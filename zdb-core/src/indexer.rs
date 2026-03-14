@@ -2812,6 +2812,7 @@ Widget
         let results = idx.resurrected_zettels().unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, z1.meta.id.as_ref().unwrap().0);
+        assert_eq!(results[0].1, "Test Note");
     }
 
     #[test]
