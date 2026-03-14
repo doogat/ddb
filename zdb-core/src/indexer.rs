@@ -1065,9 +1065,10 @@ impl Index {
     /// Return (id, title) pairs of zettels with `resurrected: true` frontmatter.
     pub fn resurrected_zettels(&self) -> Result<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT z.id, z.title FROM zettels z \
+            "SELECT DISTINCT z.id, z.title FROM zettels z \
              JOIN _zdb_fields f ON f.zettel_id = z.id \
-             WHERE f.key = 'resurrected' AND f.value = 'true'",
+             WHERE f.key = 'resurrected' AND f.value = 'true' \
+             AND f.zone = 'Frontmatter'",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
