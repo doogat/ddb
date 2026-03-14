@@ -659,7 +659,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                 let index = Index::open(&db_path)?;
                 let resurrected = index.resurrected_zettels().unwrap_or_default();
                 if !resurrected.is_empty() {
-                    outln!("resurrected zettels:")?;
+                    outln!("resurrected zettels: {}", resurrected.len())?;
                     for (id, title) in &resurrected {
                         outln!("  {id} {title}")?;
                     }
