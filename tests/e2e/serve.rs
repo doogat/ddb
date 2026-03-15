@@ -282,6 +282,50 @@ fn rest_search() {
 }
 
 #[test]
+fn rest_filter_by_field() {
+    let repo = ZdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a typed table with a frontmatter field (INTEGER → frontmatter → _zdb_fields)
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE item (name TEXT NOT NULL, priority INTEGER)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    // Insert rows with different priorities
+    for (name, priority) in [("Alpha", 1), ("Beta", 2), ("Gamma", 1)] {
+        let sql = format!("INSERT INTO item (name, priority) VALUES ('{name}', {priority})");
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({ "sql": sql }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+    }
+
+    // Filter by field.priority=1 → should return Alpha and Gamma
+    let resp = server.rest_get("/zettels?field.priority=1");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2, "expected 2 matches, got: {data:?}");
+
+    // Filter by field.priority=2 → Beta only
+    let resp = server.rest_get("/zettels?field.priority=2");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(data.len(), 1, "expected 1 match, got: {data:?}");
+
+    // Nonexistent value → empty
+    let resp = server.rest_get("/zettels?field.priority=99");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    let data = body["data"].as_array().unwrap();
+    assert!(data.is_empty());
+}
+
+#[test]
 fn rest_auth_required() {
     let repo = ZdbTestRepo::init();
     let server = ServerGuard::start(&repo);
