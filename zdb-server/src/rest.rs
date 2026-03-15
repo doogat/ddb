@@ -15,18 +15,6 @@ use zdb_core::types::{ParsedZettel, Value as ZdbValue};
 // ── Query / body types ───────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-pub struct ListParams {
-    #[serde(rename = "type")]
-    pub zettel_type: Option<String>,
-    pub tag: Option<String>,
-    pub q: Option<String>,
-    pub backlinks: Option<String>,
-    pub sort: Option<String>,
-    pub page: Option<i64>,
-    pub per_page: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct CreateBody {
     pub title: String,
     pub body: Option<String>,
