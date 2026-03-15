@@ -76,8 +76,9 @@ Extracts `- [ ]` (open), `- [x]` (done), `- [i]` (info) items from body text. Fe
 - **state**: Open, Done, or Info
 - **content**: text after the checkbox marker
 - **date**: optional `YYYY-MM-DD HH:MM` prefix (separated by ` - ` or ` – `)
-- **due_date**: optional `⏳ YYYY-MM-DD` within content
+- **due_date**: optional `⏳ YYYY-MM-DD` within content (stripped from content when extracted)
 - **line_number**: 1-indexed position within the body
+- **indent_level**: number of leading spaces (0 for top-level, 2+ for sub-items)
 
 Results stored in `ParsedZettel.checkboxes` and indexed in `_zdb_checkboxes`.
 

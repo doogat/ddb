@@ -86,3 +86,38 @@ fn checkbox_graphql_queries() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["content"], "done item");
 }
+
+#[test]
+fn checkbox_indent_level() {
+    let repo = ZdbTestRepo::init();
+    create_with_checkboxes(
+        &repo,
+        "nested",
+        "- [ ] parent\n  - [ ] child\n    - [x] grandchild",
+    );
+
+    // Verify indent_level stored correctly via SQL
+    repo.zdb()
+        .args([
+            "query",
+            "SELECT content, indent_level FROM _zdb_checkboxes ORDER BY line_number",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("parent"))
+        .stdout(predicate::str::contains("| 0"))
+        .stdout(predicate::str::contains("child"))
+        .stdout(predicate::str::contains("| 2"))
+        .stdout(predicate::str::contains("grandchild"))
+        .stdout(predicate::str::contains("| 4"));
+
+    // Verify indentLevel via GraphQL
+    let server = ServerGuard::start(&repo);
+    let result = server.graphql("{ checkboxItems { content indentLevel } }");
+    let items = result["data"]["checkboxItems"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    // Items ordered by zettel_id DESC, line_number ASC
+    assert_eq!(items[0]["indentLevel"], 0);
+    assert_eq!(items[1]["indentLevel"], 2);
+    assert_eq!(items[2]["indentLevel"], 4);
+}

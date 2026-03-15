@@ -361,6 +361,11 @@ $result = gql "{`"query`":`"mutation { deleteZettel(id: \`"$GQL_ID\`") }`"}"
 if ($result -notmatch "true") { throw "graphql delete failed" }
 pass "serve: graphql delete"
 
+# 18b. GraphQL checkbox queries
+$result = gql '{"query":"{ openActions { state content } }"}'
+if ($result -notmatch '"openActions"') { throw "graphql openActions failed" }
+pass "serve: graphql openActions"
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/zettels" -Method POST -ContentType "application/json" `

@@ -281,6 +281,11 @@ RESULT=$(gql "{\"query\":\"mutation { deleteZettel(id: \\\"$GQL_ID\\\") }\"}")
 echo "$RESULT" | grep -q "true"
 pass "serve: graphql delete"
 
+# 18b. GraphQL checkbox queries
+RESULT=$(gql '{"query":"{ openActions { state content } }"}')
+echo "$RESULT" | grep -q '"openActions"'
+pass "serve: graphql openActions"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/zettels" \
   -H "Content-Type: application/json" \
