@@ -365,6 +365,7 @@ impl<'a> SqlEngine<'a> {
             columns,
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         };
 
         // Build and commit typedef zettel
@@ -1504,11 +1505,19 @@ pub fn schema_from_parsed(zettel: &ParsedZettel) -> Result<TableSchema> {
         })
         .unwrap_or_default();
 
+    let folder = zettel
+        .meta
+        .extra
+        .get("folder")
+        .map(|v| matches!(v, crate::types::Value::Bool(true)) || v.as_str() == Some("true"))
+        .unwrap_or(false);
+
     Ok(TableSchema {
         table_name,
         columns,
         crdt_strategy,
         template_sections,
+        folder,
     })
 }
 

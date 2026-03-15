@@ -396,6 +396,7 @@ pub struct TableSchema {
     pub columns: Vec<ColumnDef>,
     pub crdt_strategy: Option<String>,
     pub template_sections: Vec<String>,
+    pub folder: bool,
 }
 
 #[derive(Debug, Clone)]

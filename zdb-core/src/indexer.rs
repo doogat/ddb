@@ -781,6 +781,7 @@ impl Index {
             columns: cols,
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         })
     }
 
@@ -2023,12 +2024,14 @@ Widget
             ],
             crdt_strategy: Some("preset:default".into()),
             template_sections: vec!["A".into()],
+            folder: false,
         };
         let inferred = TableSchema {
             table_name: "foo".to_string(),
             columns: vec![],
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -2054,6 +2057,7 @@ Widget
             }],
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         };
 
         let merged = Index::merge_schemas(None, inferred);
@@ -2079,6 +2083,7 @@ Widget
             }],
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         };
         let inferred = TableSchema {
             table_name: "baz".to_string(),
@@ -2106,6 +2111,7 @@ Widget
             ],
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -2134,6 +2140,7 @@ Widget
             }],
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         };
         let inferred = TableSchema {
             table_name: "qux".to_string(),
@@ -2161,6 +2168,7 @@ Widget
             ],
             crdt_strategy: None,
             template_sections: vec![],
+            folder: false,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);

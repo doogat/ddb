@@ -565,6 +565,7 @@ mod tests {
             ],
             crdt_strategy: None,
             template_sections: Vec::new(),
+            folder: false,
         }
     }
 
@@ -851,6 +852,7 @@ mod tests {
             }],
             crdt_strategy: None,
             template_sections: Vec::new(),
+            folder: false,
         };
         let wc = WhereClause::empty();
         let (sql, names) = build_aggregate_sql("note", &schema, &wc);
