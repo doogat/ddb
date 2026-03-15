@@ -951,49 +951,49 @@ pub fn rename_zettel(
     }
 
     let mut report = RenameReport::default();
-
-    if backlinks.is_empty() {
-        return Ok(report);
-    }
-
-    // Derive new target forms for rewriting
-    let new_target_for_path = new_path.trim_end_matches(".md");
     let old_target_for_path = old_path.trim_end_matches(".md");
 
-    // Step 3: rewrite each backlinking file
-    let mut writes: Vec<(String, String)> = Vec::new();
-    for (_source_id, source_path) in &backlinks {
-        let content = repo.read_file(source_path)?;
-        let mut rewritten = content.clone();
+    // Step 3-4: rewrite backlinks and commit
+    if !backlinks.is_empty() {
+        let new_target_for_path = new_path.trim_end_matches(".md");
 
-        // Rewrite path-qualified links (without .md, as wikilinks typically omit it)
-        rewritten =
-            crate::parser::rewrite_wikilinks(&rewritten, old_target_for_path, new_target_for_path);
+        let mut writes: Vec<(String, String)> = Vec::new();
+        for (_source_id, source_path) in &backlinks {
+            let content = repo.read_file(source_path)?;
+            let mut rewritten = content.clone();
 
-        // Rewrite bare ID links
-        if !old_id.is_empty() {
-            rewritten = crate::parser::rewrite_wikilinks(&rewritten, old_id, new_target_for_path);
+            // Rewrite path-qualified links (without .md, as wikilinks typically omit it)
+            rewritten = crate::parser::rewrite_wikilinks(
+                &rewritten,
+                old_target_for_path,
+                new_target_for_path,
+            );
+
+            // Rewrite bare ID links
+            if !old_id.is_empty() {
+                rewritten =
+                    crate::parser::rewrite_wikilinks(&rewritten, old_id, new_target_for_path);
+            }
+
+            if rewritten != content {
+                writes.push((source_path.clone(), rewritten));
+                report.updated.push(source_path.clone());
+            }
         }
 
-        if rewritten != content {
-            writes.push((source_path.clone(), rewritten));
-            report.updated.push(source_path.clone());
+        if !writes.is_empty() {
+            let write_refs: Vec<(&str, &str)> = writes
+                .iter()
+                .map(|(p, c)| (p.as_str(), c.as_str()))
+                .collect();
+            repo.commit_files(
+                &write_refs,
+                &format!("refactor: rewrite wikilinks after rename {old_path}"),
+            )?;
         }
     }
 
-    // Step 4: commit all rewrites in one batch
-    if !writes.is_empty() {
-        let write_refs: Vec<(&str, &str)> = writes
-            .iter()
-            .map(|(p, c)| (p.as_str(), c.as_str()))
-            .collect();
-        repo.commit_files(
-            &write_refs,
-            &format!("refactor: rewrite wikilinks after rename {old_path}"),
-        )?;
-    }
-
-    // Step 5: detect remaining broken references to old target
+    // Step 5: detect remaining broken references to old target (runs unconditionally)
     index.rebuild_if_stale(repo)?;
     let old_targets = [old_path, old_target_for_path, old_id];
     report.unresolvable = index
