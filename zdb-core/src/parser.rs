@@ -877,6 +877,74 @@ Body here.
         assert_eq!(result, "See [[zettelkasten/contact/20260301120000]]");
     }
 
+    // -- hashtag tests --
+
+    #[test]
+    fn hashtags_basic() {
+        let body = "Some text #gtd/act/next and more";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["gtd/act/next"]);
+    }
+
+    #[test]
+    fn hashtags_hierarchical() {
+        let body = "Tagged #client/100-acme-corp here";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["client/100-acme-corp"]);
+    }
+
+    #[test]
+    fn hashtags_skip_fenced_code() {
+        let body = "Before\n```\n#not-a-tag\n```\nAfter #real-tag";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["real-tag"]);
+    }
+
+    #[test]
+    fn hashtags_skip_inline_code() {
+        let body = "See `#not-a-tag` but #real-tag";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["real-tag"]);
+    }
+
+    #[test]
+    fn hashtags_skip_wikilinks() {
+        let body = "Link [[#heading]] and #real-tag";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["real-tag"]);
+    }
+
+    #[test]
+    fn hashtags_dedup() {
+        let body = "#duplicate and #duplicate again";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["duplicate"]);
+    }
+
+    #[test]
+    fn hashtags_line_start_and_mid() {
+        let body = "#start-tag\nsome #mid-tag text";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["start-tag", "mid-tag"]);
+    }
+
+    #[test]
+    fn hashtags_not_in_urls() {
+        let body = "Visit https://example.com#section for info";
+        let tags = extract_hashtags(body);
+        assert!(
+            tags.is_empty(),
+            "URL fragments should not be extracted: {tags:?}"
+        );
+    }
+
+    #[test]
+    fn hashtags_whitespace_required() {
+        let body = "word#not-a-tag but #real-tag";
+        let tags = extract_hashtags(body);
+        assert_eq!(tags, vec!["real-tag"]);
+    }
+
     // -- serialization tests --
 
     #[test]
