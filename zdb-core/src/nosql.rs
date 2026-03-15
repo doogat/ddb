@@ -67,10 +67,10 @@ impl RedbIndex {
             t.insert(key.as_str(), [].as_slice()).map_err(redb_err)?;
         }
 
-        // Tag index
+        // Tag index (frontmatter + body hashtags)
         {
             let mut t = txn.open_table(BY_TAG).map_err(redb_err)?;
-            for tag in &zettel.meta.tags {
+            for tag in zettel.meta.tags.iter().chain(zettel.body_tags.iter()) {
                 let key = format!("{tag}/{id}");
                 t.insert(key.as_str(), [].as_slice()).map_err(redb_err)?;
             }
@@ -169,9 +169,9 @@ impl RedbIndex {
                                 tt.remove(key.as_str());
                         }
                     }
-                    // Remove tag entries
+                    // Remove tag entries (frontmatter + body hashtags)
                     if let Ok(mut tt) = txn.open_table(BY_TAG) {
-                        for tag in &old.meta.tags {
+                        for tag in old.meta.tags.iter().chain(old.body_tags.iter()) {
                             let key = format!("{tag}/{id}");
                             let _: std::result::Result<Option<redb::AccessGuard<&[u8]>>, _> =
                                 tt.remove(key.as_str());
@@ -244,6 +244,7 @@ mod tests {
                 display: None,
                 zone: Zone::Reference,
             }],
+            body_tags: vec![],
             path: format!("zettelkasten/{id}.md"),
         }
     }
