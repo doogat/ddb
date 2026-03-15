@@ -23,6 +23,8 @@ _zdb_fields(zettel_id FK, key, value, zone)  -- index on key
 _zdb_links(source_id FK, target_path, display, zone)  -- index on target_path
 _zdb_aliases(zettel_id FK, alias COLLATE NOCASE)  -- index on alias
 _zdb_attachments(zettel_id FK, name, mime, size INTEGER, path)
+_zdb_checkboxes(zettel_id FK, state, content, date, due_date, line_number INTEGER)
+                                         -- indexes on state, zettel_id
 _zdb_fts(title, body, tags)              -- FTS5 virtual table
 _zdb_meta(key PK, value)                 -- staleness tracking
 ```
@@ -42,11 +44,12 @@ Upserts a single zettel into all tables within a transaction:
 1. Check if the zettel already exists (for FTS cleanup)
 2. Delete old FTS entry if exists
 3. `INSERT OR REPLACE` into `zettels`
-4. Delete and re-insert `tags`, `fields`, `links`, `aliases`
+4. Delete and re-insert `tags`, `fields`, `links`, `aliases`, `checkboxes`
 5. Insert scalar frontmatter extras into `_zdb_fields` with `zone = 'Frontmatter'` (String, Number, Bool — skips List/Map)
 6. Insert aliases from frontmatter `aliases` list (if present)
 7. Delete and re-insert `attachments` from frontmatter `attachments` list (if present)
-8. Insert new FTS entry
+8. Insert checkbox items from `parsed.checkboxes` into `_zdb_checkboxes`
+9. Insert new FTS entry
 
 Uses a named `SAVEPOINT`/`RELEASE` pair (via `with_savepoint`) for atomic writes that nest correctly within SQL engine transactions.
 
@@ -94,7 +97,7 @@ This is the common path for keeping the index current after `git pull` or direct
 
 `check_integrity() -> Result<bool>`
 
-Runs `PRAGMA integrity_check` and verifies core tables exist (`zettels`, `_zdb_fts`, `_zdb_tags`, `_zdb_fields`, `_zdb_links`, `_zdb_aliases`, `_zdb_meta`). Returns `false` if corrupt.
+Runs `PRAGMA integrity_check` and verifies core tables exist (`zettels`, `_zdb_fts`, `_zdb_tags`, `_zdb_fields`, `_zdb_links`, `_zdb_aliases`, `_zdb_checkboxes`, `_zdb_meta`). Returns `false` if corrupt.
 
 ### Staleness Detection
 
