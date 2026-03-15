@@ -920,6 +920,7 @@ impl crate::traits::ZettelStore for GitRepo {
 /// 2. Finds all zettels linking to the old path or bare ID.
 /// 3. Rewrites wikilinks in each backlinking file.
 /// 4. Commits all rewritten files (second commit).
+/// 5. Detects remaining broken references via `broken_backlinks()` (FR-10a).
 pub fn rename_zettel(
     repo: &GitRepo,
     index: &crate::indexer::Index,

@@ -2706,6 +2706,16 @@ pub fn rename_zettel(
         repo.commit_files(&write_refs, &format!("refactor: rewrite wikilinks after rename {old_path}"))?;
     }
 
+    // Step 5: detect remaining broken references to old target
+    index.rebuild_if_stale(repo)?;
+    let old_targets = [old_path, old_target_for_path, old_id];
+    report.unresolvable = index
+        .broken_backlinks()?
+        .into_iter()
+        .filter(|(_src, target)| old_targets.contains(&target.as_str()))
+        .filter_map(|(src_id, _)| index.resolve_path(&src_id).ok())
+        .collect();
+
     Ok(report)
 }
 ```
