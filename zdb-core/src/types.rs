@@ -220,6 +220,22 @@ pub struct WikiLink {
     pub zone: Zone,
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum CheckboxState {
+    Open,
+    Done,
+    Info,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CheckboxItem {
+    pub state: CheckboxState,
+    pub content: String,
+    pub date: Option<String>,
+    pub due_date: Option<String>,
+    pub line_number: usize,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParsedZettel {
     pub meta: ZettelMeta,
@@ -229,6 +245,8 @@ pub struct ParsedZettel {
     pub wikilinks: Vec<WikiLink>,
     #[serde(default)]
     pub body_tags: Vec<String>,
+    #[serde(default)]
+    pub checkboxes: Vec<CheckboxItem>,
     pub path: String,
 }
 

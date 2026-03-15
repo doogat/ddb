@@ -1750,6 +1750,7 @@ proptest! {
                 inline_fields: vec![],
                 wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
                 path: format!("zettelkasten/{id}.md"),
             };
             idx.index_zettel(&zettel).unwrap();
@@ -1820,6 +1821,7 @@ proptest! {
                     inline_fields: vec![],
                     wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
                     path: format!("zettelkasten/{id}.md"),
                 };
                 let _ = idx.index_zettel(&zettel);

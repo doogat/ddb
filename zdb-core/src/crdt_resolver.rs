@@ -65,6 +65,7 @@ pub fn resolve_conflicts(
             inline_fields,
             wikilinks,
             body_tags: vec![],
+            checkboxes: vec![],
             path: conflict.path.clone(),
         };
 
@@ -634,6 +635,7 @@ pub fn resolve_append_log(conflicts: Vec<ConflictFile>) -> Result<Vec<ResolvedFi
             inline_fields,
             wikilinks,
             body_tags: vec![],
+            checkboxes: vec![],
             path: conflict.path.clone(),
         };
 

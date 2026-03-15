@@ -245,6 +245,7 @@ mod tests {
                 zone: Zone::Reference,
             }],
             body_tags: vec![],
+            checkboxes: vec![],
             path: format!("zettelkasten/{id}.md"),
         }
     }

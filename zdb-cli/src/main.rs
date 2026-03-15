@@ -479,6 +479,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                 inline_fields: vec![],
                 wikilinks: vec![],
                 body_tags: vec![],
+                checkboxes: vec![],
                 path: path.clone(),
             };
 

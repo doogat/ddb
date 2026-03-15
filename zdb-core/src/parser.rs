@@ -514,6 +514,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         inline_fields,
         wikilinks,
         body_tags,
+        checkboxes: vec![],
         path: path.to_string(),
     })
 }
@@ -978,6 +979,7 @@ Some more body.
             inline_fields,
             wikilinks,
             body_tags: vec![],
+            checkboxes: vec![],
             path: "20260226120000.md".into(),
         };
 
@@ -1006,6 +1008,7 @@ Some more body.
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "test.md".into(),
         };
 
@@ -1038,6 +1041,7 @@ Some more body.
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "test.md".into(),
         };
 

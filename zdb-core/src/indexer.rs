@@ -1418,6 +1418,7 @@ mod tests {
                 zone: Zone::Body,
             }],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260226120000.md".into(),
         }
     }
@@ -2302,6 +2303,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
         };
 
@@ -2351,6 +2353,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
         };
 
@@ -2387,6 +2390,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
         };
 
@@ -2426,6 +2430,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/contact/20240101120000.md".to_string(),
         };
 
@@ -2446,6 +2451,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20240202120000.md".to_string(),
         };
 
@@ -2558,6 +2564,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: format!("zettelkasten/2026022612{n:04}.md"),
         }
     }
@@ -2653,6 +2660,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260301130000.md".into(),
         };
         idx.index_zettel(&zettel).unwrap();
@@ -2881,6 +2889,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260302120000.md".into(),
         };
         idx.index_zettel(&z2).unwrap();
@@ -2963,6 +2972,7 @@ Widget
                 zone: crate::types::Zone::Body,
             }],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260301100000.md".to_string(),
         };
 
@@ -2981,6 +2991,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260301120000.md".to_string(),
         };
 
@@ -3016,6 +3027,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260301100000.md".into(),
         };
 
@@ -3038,6 +3050,7 @@ Widget
                 zone: Zone::Body,
             }],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260301100001.md".into(),
         };
 
@@ -3094,6 +3107,7 @@ Widget
             inline_fields: vec![],
             wikilinks: vec![],
             body_tags: vec![],
+            checkboxes: vec![],
             path: "zettelkasten/20260226120001.md".into(),
         };
         writer.index_zettel(&zettel2).unwrap();
