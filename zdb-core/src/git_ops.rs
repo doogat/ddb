@@ -1666,4 +1666,46 @@ mod tests {
         assert!(report.updated.is_empty());
         assert!(report.unresolvable.is_empty());
     }
+
+    #[test]
+    fn rename_zettel_detects_unresolvable_path_qualified_link() {
+        let (dir, repo) = temp_repo();
+        let index = crate::indexer::Index::open(&dir.path().join("index.db")).unwrap();
+
+        // Create target zettel A
+        let zettel_a = "---\nid: 20260301100000\ntitle: Target\n---\nBody\n";
+        repo.commit_file("zettelkasten/20260301100000.md", zettel_a, "add A")
+            .unwrap();
+
+        // Create zettel B with path-qualified wikilink (without .md).
+        // backlinking_zettel_paths queries by exact target_path, which stores
+        // "zettelkasten/20260301100000" — this won't match old_path
+        // "zettelkasten/20260301100000.md" or old_id "20260301100000",
+        // so the link is never found for rewriting.
+        let zettel_b = "---\nid: 20260301110000\ntitle: PathLinker\n---\n\
+            See [[zettelkasten/20260301100000|Target]]\n";
+        repo.commit_file("zettelkasten/20260301110000.md", zettel_b, "add B")
+            .unwrap();
+
+        let parsed_a = crate::parser::parse(zettel_a, "zettelkasten/20260301100000.md").unwrap();
+        let parsed_b = crate::parser::parse(zettel_b, "zettelkasten/20260301110000.md").unwrap();
+        index.index_zettel(&parsed_a).unwrap();
+        index.index_zettel(&parsed_b).unwrap();
+
+        let report = rename_zettel(
+            &repo,
+            &index,
+            "zettelkasten/20260301100000.md",
+            "zettelkasten/contact/20260301100000.md",
+        )
+        .unwrap();
+
+        // B's link was not rewritten (backlinking_zettel_paths missed it),
+        // so step 5 should detect it as unresolvable
+        assert!(
+            !report.unresolvable.is_empty(),
+            "expected unresolvable reference from B's path-qualified link"
+        );
+        assert_eq!(report.unresolvable[0], "zettelkasten/20260301110000.md");
+    }
 }
