@@ -207,6 +207,7 @@ async fn list_zettels(
             params.zettel_type.clone(),
             params.tag.clone(),
             params.backlinks.clone(),
+            vec![],
         )
         .await
         .map_err(rest_error)?;
@@ -222,6 +223,7 @@ async fn list_zettels(
             params.zettel_type,
             params.tag,
             params.backlinks,
+            vec![],
             Some(per_page),
             Some(offset),
         )

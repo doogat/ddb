@@ -79,11 +79,21 @@ impl ReadPool {
         zettel_type: Option<String>,
         tag: Option<String>,
         backlinks_of: Option<String>,
+        field_filters: Vec<(String, String)>,
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> Result<Vec<ParsedZettel>> {
         self.with_index_repo(move |index, repo| {
-            actor::list_zettels(repo, index, zettel_type, tag, backlinks_of, limit, offset)
+            actor::list_zettels(
+                repo,
+                index,
+                zettel_type,
+                tag,
+                backlinks_of,
+                &field_filters,
+                limit,
+                offset,
+            )
         })
         .await
     }
@@ -123,9 +133,12 @@ impl ReadPool {
         zettel_type: Option<String>,
         tag: Option<String>,
         backlinks_of: Option<String>,
+        field_filters: Vec<(String, String)>,
     ) -> Result<i64> {
-        self.with_index(move |index| actor::count_zettels(index, zettel_type, tag, backlinks_of))
-            .await
+        self.with_index(move |index| {
+            actor::count_zettels(index, zettel_type, tag, backlinks_of, &field_filters)
+        })
+        .await
     }
 
     pub async fn get_backlinks(&self, id: String) -> Result<Vec<String>> {
@@ -276,7 +289,7 @@ mod tests {
     async fn count_zettels_empty_repo() {
         let (_dir, path) = setup_repo();
         let pool = ReadPool::new(path, 2).unwrap();
-        let count = pool.count_zettels(None, None, None).await.unwrap();
+        let count = pool.count_zettels(None, None, None, vec![]).await.unwrap();
         assert_eq!(count, 0);
     }
 

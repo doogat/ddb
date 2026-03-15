@@ -26,6 +26,7 @@ pub enum ActorCommand {
         zettel_type: Option<String>,
         tag: Option<String>,
         backlinks_of: Option<String>,
+        field_filters: Vec<(String, String)>,
         limit: Option<i64>,
         offset: Option<i64>,
     },
@@ -61,6 +62,7 @@ pub enum ActorCommand {
         zettel_type: Option<String>,
         tag: Option<String>,
         backlinks_of: Option<String>,
+        field_filters: Vec<(String, String)>,
     },
     FilteredList(crate::read_pool::FilteredListQuery),
     AggregateQuery {
@@ -169,6 +171,7 @@ impl ActorHandle {
         zettel_type: Option<String>,
         tag: Option<String>,
         backlinks_of: Option<String>,
+        field_filters: Vec<(String, String)>,
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> ActorResult<Vec<ParsedZettel>> {
@@ -177,6 +180,7 @@ impl ActorHandle {
                 zettel_type,
                 tag,
                 backlinks_of,
+                field_filters,
                 limit,
                 offset,
             })
@@ -307,12 +311,14 @@ impl ActorHandle {
         zettel_type: Option<String>,
         tag: Option<String>,
         backlinks_of: Option<String>,
+        field_filters: Vec<(String, String)>,
     ) -> ActorResult<i64> {
         match self
             .send(ActorCommand::CountZettels {
                 zettel_type,
                 tag,
                 backlinks_of,
+                field_filters,
             })
             .await
         {
@@ -606,6 +612,7 @@ fn handle_command_shared(
             zettel_type,
             tag,
             backlinks_of,
+            field_filters,
             limit,
             offset,
         } => ActorReply::ZettelList(list_zettels(
@@ -614,6 +621,7 @@ fn handle_command_shared(
             zettel_type,
             tag,
             backlinks_of,
+            &field_filters,
             limit,
             offset,
         )),
@@ -662,7 +670,14 @@ fn handle_command_shared(
             zettel_type,
             tag,
             backlinks_of,
-        } => ActorReply::Count(count_zettels(index, zettel_type, tag, backlinks_of)),
+            field_filters,
+        } => ActorReply::Count(count_zettels(
+            index,
+            zettel_type,
+            tag,
+            backlinks_of,
+            &field_filters,
+        )),
         ActorCommand::FilteredList(q) => ActorReply::ZettelList(filtered_list(repo, index, &q)),
         ActorCommand::AggregateQuery { sql, params } => ActorReply::AggregateRow(
             index
@@ -741,6 +756,7 @@ pub(crate) fn list_zettels(
     zettel_type: Option<String>,
     tag: Option<String>,
     backlinks_of: Option<String>,
+    field_filters: &[(String, String)],
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> ActorResult<Vec<ParsedZettel>> {
@@ -748,6 +764,7 @@ pub(crate) fn list_zettels(
         zettel_type.as_deref(),
         tag.as_deref(),
         backlinks_of.as_deref(),
+        field_filters,
         limit,
         offset,
     );
@@ -772,6 +789,7 @@ fn build_filtered_sql(
     zettel_type: Option<&str>,
     tag: Option<&str>,
     backlinks_of: Option<&str>,
+    field_filters: &[(String, String)],
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> String {
@@ -790,6 +808,13 @@ fn build_filtered_sql(
         conditions.push(format!(
             "z.id IN (SELECT source_id FROM _zdb_links WHERE target_path = '{}')",
             bl.replace('\'', "''")
+        ));
+    }
+    for (key, value) in field_filters {
+        conditions.push(format!(
+            "z.id IN (SELECT zettel_id FROM _zdb_fields WHERE key = '{}' AND value = '{}')",
+            key.replace('\'', "''"),
+            value.replace('\'', "''")
         ));
     }
 
@@ -971,11 +996,13 @@ pub(crate) fn count_zettels(
     zettel_type: Option<String>,
     tag: Option<String>,
     backlinks_of: Option<String>,
+    field_filters: &[(String, String)],
 ) -> ActorResult<i64> {
     let select_sql = build_filtered_sql(
         zettel_type.as_deref(),
         tag.as_deref(),
         backlinks_of.as_deref(),
+        field_filters,
         None,
         None,
     );

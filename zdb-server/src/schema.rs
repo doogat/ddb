@@ -578,7 +578,7 @@ pub fn build_schema(
                     let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
                     let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
                     let zettels = pool
-                        .list_zettels(zettel_type, tag, backlinks_of, limit, offset)
+                        .list_zettels(zettel_type, tag, backlinks_of, vec![], limit, offset)
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::list(
