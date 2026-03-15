@@ -147,6 +147,51 @@ impl ReadPool {
         self.with_index(move |index| index.backlinks(&id)).await
     }
 
+    pub async fn query_checkboxes(
+        &self,
+        state: Option<String>,
+        zettel_id: Option<String>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<Vec<String>>> {
+        self.with_index(move |index| {
+            let mut conditions = Vec::new();
+            let mut params: Vec<rusqlite::types::Value> = Vec::new();
+
+            if let Some(s) = state {
+                conditions.push(format!("c.state = ?{}", params.len() + 1));
+                params.push(rusqlite::types::Value::Text(s));
+            }
+            if let Some(id) = zettel_id {
+                conditions.push(format!("c.zettel_id = ?{}", params.len() + 1));
+                params.push(rusqlite::types::Value::Text(id));
+            }
+
+            let where_clause = if conditions.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", conditions.join(" AND "))
+            };
+
+            let limit_clause = match (limit, offset) {
+                (Some(l), Some(o)) => format!(" LIMIT {l} OFFSET {o}"),
+                (Some(l), None) => format!(" LIMIT {l}"),
+                (None, Some(o)) => format!(" LIMIT -1 OFFSET {o}"),
+                (None, None) => String::new(),
+            };
+
+            let sql = format!(
+                "SELECT c.zettel_id, z.title, c.state, c.content, c.date, c.due_date, c.line_number \
+                 FROM _zdb_checkboxes c \
+                 JOIN zettels z ON c.zettel_id = z.id{where_clause} \
+                 ORDER BY c.zettel_id DESC, c.line_number ASC{limit_clause}"
+            );
+
+            index.query_raw_with_params(&sql, &params)
+        })
+        .await
+    }
+
     pub async fn aggregate_query(
         &self,
         sql: String,

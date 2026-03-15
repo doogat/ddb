@@ -2242,6 +2242,8 @@ Startup sequence:
 
 The GraphQL schema is **dynamic** — built at runtime from `_typedef` zettels. If a user creates a `project` type with fields `status` and `deadline`, the GraphQL schema gains a `project` query type with those fields. The `SchemaReloader` uses `ArcSwap` so the schema can be atomically replaced without restarting the server.
 
+**Checkbox queries**: The schema includes `checkboxItems(state, zettelId, limit, offset)` and `openActions(limit)` queries. These route through `ReadPool::query_checkboxes()` which joins `_zdb_checkboxes` with `zettels` to return items with parent zettel context. `openActions` is a convenience alias that filters for `state = 'open'`.
+
 The reload loop (`SchemaReloader::reload_loop`) handles errors gracefully: if `get_type_schemas()` fails or `build_schema()` returns `Err`, the error is logged and the last-known-good schema is preserved. Invalid typedef table names (those failing `is_valid_graphql_name()`) are skipped with a warning during schema build, so one bad typedef doesn't poison the entire schema.
 
 Auth is bearer-token based. The token file lives at `~/.config/zetteldb/token`. All routes except `/ws` pass through the `require_auth` middleware. The `/ws` route handles auth in the handler itself (see below).

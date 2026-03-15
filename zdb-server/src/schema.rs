@@ -117,6 +117,38 @@ fn zettel_to_value(z: &ParsedZettel) -> GqlValue {
     GqlValue::Object(obj)
 }
 
+fn checkbox_row_to_value(row: &[String]) -> GqlValue {
+    let zettel_id = row.first().map(|s| s.as_str()).unwrap_or("");
+    let zettel_title = row.get(1).map(|s| s.as_str()).unwrap_or("");
+    let state = row.get(2).map(|s| s.as_str()).unwrap_or("");
+    let content = row.get(3).map(|s| s.as_str()).unwrap_or("");
+    let date = row.get(4).filter(|s| !s.is_empty());
+    let due_date = row.get(5).filter(|s| !s.is_empty());
+    let line_number = row.get(6).and_then(|s| s.parse::<i64>().ok());
+
+    let mut obj = IndexMap::new();
+    obj.insert(Name::new("zettelId"), GqlValue::from(zettel_id));
+    obj.insert(Name::new("zettelTitle"), GqlValue::from(zettel_title));
+    obj.insert(Name::new("state"), GqlValue::from(state));
+    obj.insert(Name::new("content"), GqlValue::from(content));
+    obj.insert(
+        Name::new("date"),
+        date.map(|d| GqlValue::from(d.as_str()))
+            .unwrap_or(GqlValue::Null),
+    );
+    obj.insert(
+        Name::new("dueDate"),
+        due_date
+            .map(|d| GqlValue::from(d.as_str()))
+            .unwrap_or(GqlValue::Null),
+    );
+    obj.insert(
+        Name::new("lineNumber"),
+        line_number.map(GqlValue::from).unwrap_or(GqlValue::Null),
+    );
+    GqlValue::Object(obj)
+}
+
 fn search_hit_to_value(r: &SearchResult) -> GqlValue {
     let mut obj = IndexMap::new();
     obj.insert(Name::new("id"), GqlValue::from(r.id.as_str()));
@@ -513,6 +545,24 @@ pub fn build_schema(
         }))
         .field(simple_field("url", TypeRef::named_nn(TypeRef::STRING)));
 
+    let checkbox_item_type = Object::new("CheckboxItem")
+        .field(simple_field("zettelId", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field("zettelTitle", TypeRef::named(TypeRef::STRING)))
+        .field(simple_field("state", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("content", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("date", TypeRef::named(TypeRef::STRING)))
+        .field(simple_field("dueDate", TypeRef::named(TypeRef::STRING)))
+        .field(Field::new(
+            "lineNumber",
+            TypeRef::named(TypeRef::INT),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "lineNumber"))
+                })
+            },
+        ));
+
     // Base Zettel type
     let zettel_type = zettel_object("Zettel");
 
@@ -688,6 +738,68 @@ pub fn build_schema(
                 })
             },
         ));
+    }
+
+    // checkboxItems(state?, zettelId?, limit?, offset?)
+    {
+        query = query.field(
+            Field::new(
+                "checkboxItems",
+                TypeRef::named_nn_list_nn("CheckboxItem"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let state = ctx
+                            .args
+                            .get("state")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let zettel_id = ctx
+                            .args
+                            .get("zettelId")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
+                        let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
+                        let rows = pool
+                            .query_checkboxes(state, zettel_id, limit, offset)
+                            .await
+                            .map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(rows.iter().map(|row| {
+                            FieldValue::owned_any(checkbox_row_to_value(row))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("state", TypeRef::named(TypeRef::STRING)))
+            .argument(InputValue::new("zettelId", TypeRef::named(TypeRef::ID)))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),
+        );
+    }
+
+    // openActions(limit?) — convenience alias for checkboxItems(state: "open")
+    {
+        query = query.field(
+            Field::new(
+                "openActions",
+                TypeRef::named_nn_list_nn("CheckboxItem"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
+                        let rows = pool
+                            .query_checkboxes(Some("open".to_string()), None, limit, None)
+                            .await
+                            .map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(rows.iter().map(|row| {
+                            FieldValue::owned_any(checkbox_row_to_value(row))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT))),
+        );
     }
 
     // -- Dynamic per-type queries --
@@ -1525,6 +1637,7 @@ pub fn build_schema(
     .register(create_input)
     .register(update_input)
     .register(attachment_type)
+    .register(checkbox_item_type)
     .register(change_event_type)
     .register(sync_result_type)
     .register(compact_result_type)

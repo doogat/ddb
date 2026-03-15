@@ -105,6 +105,15 @@ type SearchConnection { hits: [SearchHit!]!, totalCount: Int! }
 type TypeDef { name: String!, columns: [ColumnInfo!]!, crdtStrategy: String, templateSections: [String!]! }
 type ColumnInfo { name: String!, dataType: String!, zone: String, required: Boolean!, references: String }
 type SqlResult { rows: [String!], affected: Int, message: String }
+type CheckboxItem {
+  zettelId: ID!
+  zettelTitle: String
+  state: String!        # "open", "done", "info"
+  content: String!
+  date: String
+  dueDate: String
+  lineNumber: Int
+}
 ```
 
 Note: `SqlResult.rows` encodes each row as a JSON string to avoid nested list limitations.
@@ -119,6 +128,8 @@ type Query {
   typeDefs: [TypeDef!]!
   sql(query: String!): SqlResult!
   schemaVersion: Int!
+  checkboxItems(state: String, zettelId: ID, limit: Int, offset: Int): [CheckboxItem!]!
+  openActions(limit: Int): [CheckboxItem!]!
 }
 ```
 
