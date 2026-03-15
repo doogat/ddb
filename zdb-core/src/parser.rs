@@ -440,6 +440,72 @@ pub fn serialize(zettel: &crate::types::ParsedZettel) -> String {
     out
 }
 
+/// Extract checkbox items from body text.
+///
+/// Parses `- [ ]`, `- [x]`, `- [i]` items with optional date prefix and due date.
+/// Skips fenced code blocks.
+pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
+    use crate::types::{CheckboxItem, CheckboxState};
+    use std::sync::OnceLock;
+    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    static CB_RE: OnceLock<Regex> = OnceLock::new();
+    static DATE_RE: OnceLock<Regex> = OnceLock::new();
+    static DUE_RE: OnceLock<Regex> = OnceLock::new();
+
+    let fence_re = FENCE_RE
+        .get_or_init(|| Regex::new(r"^(?:`{3,}|~{3,})").expect("valid regex: fence marker"));
+    let cb_re = CB_RE
+        .get_or_init(|| Regex::new(r"^(\s*)- \[([ xi])\]\s+(.+)$").expect("valid regex: checkbox"));
+    let date_re = DATE_RE.get_or_init(|| {
+        Regex::new(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*[-–]\s*(.+)$")
+            .expect("valid regex: date prefix")
+    });
+    let due_re = DUE_RE
+        .get_or_init(|| Regex::new(r"⏳\s*(\d{4}-\d{2}-\d{2})").expect("valid regex: due date"));
+
+    let mut items = Vec::new();
+    let mut in_fence = false;
+
+    for (line_idx, line) in body.lines().enumerate() {
+        if fence_re.is_match(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if let Some(caps) = cb_re.captures(line) {
+            let state = match &caps[2] {
+                " " => CheckboxState::Open,
+                "x" => CheckboxState::Done,
+                "i" => CheckboxState::Info,
+                _ => continue,
+            };
+            let raw_content = caps[3].to_string();
+
+            // Parse optional date prefix
+            let (date, content) = if let Some(dc) = date_re.captures(&raw_content) {
+                (Some(dc[1].to_string()), dc[2].to_string())
+            } else {
+                (None, raw_content)
+            };
+
+            // Parse optional due date
+            let due_date = due_re.captures(&content).map(|dc| dc[1].to_string());
+
+            items.push(CheckboxItem {
+                state,
+                content,
+                date,
+                due_date,
+                line_number: line_idx + 1,
+            });
+        }
+    }
+
+    items
+}
+
 /// Extract hashtags from body text, respecting exclusion zones.
 ///
 /// Skips fenced code blocks, inline code spans, and wikilinks.
@@ -506,6 +572,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         &zettel.reference_section,
     );
     let body_tags = extract_hashtags(&zettel.body);
+    let checkboxes = extract_checkboxes(&zettel.body);
 
     Ok(crate::types::ParsedZettel {
         meta,
@@ -514,7 +581,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         inline_fields,
         wikilinks,
         body_tags,
-        checkboxes: vec![],
+        checkboxes,
         path: path.to_string(),
     })
 }
