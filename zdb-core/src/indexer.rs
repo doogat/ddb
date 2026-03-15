@@ -1457,6 +1457,68 @@ mod tests {
     }
 
     #[test]
+    fn body_hashtags_indexed() {
+        let idx = in_memory_index();
+        let mut z = sample_zettel();
+        z.body = "Some text #gtd/act/next here".into();
+        z.body_tags = vec!["gtd/act/next".into()];
+        idx.index_zettel(&z).unwrap();
+
+        let rows = idx
+            .query_raw("SELECT tag, source FROM _zdb_tags WHERE tag = 'gtd/act/next'")
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "gtd/act/next");
+        assert_eq!(rows[0][1], "body");
+    }
+
+    #[test]
+    fn body_and_frontmatter_tags_unified() {
+        let idx = in_memory_index();
+        let mut z = sample_zettel();
+        // sample_zettel has frontmatter tags: ["client/acme", "test"]
+        z.body_tags = vec!["gtd/wait".into()];
+        idx.index_zettel(&z).unwrap();
+
+        let id = z.meta.id.as_ref().unwrap().0.as_str();
+        let rows = idx
+            .query_raw(&format!(
+                "SELECT tag FROM _zdb_tags WHERE zettel_id = '{id}' ORDER BY tag"
+            ))
+            .unwrap();
+        let tags: Vec<&str> = rows.iter().map(|r| r[0].as_str()).collect();
+        assert!(tags.contains(&"client/acme"), "missing frontmatter tag");
+        assert!(tags.contains(&"test"), "missing frontmatter tag");
+        assert!(tags.contains(&"gtd/wait"), "missing body tag");
+    }
+
+    #[test]
+    fn tag_source_column() {
+        let idx = in_memory_index();
+        let mut z = sample_zettel();
+        z.body_tags = vec!["gtd/act/next".into()];
+        idx.index_zettel(&z).unwrap();
+
+        let id = z.meta.id.as_ref().unwrap().0.as_str();
+
+        // Frontmatter tags have source='frontmatter'
+        let rows = idx
+            .query_raw(&format!(
+                "SELECT source FROM _zdb_tags WHERE zettel_id = '{id}' AND tag = 'test'"
+            ))
+            .unwrap();
+        assert_eq!(rows[0][0], "frontmatter");
+
+        // Body tags have source='body'
+        let rows = idx
+            .query_raw(&format!(
+                "SELECT source FROM _zdb_tags WHERE zettel_id = '{id}' AND tag = 'gtd/act/next'"
+            ))
+            .unwrap();
+        assert_eq!(rows[0][0], "body");
+    }
+
+    #[test]
     fn fts_search() {
         let idx = in_memory_index();
         idx.index_zettel(&sample_zettel()).unwrap();
