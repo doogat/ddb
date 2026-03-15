@@ -97,6 +97,14 @@ $ZDB reindex >/dev/null
 $ZDB query "SELECT state, content FROM _zdb_checkboxes WHERE state = 'open'" | grep -q "open task"
 pass "checkbox parsing and indexing"
 
+# 7d. folder namespace
+TYPEDEF_BODY="---\ntitle: widget\ntype: _typedef\nfolder: true\ncolumns:\n  - name: color\n    data_type: TEXT\n    zone: frontmatter\n---"
+$ZDB create --title widget --type _typedef --body="$TYPEDEF_BODY" >/dev/null
+$ZDB reindex >/dev/null
+WIDGET_ID=$($ZDB query "INSERT INTO widget (color) VALUES ('red')")
+test -f "$REPO/zettelkasten/widget/${WIDGET_ID}.md"
+pass "folder namespace: typed zettel in subdirectory"
+
 # 8. full-text search
 $ZDB search "Hello" | grep -q "$ID1"
 pass "search"

@@ -2,6 +2,7 @@ mod attachments;
 mod checkboxes;
 mod common;
 mod delete_backlinks;
+mod folder_namespace;
 mod multi_device;
 mod pgwire;
 mod read_pool;

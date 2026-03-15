@@ -137,6 +137,14 @@ $output = zdb query "SELECT state, content FROM _zdb_checkboxes WHERE state = 'o
 if ($output -notmatch "open task") { throw "checkbox not indexed" }
 pass "checkbox parsing and indexing"
 
+# 7d. folder namespace
+$typedefBody = "---`ntitle: widget`ntype: _typedef`nfolder: true`ncolumns:`n  - name: color`n    data_type: TEXT`n    zone: frontmatter`n---"
+& $ZDB create --title widget --type _typedef "--body=$typedefBody" | Out-Null
+& $ZDB reindex | Out-Null
+$widgetId = (& $ZDB query "INSERT INTO widget (color) VALUES ('red')").Trim()
+if (-not (Test-Path "$REPO/zettelkasten/widget/$widgetId.md")) { throw "folder namespace: file not in subdirectory" }
+pass "folder namespace: typed zettel in subdirectory"
+
 # 8. full-text search
 $output = zdb search "Hello"
 if ($output -notmatch $ID1) { throw "search failed" }
