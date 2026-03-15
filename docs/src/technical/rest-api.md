@@ -22,6 +22,8 @@ GET /rest/zettels
 | `tag` | string | Filter by tag |
 | `backlinks` | string | Filter by backlinks of zettel ID |
 | `q` | string | Full-text search (returns search hits instead of zettels) |
+| `sort` | string | Sort field (reserved for future use) |
+| `field.{name}` | string | Filter by inline field value (repeatable for AND logic) |
 | `page` | int | Page number (default: 1) |
 | `per_page` | int | Results per page (default: 50, max: 200) |
 
