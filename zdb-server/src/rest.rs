@@ -181,6 +181,7 @@ async fn list_zettels(
         .iter()
         .filter_map(|(k, v)| {
             k.strip_prefix("field.")
+                .filter(|name| !name.is_empty())
                 .map(|name| (name.to_string(), v.clone()))
         })
         .collect();
