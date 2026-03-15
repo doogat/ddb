@@ -18,7 +18,7 @@ Created on `Index::open()` (idempotent):
 
 ```sql
 zettels(id TEXT PK, title, date, type, path UNIQUE, body, updated_at)
-_zdb_tags(zettel_id FK, tag)              -- index on tag
+_zdb_tags(zettel_id FK, tag, source DEFAULT 'frontmatter')  -- index on tag; source: 'frontmatter' or 'body'
 _zdb_fields(zettel_id FK, key, value, zone)  -- index on key
 _zdb_links(source_id FK, target_path, display, zone)  -- index on target_path
 _zdb_aliases(zettel_id FK, alias COLLATE NOCASE)  -- index on alias
