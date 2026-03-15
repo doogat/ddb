@@ -440,6 +440,60 @@ pub fn serialize(zettel: &crate::types::ParsedZettel) -> String {
     out
 }
 
+/// Extract hashtags from body text, respecting exclusion zones.
+///
+/// Skips fenced code blocks, inline code spans, and wikilinks.
+/// Returns unique tags (without `#` prefix) in first-encountered order.
+pub fn extract_hashtags(body: &str) -> Vec<String> {
+    use std::sync::OnceLock;
+    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
+    static WIKILINK_RE: OnceLock<Regex> = OnceLock::new();
+    static HASHTAG_RE: OnceLock<Regex> = OnceLock::new();
+
+    let fence_re = FENCE_RE
+        .get_or_init(|| Regex::new(r"^(?:`{3,}|~{3,})").expect("valid regex: fence marker"));
+    let inline_code_re =
+        INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+    let wikilink_re =
+        WIKILINK_RE.get_or_init(|| Regex::new(r"\[\[[^\]]*\]\]").expect("valid regex: wikilink"));
+    let hashtag_re = HASHTAG_RE
+        .get_or_init(|| Regex::new(r"(?:^|\s)#([\w][\w/-]*)").expect("valid regex: hashtag"));
+
+    let mut tags = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut in_fence = false;
+
+    for line in body.lines() {
+        if fence_re.is_match(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        // Strip inline code and wikilinks before matching hashtags
+        let stripped = inline_code_re.replace_all(line, "");
+        let stripped = wikilink_re.replace_all(&stripped, "");
+
+        for caps in hashtag_re.captures_iter(&stripped) {
+            let tag = caps[1].to_string();
+            // Check that the # is not preceded by :// (URL fragment)
+            if let Some(m) = caps.get(0) {
+                let before = &stripped[..m.start()];
+                if before.ends_with("://") {
+                    continue;
+                }
+            }
+            if seen.insert(tag.clone()) {
+                tags.push(tag);
+            }
+        }
+    }
+
+    tags
+}
+
 /// Parse a zettel Markdown file into a fully structured ParsedZettel.
 #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
 pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
@@ -451,6 +505,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         &zettel.body,
         &zettel.reference_section,
     );
+    let body_tags = extract_hashtags(&zettel.body);
 
     Ok(crate::types::ParsedZettel {
         meta,
@@ -458,7 +513,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         reference_section: zettel.reference_section,
         inline_fields,
         wikilinks,
-        body_tags: vec![],
+        body_tags,
         path: path.to_string(),
     })
 }
@@ -854,6 +909,7 @@ Some more body.
             reference_section: z.reference_section.clone(),
             inline_fields,
             wikilinks,
+            body_tags: vec![],
             path: "20260226120000.md".into(),
         };
 

@@ -1412,6 +1412,7 @@ mod tests {
                 display: Some("Link".into()),
                 zone: Zone::Body,
             }],
+            body_tags: vec![],
             path: "zettelkasten/20260226120000.md".into(),
         }
     }
@@ -2894,6 +2895,7 @@ Widget
                 display: None,
                 zone: crate::types::Zone::Body,
             }],
+            body_tags: vec![],
             path: "zettelkasten/20260301100000.md".to_string(),
         };
 
@@ -2968,6 +2970,7 @@ Widget
                 display: None,
                 zone: Zone::Body,
             }],
+            body_tags: vec![],
             path: "zettelkasten/20260301100001.md".into(),
         };
 
