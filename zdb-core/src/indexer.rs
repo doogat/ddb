@@ -1623,6 +1623,51 @@ mod tests {
     }
 
     #[test]
+    fn checkbox_reindex_state_change() {
+        let idx = in_memory_index();
+        let mut z = sample_zettel();
+
+        // Initial: one open item
+        z.checkboxes = vec![crate::types::CheckboxItem {
+            state: crate::types::CheckboxState::Open,
+            content: "buy milk".into(),
+            date: None,
+            due_date: None,
+            line_number: 1,
+            indent_level: 0,
+        }];
+        idx.index_zettel(&z).unwrap();
+
+        let open = idx
+            .query_raw("SELECT content FROM _zdb_checkboxes WHERE state = 'open'")
+            .unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0][0], "buy milk");
+
+        // Reindex with state changed to done
+        z.checkboxes = vec![crate::types::CheckboxItem {
+            state: crate::types::CheckboxState::Done,
+            content: "buy milk".into(),
+            date: None,
+            due_date: None,
+            line_number: 1,
+            indent_level: 0,
+        }];
+        idx.index_zettel(&z).unwrap();
+
+        let open = idx
+            .query_raw("SELECT content FROM _zdb_checkboxes WHERE state = 'open'")
+            .unwrap();
+        assert_eq!(open.len(), 0);
+
+        let done = idx
+            .query_raw("SELECT content FROM _zdb_checkboxes WHERE state = 'done'")
+            .unwrap();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0][0], "buy milk");
+    }
+
+    #[test]
     fn fts_search() {
         let idx = in_memory_index();
         idx.index_zettel(&sample_zettel()).unwrap();
