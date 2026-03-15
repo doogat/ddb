@@ -2233,6 +2233,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
         };
 
@@ -2281,6 +2282,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
         };
 
@@ -2316,6 +2318,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
         };
 
@@ -2354,6 +2357,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/contact/20240101120000.md".to_string(),
         };
 
@@ -2373,6 +2377,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20240202120000.md".to_string(),
         };
 
@@ -2484,6 +2489,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: format!("zettelkasten/2026022612{n:04}.md"),
         }
     }
@@ -2578,6 +2584,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20260301130000.md".into(),
         };
         idx.index_zettel(&zettel).unwrap();
@@ -2805,6 +2812,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20260302120000.md".into(),
         };
         idx.index_zettel(&z2).unwrap();
@@ -2903,6 +2911,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20260301120000.md".to_string(),
         };
 
@@ -2937,6 +2946,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20260301100000.md".into(),
         };
 
@@ -3013,6 +3023,7 @@ Widget
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "zettelkasten/20260226120001.md".into(),
         };
         writer.index_zettel(&zettel2).unwrap();

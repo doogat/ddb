@@ -227,6 +227,8 @@ pub struct ParsedZettel {
     pub reference_section: String,
     pub inline_fields: Vec<InlineField>,
     pub wikilinks: Vec<WikiLink>,
+    #[serde(default)]
+    pub body_tags: Vec<String>,
     pub path: String,
 }
 

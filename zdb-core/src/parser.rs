@@ -458,6 +458,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         reference_section: zettel.reference_section,
         inline_fields,
         wikilinks,
+        body_tags: vec![],
         path: path.to_string(),
     })
 }
@@ -880,6 +881,7 @@ Some more body.
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "test.md".into(),
         };
 
@@ -911,6 +913,7 @@ Some more body.
             reference_section: String::new(),
             inline_fields: vec![],
             wikilinks: vec![],
+            body_tags: vec![],
             path: "test.md".into(),
         };
 

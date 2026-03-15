@@ -1294,6 +1294,7 @@ pub fn build_typedef_zettel(id: &ZettelId, schema: &TableSchema) -> ParsedZettel
         reference_section: String::new(),
         inline_fields: vec![],
         wikilinks: vec![],
+        body_tags: vec![],
         path: format!("zettelkasten/_typedef/{}.md", id.0),
     }
 }
@@ -1368,6 +1369,7 @@ fn build_data_zettel(
         reference_section,
         inline_fields,
         wikilinks,
+        body_tags: vec![],
         path: format!("zettelkasten/{}.md", id.0),
     }
 }

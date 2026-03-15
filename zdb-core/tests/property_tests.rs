@@ -1749,6 +1749,7 @@ proptest! {
                 reference_section: String::new(),
                 inline_fields: vec![],
                 wikilinks: vec![],
+            body_tags: vec![],
                 path: format!("zettelkasten/{id}.md"),
             };
             idx.index_zettel(&zettel).unwrap();
@@ -1818,6 +1819,7 @@ proptest! {
                     reference_section: String::new(),
                     inline_fields: vec![],
                     wikilinks: vec![],
+            body_tags: vec![],
                     path: format!("zettelkasten/{id}.md"),
                 };
                 let _ = idx.index_zettel(&zettel);

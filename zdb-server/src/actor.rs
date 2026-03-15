@@ -923,6 +923,7 @@ fn create_zettel(
         reference_section: String::new(),
         inline_fields: vec![],
         wikilinks: vec![],
+        body_tags: vec![],
         path: path.clone(),
     };
 

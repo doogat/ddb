@@ -64,6 +64,7 @@ pub fn resolve_conflicts(
             reference_section: merged_ref,
             inline_fields,
             wikilinks,
+            body_tags: vec![],
             path: conflict.path.clone(),
         };
 
@@ -632,6 +633,7 @@ pub fn resolve_append_log(conflicts: Vec<ConflictFile>) -> Result<Vec<ResolvedFi
             reference_section: merged_ref,
             inline_fields,
             wikilinks,
+            body_tags: vec![],
             path: conflict.path.clone(),
         };
 
