@@ -1819,9 +1819,9 @@ mod tests {
         assert_eq!(rows[0][0], "Alpha"); // title = first TEXT column value
         assert_eq!(rows[0][1], "projects");
 
-        // Check zettel file in Git (typed → subfolder)
+        // Check zettel file in Git (no folder: true → flat path)
         let path = index.resolve_path(&zettel_id).unwrap();
-        assert!(path.starts_with("zettelkasten/projects/"));
+        assert!(path.starts_with("zettelkasten/") && !path.contains("projects/"));
         let content = repo.read_file(&path).unwrap();
         assert!(content.contains("type: projects"));
         assert!(content.contains("priority: 1"));
@@ -2111,7 +2111,21 @@ mod tests {
 
         engine.execute("CREATE TABLE docs (name TEXT)").unwrap();
 
-        // INSERT → should go to zettelkasten/docs/{id}.md
+        // Add folder: true to the typedef
+        let typedef_rows = index
+            .query_raw("SELECT id, path FROM zettels WHERE type = '_typedef' AND title = 'docs'")
+            .unwrap();
+        let typedef_path = &typedef_rows[0][1];
+        let typedef_content = repo.read_file(typedef_path).unwrap();
+        let updated = typedef_content.replace("type: _typedef", "type: _typedef\nfolder: true");
+        repo.commit_file(typedef_path, &updated, "add folder to docs typedef")
+            .unwrap();
+        let parsed = crate::parser::parse(&updated, typedef_path).unwrap();
+        index.index_zettel(&parsed).unwrap();
+        // Recreate engine to pick up updated typedef
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // INSERT → should go to zettelkasten/docs/{id}.md (folder: true)
         let id = match engine
             .execute("INSERT INTO docs (name) VALUES ('Guide')")
             .unwrap()
@@ -2923,14 +2937,10 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], "keep");
 
-        // Verify git file exists for survivor
-        assert!(repo
-            .read_file(&format!("zettelkasten/items/{id1}.md"))
-            .is_ok());
+        // Verify git file exists for survivor (no folder: true → flat path)
+        assert!(repo.read_file(&format!("zettelkasten/{id1}.md")).is_ok());
         // Deleted zettel should not be in git (it was buffer-only)
-        assert!(repo
-            .read_file(&format!("zettelkasten/items/{id2}.md"))
-            .is_err());
+        assert!(repo.read_file(&format!("zettelkasten/{id2}.md")).is_err());
     }
 
     #[test]
