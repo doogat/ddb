@@ -5,6 +5,19 @@ use git2::{IndexAddOption, Oid, Repository, Signature};
 use crate::error::{Result, ZettelError};
 use crate::types::{CommitHash, ConflictFile, MergeResult, RenameReport, RepoConfig};
 
+/// Compute the Git-relative path for a zettel based on type and folder setting.
+///
+/// - `folder=true` + type → `zettelkasten/{type}/{id}.md`
+/// - `folder=false` or no type → `zettelkasten/{id}.md`
+pub fn zettel_path(id: &str, type_name: Option<&str>, folder: bool) -> String {
+    if folder {
+        if let Some(t) = type_name {
+            return format!("zettelkasten/{t}/{id}.md");
+        }
+    }
+    format!("zettelkasten/{id}.md")
+}
+
 /// Current repository format version. Incremented when on-disk layout changes.
 pub const CURRENT_FORMAT_VERSION: u32 = 1;
 
@@ -1708,5 +1721,29 @@ mod tests {
             "expected unresolvable reference from B's path-qualified link"
         );
         assert_eq!(report.unresolvable[0], "zettelkasten/20260301110000.md");
+    }
+
+    #[test]
+    fn zettel_path_flat() {
+        assert_eq!(
+            super::zettel_path("20260315120000", Some("contact"), false),
+            "zettelkasten/20260315120000.md"
+        );
+    }
+
+    #[test]
+    fn zettel_path_folder() {
+        assert_eq!(
+            super::zettel_path("20260315120000", Some("contact"), true),
+            "zettelkasten/contact/20260315120000.md"
+        );
+    }
+
+    #[test]
+    fn zettel_path_no_type() {
+        assert_eq!(
+            super::zettel_path("20260315120000", None, true),
+            "zettelkasten/20260315120000.md"
+        );
     }
 }
