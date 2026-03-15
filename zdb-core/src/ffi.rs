@@ -249,10 +249,18 @@ impl ZettelDriver {
             .as_ref()
             .map(|z| z.0.clone())
             .unwrap_or_else(|| parser::generate_id().0);
-        let rel_path = format!("zettelkasten/{id}.md");
 
         let index = self.index.lock().unwrap();
         let repo = self.repo.lock().unwrap();
+
+        let folder = parsed
+            .meta
+            .zettel_type
+            .as_deref()
+            .map(|t| index.type_uses_folder(t, &*repo))
+            .unwrap_or(false);
+        let rel_path = crate::git_ops::zettel_path(&id, parsed.meta.zettel_type.as_deref(), folder);
+
         repo.commit_file(&rel_path, &content, &message)
             .map_err(ZdbError::from)?;
         index.index_zettel(&parsed).map_err(ZdbError::from)?;

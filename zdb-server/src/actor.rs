@@ -903,10 +903,11 @@ fn create_zettel(
 ) -> ActorResult<ParsedZettel> {
     let id = unique_id(repo_path);
     let id_str = id.to_string();
-    let path = match &zettel_type {
-        Some(t) => format!("zettelkasten/{t}/{id_str}.md"),
-        None => format!("zettelkasten/{id_str}.md"),
-    };
+    let folder = zettel_type
+        .as_deref()
+        .map(|t| index.type_uses_folder(t, repo))
+        .unwrap_or(false);
+    let path = zdb_core::git_ops::zettel_path(&id_str, zettel_type.as_deref(), folder);
 
     let meta = ZettelMeta {
         id: Some(id),

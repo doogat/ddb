@@ -301,6 +301,34 @@ impl Index {
             .map_err(|_| crate::error::ZettelError::NotFound(format!("zettel {id}")))
     }
 
+    /// Check if a type's typedef has `folder: true`.
+    /// Returns false if no typedef exists or folder is not set.
+    pub fn type_uses_folder(
+        &self,
+        type_name: &str,
+        repo: &impl crate::traits::ZettelSource,
+    ) -> bool {
+        // Find the typedef zettel for this type
+        let sql = "SELECT path FROM zettels WHERE type = '_typedef' AND title = ?1 LIMIT 1";
+        let path: Option<String> = self
+            .conn
+            .query_row(sql, params![type_name], |row| row.get(0))
+            .ok();
+        let Some(path) = path else { return false };
+        let Ok(content) = repo.read_file(&path) else {
+            return false;
+        };
+        let Ok(parsed) = crate::parser::parse(&content, &path) else {
+            return false;
+        };
+        parsed
+            .meta
+            .extra
+            .get("folder")
+            .map(|v| matches!(v, crate::types::Value::Bool(true)) || v.as_str() == Some("true"))
+            .unwrap_or(false)
+    }
+
     /// Resolve a zettel ID from an alias (case-insensitive).
     pub fn resolve_alias(&self, name: &str) -> Result<Option<String>> {
         let result = self.conn.query_row(
