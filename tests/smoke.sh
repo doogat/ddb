@@ -91,6 +91,12 @@ $ZDB reindex >/dev/null
 $ZDB query "SELECT tag, source FROM _zdb_tags WHERE tag = 'gtd/act/next'" | grep -q "body"
 pass "hashtag extraction and indexing"
 
+# 7c. checkbox parsing
+$ZDB update "$ID1" --body "- [ ] open task\n- [x] done task\n- [i] 2026-01-01 10:00 - info note"
+$ZDB reindex >/dev/null
+$ZDB query "SELECT state, content FROM _zdb_checkboxes WHERE state = 'open'" | grep -q "open task"
+pass "checkbox parsing and indexing"
+
 # 8. full-text search
 $ZDB search "Hello" | grep -q "$ID1"
 pass "search"

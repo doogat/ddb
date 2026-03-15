@@ -130,6 +130,13 @@ $output = zdb query "SELECT tag, source FROM _zdb_tags WHERE tag = 'gtd/act/next
 if ($output -notmatch "body") { throw "hashtag not indexed" }
 pass "hashtag extraction and indexing"
 
+# 7c. checkbox parsing
+zdb update $ID1 --body "- [ ] open task`n- [x] done task`n- [i] 2026-01-01 10:00 - info note"
+zdb reindex | Out-Null
+$output = zdb query "SELECT state, content FROM _zdb_checkboxes WHERE state = 'open'"
+if ($output -notmatch "open task") { throw "checkbox not indexed" }
+pass "checkbox parsing and indexing"
+
 # 8. full-text search
 $output = zdb search "Hello"
 if ($output -notmatch $ID1) { throw "search failed" }

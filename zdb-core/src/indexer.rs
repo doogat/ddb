@@ -1549,6 +1549,74 @@ mod tests {
     }
 
     #[test]
+    fn checkboxes_indexed() {
+        let idx = in_memory_index();
+        let mut z = sample_zettel();
+        z.body = "- [ ] open task\n- [x] done task\n- [i] 2026-01-01 10:00 - note".into();
+        z.checkboxes = vec![
+            crate::types::CheckboxItem {
+                state: crate::types::CheckboxState::Open,
+                content: "open task".into(),
+                date: None,
+                due_date: None,
+                line_number: 1,
+            },
+            crate::types::CheckboxItem {
+                state: crate::types::CheckboxState::Done,
+                content: "done task".into(),
+                date: None,
+                due_date: None,
+                line_number: 2,
+            },
+            crate::types::CheckboxItem {
+                state: crate::types::CheckboxState::Info,
+                content: "note".into(),
+                date: Some("2026-01-01 10:00".into()),
+                due_date: None,
+                line_number: 3,
+            },
+        ];
+        idx.index_zettel(&z).unwrap();
+
+        let rows = idx
+            .query_raw("SELECT state, content FROM _zdb_checkboxes ORDER BY line_number")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], "open");
+        assert_eq!(rows[1][0], "done");
+        assert_eq!(rows[2][0], "info");
+    }
+
+    #[test]
+    fn checkbox_state_query() {
+        let idx = in_memory_index();
+        let mut z = sample_zettel();
+        z.checkboxes = vec![
+            crate::types::CheckboxItem {
+                state: crate::types::CheckboxState::Open,
+                content: "pending".into(),
+                date: None,
+                due_date: None,
+                line_number: 1,
+            },
+            crate::types::CheckboxItem {
+                state: crate::types::CheckboxState::Done,
+                content: "finished".into(),
+                date: None,
+                due_date: None,
+                line_number: 2,
+            },
+        ];
+        idx.index_zettel(&z).unwrap();
+
+        let open = idx
+            .query_raw("SELECT content FROM _zdb_checkboxes WHERE state = 'open'")
+            .unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0][0], "pending");
+    }
+
+    #[test]
     fn fts_search() {
         let idx = in_memory_index();
         idx.index_zettel(&sample_zettel()).unwrap();
