@@ -945,6 +945,56 @@ Body here.
         assert_eq!(result, "See [[zettelkasten/contact/20260301120000]]");
     }
 
+    // -- checkbox tests --
+
+    #[test]
+    fn checkboxes_all_states() {
+        let body = "- [ ] open item\n- [x] done item\n- [i] info item";
+        let cbs = extract_checkboxes(body);
+        assert_eq!(cbs.len(), 3);
+        assert_eq!(cbs[0].state, crate::types::CheckboxState::Open);
+        assert_eq!(cbs[0].content, "open item");
+        assert_eq!(cbs[1].state, crate::types::CheckboxState::Done);
+        assert_eq!(cbs[1].content, "done item");
+        assert_eq!(cbs[2].state, crate::types::CheckboxState::Info);
+        assert_eq!(cbs[2].content, "info item");
+    }
+
+    #[test]
+    fn checkboxes_date_prefix() {
+        let body = "- [i] 2026-02-20 20:54 - Issue created: ENG-1234";
+        let cbs = extract_checkboxes(body);
+        assert_eq!(cbs.len(), 1);
+        assert_eq!(cbs[0].date, Some("2026-02-20 20:54".into()));
+        assert_eq!(cbs[0].content, "Issue created: ENG-1234");
+    }
+
+    #[test]
+    fn checkboxes_due_date() {
+        let body = "- [ ] Do the thing ⏳ 2026-03-20";
+        let cbs = extract_checkboxes(body);
+        assert_eq!(cbs.len(), 1);
+        assert_eq!(cbs[0].due_date, Some("2026-03-20".into()));
+    }
+
+    #[test]
+    fn checkboxes_skip_code_block() {
+        let body = "- [ ] real\n```\n- [ ] fake\n```\n- [x] also real";
+        let cbs = extract_checkboxes(body);
+        assert_eq!(cbs.len(), 2);
+        assert_eq!(cbs[0].content, "real");
+        assert_eq!(cbs[1].content, "also real");
+    }
+
+    #[test]
+    fn checkboxes_line_numbers() {
+        let body = "Some text\n- [ ] first\nmore text\n- [x] second";
+        let cbs = extract_checkboxes(body);
+        assert_eq!(cbs.len(), 2);
+        assert_eq!(cbs[0].line_number, 2);
+        assert_eq!(cbs[1].line_number, 4);
+    }
+
     // -- hashtag tests --
 
     #[test]
