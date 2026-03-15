@@ -566,7 +566,7 @@ impl<'a> SqlEngine<'a> {
             let path = if table_name == "zettels" {
                 format!("zettelkasten/{}.md", id.0)
             } else {
-                format!("zettelkasten/{}/{}.md", table_name, id.0)
+                crate::git_ops::zettel_path(&id.0, Some(&table_name), schema.folder)
             };
 
             // Index the zettel
