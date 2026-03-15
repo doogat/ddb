@@ -1439,6 +1439,8 @@ The SQL engine uses `sqlparser` to parse SQL ASTs, then dispatches:
 
 The key insight: SQL tables are zettel types. `CREATE TABLE project (...)` creates a `_typedef` zettel that defines the `project` type's schema. `INSERT INTO project VALUES (...)` creates a new zettel with `type: project` and the specified fields in its frontmatter/body/reference section.
 
+**Folder namespaces**: Typedefs can declare `folder: true` in frontmatter to store instances in `zettelkasten/{type}/{id}.md` instead of flat `zettelkasten/{id}.md`. The `zettel_path()` helper in `git_ops.rs` computes the path based on type name and folder setting. Both `handle_insert()` in the SQL engine and `create_zettel()` in the actor/FFI use this helper. The `type_uses_folder()` method on `Index` looks up the typedef to check the folder setting. Types without `folder: true` (or without a typedef) remain flat for backward compatibility.
+
 The bulk operations pattern uses `resolve_matching_ids` to delegate WHERE evaluation to SQLite — this reconstructs the WHERE clause via sqlparser's `Display` impl, runs `SELECT id FROM {table} WHERE {clause}` against the materialized table, then resolves each ID to a file path. This avoids reimplementing SQL expression evaluation in Rust.
 
 ### Quoted Identifier Handling

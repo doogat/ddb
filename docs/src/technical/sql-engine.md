@@ -55,6 +55,7 @@ Column types: `TEXT`, `INTEGER`, `REAL`, `BOOLEAN`. Foreign keys via `REFERENCES
 - **Single commit**: all N files staged and committed together via `commit_files`
 - **Return value**: comma-separated list of ZettelIds (e.g. `20260310120000,20260310120001,20260310120002`)
 - **Transaction-aware**: within a `BEGIN`/`COMMIT` block, writes are buffered as usual
+- **Folder-aware paths**: if the typedef has `folder: true`, created files go to `zettelkasten/{type}/{id}.md`; otherwise they stay flat at `zettelkasten/{id}.md`
 
 ## Zone Mapping
 
