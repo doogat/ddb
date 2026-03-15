@@ -297,6 +297,18 @@ RESULT=$(rest "/zettels?tag=rest")
 echo "$RESULT" | grep -q "$REST_ID"
 pass "rest: list with filter"
 
+# Field filtering: create typed zettel via SQL, filter by field
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokeitem (label TEXT NOT NULL, priority INTEGER)\"){message}}"}'
+gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokeitem (label, priority) VALUES ('\''Smoke1'\'', 7)\"){message}}"}'
+RESULT=$(rest "/zettels?field.priority=7")
+echo "$RESULT" | grep -q "Smoke1"
+pass "rest: field filter"
+
+# Field filter with nonexistent value returns empty
+RESULT=$(rest "/zettels?field.priority=999")
+echo "$RESULT" | grep -q '"data":\[\]'
+pass "rest: field filter no match"
+
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/zettels/$REST_ID" \
   -H "Authorization: Bearer $TOKEN" -X DELETE)
 [ "$HTTP_CODE" = "204" ]

@@ -374,6 +374,17 @@ $resp = rest "/zettels?tag=rest"
 if ($resp.Content -notmatch $REST_ID) { throw "rest list failed" }
 pass "rest: list with filter"
 
+# Field filtering
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokeitem (label TEXT NOT NULL, priority INTEGER)\"){message}}"}'
+gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokeitem (label, priority) VALUES ('\''Smoke1'\'', 7)\"){message}}"}'
+$resp = rest "/zettels?field.priority=7"
+if ($resp.Content -notmatch "Smoke1") { throw "field filter failed" }
+pass "rest: field filter"
+
+$resp = rest "/zettels?field.priority=999"
+if ($resp.Content -notmatch '"data":\[\]') { throw "field filter no-match failed" }
+pass "rest: field filter no match"
+
 $resp = Invoke-WebRequest -Uri "$REST_URL/zettels/$REST_ID" -Method DELETE `
     -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction Stop
 if ($resp.StatusCode -ne 204) { throw "rest delete expected 204" }
