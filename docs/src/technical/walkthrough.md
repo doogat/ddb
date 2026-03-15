@@ -2636,7 +2636,8 @@ sed -n '/pub fn backlinking_zettel_paths/,/^    }/p' zdb-core/src/indexer.rs
 3. Query backlinks for both old path and bare ID (wikilinks may use either form)
 4. Deduplicate, then rewrite each backlinking file using `rewrite_wikilinks()`
 5. Commit all rewritten files in a single batch (second commit)
-6. Return a `RenameReport` with updated and unresolvable file lists
+6. Refresh the index via `rebuild_if_stale()`, then query `broken_backlinks()` filtered to the old path/ID to detect any references that weren't rewritten
+7. Return a `RenameReport` with `updated` (rewritten files) and `unresolvable` (remaining broken references)
 
 ```bash
 sed -n '/^pub fn rename_zettel/,/^}/p' zdb-core/src/git_ops.rs
