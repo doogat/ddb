@@ -123,6 +123,13 @@ $output = zdb reindex
 if ($output -notmatch "indexed 2 zettels") { throw "reindex count wrong" }
 pass "reindex"
 
+# 7b. hashtag extraction
+zdb update $ID1 --body "Updated with #gtd/act/next hashtag"
+zdb reindex | Out-Null
+$output = zdb query "SELECT tag, source FROM _zdb_tags WHERE tag = 'gtd/act/next'"
+if ($output -notmatch "body") { throw "hashtag not indexed" }
+pass "hashtag extraction and indexing"
+
 # 8. full-text search
 $output = zdb search "Hello"
 if ($output -notmatch $ID1) { throw "search failed" }

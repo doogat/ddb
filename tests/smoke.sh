@@ -85,6 +85,12 @@ pass "broken backlink report on delete"
 $ZDB reindex | grep -q "indexed 2 zettels"
 pass "reindex"
 
+# 7b. hashtag extraction
+$ZDB update "$ID1" --body "Updated with #gtd/act/next hashtag"
+$ZDB reindex >/dev/null
+$ZDB query "SELECT tag, source FROM _zdb_tags WHERE tag = 'gtd/act/next'" | grep -q "body"
+pass "hashtag extraction and indexing"
+
 # 8. full-text search
 $ZDB search "Hello" | grep -q "$ID1"
 pass "search"
