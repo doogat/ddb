@@ -1,4 +1,5 @@
 mod attachments;
+mod checkboxes;
 mod common;
 mod delete_backlinks;
 mod multi_device;
