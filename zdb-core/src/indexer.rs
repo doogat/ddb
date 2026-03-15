@@ -81,7 +81,8 @@ impl Index {
             content TEXT NOT NULL,
             date TEXT,
             due_date TEXT,
-            line_number INTEGER
+            line_number INTEGER,
+            indent_level INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_zdb_checkboxes_state ON _zdb_checkboxes(state);
         CREATE INDEX IF NOT EXISTS idx_zdb_checkboxes_zettel ON _zdb_checkboxes(zettel_id);
@@ -213,8 +214,8 @@ impl Index {
                     crate::types::CheckboxState::Info => "info",
                 };
                 self.conn.execute(
-                    "INSERT INTO _zdb_checkboxes (zettel_id, state, content, date, due_date, line_number) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![id, state, cb.content, cb.date, cb.due_date, cb.line_number as i64],
+                    "INSERT INTO _zdb_checkboxes (zettel_id, state, content, date, due_date, line_number, indent_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![id, state, cb.content, cb.date, cb.due_date, cb.line_number as i64, cb.indent_level as i64],
                 )?;
             }
 
@@ -1560,6 +1561,7 @@ mod tests {
                 date: None,
                 due_date: None,
                 line_number: 1,
+                indent_level: 0,
             },
             crate::types::CheckboxItem {
                 state: crate::types::CheckboxState::Done,
@@ -1567,6 +1569,7 @@ mod tests {
                 date: None,
                 due_date: None,
                 line_number: 2,
+                indent_level: 0,
             },
             crate::types::CheckboxItem {
                 state: crate::types::CheckboxState::Info,
@@ -1574,6 +1577,7 @@ mod tests {
                 date: Some("2026-01-01 10:00".into()),
                 due_date: None,
                 line_number: 3,
+                indent_level: 0,
             },
         ];
         idx.index_zettel(&z).unwrap();
@@ -1598,6 +1602,7 @@ mod tests {
                 date: None,
                 due_date: None,
                 line_number: 1,
+                indent_level: 0,
             },
             crate::types::CheckboxItem {
                 state: crate::types::CheckboxState::Done,
@@ -1605,6 +1610,7 @@ mod tests {
                 date: None,
                 due_date: None,
                 line_number: 2,
+                indent_level: 0,
             },
         ];
         idx.index_zettel(&z).unwrap();

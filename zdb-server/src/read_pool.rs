@@ -181,7 +181,7 @@ impl ReadPool {
             };
 
             let sql = format!(
-                "SELECT c.zettel_id, z.title, c.state, c.content, c.date, c.due_date, c.line_number \
+                "SELECT c.zettel_id, z.title, c.state, c.content, c.date, c.due_date, c.line_number, c.indent_level \
                  FROM _zdb_checkboxes c \
                  JOIN zettels z ON c.zettel_id = z.id{where_clause} \
                  ORDER BY c.zettel_id DESC, c.line_number ASC{limit_clause}"

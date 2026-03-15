@@ -475,6 +475,7 @@ pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
             continue;
         }
         if let Some(caps) = cb_re.captures(line) {
+            let indent = caps[1].len();
             let state = match &caps[2] {
                 " " => CheckboxState::Open,
                 "x" => CheckboxState::Done,
@@ -499,6 +500,7 @@ pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
                 date,
                 due_date,
                 line_number: line_idx + 1,
+                indent_level: indent,
             });
         }
     }
@@ -993,6 +995,19 @@ Body here.
         assert_eq!(cbs.len(), 2);
         assert_eq!(cbs[0].line_number, 2);
         assert_eq!(cbs[1].line_number, 4);
+    }
+
+    #[test]
+    fn checkboxes_indent_level() {
+        let body = "- [ ] parent\n  - [ ] child\n    - [x] grandchild";
+        let cbs = extract_checkboxes(body);
+        assert_eq!(cbs.len(), 3);
+        assert_eq!(cbs[0].indent_level, 0);
+        assert_eq!(cbs[0].content, "parent");
+        assert_eq!(cbs[1].indent_level, 2);
+        assert_eq!(cbs[1].content, "child");
+        assert_eq!(cbs[2].indent_level, 4);
+        assert_eq!(cbs[2].content, "grandchild");
     }
 
     // -- hashtag tests --

@@ -234,6 +234,7 @@ pub struct CheckboxItem {
     pub date: Option<String>,
     pub due_date: Option<String>,
     pub line_number: usize,
+    pub indent_level: usize,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

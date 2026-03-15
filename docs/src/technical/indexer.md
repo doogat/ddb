@@ -23,7 +23,7 @@ _zdb_fields(zettel_id FK, key, value, zone)  -- index on key
 _zdb_links(source_id FK, target_path, display, zone)  -- index on target_path
 _zdb_aliases(zettel_id FK, alias COLLATE NOCASE)  -- index on alias
 _zdb_attachments(zettel_id FK, name, mime, size INTEGER, path)
-_zdb_checkboxes(zettel_id FK, state, content, date, due_date, line_number INTEGER)
+_zdb_checkboxes(zettel_id FK, state, content, date, due_date, line_number INTEGER, indent_level INTEGER)
                                          -- indexes on state, zettel_id
 _zdb_fts(title, body, tags)              -- FTS5 virtual table
 _zdb_meta(key PK, value)                 -- staleness tracking

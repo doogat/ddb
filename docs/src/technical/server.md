@@ -113,6 +113,7 @@ type CheckboxItem {
   date: String
   dueDate: String
   lineNumber: Int
+  indentLevel: Int
 }
 ```
 

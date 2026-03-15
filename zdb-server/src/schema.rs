@@ -125,6 +125,7 @@ fn checkbox_row_to_value(row: &[String]) -> GqlValue {
     let date = row.get(4).filter(|s| !s.is_empty());
     let due_date = row.get(5).filter(|s| !s.is_empty());
     let line_number = row.get(6).and_then(|s| s.parse::<i64>().ok());
+    let indent_level = row.get(7).and_then(|s| s.parse::<i64>().ok());
 
     let mut obj = IndexMap::new();
     obj.insert(Name::new("zettelId"), GqlValue::from(zettel_id));
@@ -145,6 +146,10 @@ fn checkbox_row_to_value(row: &[String]) -> GqlValue {
     obj.insert(
         Name::new("lineNumber"),
         line_number.map(GqlValue::from).unwrap_or(GqlValue::Null),
+    );
+    obj.insert(
+        Name::new("indentLevel"),
+        indent_level.map(GqlValue::from).unwrap_or(GqlValue::Null),
     );
     GqlValue::Object(obj)
 }
@@ -559,6 +564,16 @@ pub fn build_schema(
                 FieldFuture::new(async move {
                     let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
                     Ok(obj_field(obj, "lineNumber"))
+                })
+            },
+        ))
+        .field(Field::new(
+            "indentLevel",
+            TypeRef::named(TypeRef::INT),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "indentLevel"))
                 })
             },
         ));
