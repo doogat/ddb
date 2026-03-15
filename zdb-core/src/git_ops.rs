@@ -993,6 +993,16 @@ pub fn rename_zettel(
         )?;
     }
 
+    // Step 5: detect remaining broken references to old target
+    index.rebuild_if_stale(repo)?;
+    let old_targets = [old_path, old_target_for_path, old_id];
+    report.unresolvable = index
+        .broken_backlinks()?
+        .into_iter()
+        .filter(|(_src, target)| old_targets.contains(&target.as_str()))
+        .map(|(src, _)| src)
+        .collect();
+
     Ok(report)
 }
 
