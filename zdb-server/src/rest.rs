@@ -168,13 +168,40 @@ pub fn router() -> Router {
 
 async fn list_zettels(
     Extension(read_pool): Extension<ReadPool>,
-    Query(params): Query<ListParams>,
+    Query(raw_params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorBody>)> {
+    // Extract standard params from the raw map
+    let zettel_type = raw_params.get("type").cloned();
+    let tag = raw_params.get("tag").cloned();
+    let q = raw_params.get("q").cloned();
+    let backlinks = raw_params.get("backlinks").cloned();
+    let sort = raw_params.get("sort").cloned();
+    let _ = sort; // reserved for future use
+    let page: i64 = raw_params
+        .get("page")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let per_page: i64 = raw_params
+        .get("per_page")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
+    let per_page = per_page.clamp(1, 200);
+
+    // Extract field.* params
+    let field_filters: Vec<(String, String)> = raw_params
+        .iter()
+        .filter_map(|(k, v)| {
+            k.strip_prefix("field.")
+                .map(|name| (name.to_string(), v.clone()))
+        })
+        .collect();
+
     // Full-text search shortcut
-    if let Some(q) = params.q {
-        let limit = params.per_page.unwrap_or(50) as usize;
-        let page = params.page.unwrap_or(1).max(1) as usize;
-        let offset = (page - 1) * limit;
+    if let Some(q) = q {
+        let limit = per_page as usize;
+        let page_usize = page as usize;
+        let offset = (page_usize - 1) * limit;
         let result = read_pool
             .search(q, limit, offset)
             .await
@@ -198,16 +225,14 @@ async fn list_zettels(
         ));
     }
 
-    let page = params.page.unwrap_or(1).max(1);
-    let per_page = params.per_page.unwrap_or(50).clamp(1, 200);
     let offset = (page - 1) * per_page;
 
     let total = read_pool
         .count_zettels(
-            params.zettel_type.clone(),
-            params.tag.clone(),
-            params.backlinks.clone(),
-            vec![],
+            zettel_type.clone(),
+            tag.clone(),
+            backlinks.clone(),
+            field_filters.clone(),
         )
         .await
         .map_err(rest_error)?;
@@ -220,10 +245,10 @@ async fn list_zettels(
 
     let zettels = read_pool
         .list_zettels(
-            params.zettel_type,
-            params.tag,
-            params.backlinks,
-            vec![],
+            zettel_type,
+            tag,
+            backlinks,
+            field_filters,
             Some(per_page),
             Some(offset),
         )
