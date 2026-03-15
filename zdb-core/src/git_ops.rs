@@ -1000,7 +1000,7 @@ pub fn rename_zettel(
         .broken_backlinks()?
         .into_iter()
         .filter(|(_src, target)| old_targets.contains(&target.as_str()))
-        .map(|(src, _)| src)
+        .filter_map(|(src_id, _)| index.resolve_path(&src_id).ok())
         .collect();
 
     Ok(report)
