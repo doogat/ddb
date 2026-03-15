@@ -2173,8 +2173,6 @@ pub async fn run(
 
     let auth_routes = auth_routes.layer(middleware::from_fn(auth::require_auth));
 
-REST list endpoint (`GET /rest/zettels`) accepts standard query parameters (`type`, `tag`, `q`, `backlinks`, `sort`, `page`, `per_page`) plus dynamic `field.{name}=value` parameters for inline field filtering. The handler uses `Query<HashMap<String, String>>` to capture both standard and dynamic params, extracting `field.*` keys and passing them as `field_filters` through the query pipeline to `build_filtered_sql`, which generates `IN (SELECT zettel_id FROM _zdb_fields WHERE key = ? AND value = ?)` conditions.
-
     // WebSocket route — auth handled in ws_handler via header or connection_init payload
     let ws_routes = Router::new().route("/ws", axum::routing::get(ws::ws_handler));
 
@@ -2232,6 +2230,7 @@ Startup sequence:
 6. Set up `SchemaReloader` backed by `arc_swap::ArcSwap` for hot-reload when types change
 7. Spawn background maintenance task if `maintenance_enabled` (default: on, interval: 1h)
 8. Mount routes: `/graphql` (POST), `/ws` (WebSocket), `/rest/*` (REST API), `/nosql/*` (NoSQL key-value)
+   - REST list (`GET /rest/zettels`) uses `Query<HashMap<String, String>>` for dynamic `field.{name}=value` params alongside standard filters (`type`, `tag`, `q`, `backlinks`). Field filters pass through to `build_filtered_sql` as `IN (SELECT zettel_id FROM _zdb_fields ...)` conditions.
 9. Start pgwire on a separate port (default 2892), with both `ActorHandle` (writes) and `ReadPool` (SELECTs)
 10. `tokio::select!` runs both HTTP and pgwire concurrently
 
