@@ -618,12 +618,14 @@ fn handle_command_shared(
         } => ActorReply::ZettelList(list_zettels(
             repo,
             index,
-            zettel_type,
-            tag,
-            backlinks_of,
-            &field_filters,
-            limit,
-            offset,
+            ListQuery {
+                zettel_type,
+                tag,
+                backlinks_of,
+                field_filters,
+                limit,
+                offset,
+            },
         )),
         ActorCommand::Search {
             query,
@@ -750,23 +752,27 @@ pub(crate) fn get_zettel(repo: &GitRepo, index: &Index, id: &str) -> ActorResult
     parser::parse(&content, &path)
 }
 
+pub(crate) struct ListQuery {
+    pub zettel_type: Option<String>,
+    pub tag: Option<String>,
+    pub backlinks_of: Option<String>,
+    pub field_filters: Vec<(String, String)>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
 pub(crate) fn list_zettels(
     repo: &GitRepo,
     index: &Index,
-    zettel_type: Option<String>,
-    tag: Option<String>,
-    backlinks_of: Option<String>,
-    field_filters: &[(String, String)],
-    limit: Option<i64>,
-    offset: Option<i64>,
+    q: ListQuery,
 ) -> ActorResult<Vec<ParsedZettel>> {
     let sql = build_filtered_sql(
-        zettel_type.as_deref(),
-        tag.as_deref(),
-        backlinks_of.as_deref(),
-        field_filters,
-        limit,
-        offset,
+        q.zettel_type.as_deref(),
+        q.tag.as_deref(),
+        q.backlinks_of.as_deref(),
+        &q.field_filters,
+        q.limit,
+        q.offset,
     );
     let rows = index.query_raw(&sql)?;
 

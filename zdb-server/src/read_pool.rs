@@ -87,12 +87,14 @@ impl ReadPool {
             actor::list_zettels(
                 repo,
                 index,
-                zettel_type,
-                tag,
-                backlinks_of,
-                &field_filters,
-                limit,
-                offset,
+                actor::ListQuery {
+                    zettel_type,
+                    tag,
+                    backlinks_of,
+                    field_filters,
+                    limit,
+                    offset,
+                },
             )
         })
         .await
