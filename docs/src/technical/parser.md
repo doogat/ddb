@@ -57,6 +57,16 @@ Pattern: `\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`
 
 Extracts from all three zones. In frontmatter, wikilinks appear inside quoted YAML values (e.g., `related: "[[20260226120000|My Note]]"`).
 
+## Hashtag Extraction
+
+`extract_hashtags(body) -> Vec<String>`
+
+Extracts `#tag` tokens from body text. Respects the same exclusion zones as inline fields (fenced code blocks, inline code spans) plus wikilinks. URL fragments (`https://example.com#section`) are excluded by checking for `://` before `#`. Returns unique tags without `#` prefix.
+
+Pattern: `(?:^|\s)#([\w][\w/-]*)` — matches hierarchical tags like `#gtd/act/next` and `#client/100-acme-corp`.
+
+Results stored in `ParsedZettel.body_tags` and indexed in `_zdb_tags` with `source = 'body'`.
+
 ## Serialization
 
 `serialize(zettel: &ParsedZettel) -> String`

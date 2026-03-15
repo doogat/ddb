@@ -605,6 +605,8 @@ pub fn extract_inline_fields(body: &str, reference: &str) -> crate::error::Resul
 
 **Wikilinks** (`[[target|display]]`) are extracted from all three zones with a single regex.
 
+**Hashtags** (`#tag/subtag`) are extracted from body text via `extract_hashtags()`. The function reuses the same fence-tracking and inline-code-stripping logic as inline fields, and additionally strips wikilinks (`[[...]]`) before matching. URL fragments (`https://example.com#section`) are excluded by checking for `://` before the `#`. Tags are deduplicated and stored in `ParsedZettel.body_tags`. The indexer inserts them into `_zdb_tags` with `source = 'body'` alongside frontmatter tags (`source = 'frontmatter'`).
+
 ### ID Generation
 
 ZettelDB uses 14-digit timestamp IDs with collision prevention:
@@ -1243,7 +1245,8 @@ impl Index {
 
             CREATE TABLE IF NOT EXISTS _zdb_tags (
                 zettel_id TEXT NOT NULL REFERENCES zettels(id),
-                tag TEXT NOT NULL
+                tag TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'frontmatter'
             );
             CREATE INDEX IF NOT EXISTS idx_zdb_tags_tag ON _zdb_tags(tag);
 
@@ -1291,7 +1294,7 @@ impl Index {
 
 Six tables:
 - **zettels** — core metadata (id, title, date, type, path, body)
-- **_zdb_tags** — normalized tag-to-zettel mapping
+- **_zdb_tags** — normalized tag-to-zettel mapping with `source` column (`frontmatter` or `body`)
 - **_zdb_fields** — inline fields (key, value, zone) plus scalar frontmatter extras (String, Number, Bool) with `zone = 'Frontmatter'`
 - **_zdb_links** — wikilinks (source, target, display text, zone)
 - **_zdb_aliases** — alternative names for zettels (title, aliases from fields)
