@@ -34,7 +34,8 @@ impl Index {
 
         CREATE TABLE IF NOT EXISTS _zdb_tags (
             zettel_id TEXT NOT NULL REFERENCES zettels(id),
-            tag TEXT NOT NULL
+            tag TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'frontmatter'
         );
         CREATE INDEX IF NOT EXISTS idx_zdb_tags_tag ON _zdb_tags(tag);
 
@@ -186,7 +187,11 @@ impl Index {
             self.conn.execute("DELETE FROM _zdb_aliases WHERE zettel_id = ?1", params![id])?;
 
             for tag in &zettel.meta.tags {
-                self.conn.execute("INSERT INTO _zdb_tags (zettel_id, tag) VALUES (?1, ?2)", params![id, tag])?;
+                self.conn.execute("INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'frontmatter')", params![id, tag])?;
+            }
+
+            for tag in &zettel.body_tags {
+                self.conn.execute("INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'body')", params![id, tag])?;
             }
 
             for field in &zettel.inline_fields {
