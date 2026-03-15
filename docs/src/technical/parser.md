@@ -67,6 +67,20 @@ Pattern: `(?:^|\s)#([\w][\w/-]*)` — matches hierarchical tags like `#gtd/act/n
 
 Results stored in `ParsedZettel.body_tags` and indexed in `_zdb_tags` with `source = 'body'`.
 
+## Checkbox Extraction
+
+`extract_checkboxes(body) -> Vec<CheckboxItem>`
+
+Extracts `- [ ]` (open), `- [x]` (done), `- [i]` (info) items from body text. Fenced code blocks are excluded. Each item captures:
+
+- **state**: Open, Done, or Info
+- **content**: text after the checkbox marker
+- **date**: optional `YYYY-MM-DD HH:MM` prefix (separated by ` - ` or ` – `)
+- **due_date**: optional `⏳ YYYY-MM-DD` within content
+- **line_number**: 1-indexed position within the body
+
+Results stored in `ParsedZettel.checkboxes` and indexed in `_zdb_checkboxes`.
+
 ## Serialization
 
 `serialize(zettel: &ParsedZettel) -> String`

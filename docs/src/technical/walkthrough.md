@@ -607,6 +607,8 @@ pub fn extract_inline_fields(body: &str, reference: &str) -> crate::error::Resul
 
 **Hashtags** (`#tag/subtag`) are extracted from body text via `extract_hashtags()`. The function reuses the same fence-tracking and inline-code-stripping logic as inline fields, and additionally strips wikilinks (`[[...]]`) before matching. URL fragments (`https://example.com#section`) are excluded by checking for `://` before the `#`. Tags are deduplicated and stored in `ParsedZettel.body_tags`. The indexer inserts them into `_zdb_tags` with `source = 'body'` alongside frontmatter tags (`source = 'frontmatter'`).
 
+**Checkboxes** (`- [ ]`, `- [x]`, `- [i]`) are extracted from body text via `extract_checkboxes()`. Each item captures state (open/done/info), content text, optional date prefix (`YYYY-MM-DD HH:MM`), optional due date (`⏳ YYYY-MM-DD`), and line number. Fenced code blocks are excluded. Results stored in `ParsedZettel.checkboxes` and indexed in `_zdb_checkboxes` table, enabling GTD queries like `SELECT * FROM _zdb_checkboxes WHERE state = 'open'`.
+
 ### ID Generation
 
 ZettelDB uses 14-digit timestamp IDs with collision prevention:
@@ -1292,12 +1294,13 @@ impl Index {
         let id = zettel.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
 ```
 
-Six tables:
+Seven tables:
 - **zettels** — core metadata (id, title, date, type, path, body)
 - **_zdb_tags** — normalized tag-to-zettel mapping with `source` column (`frontmatter` or `body`)
 - **_zdb_fields** — inline fields (key, value, zone) plus scalar frontmatter extras (String, Number, Bool) with `zone = 'Frontmatter'`
 - **_zdb_links** — wikilinks (source, target, display text, zone)
 - **_zdb_aliases** — alternative names for zettels (title, aliases from fields)
+- **_zdb_checkboxes** — checkbox items (state, content, date, due_date, line_number) from body `- [ ]`/`[x]`/`[i]` syntax
 - **_zdb_fts** — FTS5 virtual table (porter stemmer + unicode61 tokenizer)
 
 WAL mode is enabled for concurrent read/write. The `_zdb_meta` table tracks the HEAD commit hash for staleness detection.
