@@ -75,6 +75,17 @@ impl Index {
             PRIMARY KEY (zettel_id, name)
         );
 
+        CREATE TABLE IF NOT EXISTS _zdb_checkboxes (
+            zettel_id TEXT NOT NULL REFERENCES zettels(id),
+            state TEXT NOT NULL CHECK (state IN ('open', 'done', 'info')),
+            content TEXT NOT NULL,
+            date TEXT,
+            due_date TEXT,
+            line_number INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_zdb_checkboxes_state ON _zdb_checkboxes(state);
+        CREATE INDEX IF NOT EXISTS idx_zdb_checkboxes_zettel ON _zdb_checkboxes(zettel_id);
+
         CREATE VIRTUAL TABLE IF NOT EXISTS _zdb_fts USING fts5(
             title, body, tags,
             tokenize = 'porter unicode61'
@@ -185,6 +196,7 @@ impl Index {
             self.conn.execute("DELETE FROM _zdb_fields WHERE zettel_id = ?1", params![id])?;
             self.conn.execute("DELETE FROM _zdb_links WHERE source_id = ?1", params![id])?;
             self.conn.execute("DELETE FROM _zdb_aliases WHERE zettel_id = ?1", params![id])?;
+            self.conn.execute("DELETE FROM _zdb_checkboxes WHERE zettel_id = ?1", params![id])?;
 
             for tag in &zettel.meta.tags {
                 self.conn.execute("INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'frontmatter')", params![id, tag])?;
@@ -192,6 +204,18 @@ impl Index {
 
             for tag in &zettel.body_tags {
                 self.conn.execute("INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'body')", params![id, tag])?;
+            }
+
+            for cb in &zettel.checkboxes {
+                let state = match cb.state {
+                    crate::types::CheckboxState::Open => "open",
+                    crate::types::CheckboxState::Done => "done",
+                    crate::types::CheckboxState::Info => "info",
+                };
+                self.conn.execute(
+                    "INSERT INTO _zdb_checkboxes (zettel_id, state, content, date, due_date, line_number) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![id, state, cb.content, cb.date, cb.due_date, cb.line_number as i64],
+                )?;
             }
 
             for field in &zettel.inline_fields {
@@ -331,6 +355,10 @@ impl Index {
                 .execute("DELETE FROM _zdb_links WHERE source_id = ?1", params![id])?;
             self.conn
                 .execute("DELETE FROM _zdb_aliases WHERE zettel_id = ?1", params![id])?;
+            self.conn.execute(
+                "DELETE FROM _zdb_checkboxes WHERE zettel_id = ?1",
+                params![id],
+            )?;
             self.conn
                 .execute("DELETE FROM zettels WHERE id = ?1", params![id])?;
             Ok(())
@@ -356,6 +384,7 @@ impl Index {
             "_zdb_fields",
             "_zdb_links",
             "_zdb_aliases",
+            "_zdb_checkboxes",
             "_zdb_meta",
         ] {
             let exists: bool = self
