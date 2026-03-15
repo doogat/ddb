@@ -47,6 +47,7 @@ columns:
     zone: frontmatter
     search_boost: 1.5
 crdt_strategy: preset:default
+folder: true
 template_sections:
   - First contact
   - Timeline
