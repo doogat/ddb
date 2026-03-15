@@ -323,6 +323,75 @@ fn rest_filter_by_field() {
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
     assert!(data.is_empty());
+
+    // Multiple field filters AND together
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "ALTER TABLE item ADD COLUMN status INTEGER" }),
+    );
+    assert!(r.get("errors").is_none(), "ALTER TABLE failed: {r}");
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO item (name, priority, status) VALUES ('Delta', 1, 10)" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+
+    // Delta has priority=1 AND status=10; Alpha and Gamma have priority=1 but no status
+    let resp = server.rest_get("/zettels?field.priority=1&field.status=10");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(
+        data.len(),
+        1,
+        "multi-field AND: expected 1 match, got: {data:?}"
+    );
+
+    // SQL injection via field key — should return empty, not error
+    let resp = server.rest_get("/zettels?field.';DROP%20TABLE%20zettels--=x");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    let data = body["data"].as_array().unwrap();
+    assert!(data.is_empty(), "SQL injection attempt should return empty");
+
+    // Verify zettels table still exists
+    let resp = server.rest_get("/zettels");
+    assert_eq!(resp.status(), 200);
+}
+
+#[test]
+fn rest_filter_field_and_tag() {
+    let repo = ZdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create tagged zettel with extra field via SQL type
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE widget (label TEXT NOT NULL, priority INTEGER)" }),
+    );
+    assert!(r.get("errors").is_none());
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO widget (label, priority) VALUES ('W1', 5)" }),
+    );
+    assert!(r.get("errors").is_none());
+
+    // Create untyped zettel (no priority field)
+    server.rest_post(
+        "/zettels",
+        serde_json::json!({ "title": "Plain", "tags": ["widget"] }),
+    );
+
+    // Filter by type + field → only the SQL-created widget
+    let resp = server.rest_get("/zettels?type=widget&field.priority=5");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(
+        data.len(),
+        1,
+        "type+field filter: expected 1, got: {data:?}"
+    );
 }
 
 #[test]
