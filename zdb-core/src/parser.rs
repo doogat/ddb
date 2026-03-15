@@ -1,9 +1,16 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use crate::error::{Result, ZettelError};
 use crate::types::{InlineField, Value, WikiLink, Zettel, ZettelId, ZettelMeta, Zone};
+
+/// Shared regex for fenced code block markers (``` or ~~~).
+fn fence_regex() -> &'static Regex {
+    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    FENCE_RE.get_or_init(|| Regex::new(r"^(?:`{3,}|~{3,})").expect("valid regex: fence marker"))
+}
 
 impl From<serde_yaml::Error> for ZettelError {
     fn from(e: serde_yaml::Error) -> Self {
@@ -219,8 +226,6 @@ pub fn extract_inline_fields(
     static REF_RE: OnceLock<Regex> = OnceLock::new();
 
     static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
-    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
-
     let body_re = BODY_RE.get_or_init(|| {
         Regex::new(r"^([\w][\w\s-]*):: (.+)$").expect("valid regex: body inline field")
     });
@@ -229,8 +234,7 @@ pub fn extract_inline_fields(
     });
     let inline_code_re =
         INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
-    let fence_re = FENCE_RE
-        .get_or_init(|| Regex::new(r"^(?:`{3,}|~{3,})").expect("valid regex: fence marker"));
+    let fence_re = fence_regex();
 
     let mut fields = Vec::new();
     let mut seen: std::collections::HashMap<String, Zone> = std::collections::HashMap::new();
@@ -447,13 +451,11 @@ pub fn serialize(zettel: &crate::types::ParsedZettel) -> String {
 pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
     use crate::types::{CheckboxItem, CheckboxState};
     use std::sync::OnceLock;
-    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
     static CB_RE: OnceLock<Regex> = OnceLock::new();
     static DATE_RE: OnceLock<Regex> = OnceLock::new();
     static DUE_RE: OnceLock<Regex> = OnceLock::new();
 
-    let fence_re = FENCE_RE
-        .get_or_init(|| Regex::new(r"^(?:`{3,}|~{3,})").expect("valid regex: fence marker"));
+    let fence_re = fence_regex();
     let cb_re = CB_RE
         .get_or_init(|| Regex::new(r"^(\s*)- \[([ xi])\]\s+(.+)$").expect("valid regex: checkbox"));
     let date_re = DATE_RE.get_or_init(|| {
@@ -519,13 +521,11 @@ pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
 /// Returns unique tags (without `#` prefix) in first-encountered order.
 pub fn extract_hashtags(body: &str) -> Vec<String> {
     use std::sync::OnceLock;
-    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
     static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
     static WIKILINK_RE: OnceLock<Regex> = OnceLock::new();
     static HASHTAG_RE: OnceLock<Regex> = OnceLock::new();
 
-    let fence_re = FENCE_RE
-        .get_or_init(|| Regex::new(r"^(?:`{3,}|~{3,})").expect("valid regex: fence marker"));
+    let fence_re = fence_regex();
     let inline_code_re =
         INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
     let wikilink_re =

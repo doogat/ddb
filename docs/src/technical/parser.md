@@ -112,11 +112,13 @@ Returns a `ZettelId` from the current local timestamp: `chrono::Local::now().for
 
 ## Test Coverage
 
-26+ tests covering:
+50+ tests covering:
 - Three-zone splits (basic, no ref, code blocks, thematic breaks, backtracking, trailing separators)
 - Frontmatter parsing (all fields, partial, extras, filename fallback)
 - Inline fields (body, reference, mixed, empty values, cross-zone duplication, same-zone duplication, fenced code block exclusion, inline code exclusion)
 - Wikilink extraction (body, reference, frontmatter with quoted YAML)
+- Checkbox extraction (all states, date prefix, due date, code block exclusion, line numbers, indentation)
+- Hashtag extraction (basic, hierarchical, code/wikilink exclusion, dedup)
 - Serialization round-trip
 - Obsidian syntax passthrough (dataview blocks, Templater)
 - ID generation format
