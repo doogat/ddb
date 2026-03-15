@@ -491,8 +491,13 @@ pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
                 (None, raw_content)
             };
 
-            // Parse optional due date
-            let due_date = due_re.captures(&content).map(|dc| dc[1].to_string());
+            // Parse and strip optional due date
+            let (due_date, content) = if let Some(dc) = due_re.captures(&content) {
+                let stripped = due_re.replace(&content, "").trim().to_string();
+                (Some(dc[1].to_string()), stripped)
+            } else {
+                (None, content)
+            };
 
             items.push(CheckboxItem {
                 state,
@@ -977,6 +982,7 @@ Body here.
         let cbs = extract_checkboxes(body);
         assert_eq!(cbs.len(), 1);
         assert_eq!(cbs[0].due_date, Some("2026-03-20".into()));
+        assert_eq!(cbs[0].content, "Do the thing");
     }
 
     #[test]
