@@ -147,6 +147,15 @@ enum Command {
     },
     /// Rebuild the search index
     Reindex,
+    /// Auto-fix consistency issues across zettels
+    Fix {
+        /// Report fixes without modifying files
+        #[arg(long)]
+        dry_run: bool,
+        /// Show detailed fix list per zettel
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Rename (move) a zettel and rewrite backlinks
     Rename {
         /// Zettel ID
@@ -778,6 +787,45 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             outln!("indexed {} zettels", report.indexed)?;
             if !report.warnings.is_empty() {
                 outln!("{} warning(s)", report.warnings.len())?;
+            }
+        }
+
+        Command::Fix { dry_run, verbose } => {
+            let repo = GitRepo::open(&cli.repo)?;
+            let index = open_index(&cli.repo)?;
+            index.rebuild_if_stale(&repo)?;
+            let report = zdb_core::consistency::fix_all(&repo, &index, dry_run)?;
+
+            let total_fixes: usize = report.fixes.iter().map(|f| f.applied.len()).sum();
+
+            if verbose {
+                for zf in &report.fixes {
+                    outln!("  {}", zf.path)?;
+                    for fix in &zf.applied {
+                        outln!("    [{}] {fix}", fix.severity())?;
+                    }
+                }
+            }
+
+            if dry_run {
+                if total_fixes > 0 {
+                    outln!(
+                        "would fix {} issues in {} of {} zettels",
+                        total_fixes,
+                        report.files_fixed,
+                        report.files_scanned
+                    )?;
+                } else {
+                    outln!("no issues found")?;
+                }
+            } else if total_fixes > 0 {
+                outln!(
+                    "fixed {} issues in {} zettels",
+                    total_fixes,
+                    report.files_fixed
+                )?;
+            } else {
+                outln!("no issues found")?;
             }
         }
 
