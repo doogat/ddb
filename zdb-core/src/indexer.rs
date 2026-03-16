@@ -862,10 +862,12 @@ impl Index {
                     .push(inferred_type);
             }
 
-            for heading in extract_body_headings(&parsed.body) {
-                columns
-                    .entry(heading.to_lowercase())
-                    .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+            for section in &parsed.sections {
+                if section.level > 0 {
+                    columns
+                        .entry(section.heading.to_lowercase())
+                        .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+                }
             }
 
             for field in &parsed.inline_fields {
@@ -1010,11 +1012,13 @@ impl Index {
                     .push(inferred_type);
             }
 
-            // Body ## headings → body TEXT columns
-            for heading in extract_body_headings(&parsed.body) {
-                columns
-                    .entry(heading.to_lowercase())
-                    .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+            // Body headings → body TEXT columns (from parsed sections)
+            for section in &parsed.sections {
+                if section.level > 0 {
+                    columns
+                        .entry(section.heading.to_lowercase())
+                        .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+                }
             }
 
             // Reference fields → reference columns
@@ -1656,17 +1660,6 @@ fn extract_body_section(body: &str, section_name: &str) -> String {
         i += 1;
     }
     String::new()
-}
-
-/// Extract all ## heading names from body text.
-fn extract_body_headings(body: &str) -> Vec<String> {
-    body.lines()
-        .filter_map(|line| {
-            line.trim()
-                .strip_prefix("## ")
-                .map(|h| h.trim().to_string())
-        })
-        .collect()
 }
 
 /// Infer a SQL data type from a domain Value.
@@ -2569,6 +2562,30 @@ Widget
         let details = find("details").expect("details column");
         assert_eq!(details.data_type, "TEXT");
         assert_eq!(details.zone, Some(Zone::Body));
+    }
+
+    #[test]
+    fn infer_schema_ignores_code_block_headings() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        let z1 = "---\nid: 20260226160100\ntitle: Code\ntype: article\n---\n\n## Real\n\nContent\n\n```\n## Fake\ncode block\n```";
+        repo.commit_file("zettelkasten/20260226160100.md", z1, "add")
+            .unwrap();
+
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let schema = idx.infer_schema("article", &repo).unwrap();
+        let find = |name: &str| schema.columns.iter().find(|c| c.name == name);
+
+        assert!(find("real").is_some(), "Real heading should be a column");
+        assert!(
+            find("fake").is_none(),
+            "Code block heading should not be a column"
+        );
     }
 
     #[test]
