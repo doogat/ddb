@@ -496,6 +496,15 @@ impl<'a> SqlEngine<'a> {
         // Generate all IDs upfront
         let ids = self.unique_ids(rows.len())?;
 
+        // Collect which referenced types use folder storage (for path-qualified wikilinks)
+        let ref_folder_types: std::collections::HashSet<String> = schema
+            .columns
+            .iter()
+            .filter_map(|c| c.references.as_ref())
+            .filter(|ref_table| self.index.type_uses_folder(ref_table, self.repo))
+            .cloned()
+            .collect();
+
         let mut created_ids = Vec::with_capacity(rows.len());
         let mut files: Vec<(String, String)> = Vec::with_capacity(rows.len());
 
@@ -561,7 +570,7 @@ impl<'a> SqlEngine<'a> {
             }
 
             // Build zettel
-            let zettel = build_data_zettel(&id, &schema, &col_values);
+            let zettel = build_data_zettel(&id, &schema, &col_values, &ref_folder_types);
             let content = parser::serialize(&zettel);
             let path = if table_name == "zettels" {
                 format!("zettelkasten/{}.md", id.0)
@@ -1306,6 +1315,7 @@ fn build_data_zettel(
     id: &ZettelId,
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,
+    ref_folder_types: &std::collections::HashSet<String>,
 ) -> ParsedZettel {
     let mut extra = BTreeMap::new();
     let mut body_sections: Vec<String> = Vec::new();
@@ -1322,15 +1332,24 @@ fn build_data_zettel(
 
         match effective_zone(col) {
             Zone::Reference => {
-                ref_lines.push(format!("- {}:: [[{}]]", col.name, val));
+                let link_target = if let Some(ref ref_table) = col.references {
+                    if ref_folder_types.contains(ref_table) {
+                        format!("zettelkasten/{ref_table}/{val}")
+                    } else {
+                        val.clone()
+                    }
+                } else {
+                    val.clone()
+                };
+                ref_lines.push(format!("- {}:: [[{}]]", col.name, link_target));
                 wikilinks.push(WikiLink {
-                    target: val.clone(),
+                    target: link_target.clone(),
                     display: None,
                     zone: Zone::Reference,
                 });
                 inline_fields.push(InlineField {
                     key: col.name.clone(),
-                    value: format!("[[{val}]]"),
+                    value: format!("[[{link_target}]]"),
                     zone: Zone::Reference,
                 });
             }

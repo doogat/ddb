@@ -306,7 +306,7 @@ impl Index {
     pub fn type_uses_folder(
         &self,
         type_name: &str,
-        repo: &impl crate::traits::ZettelSource,
+        repo: &(impl crate::traits::ZettelSource + ?Sized),
     ) -> bool {
         // Find the typedef zettel for this type
         let sql = "SELECT path FROM zettels WHERE type = '_typedef' AND title = ?1 LIMIT 1";
