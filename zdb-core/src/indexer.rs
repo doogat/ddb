@@ -746,25 +746,9 @@ impl Index {
         let paths = repo.list_zettels()?;
         let mut report = crate::types::RebuildReport::default();
 
-        // Phase 1: read + parse all zettels, collecting errors as warnings
-        let mut parsed = Vec::with_capacity(paths.len());
-        for path in &paths {
-            match repo
-                .read_file(path)
-                .and_then(|c| crate::parser::parse(&c, path))
-            {
-                Ok(z) => parsed.push(z),
-                Err(e) => {
-                    tracing::warn!(path, error = %e, "rebuild: skipping zettel");
-                    report
-                        .warnings
-                        .push(crate::types::ConsistencyWarning::MalformedYaml {
-                            path: path.clone(),
-                            error: e.to_string(),
-                        });
-                }
-            }
-        }
+        // Phase 1: sequential git reads + parallel parsing (rayon)
+        let (parsed, parse_warnings) = Self::parallel_parse(repo, &paths)?;
+        report.warnings.extend(parse_warnings);
 
         // Phase 2: batch index all parsed zettels (single transaction)
         report.indexed = self.batch_index(&parsed)?;
