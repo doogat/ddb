@@ -12,7 +12,7 @@ use crate::indexer::Index;
 use crate::parser;
 use crate::traits::ZettelStore;
 use crate::types::{
-    ColumnDef, InlineField, ParsedZettel, TableSchema, Value, WikiLink, ZettelId, ZettelMeta, Zone,
+    ColumnDef, InlineField, Link, ParsedZettel, TableSchema, Value, ZettelId, ZettelMeta, Zone,
 };
 
 /// Strip surrounding double-quotes from a SQL identifier.
@@ -1307,7 +1307,7 @@ pub fn build_typedef_zettel(id: &ZettelId, schema: &TableSchema) -> ParsedZettel
         body: String::new(),
         reference_section: String::new(),
         inline_fields: vec![],
-        wikilinks: vec![],
+        links: vec![],
         body_tags: vec![],
         checkboxes: vec![],
         path: format!("zettelkasten/_typedef/{}.md", id.0),
@@ -1324,7 +1324,7 @@ fn build_data_zettel(
     let mut extra = BTreeMap::new();
     let mut body_sections: Vec<String> = Vec::new();
     let mut ref_lines: Vec<String> = Vec::new();
-    let mut wikilinks: Vec<WikiLink> = Vec::new();
+    let mut links: Vec<Link> = Vec::new();
     let mut inline_fields: Vec<InlineField> = Vec::new();
     let mut title_value: Option<String> = None;
 
@@ -1346,9 +1346,11 @@ fn build_data_zettel(
                     val.clone()
                 };
                 ref_lines.push(format!("- {}:: [[{}]]", col.name, link_target));
-                wikilinks.push(WikiLink {
+                links.push(Link {
                     target: link_target.clone(),
                     display: None,
+                    section: None,
+                    kind: crate::types::LinkKind::WikiLink,
                     zone: Zone::Reference,
                 });
                 inline_fields.push(InlineField {
@@ -1393,7 +1395,7 @@ fn build_data_zettel(
         body,
         reference_section,
         inline_fields,
-        wikilinks,
+        links,
         body_tags: vec![],
         checkboxes: vec![],
         path: format!("zettelkasten/{}.md", id.0),

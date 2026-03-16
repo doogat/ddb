@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use crate::error::{Result, ZettelError};
-use crate::types::{InlineField, Value, WikiLink, Zettel, ZettelId, ZettelMeta, Zone};
+use crate::types::{InlineField, Link, Value, Zettel, ZettelId, ZettelMeta, Zone};
 
 /// Shared regex for fenced code block markers (``` or ~~~).
 fn fence_regex() -> &'static Regex {
@@ -296,7 +296,7 @@ pub fn extract_inline_fields(
 }
 
 /// Extract `[[target|display]]` wikilinks from all three zones.
-pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<WikiLink> {
+pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<Link> {
     use std::sync::OnceLock;
     static WL_RE: OnceLock<Regex> = OnceLock::new();
     let re = WL_RE.get_or_init(|| {
@@ -311,9 +311,11 @@ pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<
         (reference, Zone::Reference),
     ] {
         for caps in re.captures_iter(text) {
-            links.push(WikiLink {
+            links.push(Link {
                 target: caps[1].to_string(),
                 display: caps.get(2).map(|m| m.as_str().to_string()),
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
                 zone: zone.clone(),
             });
         }
@@ -586,7 +588,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         body: zettel.body,
         reference_section: zettel.reference_section,
         inline_fields,
-        wikilinks,
+        links: wikilinks,
         body_tags,
         checkboxes,
         path: path.to_string(),
@@ -1115,7 +1117,7 @@ Some more body.
             body: z.body.clone(),
             reference_section: z.reference_section.clone(),
             inline_fields,
-            wikilinks,
+            links: wikilinks,
             body_tags: vec![],
             checkboxes: vec![],
             path: "20260226120000.md".into(),
@@ -1144,7 +1146,7 @@ Some more body.
             body: "Just body.".into(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "test.md".into(),
@@ -1177,7 +1179,7 @@ Some more body.
             body: "Body.".into(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "test.md".into(),
@@ -1222,7 +1224,7 @@ Body with [[some/link|Link]] and source:: Wikipedia
         assert_eq!(p.meta.id, Some(ZettelId("20260226120000".into())));
         assert_eq!(p.meta.title.as_deref(), Some("Full Note"));
         assert_eq!(p.inline_fields.len(), 1); // related from ref (source:: not at line start)
-        assert_eq!(p.wikilinks.len(), 2); // one in body, one in ref
+        assert_eq!(p.links.len(), 2); // one in body, one in ref
     }
 
     #[test]

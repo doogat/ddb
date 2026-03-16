@@ -479,7 +479,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                 body: body_text,
                 reference_section: String::new(),
                 inline_fields: vec![],
-                wikilinks: vec![],
+                links: vec![],
                 body_tags: vec![],
                 checkboxes: vec![],
                 path: path.clone(),

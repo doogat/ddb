@@ -270,7 +270,7 @@ impl Index {
             )?;
         }
 
-        for link in &zettel.wikilinks {
+        for link in &zettel.links {
             let zone = format!("{:?}", link.zone);
             self.conn.execute(
                 "INSERT INTO _zdb_links (source_id, target_path, display, zone) VALUES (?1, ?2, ?3, ?4)",
@@ -1698,7 +1698,7 @@ fn widen_types(types: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::git_ops::GitRepo;
-    use crate::types::{InlineField, Value, WikiLink, ZettelId, ZettelMeta, Zone};
+    use crate::types::{InlineField, Link, Value, ZettelId, ZettelMeta, Zone};
 
     fn sample_zettel() -> ParsedZettel {
         ParsedZettel {
@@ -1717,9 +1717,11 @@ mod tests {
                 value: "Wikipedia".into(),
                 zone: Zone::Reference,
             }],
-            wikilinks: vec![WikiLink {
+            links: vec![Link {
                 target: "20260101000000".into(),
                 display: Some("Link".into()),
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
                 zone: Zone::Body,
             }],
             body_tags: vec![],
@@ -1765,7 +1767,7 @@ mod tests {
                     body: format!("Body of zettel {i}"),
                     reference_section: String::new(),
                     inline_fields: vec![],
-                    wikilinks: vec![],
+                    links: vec![],
                     body_tags: vec![],
                     checkboxes: vec![],
                     path: format!("zettelkasten/{id}.md"),
@@ -2976,7 +2978,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
@@ -3026,7 +3028,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
@@ -3063,7 +3065,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20240101120000.md".to_string(),
@@ -3103,7 +3105,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/contact/20240101120000.md".to_string(),
@@ -3124,7 +3126,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20240202120000.md".to_string(),
@@ -3237,7 +3239,7 @@ Widget
             body: format!("Searchable body number {n}"),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: format!("zettelkasten/2026022612{n:04}.md"),
@@ -3333,7 +3335,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20260301130000.md".into(),
@@ -3615,7 +3617,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20260302120000.md".into(),
@@ -3694,9 +3696,11 @@ Widget
             body: "See [[20260301120000]]".to_string(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![crate::types::WikiLink {
+            links: vec![crate::types::Link {
                 target: "20260301120000".to_string(),
                 display: None,
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
                 zone: crate::types::Zone::Body,
             }],
             body_tags: vec![],
@@ -3717,7 +3721,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20260301120000.md".to_string(),
@@ -3753,7 +3757,7 @@ Widget
             body: String::new(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20260301100000.md".into(),
@@ -3772,9 +3776,11 @@ Widget
             body: "See [[20260301100000]]".into(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![WikiLink {
+            links: vec![Link {
                 target: "20260301100000".into(),
                 display: None,
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
                 zone: Zone::Body,
             }],
             body_tags: vec![],
@@ -3833,7 +3839,7 @@ Widget
             body: "Another body".into(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![],
+            links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
             path: "zettelkasten/20260226120001.md".into(),

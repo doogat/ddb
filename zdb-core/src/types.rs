@@ -213,10 +213,20 @@ pub struct InlineField {
     pub zone: Zone,
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum LinkKind {
+    WikiLink,
+    MarkdownLink,
+    Embed,
+    BareUrl,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WikiLink {
+pub struct Link {
     pub target: String,
     pub display: Option<String>,
+    pub section: Option<String>,
+    pub kind: LinkKind,
     pub zone: Zone,
 }
 
@@ -243,7 +253,7 @@ pub struct ParsedZettel {
     pub body: String,
     pub reference_section: String,
     pub inline_fields: Vec<InlineField>,
-    pub wikilinks: Vec<WikiLink>,
+    pub links: Vec<Link>,
     #[serde(default)]
     pub body_tags: Vec<String>,
     #[serde(default)]

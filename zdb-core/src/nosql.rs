@@ -79,7 +79,7 @@ impl RedbIndex {
         // Link index
         {
             let mut t = txn.open_table(LINKS).map_err(redb_err)?;
-            for link in &zettel.wikilinks {
+            for link in &zettel.links {
                 let key = format!("{}/{id}", link.target);
                 t.insert(key.as_str(), [].as_slice()).map_err(redb_err)?;
             }
@@ -179,7 +179,7 @@ impl RedbIndex {
                     }
                     // Remove link entries
                     if let Ok(mut tt) = txn.open_table(LINKS) {
-                        for link in &old.wikilinks {
+                        for link in &old.links {
                             let key = format!("{}/{id}", link.target);
                             let _: std::result::Result<Option<redb::AccessGuard<&[u8]>>, _> =
                                 tt.remove(key.as_str());
@@ -225,7 +225,7 @@ impl RedbIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{WikiLink, ZettelId, ZettelMeta, Zone};
+    use crate::types::{Link, ZettelId, ZettelMeta, Zone};
 
     fn test_zettel(id: &str, title: &str) -> ParsedZettel {
         ParsedZettel {
@@ -239,9 +239,11 @@ mod tests {
             body: "body".into(),
             reference_section: String::new(),
             inline_fields: vec![],
-            wikilinks: vec![WikiLink {
+            links: vec![Link {
                 target: "20240102000000".into(),
                 display: None,
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
                 zone: Zone::Reference,
             }],
             body_tags: vec![],
@@ -295,7 +297,7 @@ mod tests {
         // Re-index with different type and tags
         z.meta.zettel_type = Some("contact".into());
         z.meta.tags = vec!["new-tag".into()];
-        z.wikilinks = vec![];
+        z.links = vec![];
         idx.index_zettel(&z).unwrap();
 
         // Old type/tag/link gone

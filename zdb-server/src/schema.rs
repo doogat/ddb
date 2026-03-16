@@ -52,7 +52,7 @@ fn zettel_to_value(z: &ParsedZettel) -> GqlValue {
         .collect();
 
     let links: Vec<GqlValue> = z
-        .wikilinks
+        .links
         .iter()
         .map(|l| {
             let zone = match l.zone {
