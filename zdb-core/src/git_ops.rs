@@ -761,6 +761,37 @@ impl GitRepo {
         Ok(content.to_string())
     }
 
+    /// Read multiple files from the HEAD tree in a single sequential pass.
+    ///
+    /// Resolves HEAD once, then iterates paths against the same tree.
+    /// Per-file errors are returned inline (not short-circuited).
+    pub fn read_files_batch(&self, paths: &[String]) -> Result<Vec<(String, Result<String>)>> {
+        let head = self.repo.head()?.peel_to_commit()?;
+        let tree = head.tree()?;
+
+        let results = paths
+            .iter()
+            .map(|rel_path| {
+                let content = (|| -> Result<String> {
+                    validate_path(&self.path, rel_path)?;
+                    let entry = tree
+                        .get_path(Path::new(rel_path))
+                        .map_err(|_| ZettelError::NotFound(rel_path.to_string()))?;
+                    let blob = self
+                        .repo
+                        .find_blob(entry.id())
+                        .map_err(|_| ZettelError::NotFound(rel_path.to_string()))?;
+                    let content = std::str::from_utf8(blob.content())
+                        .map_err(|e| ZettelError::Parse(e.to_string()))?;
+                    Ok(content.to_string())
+                })();
+                (rel_path.clone(), content)
+            })
+            .collect();
+
+        Ok(results)
+    }
+
     /// Walk ancestors of `commit` to find the HLC trailer from the most recent
     /// commit that touched `path`.
     pub fn find_hlc_for_path(&self, commit: &git2::Commit, path: &str) -> Option<crate::hlc::Hlc> {
@@ -897,6 +928,10 @@ impl crate::traits::ZettelSource for GitRepo {
         new_oid: &str,
     ) -> Result<Vec<(crate::types::DiffKind, String)>> {
         self.diff_paths(old_oid, new_oid)
+    }
+
+    fn read_files_batch(&self, paths: &[String]) -> Result<Vec<(String, Result<String>)>> {
+        self.read_files_batch(paths)
     }
 }
 
@@ -1106,6 +1141,39 @@ mod tests {
         let (_dir, repo) = temp_repo();
         let result = repo.read_file("nonexistent.md");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_files_batch_matches_individual() {
+        let (_dir, repo) = temp_repo();
+        let paths: Vec<String> = (0..20)
+            .map(|i| format!("zettelkasten/{:014}.md", 20260101000000u64 + i))
+            .collect();
+        for (i, path) in paths.iter().enumerate() {
+            repo.commit_file(path, &format!("content {i}"), &format!("add {i}"))
+                .unwrap();
+        }
+
+        let batch = repo.read_files_batch(&paths).unwrap();
+        assert_eq!(batch.len(), paths.len());
+        for (path, result) in &batch {
+            let expected = repo.read_file(path).unwrap();
+            assert_eq!(result.as_ref().unwrap(), &expected);
+        }
+    }
+
+    #[test]
+    fn read_files_batch_partial_errors() {
+        let (_dir, repo) = temp_repo();
+        repo.commit_file("zettelkasten/a.md", "content a", "add a")
+            .unwrap();
+        let paths = vec![
+            "zettelkasten/a.md".to_string(),
+            "zettelkasten/missing.md".to_string(),
+        ];
+        let batch = repo.read_files_batch(&paths).unwrap();
+        assert!(batch[0].1.is_ok());
+        assert!(batch[1].1.is_err());
     }
 
     #[test]

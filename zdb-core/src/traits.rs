@@ -12,6 +12,15 @@ pub trait ZettelSource {
     /// Diff two tree OIDs, returning changed paths with their change kind.
     /// Returns `Err` if either OID is unreachable (e.g. after gc).
     fn diff_paths(&self, old_oid: &str, new_oid: &str) -> Result<Vec<(DiffKind, String)>>;
+
+    /// Read multiple files, returning per-file results.
+    /// Default implementation calls `read_file` in a loop.
+    fn read_files_batch(&self, paths: &[String]) -> Result<Vec<(String, Result<String>)>> {
+        Ok(paths
+            .iter()
+            .map(|p| (p.clone(), self.read_file(p)))
+            .collect())
+    }
 }
 
 /// Read-write access to zettel storage.
