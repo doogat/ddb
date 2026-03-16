@@ -1338,7 +1338,7 @@ fn build_data_zettel(
             Zone::Reference => {
                 let link_target = if let Some(ref ref_table) = col.references {
                     if ref_folder_types.contains(ref_table) {
-                        format!("zettelkasten/{ref_table}/{val}")
+                        format!("zettelkasten/{ref_table}/{val}.md")
                     } else {
                         val.clone()
                     }

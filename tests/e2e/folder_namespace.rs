@@ -98,3 +98,57 @@ fn insert_no_folder_typedef_stays_flat() {
         "should NOT be in gadget/ subdirectory"
     );
 }
+
+#[test]
+fn cli_create_respects_folder_typedef() {
+    let repo = ZdbTestRepo::init();
+
+    // Create typedef with folder: true via SQL + manual edit
+    repo.zdb()
+        .args(["query", "CREATE TABLE pet (species TEXT)"])
+        .assert()
+        .success();
+
+    let typedef_dir = repo.path().join("zettelkasten/_typedef");
+    let typedef_file = std::fs::read_dir(&typedef_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let content = std::fs::read_to_string(e.path()).unwrap_or_default();
+            content.contains("title: pet")
+        })
+        .expect("pet typedef not found");
+
+    let content = std::fs::read_to_string(typedef_file.path()).unwrap();
+    let updated = content.replace("type: _typedef", "type: _typedef\nfolder: true");
+    std::fs::write(typedef_file.path(), &updated).unwrap();
+
+    std::process::Command::new("git")
+        .current_dir(repo.path())
+        .args(["add", "-A"])
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .current_dir(repo.path())
+        .args(["commit", "-m", "add folder to pet"])
+        .output()
+        .unwrap();
+    repo.zdb().arg("reindex").assert().success();
+
+    // CLI create with --type pet
+    let out = repo
+        .zdb()
+        .args(["create", "--title", "Buddy", "--type", "pet"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    // Should be in zettelkasten/pet/{id}.md
+    let folder_path = repo.path().join(format!("zettelkasten/pet/{id}.md"));
+    assert!(
+        folder_path.exists(),
+        "CLI create should put typed zettel in pet/ subdirectory: {}",
+        folder_path.display()
+    );
+}
