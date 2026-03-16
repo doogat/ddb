@@ -240,6 +240,11 @@ enum Command {
     /// Background update check (internal)
     #[command(name = "__update-check", hide = true)]
     UpdateCheck,
+    /// Discover connections and maintenance issues
+    Discover {
+        #[command(subcommand)]
+        action: DiscoverAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -310,6 +315,38 @@ enum BundleAction {
     Import {
         /// Path to bundle tar file
         path: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum DiscoverAction {
+    /// Find unlinked mentions of a zettel's title in other zettels
+    Mentions {
+        /// Zettel ID (omit with --all for summary)
+        id: Option<String>,
+        /// Show mentions for all zettels
+        #[arg(long)]
+        all: bool,
+    },
+    /// Suggest related zettels based on tags and content
+    Similar {
+        /// Zettel ID
+        id: String,
+        /// Max suggestions
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+    /// Find zettels past their type's staleness threshold
+    Stale {
+        /// Filter by type
+        #[arg(long, name = "type")]
+        type_filter: Option<String>,
+    },
+    /// Find zettels with zero incoming links
+    Orphans {
+        /// Filter by type
+        #[arg(long, name = "type")]
+        type_filter: Option<String>,
     },
 }
 
@@ -1081,6 +1118,96 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                 }
             }
         },
+
+        Command::Discover { action } => {
+            let repo = GitRepo::open(&cli.repo)?;
+            let index = open_index(&cli.repo)?;
+            index.rebuild_if_stale(&repo)?;
+
+            match action {
+                DiscoverAction::Mentions { id, all } => {
+                    if all {
+                        // Summary across all zettels
+                        let ids = index.query_raw(
+                            "SELECT id FROM zettels WHERE path NOT LIKE 'zettelkasten/_typedef/%'",
+                        )?;
+                        let mut total = 0usize;
+                        for row in &ids {
+                            let zid = &row[0];
+                            let mentions = index.unlinked_mentions(zid)?;
+                            if !mentions.is_empty() {
+                                total += mentions.len();
+                                outln!("{zid}\t{} mention(s)", mentions.len())?;
+                            }
+                        }
+                        if total == 0 {
+                            outln!("no unlinked mentions found")?;
+                        }
+                    } else if let Some(id) = id {
+                        let mentions = index.unlinked_mentions(&id)?;
+                        if mentions.is_empty() {
+                            outln!("no unlinked mentions")?;
+                        } else {
+                            for m in &mentions {
+                                outln!("{}\t{}\t{}", m.source_id, m.source_title, m.snippet)?;
+                            }
+                        }
+                    } else {
+                        return Err(zdb_core::error::ZettelError::Validation(
+                            "specify a zettel ID or --all".into(),
+                        ));
+                    }
+                }
+                DiscoverAction::Similar { id, limit } => {
+                    let suggestions = index.suggest_links(&id, limit)?;
+                    if suggestions.is_empty() {
+                        outln!("no suggestions")?;
+                    } else {
+                        for s in &suggestions {
+                            let tags = if s.shared_tags.is_empty() {
+                                String::new()
+                            } else {
+                                s.shared_tags.join(", ")
+                            };
+                            outln!("{}\t{}\t{:.2}\t{}", s.id, s.title, s.score, tags)?;
+                        }
+                    }
+                }
+                DiscoverAction::Stale { type_filter } => {
+                    let stale = index.stale_zettels(&repo, type_filter.as_deref())?;
+                    if stale.is_empty() {
+                        outln!("no stale zettels")?;
+                    } else {
+                        for s in &stale {
+                            outln!(
+                                "{}\t{}\t{}\t{}\t{}d stale",
+                                s.id,
+                                s.title,
+                                s.zettel_type,
+                                s.last_updated,
+                                s.days_stale
+                            )?;
+                        }
+                    }
+                }
+                DiscoverAction::Orphans { type_filter } => {
+                    let orphans = index.orphan_zettels(type_filter.as_deref())?;
+                    if orphans.is_empty() {
+                        outln!("no orphan zettels")?;
+                    } else {
+                        for o in &orphans {
+                            outln!(
+                                "{}\t{}\t{}\t{} outgoing",
+                                o.id,
+                                o.title,
+                                o.zettel_type,
+                                o.outgoing_links
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
 
         // Handled in main() before run() is called
         Command::UpdateBin | Command::UpdateCheck => unreachable!(),
