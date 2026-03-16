@@ -167,6 +167,74 @@ fn bench_incremental_reindex(c: &mut Criterion) {
     });
 }
 
+fn bench_rebuild_5k(c: &mut Criterion) {
+    c.bench_function("search/rebuild_5k", |b| {
+        b.iter_with_setup(
+            || {
+                let dir = TempDir::new().unwrap();
+                let db_path = dir.path().join("index.db");
+                let repo_dir = dir.path().join("repo");
+                let repo = GitRepo::init(&repo_dir).unwrap();
+                let files: Vec<(String, String)> = (0..ZETTEL_COUNT_5K)
+                    .map(|i| (zettel_path(i), zettel_content(i)))
+                    .collect();
+                let refs: Vec<(&str, &str)> = files
+                    .iter()
+                    .map(|(p, c)| (p.as_str(), c.as_str()))
+                    .collect();
+                repo.commit_files(&refs, "seed").unwrap();
+                let index = Index::open(&db_path).unwrap();
+                (dir, repo, index)
+            },
+            |(_dir, repo, index)| {
+                index.rebuild(&repo).unwrap();
+            },
+        );
+    });
+}
+
+fn bench_incremental_reindex_batch(c: &mut Criterion) {
+    c.bench_function("search/incremental_reindex_batch_10", |b| {
+        b.iter_with_setup(
+            || {
+                let dir = TempDir::new().unwrap();
+                let db_path = dir.path().join("index.db");
+                let repo_dir = dir.path().join("repo");
+                let repo = GitRepo::init(&repo_dir).unwrap();
+                let files: Vec<(String, String)> = (0..ZETTEL_COUNT_1K)
+                    .map(|i| (zettel_path(i), zettel_content(i)))
+                    .collect();
+                let refs: Vec<(&str, &str)> = files
+                    .iter()
+                    .map(|(p, c)| (p.as_str(), c.as_str()))
+                    .collect();
+                repo.commit_files(&refs, "seed").unwrap();
+                let index = Index::open(&db_path).unwrap();
+                index.rebuild(&repo).unwrap();
+                let old_head = index.stored_head_oid().unwrap();
+
+                // Modify 10 zettels in a single commit
+                let mods: Vec<(String, String)> = (0..10)
+                    .map(|i| {
+                        (
+                            zettel_path(i),
+                            zettel_content(i).replace("Note about", "Modified note about"),
+                        )
+                    })
+                    .collect();
+                let refs: Vec<(&str, &str)> =
+                    mods.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+                repo.commit_files(&refs, "modify 10").unwrap();
+
+                (dir, repo, index, old_head)
+            },
+            |(_dir, repo, index, old_head)| {
+                index.incremental_reindex(&repo, &old_head).unwrap();
+            },
+        );
+    });
+}
+
 criterion_group!(
     benches,
     bench_search,
@@ -174,6 +242,8 @@ criterion_group!(
     bench_search_5k,
     bench_query_raw_5k,
     bench_rebuild,
-    bench_incremental_reindex
+    bench_rebuild_5k,
+    bench_incremental_reindex,
+    bench_incremental_reindex_batch
 );
 criterion_main!(benches);
