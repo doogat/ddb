@@ -404,6 +404,19 @@ impl Index {
         if let Some(id) = self.resolve_alias(target)? {
             return Ok(Some(self.resolve_path(&id)?));
         }
+        // 4. Partial path matching — match tail path segments
+        let bare = target.strip_suffix(".md").unwrap_or(target);
+        let partial: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT path FROM zettels WHERE path LIKE '%/' || ?1 || '.md' ORDER BY length(path) ASC LIMIT 1",
+                params![bare],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(path) = partial {
+            return Ok(Some(path));
+        }
         Ok(None)
     }
 
@@ -3223,6 +3236,98 @@ Widget
 
         // Nonexistent returns None
         let result = index.resolve_wikilink("nonexistent").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_partial_path_basic() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        repo.commit_file(
+            "zettelkasten/meeting-notes.md",
+            "---\nid: 20260301000000\ntitle: Meeting Notes\n---\n",
+            "add",
+        )
+        .unwrap();
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let result = idx.resolve_wikilink("meeting-notes").unwrap();
+        assert_eq!(result, Some("zettelkasten/meeting-notes.md".into()));
+    }
+
+    #[test]
+    fn resolve_partial_path_nested() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        repo.commit_file(
+            "zettelkasten/projects/meeting-notes.md",
+            "---\nid: 20260301000000\ntitle: Meeting Notes\n---\n",
+            "add",
+        )
+        .unwrap();
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let result = idx.resolve_wikilink("meeting-notes").unwrap();
+        assert_eq!(
+            result,
+            Some("zettelkasten/projects/meeting-notes.md".into())
+        );
+    }
+
+    #[test]
+    fn resolve_partial_path_ambiguous_shortest_wins() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        repo.commit_file(
+            "zettelkasten/meeting-notes.md",
+            "---\nid: 20260301000000\ntitle: Short\n---\n",
+            "add short",
+        )
+        .unwrap();
+        repo.commit_file(
+            "zettelkasten/projects/acme/meeting-notes.md",
+            "---\nid: 20260301000001\ntitle: Long\n---\n",
+            "add long",
+        )
+        .unwrap();
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let result = idx.resolve_wikilink("meeting-notes").unwrap();
+        assert_eq!(result, Some("zettelkasten/meeting-notes.md".into()));
+    }
+
+    #[test]
+    fn resolve_partial_path_with_md_suffix() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+        repo.commit_file(
+            "zettelkasten/meeting-notes.md",
+            "---\nid: 20260301000000\ntitle: Notes\n---\n",
+            "add",
+        )
+        .unwrap();
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let result = idx.resolve_wikilink("meeting-notes.md").unwrap();
+        assert_eq!(result, Some("zettelkasten/meeting-notes.md".into()));
+    }
+
+    #[test]
+    fn resolve_partial_path_no_match() {
+        let idx = in_memory_index();
+        let result = idx.resolve_wikilink("nonexistent-thing").unwrap();
         assert_eq!(result, None);
     }
 
