@@ -529,6 +529,48 @@ pub fn rewrite_wikilinks(content: &str, old_target: &str, new_target: &str) -> S
     .into_owned()
 }
 
+/// Rewrite all internal link types (wikilinks, markdown links, embeds) targeting `old_target`.
+///
+/// Bare URLs are external and never rewritten.
+pub fn rewrite_links(content: &str, old_target: &str, new_target: &str) -> String {
+    // 1. Rewrite wikilinks
+    let result = rewrite_wikilinks(content, old_target, new_target);
+
+    // 2. Rewrite markdown links: [display](old_target) → [display](new_target)
+    use std::sync::OnceLock;
+    static MD_REWRITE_RE: OnceLock<Regex> = OnceLock::new();
+    let md_re = MD_REWRITE_RE.get_or_init(|| {
+        Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").expect("valid regex: md link rewrite")
+    });
+    let result = md_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let target = &caps[2];
+            if target == old_target {
+                format!("[{}]({})", &caps[1], new_target)
+            } else {
+                caps[0].to_string()
+            }
+        })
+        .into_owned();
+
+    // 3. Rewrite embeds: ![[old_target]] → ![[new_target]], preserving #section|display
+    static EMBED_REWRITE_RE: OnceLock<Regex> = OnceLock::new();
+    let embed_re = EMBED_REWRITE_RE.get_or_init(|| {
+        Regex::new(r"!\[\[([^\]#|]+)((?:#[^\]|]+)?(?:\|[^\]]+)?)\]\]")
+            .expect("valid regex: embed rewrite")
+    });
+    embed_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let target = &caps[1];
+            if target == old_target {
+                format!("![[{}{}]]", new_target, &caps[2])
+            } else {
+                caps[0].to_string()
+            }
+        })
+        .into_owned()
+}
+
 /// Quote a YAML string value if it contains special characters.
 fn yaml_quote(s: &str) -> String {
     if s.contains(':')
@@ -1257,6 +1299,39 @@ Body here.
             "zettelkasten/contact/20260301120000",
         );
         assert_eq!(result, "See [[zettelkasten/contact/20260301120000]]");
+    }
+
+    #[test]
+    fn rewrite_links_markdown() {
+        let content = "See [my page](old_path) for details";
+        let result = rewrite_links(content, "old_path", "new_path");
+        assert_eq!(result, "See [my page](new_path) for details");
+    }
+
+    #[test]
+    fn rewrite_links_embeds() {
+        let content = "![[old_target]] and ![[old_target#section|display]]";
+        let result = rewrite_links(content, "old_target", "new_target");
+        assert_eq!(
+            result,
+            "![[new_target]] and ![[new_target#section|display]]"
+        );
+    }
+
+    #[test]
+    fn rewrite_links_skips_bare_urls() {
+        let content = "See https://example.com and [[old_target]]";
+        let result = rewrite_links(content, "https://example.com", "https://other.com");
+        // Bare URLs are never rewritten (external), but wikilink matching the URL would be
+        // In practice URLs never appear as wikilink targets
+        assert!(result.contains("https://example.com"));
+    }
+
+    #[test]
+    fn rewrite_links_mixed() {
+        let content = "[[old]] and [title](old) and ![[old]]";
+        let result = rewrite_links(content, "old", "new");
+        assert_eq!(result, "[[new]] and [title](new) and ![[new]]");
     }
 
     // -- checkbox tests --

@@ -1012,16 +1012,12 @@ pub fn rename_zettel(
             let mut rewritten = content.clone();
 
             // Rewrite path-qualified links (without .md, as wikilinks typically omit it)
-            rewritten = crate::parser::rewrite_wikilinks(
-                &rewritten,
-                old_target_for_path,
-                new_target_for_path,
-            );
+            rewritten =
+                crate::parser::rewrite_links(&rewritten, old_target_for_path, new_target_for_path);
 
             // Rewrite bare ID links
             if !old_id.is_empty() {
-                rewritten =
-                    crate::parser::rewrite_wikilinks(&rewritten, old_id, new_target_for_path);
+                rewritten = crate::parser::rewrite_links(&rewritten, old_id, new_target_for_path);
             }
 
             if rewritten != content {
