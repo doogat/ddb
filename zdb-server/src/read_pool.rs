@@ -291,7 +291,7 @@ mod tests {
     fn default_pool_size_is_bounded() {
         let size = ReadPool::default_pool_size();
         assert!(
-            size >= 1 && size <= 4,
+            (1..=4).contains(&size),
             "pool size {size} out of range 1..=4"
         );
     }
