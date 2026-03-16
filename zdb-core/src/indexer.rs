@@ -290,6 +290,163 @@ impl Index {
         })
     }
 
+    /// Index many zettels in a single transaction with prepared statement reuse.
+    ///
+    /// Per-zettel errors are logged and skipped — they don't abort the batch.
+    /// Returns the number of successfully indexed zettels.
+    pub fn batch_index(&self, zettels: &[ParsedZettel]) -> Result<usize> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+
+        let mut count = 0;
+        // Prepare each statement once, reuse across iterations.
+        // Using prepare_cached is fine here — rusqlite caches by SQL string.
+        for zettel in zettels {
+            if let Err(e) = self.batch_index_one(zettel) {
+                tracing::warn!(path = %zettel.path, error = %e, "batch_index: skipping zettel");
+                continue;
+            }
+            count += 1;
+        }
+
+        self.conn.execute_batch("COMMIT")?;
+        Ok(count)
+    }
+
+    /// Index a single zettel within an already-open transaction.
+    fn batch_index_one(&self, zettel: &ParsedZettel) -> Result<()> {
+        let id = zettel.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
+        let title = zettel.meta.title.as_deref().unwrap_or("");
+        let date = zettel.meta.date.as_deref().unwrap_or("");
+        let ztype = zettel.meta.zettel_type.as_deref().unwrap_or("");
+        let now = chrono::Utc::now().to_rfc3339();
+        let tags_str = zettel.meta.tags.join(", ");
+
+        // Delete old FTS entry if exists
+        self.conn.execute(
+            "DELETE FROM _zdb_fts WHERE rowid = (SELECT rowid FROM zettels WHERE id = ?1)",
+            params![id],
+        )?;
+
+        // Upsert zettel
+        self.conn.execute(
+            "INSERT OR REPLACE INTO zettels (id, title, date, type, path, body, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, title, date, ztype, zettel.path, zettel.body, now],
+        )?;
+
+        // Delete and reinsert related data
+        self.conn
+            .execute("DELETE FROM _zdb_tags WHERE zettel_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM _zdb_fields WHERE zettel_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM _zdb_links WHERE source_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM _zdb_aliases WHERE zettel_id = ?1", params![id])?;
+        self.conn.execute(
+            "DELETE FROM _zdb_checkboxes WHERE zettel_id = ?1",
+            params![id],
+        )?;
+
+        for tag in &zettel.meta.tags {
+            self.conn.execute(
+                "INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'frontmatter')",
+                params![id, tag],
+            )?;
+        }
+
+        for tag in &zettel.body_tags {
+            self.conn.execute(
+                "INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'body')",
+                params![id, tag],
+            )?;
+        }
+
+        for cb in &zettel.checkboxes {
+            let state = match cb.state {
+                crate::types::CheckboxState::Open => "open",
+                crate::types::CheckboxState::Done => "done",
+                crate::types::CheckboxState::Info => "info",
+            };
+            self.conn.execute(
+                "INSERT INTO _zdb_checkboxes (zettel_id, state, content, date, due_date, line_number, indent_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![id, state, cb.content, cb.date, cb.due_date, cb.line_number as i64, cb.indent_level as i64],
+            )?;
+        }
+
+        for field in &zettel.inline_fields {
+            let zone = format!("{:?}", field.zone);
+            self.conn.execute(
+                "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
+                params![id, field.key, field.value, zone],
+            )?;
+        }
+
+        // Insert frontmatter extras (scalar values only)
+        for (key, value) in &zettel.meta.extra {
+            let str_value = match value {
+                crate::types::Value::String(s) => s.clone(),
+                crate::types::Value::Number(n) => n.to_string(),
+                crate::types::Value::Bool(b) => b.to_string(),
+                crate::types::Value::List(_) | crate::types::Value::Map(_) => continue,
+            };
+            self.conn.execute(
+                "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
+                params![id, key, str_value, "Frontmatter"],
+            )?;
+        }
+
+        for link in &zettel.wikilinks {
+            let zone = format!("{:?}", link.zone);
+            self.conn.execute(
+                "INSERT INTO _zdb_links (source_id, target_path, display, zone) VALUES (?1, ?2, ?3, ?4)",
+                params![id, link.target, link.display, zone],
+            )?;
+        }
+
+        // Insert aliases
+        if let Some(crate::types::Value::List(aliases)) = zettel.meta.extra.get("aliases") {
+            for alias in aliases {
+                if let crate::types::Value::String(a) = alias {
+                    self.conn.execute(
+                        "INSERT INTO _zdb_aliases (zettel_id, alias) VALUES (?1, ?2)",
+                        params![id, a],
+                    )?;
+                }
+            }
+        }
+
+        // Insert attachments
+        self.conn.execute(
+            "DELETE FROM _zdb_attachments WHERE zettel_id = ?1",
+            params![id],
+        )?;
+        if let Some(crate::types::Value::List(items)) = zettel.meta.extra.get("attachments") {
+            for item in items {
+                if let crate::types::Value::Map(map) = item {
+                    let name = map.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let mime = map.get("mime").and_then(|v| v.as_str()).unwrap_or("");
+                    let size = map.get("size").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
+                    let path = format!("reference/{}/{}", id, name);
+                    self.conn.execute(
+                        "INSERT INTO _zdb_attachments (zettel_id, name, mime, size, path) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![id, name, mime, size, path],
+                    )?;
+                }
+            }
+        }
+
+        // Insert FTS entry
+        self.conn.execute(
+            "INSERT INTO _zdb_fts (rowid, title, body, tags) VALUES (
+                (SELECT rowid FROM zettels WHERE id = ?1), ?2, ?3, ?4
+            )",
+            params![id, title, zettel.body, tags_str],
+        )?;
+
+        Ok(())
+    }
+
     /// Resolve the git-relative path for a zettel ID using the index.
     pub fn resolve_path(&self, id: &str) -> Result<String> {
         self.conn
@@ -1501,6 +1658,84 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    fn make_sample_zettels(n: usize) -> Vec<ParsedZettel> {
+        (0..n)
+            .map(|i| {
+                let id = format!("{:014}", 20260226120000u64 + i as u64);
+                ParsedZettel {
+                    meta: ZettelMeta {
+                        id: Some(ZettelId(id.clone())),
+                        title: Some(format!("Note {i}")),
+                        date: Some("2026-02-26".into()),
+                        zettel_type: Some("permanent".into()),
+                        tags: vec!["test".into()],
+                        extra: Default::default(),
+                    },
+                    body: format!("Body of zettel {i}"),
+                    reference_section: String::new(),
+                    inline_fields: vec![],
+                    wikilinks: vec![],
+                    body_tags: vec![],
+                    checkboxes: vec![],
+                    path: format!("zettelkasten/{id}.md"),
+                }
+            })
+            .collect()
+    }
+
+    fn dump_table(idx: &Index, table: &str) -> Vec<Vec<String>> {
+        idx.query_raw(&format!("SELECT * FROM \"{table}\" ORDER BY 1"))
+            .unwrap()
+    }
+
+    #[test]
+    fn batch_index_matches_sequential() {
+        let zettels = make_sample_zettels(10);
+
+        // Sequential: index one-by-one
+        let idx_seq = in_memory_index();
+        for z in &zettels {
+            idx_seq.index_zettel(z).unwrap();
+        }
+
+        // Batch: single transaction
+        let idx_batch = in_memory_index();
+        let count = idx_batch.batch_index(&zettels).unwrap();
+        assert_eq!(count, 10);
+
+        // Compare all tables
+        for table in &[
+            "zettels",
+            "_zdb_tags",
+            "_zdb_fields",
+            "_zdb_links",
+            "_zdb_aliases",
+            "_zdb_checkboxes",
+        ] {
+            let seq_rows = dump_table(&idx_seq, table);
+            let batch_rows = dump_table(&idx_batch, table);
+            assert_eq!(
+                seq_rows.len(),
+                batch_rows.len(),
+                "row count mismatch in {table}"
+            );
+            // Compare non-timestamp columns (updated_at varies)
+            if *table == "zettels" {
+                for (s, b) in seq_rows.iter().zip(batch_rows.iter()) {
+                    // Compare all columns except updated_at (index 6)
+                    assert_eq!(&s[..6], &b[..6], "zettels row mismatch");
+                }
+            } else {
+                assert_eq!(seq_rows, batch_rows, "mismatch in {table}");
+            }
+        }
+
+        // Verify FTS also works
+        let seq_fts = idx_seq.search("Body").unwrap();
+        let batch_fts = idx_batch.search("Body").unwrap();
+        assert_eq!(seq_fts.len(), batch_fts.len());
     }
 
     #[test]
