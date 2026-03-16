@@ -70,6 +70,20 @@ fn zettel_to_value(z: &ParsedZettel) -> GqlValue {
                     .unwrap_or(GqlValue::Null),
             );
             obj.insert(Name::new("zone"), GqlValue::from(zone));
+            let kind = match l.kind {
+                zdb_core::types::LinkKind::WikiLink => "wikilink",
+                zdb_core::types::LinkKind::MarkdownLink => "markdown",
+                zdb_core::types::LinkKind::Embed => "embed",
+                zdb_core::types::LinkKind::BareUrl => "url",
+            };
+            obj.insert(Name::new("kind"), GqlValue::from(kind));
+            obj.insert(
+                Name::new("section"),
+                l.section
+                    .as_deref()
+                    .map(GqlValue::from)
+                    .unwrap_or(GqlValue::Null),
+            );
             GqlValue::Object(obj)
         })
         .collect();
