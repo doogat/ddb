@@ -2159,6 +2159,78 @@ mod tests {
     }
 
     #[test]
+    fn backlinks_include_all_link_kinds() {
+        let idx = in_memory_index();
+
+        // Target zettel
+        let target = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260301120000".into())),
+                title: Some("Target".into()),
+                date: None,
+                zettel_type: None,
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: String::new(),
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260301120000.md".into(),
+        };
+        idx.index_zettel(&target).unwrap();
+
+        // Source zettel linking via all 4 kinds
+        let source = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260301100000".into())),
+                title: Some("Source".into()),
+                date: None,
+                zettel_type: None,
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: String::new(),
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![
+                crate::types::Link {
+                    target: "20260301120000".into(),
+                    display: None,
+                    section: None,
+                    kind: crate::types::LinkKind::WikiLink,
+                    zone: Zone::Body,
+                },
+                crate::types::Link {
+                    target: "20260301120000".into(),
+                    display: Some("t".into()),
+                    section: None,
+                    kind: crate::types::LinkKind::MarkdownLink,
+                    zone: Zone::Body,
+                },
+                crate::types::Link {
+                    target: "20260301120000".into(),
+                    display: None,
+                    section: None,
+                    kind: crate::types::LinkKind::Embed,
+                    zone: Zone::Body,
+                },
+            ],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260301100000.md".into(),
+        };
+        idx.index_zettel(&source).unwrap();
+
+        // backlinks() returns the source regardless of link kind
+        let bl = idx.backlinks("20260301120000").unwrap();
+        assert_eq!(bl.len(), 1);
+        assert_eq!(bl[0], "20260301100000");
+    }
+
+    #[test]
     fn backlink_query() {
         let idx = in_memory_index();
         idx.index_zettel(&sample_zettel()).unwrap();

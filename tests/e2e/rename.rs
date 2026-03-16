@@ -93,3 +93,56 @@ fn rename_no_backlinks() {
 
     assert!(repo.path().join(&new_path).exists());
 }
+
+#[test]
+fn rename_rewrites_markdown_and_embed_links() {
+    let repo = ZdbTestRepo::init();
+
+    // Create target zettel
+    let b_out = repo
+        .zdb()
+        .args(["create", "--title", "Target", "--body", "I am B."])
+        .output()
+        .unwrap();
+    let b_id = String::from_utf8_lossy(&b_out.stdout).trim().to_string();
+    let b_path_no_ext = format!("zettelkasten/{b_id}");
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Create linker with wikilink + markdown link + embed
+    let body =
+        format!("Wiki: [[{b_id}]]\nMd: [link]({b_path_no_ext})\nEmbed: ![[{b_path_no_ext}]]");
+    let a_out = repo
+        .zdb()
+        .args(["create", "--title", "Linker", "--body", &body])
+        .output()
+        .unwrap();
+    let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
+
+    // Reindex so links are in _zdb_links
+    repo.zdb().arg("reindex").assert().success();
+
+    // Rename target
+    let new_path = format!("zettelkasten/contact/{b_id}.md");
+    repo.zdb()
+        .args(["rename", &b_id, &new_path])
+        .assert()
+        .success();
+
+    // Read linker content — all three link types should be rewritten
+    let a_content = repo.zdb().args(["read", &a_id]).output().unwrap();
+    let a_text = String::from_utf8_lossy(&a_content.stdout);
+    let new_target = format!("zettelkasten/contact/{b_id}");
+
+    assert!(
+        a_text.contains(&format!("[[{new_target}]]")),
+        "wikilink not rewritten: {a_text}"
+    );
+    assert!(
+        a_text.contains(&format!("[link]({new_target})")),
+        "markdown link not rewritten: {a_text}"
+    );
+    assert!(
+        a_text.contains(&format!("![[{new_target}]]")),
+        "embed not rewritten: {a_text}"
+    );
+}

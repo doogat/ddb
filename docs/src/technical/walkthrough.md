@@ -222,7 +222,7 @@ pub struct InlineField {
     pub zone: Zone,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LinkKind {
     WikiLink,
     MarkdownLink,
