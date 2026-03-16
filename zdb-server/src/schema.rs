@@ -607,6 +607,93 @@ pub fn build_schema(
             },
         ));
 
+    // -- Discovery output types --
+    let unlinked_mention_type = Object::new("UnlinkedMention")
+        .field(simple_field("sourceId", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field(
+            "sourceTitle",
+            TypeRef::named_nn(TypeRef::STRING),
+        ))
+        .field(simple_field("snippet", TypeRef::named_nn(TypeRef::STRING)));
+
+    let suggestion_type = Object::new("Suggestion")
+        .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)))
+        .field(Field::new(
+            "score",
+            TypeRef::named_nn(TypeRef::FLOAT),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "score"))
+                })
+            },
+        ))
+        .field(Field::new(
+            "sharedTags",
+            TypeRef::named_nn_list_nn(TypeRef::STRING),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "sharedTags"))
+                })
+            },
+        ));
+
+    let stale_zettel_type = Object::new("StaleZettel")
+        .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field(
+            "zettelType",
+            TypeRef::named_nn(TypeRef::STRING),
+        ))
+        .field(simple_field(
+            "lastUpdated",
+            TypeRef::named_nn(TypeRef::STRING),
+        ))
+        .field(simple_field(
+            "dateSource",
+            TypeRef::named_nn(TypeRef::STRING),
+        ))
+        .field(Field::new(
+            "daysStale",
+            TypeRef::named_nn(TypeRef::INT),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "daysStale"))
+                })
+            },
+        ))
+        .field(Field::new(
+            "thresholdDays",
+            TypeRef::named_nn(TypeRef::INT),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "thresholdDays"))
+                })
+            },
+        ));
+
+    let orphan_zettel_type = Object::new("OrphanZettel")
+        .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field(
+            "zettelType",
+            TypeRef::named_nn(TypeRef::STRING),
+        ))
+        .field(Field::new(
+            "outgoingLinks",
+            TypeRef::named_nn(TypeRef::INT),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "outgoingLinks"))
+                })
+            },
+        ));
+
     // Base Zettel type
     let zettel_type = zettel_object("Zettel");
 
@@ -843,6 +930,161 @@ pub fn build_schema(
                 },
             )
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT))),
+        );
+    }
+
+    // unlinkedMentions(id: ID!): [UnlinkedMention!]!
+    {
+        query = query.field(
+            Field::new(
+                "unlinkedMentions",
+                TypeRef::named_nn_list_nn("UnlinkedMention"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let id = ctx.args.try_get("id")?.string()?.to_string();
+                        let mentions = pool.unlinked_mentions(id).await.map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(mentions.iter().map(|m| {
+                            let mut obj = IndexMap::new();
+                            obj.insert(Name::new("sourceId"), GqlValue::from(m.source_id.as_str()));
+                            obj.insert(
+                                Name::new("sourceTitle"),
+                                GqlValue::from(m.source_title.as_str()),
+                            );
+                            obj.insert(Name::new("snippet"), GqlValue::from(m.snippet.as_str()));
+                            FieldValue::owned_any(GqlValue::Object(obj))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+        );
+    }
+
+    // suggestions(id: ID!, limit: Int): [Suggestion!]!
+    {
+        query = query.field(
+            Field::new(
+                "suggestions",
+                TypeRef::named_nn_list_nn("Suggestion"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let id = ctx.args.try_get("id")?.string()?.to_string();
+                        let limit = ctx
+                            .args
+                            .get("limit")
+                            .and_then(|v| v.i64().ok())
+                            .unwrap_or(10) as usize;
+                        let suggestions = pool
+                            .suggest_links(id, limit)
+                            .await
+                            .map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(suggestions.iter().map(|s| {
+                            let tags: Vec<GqlValue> = s
+                                .shared_tags
+                                .iter()
+                                .map(|t| GqlValue::from(t.as_str()))
+                                .collect();
+                            let mut obj = IndexMap::new();
+                            obj.insert(Name::new("id"), GqlValue::from(s.id.as_str()));
+                            obj.insert(Name::new("title"), GqlValue::from(s.title.as_str()));
+                            obj.insert(Name::new("score"), GqlValue::from(s.score));
+                            obj.insert(Name::new("sharedTags"), GqlValue::List(tags));
+                            FieldValue::owned_any(GqlValue::Object(obj))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT))),
+        );
+    }
+
+    // staleZettels(type: String): [StaleZettel!]!
+    {
+        query = query.field(
+            Field::new(
+                "staleZettels",
+                TypeRef::named_nn_list_nn("StaleZettel"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let type_filter = ctx
+                            .args
+                            .get("type")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let stale = pool
+                            .stale_zettels(type_filter)
+                            .await
+                            .map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(stale.iter().map(|s| {
+                            let mut obj = IndexMap::new();
+                            obj.insert(Name::new("id"), GqlValue::from(s.id.as_str()));
+                            obj.insert(Name::new("title"), GqlValue::from(s.title.as_str()));
+                            obj.insert(
+                                Name::new("zettelType"),
+                                GqlValue::from(s.zettel_type.as_str()),
+                            );
+                            obj.insert(
+                                Name::new("lastUpdated"),
+                                GqlValue::from(s.last_updated.as_str()),
+                            );
+                            obj.insert(
+                                Name::new("dateSource"),
+                                GqlValue::from(s.date_source.to_string()),
+                            );
+                            obj.insert(Name::new("daysStale"), GqlValue::from(s.days_stale as i64));
+                            obj.insert(
+                                Name::new("thresholdDays"),
+                                GqlValue::from(s.threshold_days as i64),
+                            );
+                            FieldValue::owned_any(GqlValue::Object(obj))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING))),
+        );
+    }
+
+    // orphanZettels(type: String): [OrphanZettel!]!
+    {
+        query = query.field(
+            Field::new(
+                "orphanZettels",
+                TypeRef::named_nn_list_nn("OrphanZettel"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let type_filter = ctx
+                            .args
+                            .get("type")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let orphans = pool
+                            .orphan_zettels(type_filter)
+                            .await
+                            .map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(orphans.iter().map(|o| {
+                            let mut obj = IndexMap::new();
+                            obj.insert(Name::new("id"), GqlValue::from(o.id.as_str()));
+                            obj.insert(Name::new("title"), GqlValue::from(o.title.as_str()));
+                            obj.insert(
+                                Name::new("zettelType"),
+                                GqlValue::from(o.zettel_type.as_str()),
+                            );
+                            obj.insert(
+                                Name::new("outgoingLinks"),
+                                GqlValue::from(o.outgoing_links as i64),
+                            );
+                            FieldValue::owned_any(GqlValue::Object(obj))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING))),
         );
     }
 
@@ -1682,6 +1924,10 @@ pub fn build_schema(
     .register(update_input)
     .register(attachment_type)
     .register(checkbox_item_type)
+    .register(unlinked_mention_type)
+    .register(suggestion_type)
+    .register(stale_zettel_type)
+    .register(orphan_zettel_type)
     .register(change_event_type)
     .register(sync_result_type)
     .register(compact_result_type)

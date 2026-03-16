@@ -8,8 +8,8 @@ use zdb_core::indexer::Index;
 use zdb_core::parser;
 use zdb_core::sql_engine::{schema_from_parsed, SqlEngine, SqlResult};
 use zdb_core::types::{
-    CompactionReport, MaintenanceReport, PaginatedSearchResult, ParsedZettel, SyncReport,
-    TableSchema, ZettelMeta,
+    CompactionReport, MaintenanceReport, OrphanZettel, PaginatedSearchResult, ParsedZettel,
+    StaleZettel, Suggestion, SyncReport, TableSchema, UnlinkedMention, ZettelMeta,
 };
 
 use crate::events::{EventBus, EventKind, ZettelEvent};
@@ -106,6 +106,19 @@ pub enum ActorCommand {
     NoSqlBacklinks {
         id: String,
     },
+    UnlinkedMentions {
+        id: String,
+    },
+    SuggestLinks {
+        id: String,
+        limit: usize,
+    },
+    StaleZettels {
+        type_filter: Option<String>,
+    },
+    OrphanZettels {
+        type_filter: Option<String>,
+    },
 }
 
 /// Replies from the actor.
@@ -127,6 +140,10 @@ pub enum ActorReply {
     SyncResult(ActorResult<SyncReport>),
     NoSqlZettel(Box<ActorResult<Option<ParsedZettel>>>),
     NoSqlIds(ActorResult<Vec<String>>),
+    UnlinkedMentions(ActorResult<Vec<UnlinkedMention>>),
+    Suggestions(ActorResult<Vec<Suggestion>>),
+    StaleZettels(ActorResult<Vec<StaleZettel>>),
+    OrphanZettels(ActorResult<Vec<OrphanZettel>>),
 }
 
 struct ActorMsg {
@@ -428,6 +445,40 @@ impl ActorHandle {
     pub async fn nosql_backlinks(&self, id: String) -> ActorResult<Vec<String>> {
         match self.send(ActorCommand::NoSqlBacklinks { id }).await {
             ActorReply::NoSqlIds(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn unlinked_mentions(&self, id: String) -> ActorResult<Vec<UnlinkedMention>> {
+        match self.send(ActorCommand::UnlinkedMentions { id }).await {
+            ActorReply::UnlinkedMentions(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn suggest_links(&self, id: String, limit: usize) -> ActorResult<Vec<Suggestion>> {
+        match self.send(ActorCommand::SuggestLinks { id, limit }).await {
+            ActorReply::Suggestions(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn stale_zettels(
+        &self,
+        type_filter: Option<String>,
+    ) -> ActorResult<Vec<StaleZettel>> {
+        match self.send(ActorCommand::StaleZettels { type_filter }).await {
+            ActorReply::StaleZettels(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn orphan_zettels(
+        &self,
+        type_filter: Option<String>,
+    ) -> ActorResult<Vec<OrphanZettel>> {
+        match self.send(ActorCommand::OrphanZettels { type_filter }).await {
+            ActorReply::OrphanZettels(r) => r,
             _ => Err(ZettelError::Validation("unexpected reply".into())),
         }
     }
@@ -735,6 +786,18 @@ fn handle_command_shared(
         }
         ActorCommand::Sync { remote, branch } => {
             ActorReply::SyncResult(run_sync(repo, index, &remote, &branch))
+        }
+        ActorCommand::UnlinkedMentions { id } => {
+            ActorReply::UnlinkedMentions(index.unlinked_mentions(&id))
+        }
+        ActorCommand::SuggestLinks { id, limit } => {
+            ActorReply::Suggestions(index.suggest_links(&id, limit))
+        }
+        ActorCommand::StaleZettels { type_filter } => {
+            ActorReply::StaleZettels(index.stale_zettels(repo, type_filter.as_deref()))
+        }
+        ActorCommand::OrphanZettels { type_filter } => {
+            ActorReply::OrphanZettels(index.orphan_zettels(type_filter.as_deref()))
         }
         // NoSQL variants are handled in handle_command before delegation
         ActorCommand::NoSqlGet { .. }

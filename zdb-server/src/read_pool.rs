@@ -11,7 +11,10 @@ use zdb_core::error::ZettelError;
 use zdb_core::git_ops::GitRepo;
 use zdb_core::indexer::Index;
 use zdb_core::sql_engine::{SqlEngine, SqlResult};
-use zdb_core::types::{PaginatedSearchResult, ParsedZettel, TableSchema};
+use zdb_core::types::{
+    OrphanZettel, PaginatedSearchResult, ParsedZettel, StaleZettel, Suggestion, TableSchema,
+    UnlinkedMention,
+};
 
 use crate::actor;
 
@@ -203,6 +206,28 @@ impl ReadPool {
                 .map(|rows| rows.into_iter().next().unwrap_or_default())
         })
         .await
+    }
+
+    // --- Discovery reads ---
+
+    pub async fn unlinked_mentions(&self, id: String) -> Result<Vec<UnlinkedMention>> {
+        self.with_index(move |index| index.unlinked_mentions(&id))
+            .await
+    }
+
+    pub async fn suggest_links(&self, id: String, limit: usize) -> Result<Vec<Suggestion>> {
+        self.with_index(move |index| index.suggest_links(&id, limit))
+            .await
+    }
+
+    pub async fn stale_zettels(&self, type_filter: Option<String>) -> Result<Vec<StaleZettel>> {
+        self.with_index_repo(move |index, repo| index.stale_zettels(repo, type_filter.as_deref()))
+            .await
+    }
+
+    pub async fn orphan_zettels(&self, type_filter: Option<String>) -> Result<Vec<OrphanZettel>> {
+        self.with_index(move |index| index.orphan_zettels(type_filter.as_deref()))
+            .await
     }
 
     // --- NoSQL (redb) reads ---
