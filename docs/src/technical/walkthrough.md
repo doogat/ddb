@@ -222,10 +222,20 @@ pub struct InlineField {
     pub zone: Zone,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LinkKind {
+    WikiLink,
+    MarkdownLink,
+    Embed,
+    BareUrl,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WikiLink {
+pub struct Link {
     pub target: String,
     pub display: Option<String>,
+    pub section: Option<String>,
+    pub kind: LinkKind,
     pub zone: Zone,
 }
 
@@ -235,7 +245,9 @@ pub struct ParsedZettel {
     pub body: String,
     pub reference_section: String,
     pub inline_fields: Vec<InlineField>,
-    pub wikilinks: Vec<WikiLink>,
+    pub links: Vec<Link>,
+    pub body_tags: Vec<String>,
+    pub checkboxes: Vec<CheckboxItem>,
     pub path: String,
 }
 ```
@@ -246,7 +258,7 @@ pub struct ParsedZettel {
 
 **ZettelMeta** holds the structured frontmatter. Known fields (`id`, `title`, `date`, `type`, `tags`) are first-class; everything else lands in `extra` as a generic `Value` enum. This keeps the system extensible — users can add arbitrary YAML fields.
 
-**ParsedZettel** is the fully-parsed representation of a zettel file. It carries metadata, body text, reference section, extracted inline fields (Dataview-style `key:: value`), and wikilinks (`[[target|display]]`). This struct flows through the entire system — created by the parser, persisted via git, indexed in SQLite, served over GraphQL.
+**ParsedZettel** is the fully-parsed representation of a zettel file. It carries metadata, body text, reference section, extracted inline fields (Dataview-style `key:: value`), links of all kinds (wikilinks, embeds, markdown links, bare URLs), body hashtags, and checkboxes. This struct flows through the entire system — created by the parser, persisted via git, indexed in SQLite, served over GraphQL.
 
 The file also defines types for the sync and merge subsystems:
 
@@ -454,20 +466,30 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
     let zettel = split_zones(content)?;
     let meta = parse_frontmatter(&zettel.raw_frontmatter, path)?;
     let inline_fields = extract_inline_fields(&zettel.body, &zettel.reference_section)?;
-    let wikilinks = extract_wikilinks(&zettel.raw_frontmatter, &zettel.body, &zettel.reference_section);
+    let wikilinks = extract_links(
+        &zettel.raw_frontmatter,
+        &zettel.body,
+        &zettel.reference_section,
+    );
+    let body_tags = extract_hashtags(&zettel.body);
+    let checkboxes = extract_checkboxes(&zettel.body);
 
     Ok(crate::types::ParsedZettel {
         meta,
         body: zettel.body,
         reference_section: zettel.reference_section,
         inline_fields,
-        wikilinks,
+        links: wikilinks,
+        body_tags,
+        checkboxes,
         path: path.to_string(),
     })
 }
 ```
 
-Four steps: `split_zones` → `parse_frontmatter` → `extract_inline_fields` → `extract_wikilinks`.
+Six steps: `split_zones` → `parse_frontmatter` → `extract_inline_fields` → `extract_links` → `extract_hashtags` → `extract_checkboxes`.
+
+`extract_links()` is the unified link extraction pipeline. For each zone (frontmatter, body, reference), it runs four extractors in order: embeds → wikilinks → markdown links → bare URLs. Embeds are extracted first so the wikilink pass can filter out overlapping `[[...]]` matches. Markdown link targets are collected so the bare URL pass can skip URLs that already appear as markdown link targets. Each link carries a `LinkKind` discriminant (`WikiLink`, `Embed`, `MarkdownLink`, `BareUrl`).
 
 ### Zone Splitting
 
@@ -1067,7 +1089,9 @@ pub fn resolve_conflicts(
             body: merged_body,
             reference_section: merged_ref,
             inline_fields,
-            wikilinks,
+            links: wikilinks,
+            body_tags: vec![],
+            checkboxes: vec![],
             path: conflict.path.clone(),
         };
 
@@ -1264,7 +1288,8 @@ impl Index {
                 source_id TEXT NOT NULL REFERENCES zettels(id),
                 target_path TEXT NOT NULL,
                 display TEXT,
-                zone TEXT
+                zone TEXT,
+                kind TEXT NOT NULL DEFAULT 'wikilink'
             );
             CREATE INDEX IF NOT EXISTS idx_zdb_links_target ON _zdb_links(target_path);
 
@@ -1298,7 +1323,7 @@ Seven tables:
 - **zettels** — core metadata (id, title, date, type, path, body)
 - **_zdb_tags** — normalized tag-to-zettel mapping with `source` column (`frontmatter` or `body`)
 - **_zdb_fields** — inline fields (key, value, zone) plus scalar frontmatter extras (String, Number, Bool) with `zone = 'Frontmatter'`
-- **_zdb_links** — wikilinks (source, target, display text, zone)
+- **_zdb_links** — all link types (source, target, display text, zone, kind: `wikilink`/`embed`/`markdown`/`url`)
 - **_zdb_aliases** — alternative names for zettels (title, aliases from fields)
 - **_zdb_checkboxes** — checkbox items (state, content, date, due_date, line_number, indent_level) from body `- [ ]`/`[x]`/`[i]` syntax
 - **_zdb_fts** — FTS5 virtual table (porter stemmer + unicode61 tokenizer)
@@ -1307,13 +1332,14 @@ WAL mode is enabled for concurrent read/write. The `_zdb_meta` table tracks the 
 
 ### Wikilink Resolution
 
-`resolve_wikilink(target)` resolves a wikilink target string to a zettel path using a three-step fallback chain:
+`resolve_wikilink(target)` resolves a wikilink target string to a zettel path using a four-step fallback chain:
 
 1. **Path lookup** — `SELECT ... FROM zettels WHERE path = target`. Handles path-qualified wikilinks like `zettelkasten/contact/20240619183742.md`.
 2. **ID lookup** — `resolve_path(target)` matches against `zettels.id`. Handles bare ID wikilinks like `20240619183742`.
 3. **Alias lookup** — `resolve_alias(target)` checks `_zdb_aliases` (case-insensitive). Handles human-readable aliases.
+4. **Partial path matching** — `SELECT path FROM zettels WHERE path LIKE '%/' || target || '.md' OR path LIKE '%/' || target`. Matches filename stems (e.g., `meeting-notes` resolves to `zettelkasten/projects/meeting-notes.md`). When multiple matches exist, the shortest path wins.
 
-Path-qualified links take precedence over ID-only links per the specification. All three steps are indexed lookups (unique column or indexed column), so resolution is O(1) regardless of repo size.
+Path-qualified links take precedence over ID-only links per the specification. Steps 1-3 are indexed lookups (O(1)). Step 4 uses a LIKE scan but is only reached as a last resort.
 
 ### Index Rebuild
 
@@ -1402,7 +1428,7 @@ use crate::indexer::Index;
 use crate::parser;
 use crate::traits::ZettelStore;
 use crate::types::{
-    ColumnDef, InlineField, ParsedZettel, TableSchema, Value, WikiLink, ZettelId, ZettelMeta, Zone,
+    ColumnDef, InlineField, Link, ParsedZettel, TableSchema, Value, ZettelId, ZettelMeta, Zone,
 };
 
 /// Strip surrounding double-quotes from a SQL identifier.
@@ -2596,42 +2622,21 @@ WHERE a.mime LIKE 'image/%'
 
 ## 17. Zettel Rename — `zdb-core/src/git_ops.rs` + `parser.rs` + `indexer.rs`
 
-When a zettel moves (e.g. gains a type and relocates from `zettelkasten/` to `zettelkasten/contact/`), all wikilinks across the repo pointing to the old path or bare ID must be rewritten. The rename feature spans three modules:
+When a zettel moves (e.g. gains a type and relocates from `zettelkasten/` to `zettelkasten/contact/`), all links across the repo pointing to the old path or bare ID must be rewritten. The rename feature spans three modules:
 
-- **parser** — `rewrite_wikilinks()` performs string-level wikilink target replacement
+- **parser** — `rewrite_links()` performs string-level link target replacement across wikilinks, markdown links, and embeds
 - **indexer** — `backlinking_zettel_paths()` finds all zettels linking to a target
 - **git_ops** — `rename_file()` does the git mv, `rename_zettel()` orchestrates the full operation
 
-### Wikilink Rewriting
+### Link Rewriting
 
-The parser module provides `rewrite_wikilinks()` which replaces wikilink targets in raw file content. It matches `[[old_target]]` and `[[old_target|display]]` forms, preserving display text and YAML quoting:
+The parser module provides `rewrite_links()` which replaces link targets in raw file content. It handles three link syntaxes:
 
-```bash
-sed -n '/^pub fn rewrite_wikilinks/,/^}/p' zdb-core/src/parser.rs
-```
+1. **Wikilinks** — `[[old_target]]` and `[[old_target|display]]`, preserving display text and YAML quoting
+2. **Markdown links** — `[display](old_target)` → `[display](new_target)`
+3. **Embeds** — `![[old_target]]` and `![[old_target|display]]`
 
-```rust
-pub fn rewrite_wikilinks(content: &str, old_target: &str, new_target: &str) -> String {
-    use std::sync::OnceLock;
-    static REWRITE_RE: OnceLock<Regex> = OnceLock::new();
-    // Capture: [[target]] or [[target|display]]
-    let re = REWRITE_RE.get_or_init(|| {
-        Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("valid regex: wikilink rewrite")
-    });
-
-    re.replace_all(content, |caps: &regex::Captures| {
-        let target = &caps[1];
-        if target == old_target {
-            match caps.get(2) {
-                Some(display) => format!("[[{}|{}]]", new_target, display.as_str()),
-                None => format!("[[{}]]", new_target),
-            }
-        } else {
-            caps[0].to_string()
-        }
-    })
-    .into_owned()
-}
+Bare URLs are not rewritten (they are external references).
 ```
 
 ### Backlink Path Resolution
@@ -2666,8 +2671,8 @@ sed -n '/pub fn backlinking_zettel_paths/,/^    }/p' zdb-core/src/indexer.rs
 
 1. Move the file via `rename_file()` (first commit)
 2. Extract bare ID from the old path
-3. Query backlinks for both old path and bare ID (wikilinks may use either form)
-4. Deduplicate, then rewrite each backlinking file using `rewrite_wikilinks()`
+3. Query backlinks for both old path and bare ID (links may use either form)
+4. Deduplicate, then rewrite each backlinking file using `rewrite_links()` (handles wikilinks, markdown links, and embeds)
 5. Commit all rewritten files in a single batch (second commit)
 6. Refresh the index via `rebuild_if_stale()`, then query `broken_backlinks()` filtered to the old path/ID to detect any references that weren't rewritten
 7. Return a `RenameReport` with `updated` (rewritten files) and `unresolvable` (remaining broken references)
@@ -2720,11 +2725,11 @@ pub fn rename_zettel(
         let mut rewritten = content.clone();
 
         // Rewrite path-qualified links (without .md, as wikilinks typically omit it)
-        rewritten = crate::parser::rewrite_wikilinks(&rewritten, old_target_for_path, new_target_for_path);
+        rewritten = crate::parser::rewrite_links(&rewritten, old_target_for_path, new_target_for_path);
 
         // Rewrite bare ID links
         if !old_id.is_empty() {
-            rewritten = crate::parser::rewrite_wikilinks(&rewritten, old_id, new_target_for_path);
+            rewritten = crate::parser::rewrite_links(&rewritten, old_id, new_target_for_path);
         }
 
         if rewritten != content {
@@ -2736,7 +2741,7 @@ pub fn rename_zettel(
     // Step 4: commit all rewrites in one batch
     if !writes.is_empty() {
         let write_refs: Vec<(&str, &str)> = writes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
-        repo.commit_files(&write_refs, &format!("refactor: rewrite wikilinks after rename {old_path}"))?;
+        repo.commit_files(&write_refs, &format!("refactor: rewrite links after rename {old_path}"))?;
     }
 
     // Step 5: detect remaining broken references to old target

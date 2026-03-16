@@ -169,6 +169,17 @@ $output = zdb query "SELECT * FROM _zdb_links"
 if ($output -notmatch $ID1) { throw "wikilinks failed" }
 pass "wikilinks"
 
+# 10a. link kinds (wikilink, markdown, embed, bare_url)
+$lkBody = "See [[$ID1]] wiki.`n[md link](target.md)`n![[$ID2]]`nhttps://example.com"
+$LK_ID = zdb create --title "Link Kinds" --body $lkBody
+zdb reindex | Out-Null
+$lkOut = zdb query "SELECT kind FROM _zdb_links WHERE source_id = '$LK_ID' ORDER BY kind"
+if ($lkOut -notmatch "\burl\b") { throw "url kind missing" }
+if ($lkOut -notmatch "embed") { throw "embed kind missing" }
+if ($lkOut -notmatch "markdown") { throw "markdown kind missing" }
+if ($lkOut -notmatch "wikilink") { throw "wikilink kind missing" }
+pass "link kinds (4 types indexed)"
+
 # 10b. rename with backlink rewrite
 $RENAME_TARGET = zdb create --title "Rename Target" --body "I will move."
 zdb create --title "Rename Linker" --body "See [[$RENAME_TARGET|Target]]." | Out-Null

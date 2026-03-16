@@ -125,6 +125,17 @@ pass "sql queries"
 $ZDB query "SELECT * FROM _zdb_links" | grep -q "$ID1"
 pass "wikilinks"
 
+# 10a. link kinds (wikilink, markdown, embed, url)
+LKBODY=$(printf 'See [[%s]] wiki.\n[md link](target.md)\n![[%s]]\nhttps://example.com' "$ID1" "$ID2")
+LK_ID=$($ZDB create --title "Link Kinds" --body "$LKBODY")
+$ZDB reindex >/dev/null
+LK_OUT=$($ZDB query "SELECT kind FROM _zdb_links WHERE source_id = '$LK_ID' ORDER BY kind")
+echo "$LK_OUT" | grep -q "url"
+echo "$LK_OUT" | grep -q "embed"
+echo "$LK_OUT" | grep -q "markdown"
+echo "$LK_OUT" | grep -q "wikilink"
+pass "link kinds (4 types indexed)"
+
 # 10b. rename with backlink rewrite
 RENAME_TARGET=$($ZDB create --title "Rename Target" --body "I will move.")
 $ZDB create --title "Rename Linker" --body "See [[$RENAME_TARGET|Target]]." >/dev/null

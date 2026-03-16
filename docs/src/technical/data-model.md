@@ -107,14 +107,29 @@ pub struct InlineField {
 }
 ```
 
-### WikiLink
+### LinkKind
 
-An internal reference using `[[target|display]]` syntax:
+Discriminant for the four supported link syntaxes:
 
 ```rust
-pub struct WikiLink {
+pub enum LinkKind {
+    WikiLink,      // [[target|display]]
+    MarkdownLink,  // [title](url)
+    Embed,         // ![[file#section|display]]
+    BareUrl,       // https://example.com
+}
+```
+
+### Link
+
+A reference extracted from zettel content:
+
+```rust
+pub struct Link {
     pub target: String,
     pub display: Option<String>,
+    pub section: Option<String>,
+    pub kind: LinkKind,
     pub zone: Zone,
 }
 ```
@@ -129,7 +144,9 @@ pub struct ParsedZettel {
     pub body: String,
     pub reference_section: String,
     pub inline_fields: Vec<InlineField>,
-    pub wikilinks: Vec<WikiLink>,
+    pub links: Vec<Link>,
+    pub body_tags: Vec<String>,
+    pub checkboxes: Vec<CheckboxItem>,
     pub path: String,
 }
 ```
@@ -309,8 +326,8 @@ _zdb_tags(zettel_id FK, tag)
 -- Inline fields with zone tracking
 _zdb_fields(zettel_id FK, key, value, zone)
 
--- Wikilinks with zone tracking
-_zdb_links(source_id FK, target_path, display, zone)
+-- Links with zone and kind tracking
+_zdb_links(source_id FK, target_path, display, zone, kind TEXT DEFAULT 'wikilink')
 
 -- Attachments (one row per file per zettel)
 _zdb_attachments(zettel_id FK, name, mime, size INTEGER, path)

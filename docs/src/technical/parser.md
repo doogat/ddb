@@ -49,13 +49,18 @@ Deserializes YAML into `ZettelMeta`. If the `id` field is missing, falls back to
 - **Cross-zone duplicate** (same key in body and reference): returns `Err(Validation(...))`
 - **Same-zone duplicate**: first occurrence wins silently
 
-## Wikilink Extraction
+## Link Extraction
 
-`extract_wikilinks(frontmatter, body, reference) -> Vec<WikiLink>`
+`extract_links(frontmatter, body, reference) -> Vec<Link>`
 
-Pattern: `\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`
+Extracts all link types from all three zones into a unified `Vec<Link>`. Each link carries a `LinkKind` discriminant and optional `section` field. The extraction runs per-zone in a fixed order to avoid double-counting:
 
-Extracts from all three zones. In frontmatter, wikilinks appear inside quoted YAML values (e.g., `related: "[[20260226120000|My Note]]"`).
+1. **Embeds** (`![[file#section|display]]`) — `LinkKind::Embed`. Extracted first so the wikilink pass can skip overlapping matches.
+2. **Wikilinks** (`[[target|display]]`) — `LinkKind::WikiLink`. Pattern: `\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`. Targets matching an already-extracted embed are filtered out.
+3. **Markdown links** (`[title](url)`) — `LinkKind::MarkdownLink`. Pattern: `\[([^\]]*)\]\(([^)]+)\)`.
+4. **Bare URLs** (`https://example.com`) — `LinkKind::BareUrl`. Pattern: `https?://[^\s<>\[\])\},]+`. Targets already captured by a markdown link are excluded.
+
+In frontmatter, wikilinks appear inside quoted YAML values (e.g., `related: "[[20260226120000|My Note]]"`).
 
 ## Hashtag Extraction
 
@@ -117,7 +122,7 @@ Returns a `ZettelId` from the current local timestamp: `chrono::Local::now().for
 - Three-zone splits (basic, no ref, code blocks, thematic breaks, backtracking, trailing separators)
 - Frontmatter parsing (all fields, partial, extras, filename fallback)
 - Inline fields (body, reference, mixed, empty values, cross-zone duplication, same-zone duplication, fenced code block exclusion, inline code exclusion)
-- Wikilink extraction (body, reference, frontmatter with quoted YAML)
+- Link extraction (wikilinks, embeds, markdown links, bare URLs, deduplication, all zones)
 - Checkbox extraction (all states, date prefix, due date, code block exclusion, line numbers, indentation)
 - Hashtag extraction (basic, hierarchical, code/wikilink exclusion, dedup)
 - Serialization round-trip

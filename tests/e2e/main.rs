@@ -3,6 +3,7 @@ mod checkboxes;
 mod common;
 mod delete_backlinks;
 mod folder_namespace;
+mod link_kinds;
 mod multi_device;
 mod pgwire;
 mod read_pool;
