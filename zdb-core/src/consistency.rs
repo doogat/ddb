@@ -333,8 +333,7 @@ fn detect_schema_issues(parsed: &ParsedZettel, schema: &TableSchema, fixes: &mut
 /// Apply detected fixes to a parsed zettel and return the re-serialized content.
 ///
 /// Modifies the zettel in-place, then calls `parser::serialize()` to produce the output string.
-/// Fixes are applied in a deterministic order: tag fixes first, then defaults, title, keys,
-/// and finally cross-zone resolution.
+/// Fixes are applied in the order given (typically severity-descending from `detect_fixes`).
 pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
     for fix in fixes {
         match fix {
@@ -627,27 +626,36 @@ pub fn migrate_all(repo: &impl ZettelStore, dry_run: bool) -> Result<FixReport> 
         });
     }
 
-    if !dry_run && !writes.is_empty() {
-        let total_fixes: usize = report.fixes.iter().map(|f| f.applied.len()).sum();
-        let names: Vec<&str> = pending.iter().map(|m| m.name).collect();
-        let msg = format!(
-            "fix: migrate {} fields across {} zettels ({})",
-            total_fixes,
-            report.files_fixed,
-            names.join(", ")
-        );
-        let write_refs: Vec<(&str, &str)> = writes
-            .iter()
-            .map(|(p, c)| (p.as_str(), c.as_str()))
-            .collect();
-        repo.commit_batch(&write_refs, &[], &msg)?;
+    if !dry_run {
+        // Always include version file in the commit (even if no zettels changed)
+        let version_content = max_version.to_string();
+        writes.push((".zdb/migration-version".to_string(), version_content));
 
-        // Update version file
-        repo.commit_file(
-            ".zdb/migration-version",
-            &max_version.to_string(),
-            &format!("fix: update migration version to {max_version}"),
-        )?;
+        let names: Vec<&str> = pending.iter().map(|m| m.name).collect();
+        if report.files_fixed > 0 {
+            let total_fixes: usize = report.fixes.iter().map(|f| f.applied.len()).sum();
+            let msg = format!(
+                "fix: migrate {} fields across {} zettels ({})",
+                total_fixes,
+                report.files_fixed,
+                names.join(", ")
+            );
+            let write_refs: Vec<(&str, &str)> = writes
+                .iter()
+                .map(|(p, c)| (p.as_str(), c.as_str()))
+                .collect();
+            repo.commit_batch(&write_refs, &[], &msg)?;
+        } else {
+            // No zettels affected, but still advance the version
+            repo.commit_file(
+                ".zdb/migration-version",
+                &max_version.to_string(),
+                &format!(
+                    "fix: advance migration version to {max_version} ({})",
+                    names.join(", ")
+                ),
+            )?;
+        }
     }
 
     Ok(report)
@@ -890,6 +898,22 @@ mod tests {
             Fix::H1Aligned {
                 old_h1: "a".into(),
                 new_h1: "b".into()
+            }
+            .severity(),
+            Severity::Info
+        );
+        assert_eq!(
+            Fix::FieldRenamed {
+                old: "a".into(),
+                new: "b".into()
+            }
+            .severity(),
+            Severity::Warning
+        );
+        assert_eq!(
+            Fix::TypeNormalized {
+                old: "loop".into(),
+                new: "project".into()
             }
             .severity(),
             Severity::Info
