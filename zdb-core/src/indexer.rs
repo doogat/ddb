@@ -4642,4 +4642,628 @@ Widget
             .unwrap();
         assert_eq!(timeout, 5000);
     }
+
+    // ── unlinked_mentions tests ─────────────────────────────────────
+
+    #[test]
+    fn unlinked_mentions_basic() {
+        let idx = in_memory_index();
+
+        // Zettel A: title "Project Alpha"
+        let a = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260301000000".into())),
+                title: Some("Project Alpha".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "This is Project Alpha.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260301000000.md".into(),
+        };
+
+        // Zettel B: body mentions "Project Alpha" but does NOT link to A
+        let b = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260301000001".into())),
+                title: Some("Meeting Notes".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "Discussed Project Alpha progress today.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260301000001.md".into(),
+        };
+
+        idx.index_zettel(&a).unwrap();
+        idx.index_zettel(&b).unwrap();
+
+        let mentions = idx.unlinked_mentions("20260301000000").unwrap();
+        assert_eq!(mentions.len(), 1);
+        assert_eq!(mentions[0].source_id, "20260301000001");
+    }
+
+    #[test]
+    fn unlinked_mentions_excludes_linked() {
+        let idx = in_memory_index();
+
+        // Zettel A
+        let a = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260302000000".into())),
+                title: Some("Project Beta".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "This is Project Beta.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260302000000.md".into(),
+        };
+
+        // Zettel B: mentions "Project Beta" AND links to A via wikilink
+        let b = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260302000001".into())),
+                title: Some("Status Update".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "Project Beta is on track. See [[20260302000000]].".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![Link {
+                target: "20260302000000".into(),
+                display: None,
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
+                zone: Zone::Body,
+            }],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260302000001.md".into(),
+        };
+
+        idx.index_zettel(&a).unwrap();
+        idx.index_zettel(&b).unwrap();
+
+        let mentions = idx.unlinked_mentions("20260302000000").unwrap();
+        assert!(
+            mentions.is_empty(),
+            "linked zettel should not appear in unlinked mentions"
+        );
+    }
+
+    #[test]
+    fn unlinked_mentions_excludes_self() {
+        let idx = in_memory_index();
+
+        // Zettel whose body mentions its own title
+        let a = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260303000000".into())),
+                title: Some("Self Reference".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "This zettel is about Self Reference patterns.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260303000000.md".into(),
+        };
+
+        idx.index_zettel(&a).unwrap();
+
+        let mentions = idx.unlinked_mentions("20260303000000").unwrap();
+        assert!(
+            mentions.is_empty(),
+            "zettel should not appear in its own unlinked mentions"
+        );
+    }
+
+    // ── suggest_links tests ─────────────────────────────────────────
+
+    #[test]
+    fn suggest_links_tag_overlap() {
+        let idx = in_memory_index();
+
+        // Source: tags [a, b, c]
+        let source = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260304000000".into())),
+                title: Some("Source".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec!["a".into(), "b".into(), "c".into()],
+                extra: Default::default(),
+            },
+            body: "Source body.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260304000000.md".into(),
+        };
+
+        // Candidate1: tags [a, b] — 2 shared tags
+        let c1 = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260304000001".into())),
+                title: Some("Candidate One".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec!["a".into(), "b".into()],
+                extra: Default::default(),
+            },
+            body: "Candidate one body.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260304000001.md".into(),
+        };
+
+        // Candidate2: tags [a] — 1 shared tag
+        let c2 = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260304000002".into())),
+                title: Some("Candidate Two".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec!["a".into()],
+                extra: Default::default(),
+            },
+            body: "Candidate two body.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260304000002.md".into(),
+        };
+
+        idx.index_zettel(&source).unwrap();
+        idx.index_zettel(&c1).unwrap();
+        idx.index_zettel(&c2).unwrap();
+
+        let suggestions = idx.suggest_links("20260304000000", 10).unwrap();
+        assert!(
+            suggestions.len() >= 2,
+            "should suggest at least 2 candidates"
+        );
+
+        // Candidate1 (2 shared tags) should rank higher than candidate2 (1 shared tag)
+        let pos_c1 = suggestions.iter().position(|s| s.id == "20260304000001");
+        let pos_c2 = suggestions.iter().position(|s| s.id == "20260304000002");
+        assert!(
+            pos_c1.unwrap() < pos_c2.unwrap(),
+            "candidate with more shared tags should rank higher"
+        );
+    }
+
+    #[test]
+    fn suggest_links_excludes_linked() {
+        let idx = in_memory_index();
+
+        // Source links to candidate
+        let source = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260305000000".into())),
+                title: Some("Source".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec!["shared".into()],
+                extra: Default::default(),
+            },
+            body: "Source body with [[20260305000001]].".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![Link {
+                target: "20260305000001".into(),
+                display: None,
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
+                zone: Zone::Body,
+            }],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260305000000.md".into(),
+        };
+
+        // Candidate: same tag as source
+        let candidate = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260305000001".into())),
+                title: Some("Candidate".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec!["shared".into()],
+                extra: Default::default(),
+            },
+            body: "Candidate body.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260305000001.md".into(),
+        };
+
+        idx.index_zettel(&source).unwrap();
+        idx.index_zettel(&candidate).unwrap();
+
+        let suggestions = idx.suggest_links("20260305000000", 10).unwrap();
+        assert!(
+            !suggestions.iter().any(|s| s.id == "20260305000001"),
+            "already-linked zettel should be excluded from suggestions"
+        );
+    }
+
+    #[test]
+    fn suggest_links_respects_limit() {
+        let idx = in_memory_index();
+
+        // Source with tags
+        let source = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260306000000".into())),
+                title: Some("Source".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec!["common".into()],
+                extra: Default::default(),
+            },
+            body: "Source body.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260306000000.md".into(),
+        };
+        idx.index_zettel(&source).unwrap();
+
+        // Create 5 candidates all sharing the tag
+        for i in 1..=5 {
+            let id = format!("2026030600000{i}");
+            let c = ParsedZettel {
+                meta: ZettelMeta {
+                    id: Some(ZettelId(id.clone())),
+                    title: Some(format!("Candidate {i}")),
+                    date: None,
+                    zettel_type: Some("note".into()),
+                    tags: vec!["common".into()],
+                    extra: Default::default(),
+                },
+                body: format!("Candidate {i} body."),
+                sections: vec![],
+                reference_section: String::new(),
+                inline_fields: vec![],
+                links: vec![],
+                body_tags: vec![],
+                checkboxes: vec![],
+                path: format!("zettelkasten/{id}.md"),
+            };
+            idx.index_zettel(&c).unwrap();
+        }
+
+        let suggestions = idx.suggest_links("20260306000000", 2).unwrap();
+        assert!(
+            suggestions.len() <= 2,
+            "should respect limit of 2, got {}",
+            suggestions.len()
+        );
+    }
+
+    // ── stale_zettels tests ─────────────────────────────────────────
+
+    /// Helper: commit a file with a custom git timestamp (epoch seconds).
+    fn commit_file_with_time(
+        repo: &GitRepo,
+        rel_path: &str,
+        content: &str,
+        message: &str,
+        epoch_secs: i64,
+    ) {
+        let full_path = repo.path.join(rel_path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&full_path, content).unwrap();
+
+        let git_repo = &repo.repo;
+        let mut index = git_repo.index().unwrap();
+        index.add_path(std::path::Path::new(rel_path)).unwrap();
+        index.write().unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = git_repo.find_tree(tree_oid).unwrap();
+
+        let sig = git2::Signature::new("zdb", "zdb@test", &git2::Time::new(epoch_secs, 0)).unwrap();
+
+        let parents: Vec<git2::Commit<'_>> = match git_repo.head() {
+            Ok(head) => vec![head.peel_to_commit().unwrap()],
+            Err(_) => vec![],
+        };
+        let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
+
+        git_repo
+            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
+            .unwrap();
+    }
+
+    #[test]
+    fn stale_zettels_basic() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        // Create a _typedef with stale_after_days: 1
+        let typedef =
+            "---\nid: 20260307000000\ntitle: task\ntype: _typedef\nstale_after_days: 1\n---\n";
+        repo.commit_file(
+            "zettelkasten/_typedef/20260307000000.md",
+            typedef,
+            "add typedef",
+        )
+        .unwrap();
+
+        // Create a zettel of type "task" with an OLD git commit time (2020-01-01)
+        let zettel =
+            "---\nid: 20260307000001\ntitle: Old Task\ntype: task\ndate: 2020-01-01\n---\nBody.";
+        commit_file_with_time(
+            &repo,
+            "zettelkasten/20260307000001.md",
+            zettel,
+            "add old task",
+            1577836800, // 2020-01-01T00:00:00 UTC
+        );
+
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let stale = idx.stale_zettels(&repo, None).unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].id, "20260307000001");
+        assert_eq!(stale[0].zettel_type, "task");
+    }
+
+    #[test]
+    fn stale_zettels_no_threshold() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        // _typedef without stale_after_days
+        let typedef = "---\nid: 20260308000000\ntitle: note\ntype: _typedef\n---\n";
+        repo.commit_file(
+            "zettelkasten/_typedef/20260308000000.md",
+            typedef,
+            "add typedef",
+        )
+        .unwrap();
+
+        // Zettel of type "note" with old date
+        let zettel =
+            "---\nid: 20260308000001\ntitle: Old Note\ntype: note\ndate: 2020-01-01\n---\nBody.";
+        repo.commit_file("zettelkasten/20260308000001.md", zettel, "add note")
+            .unwrap();
+
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let stale = idx.stale_zettels(&repo, None).unwrap();
+        assert!(
+            stale.is_empty(),
+            "type without stale_after_days should not report stale zettels"
+        );
+    }
+
+    // ── orphan_zettels tests ────────────────────────────────────────
+
+    #[test]
+    fn orphan_zettels_basic() {
+        let idx = in_memory_index();
+
+        // Zettel with no incoming links
+        let orphan = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260309000000".into())),
+                title: Some("Orphan".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "Nobody links to me.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260309000000.md".into(),
+        };
+        idx.index_zettel(&orphan).unwrap();
+
+        let orphans = idx.orphan_zettels(None).unwrap();
+        assert_eq!(orphans.len(), 1);
+        assert_eq!(orphans[0].id, "20260309000000");
+    }
+
+    #[test]
+    fn orphan_zettels_excludes_linked() {
+        let idx = in_memory_index();
+
+        // Zettel B: target of a link
+        let b = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260310000001".into())),
+                title: Some("Linked Target".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "I have an incoming link.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260310000001.md".into(),
+        };
+
+        // Zettel A: links to B
+        let a = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260310000000".into())),
+                title: Some("Linker".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "See [[20260310000001]].".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![Link {
+                target: "20260310000001".into(),
+                display: None,
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
+                zone: Zone::Body,
+            }],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260310000000.md".into(),
+        };
+
+        idx.index_zettel(&b).unwrap();
+        idx.index_zettel(&a).unwrap();
+
+        let orphans = idx.orphan_zettels(None).unwrap();
+        assert!(
+            !orphans.iter().any(|o| o.id == "20260310000001"),
+            "zettel with incoming link should not be an orphan"
+        );
+    }
+
+    #[test]
+    fn orphan_zettels_excludes_typedef() {
+        let idx = in_memory_index();
+
+        // _typedef zettel (no incoming links)
+        let typedef = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260311000000".into())),
+                title: Some("task".into()),
+                date: None,
+                zettel_type: Some("_typedef".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: String::new(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/_typedef/20260311000000.md".into(),
+        };
+        idx.index_zettel(&typedef).unwrap();
+
+        let orphans = idx.orphan_zettels(None).unwrap();
+        assert!(
+            !orphans.iter().any(|o| o.id == "20260311000000"),
+            "_typedef zettels should never appear in orphan results"
+        );
+    }
+
+    #[test]
+    fn orphan_zettels_includes_outgoing_count() {
+        let idx = in_memory_index();
+
+        // Orphan zettel with 2 outgoing links (but no incoming)
+        let orphan = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260312000000".into())),
+                title: Some("Orphan With Links".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "Links to [[20260312000001]] and [[20260312000002]].".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![
+                Link {
+                    target: "20260312000001".into(),
+                    display: None,
+                    section: None,
+                    kind: crate::types::LinkKind::WikiLink,
+                    zone: Zone::Body,
+                },
+                Link {
+                    target: "20260312000002".into(),
+                    display: None,
+                    section: None,
+                    kind: crate::types::LinkKind::WikiLink,
+                    zone: Zone::Body,
+                },
+            ],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260312000000.md".into(),
+        };
+        idx.index_zettel(&orphan).unwrap();
+
+        let orphans = idx.orphan_zettels(None).unwrap();
+        let found = orphans.iter().find(|o| o.id == "20260312000000");
+        assert!(found.is_some(), "orphan should be returned");
+        assert_eq!(found.unwrap().outgoing_links, 2);
+    }
 }
