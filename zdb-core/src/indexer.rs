@@ -160,138 +160,13 @@ impl Index {
         }
     }
 
-    /// Upsert a single parsed zettel into the index.
+    /// Upsert a single parsed zettel into the index (savepoint-wrapped).
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn index_zettel(&self, zettel: &ParsedZettel) -> Result<()> {
-        let id = zettel.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
-        let title = zettel.meta.title.as_deref().unwrap_or("");
-        let date = zettel.meta.date.as_deref().unwrap_or("");
-        let ztype = zettel.meta.zettel_type.as_deref().unwrap_or("");
-        let now = chrono::Utc::now().to_rfc3339();
-        let tags_str = zettel.meta.tags.join(", ");
-
-        self.with_savepoint("index_zettel", || {
-            // Check if exists for FTS cleanup
-            let exists: bool = self.conn.query_row(
-                "SELECT COUNT(*) > 0 FROM zettels WHERE id = ?1",
-                params![id],
-                |row| row.get(0),
-            )?;
-
-            if exists {
-                // Delete old FTS entry
-                self.conn.execute(
-                    "DELETE FROM _zdb_fts WHERE rowid = (SELECT rowid FROM zettels WHERE id = ?1)",
-                    params![id],
-                )?;
-            }
-
-            // Upsert zettel
-            self.conn.execute(
-                "INSERT OR REPLACE INTO zettels (id, title, date, type, path, body, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![id, title, date, ztype, zettel.path, zettel.body, now],
-            )?;
-
-            // Delete and reinsert related data
-            self.conn.execute("DELETE FROM _zdb_tags WHERE zettel_id = ?1", params![id])?;
-            self.conn.execute("DELETE FROM _zdb_fields WHERE zettel_id = ?1", params![id])?;
-            self.conn.execute("DELETE FROM _zdb_links WHERE source_id = ?1", params![id])?;
-            self.conn.execute("DELETE FROM _zdb_aliases WHERE zettel_id = ?1", params![id])?;
-            self.conn.execute("DELETE FROM _zdb_checkboxes WHERE zettel_id = ?1", params![id])?;
-
-            for tag in &zettel.meta.tags {
-                self.conn.execute("INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'frontmatter')", params![id, tag])?;
-            }
-
-            for tag in &zettel.body_tags {
-                self.conn.execute("INSERT INTO _zdb_tags (zettel_id, tag, source) VALUES (?1, ?2, 'body')", params![id, tag])?;
-            }
-
-            for cb in &zettel.checkboxes {
-                let state = match cb.state {
-                    crate::types::CheckboxState::Open => "open",
-                    crate::types::CheckboxState::Done => "done",
-                    crate::types::CheckboxState::Info => "info",
-                };
-                self.conn.execute(
-                    "INSERT INTO _zdb_checkboxes (zettel_id, state, content, date, due_date, line_number, indent_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![id, state, cb.content, cb.date, cb.due_date, cb.line_number as i64, cb.indent_level as i64],
-                )?;
-            }
-
-            for field in &zettel.inline_fields {
-                let zone = format!("{:?}", field.zone);
-                self.conn.execute(
-                    "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
-                    params![id, field.key, field.value, zone],
-                )?;
-            }
-
-            // Insert frontmatter extras (scalar values only)
-            for (key, value) in &zettel.meta.extra {
-                let str_value = match value {
-                    crate::types::Value::String(s) => s.clone(),
-                    crate::types::Value::Number(n) => n.to_string(),
-                    crate::types::Value::Bool(b) => b.to_string(),
-                    crate::types::Value::List(_) | crate::types::Value::Map(_) => continue,
-                };
-                self.conn.execute(
-                    "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
-                    params![id, key, str_value, "Frontmatter"],
-                )?;
-            }
-
-            for link in &zettel.wikilinks {
-                let zone = format!("{:?}", link.zone);
-                self.conn.execute(
-                    "INSERT INTO _zdb_links (source_id, target_path, display, zone) VALUES (?1, ?2, ?3, ?4)",
-                    params![id, link.target, link.display, zone],
-                )?;
-            }
-
-            // Insert aliases
-            if let Some(crate::types::Value::List(aliases)) = zettel.meta.extra.get("aliases") {
-                for alias in aliases {
-                    if let crate::types::Value::String(a) = alias {
-                        self.conn.execute(
-                            "INSERT INTO _zdb_aliases (zettel_id, alias) VALUES (?1, ?2)",
-                            params![id, a],
-                        )?;
-                    }
-                }
-            }
-
-            // Insert attachments
-            self.conn.execute("DELETE FROM _zdb_attachments WHERE zettel_id = ?1", params![id])?;
-            if let Some(crate::types::Value::List(items)) = zettel.meta.extra.get("attachments") {
-                for item in items {
-                    if let crate::types::Value::Map(map) = item {
-                        let name = map.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let mime = map.get("mime").and_then(|v| v.as_str()).unwrap_or("");
-                        let size = map.get("size").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
-                        let path = format!("reference/{}/{}", id, name);
-                        self.conn.execute(
-                            "INSERT INTO _zdb_attachments (zettel_id, name, mime, size, path) VALUES (?1, ?2, ?3, ?4, ?5)",
-                            params![id, name, mime, size, path],
-                        )?;
-                    }
-                }
-            }
-
-            // Insert FTS entry
-            self.conn.execute(
-                "INSERT INTO _zdb_fts (rowid, title, body, tags) VALUES (
-                    (SELECT rowid FROM zettels WHERE id = ?1), ?2, ?3, ?4
-                )",
-                params![id, title, zettel.body, tags_str],
-            )?;
-
-            Ok(())
-        })
+        self.with_savepoint("index_zettel", || self.upsert_zettel(zettel))
     }
 
-    /// Index many zettels in a single transaction with prepared statement reuse.
+    /// Index many zettels in a single transaction.
     ///
     /// Per-zettel errors are logged and skipped — they don't abort the batch.
     /// Returns the number of successfully indexed zettels.
@@ -300,7 +175,7 @@ impl Index {
 
         let mut count = 0;
         for zettel in zettels {
-            if let Err(e) = self.batch_index_one(zettel) {
+            if let Err(e) = self.upsert_zettel(zettel) {
                 tracing::warn!(path = %zettel.path, error = %e, "batch_index: skipping zettel");
                 continue;
             }
@@ -311,8 +186,8 @@ impl Index {
         Ok(count)
     }
 
-    /// Index a single zettel within an already-open transaction.
-    fn batch_index_one(&self, zettel: &ParsedZettel) -> Result<()> {
+    /// Shared upsert logic used by both `index_zettel` (savepoint) and `batch_index` (transaction).
+    fn upsert_zettel(&self, zettel: &ParsedZettel) -> Result<()> {
         let id = zettel.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
         let title = zettel.meta.title.as_deref().unwrap_or("");
         let date = zettel.meta.date.as_deref().unwrap_or("");
@@ -320,7 +195,7 @@ impl Index {
         let now = chrono::Utc::now().to_rfc3339();
         let tags_str = zettel.meta.tags.join(", ");
 
-        // Delete old FTS entry if exists
+        // Delete old FTS entry (no-op if zettel doesn't exist yet)
         self.conn.execute(
             "DELETE FROM _zdb_fts WHERE rowid = (SELECT rowid FROM zettels WHERE id = ?1)",
             params![id],
@@ -675,10 +550,11 @@ impl Index {
 
         // Batch-index additions/modifications
         if to_index_paths.len() > 1 {
-            let mut parsed = Vec::with_capacity(to_index_paths.len());
-            for path in &to_index_paths {
-                let content = repo.read_file(path)?;
-                parsed.push(crate::parser::parse(&content, path)?);
+            let contents = repo.read_files_batch(&to_index_paths)?;
+            let mut parsed = Vec::with_capacity(contents.len());
+            for (path, content_result) in contents {
+                let content = content_result?;
+                parsed.push(crate::parser::parse(&content, &path)?);
             }
             report.indexed = self.batch_index(&parsed)?;
         } else if let Some(path) = to_index_paths.first() {
@@ -777,7 +653,7 @@ impl Index {
             .extend(self.collect_consistency_warnings(repo));
 
         // Phase 4: materialize typed tables from cached parse results
-        let mat_report = self.materialize_all_types_from(&parsed, repo)?;
+        let mat_report = self.materialize_all_types_from(&parsed)?;
         report.tables_materialized = mat_report.0;
         report.types_inferred = mat_report.1;
 
@@ -1030,17 +906,15 @@ impl Index {
         Ok(())
     }
 
-    /// Materialize all typed tables from pre-parsed zettels (no redundant git reads).
-    /// Still needs `repo` for loading _typedef content.
+    /// Materialize all typed tables from pre-parsed zettels (no git reads).
     pub fn materialize_all_types_from(
         &self,
         zettels: &[ParsedZettel],
-        repo: &impl ZettelSource,
     ) -> Result<(usize, Vec<String>)> {
         let mut tables_materialized = 0;
         let mut types_inferred = Vec::new();
 
-        let typedef_schemas = self.load_all_typedefs(repo);
+        let typedef_schemas = Self::load_all_typedefs_from(zettels);
 
         // Find distinct types from the pre-parsed data
         let type_names: Vec<String> = zettels
@@ -1311,6 +1185,24 @@ impl Index {
             }
         }
 
+        schemas
+    }
+
+    /// Load typedef schemas from pre-parsed zettels (no git reads).
+    fn load_all_typedefs_from(
+        zettels: &[ParsedZettel],
+    ) -> std::collections::HashMap<String, crate::types::TableSchema> {
+        use crate::sql_engine::schema_from_parsed;
+
+        let mut schemas = std::collections::HashMap::new();
+        for z in zettels
+            .iter()
+            .filter(|z| z.meta.zettel_type.as_deref() == Some("_typedef"))
+        {
+            if let Ok(schema) = schema_from_parsed(z) {
+                schemas.insert(schema.table_name.clone(), schema);
+            }
+        }
         schemas
     }
 
@@ -2387,9 +2279,7 @@ Widget
         // Path B: cached materialization
         let idx_cached = in_memory_index();
         idx_cached.batch_index(&parsed).unwrap();
-        let (mat_b, inf_b) = idx_cached
-            .materialize_all_types_from(&parsed, &source)
-            .unwrap();
+        let (mat_b, inf_b) = idx_cached.materialize_all_types_from(&parsed).unwrap();
 
         assert_eq!(mat_a, mat_b);
         assert_eq!(inf_a, inf_b);
