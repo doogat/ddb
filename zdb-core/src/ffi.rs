@@ -263,6 +263,8 @@ impl ZettelDriver {
 
         repo.commit_file(&rel_path, &content, &message)
             .map_err(ZdbError::from)?;
+        // Re-parse with correct path so index stores the right path
+        let parsed = parser::parse(&content, &rel_path).map_err(ZdbError::from)?;
         index.index_zettel(&parsed).map_err(ZdbError::from)?;
 
         Ok(id)

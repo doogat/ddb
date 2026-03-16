@@ -138,8 +138,10 @@ if ($output -notmatch "open task") { throw "checkbox not indexed" }
 pass "checkbox parsing and indexing"
 
 # 7d. folder namespace
-$typedefBody = "---`ntitle: widget`ntype: _typedef`nfolder: true`ncolumns:`n  - name: color`n    data_type: TEXT`n    zone: frontmatter`n---"
-& $ZDB create --title widget --type _typedef "--body=$typedefBody" | Out-Null
+& $ZDB query "CREATE TABLE widget (color TEXT)" | Out-Null
+$widgetTypedef = Get-ChildItem "$REPO/zettelkasten/_typedef/*.md" | Where-Object { (Get-Content $_) -match "title: widget" } | Select-Object -First 1
+(Get-Content $widgetTypedef.FullName -Raw) -replace "type: _typedef", "type: _typedef`nfolder: true" | Set-Content $widgetTypedef.FullName
+git -C $REPO add -A 2>$null; git -C $REPO commit -m "add folder to widget" 2>$null | Out-Null
 & $ZDB reindex | Out-Null
 $widgetId = (& $ZDB query "INSERT INTO widget (color) VALUES ('red')").Trim()
 if (-not (Test-Path "$REPO/zettelkasten/widget/$widgetId.md")) { throw "folder namespace: file not in subdirectory" }

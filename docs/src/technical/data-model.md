@@ -247,6 +247,7 @@ pub struct TableSchema {
     pub columns: Vec<ColumnDef>,
     pub crdt_strategy: Option<String>,   // e.g. "preset:append-log"
     pub template_sections: Vec<String>,  // expected body section headings
+    pub folder: bool,                    // store instances in zettelkasten/{type}/ subdirectory
 }
 ```
 

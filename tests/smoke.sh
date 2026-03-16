@@ -98,8 +98,11 @@ $ZDB query "SELECT state, content FROM _zdb_checkboxes WHERE state = 'open'" | g
 pass "checkbox parsing and indexing"
 
 # 7d. folder namespace
-TYPEDEF_BODY="---\ntitle: widget\ntype: _typedef\nfolder: true\ncolumns:\n  - name: color\n    data_type: TEXT\n    zone: frontmatter\n---"
-$ZDB create --title widget --type _typedef --body="$TYPEDEF_BODY" >/dev/null
+$ZDB query "CREATE TABLE widget (color TEXT)" >/dev/null
+# Add folder: true to the widget typedef
+WIDGET_TYPEDEF=$(find "$REPO/zettelkasten/_typedef" -name "*.md" -exec grep -l "title: widget" {} \;)
+sed -i.bak 's/type: _typedef/type: _typedef\nfolder: true/' "$WIDGET_TYPEDEF" && rm -f "${WIDGET_TYPEDEF}.bak"
+git -C "$REPO" add -A && git -C "$REPO" commit -m "add folder to widget" >/dev/null
 $ZDB reindex >/dev/null
 WIDGET_ID=$($ZDB query "INSERT INTO widget (color) VALUES ('red')")
 test -f "$REPO/zettelkasten/widget/${WIDGET_ID}.md"
