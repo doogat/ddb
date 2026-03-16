@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use rayon::prelude::*;
 use rusqlite::{params, Connection};
 
 use crate::error::{Result, ZettelError};
@@ -689,6 +690,46 @@ impl Index {
             "incremental_reindex_complete"
         );
         Ok(report)
+    }
+
+    /// Read files sequentially from git, then parse in parallel with rayon.
+    ///
+    /// Returns successfully parsed zettels and warnings for failures.
+    /// Parse errors are collected, not propagated — one bad zettel doesn't block the rest.
+    pub fn parallel_parse(
+        repo: &impl ZettelSource,
+        paths: &[String],
+    ) -> Result<(Vec<ParsedZettel>, Vec<crate::types::ConsistencyWarning>)> {
+        // Step 1: sequential git reads (optimal for pack I/O)
+        let contents = repo.read_files_batch(paths)?;
+
+        // Step 2: parallel parse (CPU-bound, benefits from rayon)
+        let results: Vec<(String, std::result::Result<ParsedZettel, String>)> = contents
+            .into_par_iter()
+            .map(|(path, content_result)| match content_result {
+                Ok(content) => match crate::parser::parse(&content, &path) {
+                    Ok(parsed) => (path, Ok(parsed)),
+                    Err(e) => (path, Err(e.to_string())),
+                },
+                Err(e) => (path, Err(e.to_string())),
+            })
+            .collect();
+
+        // Step 3: partition into successes and warnings
+        let mut parsed = Vec::with_capacity(results.len());
+        let mut warnings = Vec::new();
+        for (path, result) in results {
+            match result {
+                Ok(z) => parsed.push(z),
+                Err(e) => {
+                    tracing::warn!(path = %path, error = %e, "parallel_parse: skipping zettel");
+                    warnings
+                        .push(crate::types::ConsistencyWarning::MalformedYaml { path, error: e });
+                }
+            }
+        }
+
+        Ok((parsed, warnings))
     }
 
     /// Rebuild entire index from all zettels in Git repo.
@@ -1891,6 +1932,38 @@ mod tests {
         let seq_fts = idx_seq.search("Body").unwrap();
         let batch_fts = idx_batch.search("Body").unwrap();
         assert_eq!(seq_fts.len(), batch_fts.len());
+    }
+
+    #[test]
+    fn parallel_parse_error_resilience() {
+        use crate::traits::mock::MockSource;
+
+        let mut source = MockSource::new();
+        // 9 valid zettels
+        for i in 0..9 {
+            let id = format!("{:014}", 20260226120000u64 + i);
+            let content =
+                format!("---\nid: {id}\ntitle: Note {i}\ndate: 2026-02-26\n---\nBody {i}");
+            source
+                .files
+                .insert(format!("zettelkasten/{id}.md"), content);
+        }
+        // 1 malformed zettel (invalid YAML frontmatter)
+        source.files.insert(
+            "zettelkasten/20260226129999.md".into(),
+            "---\n: invalid yaml [\n---\nbody".into(),
+        );
+
+        let paths = source.list_zettels().unwrap();
+        let (parsed, warnings) = Index::parallel_parse(&source, &paths).unwrap();
+
+        assert_eq!(parsed.len(), 9);
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            &warnings[0],
+            crate::types::ConsistencyWarning::MalformedYaml { path, .. }
+            if path == "zettelkasten/20260226129999.md"
+        ));
     }
 
     #[test]
