@@ -2408,6 +2408,66 @@ Widget
     }
 
     #[test]
+    fn rebuild_deterministic_across_runs() {
+        use crate::traits::mock::MockSource;
+
+        let mut source = MockSource::new();
+        // 20 zettels of mixed types
+        for i in 0..15 {
+            let id = format!("{:014}", 20260226120000u64 + i);
+            let content = format!(
+                "---\nid: {id}\ntitle: Note {i}\ndate: 2026-02-26\ntype: permanent\ntags:\n  - test\n---\nBody of {i}.\n---\n- source:: ref-{i}"
+            );
+            source
+                .files
+                .insert(format!("zettelkasten/{id}.md"), content);
+        }
+        for i in 0..5 {
+            let id = format!("{:014}", 20260226130000u64 + i);
+            let content = format!(
+                "---\nid: {id}\ntitle: Task {i}\ndate: 2026-02-26\ntype: task\npriority: {i}\n---\nTask body {i}."
+            );
+            source
+                .files
+                .insert(format!("zettelkasten/{id}.md"), content);
+        }
+
+        // Rebuild twice into separate indexes
+        let idx_a = in_memory_index();
+        let report_a = idx_a.rebuild(&source).unwrap();
+
+        let idx_b = in_memory_index();
+        let report_b = idx_b.rebuild(&source).unwrap();
+
+        assert_eq!(report_a.indexed, report_b.indexed);
+
+        // Compare all core tables
+        for table in &[
+            "zettels",
+            "_zdb_tags",
+            "_zdb_fields",
+            "_zdb_links",
+            "_zdb_checkboxes",
+        ] {
+            let rows_a = dump_table(&idx_a, table);
+            let rows_b = dump_table(&idx_b, table);
+            if *table == "zettels" {
+                // Skip updated_at column
+                for (a, b) in rows_a.iter().zip(rows_b.iter()) {
+                    assert_eq!(&a[..6], &b[..6], "zettels row mismatch");
+                }
+            } else {
+                assert_eq!(rows_a, rows_b, "mismatch in {table}");
+            }
+        }
+
+        // Verify FTS produces same results
+        let fts_a = idx_a.search("Body").unwrap();
+        let fts_b = idx_b.search("Body").unwrap();
+        assert_eq!(fts_a.len(), fts_b.len());
+    }
+
+    #[test]
     fn infer_schema_frontmatter_types() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo = GitRepo::init(dir.path()).unwrap();
