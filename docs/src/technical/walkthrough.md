@@ -243,6 +243,7 @@ pub struct Link {
 pub struct ParsedZettel {
     pub meta: ZettelMeta,
     pub body: String,
+    pub sections: Vec<Section>,       // parsed body sections (heading + content)
     pub reference_section: String,
     pub inline_fields: Vec<InlineField>,
     pub links: Vec<Link>,
@@ -258,7 +259,9 @@ pub struct ParsedZettel {
 
 **ZettelMeta** holds the structured frontmatter. Known fields (`id`, `title`, `date`, `type`, `tags`) are first-class; everything else lands in `extra` as a generic `Value` enum. This keeps the system extensible — users can add arbitrary YAML fields.
 
-**ParsedZettel** is the fully-parsed representation of a zettel file. It carries metadata, body text, reference section, extracted inline fields (Dataview-style `key:: value`), links of all kinds (wikilinks, embeds, markdown links, bare URLs), body hashtags, and checkboxes. This struct flows through the entire system — created by the parser, persisted via git, indexed in SQLite, served over GraphQL.
+**Section** represents a body section: `heading` (empty for pre-heading content), `level` (0 for pre-heading, 1-6 for ATX headings), and `content` (text until next heading). Extracted by `extract_sections()` which respects fenced code blocks.
+
+**ParsedZettel** is the fully-parsed representation of a zettel file. It carries metadata, body text, parsed sections (from `extract_sections`), reference section, extracted inline fields (Dataview-style `key:: value`), links of all kinds (wikilinks, embeds, markdown links, bare URLs), body hashtags, and checkboxes. This struct flows through the entire system — created by the parser, persisted via git, indexed in SQLite, served over GraphQL.
 
 The file also defines types for the sync and merge subsystems:
 
@@ -487,7 +490,9 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
 }
 ```
 
-Six steps: `split_zones` → `parse_frontmatter` → `extract_inline_fields` → `extract_links` → `extract_hashtags` → `extract_checkboxes`.
+Seven steps: `split_zones` → `parse_frontmatter` → `extract_inline_fields` → `extract_links` → `extract_sections` → `extract_hashtags` → `extract_checkboxes`.
+
+`extract_sections()` parses body text into `Vec<Section>` at ATX headings (`# ` through `###### `), respecting fenced code blocks. Pre-heading content becomes a level-0 section with an empty heading. Trailing `#` closers are stripped. The indexer's `infer_schema` uses these parsed sections instead of a raw regex over body text, making type inference code-block-safe.
 
 `extract_links()` is the unified link extraction pipeline. For each zone (frontmatter, body, reference), it runs four extractors in order: embeds → wikilinks → markdown links → bare URLs. Embeds are extracted first so the wikilink pass can filter out overlapping `[[...]]` matches. Markdown link targets are collected so the bare URL pass can skip URLs that already appear as markdown link targets. Each link carries a `LinkKind` discriminant (`WikiLink`, `Embed`, `MarkdownLink`, `BareUrl`).
 

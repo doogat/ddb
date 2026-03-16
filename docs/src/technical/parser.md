@@ -62,6 +62,22 @@ Extracts all link types from all three zones into a unified `Vec<Link>`. Each li
 
 In frontmatter, wikilinks appear inside quoted YAML values (e.g., `related: "[[20260226120000|My Note]]"`).
 
+## Section Parsing
+
+`extract_sections(body) -> Vec<Section>`
+
+Parses body text into sections at ATX headings. Each `Section` has:
+
+- **heading**: heading text without `#` prefix (empty for pre-heading content)
+- **level**: 0 for pre-heading content, 1-6 for ATX headings
+- **content**: text after the heading until the next heading or end of body
+
+ATX heading regex: `^(#{1,6})\s+(.+?)(?:\s+#+)?$` — supports optional trailing `#` closers.
+
+Headings inside fenced code blocks are ignored. Pre-heading content (text before the first heading) is stored as a level-0 section.
+
+The indexer's `infer_schema()` uses parsed sections for body-zone column inference, replacing the previous raw-body regex which was not code-block-safe.
+
 ## Hashtag Extraction
 
 `extract_hashtags(body) -> Vec<String>`
