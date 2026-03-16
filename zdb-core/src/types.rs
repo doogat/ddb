@@ -454,6 +454,103 @@ pub struct RebuildReport {
     pub warnings: Vec<ConsistencyWarning>,
 }
 
+// ── Consistency auto-fix types ──────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Severity {
+    Info,
+    Warning,
+    Error,
+}
+
+impl fmt::Display for Severity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Severity::Info => write!(f, "info"),
+            Severity::Warning => write!(f, "warning"),
+            Severity::Error => write!(f, "error"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum TitleSource {
+    FirstH1(String),
+    Filename(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum Fix {
+    TagsDeduped { removed: Vec<String> },
+    TagsSorted,
+    TagsStrippedHash { tags: Vec<String> },
+    DefaultSet { field: String, value: String },
+    TitleDerived { source: TitleSource },
+    KeyNormalized { old: String, new: String },
+    TitleTrimmed,
+    TitleCapitalized,
+    H1Aligned { old_h1: String, new_h1: String },
+    CrossZoneResolved { key: String, kept_zone: Zone },
+}
+
+impl Fix {
+    pub fn severity(&self) -> Severity {
+        match self {
+            Fix::CrossZoneResolved { .. } => Severity::Error,
+            Fix::DefaultSet { .. } | Fix::TitleDerived { .. } => Severity::Warning,
+            Fix::TagsDeduped { .. }
+            | Fix::TagsSorted
+            | Fix::TagsStrippedHash { .. }
+            | Fix::KeyNormalized { .. }
+            | Fix::TitleTrimmed
+            | Fix::TitleCapitalized
+            | Fix::H1Aligned { .. } => Severity::Info,
+        }
+    }
+}
+
+impl fmt::Display for Fix {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Fix::TagsDeduped { removed } => write!(f, "deduplicated tags: {}", removed.join(", ")),
+            Fix::TagsSorted => write!(f, "sorted tags"),
+            Fix::TagsStrippedHash { tags } => {
+                write!(f, "stripped # from tags: {}", tags.join(", "))
+            }
+            Fix::DefaultSet { field, value } => write!(f, "set default {field}: {value}"),
+            Fix::TitleDerived { source } => match source {
+                TitleSource::FirstH1(h) => write!(f, "derived title from H1: {h}"),
+                TitleSource::Filename(n) => write!(f, "derived title from filename: {n}"),
+            },
+            Fix::KeyNormalized { old, new } => write!(f, "normalized key {old} -> {new}"),
+            Fix::TitleTrimmed => write!(f, "trimmed title"),
+            Fix::TitleCapitalized => write!(f, "capitalized title"),
+            Fix::H1Aligned { old_h1, new_h1 } => {
+                write!(f, "aligned H1: {old_h1} -> {new_h1}")
+            }
+            Fix::CrossZoneResolved { key, kept_zone } => {
+                write!(
+                    f,
+                    "resolved cross-zone duplicate: {key} (kept {kept_zone:?})"
+                )
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ZettelFix {
+    pub path: String,
+    pub applied: Vec<Fix>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FixReport {
+    pub files_scanned: usize,
+    pub files_fixed: usize,
+    pub fixes: Vec<ZettelFix>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub id: String,
