@@ -295,6 +295,46 @@ pub fn extract_inline_fields(
     Ok(fields)
 }
 
+/// Extract `![[target#section|display]]` embed links from text, skipping code blocks.
+pub fn extract_embeds(text: &str, zone: Zone) -> Vec<Link> {
+    use std::sync::OnceLock;
+    static EMBED_RE: OnceLock<Regex> = OnceLock::new();
+    static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = EMBED_RE.get_or_init(|| {
+        Regex::new(r"!\[\[([^\]#|]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]")
+            .expect("valid regex: embed")
+    });
+    let fence_re = fence_regex();
+    let inline_code_re =
+        INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+
+    let mut links = Vec::new();
+    let mut in_fence = false;
+
+    for line in text.lines() {
+        if fence_re.is_match(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let stripped = inline_code_re.replace_all(line, "");
+        for caps in re.captures_iter(&stripped) {
+            links.push(Link {
+                target: caps[1].to_string(),
+                section: caps.get(2).map(|m| m.as_str().to_string()),
+                display: caps.get(3).map(|m| m.as_str().to_string()),
+                kind: crate::types::LinkKind::Embed,
+                zone: zone.clone(),
+            });
+        }
+    }
+
+    links
+}
+
 /// Extract `[[target|display]]` wikilinks from all three zones.
 pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<Link> {
     use std::sync::OnceLock;
@@ -870,6 +910,50 @@ Body here.
     }
 
     // -- wikilink extraction tests --
+
+    #[test]
+    fn extract_embed_basic() {
+        let links = extract_embeds("![[myfile]]", Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "myfile");
+        assert!(links[0].section.is_none());
+        assert!(links[0].display.is_none());
+        assert_eq!(links[0].kind, crate::types::LinkKind::Embed);
+    }
+
+    #[test]
+    fn extract_embed_with_section() {
+        let links = extract_embeds("![[file#heading]]", Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "file");
+        assert_eq!(links[0].section.as_deref(), Some("heading"));
+        assert!(links[0].display.is_none());
+    }
+
+    #[test]
+    fn extract_embed_with_display() {
+        let links = extract_embeds("![[file|alt text]]", Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "file");
+        assert_eq!(links[0].display.as_deref(), Some("alt text"));
+    }
+
+    #[test]
+    fn extract_embed_full() {
+        let links = extract_embeds("![[file#section|display]]", Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "file");
+        assert_eq!(links[0].section.as_deref(), Some("section"));
+        assert_eq!(links[0].display.as_deref(), Some("display"));
+    }
+
+    #[test]
+    fn embed_in_code_block_skipped() {
+        let text = "before\n```\n![[inside]]\n```\n![[outside]]";
+        let links = extract_embeds(text, Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "outside");
+    }
 
     #[test]
     fn wikilinks_body() {
