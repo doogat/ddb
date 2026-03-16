@@ -173,6 +173,16 @@ fn detect_title_issues(parsed: &ParsedZettel, fixes: &mut Vec<Fix>) {
             fixes.push(Fix::TitleCapitalized);
         }
     }
+
+    // H1 alignment: if title exists and first H1 heading differs
+    if let Some(section) = parsed.sections.iter().find(|s| s.level == 1) {
+        if section.heading != check_title {
+            fixes.push(Fix::H1Aligned {
+                old_h1: section.heading.clone(),
+                new_h1: check_title.to_string(),
+            });
+        }
+    }
 }
 
 /// Derive a title from a zettel file path.
@@ -646,6 +656,77 @@ mod tests {
             fixes.iter().any(|f| matches!(f, Fix::TitleCapitalized)),
             "should detect uncapitalized title: {fixes:?}"
         );
+    }
+
+    // ── H1 alignment tests ──────────────────────────────────────────
+
+    #[test]
+    fn detect_h1_mismatch() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("My Note".to_string());
+        parsed.sections = vec![Section {
+            heading: "Old Title".to_string(),
+            level: 1,
+            content: String::new(),
+        }];
+        let fixes = detect_fixes(&parsed, None);
+        assert!(
+            fixes.iter().any(
+                |f| matches!(f, Fix::H1Aligned { old_h1, new_h1 } if old_h1 == "Old Title" && new_h1 == "My Note")
+            ),
+            "should detect H1 mismatch: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn detect_h1_match_no_fix() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("Same Title".to_string());
+        parsed.sections = vec![Section {
+            heading: "Same Title".to_string(),
+            level: 1,
+            content: String::new(),
+        }];
+        let fixes = detect_fixes(&parsed, None);
+        assert!(
+            !fixes.iter().any(|f| matches!(f, Fix::H1Aligned { .. })),
+            "matching H1 should not produce fix: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn detect_no_h1_no_fix() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("My Note".to_string());
+        parsed.sections = vec![Section {
+            heading: "Sub heading".to_string(),
+            level: 2,
+            content: String::new(),
+        }];
+        let fixes = detect_fixes(&parsed, None);
+        assert!(
+            !fixes.iter().any(|f| matches!(f, Fix::H1Aligned { .. })),
+            "no H1 should not produce alignment fix: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn apply_h1_alignment() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("My Note".to_string());
+        parsed.body = "# Old Title\n\nSome content.\n".to_string();
+        parsed.sections = vec![Section {
+            heading: "Old Title".to_string(),
+            level: 1,
+            content: "\nSome content.\n".to_string(),
+        }];
+        let fixes = vec![Fix::H1Aligned {
+            old_h1: "Old Title".into(),
+            new_h1: "My Note".into(),
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert!(result.contains("# My Note\n"));
+        assert!(!result.contains("# Old Title"));
     }
 
     // ── apply_fixes tests ──────────────────────────────────────────
