@@ -1291,6 +1291,10 @@ pub fn build_typedef_zettel(id: &ZettelId, schema: &TableSchema) -> ParsedZettel
         );
     }
 
+    if schema.folder {
+        extra.insert("folder".to_string(), Value::Bool(true));
+    }
+
     ParsedZettel {
         meta: ZettelMeta {
             id: Some(id.clone()),
