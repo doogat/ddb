@@ -1319,12 +1319,32 @@ Path-qualified links take precedence over ID-only links per the specification. A
 
 `rebuild()` drops all tables (internal and materialized), recreates the schema from `SCHEMA_DDL`, then re-indexes every zettel from git. No migration framework — the index is a disposable cache, so schema changes are handled by rebuilding from scratch.
 
-Rebuild phases:
+Rebuild uses a three-phase pipeline that separates I/O from CPU from SQL:
 
-1. **Drop & recreate** — drop every table (FK checks disabled for drop order), recreate internal schema from `SCHEMA_DDL`
-2. **Index all zettels** — parse each .md file and upsert into all six tables
-3. **Consistency warnings** — detect malformed YAML, cross-zone duplicates, missing required fields
-4. **Materialize typed tables** — create a SQLite table for each zettel type (e.g. `project`, `contact`) with columns derived from _typedef zettels or inferred from existing data. Column names are normalized to lowercase during inference since SQLite column names are case-insensitive; this prevents duplicate column errors from case-variant frontmatter keys (e.g. `xP` and `xp`)
+```text
+rebuild()
+  ├── list_zettels() → paths
+  ├── parallel_parse(repo, paths)
+  │     ├── read_files_batch(paths)          [sequential git I/O — optimal for pack files]
+  │     └── contents.par_iter().map(parse)   [parallel CPU via rayon]
+  │     → (Vec<ParsedZettel>, warnings)
+  ├── batch_index(&parsed)                   [sequential SQL, single transaction]
+  │     ├── BEGIN IMMEDIATE
+  │     ├── for zettel in parsed: execute prepared stmts
+  │     └── COMMIT
+  ├── collect_consistency_warnings()
+  └── materialize_all_types_from(&parsed)    [sequential SQL, no git reads]
+        ├── infer_schema_from(type, &filtered)
+        └── populate_from(schema, &filtered)
+```
+
+Key design decisions:
+
+- **Sequential git reads**: `read_files_batch()` resolves HEAD tree once, iterates paths against the same tree. Git pack files benefit from sequential access patterns — parallelizing reads would thrash the pack.
+- **Parallel parsing**: `par_iter()` (rayon) distributes CPU-bound `parser::parse()` across cores. `parser::parse` is thread-safe (uses `OnceLock` for compiled regexes).
+- **Single transaction**: `batch_index()` wraps all SQL writes in one `BEGIN IMMEDIATE`/`COMMIT` instead of per-zettel savepoints, eliminating per-zettel fsync. WAL mode allows concurrent readers during the write.
+- **Cached materialization**: `materialize_all_types_from()` reuses the `Vec<ParsedZettel>` from the parse phase. The old `materialize_all_types()` re-read every data zettel from git twice (once for schema inference, once for population). The `_from` variants filter the pre-parsed vector by type instead.
+- **Error resilience**: Parse errors produce `ConsistencyWarning::MalformedYaml` warnings instead of aborting. One malformed zettel doesn't block the rest.
 
 Full rebuild is only triggered by explicit `zdb reindex`, index corruption, or unreachable HEAD OID (e.g. after `git gc`). Normal operations use incremental reindex instead (see below).
 
@@ -1337,6 +1357,8 @@ When the stored HEAD exists and is reachable, `rebuild_if_stale()` uses `increme
 - **Added/Modified**: read, parse, and upsert into SQLite
 - **Deleted**: remove from the index
 - **`_typedef` change**: triggers full `materialize_all_types` (schema changes affect table structure)
+
+When multiple files are changed (2+), `incremental_reindex` uses `batch_index()` (single transaction) instead of per-zettel `index_zettel()`. Single-change diffs still use the per-zettel path to avoid transaction overhead.
 
 If the diff fails (e.g. old HEAD was garbage-collected), it falls back to a full rebuild. At 1K zettels with 1 change, incremental reindex takes ~1ms vs ~200ms for a full rebuild.
 

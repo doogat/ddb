@@ -55,17 +55,18 @@ Uses a named `SAVEPOINT`/`RELEASE` pair (via `with_savepoint`) for atomic writes
 
 ### rebuild
 
-`rebuild(repo: &GitRepo) -> Result<RebuildReport>`
+`rebuild(repo: &impl ZettelSource) -> Result<RebuildReport>`
 
-Full index rebuild. Drops all tables (internal and materialized) and recreates the schema from scratch before re-indexing. This ensures schema changes take effect without migrations — the index is a disposable cache.
+Full index rebuild using a parallel pipeline. Drops all tables (internal and materialized) and recreates the schema from scratch. The index is a disposable cache — no migration framework needed.
 
 Phases:
 
-1. **Drop & recreate** — drop every table, recreate internal schema from `SCHEMA_DDL`
-2. **Index** — walk all `zettelkasten/*.md` paths in Git HEAD, parse and index each zettel
-3. **Warn** — collect consistency warnings (malformed YAML, missing required fields, cross-zone duplicates)
-4. **Materialize** — for each distinct type, merge typedef + inferred schema and create SQLite tables with data
-5. Store current HEAD OID in `_zdb_meta` table
+1. **Drop & recreate** — drop every table (FK checks disabled for drop order), recreate internal schema from `SCHEMA_DDL`
+2. **Parallel parse** — `parallel_parse()` reads all files from git sequentially via `read_files_batch()` (optimal for pack I/O), then parses in parallel using rayon `par_iter()`. Parse errors become warnings, not failures.
+3. **Batch index** — `batch_index()` writes all parsed zettels to SQLite in a single `BEGIN IMMEDIATE`/`COMMIT` transaction. Per-zettel errors are logged and skipped.
+4. **Consistency warnings** — detect malformed YAML, cross-zone duplicates, missing required fields
+5. **Cached materialization** — `materialize_all_types_from()` creates typed SQLite tables using the already-parsed data (no redundant git reads). Schema inference and row population both filter the in-memory `Vec<ParsedZettel>` by type.
+6. Store current HEAD OID in `_zdb_meta` table
 
 Full rebuild is only triggered by:
 - Explicit `zdb reindex`
@@ -87,9 +88,11 @@ pub struct RebuildReport {
 
 ### incremental_reindex
 
-`incremental_reindex(repo: &GitRepo, old_head: &str) -> Result<RebuildReport>`
+`incremental_reindex(repo: &impl ZettelSource, old_head: &str) -> Result<RebuildReport>`
 
 Diffs `old_head` against the current HEAD and processes only changed files. Added or modified zettels are re-indexed; deleted zettels are removed. Falls back to full `rebuild` if the diff fails (e.g. old HEAD unreachable after gc).
+
+When multiple files are changed (2+), uses `batch_index()` (single transaction) instead of per-zettel `index_zettel()` for better throughput.
 
 This is the common path for keeping the index current after `git pull` or direct file edits — fast and non-destructive (no table drops).
 
