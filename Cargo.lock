@@ -4733,6 +4733,7 @@ dependencies = [
  "criterion",
  "git2",
  "proptest",
+ "rayon",
  "redb",
  "regex",
  "rusqlite",

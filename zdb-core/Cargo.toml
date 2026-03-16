@@ -11,6 +11,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 automerge = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 git2 = "0.19"
+rayon = "1"
 tracing = "0.1"
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
