@@ -299,8 +299,6 @@ impl Index {
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
 
         let mut count = 0;
-        // Prepare each statement once, reuse across iterations.
-        // Using prepare_cached is fine here — rusqlite caches by SQL string.
         for zettel in zettels {
             if let Err(e) = self.batch_index_one(zettel) {
                 tracing::warn!(path = %zettel.path, error = %e, "batch_index: skipping zettel");
@@ -1053,7 +1051,6 @@ impl Index {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
-        type_names.sort();
 
         for type_name in &type_names {
             let typedef = typedef_schemas.get(type_name.as_str()).cloned();
