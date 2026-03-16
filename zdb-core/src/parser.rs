@@ -374,6 +374,62 @@ pub fn extract_markdown_links(text: &str, zone: Zone) -> Vec<Link> {
     links
 }
 
+/// Extract standalone `https://...` or `http://...` URLs from text, skipping code blocks.
+///
+/// `exclude_targets` contains URLs already captured as markdown link targets (avoid double-counting).
+pub fn extract_bare_urls(text: &str, zone: Zone, exclude_targets: &[&str]) -> Vec<Link> {
+    use std::sync::OnceLock;
+    static URL_RE: OnceLock<Regex> = OnceLock::new();
+    static INLINE_CODE_RE3: OnceLock<Regex> = OnceLock::new();
+
+    let re = URL_RE.get_or_init(|| {
+        Regex::new(r"(?:^|\s)(https?://[^\s<>\[\]()]+)").expect("valid regex: bare url")
+    });
+    let fence_re = fence_regex();
+    let inline_code_re =
+        INLINE_CODE_RE3.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+
+    let mut links = Vec::new();
+    let mut in_fence = false;
+
+    for line in text.lines() {
+        if fence_re.is_match(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let stripped = inline_code_re.replace_all(line, "");
+        for caps in re.captures_iter(&stripped) {
+            let mut url = caps[1].to_string();
+            // Trim trailing punctuation
+            while url.ends_with(['.', ',', ';', ':', '!', '?']) {
+                url.pop();
+            }
+            // Trim trailing ) if unbalanced
+            while url.matches(')').count() > url.matches('(').count() {
+                url.pop();
+            }
+            if url.is_empty() {
+                continue;
+            }
+            if exclude_targets.contains(&url.as_str()) {
+                continue;
+            }
+            links.push(Link {
+                target: url,
+                display: None,
+                section: None,
+                kind: crate::types::LinkKind::BareUrl,
+                zone: zone.clone(),
+            });
+        }
+    }
+
+    links
+}
+
 /// Extract `[[target|display]]` wikilinks from all three zones.
 pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<Link> {
     use std::sync::OnceLock;
@@ -949,6 +1005,42 @@ Body here.
     }
 
     // -- wikilink extraction tests --
+
+    #[test]
+    fn extract_bare_url_basic() {
+        let links = extract_bare_urls("Visit https://example.com for info", Zone::Body, &[]);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "https://example.com");
+        assert_eq!(links[0].kind, crate::types::LinkKind::BareUrl);
+        assert!(links[0].display.is_none());
+    }
+
+    #[test]
+    fn bare_url_trailing_punct_trimmed() {
+        let links = extract_bare_urls("See https://example.com.", Zone::Body, &[]);
+        assert_eq!(links[0].target, "https://example.com");
+
+        let links = extract_bare_urls("See https://example.com,", Zone::Body, &[]);
+        assert_eq!(links[0].target, "https://example.com");
+    }
+
+    #[test]
+    fn bare_url_not_double_counted() {
+        let links = extract_bare_urls(
+            "Check https://example.com for details",
+            Zone::Body,
+            &["https://example.com"],
+        );
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn bare_url_in_code_block_skipped() {
+        let text = "```\nhttps://hidden.com\n```\nhttps://visible.com";
+        let links = extract_bare_urls(text, Zone::Body, &[]);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "https://visible.com");
+    }
 
     #[test]
     fn extract_markdown_link_basic() {
