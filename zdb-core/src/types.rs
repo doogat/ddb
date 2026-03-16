@@ -427,6 +427,7 @@ pub struct TableSchema {
     pub crdt_strategy: Option<String>,
     pub template_sections: Vec<String>,
     pub folder: bool,
+    pub stale_after_days: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -577,6 +578,59 @@ pub struct PaginatedSearchResult {
 pub struct RenameReport {
     pub updated: Vec<String>,
     pub unresolvable: Vec<String>,
+}
+
+// ── Discovery types ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct UnlinkedMention {
+    pub source_id: String,
+    pub source_title: String,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Suggestion {
+    pub id: String,
+    pub title: String,
+    pub score: f64,
+    pub shared_tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DateSource {
+    GitRevision,
+    FrontmatterDate,
+    IndexerUpdatedAt,
+}
+
+impl fmt::Display for DateSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DateSource::GitRevision => write!(f, "git"),
+            DateSource::FrontmatterDate => write!(f, "frontmatter"),
+            DateSource::IndexerUpdatedAt => write!(f, "indexer"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StaleZettel {
+    pub id: String,
+    pub title: String,
+    pub zettel_type: String,
+    pub last_updated: String,
+    pub date_source: DateSource,
+    pub days_stale: u32,
+    pub threshold_days: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrphanZettel {
+    pub id: String,
+    pub title: String,
+    pub zettel_type: String,
+    pub outgoing_links: usize,
 }
 
 /// Metadata for a file attached to a zettel, stored in `reference/{zettel_id}/`.

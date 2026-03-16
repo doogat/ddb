@@ -905,6 +905,7 @@ impl Index {
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         }
     }
 
@@ -1059,6 +1060,7 @@ impl Index {
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         })
     }
 
@@ -2696,6 +2698,7 @@ Widget
             crdt_strategy: Some("preset:default".into()),
             template_sections: vec!["A".into()],
             folder: false,
+            stale_after_days: None,
         };
         let inferred = TableSchema {
             table_name: "foo".to_string(),
@@ -2703,6 +2706,7 @@ Widget
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -2729,6 +2733,7 @@ Widget
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
 
         let merged = Index::merge_schemas(None, inferred);
@@ -2755,6 +2760,7 @@ Widget
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
         let inferred = TableSchema {
             table_name: "baz".to_string(),
@@ -2783,6 +2789,7 @@ Widget
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -2812,6 +2819,7 @@ Widget
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
         let inferred = TableSchema {
             table_name: "qux".to_string(),
@@ -2840,6 +2848,7 @@ Widget
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);

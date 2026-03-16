@@ -366,6 +366,7 @@ impl<'a> SqlEngine<'a> {
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
 
         // Build and commit typedef zettel
@@ -1545,6 +1546,7 @@ pub fn schema_from_parsed(zettel: &ParsedZettel) -> Result<TableSchema> {
         crdt_strategy,
         template_sections,
         folder,
+        stale_after_days: None,
     })
 }
 

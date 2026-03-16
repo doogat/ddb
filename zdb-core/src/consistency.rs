@@ -1019,6 +1019,7 @@ mod tests {
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
         let fixes = detect_fixes(&parsed, Some(&schema));
         assert!(
@@ -1051,6 +1052,7 @@ mod tests {
             crdt_strategy: None,
             template_sections: vec![],
             folder: false,
+            stale_after_days: None,
         };
         let fixes = detect_fixes(&parsed, Some(&schema));
         assert!(
