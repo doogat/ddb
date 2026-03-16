@@ -1043,7 +1043,7 @@ impl Index {
         let typedef_schemas = self.load_all_typedefs(repo);
 
         // Find distinct types from the pre-parsed data
-        let mut type_names: Vec<String> = zettels
+        let type_names: Vec<String> = zettels
             .iter()
             .filter_map(|z| z.meta.zettel_type.as_deref())
             .filter(|t| !t.is_empty() && *t != "_typedef")
