@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use crate::error::Result;
-use crate::types::{Fix, ParsedZettel, TableSchema, TitleSource, Zone};
+use crate::indexer::Index;
+use crate::traits::ZettelStore;
+use crate::types::{Fix, FixReport, ParsedZettel, TableSchema, TitleSource, ZettelFix, Zone};
 
 /// Convert a string to kebab-case.
 ///
@@ -345,6 +347,73 @@ pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
     }
 
     Ok(crate::parser::serialize(parsed))
+}
+
+/// Scan all zettels, detect and apply fixes, commit atomically.
+///
+/// When `dry_run` is true, detects fixes and builds a report but does not modify files or commit.
+pub fn fix_all(repo: &impl ZettelStore, index: &Index, dry_run: bool) -> Result<FixReport> {
+    let paths = repo.list_zettels()?;
+    let typedef_schemas = index.load_all_typedefs(repo);
+
+    let mut report = FixReport {
+        files_scanned: 0,
+        files_fixed: 0,
+        fixes: Vec::new(),
+    };
+
+    let mut writes: Vec<(String, String)> = Vec::new();
+
+    for path in &paths {
+        let content = match repo.read_file(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let mut parsed = match crate::parser::parse(&content, path) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        report.files_scanned += 1;
+
+        let schema = parsed
+            .meta
+            .zettel_type
+            .as_ref()
+            .and_then(|t| typedef_schemas.get(t));
+
+        let fixes = detect_fixes(&parsed, schema);
+        if fixes.is_empty() {
+            continue;
+        }
+
+        if !dry_run {
+            let new_content = apply_fixes(&mut parsed, &fixes)?;
+            writes.push((path.clone(), new_content));
+        }
+
+        report.files_fixed += 1;
+        report.fixes.push(ZettelFix {
+            path: path.clone(),
+            applied: fixes,
+        });
+    }
+
+    if !dry_run && !writes.is_empty() {
+        let total_fixes: usize = report.fixes.iter().map(|f| f.applied.len()).sum();
+        let msg = format!(
+            "fix: auto-fix {} issues across {} zettels",
+            total_fixes, report.files_fixed
+        );
+        let write_refs: Vec<(&str, &str)> = writes
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        repo.commit_batch(&write_refs, &[], &msg)?;
+    }
+
+    Ok(report)
 }
 
 /// Remove lines matching `key:: ...` from body text.

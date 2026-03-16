@@ -1174,7 +1174,7 @@ impl Index {
     }
 
     /// Load all _typedef schemas from the index.
-    fn load_all_typedefs(
+    pub(crate) fn load_all_typedefs(
         &self,
         repo: &impl ZettelSource,
     ) -> std::collections::HashMap<String, crate::types::TableSchema> {
