@@ -335,6 +335,45 @@ pub fn extract_embeds(text: &str, zone: Zone) -> Vec<Link> {
     links
 }
 
+/// Extract `[display](target)` markdown links from text, skipping code blocks.
+pub fn extract_markdown_links(text: &str, zone: Zone) -> Vec<Link> {
+    use std::sync::OnceLock;
+    static MD_LINK_RE: OnceLock<Regex> = OnceLock::new();
+    static INLINE_CODE_RE2: OnceLock<Regex> = OnceLock::new();
+
+    let re = MD_LINK_RE.get_or_init(|| {
+        Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").expect("valid regex: markdown link")
+    });
+    let fence_re = fence_regex();
+    let inline_code_re =
+        INLINE_CODE_RE2.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+
+    let mut links = Vec::new();
+    let mut in_fence = false;
+
+    for line in text.lines() {
+        if fence_re.is_match(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let stripped = inline_code_re.replace_all(line, "");
+        for caps in re.captures_iter(&stripped) {
+            links.push(Link {
+                target: caps[2].to_string(),
+                display: Some(caps[1].to_string()),
+                section: None,
+                kind: crate::types::LinkKind::MarkdownLink,
+                zone: zone.clone(),
+            });
+        }
+    }
+
+    links
+}
+
 /// Extract `[[target|display]]` wikilinks from all three zones.
 pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<Link> {
     use std::sync::OnceLock;
@@ -910,6 +949,30 @@ Body here.
     }
 
     // -- wikilink extraction tests --
+
+    #[test]
+    fn extract_markdown_link_basic() {
+        let links = extract_markdown_links("[My Page](some/page.md)", Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "some/page.md");
+        assert_eq!(links[0].display.as_deref(), Some("My Page"));
+        assert_eq!(links[0].kind, crate::types::LinkKind::MarkdownLink);
+    }
+
+    #[test]
+    fn extract_markdown_link_external() {
+        let links = extract_markdown_links("[Google](https://google.com)", Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "https://google.com");
+    }
+
+    #[test]
+    fn markdown_link_in_code_block_skipped() {
+        let text = "```\n[hidden](path)\n```\n[visible](other)";
+        let links = extract_markdown_links(text, Zone::Body);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "other");
+    }
 
     #[test]
     fn extract_embed_basic() {
