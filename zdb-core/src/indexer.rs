@@ -52,7 +52,8 @@ impl Index {
             source_id TEXT NOT NULL REFERENCES zettels(id),
             target_path TEXT NOT NULL,
             display TEXT,
-            zone TEXT
+            zone TEXT,
+            kind TEXT NOT NULL DEFAULT 'wikilink'
         );
         CREATE INDEX IF NOT EXISTS idx_zdb_links_target ON _zdb_links(target_path);
 
@@ -272,9 +273,15 @@ impl Index {
 
         for link in &zettel.links {
             let zone = format!("{:?}", link.zone);
+            let kind = match link.kind {
+                crate::types::LinkKind::WikiLink => "wikilink",
+                crate::types::LinkKind::MarkdownLink => "markdown",
+                crate::types::LinkKind::Embed => "embed",
+                crate::types::LinkKind::BareUrl => "url",
+            };
             self.conn.execute(
-                "INSERT INTO _zdb_links (source_id, target_path, display, zone) VALUES (?1, ?2, ?3, ?4)",
-                params![id, link.target, link.display, zone],
+                "INSERT INTO _zdb_links (source_id, target_path, display, zone, kind) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, link.target, link.display, zone, kind],
             )?;
         }
 
@@ -2077,6 +2084,68 @@ mod tests {
 
         let ids = idx.by_tag("nonexistent").unwrap();
         assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn index_all_link_kinds() {
+        let idx = in_memory_index();
+        let z = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260226120000".into())),
+                title: Some("Mixed Links".into()),
+                date: None,
+                zettel_type: None,
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: String::new(),
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![
+                crate::types::Link {
+                    target: "wiki_target".into(),
+                    display: None,
+                    section: None,
+                    kind: crate::types::LinkKind::WikiLink,
+                    zone: Zone::Body,
+                },
+                crate::types::Link {
+                    target: "path.md".into(),
+                    display: Some("title".into()),
+                    section: None,
+                    kind: crate::types::LinkKind::MarkdownLink,
+                    zone: Zone::Body,
+                },
+                crate::types::Link {
+                    target: "embed_file".into(),
+                    display: None,
+                    section: Some("sec".into()),
+                    kind: crate::types::LinkKind::Embed,
+                    zone: Zone::Body,
+                },
+                crate::types::Link {
+                    target: "https://example.com".into(),
+                    display: None,
+                    section: None,
+                    kind: crate::types::LinkKind::BareUrl,
+                    zone: Zone::Body,
+                },
+            ],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260226120000.md".into(),
+        };
+        idx.index_zettel(&z).unwrap();
+
+        let rows = idx
+            .query_raw("SELECT target_path, kind FROM _zdb_links ORDER BY kind")
+            .unwrap();
+        assert_eq!(rows.len(), 4);
+        let kinds: Vec<&str> = rows.iter().map(|r| r[1].as_str()).collect();
+        assert!(kinds.contains(&"wikilink"));
+        assert!(kinds.contains(&"markdown"));
+        assert!(kinds.contains(&"embed"));
+        assert!(kinds.contains(&"url"));
     }
 
     #[test]
