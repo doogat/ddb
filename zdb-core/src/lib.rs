@@ -21,6 +21,7 @@ pub mod attachments;
 pub mod bundle;
 pub mod bundled_types;
 pub mod compaction;
+pub mod consistency;
 pub mod crdt_resolver;
 pub mod error;
 pub mod ffi;
