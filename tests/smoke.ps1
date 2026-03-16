@@ -139,21 +139,21 @@ pass "checkbox parsing and indexing"
 
 # 7d. folder namespace
 & $ZDB query "CREATE TABLE widget (color TEXT)" | Out-Null
-$widgetTypedef = Get-ChildItem "$REPO/zettelkasten/_typedef/*.md" | Where-Object { (Get-Content $_) -match "title: widget" } | Select-Object -First 1
+$widgetTypedef = Get-ChildItem "$TMPDIR/zettelkasten/_typedef/*.md" | Where-Object { (Get-Content $_) -match "title: widget" } | Select-Object -First 1
 (Get-Content $widgetTypedef.FullName -Raw) -replace "type: _typedef", "type: _typedef`nfolder: true" | Set-Content $widgetTypedef.FullName
-git -C $REPO add -A 2>$null; git -C $REPO commit -m "add folder to widget" 2>$null | Out-Null
+git -C $TMPDIR add -A 2>$null; git -C $TMPDIR commit -m "add folder to widget" 2>$null | Out-Null
 & $ZDB reindex | Out-Null
 $widgetId = (& $ZDB query "INSERT INTO widget (color) VALUES ('red')").Trim()
-if (-not (Test-Path "$REPO/zettelkasten/widget/$widgetId.md")) { throw "folder namespace: file not in subdirectory" }
+if (-not (Test-Path "$TMPDIR/zettelkasten/widget/$widgetId.md")) { throw "folder namespace: file not in subdirectory" }
 pass "folder namespace: typed zettel in subdirectory"
 
 # 8. full-text search
-$output = zdb search "Hello"
+$output = zdb search "First note"
 if ($output -notmatch $ID1) { throw "search failed" }
 pass "search"
 
 # 8b. paginated search
-$output = zdb search "Hello" --limit 1 --offset 0
+$output = zdb search "First note" --limit 1 --offset 0
 if ($output -notmatch "Showing 1-1 of") { throw "paginated search failed" }
 pass "paginated search"
 

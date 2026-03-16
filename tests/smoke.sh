@@ -100,20 +100,20 @@ pass "checkbox parsing and indexing"
 # 7d. folder namespace
 $ZDB query "CREATE TABLE widget (color TEXT)" >/dev/null
 # Add folder: true to the widget typedef
-WIDGET_TYPEDEF=$(find "$REPO/zettelkasten/_typedef" -name "*.md" -exec grep -l "title: widget" {} \;)
+WIDGET_TYPEDEF=$(find "$TMPDIR/zettelkasten/_typedef" -name "*.md" -exec grep -l "title: widget" {} \;)
 sed -i.bak 's/type: _typedef/type: _typedef\nfolder: true/' "$WIDGET_TYPEDEF" && rm -f "${WIDGET_TYPEDEF}.bak"
-git -C "$REPO" add -A && git -C "$REPO" commit -m "add folder to widget" >/dev/null
+git -C "$TMPDIR" add -A && git -C "$TMPDIR" commit -m "add folder to widget" >/dev/null
 $ZDB reindex >/dev/null
 WIDGET_ID=$($ZDB query "INSERT INTO widget (color) VALUES ('red')")
-test -f "$REPO/zettelkasten/widget/${WIDGET_ID}.md"
+test -f "$TMPDIR/zettelkasten/widget/${WIDGET_ID}.md"
 pass "folder namespace: typed zettel in subdirectory"
 
 # 8. full-text search
-$ZDB search "Hello" | grep -q "$ID1"
+$ZDB search "First note" | grep -q "$ID1"
 pass "search"
 
 # 8b. paginated search
-$ZDB search "Hello" --limit 1 --offset 0 | grep -q "Showing 1-1 of"
+$ZDB search "First note" --limit 1 --offset 0 | grep -q "Showing 1-1 of"
 pass "paginated search"
 
 # 9. SQL queries

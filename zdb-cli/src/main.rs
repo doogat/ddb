@@ -72,7 +72,7 @@ enum Command {
         tags: Option<String>,
         #[arg(long, rename_all = "kebab-case")]
         r#type: Option<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         body: Option<String>,
     },
     /// Read a zettel by ID
@@ -90,7 +90,7 @@ enum Command {
         tags: Option<String>,
         #[arg(long, rename_all = "kebab-case")]
         r#type: Option<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         body: Option<String>,
     },
     /// Delete a zettel by ID
