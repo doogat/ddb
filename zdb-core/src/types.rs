@@ -221,6 +221,17 @@ pub enum LinkKind {
     BareUrl,
 }
 
+impl LinkKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LinkKind::WikiLink => "wikilink",
+            LinkKind::MarkdownLink => "markdown",
+            LinkKind::Embed => "embed",
+            LinkKind::BareUrl => "url",
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Link {
     pub target: String,

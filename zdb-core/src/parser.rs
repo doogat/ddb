@@ -12,6 +12,12 @@ fn fence_regex() -> &'static Regex {
     FENCE_RE.get_or_init(|| Regex::new(r"^(?:`{3,}|~{3,})").expect("valid regex: fence marker"))
 }
 
+/// Shared regex for inline code spans (`...`).
+fn inline_code_regex() -> &'static Regex {
+    static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
+    INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"))
+}
+
 impl From<serde_yaml::Error> for ZettelError {
     fn from(e: serde_yaml::Error) -> Self {
         Self::Yaml(e.to_string())
@@ -225,15 +231,13 @@ pub fn extract_inline_fields(
     static BODY_RE: OnceLock<Regex> = OnceLock::new();
     static REF_RE: OnceLock<Regex> = OnceLock::new();
 
-    static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
     let body_re = BODY_RE.get_or_init(|| {
         Regex::new(r"^([\w][\w\s-]*):: (.+)$").expect("valid regex: body inline field")
     });
     let ref_re = REF_RE.get_or_init(|| {
         Regex::new(r"^- ([\w][\w\s-]*):: ?(.*)$").expect("valid regex: ref inline field")
     });
-    let inline_code_re =
-        INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+    let inline_code_re = inline_code_regex();
     let fence_re = fence_regex();
 
     let mut fields = Vec::new();
@@ -299,15 +303,13 @@ pub fn extract_inline_fields(
 pub fn extract_embeds(text: &str, zone: Zone) -> Vec<Link> {
     use std::sync::OnceLock;
     static EMBED_RE: OnceLock<Regex> = OnceLock::new();
-    static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
 
     let re = EMBED_RE.get_or_init(|| {
         Regex::new(r"!\[\[([^\]#|]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]")
             .expect("valid regex: embed")
     });
     let fence_re = fence_regex();
-    let inline_code_re =
-        INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+    let inline_code_re = inline_code_regex();
 
     let mut links = Vec::new();
     let mut in_fence = false;
@@ -339,14 +341,13 @@ pub fn extract_embeds(text: &str, zone: Zone) -> Vec<Link> {
 pub fn extract_markdown_links(text: &str, zone: Zone) -> Vec<Link> {
     use std::sync::OnceLock;
     static MD_LINK_RE: OnceLock<Regex> = OnceLock::new();
-    static INLINE_CODE_RE2: OnceLock<Regex> = OnceLock::new();
 
+    // Captures optional `!` prefix to distinguish images from links
     let re = MD_LINK_RE.get_or_init(|| {
-        Regex::new(r"\[([^\]]*)\]\(([^)]+)\)").expect("valid regex: markdown link")
+        Regex::new(r"(!?)\[([^\]]*)\]\(([^)]+)\)").expect("valid regex: markdown link")
     });
     let fence_re = fence_regex();
-    let inline_code_re =
-        INLINE_CODE_RE2.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+    let inline_code_re = inline_code_regex();
 
     let mut links = Vec::new();
     let mut in_fence = false;
@@ -361,9 +362,13 @@ pub fn extract_markdown_links(text: &str, zone: Zone) -> Vec<Link> {
         }
         let stripped = inline_code_re.replace_all(line, "");
         for caps in re.captures_iter(&stripped) {
+            // Skip markdown images (![alt](url))
+            if &caps[1] == "!" {
+                continue;
+            }
             links.push(Link {
-                target: caps[2].to_string(),
-                display: Some(caps[1].to_string()),
+                target: caps[3].to_string(),
+                display: Some(caps[2].to_string()),
                 section: None,
                 kind: crate::types::LinkKind::MarkdownLink,
                 zone: zone.clone(),
@@ -380,14 +385,12 @@ pub fn extract_markdown_links(text: &str, zone: Zone) -> Vec<Link> {
 pub fn extract_bare_urls(text: &str, zone: Zone, exclude_targets: &[&str]) -> Vec<Link> {
     use std::sync::OnceLock;
     static URL_RE: OnceLock<Regex> = OnceLock::new();
-    static INLINE_CODE_RE3: OnceLock<Regex> = OnceLock::new();
 
     let re = URL_RE.get_or_init(|| {
         Regex::new(r"(?:^|\s)(https?://[^\s<>\[\]()]+)").expect("valid regex: bare url")
     });
     let fence_re = fence_regex();
-    let inline_code_re =
-        INLINE_CODE_RE3.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+    let inline_code_re = inline_code_regex();
 
     let mut links = Vec::new();
     let mut in_fence = false;
@@ -471,23 +474,40 @@ pub fn extract_links(frontmatter: &str, body: &str, reference: &str) -> Vec<Link
     links
 }
 
-/// Extract `[[target|display]]` wikilinks from a single text zone.
+/// Extract `[[target|display]]` wikilinks from a single text zone, skipping code blocks.
 fn extract_wikilinks_from(text: &str, zone: Zone) -> Vec<Link> {
     use std::sync::OnceLock;
     static WL_RE: OnceLock<Regex> = OnceLock::new();
     let re = WL_RE.get_or_init(|| {
         Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("valid regex: wikilink")
     });
+    let fence_re = fence_regex();
+    let inline_code_re = inline_code_regex();
 
-    re.captures_iter(text)
-        .map(|caps| Link {
-            target: caps[1].to_string(),
-            display: caps.get(2).map(|m| m.as_str().to_string()),
-            section: None,
-            kind: crate::types::LinkKind::WikiLink,
-            zone: zone.clone(),
-        })
-        .collect()
+    let mut links = Vec::new();
+    let mut in_fence = false;
+
+    for line in text.lines() {
+        if fence_re.is_match(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let stripped = inline_code_re.replace_all(line, "");
+        for caps in re.captures_iter(&stripped) {
+            links.push(Link {
+                target: caps[1].to_string(),
+                display: caps.get(2).map(|m| m.as_str().to_string()),
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
+                zone: zone.clone(),
+            });
+        }
+    }
+
+    links
 }
 
 /// Extract `[[target|display]]` wikilinks from all three zones.
@@ -744,13 +764,11 @@ pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
 /// Returns unique tags (without `#` prefix) in first-encountered order.
 pub fn extract_hashtags(body: &str) -> Vec<String> {
     use std::sync::OnceLock;
-    static INLINE_CODE_RE: OnceLock<Regex> = OnceLock::new();
     static WIKILINK_RE: OnceLock<Regex> = OnceLock::new();
     static HASHTAG_RE: OnceLock<Regex> = OnceLock::new();
 
     let fence_re = fence_regex();
-    let inline_code_re =
-        INLINE_CODE_RE.get_or_init(|| Regex::new(r"`[^`]+`").expect("valid regex: inline code"));
+    let inline_code_re = inline_code_regex();
     let wikilink_re =
         WIKILINK_RE.get_or_init(|| Regex::new(r"\[\[[^\]]*\]\]").expect("valid regex: wikilink"));
     let hashtag_re = HASHTAG_RE

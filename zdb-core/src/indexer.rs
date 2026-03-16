@@ -273,12 +273,7 @@ impl Index {
 
         for link in &zettel.links {
             let zone = format!("{:?}", link.zone);
-            let kind = match link.kind {
-                crate::types::LinkKind::WikiLink => "wikilink",
-                crate::types::LinkKind::MarkdownLink => "markdown",
-                crate::types::LinkKind::Embed => "embed",
-                crate::types::LinkKind::BareUrl => "url",
-            };
+            let kind = link.kind.as_str();
             self.conn.execute(
                 "INSERT INTO _zdb_links (source_id, target_path, display, zone, kind) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![id, link.target, link.display, zone, kind],
@@ -406,11 +401,13 @@ impl Index {
         }
         // 4. Partial path matching — match tail path segments
         let bare = target.strip_suffix(".md").unwrap_or(target);
+        // Escape LIKE wildcards so _ and % in zettel names are matched literally
+        let escaped = bare.replace('%', "\\%").replace('_', "\\_");
         let partial: Option<String> = self
             .conn
             .query_row(
-                "SELECT path FROM zettels WHERE path LIKE '%/' || ?1 || '.md' ORDER BY length(path) ASC LIMIT 1",
-                params![bare],
+                "SELECT path FROM zettels WHERE path LIKE '%/' || ?1 || '.md' ESCAPE '\\' ORDER BY length(path) ASC LIMIT 1",
+                params![escaped],
                 |row| row.get(0),
             )
             .ok();

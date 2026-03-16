@@ -1033,7 +1033,7 @@ pub fn rename_zettel(
                 .collect();
             repo.commit_files(
                 &write_refs,
-                &format!("refactor: rewrite wikilinks after rename {old_path}"),
+                &format!("refactor: rewrite links after rename {old_path}"),
             )?;
         }
     }

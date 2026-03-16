@@ -56,7 +56,7 @@ pub fn resolve_conflicts(
         // Reassemble via parser
         let meta = parser::parse_frontmatter(&merged_fm, &conflict.path)?;
         let inline_fields = parser::extract_inline_fields(&merged_body, &merged_ref)?;
-        let wikilinks = parser::extract_wikilinks(&merged_fm, &merged_body, &merged_ref);
+        let wikilinks = parser::extract_links(&merged_fm, &merged_body, &merged_ref);
 
         let parsed = crate::types::ParsedZettel {
             meta,
@@ -626,7 +626,7 @@ pub fn resolve_append_log(conflicts: Vec<ConflictFile>) -> Result<Vec<ResolvedFi
 
         let meta = parser::parse_frontmatter(&merged_fm, &conflict.path)?;
         let inline_fields = parser::extract_inline_fields(&merged_body, &merged_ref)?;
-        let wikilinks = parser::extract_wikilinks(&merged_fm, &merged_body, &merged_ref);
+        let wikilinks = parser::extract_links(&merged_fm, &merged_body, &merged_ref);
 
         let parsed = crate::types::ParsedZettel {
             meta,

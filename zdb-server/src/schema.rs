@@ -70,12 +70,7 @@ fn zettel_to_value(z: &ParsedZettel) -> GqlValue {
                     .unwrap_or(GqlValue::Null),
             );
             obj.insert(Name::new("zone"), GqlValue::from(zone));
-            let kind = match l.kind {
-                zdb_core::types::LinkKind::WikiLink => "wikilink",
-                zdb_core::types::LinkKind::MarkdownLink => "markdown",
-                zdb_core::types::LinkKind::Embed => "embed",
-                zdb_core::types::LinkKind::BareUrl => "url",
-            };
+            let kind = l.kind.as_str();
             obj.insert(Name::new("kind"), GqlValue::from(kind));
             obj.insert(
                 Name::new("section"),
@@ -431,6 +426,26 @@ pub fn build_schema(
                 FieldFuture::new(async move {
                     let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
                     Ok(obj_field(obj, "zone"))
+                })
+            },
+        ))
+        .field(Field::new(
+            "kind",
+            TypeRef::named_nn(TypeRef::STRING),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "kind"))
+                })
+            },
+        ))
+        .field(Field::new(
+            "section",
+            TypeRef::named(TypeRef::STRING),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "section"))
                 })
             },
         ));
