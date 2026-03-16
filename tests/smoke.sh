@@ -232,6 +232,22 @@ $ZDB maintenance auto off | grep -q "disabled"
 $ZDB maintenance auto status | grep -q "off"
 pass "maintenance auto off"
 
+# 16d. consistency fix
+FIX_ID=$($ZDB create --title "Fix Test" --tags "#gtd,zebra,apple")
+BEFORE_HEAD=$(git rev-parse HEAD)
+$ZDB fix --dry-run | grep -q "would fix"
+[ "$(git rev-parse HEAD)" = "$BEFORE_HEAD" ]
+pass "fix dry-run"
+
+$ZDB fix | grep -q "fixed"
+pass "fix apply"
+
+$ZDB fix | grep -q "no issues"
+pass "fix idempotent"
+
+$ZDB read "$FIX_ID" | grep -q "  - apple"
+pass "fix result verified"
+
 if [ "$SMOKE_PROFILE" = "quick" ]; then
   pass "quick profile complete"
   exit 0

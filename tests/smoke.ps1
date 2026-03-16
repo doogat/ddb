@@ -294,6 +294,27 @@ $output = zdb maintenance auto status
 if ($output -notmatch "off") { throw "maintenance auto status should be off" }
 pass "maintenance auto off"
 
+# 16d. consistency fix
+$FIX_ID = zdb create --title "Fix Test" --tags "#gtd,zebra,apple"
+$beforeHead = git rev-parse HEAD
+$fixDry = zdb fix --dry-run
+if ($fixDry -notmatch "would fix") { throw "dry run should report fixes" }
+$afterHead = git rev-parse HEAD
+if ($beforeHead -ne $afterHead) { throw "dry run should not commit" }
+pass "fix dry-run"
+
+$fixApply = zdb fix
+if ($fixApply -notmatch "fixed") { throw "fix should report applied" }
+pass "fix apply"
+
+$fixAgain = zdb fix
+if ($fixAgain -notmatch "no issues") { throw "second fix should find nothing" }
+pass "fix idempotent"
+
+$fixContent = zdb read $FIX_ID
+if ($fixContent -notmatch "  - apple") { throw "tags should be sorted" }
+pass "fix result verified"
+
 if ($SmokeProfile -eq "quick") {
     pass "quick profile complete"
     exit 0
