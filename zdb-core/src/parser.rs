@@ -430,14 +430,11 @@ pub fn extract_bare_urls(text: &str, zone: Zone, exclude_targets: &[&str]) -> Ve
     links
 }
 
-/// Extract `[[target|display]]` wikilinks from all three zones.
-pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<Link> {
-    use std::sync::OnceLock;
-    static WL_RE: OnceLock<Regex> = OnceLock::new();
-    let re = WL_RE.get_or_init(|| {
-        Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("valid regex: wikilink")
-    });
-
+/// Extract all link types from the three zettel zones.
+///
+/// Extraction order: embeds → wikilinks → markdown links → bare URLs.
+/// Embeds run before wikilinks so `![[x]]` isn't double-counted as `[[x]]`.
+pub fn extract_links(frontmatter: &str, body: &str, reference: &str) -> Vec<Link> {
     let mut links = Vec::new();
 
     for (text, zone) in [
@@ -445,17 +442,64 @@ pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<
         (body, Zone::Body),
         (reference, Zone::Reference),
     ] {
-        for caps in re.captures_iter(text) {
-            links.push(Link {
-                target: caps[1].to_string(),
-                display: caps.get(2).map(|m| m.as_str().to_string()),
-                section: None,
-                kind: crate::types::LinkKind::WikiLink,
-                zone: zone.clone(),
-            });
-        }
+        // Embeds first (before wikilinks to avoid double-counting)
+        let embeds = extract_embeds(text, zone.clone());
+
+        // Collect embed byte ranges to skip in wikilink pass
+        let embed_targets: Vec<String> = embeds.iter().map(|e| e.target.clone()).collect();
+        links.extend(embeds);
+
+        // Wikilinks — filter out any that overlap with embed matches
+        // Embed `![[file#sec|disp]]` also matches wikilink regex as `[[file#sec|disp]]`
+        // so we exclude wikilinks whose target (with # stripped) matches an embed target
+        let wl = extract_wikilinks_from(text, zone.clone());
+        links.extend(wl.into_iter().filter(|l| {
+            let base = l.target.split('#').next().unwrap_or(&l.target);
+            !embed_targets.iter().any(|et| et == base)
+        }));
+
+        // Markdown links
+        let md = extract_markdown_links(text, zone.clone());
+        let md_targets: Vec<String> = md.iter().map(|l| l.target.clone()).collect();
+        links.extend(md);
+
+        // Bare URLs (excluding markdown link targets)
+        let md_target_refs: Vec<&str> = md_targets.iter().map(|s| s.as_str()).collect();
+        links.extend(extract_bare_urls(text, zone, &md_target_refs));
     }
 
+    links
+}
+
+/// Extract `[[target|display]]` wikilinks from a single text zone.
+fn extract_wikilinks_from(text: &str, zone: Zone) -> Vec<Link> {
+    use std::sync::OnceLock;
+    static WL_RE: OnceLock<Regex> = OnceLock::new();
+    let re = WL_RE.get_or_init(|| {
+        Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("valid regex: wikilink")
+    });
+
+    re.captures_iter(text)
+        .map(|caps| Link {
+            target: caps[1].to_string(),
+            display: caps.get(2).map(|m| m.as_str().to_string()),
+            section: None,
+            kind: crate::types::LinkKind::WikiLink,
+            zone: zone.clone(),
+        })
+        .collect()
+}
+
+/// Extract `[[target|display]]` wikilinks from all three zones.
+pub fn extract_wikilinks(frontmatter: &str, body: &str, reference: &str) -> Vec<Link> {
+    let mut links = Vec::new();
+    for (text, zone) in [
+        (frontmatter, Zone::Frontmatter),
+        (body, Zone::Body),
+        (reference, Zone::Reference),
+    ] {
+        links.extend(extract_wikilinks_from(text, zone));
+    }
     links
 }
 
@@ -710,7 +754,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
     let zettel = split_zones(content)?;
     let meta = parse_frontmatter(&zettel.raw_frontmatter, path)?;
     let inline_fields = extract_inline_fields(&zettel.body, &zettel.reference_section)?;
-    let wikilinks = extract_wikilinks(
+    let wikilinks = extract_links(
         &zettel.raw_frontmatter,
         &zettel.body,
         &zettel.reference_section,
@@ -1005,6 +1049,28 @@ Body here.
     }
 
     // -- wikilink extraction tests --
+
+    #[test]
+    fn extract_all_link_types() {
+        let body = "See [[wiki]] and [md link](path.md). Also ![[embed#sec|alt]]. Visit https://example.com for info.";
+        let links = extract_links("", body, "");
+        assert_eq!(links.len(), 4);
+
+        let kinds: Vec<_> = links.iter().map(|l| &l.kind).collect();
+        assert!(kinds.contains(&&crate::types::LinkKind::Embed));
+        assert!(kinds.contains(&&crate::types::LinkKind::WikiLink));
+        assert!(kinds.contains(&&crate::types::LinkKind::MarkdownLink));
+        assert!(kinds.contains(&&crate::types::LinkKind::BareUrl));
+    }
+
+    #[test]
+    fn embed_not_double_counted_as_wikilink() {
+        let body = "![[embed_target]]";
+        let links = extract_links("", body, "");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].kind, crate::types::LinkKind::Embed);
+        assert_eq!(links[0].target, "embed_target");
+    }
 
     #[test]
     fn extract_bare_url_basic() {
