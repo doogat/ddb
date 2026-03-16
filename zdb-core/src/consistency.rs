@@ -76,7 +76,7 @@ fn is_kebab_case(s: &str) -> bool {
 ///
 /// Returns a list of fixes ordered by severity (errors first, then warnings, then info).
 /// Does not modify the zettel — use [`apply_fixes`] to apply.
-pub fn detect_fixes(parsed: &ParsedZettel, _schema: Option<&TableSchema>) -> Vec<Fix> {
+pub fn detect_fixes(parsed: &ParsedZettel, schema: Option<&TableSchema>) -> Vec<Fix> {
     let mut fixes = Vec::new();
 
     detect_tag_issues(&parsed.meta.tags, &mut fixes);
@@ -84,6 +84,9 @@ pub fn detect_fixes(parsed: &ParsedZettel, _schema: Option<&TableSchema>) -> Vec
     detect_title_issues(parsed, &mut fixes);
     detect_key_issues(parsed, &mut fixes);
     detect_cross_zone_issues(parsed, &mut fixes);
+    if let Some(s) = schema {
+        detect_schema_issues(parsed, s, &mut fixes);
+    }
 
     // Stable sort: errors first, then warnings, then info
     fixes.sort_by_key(|f| std::cmp::Reverse(f.severity()));
@@ -286,6 +289,43 @@ fn detect_cross_zone_issues(parsed: &ParsedZettel, fixes: &mut Vec<Fix>) {
                 key: field.key.clone(),
                 kept_zone: crate::types::Zone::Frontmatter,
             });
+        }
+    }
+}
+
+fn detect_schema_issues(parsed: &ParsedZettel, schema: &TableSchema, fixes: &mut Vec<Fix>) {
+    let known_fields: HashSet<&str> = {
+        let mut keys: HashSet<&str> = parsed.meta.extra.keys().map(|k| k.as_str()).collect();
+        if parsed.meta.title.is_some() {
+            keys.insert("title");
+        }
+        if parsed.meta.zettel_type.is_some() {
+            keys.insert("type");
+        }
+        if !parsed.meta.tags.is_empty() {
+            keys.insert("tags");
+        }
+        if parsed.meta.date.is_some() {
+            keys.insert("date");
+        }
+        if parsed.meta.id.is_some() {
+            keys.insert("id");
+        }
+        // Also count inline fields
+        for field in &parsed.inline_fields {
+            keys.insert(&field.key);
+        }
+        keys
+    };
+
+    for col in &schema.columns {
+        if col.required && !known_fields.contains(col.name.as_str()) {
+            if let Some(ref default) = col.default_value {
+                fixes.push(Fix::DefaultSet {
+                    field: col.name.clone(),
+                    value: default.clone(),
+                });
+            }
         }
     }
 }
@@ -934,6 +974,66 @@ mod tests {
                 |f| matches!(f, Fix::DefaultSet { field, value } if field == "tags" && value == "[]")
             ),
             "should detect missing tags: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn detect_schema_required_field_with_default() {
+        let parsed = empty_parsed();
+        let schema = crate::types::TableSchema {
+            table_name: "note".into(),
+            columns: vec![crate::types::ColumnDef {
+                name: "priority".into(),
+                data_type: "INTEGER".into(),
+                references: None,
+                zone: None,
+                required: true,
+                search_boost: None,
+                allowed_values: None,
+                default_value: Some("0".into()),
+            }],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+        };
+        let fixes = detect_fixes(&parsed, Some(&schema));
+        assert!(
+            fixes.iter().any(
+                |f| matches!(f, Fix::DefaultSet { field, value } if field == "priority" && value == "0")
+            ),
+            "should detect missing required field from schema: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn detect_schema_required_field_present_no_fix() {
+        let mut parsed = empty_parsed();
+        parsed
+            .meta
+            .extra
+            .insert("priority".into(), crate::types::Value::Number(5.0));
+        let schema = crate::types::TableSchema {
+            table_name: "note".into(),
+            columns: vec![crate::types::ColumnDef {
+                name: "priority".into(),
+                data_type: "INTEGER".into(),
+                references: None,
+                zone: None,
+                required: true,
+                search_boost: None,
+                allowed_values: None,
+                default_value: Some("0".into()),
+            }],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+        };
+        let fixes = detect_fixes(&parsed, Some(&schema));
+        assert!(
+            !fixes
+                .iter()
+                .any(|f| matches!(f, Fix::DefaultSet { field, .. } if field == "priority")),
+            "present field should not trigger schema fix: {fixes:?}"
         );
     }
 
