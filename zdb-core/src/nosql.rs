@@ -237,6 +237,7 @@ mod tests {
                 ..Default::default()
             },
             body: "body".into(),
+            sections: vec![],
             reference_section: String::new(),
             inline_fields: vec![],
             links: vec![Link {

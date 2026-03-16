@@ -241,6 +241,13 @@ pub struct Link {
     pub zone: Zone,
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Section {
+    pub heading: String,
+    pub level: u8,
+    pub content: String,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum CheckboxState {
     Open,
@@ -262,6 +269,8 @@ pub struct CheckboxItem {
 pub struct ParsedZettel {
     pub meta: ZettelMeta,
     pub body: String,
+    #[serde(default)]
+    pub sections: Vec<Section>,
     pub reference_section: String,
     pub inline_fields: Vec<InlineField>,
     pub links: Vec<Link>,

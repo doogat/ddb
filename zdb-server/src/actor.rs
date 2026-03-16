@@ -921,6 +921,7 @@ fn create_zettel(
     let parsed = ParsedZettel {
         meta,
         body: body.unwrap_or_default(),
+        sections: vec![],
         reference_section: String::new(),
         inline_fields: vec![],
         links: vec![],

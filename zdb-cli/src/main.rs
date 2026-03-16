@@ -477,6 +477,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             let parsed = zdb_core::types::ParsedZettel {
                 meta,
                 body: body_text,
+                sections: vec![],
                 reference_section: String::new(),
                 inline_fields: vec![],
                 links: vec![],

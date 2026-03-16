@@ -825,6 +825,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
     Ok(crate::types::ParsedZettel {
         meta,
         body: zettel.body,
+        sections: vec![],
         reference_section: zettel.reference_section,
         inline_fields,
         links: wikilinks,
@@ -1513,6 +1514,7 @@ Some more body.
         let parsed = crate::types::ParsedZettel {
             meta,
             body: z.body.clone(),
+            sections: vec![],
             reference_section: z.reference_section.clone(),
             inline_fields,
             links: wikilinks,
@@ -1542,6 +1544,7 @@ Some more body.
                 ..Default::default()
             },
             body: "Just body.".into(),
+            sections: vec![],
             reference_section: String::new(),
             inline_fields: vec![],
             links: vec![],
@@ -1575,6 +1578,7 @@ Some more body.
                 extra,
             },
             body: "Body.".into(),
+            sections: vec![],
             reference_section: String::new(),
             inline_fields: vec![],
             links: vec![],

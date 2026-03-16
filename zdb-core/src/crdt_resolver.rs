@@ -61,6 +61,7 @@ pub fn resolve_conflicts(
         let parsed = crate::types::ParsedZettel {
             meta,
             body: merged_body,
+            sections: vec![],
             reference_section: merged_ref,
             inline_fields,
             links: wikilinks,
@@ -631,6 +632,7 @@ pub fn resolve_append_log(conflicts: Vec<ConflictFile>) -> Result<Vec<ResolvedFi
         let parsed = crate::types::ParsedZettel {
             meta,
             body: merged_body,
+            sections: vec![],
             reference_section: merged_ref,
             inline_fields,
             links: wikilinks,
