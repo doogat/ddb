@@ -457,10 +457,12 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             let body_text = body.unwrap_or_default();
 
             let id_str = id.to_string();
-            let path = match &r#type {
-                Some(t) => format!("zettelkasten/{t}/{id_str}.md"),
-                None => format!("zettelkasten/{id_str}.md"),
-            };
+            let index = open_index(&cli.repo)?;
+            let folder = r#type
+                .as_deref()
+                .map(|t| index.type_uses_folder(t, &repo))
+                .unwrap_or(false);
+            let path = zdb_core::git_ops::zettel_path(&id_str, r#type.as_deref(), folder);
             let commit_msg = format!("create zettel {id_str}");
 
             let meta = zdb_core::types::ZettelMeta {
@@ -486,8 +488,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             let content = parser::serialize(&parsed);
             repo.commit_file(&path, &content, &commit_msg)?;
 
-            // Index
-            let index = open_index(&cli.repo)?;
+            // Index (index already opened above for folder lookup)
             index.index_zettel(&parsed)?;
             redb_index_zettel(&cli.repo, &parsed);
 
