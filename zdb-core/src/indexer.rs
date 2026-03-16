@@ -705,19 +705,36 @@ impl Index {
         let paths = repo.list_zettels()?;
         let mut report = crate::types::RebuildReport::default();
 
-        // Phase 1: index all zettels
+        // Phase 1: read + parse all zettels, collecting errors as warnings
+        let mut parsed = Vec::with_capacity(paths.len());
         for path in &paths {
-            let content = repo.read_file(path)?;
-            let parsed = crate::parser::parse(&content, path)?;
-            self.index_zettel(&parsed)?;
-            report.indexed += 1;
+            match repo
+                .read_file(path)
+                .and_then(|c| crate::parser::parse(&c, path))
+            {
+                Ok(z) => parsed.push(z),
+                Err(e) => {
+                    tracing::warn!(path, error = %e, "rebuild: skipping zettel");
+                    report
+                        .warnings
+                        .push(crate::types::ConsistencyWarning::MalformedYaml {
+                            path: path.clone(),
+                            error: e.to_string(),
+                        });
+                }
+            }
         }
 
-        // Phase 2: collect consistency warnings
-        report.warnings = self.collect_consistency_warnings(repo);
+        // Phase 2: batch index all parsed zettels (single transaction)
+        report.indexed = self.batch_index(&parsed)?;
 
-        // Phase 3: materialize typed tables using merged schemas
-        let mat_report = self.materialize_all_types(repo)?;
+        // Phase 3: collect consistency warnings
+        report
+            .warnings
+            .extend(self.collect_consistency_warnings(repo));
+
+        // Phase 4: materialize typed tables from cached parse results
+        let mat_report = self.materialize_all_types_from(&parsed, repo)?;
         report.tables_materialized = mat_report.0;
         report.types_inferred = mat_report.1;
 
