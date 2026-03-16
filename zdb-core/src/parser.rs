@@ -758,6 +758,65 @@ pub fn extract_checkboxes(body: &str) -> Vec<crate::types::CheckboxItem> {
     items
 }
 
+/// Parse body text into sections at ATX headings, respecting fenced code blocks.
+///
+/// Returns sections in document order. Pre-heading content is level 0 with empty heading.
+pub fn extract_sections(body: &str) -> Vec<crate::types::Section> {
+    use std::sync::OnceLock;
+    static HEADING_RE: OnceLock<Regex> = OnceLock::new();
+
+    let re = HEADING_RE.get_or_init(|| {
+        Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#+)?$").expect("valid regex: atx heading")
+    });
+    let fence_re = fence_regex();
+
+    let mut sections = Vec::new();
+    let mut current_heading = String::new();
+    let mut current_level: u8 = 0;
+    let mut current_lines: Vec<&str> = Vec::new();
+    let mut in_fence = false;
+
+    for line in body.lines() {
+        if fence_re.is_match(line) {
+            in_fence = !in_fence;
+            current_lines.push(line);
+            continue;
+        }
+        if in_fence {
+            current_lines.push(line);
+            continue;
+        }
+
+        if let Some(caps) = re.captures(line) {
+            // Push previous section
+            if current_level > 0 || !current_lines.is_empty() {
+                sections.push(crate::types::Section {
+                    heading: current_heading.clone(),
+                    level: current_level,
+                    content: current_lines.join("\n"),
+                });
+            }
+            // Start new section
+            current_level = caps[1].len() as u8;
+            current_heading = caps[2].to_string();
+            current_lines.clear();
+        } else {
+            current_lines.push(line);
+        }
+    }
+
+    // Push final section
+    if current_level > 0 || !current_lines.is_empty() {
+        sections.push(crate::types::Section {
+            heading: current_heading,
+            level: current_level,
+            content: current_lines.join("\n"),
+        });
+    }
+
+    sections
+}
+
 /// Extract hashtags from body text, respecting exclusion zones.
 ///
 /// Skips fenced code blocks, inline code spans, and wikilinks.
@@ -819,13 +878,14 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedZettel> {
         &zettel.body,
         &zettel.reference_section,
     );
+    let sections = extract_sections(&zettel.body);
     let body_tags = extract_hashtags(&zettel.body);
     let checkboxes = extract_checkboxes(&zettel.body);
 
     Ok(crate::types::ParsedZettel {
         meta,
         body: zettel.body,
-        sections: vec![],
+        sections,
         reference_section: zettel.reference_section,
         inline_fields,
         links: wikilinks,
@@ -1354,6 +1414,80 @@ Body here.
     }
 
     // -- checkbox tests --
+
+    #[test]
+    fn sections_basic() {
+        let body = "## A\ncontent a\n## B\ncontent b";
+        let secs = extract_sections(body);
+        assert_eq!(secs.len(), 2);
+        assert_eq!(secs[0].heading, "A");
+        assert_eq!(secs[0].level, 2);
+        assert_eq!(secs[0].content, "content a");
+        assert_eq!(secs[1].heading, "B");
+        assert_eq!(secs[1].content, "content b");
+    }
+
+    #[test]
+    fn sections_nested_levels() {
+        let body = "# H1\n## H2\n### H3";
+        let secs = extract_sections(body);
+        assert_eq!(secs.len(), 3);
+        assert_eq!(secs[0].level, 1);
+        assert_eq!(secs[1].level, 2);
+        assert_eq!(secs[2].level, 3);
+    }
+
+    #[test]
+    fn sections_pre_heading_content() {
+        let body = "intro text\n\n## Section\ncontent";
+        let secs = extract_sections(body);
+        assert_eq!(secs.len(), 2);
+        assert_eq!(secs[0].level, 0);
+        assert_eq!(secs[0].heading, "");
+        assert_eq!(secs[0].content, "intro text\n");
+        assert_eq!(secs[1].heading, "Section");
+    }
+
+    #[test]
+    fn sections_skip_fenced_code() {
+        let body = "## Real\ncontent\n```\n## Fake\n```\n## Also Real\nmore";
+        let secs = extract_sections(body);
+        assert_eq!(secs.len(), 2);
+        assert_eq!(secs[0].heading, "Real");
+        assert!(secs[0].content.contains("## Fake"));
+        assert_eq!(secs[1].heading, "Also Real");
+    }
+
+    #[test]
+    fn sections_trailing_hashes() {
+        let body = "## Title ##\ncontent";
+        let secs = extract_sections(body);
+        assert_eq!(secs.len(), 1);
+        assert_eq!(secs[0].heading, "Title");
+    }
+
+    #[test]
+    fn sections_empty_body() {
+        let secs = extract_sections("");
+        assert!(secs.is_empty());
+    }
+
+    #[test]
+    fn sections_heading_only() {
+        let body = "## Heading";
+        let secs = extract_sections(body);
+        assert_eq!(secs.len(), 1);
+        assert_eq!(secs[0].heading, "Heading");
+        assert_eq!(secs[0].content, "");
+    }
+
+    #[test]
+    fn sections_preserves_content_whitespace() {
+        let body = "## Section\n\nline 1\n\nline 2";
+        let secs = extract_sections(body);
+        assert_eq!(secs.len(), 1);
+        assert!(secs[0].content.contains("line 1\n\nline 2"));
+    }
 
     #[test]
     fn checkboxes_all_states() {
