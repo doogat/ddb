@@ -1540,13 +1540,20 @@ pub fn schema_from_parsed(zettel: &ParsedZettel) -> Result<TableSchema> {
         .map(|v| matches!(v, crate::types::Value::Bool(true)) || v.as_str() == Some("true"))
         .unwrap_or(false);
 
+    let stale_after_days = zettel
+        .meta
+        .extra
+        .get("stale_after_days")
+        .and_then(|v| v.as_f64())
+        .map(|n| n as u32);
+
     Ok(TableSchema {
         table_name,
         columns,
         crdt_strategy,
         template_sections,
         folder,
-        stale_after_days: None,
+        stale_after_days,
     })
 }
 
