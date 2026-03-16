@@ -33,6 +33,9 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
   ├──> maintenance (depends: error, types, git_ops
   │                          — git maintenance runner + auto-trigger)
   │
+  ├──> consistency (depends: error, types, parser, indexer, traits
+  │                          — detect/apply/migrate auto-fixes)
+  │
   ├──> attachments (depends: error, types, git_ops, indexer, parser)
   │
   ├──> bundled_types (standalone, no deps)
@@ -59,6 +62,7 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 | `sync_manager` | Multi-device sync orchestration | uuid, toml, chrono |
 | `compaction` | CRDT cleanup + git gc | — |
 | `maintenance` | Git maintenance runner, auto-trigger | — |
+| `consistency` | Detect/apply/migrate auto-fixes (tags, titles, keys, types) | — |
 | `attachments` | File attachment CRUD (attach, detach, list) on `reference/{id}/` | — |
 | `ffi` | UniFFI facade (ZettelDriver) for Swift/Kotlin bindings | uniffi |
 | **CLI** | Command-line interface | clap |

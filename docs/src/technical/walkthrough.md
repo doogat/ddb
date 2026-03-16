@@ -384,6 +384,36 @@ Criterion benchmarks in `zdb-core/benches/` measure CRUD operations and search p
 
 `cargo test --workspace` (aliased as `cargo test-full`) runs all of the above: unit tests, integration tests, and e2e tests across all crates. This is the definitive validation before merging any change.
 
+## 8. Consistency Auto-Fix
+
+The `consistency` module (`consistency.rs`) provides a detect-then-apply pipeline for normalizing zettels. The `zdb fix` command scans all zettels and corrects common data quality issues in a single atomic commit.
+
+### Detection
+
+`detect_fixes(parsed, schema)` inspects a `ParsedZettel` and returns a `Vec<Fix>` with severity-ordered issues:
+
+- **Error**: cross-zone duplicate fields (same key in frontmatter and body inline fields)
+- **Warning**: missing type default, missing title (derived from H1 or filename)
+- **Info**: duplicate tags, unsorted tags, `#`-prefixed tags, non-kebab-case keys, untrimmed/uncapitalized title, H1-title mismatch
+
+### Application
+
+`apply_fixes(parsed, fixes)` modifies the `ParsedZettel` in-place and re-serializes via `parser::serialize()`. Tag fixes run in order: strip hash, dedup, sort. Key normalization uses `to_kebab_case()` which handles CamelCase, snake_case, and acronyms (e.g. `XMLParser` -> `xml-parser`).
+
+### Orchestration
+
+`fix_all(repo, index, dry_run)` iterates all zettels, detects fixes per typedef schema, applies them, and commits atomically. Dry-run mode collects the report without modifying files.
+
+### Migration
+
+`migrate_all(repo, dry_run)` runs versioned field-level migrations: `zkn-id` -> `id`, `tag` (singular) -> `tags`, type normalization (`loop` -> `project`, `zettel`/`wiki-article` -> `note`). Version tracked in `.zdb/migration-version`. Invoked via `zdb fix --migrate`.
+
+### CLI
+
+```
+zdb fix [--dry-run] [-v/--verbose] [--migrate]
+```
+
 For deeper detail on any module, see the corresponding document in `docs/src/technical/`:
 
 - `technical/parser.md` -- three-zone Markdown parsing
