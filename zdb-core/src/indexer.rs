@@ -650,24 +650,44 @@ impl Index {
         let mut report = crate::types::RebuildReport::default();
         let mut typedef_changed = false;
 
+        // Partition changes by kind
+        let mut to_index_paths = Vec::new();
+        let mut to_delete = Vec::new();
+
         for (kind, path) in &changes {
             if path.contains("_typedef/") {
                 typedef_changed = true;
             }
             match kind {
                 DiffKind::Added | DiffKind::Modified => {
-                    let content = repo.read_file(path)?;
-                    let parsed = crate::parser::parse(&content, path)?;
-                    self.index_zettel(&parsed)?;
-                    report.indexed += 1;
+                    to_index_paths.push(path.clone());
                 }
                 DiffKind::Deleted => {
-                    // Extract ID from path
                     if let Some(id) = crate::parser::extract_id_from_path(path) {
-                        self.remove_zettel(&id)?;
+                        to_delete.push(id);
                     }
                 }
             }
+        }
+
+        // Handle deletes individually (cheap operations)
+        for id in &to_delete {
+            self.remove_zettel(id)?;
+        }
+
+        // Batch-index additions/modifications
+        if to_index_paths.len() > 1 {
+            let mut parsed = Vec::with_capacity(to_index_paths.len());
+            for path in &to_index_paths {
+                let content = repo.read_file(path)?;
+                parsed.push(crate::parser::parse(&content, path)?);
+            }
+            report.indexed = self.batch_index(&parsed)?;
+        } else if let Some(path) = to_index_paths.first() {
+            let content = repo.read_file(path)?;
+            let parsed = crate::parser::parse(&content, path)?;
+            self.index_zettel(&parsed)?;
+            report.indexed = 1;
         }
 
         // If any typedef changed, full rematerialization is needed
@@ -3498,6 +3518,59 @@ Widget
             .incremental_reindex(&repo, "0000000000000000000000000000000000000000")
             .unwrap();
         assert_eq!(report.indexed, 1); // Full rebuild found 1 zettel
+    }
+
+    #[test]
+    fn incremental_batch_mode_multi_change() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        // Create 5 zettels
+        for i in 0..5 {
+            repo.commit_file(
+                &format!("zettelkasten/2024010{i}000000.md"),
+                &format!("---\ntitle: Note {i}\n---\nBody {i}."),
+                &format!("add {i}"),
+            )
+            .unwrap();
+        }
+
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+        let old_head = idx.stored_head_oid().unwrap();
+
+        // Modify 3 zettels in a single commit
+        let modifications: Vec<(&str, &str)> = vec![
+            (
+                "zettelkasten/20240100000000.md",
+                "---\ntitle: Modified 0\n---\nUpdated body 0.",
+            ),
+            (
+                "zettelkasten/20240101000000.md",
+                "---\ntitle: Modified 1\n---\nUpdated body 1.",
+            ),
+            (
+                "zettelkasten/20240102000000.md",
+                "---\ntitle: Modified 2\n---\nUpdated body 2.",
+            ),
+        ];
+        repo.commit_files(&modifications, "modify 3").unwrap();
+
+        let report = idx.incremental_reindex(&repo, &old_head).unwrap();
+        assert_eq!(report.indexed, 3);
+
+        // Verify modifications
+        let rows = idx
+            .query_raw("SELECT title FROM zettels WHERE id = '20240100000000'")
+            .unwrap();
+        assert_eq!(rows[0][0], "Modified 0");
+
+        let rows = idx
+            .query_raw("SELECT title FROM zettels WHERE id = '20240102000000'")
+            .unwrap();
+        assert_eq!(rows[0][0], "Modified 2");
     }
 
     #[test]
