@@ -343,6 +343,14 @@ pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
                     remove_inline_field_from_body(&mut parsed.body, key);
                 }
             }
+            Fix::FieldRenamed { old, new } => {
+                if let Some(value) = parsed.meta.extra.remove(old) {
+                    parsed.meta.extra.insert(new.clone(), value);
+                }
+            }
+            Fix::TypeNormalized { new, .. } => {
+                parsed.meta.zettel_type = Some(new.clone());
+            }
         }
     }
 
@@ -411,6 +419,175 @@ pub fn fix_all(repo: &impl ZettelStore, index: &Index, dry_run: bool) -> Result<
             .map(|(p, c)| (p.as_str(), c.as_str()))
             .collect();
         repo.commit_batch(&write_refs, &[], &msg)?;
+    }
+
+    Ok(report)
+}
+
+// ── Migration framework ──────────────────────────────────────────
+
+/// A field-level migration that transforms zettels during format evolution.
+pub struct Migration {
+    pub version: u32,
+    pub name: &'static str,
+    pub apply: fn(&mut ParsedZettel) -> Vec<Fix>,
+}
+
+/// Built-in migrations for known field renames and type normalizations.
+fn built_in_migrations() -> Vec<Migration> {
+    vec![
+        Migration {
+            version: 1,
+            name: "zkn-id-to-id",
+            apply: |p| {
+                if let Some(value) = p.meta.extra.get("zkn-id").cloned() {
+                    if p.meta.id.is_none() {
+                        if let Some(s) = value.as_str() {
+                            p.meta.id = Some(crate::types::ZettelId(s.to_string()));
+                        }
+                    }
+                    return vec![Fix::FieldRenamed {
+                        old: "zkn-id".into(),
+                        new: "id".into(),
+                    }];
+                }
+                vec![]
+            },
+        },
+        Migration {
+            version: 2,
+            name: "tag-to-tags",
+            apply: |p| {
+                if let Some(value) = p.meta.extra.get("tag").cloned() {
+                    if let Some(s) = value.as_str() {
+                        if p.meta.tags.is_empty() {
+                            p.meta.tags = vec![s.to_string()];
+                        }
+                    }
+                    return vec![Fix::FieldRenamed {
+                        old: "tag".into(),
+                        new: "tags".into(),
+                    }];
+                }
+                vec![]
+            },
+        },
+        Migration {
+            version: 3,
+            name: "type-normalize",
+            apply: |p| {
+                let old_type = match p.meta.zettel_type.as_deref() {
+                    Some(t) => t.to_string(),
+                    None => return vec![],
+                };
+                let new_type = match old_type.as_str() {
+                    "loop" => "project",
+                    "wiki-article" | "zettel" => "note",
+                    _ => return vec![],
+                };
+                p.meta.zettel_type = Some(new_type.to_string());
+                vec![Fix::TypeNormalized {
+                    old: old_type,
+                    new: new_type.to_string(),
+                }]
+            },
+        },
+    ]
+}
+
+/// Read the current migration version from `.zdb/migration-version`.
+fn read_migration_version(repo: &impl crate::traits::ZettelSource) -> u32 {
+    repo.read_file(".zdb/migration-version")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Run pending migrations on all zettels.
+///
+/// Applies migrations with version > current, commits changes, and updates the version file.
+pub fn migrate_all(repo: &impl ZettelStore, dry_run: bool) -> Result<FixReport> {
+    let current_version = read_migration_version(repo);
+    let migrations = built_in_migrations();
+    let pending: Vec<&Migration> = migrations
+        .iter()
+        .filter(|m| m.version > current_version)
+        .collect();
+
+    if pending.is_empty() {
+        return Ok(FixReport::default());
+    }
+
+    let max_version = pending.iter().map(|m| m.version).max().unwrap_or(0);
+    let paths = repo.list_zettels()?;
+
+    let mut report = FixReport {
+        files_scanned: 0,
+        files_fixed: 0,
+        fixes: Vec::new(),
+    };
+    let mut writes: Vec<(String, String)> = Vec::new();
+
+    for path in &paths {
+        let content = match repo.read_file(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let mut parsed = match crate::parser::parse(&content, path) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        report.files_scanned += 1;
+
+        let mut all_fixes = Vec::new();
+        for migration in &pending {
+            let fixes = (migration.apply)(&mut parsed);
+            // Remove migrated fields from extras
+            for fix in &fixes {
+                if let Fix::FieldRenamed { old, .. } = fix {
+                    parsed.meta.extra.remove(old);
+                }
+            }
+            all_fixes.extend(fixes);
+        }
+
+        if all_fixes.is_empty() {
+            continue;
+        }
+
+        if !dry_run {
+            let new_content = crate::parser::serialize(&parsed);
+            writes.push((path.clone(), new_content));
+        }
+
+        report.files_fixed += 1;
+        report.fixes.push(ZettelFix {
+            path: path.clone(),
+            applied: all_fixes,
+        });
+    }
+
+    if !dry_run && !writes.is_empty() {
+        let total_fixes: usize = report.fixes.iter().map(|f| f.applied.len()).sum();
+        let names: Vec<&str> = pending.iter().map(|m| m.name).collect();
+        let msg = format!(
+            "fix: migrate {} fields across {} zettels ({})",
+            total_fixes,
+            report.files_fixed,
+            names.join(", ")
+        );
+        let write_refs: Vec<(&str, &str)> = writes
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        repo.commit_batch(&write_refs, &[], &msg)?;
+
+        // Update version file
+        repo.commit_file(
+            ".zdb/migration-version",
+            &max_version.to_string(),
+            &format!("fix: update migration version to {max_version}"),
+        )?;
     }
 
     Ok(report)
@@ -923,5 +1100,127 @@ mod tests {
             second_fixes.is_empty(),
             "round-trip should produce clean zettel, but found: {second_fixes:?}"
         );
+    }
+
+    // ── migration tests ──────────────────────────────────────────
+
+    #[test]
+    fn migrate_zkn_id_to_id() {
+        let mut parsed = empty_parsed();
+        parsed.meta.id = None;
+        parsed.meta.extra.insert(
+            "zkn-id".into(),
+            crate::types::Value::String("20260101120000".into()),
+        );
+
+        let migrations = super::built_in_migrations();
+        let m = &migrations[0]; // v1: zkn-id-to-id
+        let fixes = (m.apply)(&mut parsed);
+
+        assert_eq!(fixes.len(), 1);
+        assert!(
+            matches!(&fixes[0], Fix::FieldRenamed { old, new } if old == "zkn-id" && new == "id")
+        );
+        assert_eq!(
+            parsed.meta.id,
+            Some(crate::types::ZettelId("20260101120000".into()))
+        );
+    }
+
+    #[test]
+    fn migrate_tag_singular_to_tags() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec![];
+        parsed
+            .meta
+            .extra
+            .insert("tag".into(), crate::types::Value::String("gtd".into()));
+
+        let migrations = super::built_in_migrations();
+        let m = &migrations[1]; // v2: tag-to-tags
+        let fixes = (m.apply)(&mut parsed);
+
+        assert_eq!(fixes.len(), 1);
+        assert!(
+            matches!(&fixes[0], Fix::FieldRenamed { old, new } if old == "tag" && new == "tags")
+        );
+        assert_eq!(parsed.meta.tags, vec!["gtd".to_string()]);
+    }
+
+    #[test]
+    fn migrate_type_loop_to_project() {
+        let mut parsed = empty_parsed();
+        parsed.meta.zettel_type = Some("loop".into());
+
+        let migrations = super::built_in_migrations();
+        let m = &migrations[2]; // v3: type-normalize
+        let fixes = (m.apply)(&mut parsed);
+
+        assert_eq!(fixes.len(), 1);
+        assert!(
+            matches!(&fixes[0], Fix::TypeNormalized { old, new } if old == "loop" && new == "project")
+        );
+        assert_eq!(parsed.meta.zettel_type, Some("project".into()));
+    }
+
+    #[test]
+    fn migrate_type_zettel_to_note() {
+        let mut parsed = empty_parsed();
+        parsed.meta.zettel_type = Some("zettel".into());
+
+        let migrations = super::built_in_migrations();
+        let m = &migrations[2];
+        let fixes = (m.apply)(&mut parsed);
+
+        assert_eq!(fixes.len(), 1);
+        assert!(
+            matches!(&fixes[0], Fix::TypeNormalized { old, new } if old == "zettel" && new == "note")
+        );
+    }
+
+    #[test]
+    fn migrate_type_normal_no_change() {
+        let mut parsed = empty_parsed();
+        parsed.meta.zettel_type = Some("project".into());
+
+        let migrations = super::built_in_migrations();
+        let m = &migrations[2];
+        let fixes = (m.apply)(&mut parsed);
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn migration_version_tracking() {
+        // read_migration_version returns 0 when file doesn't exist
+        // (can't test file I/O without a repo, but we test the function logic)
+        assert_eq!(super::read_migration_version(&MockSource), 0);
+    }
+
+    /// Minimal mock for testing read_migration_version when file doesn't exist.
+    struct MockSource;
+
+    impl crate::traits::ZettelSource for MockSource {
+        fn list_zettels(&self) -> crate::error::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        fn read_file(&self, _path: &str) -> crate::error::Result<String> {
+            Err(crate::error::ZettelError::Git("not found".into()))
+        }
+        fn head_oid(&self) -> crate::error::Result<crate::types::CommitHash> {
+            Ok(crate::types::CommitHash("abc".into()))
+        }
+        fn diff_paths(
+            &self,
+            _old: &str,
+            _new: &str,
+        ) -> crate::error::Result<Vec<(crate::types::DiffKind, String)>> {
+            Ok(vec![])
+        }
+        fn read_files_batch(
+            &self,
+            _paths: &[String],
+        ) -> crate::error::Result<Vec<(String, crate::error::Result<String>)>> {
+            Ok(vec![])
+        }
     }
 }

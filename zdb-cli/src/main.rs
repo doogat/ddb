@@ -155,6 +155,9 @@ enum Command {
         /// Show detailed fix list per zettel
         #[arg(short, long)]
         verbose: bool,
+        /// Run pending field migrations before fixing
+        #[arg(long)]
+        migrate: bool,
     },
     /// Rename (move) a zettel and rewrite backlinks
     Rename {
@@ -790,10 +793,44 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             }
         }
 
-        Command::Fix { dry_run, verbose } => {
+        Command::Fix {
+            dry_run,
+            verbose,
+            migrate,
+        } => {
             let repo = GitRepo::open(&cli.repo)?;
             let index = open_index(&cli.repo)?;
             index.rebuild_if_stale(&repo)?;
+
+            // Run migrations first if requested
+            if migrate {
+                let mig_report = zdb_core::consistency::migrate_all(&repo, dry_run)?;
+                let mig_fixes: usize = mig_report.fixes.iter().map(|f| f.applied.len()).sum();
+                if mig_fixes > 0 {
+                    if verbose {
+                        for zf in &mig_report.fixes {
+                            outln!("  {}", zf.path)?;
+                            for fix in &zf.applied {
+                                outln!("    [{}] {fix}", fix.severity())?;
+                            }
+                        }
+                    }
+                    if dry_run {
+                        outln!(
+                            "would migrate {} fields in {} zettels",
+                            mig_fixes,
+                            mig_report.files_fixed
+                        )?;
+                    } else {
+                        outln!(
+                            "migrated {} fields in {} zettels",
+                            mig_fixes,
+                            mig_report.files_fixed
+                        )?;
+                    }
+                }
+            }
+
             let report = zdb_core::consistency::fix_all(&repo, &index, dry_run)?;
 
             let total_fixes: usize = report.fixes.iter().map(|f| f.applied.len()).sum();

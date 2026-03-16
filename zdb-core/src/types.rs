@@ -491,20 +491,25 @@ pub enum Fix {
     TitleCapitalized,
     H1Aligned { old_h1: String, new_h1: String },
     CrossZoneResolved { key: String, kept_zone: Zone },
+    FieldRenamed { old: String, new: String },
+    TypeNormalized { old: String, new: String },
 }
 
 impl Fix {
     pub fn severity(&self) -> Severity {
         match self {
             Fix::CrossZoneResolved { .. } => Severity::Error,
-            Fix::DefaultSet { .. } | Fix::TitleDerived { .. } => Severity::Warning,
+            Fix::DefaultSet { .. } | Fix::TitleDerived { .. } | Fix::FieldRenamed { .. } => {
+                Severity::Warning
+            }
             Fix::TagsDeduped { .. }
             | Fix::TagsSorted
             | Fix::TagsStrippedHash { .. }
             | Fix::KeyNormalized { .. }
             | Fix::TitleTrimmed
             | Fix::TitleCapitalized
-            | Fix::H1Aligned { .. } => Severity::Info,
+            | Fix::H1Aligned { .. }
+            | Fix::TypeNormalized { .. } => Severity::Info,
         }
     }
 }
@@ -534,6 +539,8 @@ impl fmt::Display for Fix {
                     "resolved cross-zone duplicate: {key} (kept {kept_zone:?})"
                 )
             }
+            Fix::FieldRenamed { old, new } => write!(f, "renamed field {old} -> {new}"),
+            Fix::TypeNormalized { old, new } => write!(f, "normalized type {old} -> {new}"),
         }
     }
 }
