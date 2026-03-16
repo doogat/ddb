@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use crate::types::{Fix, ParsedZettel, TableSchema, TitleSource};
+use crate::error::Result;
+use crate::types::{Fix, ParsedZettel, TableSchema, TitleSource, Zone};
 
 /// Convert a string to kebab-case.
 ///
@@ -258,6 +259,98 @@ fn detect_cross_zone_issues(parsed: &ParsedZettel, fixes: &mut Vec<Fix>) {
             });
         }
     }
+}
+
+/// Apply detected fixes to a parsed zettel and return the re-serialized content.
+///
+/// Modifies the zettel in-place, then calls `parser::serialize()` to produce the output string.
+/// Fixes are applied in a deterministic order: tag fixes first, then defaults, title, keys,
+/// and finally cross-zone resolution.
+pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
+    for fix in fixes {
+        match fix {
+            Fix::TagsStrippedHash { .. } => {
+                parsed.meta.tags = parsed
+                    .meta
+                    .tags
+                    .iter()
+                    .map(|t| t.strip_prefix('#').unwrap_or(t).to_string())
+                    .collect();
+            }
+            Fix::TagsDeduped { .. } => {
+                let mut seen = HashSet::new();
+                parsed.meta.tags.retain(|t| seen.insert(t.to_lowercase()));
+            }
+            Fix::TagsSorted => {
+                parsed.meta.tags.sort_by_key(|a| a.to_lowercase());
+            }
+            Fix::DefaultSet { field, value } => {
+                if field == "type" {
+                    parsed.meta.zettel_type = Some(value.clone());
+                } else {
+                    parsed
+                        .meta
+                        .extra
+                        .insert(field.clone(), crate::types::Value::String(value.clone()));
+                }
+            }
+            Fix::TitleDerived { source } => {
+                let title = match source {
+                    TitleSource::FirstH1(h) => h.clone(),
+                    TitleSource::Filename(n) => n.clone(),
+                };
+                parsed.meta.title = Some(title);
+            }
+            Fix::TitleTrimmed => {
+                if let Some(ref mut title) = parsed.meta.title {
+                    *title = title.trim().to_string();
+                }
+            }
+            Fix::TitleCapitalized => {
+                if let Some(ref mut title) = parsed.meta.title {
+                    *title = capitalize_first(title);
+                }
+            }
+            Fix::KeyNormalized { old, new } => {
+                if let Some(value) = parsed.meta.extra.remove(old) {
+                    parsed.meta.extra.insert(new.clone(), value);
+                }
+            }
+            Fix::H1Aligned { old_h1, new_h1 } => {
+                // Replace first matching H1 line in body
+                let target = format!("# {old_h1}");
+                let replacement = format!("# {new_h1}");
+                if let Some(pos) = parsed.body.find(&target) {
+                    let end = pos + target.len();
+                    parsed.body.replace_range(pos..end, &replacement);
+                }
+            }
+            Fix::CrossZoneResolved { key, kept_zone } => {
+                if *kept_zone == Zone::Frontmatter {
+                    // Remove inline field line from body: `key:: value`
+                    remove_inline_field_from_body(&mut parsed.body, key);
+                }
+            }
+        }
+    }
+
+    Ok(crate::parser::serialize(parsed))
+}
+
+/// Remove lines matching `key:: ...` from body text.
+fn remove_inline_field_from_body(body: &mut String, key: &str) {
+    let prefix = format!("{key}::");
+    let lines: Vec<&str> = body.lines().collect();
+    let filtered: Vec<&str> = lines
+        .into_iter()
+        .filter(|line| !line.trim_start().starts_with(&prefix))
+        .collect();
+    let mut result = filtered.join("\n");
+    // Preserve trailing newline if original had one
+    if body.ends_with('\n') {
+        result.push('\n');
+    }
+    *body = result;
 }
 
 #[cfg(test)]
@@ -552,6 +645,133 @@ mod tests {
         assert!(
             fixes.iter().any(|f| matches!(f, Fix::TitleCapitalized)),
             "should detect uncapitalized title: {fixes:?}"
+        );
+    }
+
+    // ── apply_fixes tests ──────────────────────────────────────────
+
+    #[test]
+    fn apply_tag_dedup() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec!["a".into(), "b".into(), "a".into()];
+        let fixes = vec![Fix::TagsDeduped {
+            removed: vec!["a".into()],
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert!(result.contains("  - a\n  - b\n"));
+        assert_eq!(result.matches("  - a").count(), 1);
+    }
+
+    #[test]
+    fn apply_tag_sort() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec!["zebra".into(), "apple".into()];
+        let fixes = vec![Fix::TagsSorted];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        let tag_section = result
+            .lines()
+            .skip_while(|l| !l.starts_with("tags:"))
+            .skip(1)
+            .take_while(|l| l.starts_with("  - "))
+            .collect::<Vec<_>>();
+        assert_eq!(tag_section, vec!["  - apple", "  - zebra"]);
+    }
+
+    #[test]
+    fn apply_tag_strip_hash() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec!["#gtd".into(), "work".into()];
+        let fixes = vec![Fix::TagsStrippedHash {
+            tags: vec!["#gtd".into()],
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert!(result.contains("  - gtd\n"));
+        assert!(!result.contains("#gtd"));
+    }
+
+    #[test]
+    fn apply_default_type() {
+        let mut parsed = empty_parsed();
+        parsed.meta.zettel_type = None;
+        let fixes = vec![Fix::DefaultSet {
+            field: "type".into(),
+            value: "note".into(),
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert!(result.contains("type: note"));
+    }
+
+    #[test]
+    fn apply_title_derived() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = None;
+        let fixes = vec![Fix::TitleDerived {
+            source: TitleSource::FirstH1("Derived Title".into()),
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert!(result.contains("title: Derived Title"));
+    }
+
+    #[test]
+    fn apply_key_normalize() {
+        let mut parsed = empty_parsed();
+        parsed
+            .meta
+            .extra
+            .insert("CamelKey".into(), crate::types::Value::String("val".into()));
+        let fixes = vec![Fix::KeyNormalized {
+            old: "CamelKey".into(),
+            new: "camel-key".into(),
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert!(result.contains("camel-key: val"));
+        assert!(!result.contains("CamelKey"));
+    }
+
+    #[test]
+    fn apply_cross_zone_resolved() {
+        let mut parsed = empty_parsed();
+        parsed.body = "Some text.\nproject:: bar\nMore text.\n".to_string();
+        parsed
+            .meta
+            .extra
+            .insert("project".into(), crate::types::Value::String("foo".into()));
+        let fixes = vec![Fix::CrossZoneResolved {
+            key: "project".into(),
+            kept_zone: Zone::Frontmatter,
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert!(!result.contains("project:: bar"));
+        assert!(result.contains("project: foo"));
+    }
+
+    #[test]
+    fn round_trip_fidelity() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec![
+            "#gtd".into(),
+            "zebra".into(),
+            "apple".into(),
+            "apple".into(),
+        ];
+        parsed.meta.zettel_type = None;
+        parsed.meta.title = Some("  lowercase  ".into());
+        parsed
+            .meta
+            .extra
+            .insert("CamelKey".into(), crate::types::Value::String("val".into()));
+
+        let fixes = detect_fixes(&parsed, None);
+        assert!(!fixes.is_empty());
+
+        let content = apply_fixes(&mut parsed, &fixes).unwrap();
+
+        // Re-parse and detect again — should find no fixes
+        let reparsed = crate::parser::parse(&content, &parsed.path).unwrap();
+        let second_fixes = detect_fixes(&reparsed, None);
+        assert!(
+            second_fixes.is_empty(),
+            "round-trip should produce clean zettel, but found: {second_fixes:?}"
         );
     }
 }
