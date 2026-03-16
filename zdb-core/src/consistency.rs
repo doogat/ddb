@@ -91,20 +91,7 @@ pub fn detect_fixes(parsed: &ParsedZettel, _schema: Option<&TableSchema>) -> Vec
 }
 
 fn detect_tag_issues(tags: &[String], fixes: &mut Vec<Fix>) {
-    // 1. Duplicate tags (case-insensitive)
-    let mut seen = HashSet::new();
-    let mut removed = Vec::new();
-    for tag in tags {
-        let lower = tag.to_lowercase();
-        if !seen.insert(lower) {
-            removed.push(tag.clone());
-        }
-    }
-    if !removed.is_empty() {
-        fixes.push(Fix::TagsDeduped { removed });
-    }
-
-    // 2. Hash-prefixed tags
+    // 1. Hash-prefixed tags (detect first since strip affects dedup)
     let hash_tags: Vec<String> = tags
         .iter()
         .filter(|t| t.starts_with('#'))
@@ -114,12 +101,33 @@ fn detect_tag_issues(tags: &[String], fixes: &mut Vec<Fix>) {
         fixes.push(Fix::TagsStrippedHash { tags: hash_tags });
     }
 
-    // 3. Unsorted tags (case-insensitive, check after dedup/strip would apply)
-    // We check the current state; apply_fixes will sort after other tag fixes.
-    if tags.len() > 1 {
-        let sorted = tags
-            .windows(2)
-            .all(|w| w[0].to_lowercase() <= w[1].to_lowercase());
+    // 2. Duplicate tags (case-insensitive, checked on post-strip values
+    //    so "#apple" + "apple" is detected as a duplicate)
+    let normalized: Vec<String> = tags
+        .iter()
+        .map(|t| t.strip_prefix('#').unwrap_or(t).to_lowercase())
+        .collect();
+    let mut seen = HashSet::new();
+    let mut removed = Vec::new();
+    for (i, norm) in normalized.iter().enumerate() {
+        if !seen.insert(norm.clone()) {
+            removed.push(tags[i].clone());
+        }
+    }
+    if !removed.is_empty() {
+        fixes.push(Fix::TagsDeduped { removed });
+    }
+
+    // 3. Unsorted tags (checked on post-strip post-dedup projection)
+    let mut unique_normalized: Vec<String> = Vec::new();
+    let mut seen2 = HashSet::new();
+    for norm in &normalized {
+        if seen2.insert(norm.clone()) {
+            unique_normalized.push(norm.clone());
+        }
+    }
+    if unique_normalized.len() > 1 {
+        let sorted = unique_normalized.windows(2).all(|w| w[0] <= w[1]);
         if !sorted {
             fixes.push(Fix::TagsSorted);
         }
@@ -138,6 +146,15 @@ fn detect_default_issues(parsed: &ParsedZettel, fixes: &mut Vec<Fix>) {
         fixes.push(Fix::DefaultSet {
             field: "type".to_string(),
             value: "note".to_string(),
+        });
+    }
+
+    // Missing tags — serialize() skips empty tags, so re-serializing after
+    // setting this makes the field explicit in frontmatter
+    if parsed.meta.tags.is_empty() {
+        fixes.push(Fix::DefaultSet {
+            field: "tags".to_string(),
+            value: "[]".to_string(),
         });
     }
 }
@@ -299,6 +316,9 @@ pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
             Fix::DefaultSet { field, value } => {
                 if field == "type" {
                     parsed.meta.zettel_type = Some(value.clone());
+                } else if field == "tags" {
+                    // tags: [] default — tags is already Vec::new(), this is a no-op
+                    // but the fix is recorded for reporting purposes
                 } else {
                     parsed
                         .meta
@@ -901,6 +921,50 @@ mod tests {
         assert!(
             fixes.iter().any(|f| matches!(f, Fix::TitleCapitalized)),
             "should detect uncapitalized title: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn detect_missing_tags_default() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec![];
+        let fixes = detect_fixes(&parsed, None);
+        assert!(
+            fixes.iter().any(
+                |f| matches!(f, Fix::DefaultSet { field, value } if field == "tags" && value == "[]")
+            ),
+            "should detect missing tags: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn detect_hash_apple_plus_apple_dedup() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec!["#apple".into(), "apple".into()];
+        let fixes = detect_fixes(&parsed, None);
+        assert!(
+            fixes
+                .iter()
+                .any(|f| matches!(f, Fix::TagsDeduped { removed } if !removed.is_empty())),
+            "should detect post-strip duplicate: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn apply_hash_apple_plus_apple_roundtrip() {
+        let mut parsed = empty_parsed();
+        parsed.meta.tags = vec!["#apple".into(), "apple".into()];
+        let fixes = detect_fixes(&parsed, None);
+        let content = apply_fixes(&mut parsed, &fixes).unwrap();
+        let reparsed = crate::parser::parse(&content, &parsed.path).unwrap();
+        assert_eq!(reparsed.meta.tags, vec!["apple".to_string()]);
+        // Idempotent
+        let second_fixes = detect_fixes(&reparsed, None);
+        assert!(
+            !second_fixes
+                .iter()
+                .any(|f| matches!(f, Fix::TagsDeduped { .. } | Fix::TagsStrippedHash { .. })),
+            "should be idempotent: {second_fixes:?}"
         );
     }
 
