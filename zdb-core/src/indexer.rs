@@ -886,6 +886,144 @@ impl Index {
         Ok((tables_materialized, types_inferred))
     }
 
+    /// Infer a TableSchema from pre-parsed zettels (no git reads).
+    pub fn infer_schema_from(
+        type_name: &str,
+        zettels: &[ParsedZettel],
+    ) -> crate::types::TableSchema {
+        use crate::types::{ColumnDef, TableSchema, Zone};
+        use std::collections::HashMap;
+
+        let mut columns: HashMap<String, (Zone, Vec<String>)> = HashMap::new();
+
+        for parsed in zettels
+            .iter()
+            .filter(|z| z.meta.zettel_type.as_deref() == Some(type_name))
+        {
+            for (key, value) in &parsed.meta.extra {
+                let inferred_type = infer_yaml_type(value);
+                columns
+                    .entry(key.to_lowercase())
+                    .or_insert_with(|| (Zone::Frontmatter, Vec::new()))
+                    .1
+                    .push(inferred_type);
+            }
+
+            for heading in extract_body_headings(&parsed.body) {
+                columns
+                    .entry(heading.to_lowercase())
+                    .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+            }
+
+            for field in &parsed.inline_fields {
+                if field.zone == Zone::Reference {
+                    let entry = columns
+                        .entry(field.key.to_lowercase())
+                        .or_insert_with(|| (Zone::Reference, Vec::new()));
+                    entry.1.push("TEXT".to_string());
+                }
+            }
+        }
+
+        let mut cols: Vec<ColumnDef> = columns
+            .into_iter()
+            .map(|(name, (zone, types))| {
+                let data_type = widen_types(&types);
+                ColumnDef {
+                    name,
+                    data_type,
+                    references: None,
+                    zone: Some(zone),
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                }
+            })
+            .collect();
+
+        cols.sort_by(|a, b| a.name.cmp(&b.name));
+
+        TableSchema {
+            table_name: type_name.to_string(),
+            columns: cols,
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+        }
+    }
+
+    /// Populate a materialized table from pre-parsed zettels (no git reads).
+    fn populate_materialized_table_from(
+        &self,
+        schema: &crate::types::TableSchema,
+        zettels: &[ParsedZettel],
+    ) -> Result<()> {
+        let type_name = &schema.table_name;
+        for zettel in zettels
+            .iter()
+            .filter(|z| z.meta.zettel_type.as_deref() == Some(type_name.as_str()))
+        {
+            let id = zettel.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
+            self.materialize_row(schema, id, zettel)?;
+        }
+        Ok(())
+    }
+
+    /// Materialize all typed tables from pre-parsed zettels (no redundant git reads).
+    /// Still needs `repo` for loading _typedef content.
+    pub fn materialize_all_types_from(
+        &self,
+        zettels: &[ParsedZettel],
+        repo: &impl ZettelSource,
+    ) -> Result<(usize, Vec<String>)> {
+        let mut tables_materialized = 0;
+        let mut types_inferred = Vec::new();
+
+        let typedef_schemas = self.load_all_typedefs(repo);
+
+        // Find distinct types from the pre-parsed data
+        let mut type_names: Vec<String> = zettels
+            .iter()
+            .filter_map(|z| z.meta.zettel_type.as_deref())
+            .filter(|t| !t.is_empty() && *t != "_typedef")
+            .map(|t| t.to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        type_names.sort();
+
+        for type_name in &type_names {
+            let typedef = typedef_schemas.get(type_name.as_str()).cloned();
+
+            let inferred = Self::infer_schema_from(type_name, zettels);
+            let schema = Self::merge_schemas(typedef.clone(), inferred);
+
+            if schema.columns.is_empty() {
+                continue;
+            }
+
+            if typedef.is_none() {
+                eprintln!("info: type \"{}\" inferred from data", type_name);
+                types_inferred.push(type_name.clone());
+            }
+
+            self.drop_and_create_materialized_table(&schema)?;
+            self.populate_materialized_table_from(&schema, zettels)?;
+            tables_materialized += 1;
+        }
+
+        // Also materialize typedef-only types with no data zettels
+        for (type_name, schema) in &typedef_schemas {
+            if !type_names.contains(type_name) && !schema.columns.is_empty() {
+                self.drop_and_create_materialized_table(schema)?;
+                tables_materialized += 1;
+            }
+        }
+
+        Ok((tables_materialized, types_inferred))
+    }
+
     /// Infer a TableSchema for a type by scanning all data zettels of that type.
     pub fn infer_schema(
         &self,
@@ -2096,6 +2234,83 @@ Widget
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], "Widget");
         assert_eq!(rows[0][1], "42");
+    }
+
+    #[test]
+    fn materialize_from_cached_matches_repo() {
+        use crate::traits::mock::MockSource;
+
+        // Typedef zettel
+        let typedef_content = "\
+---
+id: 20260226140000
+title: items
+type: _typedef
+columns:
+  - name: name
+    data_type: TEXT
+    zone: body
+  - name: count
+    data_type: INTEGER
+    zone: frontmatter
+---\n";
+
+        // Data zettel
+        let data_content = "\
+---
+id: 20260226140100
+title: Widget
+type: items
+count: 42
+---
+
+## name
+
+Widget
+";
+
+        let mut source = MockSource::new();
+        source.files.insert(
+            "zettelkasten/_typedef/20260226140000.md".into(),
+            typedef_content.into(),
+        );
+        source
+            .files
+            .insert("zettelkasten/20260226140100.md".into(), data_content.into());
+
+        // Build parsed zettels
+        let paths = source.list_zettels().unwrap();
+        let parsed: Vec<ParsedZettel> = paths
+            .iter()
+            .map(|p| {
+                let c = source.read_file(p).unwrap();
+                crate::parser::parse(&c, p).unwrap()
+            })
+            .collect();
+
+        // Path A: repo-based materialization
+        let idx_repo = in_memory_index();
+        idx_repo.batch_index(&parsed).unwrap();
+        let (mat_a, inf_a) = idx_repo.materialize_all_types(&source).unwrap();
+
+        // Path B: cached materialization
+        let idx_cached = in_memory_index();
+        idx_cached.batch_index(&parsed).unwrap();
+        let (mat_b, inf_b) = idx_cached
+            .materialize_all_types_from(&parsed, &source)
+            .unwrap();
+
+        assert_eq!(mat_a, mat_b);
+        assert_eq!(inf_a, inf_b);
+
+        // Compare materialized table contents
+        let rows_a = idx_repo.query_raw("SELECT name, count FROM items").unwrap();
+        let rows_b = idx_cached
+            .query_raw("SELECT name, count FROM items")
+            .unwrap();
+        assert_eq!(rows_a, rows_b);
+        assert_eq!(rows_a[0][0], "Widget");
+        assert_eq!(rows_a[0][1], "42");
     }
 
     #[test]
