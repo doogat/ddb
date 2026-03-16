@@ -1630,36 +1630,13 @@ fn extract_column_value(
                 _ => format!("{v:?}"),
             })
             .unwrap_or_default(),
-        Zone::Body => extract_body_section(&zettel.body, &col.name),
+        Zone::Body => zettel
+            .sections
+            .iter()
+            .find(|s| s.level > 0 && s.heading.eq_ignore_ascii_case(&col.name))
+            .map(|s| s.content.trim().to_string())
+            .unwrap_or_default(),
     }
-}
-
-/// Extract text content under a `## heading` in the body.
-fn extract_body_section(body: &str, section_name: &str) -> String {
-    let heading = format!("## {section_name}");
-    let lines: Vec<&str> = body.lines().collect();
-    let mut i = 0;
-    while i < lines.len() {
-        if lines[i].trim() == heading {
-            i += 1;
-            // Skip blank line after heading
-            if i < lines.len() && lines[i].trim().is_empty() {
-                i += 1;
-            }
-            let mut content_lines = Vec::new();
-            while i < lines.len() && !lines[i].starts_with("## ") {
-                content_lines.push(lines[i]);
-                i += 1;
-            }
-            // Trim trailing blank lines
-            while content_lines.last().is_some_and(|l| l.trim().is_empty()) {
-                content_lines.pop();
-            }
-            return content_lines.join("\n");
-        }
-        i += 1;
-    }
-    String::new()
 }
 
 /// Infer a SQL data type from a domain Value.

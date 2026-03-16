@@ -142,6 +142,7 @@ Full parsed representation of a zettel:
 pub struct ParsedZettel {
     pub meta: ZettelMeta,
     pub body: String,
+    pub sections: Vec<Section>,       // parsed body sections
     pub reference_section: String,
     pub inline_fields: Vec<InlineField>,
     pub links: Vec<Link>,
