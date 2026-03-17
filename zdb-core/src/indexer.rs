@@ -2020,7 +2020,7 @@ impl Index {
                 |row| row.get::<_, String>(0),
             )
             .ok()
-            .and_then(|pid| {
+            .map(|pid| {
                 let title: String = self
                     .conn
                     .query_row(
@@ -2029,7 +2029,7 @@ impl Index {
                         |row| row.get(0),
                     )
                     .unwrap_or_default();
-                Some(crate::types::SequenceNode { id: pid, title })
+                crate::types::SequenceNode { id: pid, title }
             });
 
         let children = self.sequence_children(id)?;
