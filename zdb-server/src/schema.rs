@@ -294,12 +294,21 @@ fn typed_zettel_to_value(z: &ParsedZettel, schema: &TableSchema) -> GqlValue {
 fn extract_typed_field(z: &ParsedZettel, col: &ColumnDef) -> GqlValue {
     let zone = col.zone.as_ref().unwrap_or(&Zone::Frontmatter);
     let raw = match zone {
-        Zone::Frontmatter => z.meta.extra.get(&col.name).map(|v| match v {
-            zdb_core::types::Value::String(s) => s.clone(),
-            zdb_core::types::Value::Number(n) => n.to_string(),
-            zdb_core::types::Value::Bool(b) => b.to_string(),
-            _ => String::new(),
-        }),
+        Zone::Frontmatter => {
+            // Use path navigation for dot/bracket column names, flat lookup otherwise
+            let val = if col.name.contains('.') || col.name.contains('[') {
+                let extra = zdb_core::types::Value::Map(z.meta.extra.clone());
+                extra.get_path(&col.name).ok().cloned()
+            } else {
+                z.meta.extra.get(&col.name).cloned()
+            };
+            val.map(|v| match &v {
+                zdb_core::types::Value::String(s) => s.clone(),
+                zdb_core::types::Value::Number(n) => n.to_string(),
+                zdb_core::types::Value::Bool(b) => b.to_string(),
+                _ => String::new(),
+            })
+        }
         Zone::Body => {
             // Extract section content under ## {column_name}
             extract_body_section(&z.body, &col.name)
