@@ -352,6 +352,211 @@ impl Value {
         }
         Ok(current)
     }
+
+    /// Set a value at a dot/bracket path, creating intermediate containers as needed.
+    pub fn set_path(&mut self, path: &str, value: Value) -> std::result::Result<(), PathError> {
+        let segments = parse_path(path)?;
+        let mut current = self;
+
+        for (i, seg) in segments.iter().enumerate() {
+            let is_last = i == segments.len() - 1;
+
+            if is_last {
+                match seg {
+                    PathSegment::Key(key) => match current {
+                        Value::Map(map) => {
+                            map.insert(key.clone(), value);
+                            return Ok(());
+                        }
+                        other => {
+                            return Err(PathError::TypeMismatch {
+                                path: path.to_string(),
+                                expected: "map",
+                                actual: other.type_name(),
+                            });
+                        }
+                    },
+                    PathSegment::Index(idx) => match current {
+                        Value::List(list) => {
+                            while list.len() <= *idx {
+                                list.push(Value::String(String::new()));
+                            }
+                            list[*idx] = value;
+                            return Ok(());
+                        }
+                        other => {
+                            return Err(PathError::TypeMismatch {
+                                path: path.to_string(),
+                                expected: "list",
+                                actual: other.type_name(),
+                            });
+                        }
+                    },
+                }
+            }
+
+            // Navigate intermediate, creating containers if needed
+            let next_is_index = matches!(segments.get(i + 1), Some(PathSegment::Index(_)));
+            match seg {
+                PathSegment::Key(key) => match current {
+                    Value::Map(map) => {
+                        current = map.entry(key.clone()).or_insert_with(|| {
+                            if next_is_index {
+                                Value::List(Vec::new())
+                            } else {
+                                Value::Map(BTreeMap::new())
+                            }
+                        });
+                    }
+                    other => {
+                        return Err(PathError::TypeMismatch {
+                            path: path.to_string(),
+                            expected: "map",
+                            actual: other.type_name(),
+                        });
+                    }
+                },
+                PathSegment::Index(idx) => match current {
+                    Value::List(list) => {
+                        while list.len() <= *idx {
+                            list.push(if next_is_index {
+                                Value::List(Vec::new())
+                            } else {
+                                Value::Map(BTreeMap::new())
+                            });
+                        }
+                        current = &mut list[*idx];
+                    }
+                    other => {
+                        return Err(PathError::TypeMismatch {
+                            path: path.to_string(),
+                            expected: "list",
+                            actual: other.type_name(),
+                        });
+                    }
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove a value at a dot/bracket path, returning the removed value.
+    pub fn remove_path(&mut self, path: &str) -> std::result::Result<Value, PathError> {
+        let segments = parse_path(path)?;
+
+        if segments.len() == 1 {
+            // Single segment: operate directly on self
+            return match &segments[0] {
+                PathSegment::Key(key) => match self {
+                    Value::Map(map) => map.remove(key).ok_or_else(|| PathError::KeyNotFound {
+                        path: path.to_string(),
+                        segment: key.clone(),
+                    }),
+                    other => Err(PathError::TypeMismatch {
+                        path: path.to_string(),
+                        expected: "map",
+                        actual: other.type_name(),
+                    }),
+                },
+                PathSegment::Index(idx) => match self {
+                    Value::List(list) => {
+                        if *idx >= list.len() {
+                            Err(PathError::IndexOutOfBounds {
+                                path: path.to_string(),
+                                index: *idx,
+                                length: list.len(),
+                            })
+                        } else {
+                            Ok(list.remove(*idx))
+                        }
+                    }
+                    other => Err(PathError::TypeMismatch {
+                        path: path.to_string(),
+                        expected: "list",
+                        actual: other.type_name(),
+                    }),
+                },
+            };
+        }
+
+        // Navigate to parent
+        let parent_segments = &segments[..segments.len() - 1];
+        let last = &segments[segments.len() - 1];
+        let mut current = self;
+
+        for seg in parent_segments {
+            match seg {
+                PathSegment::Key(key) => match current {
+                    Value::Map(map) => {
+                        current = map.get_mut(key).ok_or_else(|| PathError::KeyNotFound {
+                            path: path.to_string(),
+                            segment: key.clone(),
+                        })?;
+                    }
+                    other => {
+                        return Err(PathError::TypeMismatch {
+                            path: path.to_string(),
+                            expected: "map",
+                            actual: other.type_name(),
+                        });
+                    }
+                },
+                PathSegment::Index(idx) => match current {
+                    Value::List(list) => {
+                        let len = list.len();
+                        current =
+                            list.get_mut(*idx)
+                                .ok_or_else(|| PathError::IndexOutOfBounds {
+                                    path: path.to_string(),
+                                    index: *idx,
+                                    length: len,
+                                })?;
+                    }
+                    other => {
+                        return Err(PathError::TypeMismatch {
+                            path: path.to_string(),
+                            expected: "list",
+                            actual: other.type_name(),
+                        });
+                    }
+                },
+            }
+        }
+
+        // Remove from parent
+        match last {
+            PathSegment::Key(key) => match current {
+                Value::Map(map) => map.remove(key).ok_or_else(|| PathError::KeyNotFound {
+                    path: path.to_string(),
+                    segment: key.clone(),
+                }),
+                other => Err(PathError::TypeMismatch {
+                    path: path.to_string(),
+                    expected: "map",
+                    actual: other.type_name(),
+                }),
+            },
+            PathSegment::Index(idx) => match current {
+                Value::List(list) => {
+                    if *idx >= list.len() {
+                        Err(PathError::IndexOutOfBounds {
+                            path: path.to_string(),
+                            index: *idx,
+                            length: list.len(),
+                        })
+                    } else {
+                        Ok(list.remove(*idx))
+                    }
+                }
+                other => Err(PathError::TypeMismatch {
+                    path: path.to_string(),
+                    expected: "list",
+                    actual: other.type_name(),
+                }),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
