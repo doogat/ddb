@@ -557,6 +557,63 @@ impl Value {
             },
         }
     }
+
+    // ── Type-safe path accessors ────────────────────────────────────
+
+    pub fn str_at(&self, path: &str) -> std::result::Result<&str, PathError> {
+        match self.get_path(path)? {
+            Value::String(s) => Ok(s),
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "string",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub fn f64_at(&self, path: &str) -> std::result::Result<f64, PathError> {
+        match self.get_path(path)? {
+            Value::Number(n) => Ok(*n),
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "number",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub fn bool_at(&self, path: &str) -> std::result::Result<bool, PathError> {
+        match self.get_path(path)? {
+            Value::Bool(b) => Ok(*b),
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "bool",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub fn list_at(&self, path: &str) -> std::result::Result<&[Value], PathError> {
+        match self.get_path(path)? {
+            Value::List(v) => Ok(v),
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "list",
+                actual: other.type_name(),
+            }),
+        }
+    }
+
+    pub fn map_at(&self, path: &str) -> std::result::Result<&BTreeMap<String, Value>, PathError> {
+        match self.get_path(path)? {
+            Value::Map(m) => Ok(m),
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "map",
+                actual: other.type_name(),
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
