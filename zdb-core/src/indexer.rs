@@ -2042,6 +2042,51 @@ impl Index {
         })
     }
 
+    /// Recursive subtree rooted at `id`. Returns nodes with their depth (0 = root).
+    ///
+    /// Depth-limited to `max_depth` to guard against cycles or very deep trees.
+    pub fn sequence_tree(
+        &self,
+        id: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(crate::types::SequenceNode, usize)>> {
+        let mut result = Vec::new();
+        self.sequence_tree_inner(id, 0, max_depth, &mut result)?;
+        Ok(result)
+    }
+
+    fn sequence_tree_inner(
+        &self,
+        id: &str,
+        depth: usize,
+        max_depth: usize,
+        out: &mut Vec<(crate::types::SequenceNode, usize)>,
+    ) -> Result<()> {
+        let title: String = self
+            .conn
+            .query_row(
+                "SELECT title FROM zettels WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap_or_default();
+        out.push((
+            crate::types::SequenceNode {
+                id: id.to_string(),
+                title,
+            },
+            depth,
+        ));
+        if depth >= max_depth {
+            return Ok(());
+        }
+        let children = self.sequence_children(id)?;
+        for child in &children {
+            self.sequence_tree_inner(&child.id, depth + 1, max_depth, out)?;
+        }
+        Ok(())
+    }
+
     /// Find zettels whose `sequence` field references a non-existent parent.
     pub fn broken_sequences(&self) -> Result<Vec<crate::types::BrokenSequence>> {
         let mut stmt = self.conn.prepare(
@@ -5735,5 +5780,25 @@ Widget
 
         let broken = idx.broken_sequences().unwrap();
         assert!(broken.is_empty());
+    }
+
+    #[test]
+    fn sequence_tree_recursive() {
+        let idx = in_memory_index();
+        let root = seq_zettel("20260315180000", "Root", None);
+        let mid = seq_zettel("20260315180001", "Mid", Some("20260315180000"));
+        let leaf = seq_zettel("20260315180002", "Leaf", Some("20260315180001"));
+        idx.index_zettel(&root).unwrap();
+        idx.index_zettel(&mid).unwrap();
+        idx.index_zettel(&leaf).unwrap();
+
+        let tree = idx.sequence_tree("20260315180000", 100).unwrap();
+        assert_eq!(tree.len(), 3);
+        assert_eq!(tree[0].0.id, "20260315180000");
+        assert_eq!(tree[0].1, 0);
+        assert_eq!(tree[1].0.id, "20260315180001");
+        assert_eq!(tree[1].1, 1);
+        assert_eq!(tree[2].0.id, "20260315180002");
+        assert_eq!(tree[2].1, 2);
     }
 }

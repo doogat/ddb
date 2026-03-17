@@ -1237,21 +1237,10 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
 
             match action {
                 SequenceAction::Tree { id } => {
-                    let info = index.sequence_info(&id)?;
-                    // Print breadcrumb line
-                    let bc: Vec<String> = info
-                        .breadcrumb
-                        .iter()
-                        .map(|n| format!("{} {}", n.id, n.title))
-                        .collect();
-                    outln!("{}", bc.join(" > "))?;
-                    // Print children
-                    if info.children.is_empty() {
-                        outln!("  (no children)")?;
-                    } else {
-                        for c in &info.children {
-                            outln!("  {} {}", c.id, c.title)?;
-                        }
+                    let tree = index.sequence_tree(&id, 100)?;
+                    for (node, depth) in &tree {
+                        let indent = "  ".repeat(*depth);
+                        outln!("{}{} {}", indent, node.id, node.title)?;
                     }
                 }
                 SequenceAction::Breadcrumb { id } => {
