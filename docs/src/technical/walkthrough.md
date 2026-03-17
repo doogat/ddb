@@ -474,6 +474,59 @@ query { orphanZettels(type: "note") { id title zettelType outgoingLinks } }
 ```
 
 
+## 10. Metadata Path Navigation
+
+The `Value` enum supports nested structures (`Map`, `List`), and path navigation lets you traverse them using dot/bracket notation.
+
+### Path syntax
+
+- `author.name` -- navigate nested maps
+- `tags[0]` -- index into lists
+- `author.address.city` -- arbitrary depth
+- `a[0].b.c[2]` -- mixed map/list paths
+- `a\.b` -- escaped dot (literal dot in key name)
+
+### Core API (types.rs)
+
+```rust
+// Navigate
+value.get_path("author.name")?;        // -> &Value
+
+// Mutate
+value.set_path("author.name", val)?;   // creates intermediate maps
+value.remove_path("author.age")?;      // returns removed value
+
+// Type-safe accessors
+value.str_at("author.name")?;          // -> &str
+value.f64_at("score")?;                // -> f64
+value.bool_at("active")?;              // -> bool
+value.list_at("tags")?;                // -> &[Value]
+value.map_at("author")?;               // -> &BTreeMap<String, Value>
+```
+
+Errors are structured as `PathError` with variants `KeyNotFound`, `IndexOutOfBounds`, `TypeMismatch`, and `InvalidPath`, each carrying the full path and failing segment context.
+
+### Indexer integration
+
+Nested `Map` and `List` values in frontmatter `extra` fields are flattened into the `_zdb_fields` table with dot/bracket notation keys:
+
+```yaml
+author:
+  name: Alice
+  email: alice@example.com
+scores:
+  - 10
+  - 20
+```
+
+Produces `_zdb_fields` rows with keys: `author.name`, `author.email`, `scores[0]`, `scores[1]`.
+
+### SQL and GraphQL
+
+Column names containing `.` or `[` trigger path navigation in both:
+- SQL engine `extract_column_value` (materialized type views)
+- GraphQL `extract_typed_field` (dynamic schema resolvers)
+
 For deeper detail on any module, see the corresponding document in `docs/src/technical/`:
 
 - `technical/parser.md` -- three-zone Markdown parsing
