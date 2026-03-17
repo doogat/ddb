@@ -334,6 +334,60 @@ $fixContent = zdb read $FIX_ID
 if ($fixContent -notmatch "  - apple") { throw "tags should be sorted" }
 pass "fix result verified"
 
+# 16f. sequence navigation
+$SEQ_ROOT = zdb create --title "Seq Root"
+$SEQ_CHILD1 = zdb create --title "Seq Child 1"
+$SEQ_CHILD1_PATH = "zettelkasten/$SEQ_CHILD1.md"
+@"
+---
+id: $SEQ_CHILD1
+title: Seq Child 1
+sequence: $SEQ_ROOT
+---
+
+"@ | Set-Content -Path $SEQ_CHILD1_PATH -NoNewline
+git add $SEQ_CHILD1_PATH
+git commit -m "add sequence field" --quiet
+
+$SEQ_CHILD2 = zdb create --title "Seq Child 2"
+$SEQ_CHILD2_PATH = "zettelkasten/$SEQ_CHILD2.md"
+@"
+---
+id: $SEQ_CHILD2
+title: Seq Child 2
+sequence: $SEQ_ROOT
+---
+
+"@ | Set-Content -Path $SEQ_CHILD2_PATH -NoNewline
+git add $SEQ_CHILD2_PATH
+git commit -m "add sequence field" --quiet
+
+zdb reindex | Out-Null
+$output = zdb sequence tree $SEQ_ROOT
+if ($output -notmatch $SEQ_CHILD1) { throw "sequence tree missing child" }
+pass "sequence tree"
+
+$output = zdb sequence breadcrumb $SEQ_CHILD1
+if ($output -notmatch $SEQ_ROOT) { throw "sequence breadcrumb missing root" }
+pass "sequence breadcrumb"
+
+$SEQ_BROKEN = zdb create --title "Seq Broken"
+$SEQ_BROKEN_PATH = "zettelkasten/$SEQ_BROKEN.md"
+@"
+---
+id: $SEQ_BROKEN
+title: Seq Broken
+sequence: "99999999999999"
+---
+
+"@ | Set-Content -Path $SEQ_BROKEN_PATH -NoNewline
+git add $SEQ_BROKEN_PATH
+git commit -m "broken sequence ref" --quiet
+zdb reindex | Out-Null
+$output = zdb sequence broken
+if ($output -notmatch "not found") { throw "sequence broken not detected" }
+pass "sequence broken"
+
 if ($SmokeProfile -eq "quick") {
     pass "quick profile complete"
     exit 0

@@ -264,6 +264,59 @@ pass "fix idempotent"
 $ZDB read "$FIX_ID" | grep -q "  - apple"
 pass "fix result verified"
 
+# 16f. sequence navigation
+SEQ_ROOT=$($ZDB create --title "Seq Root")
+# Patch child zettel to have sequence field
+SEQ_CHILD1=$($ZDB create --title "Seq Child 1")
+SEQ_CHILD1_PATH="zettelkasten/${SEQ_CHILD1}.md"
+cat > "$SEQ_CHILD1_PATH" <<SEQEOF
+---
+id: $SEQ_CHILD1
+title: Seq Child 1
+sequence: $SEQ_ROOT
+---
+
+SEQEOF
+git add "$SEQ_CHILD1_PATH"
+git commit -m "add sequence field" --quiet
+
+SEQ_CHILD2=$($ZDB create --title "Seq Child 2")
+SEQ_CHILD2_PATH="zettelkasten/${SEQ_CHILD2}.md"
+cat > "$SEQ_CHILD2_PATH" <<SEQEOF
+---
+id: $SEQ_CHILD2
+title: Seq Child 2
+sequence: $SEQ_ROOT
+---
+
+SEQEOF
+git add "$SEQ_CHILD2_PATH"
+git commit -m "add sequence field" --quiet
+
+$ZDB reindex >/dev/null
+$ZDB sequence tree "$SEQ_ROOT" | grep -q "$SEQ_CHILD1"
+pass "sequence tree"
+
+$ZDB sequence breadcrumb "$SEQ_CHILD1" | grep -q "$SEQ_ROOT"
+pass "sequence breadcrumb"
+
+# Broken sequence ref
+SEQ_BROKEN=$($ZDB create --title "Seq Broken")
+SEQ_BROKEN_PATH="zettelkasten/${SEQ_BROKEN}.md"
+cat > "$SEQ_BROKEN_PATH" <<SEQEOF
+---
+id: $SEQ_BROKEN
+title: Seq Broken
+sequence: "99999999999999"
+---
+
+SEQEOF
+git add "$SEQ_BROKEN_PATH"
+git commit -m "broken sequence ref" --quiet
+$ZDB reindex >/dev/null
+$ZDB sequence broken | grep -q "not found"
+pass "sequence broken"
+
 if [ "$SMOKE_PROFILE" = "quick" ]; then
   pass "quick profile complete"
   exit 0
