@@ -960,37 +960,15 @@ impl GitRepo {
     }
 }
 
-/// Format a git2 commit time as ISO 8601 (YYYY-MM-DDTHH:MM:SS±HH:MM).
+/// Format a git2 commit time as ISO 8601 (RFC 3339).
 fn format_git_time(commit: &git2::Commit) -> String {
     let time = commit.time();
-    let secs = time.seconds();
-    let offset_min = time.offset_minutes();
-    let sign = if offset_min >= 0 { '+' } else { '-' };
-    let offset_abs = offset_min.unsigned_abs();
-    let oh = offset_abs / 60;
-    let om = offset_abs % 60;
-
-    // Convert epoch seconds + offset to local wall-clock components
-    let local_secs = secs + (offset_min as i64) * 60;
-    let days = local_secs.div_euclid(86400);
-    let day_secs = local_secs.rem_euclid(86400) as u32;
-    let hh = day_secs / 3600;
-    let mm = (day_secs % 3600) / 60;
-    let ss = day_secs % 60;
-
-    // Civil date from Unix day count (algorithm from Howard Hinnant)
-    let z = days + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z.rem_euclid(146097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = (yoe as i64) + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}{sign}{oh:02}:{om:02}")
+    let offset = chrono::FixedOffset::east_opt(time.offset_minutes() * 60)
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+    chrono::DateTime::from_timestamp(time.seconds(), 0)
+        .unwrap_or_default()
+        .with_timezone(&offset)
+        .to_rfc3339()
 }
 
 impl crate::traits::ZettelSource for GitRepo {

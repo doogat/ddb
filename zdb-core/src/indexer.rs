@@ -1778,39 +1778,58 @@ impl Index {
         }
 
         // Query candidate zettels
-        let sql = if let Some(t) = type_filter {
-            if !thresholds.contains_key(t) {
+        let (sql, use_param) = if type_filter.is_some() {
+            if !thresholds.contains_key(type_filter.unwrap()) {
                 return Ok(vec![]);
             }
-            format!(
+            (
                 "SELECT id, title, type, date, path, updated_at FROM zettels \
-                 WHERE type = '{}' AND path NOT LIKE 'zettelkasten/_typedef/%'",
-                t.replace('\'', "''")
+                 WHERE type = ?1 AND path NOT LIKE 'zettelkasten/_typedef/%'"
+                    .to_string(),
+                true,
             )
         } else {
-            "SELECT id, title, type, date, path, updated_at FROM zettels \
-             WHERE path NOT LIKE 'zettelkasten/_typedef/%'"
-                .to_string()
+            (
+                "SELECT id, title, type, date, path, updated_at FROM zettels \
+                 WHERE path NOT LIKE 'zettelkasten/_typedef/%'"
+                    .to_string(),
+                false,
+            )
         };
 
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map([], |row| {
+
+        type Row = (
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+        );
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
             ))
-        })?;
+        };
+
+        let collected: Vec<Row> = if use_param {
+            let rows = stmt.query_map(params![type_filter.unwrap()], map_row)?;
+            rows.filter_map(|r| r.ok()).collect()
+        } else {
+            let rows = stmt.query_map([], map_row)?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
 
         let today = chrono::Utc::now().date_naive();
         let mut stale = Vec::new();
 
-        for r in rows {
-            let (id, title, zettel_type, fm_date, path, updated_at) = r?;
-
+        for (id, title, zettel_type, fm_date, path, updated_at) in collected {
             let threshold = match thresholds.get(&zettel_type) {
                 Some(&t) => t,
                 None => continue,
@@ -1871,29 +1890,31 @@ impl Index {
                    OR l.target_path = z.id \
               )";
 
-        let sql = if let Some(t) = type_filter {
-            format!(
-                "{base} AND z.type = '{}' ORDER BY z.id",
-                t.replace('\'', "''")
-            )
+        let sql = if type_filter.is_some() {
+            format!("{base} AND z.type = ?1 ORDER BY z.id")
         } else {
             format!("{base} ORDER BY z.id")
         };
 
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map([], |row| {
+
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<OrphanZettel> {
             Ok(OrphanZettel {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 zettel_type: row.get(2)?,
                 outgoing_links: row.get::<_, i64>(3)? as usize,
             })
-        })?;
+        };
 
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
+        let out: Vec<OrphanZettel> = if let Some(t) = type_filter {
+            let rows = stmt.query_map(params![t], map_row)?;
+            rows.filter_map(|r| r.ok()).collect()
+        } else {
+            let rows = stmt.query_map([], map_row)?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
         Ok(out)
     }
 
