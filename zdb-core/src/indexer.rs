@@ -1977,14 +1977,16 @@ impl Index {
             if !seen.insert(current.clone()) {
                 break; // cycle detected
             }
-            let title: String = self
+            // Check zettel exists; stop if it doesn't (broken mid-chain ref)
+            let title: Option<String> = self
                 .conn
                 .query_row(
                     "SELECT title FROM zettels WHERE id = ?1",
                     params![&current],
                     |row| row.get(0),
                 )
-                .unwrap_or_default();
+                .ok();
+            let Some(title) = title else { break };
             chain.push(crate::types::SequenceNode {
                 id: current.clone(),
                 title,
@@ -5800,5 +5802,18 @@ Widget
         assert_eq!(tree[1].1, 1);
         assert_eq!(tree[2].0.id, "20260315180002");
         assert_eq!(tree[2].1, 2);
+    }
+
+    #[test]
+    fn sequence_breadcrumb_broken_parent() {
+        let idx = in_memory_index();
+        // Zettel points to nonexistent parent
+        let z = seq_zettel("20260315190000", "Orphan", Some("99999999999999"));
+        idx.index_zettel(&z).unwrap();
+
+        let bc = idx.sequence_breadcrumb("20260315190000").unwrap();
+        // Should return just self, not a phantom node for the missing parent
+        assert_eq!(bc.len(), 1);
+        assert_eq!(bc[0].id, "20260315190000");
     }
 }
