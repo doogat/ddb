@@ -259,7 +259,11 @@ impl Index {
 
         // Insert frontmatter extras, flattening nested maps/lists into dot-notation keys
         for (key, value) in &zettel.meta.extra {
-            flatten_value_into_fields(&self.conn, id, key, value)?;
+            let escaped = key
+                .replace('\\', "\\\\")
+                .replace('.', "\\.")
+                .replace('[', "\\[");
+            flatten_value_into_fields(&self.conn, id, &escaped, value)?;
         }
 
         for link in &zettel.links {
@@ -2126,7 +2130,12 @@ fn flatten_value_into_fields(
         }
         crate::types::Value::Map(map) => {
             for (k, v) in map {
-                let nested_key = format!("{prefix}.{k}");
+                // Escape dots and brackets in key names to avoid ambiguity with path separators
+                let escaped = k
+                    .replace('\\', "\\\\")
+                    .replace('.', "\\.")
+                    .replace('[', "\\[");
+                let nested_key = format!("{prefix}.{escaped}");
                 flatten_value_into_fields(conn, id, &nested_key, v)?;
             }
         }
