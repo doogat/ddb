@@ -233,6 +233,9 @@ $ZDB maintenance auto status | grep -q "off"
 pass "maintenance auto off"
 
 # 16d. discover
+$ZDB discover stale >/dev/null
+pass "discover stale"
+
 $ZDB discover orphans | head -1 | grep -q "."
 pass "discover orphans"
 

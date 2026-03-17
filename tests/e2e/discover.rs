@@ -2,6 +2,71 @@ use crate::common::ZdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
+fn discover_stale() {
+    let repo = ZdbTestRepo::init();
+
+    // Create a typedef via SQL DDL, which places it in zettelkasten/_typedef/
+    repo.zdb()
+        .args(["query", "CREATE TABLE expiring (dummy TEXT)"])
+        .assert()
+        .success();
+
+    // Find the typedef file and patch it to add stale_after_days
+    let typedef_dir = repo.path().join("zettelkasten/_typedef");
+    let typedef_entry = std::fs::read_dir(&typedef_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let content = std::fs::read_to_string(e.path()).unwrap_or_default();
+            content.contains("title: expiring")
+        })
+        .expect("typedef file not found");
+    let typedef_path = typedef_entry.path();
+    let content = std::fs::read_to_string(&typedef_path).unwrap();
+    let patched = content.replace("type: _typedef", "type: _typedef\nstale_after_days: 1");
+    std::fs::write(&typedef_path, &patched).unwrap();
+
+    // Commit the change so git sees it
+    std::process::Command::new("git")
+        .current_dir(repo.path())
+        .args(["add", "-A"])
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .current_dir(repo.path())
+        .args(["commit", "-m", "add stale_after_days"])
+        .output()
+        .unwrap();
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Create a zettel of that type
+    repo.zdb()
+        .args([
+            "create",
+            "--title",
+            "Expiring Note",
+            "--type",
+            "expiring",
+            "--body",
+            "Some content.",
+        ])
+        .assert()
+        .success();
+
+    repo.zdb().arg("reindex").assert().success();
+
+    // The zettel was just committed, so its git revision date is "now".
+    // With stale_after_days=1, it won't be stale yet.
+    // Verify the command runs without error and reports no stale zettels.
+    repo.zdb()
+        .args(["discover", "stale"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("no stale zettels"));
+}
+
+#[test]
 fn discover_mentions() {
     let repo = ZdbTestRepo::init();
 

@@ -295,6 +295,9 @@ if ($output -notmatch "off") { throw "maintenance auto status should be off" }
 pass "maintenance auto off"
 
 # 16d. discover
+zdb discover stale | Out-Null
+pass "discover stale"
+
 $output = zdb discover orphans
 if ($output -notmatch "\d{14}") { throw "discover orphans returned nothing" }
 pass "discover orphans"

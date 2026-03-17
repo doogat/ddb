@@ -1809,22 +1809,22 @@ impl Index {
         }
 
         // Query candidate zettels
-        let (sql, use_param) = if type_filter.is_some() {
-            if !thresholds.contains_key(type_filter.unwrap()) {
+        let (sql, filter_val) = if let Some(t) = type_filter {
+            if !thresholds.contains_key(t) {
                 return Ok(vec![]);
             }
             (
                 "SELECT id, title, type, date, path, updated_at FROM zettels \
                  WHERE type = ?1 AND path NOT LIKE 'zettelkasten/_typedef/%'"
                     .to_string(),
-                true,
+                Some(t.to_string()),
             )
         } else {
             (
                 "SELECT id, title, type, date, path, updated_at FROM zettels \
                  WHERE path NOT LIKE 'zettelkasten/_typedef/%'"
                     .to_string(),
-                false,
+                None,
             )
         };
 
@@ -1849,8 +1849,8 @@ impl Index {
             ))
         };
 
-        let collected: Vec<Row> = if use_param {
-            let rows = stmt.query_map(params![type_filter.unwrap()], map_row)?;
+        let collected: Vec<Row> = if let Some(ref t) = filter_val {
+            let rows = stmt.query_map(params![t], map_row)?;
             rows.filter_map(|r| r.ok()).collect()
         } else {
             let rows = stmt.query_map([], map_row)?;
