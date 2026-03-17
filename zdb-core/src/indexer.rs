@@ -1467,6 +1467,7 @@ impl Index {
               AND z.id NOT IN ( \
                 SELECT source_id FROM _zdb_links \
                 WHERE target_path = ?3 OR target_path = ?4 \
+                   OR target_path IN (SELECT alias FROM _zdb_aliases WHERE zettel_id = ?2) \
               ) \
             ORDER BY z.id";
 
@@ -1556,11 +1557,23 @@ impl Index {
             set
         };
 
+        // Prepare alias lookup for linked-check
+        let mut alias_stmt = self
+            .conn
+            .prepare("SELECT alias FROM _zdb_aliases WHERE zettel_id = ?1")?;
+
         let mut scored: Vec<(String, f64, Vec<String>)> = Vec::new();
         for (candidate_id, shared) in &candidate_tags {
-            // Skip already-linked
+            // Skip already-linked (by ID, path, or alias)
             if linked_ids.contains(candidate_id)
                 || linked_ids.contains(&self.resolve_path(candidate_id).unwrap_or_default())
+                || alias_stmt
+                    .query_map(params![candidate_id], |row| row.get::<_, String>(0))
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .any(|alias| linked_ids.contains(&alias))
             {
                 continue;
             }
@@ -1626,6 +1639,13 @@ impl Index {
                         && id != source_id
                         && !linked_ids.contains(id)
                         && !linked_ids.contains(&self.resolve_path(id).unwrap_or_default())
+                        && !alias_stmt
+                            .query_map(params![id.as_str()], |row| row.get::<_, String>(0))
+                            .ok()
+                            .into_iter()
+                            .flatten()
+                            .flatten()
+                            .any(|alias| linked_ids.contains(&alias))
                     {
                         scored.push((id.clone(), norm_score * 0.4, vec![]));
                     }
@@ -1693,6 +1713,10 @@ impl Index {
             set
         };
 
+        let mut alias_stmt = self
+            .conn
+            .prepare("SELECT alias FROM _zdb_aliases WHERE zettel_id = ?1")?;
+
         let phrase = format!("\"{}\"", source_title.replace('"', "\"\""));
         let mut stmt = self.conn.prepare(
             "SELECT z.id, z.title, rank FROM _zdb_fts \
@@ -1713,6 +1737,13 @@ impl Index {
             let (id, title, rank) = r?;
             if linked_ids.contains(&id)
                 || linked_ids.contains(&self.resolve_path(&id).unwrap_or_default())
+                || alias_stmt
+                    .query_map(params![&id], |row| row.get::<_, String>(0))
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .any(|alias| linked_ids.contains(&alias))
             {
                 continue;
             }
@@ -1888,6 +1919,7 @@ impl Index {
                 SELECT 1 FROM _zdb_links l \
                 WHERE l.target_path = z.path \
                    OR l.target_path = z.id \
+                   OR l.target_path IN (SELECT alias FROM _zdb_aliases WHERE zettel_id = z.id) \
               )";
 
         let sql = if type_filter.is_some() {
@@ -5009,6 +5041,63 @@ Widget
         );
     }
 
+    #[test]
+    fn suggest_links_content_similarity() {
+        let idx = in_memory_index();
+
+        // Zettel A: no tags, title "Machine Learning"
+        let a = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260314000000".into())),
+                title: Some("Machine Learning".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "An overview of ML techniques.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260314000000.md".into(),
+        };
+
+        // Zettel B: no shared tags, body contains "machine learning"
+        let b = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260314000001".into())),
+                title: Some("Deep Learning".into()),
+                date: None,
+                zettel_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "This explores machine learning algorithms and neural networks.".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "zettelkasten/20260314000001.md".into(),
+        };
+
+        idx.index_zettel(&a).unwrap();
+        idx.index_zettel(&b).unwrap();
+
+        // A has no tags, so suggest_links falls back to content-only similarity.
+        // B's body contains "machine learning" which matches A's title via FTS5.
+        let suggestions = idx.suggest_links("20260314000000", 5).unwrap();
+        assert!(
+            suggestions.iter().any(|s| s.id == "20260314000001"),
+            "B should appear via content similarity; got: {:?}",
+            suggestions.iter().map(|s| &s.id).collect::<Vec<_>>()
+        );
+    }
+
     // ── stale_zettels tests ─────────────────────────────────────────
 
     /// Helper: commit a file with a custom git timestamp (epoch seconds).
@@ -5080,6 +5169,71 @@ Widget
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0].id, "20260307000001");
         assert_eq!(stale[0].zettel_type, "task");
+    }
+
+    #[test]
+    fn stale_zettels_respects_type() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        // Type A: stale_after_days: 1
+        let typedef_a =
+            "---\nid: 20260313000000\ntitle: taskA\ntype: _typedef\nstale_after_days: 1\n---\n";
+        repo.commit_file(
+            "zettelkasten/_typedef/20260313000000.md",
+            typedef_a,
+            "add typedef A",
+        )
+        .unwrap();
+
+        // Type B: stale_after_days: 1
+        let typedef_b =
+            "---\nid: 20260313000001\ntitle: taskB\ntype: _typedef\nstale_after_days: 1\n---\n";
+        repo.commit_file(
+            "zettelkasten/_typedef/20260313000001.md",
+            typedef_b,
+            "add typedef B",
+        )
+        .unwrap();
+
+        // Zettel of type A with old git commit time
+        let zettel_a = "---\nid: 20260313000002\ntitle: Old A\ntype: taskA\n---\nBody A.";
+        commit_file_with_time(
+            &repo,
+            "zettelkasten/20260313000002.md",
+            zettel_a,
+            "add old A",
+            1577836800, // 2020-01-01
+        );
+
+        // Zettel of type B with old git commit time
+        let zettel_b = "---\nid: 20260313000003\ntitle: Old B\ntype: taskB\n---\nBody B.";
+        commit_file_with_time(
+            &repo,
+            "zettelkasten/20260313000003.md",
+            zettel_b,
+            "add old B",
+            1577836800, // 2020-01-01
+        );
+
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        // Filter by type A — only type A zettel should be returned
+        let stale = idx.stale_zettels(&repo, Some("taskA")).unwrap();
+        assert_eq!(stale.len(), 1, "should return exactly one stale zettel");
+        assert_eq!(stale[0].id, "20260313000002");
+        assert_eq!(stale[0].zettel_type, "taskA");
+
+        // Unfiltered — both should appear
+        let all_stale = idx.stale_zettels(&repo, None).unwrap();
+        assert_eq!(
+            all_stale.len(),
+            2,
+            "unfiltered should return both stale zettels"
+        );
     }
 
     #[test]
