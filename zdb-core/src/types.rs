@@ -190,14 +190,17 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
                 }
             }
             '.' => {
-                // Flush current key
                 if current_key.is_empty() {
-                    return Err(PathError::InvalidPath {
-                        path: path.to_string(),
-                        reason: "empty segment".to_string(),
-                    });
+                    // Allow dot after bracket (e.g. "a[0].b") — just a separator
+                    if !matches!(segments.last(), Some(PathSegment::Index(_))) {
+                        return Err(PathError::InvalidPath {
+                            path: path.to_string(),
+                            reason: "empty segment".to_string(),
+                        });
+                    }
+                } else {
+                    segments.push(PathSegment::Key(std::mem::take(&mut current_key)));
                 }
-                segments.push(PathSegment::Key(std::mem::take(&mut current_key)));
             }
             '[' => {
                 // Flush any pending key
@@ -1192,5 +1195,183 @@ mod tests {
             AttachmentInfo::mime_from_filename("noext"),
             "application/octet-stream"
         );
+    }
+
+    // ── Path navigation tests ───────────────────────────────────────
+
+    fn nested_map() -> Value {
+        let mut inner = BTreeMap::new();
+        inner.insert("name".to_string(), Value::String("Alice".to_string()));
+        inner.insert("age".to_string(), Value::Number(30.0));
+
+        let mut deep = BTreeMap::new();
+        deep.insert("city".to_string(), Value::String("NYC".to_string()));
+        inner.insert("address".to_string(), Value::Map(deep));
+
+        let mut root = BTreeMap::new();
+        root.insert("author".to_string(), Value::Map(inner));
+        root.insert(
+            "tags".to_string(),
+            Value::List(vec![
+                Value::String("rust".to_string()),
+                Value::String("zettel".to_string()),
+            ]),
+        );
+        Value::Map(root)
+    }
+
+    #[test]
+    fn path_parse_simple() {
+        let segs = parse_path("a.b").unwrap();
+        assert_eq!(
+            segs,
+            vec![PathSegment::Key("a".into()), PathSegment::Key("b".into())]
+        );
+    }
+
+    #[test]
+    fn path_parse_index() {
+        let segs = parse_path("a[0]").unwrap();
+        assert_eq!(
+            segs,
+            vec![PathSegment::Key("a".into()), PathSegment::Index(0)]
+        );
+    }
+
+    #[test]
+    fn path_parse_complex() {
+        let segs = parse_path("a[0].b.c[2]").unwrap();
+        assert_eq!(
+            segs,
+            vec![
+                PathSegment::Key("a".into()),
+                PathSegment::Index(0),
+                PathSegment::Key("b".into()),
+                PathSegment::Key("c".into()),
+                PathSegment::Index(2),
+            ]
+        );
+    }
+
+    #[test]
+    fn path_parse_escaped_dot() {
+        let segs = parse_path(r"a\.b").unwrap();
+        assert_eq!(segs, vec![PathSegment::Key("a.b".into())]);
+    }
+
+    #[test]
+    fn path_parse_empty_rejected() {
+        assert!(parse_path("").is_err());
+        assert!(parse_path("a..b").is_err());
+    }
+
+    #[test]
+    fn get_path_nested_map() {
+        let v = nested_map();
+        assert_eq!(
+            v.get_path("author.name").unwrap(),
+            &Value::String("Alice".into())
+        );
+        assert_eq!(
+            v.get_path("author.address.city").unwrap(),
+            &Value::String("NYC".into())
+        );
+    }
+
+    #[test]
+    fn get_path_list_index() {
+        let v = nested_map();
+        assert_eq!(
+            v.get_path("tags[0]").unwrap(),
+            &Value::String("rust".into())
+        );
+        assert_eq!(
+            v.get_path("tags[1]").unwrap(),
+            &Value::String("zettel".into())
+        );
+    }
+
+    #[test]
+    fn get_path_missing_key() {
+        let v = nested_map();
+        let err = v.get_path("author.email").unwrap_err();
+        match err {
+            PathError::KeyNotFound { segment, .. } => assert_eq!(segment, "email"),
+            other => panic!("expected KeyNotFound, got {other}"),
+        }
+    }
+
+    #[test]
+    fn get_path_out_of_bounds() {
+        let v = nested_map();
+        let err = v.get_path("tags[5]").unwrap_err();
+        match err {
+            PathError::IndexOutOfBounds { index, length, .. } => {
+                assert_eq!(index, 5);
+                assert_eq!(length, 2);
+            }
+            other => panic!("expected IndexOutOfBounds, got {other}"),
+        }
+    }
+
+    #[test]
+    fn get_path_type_mismatch() {
+        let v = nested_map();
+        let err = v.get_path("author.name.foo").unwrap_err();
+        match err {
+            PathError::TypeMismatch {
+                expected, actual, ..
+            } => {
+                assert_eq!(expected, "map");
+                assert_eq!(actual, "string");
+            }
+            other => panic!("expected TypeMismatch, got {other}"),
+        }
+    }
+
+    #[test]
+    fn set_path_creates_intermediates() {
+        let mut v = Value::Map(BTreeMap::new());
+        v.set_path("a.b.c", Value::Number(42.0)).unwrap();
+        assert_eq!(v.get_path("a.b.c").unwrap(), &Value::Number(42.0));
+    }
+
+    #[test]
+    fn set_path_replaces_existing() {
+        let mut v = nested_map();
+        v.set_path("author.name", Value::String("Bob".into()))
+            .unwrap();
+        assert_eq!(
+            v.get_path("author.name").unwrap(),
+            &Value::String("Bob".into())
+        );
+    }
+
+    #[test]
+    fn remove_path_returns_value() {
+        let mut v = nested_map();
+        let removed = v.remove_path("author.age").unwrap();
+        assert_eq!(removed, Value::Number(30.0));
+        assert!(v.get_path("author.age").is_err());
+    }
+
+    #[test]
+    fn convenience_str_at() {
+        let v = nested_map();
+        assert_eq!(v.str_at("author.name").unwrap(), "Alice");
+        let err = v.str_at("author.age").unwrap_err();
+        match err {
+            PathError::TypeMismatch { expected, .. } => assert_eq!(expected, "string"),
+            other => panic!("expected TypeMismatch, got {other}"),
+        }
+    }
+
+    #[test]
+    fn round_trip() {
+        let mut v = Value::Map(BTreeMap::new());
+        let val = Value::List(vec![Value::Number(1.0), Value::Number(2.0)]);
+        v.set_path("data.items", val.clone()).unwrap();
+        assert_eq!(v.get_path("data.items").unwrap(), &val);
+        assert_eq!(v.f64_at("data.items[0]").unwrap(), 1.0);
     }
 }
