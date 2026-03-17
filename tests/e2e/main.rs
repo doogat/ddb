@@ -12,6 +12,7 @@ mod pgwire;
 mod read_pool;
 mod rename;
 mod search_links;
+mod sequence;
 mod serve;
 mod server_mutations;
 mod sql_lifecycle;
