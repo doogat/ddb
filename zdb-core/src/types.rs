@@ -310,6 +310,48 @@ impl Value {
     pub fn is_mapping(&self) -> bool {
         matches!(self, Value::Map(_))
     }
+
+    /// Navigate a nested `Value` tree using dot/bracket path notation.
+    pub fn get_path(&self, path: &str) -> std::result::Result<&Value, PathError> {
+        let segments = parse_path(path)?;
+        let mut current = self;
+        for seg in &segments {
+            match seg {
+                PathSegment::Key(key) => match current {
+                    Value::Map(map) => {
+                        current = map.get(key).ok_or_else(|| PathError::KeyNotFound {
+                            path: path.to_string(),
+                            segment: key.clone(),
+                        })?;
+                    }
+                    other => {
+                        return Err(PathError::TypeMismatch {
+                            path: path.to_string(),
+                            expected: "map",
+                            actual: other.type_name(),
+                        });
+                    }
+                },
+                PathSegment::Index(idx) => match current {
+                    Value::List(list) => {
+                        current = list.get(*idx).ok_or_else(|| PathError::IndexOutOfBounds {
+                            path: path.to_string(),
+                            index: *idx,
+                            length: list.len(),
+                        })?;
+                    }
+                    other => {
+                        return Err(PathError::TypeMismatch {
+                            path: path.to_string(),
+                            expected: "list",
+                            actual: other.type_name(),
+                        });
+                    }
+                },
+            }
+        }
+        Ok(current)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
