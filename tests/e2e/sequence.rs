@@ -1,4 +1,4 @@
-use crate::common::ZdbTestRepo;
+use crate::common::{ServerGuard, ZdbTestRepo};
 use predicates::prelude::*;
 
 /// Helper: create a zettel, patch its frontmatter to include `sequence: <parent_id>`,
@@ -107,4 +107,54 @@ fn sequence_broken_list() {
         .stdout(predicate::str::contains(&broken_id))
         .stdout(predicate::str::contains("99999999999999"))
         .stdout(predicate::str::contains("not found"));
+}
+
+#[test]
+fn sequence_graphql_queries() {
+    let repo = ZdbTestRepo::init();
+
+    // Create root
+    let out = repo
+        .zdb()
+        .args(["create", "--title", "GQL Root"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let root_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    // Create child with sequence field
+    let child_id = create_with_sequence(&repo, "GQL Child", &root_id);
+    repo.zdb().arg("reindex").assert().success();
+
+    let server = ServerGuard::start(&repo);
+
+    // sequenceChildren
+    let result = server.graphql(&format!(
+        r#"{{ sequenceChildren(id: "{root_id}") {{ id title }} }}"#
+    ));
+    let children = &result["data"]["sequenceChildren"];
+    assert!(children.is_array());
+    assert_eq!(children[0]["id"].as_str().unwrap(), child_id);
+
+    // sequenceBreadcrumb
+    let result = server.graphql(&format!(
+        r#"{{ sequenceBreadcrumb(id: "{child_id}") {{ id title }} }}"#
+    ));
+    let bc = &result["data"]["sequenceBreadcrumb"];
+    assert!(bc.is_array());
+    assert_eq!(bc[0]["id"].as_str().unwrap(), root_id);
+    assert_eq!(bc[1]["id"].as_str().unwrap(), child_id);
+
+    // sequenceInfo
+    let result = server.graphql(&format!(
+        r#"{{ sequenceInfo(id: "{child_id}") {{ parent {{ id }} children {{ id }} breadcrumb {{ id }} }} }}"#
+    ));
+    let info = &result["data"]["sequenceInfo"];
+    assert_eq!(info["parent"]["id"].as_str().unwrap(), root_id);
+
+    // brokenSequences (should be empty here)
+    let result = server.graphql(r#"{ brokenSequences { zettelId brokenParentId } }"#);
+    let broken = &result["data"]["brokenSequences"];
+    assert!(broken.is_array());
+    assert_eq!(broken.as_array().unwrap().len(), 0);
 }
