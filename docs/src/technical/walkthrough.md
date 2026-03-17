@@ -414,6 +414,66 @@ The `consistency` module (`consistency.rs`) provides a detect-then-apply pipelin
 zdb fix [--dry-run] [-v/--verbose] [--migrate]
 ```
 
+## 9. Discovery
+
+The discovery system surfaces latent connections, maintenance issues, and knowledge gaps across the zettel graph. Four queries are available via CLI and GraphQL.
+
+### Unlinked mentions
+
+Finds zettels whose body text mentions another zettel's title without linking to it. Uses FTS5 phrase matching against the target's title, then excludes zettels that already link to the target (by path, ID, or alias). Self-references are also excluded.
+
+```bash
+zdb discover mentions <id>
+zdb discover mentions --all
+```
+
+```graphql
+query { unlinkedMentions(id: "20260301120000") { sourceId sourceTitle snippet } }
+```
+
+### Link suggestions
+
+Suggests related zettels based on a hybrid scoring algorithm. Candidates with shared tags are scored by Jaccard similarity (weighted 0.6), then FTS5 BM25 content similarity against the source title is added (weighted 0.4). Already-linked zettels are excluded. When the source has no tags, the system falls back to content-only scoring.
+
+```bash
+zdb discover similar <id> [--limit N]
+```
+
+```graphql
+query { suggestions(id: "20260301120000", limit: 5) { id title score sharedTags } }
+```
+
+### Staleness tracking
+
+Identifies zettels that haven't been updated within their type's configured threshold. Types opt in by setting `stale_after_days` in the typedef frontmatter:
+
+```yaml
+stale_after_days: 30
+```
+
+The last-updated date uses a priority chain: git revision date > frontmatter `date` field > indexer `updated_at`. Results are sorted by staleness (most stale first).
+
+```bash
+zdb discover stale [--type <type>]
+```
+
+```graphql
+query { staleZettels(type: "project") { id title zettelType lastUpdated dateSource daysStale thresholdDays } }
+```
+
+### Orphan detection
+
+Finds zettels with zero incoming links (no other zettel links to them). Typedef zettels are excluded since they are structural, not content nodes. Results include the outgoing link count to help assess whether an orphan is isolated or simply unreferenced.
+
+```bash
+zdb discover orphans [--type <type>]
+```
+
+```graphql
+query { orphanZettels(type: "note") { id title zettelType outgoingLinks } }
+```
+
+
 For deeper detail on any module, see the corresponding document in `docs/src/technical/`:
 
 - `technical/parser.md` -- three-zone Markdown parsing
