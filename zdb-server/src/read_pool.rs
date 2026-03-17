@@ -12,8 +12,8 @@ use zdb_core::git_ops::GitRepo;
 use zdb_core::indexer::Index;
 use zdb_core::sql_engine::{SqlEngine, SqlResult};
 use zdb_core::types::{
-    OrphanZettel, PaginatedSearchResult, ParsedZettel, StaleZettel, Suggestion, TableSchema,
-    UnlinkedMention,
+    BrokenSequence, OrphanZettel, PaginatedSearchResult, ParsedZettel, SequenceInfo, SequenceNode,
+    StaleZettel, Suggestion, TableSchema, UnlinkedMention,
 };
 
 use crate::actor;
@@ -228,6 +228,24 @@ impl ReadPool {
     pub async fn orphan_zettels(&self, type_filter: Option<String>) -> Result<Vec<OrphanZettel>> {
         self.with_index(move |index| index.orphan_zettels(type_filter.as_deref()))
             .await
+    }
+
+    pub async fn sequence_info(&self, id: String) -> Result<SequenceInfo> {
+        self.with_index(move |index| index.sequence_info(&id)).await
+    }
+
+    pub async fn sequence_children(&self, id: String) -> Result<Vec<SequenceNode>> {
+        self.with_index(move |index| index.sequence_children(&id))
+            .await
+    }
+
+    pub async fn sequence_breadcrumb(&self, id: String) -> Result<Vec<SequenceNode>> {
+        self.with_index(move |index| index.sequence_breadcrumb(&id))
+            .await
+    }
+
+    pub async fn broken_sequences(&self) -> Result<Vec<BrokenSequence>> {
+        self.with_index(move |index| index.broken_sequences()).await
     }
 
     // --- NoSQL (redb) reads ---

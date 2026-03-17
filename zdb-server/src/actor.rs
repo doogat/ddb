@@ -8,8 +8,9 @@ use zdb_core::indexer::Index;
 use zdb_core::parser;
 use zdb_core::sql_engine::{schema_from_parsed, SqlEngine, SqlResult};
 use zdb_core::types::{
-    CompactionReport, MaintenanceReport, OrphanZettel, PaginatedSearchResult, ParsedZettel,
-    StaleZettel, Suggestion, SyncReport, TableSchema, UnlinkedMention, ZettelMeta,
+    BrokenSequence, CompactionReport, MaintenanceReport, OrphanZettel, PaginatedSearchResult,
+    ParsedZettel, SequenceInfo, SequenceNode, StaleZettel, Suggestion, SyncReport, TableSchema,
+    UnlinkedMention, ZettelMeta,
 };
 
 use crate::events::{EventBus, EventKind, ZettelEvent};
@@ -119,6 +120,16 @@ pub enum ActorCommand {
     OrphanZettels {
         type_filter: Option<String>,
     },
+    SequenceInfo {
+        id: String,
+    },
+    SequenceChildren {
+        id: String,
+    },
+    SequenceBreadcrumb {
+        id: String,
+    },
+    BrokenSequences,
 }
 
 /// Replies from the actor.
@@ -144,6 +155,9 @@ pub enum ActorReply {
     Suggestions(ActorResult<Vec<Suggestion>>),
     StaleZettels(ActorResult<Vec<StaleZettel>>),
     OrphanZettels(ActorResult<Vec<OrphanZettel>>),
+    SequenceInfoResult(ActorResult<SequenceInfo>),
+    SequenceNodes(ActorResult<Vec<SequenceNode>>),
+    BrokenSequences(ActorResult<Vec<BrokenSequence>>),
 }
 
 struct ActorMsg {
@@ -483,6 +497,34 @@ impl ActorHandle {
         }
     }
 
+    pub async fn sequence_info(&self, id: String) -> ActorResult<SequenceInfo> {
+        match self.send(ActorCommand::SequenceInfo { id }).await {
+            ActorReply::SequenceInfoResult(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn sequence_children(&self, id: String) -> ActorResult<Vec<SequenceNode>> {
+        match self.send(ActorCommand::SequenceChildren { id }).await {
+            ActorReply::SequenceNodes(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn sequence_breadcrumb(&self, id: String) -> ActorResult<Vec<SequenceNode>> {
+        match self.send(ActorCommand::SequenceBreadcrumb { id }).await {
+            ActorReply::SequenceNodes(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn broken_sequences(&self) -> ActorResult<Vec<BrokenSequence>> {
+        match self.send(ActorCommand::BrokenSequences).await {
+            ActorReply::BrokenSequences(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
     async fn send(&self, cmd: ActorCommand) -> ActorReply {
         let (reply_tx, reply_rx) = oneshot::channel();
         let msg = ActorMsg {
@@ -799,6 +841,16 @@ fn handle_command_shared(
         ActorCommand::OrphanZettels { type_filter } => {
             ActorReply::OrphanZettels(index.orphan_zettels(type_filter.as_deref()))
         }
+        ActorCommand::SequenceInfo { id } => {
+            ActorReply::SequenceInfoResult(index.sequence_info(&id))
+        }
+        ActorCommand::SequenceChildren { id } => {
+            ActorReply::SequenceNodes(index.sequence_children(&id))
+        }
+        ActorCommand::SequenceBreadcrumb { id } => {
+            ActorReply::SequenceNodes(index.sequence_breadcrumb(&id))
+        }
+        ActorCommand::BrokenSequences => ActorReply::BrokenSequences(index.broken_sequences()),
         // NoSQL variants are handled in handle_command before delegation
         ActorCommand::NoSqlGet { .. }
         | ActorCommand::NoSqlScanType { .. }

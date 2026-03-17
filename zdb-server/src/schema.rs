@@ -1096,6 +1096,181 @@ pub fn build_schema(
         );
     }
 
+    // -- Sequence output types --
+    let sequence_node_type = Object::new("SequenceNode")
+        .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)));
+
+    let sequence_info_type = Object::new("SequenceInfo")
+        .field(Field::new(
+            "parent",
+            TypeRef::named("SequenceNode"),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let info = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    if let GqlValue::Object(obj) = info {
+                        if let Some(p) = obj.get("parent") {
+                            if matches!(p, GqlValue::Null) {
+                                return Ok(None);
+                            }
+                            return Ok(Some(FieldValue::owned_any(p.clone())));
+                        }
+                    }
+                    Ok(None)
+                })
+            },
+        ))
+        .field(Field::new(
+            "children",
+            TypeRef::named_nn_list_nn("SequenceNode"),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let info = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    if let GqlValue::Object(obj) = info {
+                        if let Some(GqlValue::List(children)) = obj.get("children") {
+                            return Ok(Some(FieldValue::list(
+                                children.iter().map(|c| FieldValue::owned_any(c.clone())),
+                            )));
+                        }
+                    }
+                    Ok(Some(FieldValue::list(std::iter::empty::<FieldValue>())))
+                })
+            },
+        ))
+        .field(Field::new(
+            "breadcrumb",
+            TypeRef::named_nn_list_nn("SequenceNode"),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let info = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    if let GqlValue::Object(obj) = info {
+                        if let Some(GqlValue::List(bc)) = obj.get("breadcrumb") {
+                            return Ok(Some(FieldValue::list(
+                                bc.iter().map(|c| FieldValue::owned_any(c.clone())),
+                            )));
+                        }
+                    }
+                    Ok(Some(FieldValue::list(std::iter::empty::<FieldValue>())))
+                })
+            },
+        ));
+
+    let broken_sequence_type = Object::new("BrokenSequence")
+        .field(simple_field("zettelId", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field(
+            "brokenParentId",
+            TypeRef::named_nn(TypeRef::ID),
+        ));
+
+    // sequenceInfo(id: ID!): SequenceInfo!
+    {
+        query = query.field(
+            Field::new("sequenceInfo", TypeRef::named_nn("SequenceInfo"), |ctx| {
+                FieldFuture::new(async move {
+                    let pool = ctx.data::<ReadPool>()?;
+                    let id = ctx.args.try_get("id")?.string()?.to_string();
+                    let info = pool.sequence_info(id).await.map_err(to_server_error)?;
+
+                    fn node_to_gql(n: &zdb_core::types::SequenceNode) -> GqlValue {
+                        let mut obj = IndexMap::new();
+                        obj.insert(Name::new("id"), GqlValue::from(n.id.as_str()));
+                        obj.insert(Name::new("title"), GqlValue::from(n.title.as_str()));
+                        GqlValue::Object(obj)
+                    }
+
+                    let parent_val = match &info.parent {
+                        Some(p) => node_to_gql(p),
+                        None => GqlValue::Null,
+                    };
+                    let children_val =
+                        GqlValue::List(info.children.iter().map(node_to_gql).collect());
+                    let bc_val = GqlValue::List(info.breadcrumb.iter().map(node_to_gql).collect());
+
+                    let mut obj = IndexMap::new();
+                    obj.insert(Name::new("parent"), parent_val);
+                    obj.insert(Name::new("children"), children_val);
+                    obj.insert(Name::new("breadcrumb"), bc_val);
+                    Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
+                })
+            })
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+        );
+    }
+
+    // sequenceChildren(id: ID!): [SequenceNode!]!
+    {
+        query = query.field(
+            Field::new(
+                "sequenceChildren",
+                TypeRef::named_nn_list_nn("SequenceNode"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let id = ctx.args.try_get("id")?.string()?.to_string();
+                        let children = pool.sequence_children(id).await.map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(children.iter().map(|n| {
+                            let mut obj = IndexMap::new();
+                            obj.insert(Name::new("id"), GqlValue::from(n.id.as_str()));
+                            obj.insert(Name::new("title"), GqlValue::from(n.title.as_str()));
+                            FieldValue::owned_any(GqlValue::Object(obj))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+        );
+    }
+
+    // sequenceBreadcrumb(id: ID!): [SequenceNode!]!
+    {
+        query = query.field(
+            Field::new(
+                "sequenceBreadcrumb",
+                TypeRef::named_nn_list_nn("SequenceNode"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let id = ctx.args.try_get("id")?.string()?.to_string();
+                        let bc = pool
+                            .sequence_breadcrumb(id)
+                            .await
+                            .map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(bc.iter().map(|n| {
+                            let mut obj = IndexMap::new();
+                            obj.insert(Name::new("id"), GqlValue::from(n.id.as_str()));
+                            obj.insert(Name::new("title"), GqlValue::from(n.title.as_str()));
+                            FieldValue::owned_any(GqlValue::Object(obj))
+                        }))))
+                    })
+                },
+            )
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+        );
+    }
+
+    // brokenSequences: [BrokenSequence!]!
+    {
+        query = query.field(Field::new(
+            "brokenSequences",
+            TypeRef::named_nn_list_nn("BrokenSequence"),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let pool = ctx.data::<ReadPool>()?;
+                    let broken = pool.broken_sequences().await.map_err(to_server_error)?;
+                    Ok(Some(FieldValue::list(broken.iter().map(|b| {
+                        let mut obj = IndexMap::new();
+                        obj.insert(Name::new("zettelId"), GqlValue::from(b.zettel_id.as_str()));
+                        obj.insert(
+                            Name::new("brokenParentId"),
+                            GqlValue::from(b.broken_parent_id.as_str()),
+                        );
+                        FieldValue::owned_any(GqlValue::Object(obj))
+                    }))))
+                })
+            },
+        ));
+    }
+
     // -- Dynamic per-type queries --
     let mut dynamic_types: Vec<Object> = Vec::new();
     let mut dynamic_inputs: Vec<InputObject> = Vec::new();
@@ -1936,6 +2111,9 @@ pub fn build_schema(
     .register(suggestion_type)
     .register(stale_zettel_type)
     .register(orphan_zettel_type)
+    .register(sequence_node_type)
+    .register(sequence_info_type)
+    .register(broken_sequence_type)
     .register(change_event_type)
     .register(sync_result_type)
     .register(compact_result_type)
