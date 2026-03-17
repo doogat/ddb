@@ -1188,6 +1188,27 @@ pub struct OrphanZettel {
     pub outgoing_links: usize,
 }
 
+// ── Sequence types ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct SequenceNode {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SequenceInfo {
+    pub parent: Option<SequenceNode>,
+    pub children: Vec<SequenceNode>,
+    pub breadcrumb: Vec<SequenceNode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BrokenSequence {
+    pub zettel_id: String,
+    pub broken_parent_id: String,
+}
+
 /// Metadata for a file attached to a zettel, stored in `reference/{zettel_id}/`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AttachmentInfo {
