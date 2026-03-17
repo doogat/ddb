@@ -245,6 +245,11 @@ enum Command {
         #[command(subcommand)]
         action: DiscoverAction,
     },
+    /// Navigate zettel sequences (parent/child chains)
+    Sequence {
+        #[command(subcommand)]
+        action: SequenceAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -348,6 +353,22 @@ enum DiscoverAction {
         #[arg(long, name = "type")]
         type_filter: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum SequenceAction {
+    /// Show parent, self, and children of a zettel in a sequence
+    Tree {
+        /// Zettel ID
+        id: String,
+    },
+    /// Show the path from the sequence root to a zettel
+    Breadcrumb {
+        /// Zettel ID
+        id: String,
+    },
+    /// List broken sequence references (parent doesn't exist)
+    Broken,
 }
 
 fn main() {
@@ -1203,6 +1224,49 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                                 o.zettel_type,
                                 o.outgoing_links
                             )?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Command::Sequence { action } => {
+            let repo = GitRepo::open(&cli.repo)?;
+            let index = open_index(&cli.repo)?;
+            index.rebuild_if_stale(&repo)?;
+
+            match action {
+                SequenceAction::Tree { id } => {
+                    let info = index.sequence_info(&id)?;
+                    // Print breadcrumb line
+                    let bc: Vec<String> = info
+                        .breadcrumb
+                        .iter()
+                        .map(|n| format!("{} {}", n.id, n.title))
+                        .collect();
+                    outln!("{}", bc.join(" > "))?;
+                    // Print children
+                    if info.children.is_empty() {
+                        outln!("  (no children)")?;
+                    } else {
+                        for c in &info.children {
+                            outln!("  {} {}", c.id, c.title)?;
+                        }
+                    }
+                }
+                SequenceAction::Breadcrumb { id } => {
+                    let bc = index.sequence_breadcrumb(&id)?;
+                    for n in &bc {
+                        outln!("{}\t{}", n.id, n.title)?;
+                    }
+                }
+                SequenceAction::Broken => {
+                    let broken = index.broken_sequences()?;
+                    if broken.is_empty() {
+                        outln!("no broken sequences")?;
+                    } else {
+                        for b in &broken {
+                            outln!("{} -> {} (not found)", b.zettel_id, b.broken_parent_id)?;
                         }
                     }
                 }
