@@ -2174,14 +2174,13 @@ fn extract_column_value(
             String::new()
         }
         Zone::Frontmatter => {
-            // Try path navigation for dot-notation column names, fall back to flat lookup
+            // Use path navigation for dot/bracket names, flat lookup otherwise
             let val = if col.name.contains('.') || col.name.contains('[') {
-                let extra_val = crate::types::Value::Map(zettel.meta.extra.clone());
-                extra_val.get_path(&col.name).ok().cloned()
+                crate::types::get_path_in_map(&zettel.meta.extra, &col.name).ok()
             } else {
-                zettel.meta.extra.get(&col.name).cloned()
+                zettel.meta.extra.get(&col.name)
             };
-            val.map(|v| match &v {
+            val.map(|v| match v {
                 crate::types::Value::Number(n) => n.to_string(),
                 crate::types::Value::Bool(b) => b.to_string(),
                 crate::types::Value::String(s) => s.clone(),

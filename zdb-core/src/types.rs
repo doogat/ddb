@@ -271,6 +271,73 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
     Ok(segments)
 }
 
+/// Navigate a dot/bracket path starting from a `BTreeMap`, without wrapping in `Value::Map`.
+/// Useful when you have `&BTreeMap<String, Value>` (e.g., `extra` fields) and want to avoid cloning.
+pub fn get_path_in_map<'a>(
+    map: &'a BTreeMap<String, Value>,
+    path: &str,
+) -> std::result::Result<&'a Value, PathError> {
+    let segments = parse_path(path)?;
+    if segments.is_empty() {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "no segments".to_string(),
+        });
+    }
+
+    // First segment must be a Key into the map
+    let first = &segments[0];
+    let PathSegment::Key(key) = first else {
+        return Err(PathError::TypeMismatch {
+            path: path.to_string(),
+            expected: "map",
+            actual: "map (index on root)",
+        });
+    };
+    let mut current = map.get(key).ok_or_else(|| PathError::KeyNotFound {
+        path: path.to_string(),
+        segment: key.clone(),
+    })?;
+
+    for seg in &segments[1..] {
+        match seg {
+            PathSegment::Key(k) => match current {
+                Value::Map(m) => {
+                    current = m.get(k).ok_or_else(|| PathError::KeyNotFound {
+                        path: path.to_string(),
+                        segment: k.clone(),
+                    })?;
+                }
+                other => {
+                    return Err(PathError::TypeMismatch {
+                        path: path.to_string(),
+                        expected: "map",
+                        actual: other.type_name(),
+                    });
+                }
+            },
+            PathSegment::Index(idx) => match current {
+                Value::List(list) => {
+                    let len = list.len();
+                    current = list.get(*idx).ok_or_else(|| PathError::IndexOutOfBounds {
+                        path: path.to_string(),
+                        index: *idx,
+                        length: len,
+                    })?;
+                }
+                other => {
+                    return Err(PathError::TypeMismatch {
+                        path: path.to_string(),
+                        expected: "list",
+                        actual: other.type_name(),
+                    });
+                }
+            },
+        }
+    }
+    Ok(current)
+}
+
 impl Value {
     fn type_name(&self) -> &'static str {
         match self {

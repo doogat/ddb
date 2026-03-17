@@ -295,14 +295,13 @@ fn extract_typed_field(z: &ParsedZettel, col: &ColumnDef) -> GqlValue {
     let zone = col.zone.as_ref().unwrap_or(&Zone::Frontmatter);
     let raw = match zone {
         Zone::Frontmatter => {
-            // Use path navigation for dot/bracket column names, flat lookup otherwise
+            // Use path navigation for dot/bracket names, flat lookup otherwise
             let val = if col.name.contains('.') || col.name.contains('[') {
-                let extra = zdb_core::types::Value::Map(z.meta.extra.clone());
-                extra.get_path(&col.name).ok().cloned()
+                zdb_core::types::get_path_in_map(&z.meta.extra, &col.name).ok()
             } else {
-                z.meta.extra.get(&col.name).cloned()
+                z.meta.extra.get(&col.name)
             };
-            val.map(|v| match &v {
+            val.map(|v| match v {
                 zdb_core::types::Value::String(s) => s.clone(),
                 zdb_core::types::Value::Number(n) => n.to_string(),
                 zdb_core::types::Value::Bool(b) => b.to_string(),
