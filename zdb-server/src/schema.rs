@@ -1162,6 +1162,13 @@ pub fn build_schema(
             TypeRef::named_nn(TypeRef::ID),
         ));
 
+    fn seq_node_to_gql(n: &zdb_core::types::SequenceNode) -> GqlValue {
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("id"), GqlValue::from(n.id.as_str()));
+        obj.insert(Name::new("title"), GqlValue::from(n.title.as_str()));
+        GqlValue::Object(obj)
+    }
+
     // sequenceInfo(id: ID!): SequenceInfo!
     {
         query = query.field(
@@ -1171,20 +1178,14 @@ pub fn build_schema(
                     let id = ctx.args.try_get("id")?.string()?.to_string();
                     let info = pool.sequence_info(id).await.map_err(to_server_error)?;
 
-                    fn node_to_gql(n: &zdb_core::types::SequenceNode) -> GqlValue {
-                        let mut obj = IndexMap::new();
-                        obj.insert(Name::new("id"), GqlValue::from(n.id.as_str()));
-                        obj.insert(Name::new("title"), GqlValue::from(n.title.as_str()));
-                        GqlValue::Object(obj)
-                    }
-
                     let parent_val = match &info.parent {
-                        Some(p) => node_to_gql(p),
+                        Some(p) => seq_node_to_gql(p),
                         None => GqlValue::Null,
                     };
                     let children_val =
-                        GqlValue::List(info.children.iter().map(node_to_gql).collect());
-                    let bc_val = GqlValue::List(info.breadcrumb.iter().map(node_to_gql).collect());
+                        GqlValue::List(info.children.iter().map(seq_node_to_gql).collect());
+                    let bc_val =
+                        GqlValue::List(info.breadcrumb.iter().map(seq_node_to_gql).collect());
 
                     let mut obj = IndexMap::new();
                     obj.insert(Name::new("parent"), parent_val);
@@ -1208,12 +1209,11 @@ pub fn build_schema(
                         let pool = ctx.data::<ReadPool>()?;
                         let id = ctx.args.try_get("id")?.string()?.to_string();
                         let children = pool.sequence_children(id).await.map_err(to_server_error)?;
-                        Ok(Some(FieldValue::list(children.iter().map(|n| {
-                            let mut obj = IndexMap::new();
-                            obj.insert(Name::new("id"), GqlValue::from(n.id.as_str()));
-                            obj.insert(Name::new("title"), GqlValue::from(n.title.as_str()));
-                            FieldValue::owned_any(GqlValue::Object(obj))
-                        }))))
+                        Ok(Some(FieldValue::list(
+                            children
+                                .iter()
+                                .map(|n| FieldValue::owned_any(seq_node_to_gql(n))),
+                        )))
                     })
                 },
             )
@@ -1235,12 +1235,9 @@ pub fn build_schema(
                             .sequence_breadcrumb(id)
                             .await
                             .map_err(to_server_error)?;
-                        Ok(Some(FieldValue::list(bc.iter().map(|n| {
-                            let mut obj = IndexMap::new();
-                            obj.insert(Name::new("id"), GqlValue::from(n.id.as_str()));
-                            obj.insert(Name::new("title"), GqlValue::from(n.title.as_str()));
-                            FieldValue::owned_any(GqlValue::Object(obj))
-                        }))))
+                        Ok(Some(FieldValue::list(
+                            bc.iter().map(|n| FieldValue::owned_any(seq_node_to_gql(n))),
+                        )))
                     })
                 },
             )
