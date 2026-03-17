@@ -236,6 +236,15 @@ Find all zettel IDs that link to the given target path.
 
 Execute arbitrary SQL. Returns rows as string vectors. Handles all SQLite value types (null, integer, real, text, blob).
 
+### Sequence Navigation
+
+Zettels form ordered chains via the `sequence` frontmatter field (stored in `_zdb_fields`). No schema migration needed.
+
+- `sequence_children(id)` — children sorted by ID (chronological). Queries `_zdb_fields` WHERE key='sequence' AND value=?id, JOINs zettels for title.
+- `sequence_breadcrumb(id)` — walks parent chain to root via repeated `_zdb_fields` lookups. Returns root-to-self path. Cycle detection breaks after 100 iterations using a HashSet of visited IDs.
+- `sequence_info(id)` — combines parent lookup, `sequence_children`, and `sequence_breadcrumb` into `SequenceInfo { parent, children, breadcrumb }`.
+- `broken_sequences()` — LEFT JOIN `_zdb_fields` (key='sequence') against `zettels` to find references to non-existent parents.
+
 ## Test Coverage
 
 20+ tests covering:
@@ -255,3 +264,4 @@ Execute arbitrary SQL. Returns rows as string vectors. Handles all SQLite value 
 - Integration: typedef + inferred merge
 - Integration: external edit reconciliation
 - Integration: consistency warnings in rebuild
+- Sequence navigation: children, breadcrumb, info, broken detection, cycle safety

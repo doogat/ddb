@@ -13,7 +13,7 @@ All domain logic lives here: parsing, Git storage, CRDT conflict resolution, SQL
 
 ### zdb-cli
 
-A thin clap-derived binary (`zdb`) in a single `main.rs`. It wires CLI flags to core library calls. Subcommands cover the full lifecycle: `init`, `create`, `read`, `update`, `delete`, `search`, `query`, `sync`, `reindex`, `compact`, `rename`, `serve`, `type`, `node`, `bundle`, `attach`, `detach`, `attachments`, `get`, `scan`, `backlinks`, `maintenance`, and `update-bin`. An embedded `updater` module handles self-update from GitHub releases.
+A thin clap-derived binary (`zdb`) in a single `main.rs`. It wires CLI flags to core library calls. Subcommands cover the full lifecycle: `init`, `create`, `read`, `update`, `delete`, `search`, `query`, `sync`, `reindex`, `compact`, `rename`, `serve`, `type`, `node`, `bundle`, `attach`, `detach`, `attachments`, `get`, `scan`, `backlinks`, `maintenance`, `discover`, `sequence`, and `update-bin`. An embedded `updater` module handles self-update from GitHub releases.
 
 ### zdb-server
 
@@ -526,6 +526,46 @@ Produces `_zdb_fields` rows with keys: `author.name`, `author.email`, `scores[0]
 Column names containing `.` or `[` trigger path navigation in both:
 - SQL engine `extract_column_value` (materialized type views)
 - GraphQL `extract_typed_field` (dynamic schema resolvers)
+
+## 12. Sequence Navigation
+
+Zettels can form ordered chains using the `sequence` frontmatter field. A zettel points to its parent:
+
+```yaml
+---
+id: 20260315120002
+title: Chapter 3
+sequence: 20260315120000
+---
+```
+
+Children are discovered by reverse lookup: all zettels where `sequence == this.id`. No schema change is needed — the existing `_zdb_fields` table stores the `sequence` key.
+
+### Core queries (indexer.rs)
+
+- `sequence_children(id)` — direct children sorted by ID (chronological)
+- `sequence_breadcrumb(id)` — walk up parent chain to root, return root-to-self path
+- `sequence_info(id)` — parent + children + breadcrumb in one call
+- `broken_sequences()` — LEFT JOIN to find sequence fields referencing non-existent parents
+
+Cycle detection: breadcrumb walk tracks visited IDs and breaks after 100 iterations.
+
+### CLI
+
+```bash
+zdb sequence tree <id>         # breadcrumb line + children list
+zdb sequence breadcrumb <id>   # root → ... → self
+zdb sequence broken            # broken sequence references
+```
+
+### GraphQL
+
+```graphql
+sequenceInfo(id: ID!): SequenceInfo!
+sequenceChildren(id: ID!): [SequenceNode!]!
+sequenceBreadcrumb(id: ID!): [SequenceNode!]!
+brokenSequences: [BrokenSequence!]!
+```
 
 For deeper detail on any module, see the corresponding document in `docs/src/technical/`:
 
