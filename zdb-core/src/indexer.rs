@@ -257,18 +257,9 @@ impl Index {
             )?;
         }
 
-        // Insert frontmatter extras (scalar values only)
+        // Insert frontmatter extras, flattening nested maps/lists into dot-notation keys
         for (key, value) in &zettel.meta.extra {
-            let str_value = match value {
-                crate::types::Value::String(s) => s.clone(),
-                crate::types::Value::Number(n) => n.to_string(),
-                crate::types::Value::Bool(b) => b.to_string(),
-                crate::types::Value::List(_) | crate::types::Value::Map(_) => continue,
-            };
-            self.conn.execute(
-                "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
-                params![id, key, str_value, "Frontmatter"],
-            )?;
+            flatten_value_into_fields(&self.conn, id, key, value)?;
         }
 
         for link in &zettel.links {
@@ -2107,6 +2098,48 @@ impl crate::traits::ZettelIndex for Index {
     }
 }
 
+/// Recursively flatten a `Value` into `_zdb_fields` rows with dot-notation keys.
+fn flatten_value_into_fields(
+    conn: &rusqlite::Connection,
+    id: &str,
+    prefix: &str,
+    value: &crate::types::Value,
+) -> Result<()> {
+    match value {
+        crate::types::Value::String(s) => {
+            conn.execute(
+                "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
+                params![id, prefix, s, "Frontmatter"],
+            )?;
+        }
+        crate::types::Value::Number(n) => {
+            conn.execute(
+                "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
+                params![id, prefix, n.to_string(), "Frontmatter"],
+            )?;
+        }
+        crate::types::Value::Bool(b) => {
+            conn.execute(
+                "INSERT INTO _zdb_fields (zettel_id, key, value, zone) VALUES (?1, ?2, ?3, ?4)",
+                params![id, prefix, b.to_string(), "Frontmatter"],
+            )?;
+        }
+        crate::types::Value::Map(map) => {
+            for (k, v) in map {
+                let nested_key = format!("{prefix}.{k}");
+                flatten_value_into_fields(conn, id, &nested_key, v)?;
+            }
+        }
+        crate::types::Value::List(list) => {
+            for (i, v) in list.iter().enumerate() {
+                let nested_key = format!("{prefix}[{i}]");
+                flatten_value_into_fields(conn, id, &nested_key, v)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Extract a column value from a parsed zettel according to zone mapping.
 fn extract_column_value(
     zettel: &crate::types::ParsedZettel,
@@ -2140,17 +2173,22 @@ fn extract_column_value(
             }
             String::new()
         }
-        Zone::Frontmatter => zettel
-            .meta
-            .extra
-            .get(&col.name)
-            .map(|v| match v {
+        Zone::Frontmatter => {
+            // Try path navigation for dot-notation column names, fall back to flat lookup
+            let val = if col.name.contains('.') || col.name.contains('[') {
+                let extra_val = crate::types::Value::Map(zettel.meta.extra.clone());
+                extra_val.get_path(&col.name).ok().cloned()
+            } else {
+                zettel.meta.extra.get(&col.name).cloned()
+            };
+            val.map(|v| match &v {
                 crate::types::Value::Number(n) => n.to_string(),
                 crate::types::Value::Bool(b) => b.to_string(),
                 crate::types::Value::String(s) => s.clone(),
                 _ => format!("{v:?}"),
             })
-            .unwrap_or_default(),
+            .unwrap_or_default()
+        }
         Zone::Body => zettel
             .sections
             .iter()
