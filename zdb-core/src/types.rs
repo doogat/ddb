@@ -179,8 +179,10 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
     let mut segments = Vec::new();
     let mut current_key = String::new();
     let mut chars = path.chars().peekable();
+    let mut last_was_dot = false;
 
     while let Some(ch) = chars.next() {
+        last_was_dot = false;
         match ch {
             '\\' => {
                 // Escaped character — next char is literal
@@ -190,6 +192,7 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
                 }
             }
             '.' => {
+                last_was_dot = true;
                 if current_key.is_empty() {
                     // Allow dot after bracket (e.g. "a[0].b") — just a separator
                     if !matches!(segments.last(), Some(PathSegment::Index(_))) {
@@ -243,6 +246,14 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
                 current_key.push(ch);
             }
         }
+    }
+
+    // Reject trailing dot
+    if last_was_dot {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "trailing dot".to_string(),
+        });
     }
 
     // Flush trailing key
@@ -1266,6 +1277,12 @@ mod tests {
     }
 
     #[test]
+    fn path_parse_trailing_dot_rejected() {
+        assert!(parse_path("a.").is_err());
+        assert!(parse_path("a.b.").is_err());
+    }
+
+    #[test]
     fn get_path_nested_map() {
         let v = nested_map();
         assert_eq!(
@@ -1364,6 +1381,62 @@ mod tests {
             PathError::TypeMismatch { expected, .. } => assert_eq!(expected, "string"),
             other => panic!("expected TypeMismatch, got {other}"),
         }
+    }
+
+    #[test]
+    fn convenience_f64_at() {
+        let v = nested_map();
+        assert_eq!(v.f64_at("author.age").unwrap(), 30.0);
+        assert!(matches!(
+            v.f64_at("author.name").unwrap_err(),
+            PathError::TypeMismatch {
+                expected: "number",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn convenience_bool_at() {
+        let mut v = Value::Map(BTreeMap::new());
+        v.set_path("flag", Value::Bool(true)).unwrap();
+        assert!(v.bool_at("flag").unwrap());
+        v.set_path("name", Value::String("x".into())).unwrap();
+        assert!(matches!(
+            v.bool_at("name").unwrap_err(),
+            PathError::TypeMismatch {
+                expected: "bool",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn convenience_list_at() {
+        let v = nested_map();
+        let tags = v.list_at("tags").unwrap();
+        assert_eq!(tags.len(), 2);
+        assert!(matches!(
+            v.list_at("author.name").unwrap_err(),
+            PathError::TypeMismatch {
+                expected: "list",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn convenience_map_at() {
+        let v = nested_map();
+        let author = v.map_at("author").unwrap();
+        assert!(author.contains_key("name"));
+        assert!(matches!(
+            v.map_at("author.name").unwrap_err(),
+            PathError::TypeMismatch {
+                expected: "map",
+                ..
+            }
+        ));
     }
 
     #[test]
