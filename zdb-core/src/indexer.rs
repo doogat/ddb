@@ -1550,10 +1550,8 @@ impl Index {
                 .prepare("SELECT target_path FROM _zdb_links WHERE source_id = ?1")?;
             let rows = stmt.query_map(params![source_id], |row| row.get(0))?;
             let mut set = HashSet::new();
-            for r in rows {
-                if let Ok(id) = r {
-                    set.insert(id);
-                }
+            for id in rows.flatten() {
+                set.insert(id);
             }
             set
         };
@@ -1689,10 +1687,8 @@ impl Index {
                 .prepare("SELECT target_path FROM _zdb_links WHERE source_id = ?1")?;
             let rows = stmt.query_map(params![source_id], |row| row.get(0))?;
             let mut set = HashSet::new();
-            for r in rows {
-                if let Ok(id) = r {
-                    set.insert(id);
-                }
+            for id in rows.flatten() {
+                set.insert(id);
             }
             set
         };
