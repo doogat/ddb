@@ -97,7 +97,177 @@ pub enum Value {
     Map(BTreeMap<String, Value>),
 }
 
+// ── Path navigation ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathSegment {
+    Key(String),
+    Index(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathError {
+    KeyNotFound {
+        path: String,
+        segment: String,
+    },
+    IndexOutOfBounds {
+        path: String,
+        index: usize,
+        length: usize,
+    },
+    TypeMismatch {
+        path: String,
+        expected: &'static str,
+        actual: &'static str,
+    },
+    InvalidPath {
+        path: String,
+        reason: String,
+    },
+}
+
+impl fmt::Display for PathError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PathError::KeyNotFound { path, segment } => {
+                write!(f, "key not found: \"{segment}\" in path \"{path}\"")
+            }
+            PathError::IndexOutOfBounds {
+                path,
+                index,
+                length,
+            } => {
+                write!(
+                    f,
+                    "index {index} out of bounds (length {length}) in path \"{path}\""
+                )
+            }
+            PathError::TypeMismatch {
+                path,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "type mismatch at \"{path}\": expected {expected}, got {actual}"
+                )
+            }
+            PathError::InvalidPath { path, reason } => {
+                write!(f, "invalid path \"{path}\": {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PathError {}
+
+/// Parse a dot/bracket notation path into segments.
+///
+/// - `.` separates map keys
+/// - `[N]` indexes into lists (0-based)
+/// - `\.` is a literal dot within a key name
+/// - Empty segments are rejected
+pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError> {
+    if path.is_empty() {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "empty path".to_string(),
+        });
+    }
+
+    let mut segments = Vec::new();
+    let mut current_key = String::new();
+    let mut chars = path.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                // Escaped character — next char is literal
+                match chars.next() {
+                    Some(escaped) => current_key.push(escaped),
+                    None => current_key.push('\\'),
+                }
+            }
+            '.' => {
+                // Flush current key
+                if current_key.is_empty() {
+                    return Err(PathError::InvalidPath {
+                        path: path.to_string(),
+                        reason: "empty segment".to_string(),
+                    });
+                }
+                segments.push(PathSegment::Key(std::mem::take(&mut current_key)));
+            }
+            '[' => {
+                // Flush any pending key
+                if !current_key.is_empty() {
+                    segments.push(PathSegment::Key(std::mem::take(&mut current_key)));
+                }
+                // Parse index number
+                let mut index_str = String::new();
+                loop {
+                    match chars.next() {
+                        Some(']') => break,
+                        Some(d) if d.is_ascii_digit() => index_str.push(d),
+                        Some(other) => {
+                            return Err(PathError::InvalidPath {
+                                path: path.to_string(),
+                                reason: format!("unexpected '{other}' in index"),
+                            });
+                        }
+                        None => {
+                            return Err(PathError::InvalidPath {
+                                path: path.to_string(),
+                                reason: "unclosed bracket".to_string(),
+                            });
+                        }
+                    }
+                }
+                if index_str.is_empty() {
+                    return Err(PathError::InvalidPath {
+                        path: path.to_string(),
+                        reason: "empty index".to_string(),
+                    });
+                }
+                let idx: usize = index_str.parse().map_err(|_| PathError::InvalidPath {
+                    path: path.to_string(),
+                    reason: format!("invalid index: {index_str}"),
+                })?;
+                segments.push(PathSegment::Index(idx));
+            }
+            _ => {
+                current_key.push(ch);
+            }
+        }
+    }
+
+    // Flush trailing key
+    if !current_key.is_empty() {
+        segments.push(PathSegment::Key(current_key));
+    }
+
+    if segments.is_empty() {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "no segments".to_string(),
+        });
+    }
+
+    Ok(segments)
+}
+
 impl Value {
+    fn type_name(&self) -> &'static str {
+        match self {
+            Value::String(_) => "string",
+            Value::Number(_) => "number",
+            Value::Bool(_) => "bool",
+            Value::List(_) => "list",
+            Value::Map(_) => "map",
+        }
+    }
+
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Value::String(s) => Some(s),
