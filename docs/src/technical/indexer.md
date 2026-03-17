@@ -245,6 +245,8 @@ Zettels form ordered chains via the `sequence` frontmatter field (stored in `_zd
 - `sequence_info(id)` — combines parent lookup, `sequence_children`, and `sequence_breadcrumb` into `SequenceInfo { parent, children, breadcrumb }`.
 - `broken_sequences()` — LEFT JOIN `_zdb_fields` (key='sequence') against `zettels` to find references to non-existent parents.
 
+MOC (Map of Content) zettels use `role: moc` in frontmatter and serve as natural sequence roots. The `role` field is indexed in `_zdb_fields` automatically — no special handling required.
+
 ## Test Coverage
 
 20+ tests covering:

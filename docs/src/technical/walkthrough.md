@@ -550,6 +550,18 @@ Children are discovered by reverse lookup: all zettels where `sequence == this.i
 
 Cycle detection: breadcrumb walk tracks visited IDs and breaks after 100 iterations.
 
+### MOC (Map of Content) recognition
+
+Zettels with `role: moc` (or `role: index`, `role: hub`, `role: structure`) in frontmatter are recognized as structural organizers — natural sequence roots. No special code is needed: the `role` field is stored in `_zdb_fields` like any other frontmatter extra, so these zettels are discoverable via SQL queries:
+
+```sql
+SELECT z.id, z.title FROM _zdb_fields f
+JOIN zettels z ON z.id = f.zettel_id
+WHERE f.key = 'role' AND f.value = 'moc'
+```
+
+A MOC zettel typically has no `sequence` field (it's the root) and its children point to it via their `sequence` field.
+
 ### CLI
 
 ```bash
