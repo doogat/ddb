@@ -7,6 +7,7 @@ mod fix;
 mod folder_namespace;
 mod link_kinds;
 mod multi_device;
+mod path_navigation;
 mod pgwire;
 mod read_pool;
 mod rename;
