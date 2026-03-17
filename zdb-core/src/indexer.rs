@@ -1945,6 +1945,119 @@ impl Index {
         Ok(out)
     }
 
+    // ── Sequence queries ──────────────────────────────────────────
+
+    /// Return direct children of a zettel in a sequence (sorted by ID).
+    pub fn sequence_children(&self, id: &str) -> Result<Vec<crate::types::SequenceNode>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT z.id, z.title FROM _zdb_fields f \
+             JOIN zettels z ON z.id = f.zettel_id \
+             WHERE f.key = 'sequence' AND f.value = ?1 \
+             ORDER BY z.id",
+        )?;
+        let rows = stmt.query_map(params![id], |row| {
+            Ok(crate::types::SequenceNode {
+                id: row.get(0)?,
+                title: row.get(1)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Walk up the parent chain from a zettel to the sequence root.
+    ///
+    /// Returns the path from root to self (inclusive). Breaks after 100
+    /// iterations to guard against cycles.
+    pub fn sequence_breadcrumb(&self, id: &str) -> Result<Vec<crate::types::SequenceNode>> {
+        let mut chain = Vec::new();
+        let mut current = id.to_string();
+        let mut seen = std::collections::HashSet::new();
+
+        for _ in 0..100 {
+            if !seen.insert(current.clone()) {
+                break; // cycle detected
+            }
+            let title: String = self
+                .conn
+                .query_row(
+                    "SELECT title FROM zettels WHERE id = ?1",
+                    params![&current],
+                    |row| row.get(0),
+                )
+                .unwrap_or_default();
+            chain.push(crate::types::SequenceNode {
+                id: current.clone(),
+                title,
+            });
+
+            let parent: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT f.value FROM _zdb_fields f \
+                     WHERE f.zettel_id = ?1 AND f.key = 'sequence'",
+                    params![&current],
+                    |row| row.get(0),
+                )
+                .ok();
+            match parent {
+                Some(pid) => current = pid,
+                None => break,
+            }
+        }
+
+        chain.reverse();
+        Ok(chain)
+    }
+
+    /// Full sequence context for a zettel: parent, children, and breadcrumb.
+    pub fn sequence_info(&self, id: &str) -> Result<crate::types::SequenceInfo> {
+        let parent: Option<crate::types::SequenceNode> = self
+            .conn
+            .query_row(
+                "SELECT f.value FROM _zdb_fields f \
+                 WHERE f.zettel_id = ?1 AND f.key = 'sequence'",
+                params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|pid| {
+                let title: String = self
+                    .conn
+                    .query_row(
+                        "SELECT title FROM zettels WHERE id = ?1",
+                        params![&pid],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or_default();
+                Some(crate::types::SequenceNode { id: pid, title })
+            });
+
+        let children = self.sequence_children(id)?;
+        let breadcrumb = self.sequence_breadcrumb(id)?;
+
+        Ok(crate::types::SequenceInfo {
+            parent,
+            children,
+            breadcrumb,
+        })
+    }
+
+    /// Find zettels whose `sequence` field references a non-existent parent.
+    pub fn broken_sequences(&self) -> Result<Vec<crate::types::BrokenSequence>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT f.zettel_id, f.value FROM _zdb_fields f \
+             LEFT JOIN zettels z ON z.id = f.value \
+             WHERE f.key = 'sequence' AND z.id IS NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(crate::types::BrokenSequence {
+                zettel_id: row.get(0)?,
+                broken_parent_id: row.get(1)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     /// Execute arbitrary SQL query, return rows as string vectors.
     pub fn query_raw(&self, sql: &str) -> Result<Vec<Vec<String>>> {
         let mut stmt = self.conn.prepare(sql)?;
@@ -5482,5 +5595,145 @@ Widget
         let found = orphans.iter().find(|o| o.id == "20260312000000");
         assert!(found.is_some(), "orphan should be returned");
         assert_eq!(found.unwrap().outgoing_links, 2);
+    }
+
+    // ── Sequence tests ──────────────────────────────────────────────
+
+    fn seq_zettel(id: &str, title: &str, parent: Option<&str>) -> ParsedZettel {
+        let mut extra = std::collections::BTreeMap::new();
+        if let Some(pid) = parent {
+            extra.insert("sequence".into(), Value::String(pid.into()));
+        }
+        ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId(id.into())),
+                title: Some(title.into()),
+                date: None,
+                zettel_type: None,
+                tags: vec![],
+                extra,
+            },
+            body: String::new(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: format!("zettelkasten/{id}.md"),
+        }
+    }
+
+    #[test]
+    fn sequence_children_basic() {
+        let idx = in_memory_index();
+        let parent = seq_zettel("20260315100000", "Root", None);
+        let child1 = seq_zettel("20260315100001", "Child A", Some("20260315100000"));
+        let child2 = seq_zettel("20260315100002", "Child B", Some("20260315100000"));
+        idx.index_zettel(&parent).unwrap();
+        idx.index_zettel(&child1).unwrap();
+        idx.index_zettel(&child2).unwrap();
+
+        let children = idx.sequence_children("20260315100000").unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].id, "20260315100001");
+        assert_eq!(children[1].id, "20260315100002");
+    }
+
+    #[test]
+    fn sequence_children_empty() {
+        let idx = in_memory_index();
+        let z = seq_zettel("20260315110000", "Standalone", None);
+        idx.index_zettel(&z).unwrap();
+
+        let children = idx.sequence_children("20260315110000").unwrap();
+        assert!(children.is_empty());
+    }
+
+    #[test]
+    fn sequence_breadcrumb_chain() {
+        let idx = in_memory_index();
+        let root = seq_zettel("20260315120000", "Root", None);
+        let mid = seq_zettel("20260315120001", "Mid", Some("20260315120000"));
+        let leaf = seq_zettel("20260315120002", "Leaf", Some("20260315120001"));
+        idx.index_zettel(&root).unwrap();
+        idx.index_zettel(&mid).unwrap();
+        idx.index_zettel(&leaf).unwrap();
+
+        let bc = idx.sequence_breadcrumb("20260315120002").unwrap();
+        assert_eq!(bc.len(), 3);
+        assert_eq!(bc[0].id, "20260315120000");
+        assert_eq!(bc[1].id, "20260315120001");
+        assert_eq!(bc[2].id, "20260315120002");
+    }
+
+    #[test]
+    fn sequence_breadcrumb_root() {
+        let idx = in_memory_index();
+        let root = seq_zettel("20260315130000", "Root", None);
+        idx.index_zettel(&root).unwrap();
+
+        let bc = idx.sequence_breadcrumb("20260315130000").unwrap();
+        assert_eq!(bc.len(), 1);
+        assert_eq!(bc[0].id, "20260315130000");
+    }
+
+    #[test]
+    fn sequence_breadcrumb_cycle() {
+        let idx = in_memory_index();
+        let a = seq_zettel("20260315140000", "A", Some("20260315140001"));
+        let b = seq_zettel("20260315140001", "B", Some("20260315140000"));
+        idx.index_zettel(&a).unwrap();
+        idx.index_zettel(&b).unwrap();
+
+        let bc = idx.sequence_breadcrumb("20260315140000").unwrap();
+        // Should not hang; returns partial chain
+        assert!(bc.len() <= 3);
+    }
+
+    #[test]
+    fn sequence_info_complete() {
+        let idx = in_memory_index();
+        let root = seq_zettel("20260315150000", "Root", None);
+        let mid = seq_zettel("20260315150001", "Mid", Some("20260315150000"));
+        let child1 = seq_zettel("20260315150002", "Child C", Some("20260315150001"));
+        let child2 = seq_zettel("20260315150003", "Child D", Some("20260315150001"));
+        idx.index_zettel(&root).unwrap();
+        idx.index_zettel(&mid).unwrap();
+        idx.index_zettel(&child1).unwrap();
+        idx.index_zettel(&child2).unwrap();
+
+        let info = idx.sequence_info("20260315150001").unwrap();
+        assert!(info.parent.is_some());
+        assert_eq!(info.parent.unwrap().id, "20260315150000");
+        assert_eq!(info.children.len(), 2);
+        assert_eq!(info.children[0].id, "20260315150002");
+        assert_eq!(info.breadcrumb.len(), 2);
+        assert_eq!(info.breadcrumb[0].id, "20260315150000");
+        assert_eq!(info.breadcrumb[1].id, "20260315150001");
+    }
+
+    #[test]
+    fn broken_sequence_detected() {
+        let idx = in_memory_index();
+        let z = seq_zettel("20260315160000", "Orphan", Some("99999999999999"));
+        idx.index_zettel(&z).unwrap();
+
+        let broken = idx.broken_sequences().unwrap();
+        assert_eq!(broken.len(), 1);
+        assert_eq!(broken[0].zettel_id, "20260315160000");
+        assert_eq!(broken[0].broken_parent_id, "99999999999999");
+    }
+
+    #[test]
+    fn broken_sequence_clean() {
+        let idx = in_memory_index();
+        let root = seq_zettel("20260315170000", "Root", None);
+        let child = seq_zettel("20260315170001", "Child", Some("20260315170000"));
+        idx.index_zettel(&root).unwrap();
+        idx.index_zettel(&child).unwrap();
+
+        let broken = idx.broken_sequences().unwrap();
+        assert!(broken.is_empty());
     }
 }
