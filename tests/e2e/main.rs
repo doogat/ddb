@@ -2,6 +2,7 @@ mod attachments;
 mod checkboxes;
 mod common;
 mod delete_backlinks;
+mod discover;
 mod fix;
 mod folder_namespace;
 mod link_kinds;

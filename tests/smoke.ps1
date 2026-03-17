@@ -294,7 +294,23 @@ $output = zdb maintenance auto status
 if ($output -notmatch "off") { throw "maintenance auto status should be off" }
 pass "maintenance auto off"
 
-# 16d. consistency fix
+# 16d. discover
+$output = zdb discover orphans
+if ($output -notmatch "\d{14}") { throw "discover orphans returned nothing" }
+pass "discover orphans"
+
+# Create a zettel that mentions ID1's title without linking
+$MENTION_ID = zdb create --title "Review notes" --body "About First note (edited) topic"
+zdb reindex | Out-Null
+$output = zdb discover mentions $ID1
+if ($output -notmatch $MENTION_ID) { throw "discover mentions failed" }
+pass "discover mentions"
+
+$output = zdb discover similar $ID1
+if ($output -notmatch "\d{14}") { throw "discover similar returned nothing" }
+pass "discover similar"
+
+# 16e. consistency fix
 $FIX_ID = zdb create --title "Fix Test" --tags "#gtd,zebra,apple"
 $beforeHead = git rev-parse HEAD
 $fixDry = zdb fix --dry-run

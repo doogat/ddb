@@ -232,7 +232,20 @@ $ZDB maintenance auto off | grep -q "disabled"
 $ZDB maintenance auto status | grep -q "off"
 pass "maintenance auto off"
 
-# 16d. consistency fix
+# 16d. discover
+$ZDB discover orphans | head -1 | grep -q "."
+pass "discover orphans"
+
+# Create a zettel that mentions ID1's title without linking
+MENTION_ID=$($ZDB create --title "Review notes" --body "About First note (edited) topic")
+$ZDB reindex >/dev/null
+$ZDB discover mentions "$ID1" | grep -q "$MENTION_ID"
+pass "discover mentions"
+
+$ZDB discover similar "$ID1" | head -1 | grep -q "."
+pass "discover similar"
+
+# 16e. consistency fix
 FIX_ID=$($ZDB create --title "Fix Test" --tags "#gtd,zebra,apple")
 BEFORE_HEAD=$(git rev-parse HEAD)
 $ZDB fix --dry-run | grep -q "would fix"
