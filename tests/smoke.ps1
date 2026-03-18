@@ -939,32 +939,32 @@ pass "stale node resync after compaction"
 # 34. multi-row INSERT
 Push-Location $TMPDIR
 zdb query "CREATE TABLE multirow (name TEXT, val INTEGER)" | Out-Null
-$MULTI_IDS = zdb query "INSERT INTO multirow (name, val) VALUES ('a', 1), ('b', 2), ('c', 3)"
+$MULTI_IDS = zdb query "INSERT INTO multirow (name, val) VALUES ('a', 1), ('b', 2), ('c', 3)" 2>$null
 if ($MULTI_IDS -notmatch "^\d{14},\d{14},\d{14}$") { throw "multi-row insert did not return 3 IDs: $MULTI_IDS" }
-$count = zdb query "SELECT COUNT(*) FROM multirow"
+$count = zdb query "SELECT COUNT(*) FROM multirow" 2>$null
 if ($count -notmatch "3") { throw "expected 3 rows, got: $count" }
 pass "multi-row insert"
 
 # 35. transaction commit + rollback
 Push-Location $TMPDIR
 zdb query "CREATE TABLE txntest (val TEXT)" | Out-Null
-$txnOut = zdb query "BEGIN; INSERT INTO txntest (val) VALUES ('committed'); COMMIT"
+$txnOut = zdb query "BEGIN; INSERT INTO txntest (val) VALUES ('committed'); COMMIT" 2>$null
 if ($txnOut -notmatch "COMMIT") { throw "transaction commit failed: $txnOut" }
-$txnSel = zdb query "SELECT val FROM txntest"
+$txnSel = zdb query "SELECT val FROM txntest" 2>$null
 if ($txnSel -notmatch "committed") { throw "committed row missing" }
-$rbOut = zdb query "BEGIN; INSERT INTO txntest (val) VALUES ('rolled-back'); ROLLBACK"
+$rbOut = zdb query "BEGIN; INSERT INTO txntest (val) VALUES ('rolled-back'); ROLLBACK" 2>$null
 if ($rbOut -notmatch "ROLLBACK") { throw "rollback failed: $rbOut" }
-$txnCount = zdb query "SELECT COUNT(*) FROM txntest"
+$txnCount = zdb query "SELECT COUNT(*) FROM txntest" 2>$null
 if ($txnCount -notmatch "1") { throw "expected 1 row after rollback, got: $txnCount" }
 pass "transaction commit + rollback"
 
 # 36. hyphenated type SQL via quoted identifiers
 Push-Location $TMPDIR
 zdb query 'CREATE TABLE "my-type" (label TEXT)' | Out-Null
-$MY_ID = zdb query "INSERT INTO `"my-type`" (label) VALUES ('test')"
-$hSel = zdb query "SELECT label FROM `"my-type`""
+$MY_ID = zdb query "INSERT INTO `"my-type`" (label) VALUES ('test')" 2>$null
+$hSel = zdb query "SELECT label FROM `"my-type`"" 2>$null
 if ($hSel -notmatch "test") { throw "hyphenated select failed" }
-$hDel = zdb query "DELETE FROM `"my-type`" WHERE id = '$MY_ID'"
+$hDel = zdb query "DELETE FROM `"my-type`" WHERE id = '$MY_ID'" 2>$null
 if ($hDel -notmatch "1 row") { throw "hyphenated delete failed: $hDel" }
 pass "hyphenated type SQL"
 
