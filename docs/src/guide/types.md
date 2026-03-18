@@ -55,7 +55,7 @@ Types without a `_typedef` are inferred from data. The indexer scans all zettels
 - **Body** `## headings` → TEXT columns in body zone
 - **Reference** `key:: value` fields → TEXT columns in reference zone
 
-Advisory logging prints `info: type "foo" inferred from data` for inferred-only types.
+Inferred-only types are tracked internally and reported in the rebuild summary.
 
 ## Merged Schemas
 

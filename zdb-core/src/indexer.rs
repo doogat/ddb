@@ -814,7 +814,7 @@ impl Index {
             }
 
             if typedef.is_none() {
-                eprintln!("info: type \"{}\" inferred from data", type_name);
+                // Type inference is tracked in types_inferred and returned to caller
                 types_inferred.push(type_name.clone());
             }
 
@@ -952,7 +952,7 @@ impl Index {
             }
 
             if typedef.is_none() {
-                eprintln!("info: type \"{}\" inferred from data", type_name);
+                // Type inference is tracked in types_inferred and returned to caller
                 types_inferred.push(type_name.clone());
             }
 
