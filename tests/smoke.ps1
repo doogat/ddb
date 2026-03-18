@@ -595,7 +595,8 @@ pass "serve: compact(noBackup: true) mutation"
 
 # compact(backupPath: custom)
 $gqlBackup = Join-Path $env:TEMP "gql-backup.bundle.tar"
-$result = gql "{`"query`":`"mutation { compact(force: true, backupPath: \`"$gqlBackup\`") { gcSuccess backupPath } }`"}"
+$gqlBackupEsc = $gqlBackup -replace '\\', '\\\\'
+$result = gql "{`"query`":`"mutation { compact(force: true, backupPath: \`"$gqlBackupEsc\`") { gcSuccess backupPath } }`"}"
 if ($result -notmatch "gcSuccess") { throw "compact(backupPath) failed" }
 if ($result -notmatch "backupPath") { throw "compact(backupPath) missing backupPath" }
 if (-not (Test-Path $gqlBackup)) { throw "compact(backupPath) file not created" }
