@@ -446,8 +446,14 @@ function content($resp) {
 
 # Run a zdb command capturing only stdout (PS7 merges native stderr into captures)
 function zdb_out {
-    $all = & zdb @args 2>&1
-    ($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $all = & zdb @args 2>&1
+        ($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+    } finally {
+        $ErrorActionPreference = $prev
+    }
 }
 
 # Test auth
