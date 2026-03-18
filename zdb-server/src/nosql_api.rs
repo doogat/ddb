@@ -2,7 +2,7 @@ use axum::extract::{Path, Query};
 use axum::{routing, Extension, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::read_pool::ReadPool;
+use crate::actor::ActorHandle;
 use crate::rest::ErrorBody;
 
 #[derive(Deserialize)]
@@ -25,14 +25,14 @@ pub fn router() -> Router {
 }
 
 async fn get_zettel(
-    Extension(read_pool): Extension<ReadPool>,
+    Extension(actor): Extension<ActorHandle>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use axum::Json;
 
-    match read_pool.nosql_get(id).await {
+    match actor.nosql_get(id).await {
         Ok(Some(z)) => {
             let json = crate::rest::zettel_to_json(&z);
             Json(json).into_response()
@@ -57,7 +57,7 @@ async fn get_zettel(
 }
 
 async fn scan(
-    Extension(read_pool): Extension<ReadPool>,
+    Extension(actor): Extension<ActorHandle>,
     Query(params): Query<ScanParams>,
 ) -> axum::response::Response {
     use axum::http::StatusCode;
@@ -75,8 +75,8 @@ async fn scan(
             )
                 .into_response();
         }
-        (Some(t), None) => read_pool.nosql_scan_type(t).await,
-        (None, Some(tag)) => read_pool.nosql_scan_tag(tag).await,
+        (Some(t), None) => actor.nosql_scan_type(t).await,
+        (None, Some(tag)) => actor.nosql_scan_tag(tag).await,
         (None, None) => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -103,14 +103,14 @@ async fn scan(
 }
 
 async fn backlinks(
-    Extension(read_pool): Extension<ReadPool>,
+    Extension(actor): Extension<ActorHandle>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use axum::Json;
 
-    match read_pool.nosql_backlinks(id).await {
+    match actor.nosql_backlinks(id).await {
         Ok(ids) => Json(IdsResponse { ids }).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

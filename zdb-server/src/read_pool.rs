@@ -44,7 +44,6 @@ pub struct ReadPool {
 struct Inner {
     repo_path: PathBuf,
     db_path: PathBuf,
-    redb_path: PathBuf,
     semaphore: Arc<Semaphore>,
 }
 
@@ -52,13 +51,11 @@ impl ReadPool {
     pub fn new(repo_path: PathBuf, pool_size: usize) -> Result<Self> {
         let pool_size = pool_size.max(1);
         let db_path = repo_path.join(".zdb/index.db");
-        let redb_path = repo_path.join(".zdb/nosql.redb");
 
         Ok(Self {
             inner: Arc::new(Inner {
                 repo_path,
                 db_path,
-                redb_path,
                 semaphore: Arc::new(Semaphore::new(pool_size)),
             }),
         })
@@ -248,25 +245,6 @@ impl ReadPool {
         self.with_index(move |index| index.broken_sequences()).await
     }
 
-    // --- NoSQL (redb) reads ---
-
-    pub async fn nosql_get(&self, id: String) -> Result<Option<ParsedZettel>> {
-        self.with_redb(move |redb| redb.get(&id)).await
-    }
-
-    pub async fn nosql_scan_type(&self, type_name: String) -> Result<Vec<String>> {
-        self.with_redb(move |redb| redb.scan_by_type(&type_name))
-            .await
-    }
-
-    pub async fn nosql_scan_tag(&self, tag: String) -> Result<Vec<String>> {
-        self.with_redb(move |redb| redb.scan_by_tag(&tag)).await
-    }
-
-    pub async fn nosql_backlinks(&self, id: String) -> Result<Vec<String>> {
-        self.with_redb(move |redb| redb.backlinks(&id)).await
-    }
-
     // --- Dispatch helpers ---
 
     async fn acquire(&self) -> Result<OwnedSemaphorePermit> {
@@ -304,22 +282,6 @@ impl ReadPool {
             let index = Index::open(&inner.db_path)?;
             let repo = GitRepo::open(&inner.repo_path)?;
             f(&index, &repo)
-        })
-        .await
-        .map_err(|e| ZettelError::Validation(format!("read task panicked: {e}")))?
-    }
-
-    async fn with_redb<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(&zdb_core::nosql::RedbIndex) -> Result<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let permit = self.acquire().await?;
-        let inner = self.inner.clone();
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            let redb = zdb_core::nosql::RedbIndex::open(&inner.redb_path)?;
-            f(&redb)
         })
         .await
         .map_err(|e| ZettelError::Validation(format!("read task panicked: {e}")))?

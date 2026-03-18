@@ -398,13 +398,12 @@ $SERVER_PORT = 19200 + (Get-Random -Maximum 800)
 $PG_PORT = $SERVER_PORT + 1
 $serverProc = Start-Process -FilePath $ZDB -ArgumentList "serve","--port","$SERVER_PORT","--pg-port","$PG_PORT" -PassThru -NoNewWindow
 
-# Wait for server to start
+# Wait for server to start (re-read token each iteration since the server writes it on startup)
 $tokenPath = Join-Path $env:USERPROFILE ".config" "zetteldb" "token"
-$TOKEN = if (Test-Path $tokenPath) { Get-Content $tokenPath -Raw } else { "" }
-$TOKEN = $TOKEN.Trim()
 
 for ($i = 0; $i -lt 20; $i++) {
     try {
+        $TOKEN = if (Test-Path $tokenPath) { (Get-Content $tokenPath -Raw).Trim() } else { "" }
         $null = Invoke-WebRequest -Uri "http://127.0.0.1:$SERVER_PORT/graphql" `
             -Method POST -ContentType "application/json" `
             -Headers @{ Authorization = "Bearer $TOKEN" } `
@@ -414,6 +413,7 @@ for ($i = 0; $i -lt 20; $i++) {
         Start-Sleep -Milliseconds 200
     }
 }
+$TOKEN = if (Test-Path $tokenPath) { (Get-Content $tokenPath -Raw).Trim() } else { "" }
 
 $GQL_URL = "http://127.0.0.1:$SERVER_PORT/graphql"
 $REST_URL = "http://127.0.0.1:$SERVER_PORT/rest"
