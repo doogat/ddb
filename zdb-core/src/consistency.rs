@@ -151,15 +151,6 @@ fn detect_default_issues(parsed: &ParsedZettel, fixes: &mut Vec<Fix>) {
             value: "note".to_string(),
         });
     }
-
-    // Missing tags — serialize() skips empty tags, so re-serializing after
-    // setting this makes the field explicit in frontmatter
-    if parsed.meta.tags.is_empty() {
-        fixes.push(Fix::DefaultSet {
-            field: "tags".to_string(),
-            value: "[]".to_string(),
-        });
-    }
 }
 
 fn detect_title_issues(parsed: &ParsedZettel, fixes: &mut Vec<Fix>) {
@@ -355,9 +346,6 @@ pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
             Fix::DefaultSet { field, value } => {
                 if field == "type" {
                     parsed.meta.zettel_type = Some(value.clone());
-                } else if field == "tags" {
-                    // tags: [] default — tags is already Vec::new(), this is a no-op
-                    // but the fix is recorded for reporting purposes
                 } else {
                     parsed
                         .meta
@@ -989,15 +977,15 @@ mod tests {
     }
 
     #[test]
-    fn detect_missing_tags_default() {
+    fn empty_tags_no_fix() {
         let mut parsed = empty_parsed();
         parsed.meta.tags = vec![];
         let fixes = detect_fixes(&parsed, None);
         assert!(
-            fixes.iter().any(
-                |f| matches!(f, Fix::DefaultSet { field, value } if field == "tags" && value == "[]")
-            ),
-            "should detect missing tags: {fixes:?}"
+            !fixes
+                .iter()
+                .any(|f| matches!(f, Fix::DefaultSet { field, .. } if field == "tags")),
+            "empty tags should not trigger a fix: {fixes:?}"
         );
     }
 
