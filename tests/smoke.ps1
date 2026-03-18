@@ -439,6 +439,11 @@ function rest {
     return $resp
 }
 
+function content($resp) {
+    if ($resp.Content -is [byte[]]) { return [System.Text.Encoding]::UTF8.GetString($resp.Content) }
+    return $resp.Content
+}
+
 # Test auth
 try {
     Invoke-WebRequest -Uri $GQL_URL -Method POST -ContentType "application/json" `
@@ -494,30 +499,30 @@ pass "rest: auth rejects missing token"
 
 $resp = rest "/zettels" "POST" '{"title":"REST Smoke","body":"rest body","tags":["rest"]}'
 if ($resp.StatusCode -ne 201) { throw "rest create expected 201" }
-$REST_ID = if ($resp.Content -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no id" }
+$REST_ID = if ((content $resp) -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no id" }
 pass "rest: create"
 
 $resp = rest "/zettels/$REST_ID"
-if ($resp.Content -notmatch "REST Smoke") { throw "rest get failed" }
+if ((content $resp) -notmatch "REST Smoke") { throw "rest get failed" }
 pass "rest: get"
 
 $resp = rest "/zettels/$REST_ID" "PUT" '{"title":"REST Updated"}'
-if ($resp.Content -notmatch "REST Updated") { throw "rest update failed" }
+if ((content $resp) -notmatch "REST Updated") { throw "rest update failed" }
 pass "rest: update"
 
 $resp = rest "/zettels?tag=rest"
-if ($resp.Content -notmatch $REST_ID) { throw "rest list failed" }
+if ((content $resp) -notmatch $REST_ID) { throw "rest list failed" }
 pass "rest: list with filter"
 
 # Field filtering
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokeitem (label TEXT NOT NULL, priority INTEGER)\"){message}}"}'
-gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokeitem (label, priority) VALUES ('\''Smoke1'\'', 7)\"){message}}"}'
+gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokeitem (label, priority) VALUES (''Smoke1'', 7)\"){message}}"}'
 $resp = rest "/zettels?field.priority=7"
-if ($resp.Content -notmatch "Smoke1") { throw "field filter failed" }
+if ((content $resp) -notmatch "Smoke1") { throw "field filter failed" }
 pass "rest: field filter"
 
 $resp = rest "/zettels?field.priority=999"
-if ($resp.Content -notmatch '"data":\[\]') { throw "field filter no-match failed" }
+if ((content $resp) -notmatch '"data":\[\]') { throw "field filter no-match failed" }
 pass "rest: field filter no match"
 
 $resp = Invoke-WebRequest -Uri "$REST_URL/zettels/$REST_ID" -Method DELETE `
@@ -542,6 +547,7 @@ $NOSQL_URL = "http://127.0.0.1:$SERVER_PORT/nosql"
 function nosql($path) {
     $resp = Invoke-WebRequest -Uri "$NOSQL_URL$path" `
         -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction Stop
+    if ($resp.Content -is [byte[]]) { return [System.Text.Encoding]::UTF8.GetString($resp.Content) }
     return $resp.Content
 }
 
