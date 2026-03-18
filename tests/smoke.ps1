@@ -414,6 +414,7 @@ for ($i = 0; $i -lt 20; $i++) {
     }
 }
 $TOKEN = if (Test-Path $tokenPath) { (Get-Content $tokenPath -Raw).Trim() } else { "" }
+if (-not $TOKEN) { Write-Host "WARNING: token is empty after wait loop (path=$tokenPath, exists=$(Test-Path $tokenPath))" }
 
 $GQL_URL = "http://127.0.0.1:$SERVER_PORT/graphql"
 $REST_URL = "http://127.0.0.1:$SERVER_PORT/rest"
@@ -450,7 +451,7 @@ pass "serve: auth rejects missing token"
 
 # Test query
 $result = gql '{"query":"{ typeDefs { name } }"}'
-if ($result -notmatch '"typeDefs"') { throw "graphql query failed" }
+if ($result -notmatch '"typeDefs"') { throw "graphql query failed: $result" }
 pass "serve: graphql query"
 
 # Test mutation -- create
