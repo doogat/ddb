@@ -16,8 +16,17 @@ pub fn classify(e: &ZettelError) -> (&'static str, String) {
             eprintln!("[zdb-server] internal error: {e}");
             ("SQL_ERROR", "query failed".into())
         }
-        // All other variants are internal — redact completely
-        _ => {
+        // All other variants are internal — redact completely.
+        // Explicit matches so the compiler forces a decision on new variants.
+        ZettelError::Git(_)
+        | ZettelError::Yaml(_)
+        | ZettelError::Sql(_)
+        | ZettelError::Automerge(_)
+        | ZettelError::Io(_)
+        | ZettelError::Toml(_)
+        | ZettelError::Parse(_)
+        | ZettelError::VersionMismatch { .. }
+        | ZettelError::Redb(_) => {
             eprintln!("[zdb-server] internal error: {e}");
             ("INTERNAL_ERROR", "internal error".into())
         }
