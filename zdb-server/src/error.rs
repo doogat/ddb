@@ -96,12 +96,52 @@ mod tests {
     }
 
     #[test]
+    fn redb_error_redacted() {
+        let (code, msg) = classify(&ZettelError::Redb("corrupt table".into()));
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
+    fn version_mismatch_redacted() {
+        let (code, msg) = classify(&ZettelError::VersionMismatch { repo: 99, driver: 1 });
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
     fn to_server_error_uses_classification() {
         let err = to_server_error(ZettelError::Git("repo corrupt".into()));
         assert_eq!(err.message, "internal error");
 
         let err = to_server_error(ZettelError::NotFound("missing".into()));
         assert_eq!(err.message, "missing");
+    }
+
+    #[test]
+    fn graphql_sql_error_sanitized() {
+        let err = to_server_error(ZettelError::SqlEngine(
+            "near \"SELCT\": syntax error at position 0".into(),
+        ));
+        assert_eq!(err.message, "query failed");
+        assert!(!err.message.contains("SELCT"));
+        assert!(!err.message.contains("syntax error"));
+    }
+
+    #[test]
+    fn graphql_internal_error_no_details() {
+        let err = to_server_error(ZettelError::Git(
+            "/Users/secret/.zdb/objects/ab/cdef1234".into(),
+        ));
+        assert_eq!(err.message, "internal error");
+        assert!(!err.message.contains("secret"));
+        assert!(!err.message.contains(".zdb"));
+    }
+
+    #[test]
+    fn graphql_not_found_descriptive() {
+        let err = to_server_error(ZettelError::NotFound("zettel 20260319120000 not found".into()));
+        assert_eq!(err.message, "zettel 20260319120000 not found");
     }
 }
 
