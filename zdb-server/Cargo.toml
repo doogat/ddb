@@ -2,6 +2,9 @@
 name = "zdb-server"
 version = "0.1.0"
 edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/doogat/zdb"
+description = "GraphQL/REST/PgWire server for ZettelDB"
 
 [dependencies]
 zdb-core = { path = "../zdb-core", features = ["nosql"] }

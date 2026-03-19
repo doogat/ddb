@@ -2,6 +2,9 @@
 name = "zdb-uniffi-bindgen"
 version = "0.1.0"
 edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/doogat/zdb"
+description = "UniFFI binding generator for ZettelDB"
 
 [[bin]]
 name = "uniffi-bindgen"
