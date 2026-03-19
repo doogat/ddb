@@ -4,7 +4,7 @@
 
 > **Status**: go (with accepted deferrals)
 
-**Tally**: 17 done, 1 partial, 1 not started, 1 fail, 3 deferred
+**Tally**: 19 done, 1 partial, 1 fail, 1 deferred
 
 ### Blockers
 
@@ -14,16 +14,14 @@
 
 - **Sparse index**: dropped — ZDB indexes all zettels, sparse checkout adds no value
 - **fsmonitor**: not supported in libgit2/gitoxide, deferred to Phase 3+
-- **Background maintenance**: Phase 3+ candidate, existing `compact` covers manual gc
 
 ### Partial items
 
 - **FR-33 (delta export)**: implemented with unit + smoke coverage. FFI delta export deferred until mobile needs it
-- **FR-64a (pre-compaction backup)**: not started. Bundle export exists standalone but is not wired into compact pipeline. Backlog candidate
 
 ### Recommendation
 
-Phase 2 is complete for practical purposes. Core functionality (bundles, REST, NoSQL, compaction, types, multi-device) is implemented and tested. The three deferred items (sparse index, fsmonitor, background maintenance) were formally evaluated and documented as not applicable or Phase 3+ candidates. NFR-03 is the only measurable miss — accept as known debt and track as Phase 3 optimization work.
+Phase 2 is complete for practical purposes. Core functionality (bundles, REST, NoSQL, compaction, types, multi-device, background maintenance, pre-compaction backup) is implemented and tested. The two deferred items (sparse index, fsmonitor) were formally evaluated and documented as not applicable or Phase 3+ candidates. NFR-03 is the only measurable miss — accept as known debt and track as Phase 3 optimization work.
 
 ## Checklist
 
@@ -56,7 +54,7 @@ Phase 2 is complete for practical purposes. Core functionality (bundles, REST, N
 | FR-61 | Compaction boundary: hash present in ALL active nodes' known_heads | done | `compaction.rs:shared_head` (filters Active nodes, merge-base across known_heads) | unit: `cleanup_removes_temp_files`; e2e: multi_device compaction tests | `sync.md` |
 | FR-63 | Annual growth within NFR-02 targets with compaction | done | `benches/growth.rs` (5K, 365 days, 10 edits/day) | bench: `repo_size_after_1yr_with_compaction` (1.2 MB/yr) | `storage-budget.md` |
 | FR-64 | git gc after pruning (not --aggressive) | done | `compaction.rs:run_gc` (just `["gc"]`, no --aggressive) | unit: `gc_runs_on_test_repo`, `full_compact_pipeline` | `sync.md` |
-| FR-64a | Export git bundle backup before compaction | not started | Bundle export exists (`zdb bundle export --full`) but not wired into compact pipeline | — | — |
+| FR-64a | Export git bundle backup before compaction | done | `compaction.rs:backup_before_compact`, `main.rs` `--no-backup`/`--backup-path` flags | unit: `backup_before_compact_writes_file`, `backup_before_compact_default_path`, `compact_skip_backup`; smoke: sh/ps1 §14 | walkthrough |
 | FR-64b | Dry-run mode: report what would be compacted | done | `main.rs` Compact `--dry-run` flag | smoke: sh/ps1 §16 | walkthrough |
 | FR-65 | Frontmatter CRDT separate compaction when all nodes sync past commit | done | `compaction.rs:compact_crdt_docs` groups by `(zettel_id, is_frontmatter)` | unit: `compact_crdt_docs_separates_fm_and_body`, `parse_crdt_temp_name_formats`, `cleanup_handles_fm_naming_format` | walkthrough |
 
@@ -77,8 +75,8 @@ Phase 2 is complete for practical purposes. Core functionality (bundles, REST, N
 | Bundled type: kanban | Type definition via `zdb type install` | done | `bundled_types.rs:KANBAN_TYPEDEF`; unit+e2e: `sql_lifecycle`, `hlc_lww_picks_later_writer` |
 | Sparse index | Audit libgit2/gitoxide coverage for sparse checkout | deferred | `git-scalability-audit.md`: "Not applicable — ZDB indexes all zettels, sparse checkout adds no value" |
 | fsmonitor | OS file watchers (FSEvents, inotify) for O(changed) status | deferred | `git-scalability-audit.md`: not supported in libgit2/gitoxide. Deferred to Phase 3+ |
-| Background maintenance | Scheduled `git maintenance run --auto` | deferred | `git-scalability-audit.md`: Phase 3+ candidate. Existing `compact` covers manual gc |
-| Multi-device simulation | Automated multi-node sync testing | done | PRD 00004 complete. `tests/e2e/multi_device.rs`: 12 tests (3-node convergence, chaos, partition, etc.) |
+| Background maintenance | Scheduled `git maintenance run --auto` | done | `maintenance.rs`: `run()`, `check_write_threshold()`, `maybe_auto_run()`; integrated in `git_ops.rs`, `compaction.rs`, `sync_manager.rs`; config: `MaintenanceConfig { auto_enabled, write_threshold }` | unit: 9 tests in `maintenance.rs` | `git-scalability-audit.md` |
+| Multi-device simulation | Automated multi-node sync testing | done | PRD 00004 complete. `tests/e2e/multi_device.rs`: 18 tests (3-node convergence, chaos, partition, stale-node, bundle bootstrap, etc.) |
 
 ## Deviation Log
 
@@ -87,13 +85,13 @@ _Items that diverge from the initial spec. Each entry: what changed, why, replac
 | Req/Item | Deviation | Rationale | Replacement |
 |----------|-----------|-----------|-------------|
 | FR-33 | Delta export implemented; FFI exposes full export only | Delta path works with unit + smoke coverage. Mobile use case only needs full export for now | FFI delta export deferred until mobile clients need node-targeted sync |
-| FR-64a | Pre-compaction bundle backup not wired into compact pipeline | Bundle export exists standalone (`zdb bundle export --full`) but spec requires automatic backup before compaction | Wire `export_full_bundle` into `compact()` or add `--backup` flag to CLI. Formally deferred to Phase 3 |
+| ~~FR-64a~~ | ~~Pre-compaction bundle backup not wired into compact pipeline~~ Resolved | Implemented: `backup_before_compact()` wired into `compact()` pipeline; CLI flags `--no-backup`, `--backup-path` | No action needed |
 | NFR-03 | Sync time 12.6s at 5K vs 2s target (6x over) | Git fetch+merge dominates. Optimization not yet attempted | Profile `SyncManager::sync` hot path. Likely needs shallow fetch or incremental approach. Formally deferred to Phase 3. Evidence: `sync_thresholds.rs` (ignored, annotated with current measurement) |
 | NFR-01 (50K) | Benchmarks exist but results not measured/recorded | 50K threshold tests are `#[ignore]`. Need dedicated run on representative hardware | Run `large_scale.rs` benchmarks, record in `performance.md` |
 | NFR-02 (50K) | No 50K growth benchmark | Only 5K measured. Linear extrapolation suggests ~8.7 MB/yr with compaction | Add `growth_50k` benchmark or document extrapolation as sufficient |
 | Sparse index | Dropped entirely | ZDB indexes all zettels — sparse checkout adds no value when full index is required | No replacement needed; architecture eliminates the use case |
 | fsmonitor | Deferred to Phase 3+ | Not supported in libgit2 or gitoxide; requires external watchman daemon | Phase 3 candidate when gitoxide adds support or ZDB migrates git backend |
-| Background maintenance | Deferred to Phase 3+ | Requires shelling out to `git maintenance start`; existing `compact` command covers manual gc | Phase 3 candidate. Low effort, high value for repos >10K zettels |
+| ~~Background maintenance~~ | ~~Deferred to Phase 3+~~ Resolved | Implemented: `maintenance.rs` with auto/manual modes, write-threshold triggers, 9 unit tests | No action needed |
 | meeting-minutes | ~~Implemented but weak test coverage~~ Resolved | Unit + e2e test now cover install+use (`install_meeting_minutes_type`) | No action needed |
 
 ## Phase 3 Entry Criteria
@@ -101,7 +99,7 @@ _Items that diverge from the initial spec. Each entry: what changed, why, replac
 Phase 3 work may begin when all of these hold:
 
 1. This exit checklist is reviewed and accepted
-2. ~~FR-64a (pre-compaction backup) is either implemented or formally deferred with a backlog item~~ ✓ Formally deferred in deviation log with replacement strategy
+2. ~~FR-64a (pre-compaction backup) is either implemented or formally deferred with a backlog item~~ ✓ Implemented: `backup_before_compact()` in compact pipeline, `--no-backup`/`--backup-path` CLI flags
 3. ~~NFR-03 sync regression is tracked as a concrete backlog item with profiling data~~ ✓ Formally deferred in deviation log; baseline measurement in `sync_thresholds.rs`; profiling deferred to Phase 3 start
 4. All `cargo test` and `cargo clippy --workspace` pass on master
 5. No Phase 2 items remain marked "not started" without an explicit deferral rationale
