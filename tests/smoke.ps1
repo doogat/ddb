@@ -972,10 +972,8 @@ $hDel = zdb query "DELETE FROM `"my-type`" WHERE id = '$MY_ID'"
 if ($hDel -notmatch "1 row") { throw "hyphenated delete failed: $hDel" }
 pass "hyphenated type SQL"
 
-# Clean up location stack
-while ($true) {
-    try { Pop-Location -ErrorAction Stop } catch { break }
-}
+# Return to original directory
+Set-Location $TMPDIR
 
 Cleanup
 Write-Host "=== all passed ==="
