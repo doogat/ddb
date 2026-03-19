@@ -41,6 +41,9 @@ $NODE2_DIR = New-TempDir
 $NODE3_DIR = New-TempDir
 
 function Cleanup {
+    # On CI, skip cleanup — the runner wipes the workspace. Local Remove-Item on
+    # Windows git repos can hang for minutes due to file locks and antivirus scans.
+    if ($env:CI) { return }
     foreach ($d in @($TMPDIR, $REMOTE_DIR, $NODE1_DIR, $NODE2_DIR, $NODE3_DIR)) {
         if (Test-Path $d) { Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue }
     }
