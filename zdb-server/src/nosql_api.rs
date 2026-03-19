@@ -21,9 +21,15 @@ struct IdsResponse {
 }
 
 fn nosql_error(e: ZettelError) -> axum::response::Response {
+    let status = match &e {
+        ZettelError::NotFound(_) => StatusCode::NOT_FOUND,
+        ZettelError::Validation(_) | ZettelError::InvalidPath(_) => StatusCode::BAD_REQUEST,
+        ZettelError::SqlEngine(_) => StatusCode::UNPROCESSABLE_ENTITY,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
     let (code, message) = crate::error::classify(&e);
     (
-        StatusCode::INTERNAL_SERVER_ERROR,
+        status,
         Json(ErrorBody {
             error: code.into(),
             message,
