@@ -31,7 +31,7 @@ jobs:
       - name: Dependency policy
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check licenses sources
+          command: check licenses sources advisories
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
