@@ -804,6 +804,39 @@ mod tests {
     }
 
     #[test]
+    fn frontmatter_crdt_preserved_when_newer_than_shared_head() {
+        let (_dir, repo) = temp_repo();
+
+        // Create two commits to serve as time anchors
+        let commit_old = repo.commit_file("zettelkasten/a.md", "a", "c_old").unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let commit_new = repo.commit_file("zettelkasten/b.md", "b", "c_new").unwrap();
+
+        // Create a _fm.crdt file named with commit_new's OID
+        let temp_dir = repo.path.join(".crdt/temp");
+        let fm_crdt_name = format!("{}_20260301120000_fm.crdt", commit_new.0);
+        std::fs::write(temp_dir.join(&fm_crdt_name), "fm-crdt-data").unwrap();
+
+        // cleanup with shared_head = commit_old → file is NEWER, should NOT be removed
+        let old_oid = git2::Oid::from_str(&commit_old.0).unwrap();
+        let removed = cleanup_crdt_temp(&repo, Some(old_oid)).unwrap();
+        assert_eq!(removed, 0, "file newer than shared_head should be preserved");
+        assert!(
+            temp_dir.join(&fm_crdt_name).exists(),
+            "_fm.crdt file should still exist after cleanup with older shared_head"
+        );
+
+        // cleanup with shared_head = commit_new → file is at or older, should be removed
+        let new_oid = git2::Oid::from_str(&commit_new.0).unwrap();
+        let removed = cleanup_crdt_temp(&repo, Some(new_oid)).unwrap();
+        assert_eq!(removed, 1, "file at shared_head should be removed");
+        assert!(
+            !temp_dir.join(&fm_crdt_name).exists(),
+            "_fm.crdt file should be removed after cleanup with matching shared_head"
+        );
+    }
+
+    #[test]
     fn compact_under_threshold_no_backup() {
         let (_dir, repo) = temp_repo();
         crate::sync_manager::register_node(&repo, "Test").unwrap();

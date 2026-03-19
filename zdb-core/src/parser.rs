@@ -1816,4 +1816,126 @@ Body continues.";
         assert_ne!(a, b, "rapid consecutive calls must produce unique IDs");
         assert_eq!(b.0.len(), 14);
     }
+
+    #[test]
+    fn yaml_canonical_special_chars_quoted() {
+        let content = "\
+---
+id: 20260301120000
+title: \"ticket: ENG-1234\"
+date: 2026-03-01
+tags:
+  - alpha
+  - beta
+---
+Body content.";
+
+        let parsed = parse(content, "zettelkasten/20260301120000.md").unwrap();
+        let serialized = serialize(&parsed);
+
+        // Title with colons must be double-quoted (core field uses yaml_quote directly)
+        assert!(
+            serialized.contains("title: \"ticket: ENG-1234\""),
+            "colon-containing title should be double-quoted: {serialized}"
+        );
+        // Tags should be block-style list
+        assert!(
+            serialized.contains("tags:\n  - alpha\n  - beta"),
+            "tags should use block-style list: {serialized}"
+        );
+        // Closing --- should be followed only by body content
+        let fm_end = serialized.rfind("---\n").expect("should have closing ---");
+        let after_fm = &serialized[fm_end + 4..];
+        assert!(
+            after_fm.starts_with("Body content."),
+            "body should follow closing --- directly: {serialized}"
+        );
+
+        // Re-parse to verify the round-trip produces equivalent data
+        let reparsed = parse(&serialized, "zettelkasten/20260301120000.md").unwrap();
+        assert_eq!(reparsed.meta.title, parsed.meta.title);
+        assert_eq!(reparsed.meta.tags, parsed.meta.tags);
+
+        // Also test wikilinks in title (another special-char scenario)
+        let wikilink_content = "\
+---
+id: 20260301120001
+title: \"See [[zettelkasten/20260101120000|Foo]]\"
+date: 2026-03-01
+tags:
+  - test
+---
+Body.";
+
+        let parsed2 = parse(wikilink_content, "zettelkasten/20260301120001.md").unwrap();
+        let serialized2 = serialize(&parsed2);
+
+        // Wikilink-containing title must be double-quoted
+        assert!(
+            serialized2.contains("\"See [[zettelkasten/20260101120000|Foo]]\""),
+            "wikilink title should be double-quoted: {serialized2}"
+        );
+
+        // Round-trip preserves title value
+        let reparsed2 = parse(&serialized2, "zettelkasten/20260301120001.md").unwrap();
+        assert_eq!(reparsed2.meta.title, parsed2.meta.title);
+    }
+
+    #[test]
+    fn yaml_user_key_order_preserved_on_body_edit() {
+        let content = "\
+---
+title: My Note
+id: 20260301120000
+type: permanent
+date: 2026-03-01
+---
+Original body.
+---
+- source:: Wikipedia";
+
+        let z = split_zones(content).unwrap();
+        // Verify original key order: title before id, type before date
+        let fm_lines: Vec<&str> = z.raw_frontmatter.lines().collect();
+        let title_pos = fm_lines.iter().position(|l| l.starts_with("title:")).unwrap();
+        let id_pos = fm_lines.iter().position(|l| l.starts_with("id:")).unwrap();
+        let type_pos = fm_lines.iter().position(|l| l.starts_with("type:")).unwrap();
+        let date_pos = fm_lines.iter().position(|l| l.starts_with("date:")).unwrap();
+        assert!(title_pos < id_pos, "title should come before id in original");
+        assert!(type_pos < date_pos, "type should come before date in original");
+
+        // Modify body, keep frontmatter and references unchanged
+        let modified_body = "Modified body content.";
+
+        // Reassemble using original frontmatter (unchanged) + modified body + original references
+        let reassembled = if z.reference_section.is_empty() {
+            format!("---\n{}\n---\n{}", z.raw_frontmatter, modified_body)
+        } else {
+            format!(
+                "---\n{}\n---\n{}\n---\n{}",
+                z.raw_frontmatter, modified_body, z.reference_section
+            )
+        };
+
+        // Re-split and verify frontmatter key order is preserved
+        let z2 = split_zones(&reassembled).unwrap();
+        let fm_lines2: Vec<&str> = z2.raw_frontmatter.lines().collect();
+        let title_pos2 = fm_lines2.iter().position(|l| l.starts_with("title:")).unwrap();
+        let id_pos2 = fm_lines2.iter().position(|l| l.starts_with("id:")).unwrap();
+        let type_pos2 = fm_lines2.iter().position(|l| l.starts_with("type:")).unwrap();
+        let date_pos2 = fm_lines2.iter().position(|l| l.starts_with("date:")).unwrap();
+        assert!(
+            title_pos2 < id_pos2,
+            "title should still come before id after body edit"
+        );
+        assert!(
+            type_pos2 < date_pos2,
+            "type should still come before date after body edit"
+        );
+
+        // Verify body was actually modified
+        assert_eq!(z2.body, modified_body);
+        // Verify references survived
+        assert!(z2.reference_section.contains("- source:: Wikipedia"));
+    }
 }

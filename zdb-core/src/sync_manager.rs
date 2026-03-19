@@ -738,6 +738,92 @@ mod tests {
     }
 
     #[test]
+    fn lww_fallback_when_crdt_produces_invalid_output() {
+        // Test the cascade: CRDT resolve -> validation fails -> LWW fallback.
+        // We set up a real git merge conflict where the CRDT merge produces
+        // invalid output (malformed frontmatter), triggering LWW fallback.
+        let (dir, repo) = temp_repo();
+        register_node(&repo, "Test").unwrap();
+
+        let path = "zettelkasten/20260301120000.md";
+
+        // Ancestor: valid zettel
+        let ancestor = "---\nid: 20260301120000\ntitle: Base\ndate: 2026-03-01\n---\nBase body.\n---\n- source:: base";
+        repo.commit_file(path, ancestor, "ancestor").unwrap();
+        let ancestor_hash = repo.head_oid().unwrap();
+
+        // Ours: valid edit
+        let ours = "---\nid: 20260301120000\ntitle: Ours Edit\ndate: 2026-03-01\n---\nOurs body.\n---\n- source:: ours";
+        repo.commit_file(path, ours, "ours edit").unwrap();
+
+        // Create theirs branch from ancestor
+        let ancestor_commit = repo
+            .repo
+            .find_commit(git2::Oid::from_str(&ancestor_hash.0).unwrap())
+            .unwrap();
+        repo.repo.branch("theirs_lww", &ancestor_commit, true).unwrap();
+        repo.repo.set_head("refs/heads/theirs_lww").unwrap();
+        repo.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+
+        // Theirs: valid edit with cross-zone inline field duplication
+        let theirs = "---\nid: 20260301120000\ntitle: Theirs Edit\ndate: 2026-03-01\n---\nsource:: theirs_body_field\n---\n- source:: theirs";
+        repo.commit_file(path, theirs, "theirs edit").unwrap();
+        let theirs_hash = repo.head_oid().unwrap();
+
+        // Switch back to master
+        repo.repo.set_head("refs/heads/master").unwrap();
+        repo.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+
+        // Create a synthetic merge commit with INVALID content
+        // (malformed YAML that parser::parse will reject)
+        let merged_invalid = "---\ntitle: Broken\n: invalid yaml [\n---\nBody.";
+        let merge_hash = repo
+            .commit_merge(
+                &[(path, merged_invalid)],
+                "synthetic merge with invalid content",
+                &theirs_hash,
+            )
+            .unwrap();
+
+        // validate_clean_merge_or_fallback detects the invalid content,
+        // builds ConflictFile from the two parent commits, and calls
+        // cascade_resolve. The CRDT merge of ours+theirs may also produce
+        // a cross-zone "source" duplicate (body + ref) which fails validation,
+        // triggering LWW fallback.
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let index = crate::indexer::Index::open(&db_path).unwrap();
+        let mgr = SyncManager::open(&repo).unwrap();
+
+        let resolved_count = mgr
+            .validate_clean_merge_or_fallback(merge_hash, &index)
+            .unwrap();
+        assert_eq!(resolved_count, 1, "should have resolved 1 conflict");
+
+        // The key assertion: the resolved file MUST be valid (parseable).
+        // Whether CRDT or LWW won, the cascade guarantees a valid result.
+        let final_content = repo.read_file(path).unwrap();
+        let parsed = crate::parser::parse(&final_content, path);
+        assert!(
+            parsed.is_ok(),
+            "cascade_resolve must produce parseable output: {:?}",
+            parsed.err()
+        );
+
+        // The resolved title must be from one of the two parents (not the invalid merge)
+        let parsed = parsed.unwrap();
+        let title = parsed.meta.title.as_deref().unwrap_or("");
+        assert!(
+            title == "Ours Edit" || title == "Theirs Edit",
+            "title should be from one of the parents, got: {title}"
+        );
+    }
+
+    #[test]
     fn sync_error_resets_skip_commit_graph_for_subsequent_commits() {
         let (dir, repo) = temp_repo();
         register_node(&repo, "Test").unwrap();

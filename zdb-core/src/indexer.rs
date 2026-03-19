@@ -2788,6 +2788,92 @@ mod tests {
     }
 
     #[test]
+    fn gtd_state_aggregated_from_all_zones() {
+        let idx = in_memory_index();
+
+        // Parse a zettel with GTD-relevant data in all zones:
+        // - frontmatter: processed=true, tags=[gtd/ignore]
+        // - body: checkboxes + hashtag #gtd/act/next
+        let content = "\
+---
+id: 20260301120000
+title: GTD Aggregation Test
+date: 2026-03-01
+tags:
+  - gtd/ignore
+processed: true
+---
+- [ ] task one #gtd/act/next
+- [x] done task
+- [i] info entry
+---
+- source:: Wikipedia";
+
+        let parsed = crate::parser::parse(content, "zettelkasten/20260301120000.md").unwrap();
+        idx.index_zettel(&parsed).unwrap();
+
+        let id = "20260301120000";
+
+        // Verify _zdb_fields has processed=true (from frontmatter extra)
+        let fields = idx
+            .query_raw(&format!(
+                "SELECT key, value FROM _zdb_fields WHERE zettel_id = '{id}' AND key = 'processed'"
+            ))
+            .unwrap();
+        assert_eq!(fields.len(), 1, "should have processed field");
+        assert_eq!(fields[0][0], "processed");
+        assert_eq!(fields[0][1], "true");
+
+        // Verify _zdb_tags has both frontmatter tag and body hashtag
+        let tags = idx
+            .query_raw(&format!(
+                "SELECT tag, source FROM _zdb_tags WHERE zettel_id = '{id}' ORDER BY tag"
+            ))
+            .unwrap();
+        let tag_names: Vec<&str> = tags.iter().map(|r| r[0].as_str()).collect();
+        assert!(
+            tag_names.contains(&"gtd/ignore"),
+            "should have frontmatter tag gtd/ignore: {tag_names:?}"
+        );
+        assert!(
+            tag_names.contains(&"gtd/act/next"),
+            "should have body hashtag gtd/act/next: {tag_names:?}"
+        );
+
+        // Verify sources are correct
+        let fm_tag = tags.iter().find(|r| r[0] == "gtd/ignore").unwrap();
+        assert_eq!(fm_tag[1], "frontmatter", "gtd/ignore should be from frontmatter");
+        let body_tag = tags.iter().find(|r| r[0] == "gtd/act/next").unwrap();
+        assert_eq!(body_tag[1], "body", "gtd/act/next should be from body");
+
+        // Verify _zdb_checkboxes has 3 rows with correct states
+        let checkboxes = idx
+            .query_raw(&format!(
+                "SELECT state, content FROM _zdb_checkboxes WHERE zettel_id = '{id}' ORDER BY line_number"
+            ))
+            .unwrap();
+        assert_eq!(checkboxes.len(), 3, "should have 3 checkboxes");
+        assert_eq!(checkboxes[0][0], "open", "first checkbox should be open");
+        assert!(
+            checkboxes[0][1].contains("task one"),
+            "first checkbox content: {}",
+            checkboxes[0][1]
+        );
+        assert_eq!(checkboxes[1][0], "done", "second checkbox should be done");
+        assert!(
+            checkboxes[1][1].contains("done task"),
+            "second checkbox content: {}",
+            checkboxes[1][1]
+        );
+        assert_eq!(checkboxes[2][0], "info", "third checkbox should be info");
+        assert!(
+            checkboxes[2][1].contains("info entry"),
+            "third checkbox content: {}",
+            checkboxes[2][1]
+        );
+    }
+
+    #[test]
     fn fts_search() {
         let idx = in_memory_index();
         idx.index_zettel(&sample_zettel()).unwrap();

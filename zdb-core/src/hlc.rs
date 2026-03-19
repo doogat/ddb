@@ -250,6 +250,79 @@ mod tests {
     }
 
     #[test]
+    fn monotonic_1000_sequential_calls() {
+        let mut last: Option<Hlc> = None;
+        for _ in 0..1000 {
+            let next = Hlc::now("test-node", &last);
+            if let Some(ref prev) = last {
+                assert!(
+                    next > *prev,
+                    "HLC must be strictly monotonic: {prev} >= {next}"
+                );
+            }
+            last = Some(next);
+        }
+    }
+
+    #[test]
+    fn cross_node_causal_consistency() {
+        // Node A generates t1
+        let t1 = Hlc::now("node-a-1234", &None);
+
+        // Node B generates t2 independently
+        let t2 = Hlc::now("node-b-5678", &None);
+
+        // B merges t1 via recv
+        let b_merged = Hlc::recv("node-b-5678", &Some(t2.clone()), &t1);
+        assert!(
+            b_merged > t1,
+            "B's merged timestamp must be > t1: {b_merged} vs {t1}"
+        );
+        assert!(
+            b_merged > t2,
+            "B's merged timestamp must be > t2: {b_merged} vs {t2}"
+        );
+
+        // A merges B's result
+        let a_merged = Hlc::recv("node-a-1234", &Some(t1.clone()), &b_merged);
+        assert!(
+            a_merged > t1,
+            "A's merged must be > t1: {a_merged} vs {t1}"
+        );
+        assert!(
+            a_merged > t2,
+            "A's merged must be > t2: {a_merged} vs {t2}"
+        );
+        assert!(
+            a_merged > b_merged,
+            "A's merged must be > B's merged: {a_merged} vs {b_merged}"
+        );
+    }
+
+    #[test]
+    fn monotonic_despite_clock_regression() {
+        // Simulate a "last" with wall_ms far in the future (clock regression scenario)
+        let future_last = Hlc {
+            wall_ms: u64::MAX / 2, // far future, real wall clock won't reach this
+            counter: 0,
+            node: "oldnode1".into(),
+        };
+
+        // Call now() — wall clock is behind, so HLC must not regress
+        let next = Hlc::now("test-node", &Some(future_last.clone()));
+        assert!(
+            next.wall_ms >= future_last.wall_ms,
+            "wall_ms must not regress: {} < {}",
+            next.wall_ms,
+            future_last.wall_ms
+        );
+        assert!(
+            next > future_last,
+            "new HLC must sort after previous: {next} vs {future_last}"
+        );
+    }
+
+    #[test]
     fn extract_hlc_missing() {
         assert!(extract_hlc("plain commit message").is_none());
     }
