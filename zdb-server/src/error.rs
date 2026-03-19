@@ -24,6 +24,78 @@ pub fn classify(e: &ZettelError) -> (&'static str, String) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn not_found_passes_through() {
+        let (code, msg) = classify(&ZettelError::NotFound("zettel not found".into()));
+        assert_eq!(code, "NOT_FOUND");
+        assert_eq!(msg, "zettel not found");
+    }
+
+    #[test]
+    fn validation_passes_through() {
+        let (code, msg) = classify(&ZettelError::Validation("title required".into()));
+        assert_eq!(code, "VALIDATION_ERROR");
+        assert_eq!(msg, "title required");
+    }
+
+    #[test]
+    fn invalid_path_passes_through() {
+        let (code, msg) = classify(&ZettelError::InvalidPath("../escape".into()));
+        assert_eq!(code, "INVALID_PATH");
+        assert_eq!(msg, "../escape");
+    }
+
+    #[test]
+    fn sql_engine_redacted_to_query_failed() {
+        let (code, msg) =
+            classify(&ZettelError::SqlEngine("near SELCT: syntax error".into()));
+        assert_eq!(code, "SQL_ERROR");
+        assert_eq!(msg, "query failed");
+    }
+
+    #[test]
+    fn git_error_redacted() {
+        let (code, msg) = classify(&ZettelError::Git("object not found".into()));
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
+    fn io_error_redacted() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "secret path");
+        let (code, msg) = classify(&ZettelError::Io(io_err));
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
+    fn yaml_error_redacted() {
+        let (code, msg) = classify(&ZettelError::Yaml("bad yaml at line 3".into()));
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
+    fn sql_error_redacted() {
+        let (code, msg) = classify(&ZettelError::Sql("table schema leaked".into()));
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
+    fn to_server_error_uses_classification() {
+        let err = to_server_error(ZettelError::Git("repo corrupt".into()));
+        assert_eq!(err.message, "internal error");
+
+        let err = to_server_error(ZettelError::NotFound("missing".into()));
+        assert_eq!(err.message, "missing");
+    }
+}
+
 /// Convert ZettelError to ServerError for use in dynamic schema resolvers.
 pub fn to_server_error(e: ZettelError) -> ServerError {
     let (code, message) = classify(&e);
