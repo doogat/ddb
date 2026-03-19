@@ -79,6 +79,10 @@ fi
 run_preflight
 
 # --- rotate changelog ---
+# Inserts new version heading below [Unreleased]. Any content accumulated
+# under [Unreleased] stays in place and becomes the new release's notes
+# while [Unreleased] resets to empty. This is standard Keep a Changelog
+# rotation — do not change to a rename/replace approach.
 RELEASE_DATE=$(date +%Y-%m-%d)
 sed -i.bak '/^## \[Unreleased\]/a\
 \
