@@ -28,6 +28,11 @@ jobs:
           git config --global user.email "ci@zetteldb.dev"
           git config --global user.name "ZettelDB CI"
 
+      - name: Dependency policy
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses sources
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
