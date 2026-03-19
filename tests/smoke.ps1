@@ -580,6 +580,23 @@ try {
 }
 pass "nosql-api: auth rejects missing token"
 
+# error sanitization — SQL error must not leak raw details
+$result = gql '{"query":"{ executeSQL(sql: \"SELCT * FORM oops\") { columns rows } }"}'
+if ($result -notmatch "errors") { throw "expected errors in response" }
+if ($result -notmatch "(?i)query failed|internal error") { throw "expected sanitized message" }
+if ($result -match "(?i)SELCT|syntax error|sqlite") { throw "raw SQL details leaked" }
+pass "serve: sql error sanitized (no raw details)"
+
+# error sanitization — not-found returns 404
+try {
+    Invoke-WebRequest -Uri "$REST_URL/zettels/99990101000000" `
+        -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction Stop
+    throw "should have been 404"
+} catch {
+    if ($_.Exception.Response.StatusCode.value__ -ne 404) { throw "expected 404" }
+}
+pass "serve: not-found returns 404"
+
 # compact mutation
 $result = gql '{"query":"mutation { compact { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter crdtTempFilesBefore crdtTempFilesAfter repoBytesBefore repoBytesAfter backupPath } }"}'
 if ($result -notmatch "gcSuccess") { throw "compact mutation failed" }

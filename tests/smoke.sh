@@ -477,6 +477,19 @@ HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$NOSQL_URL/$ID1" \
 [ "$HTTP_CODE" = "401" ]
 pass "nosql-api: auth rejects missing token"
 
+# error sanitization — SQL error must not leak raw details
+RESULT=$(gql '{"query":"{ executeSQL(sql: \"SELCT * FORM oops\") { columns rows } }"}')
+echo "$RESULT" | grep -q '"errors"'
+echo "$RESULT" | grep -qi "query failed\|internal error"
+! echo "$RESULT" | grep -qi "SELCT\|syntax error\|sqlite"
+pass "serve: sql error sanitized (no raw details)"
+
+# error sanitization — not-found returns descriptive message
+HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/zettels/99990101000000" \
+  -H "Authorization: Bearer $TOKEN")
+[ "$HTTP_CODE" = "404" ]
+pass "serve: not-found returns 404"
+
 # compact mutation
 RESULT=$(gql '{"query":"mutation { compact { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter crdtTempFilesBefore crdtTempFilesAfter repoBytesBefore repoBytesAfter backupPath } }"}')
 echo "$RESULT" | grep -q '"gcSuccess"'
