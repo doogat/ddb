@@ -59,7 +59,7 @@ Keep PRs focused — one concern per PR.
 
 ## Changelog
 
-Every PR with user-facing changes must add an entry under `## [Unreleased]` in CHANGELOG.md. Use the standard sections: Added, Changed, Deprecated, Removed, Fixed, Security. Not enforced by CI — enforced by code review convention.
+Every PR with user-facing changes must add an entry under `## [Unreleased]` in CHANGELOG.md. Use the standard sections: Added, Changed, Deprecated, Removed, Fixed, Security. Breaking changes must include migration notes. FFI/UniFFI binding changes must always be noted explicitly. Not enforced by CI — enforced by code review convention.
 
 ## Architecture
 
