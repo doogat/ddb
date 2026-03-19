@@ -137,6 +137,7 @@ jobs:
           PROPTEST_CASES: 50
         run: cargo test-full
       - name: Full smoke test
+        timeout-minutes: 15
         env:
           ZDB_BIN: ${{ github.workspace }}\target\debug\zdb.exe
         run: pwsh -File tests/smoke.ps1
