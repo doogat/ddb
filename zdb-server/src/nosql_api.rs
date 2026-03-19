@@ -1,9 +1,12 @@
 use axum::extract::{Path, Query};
-use axum::{routing, Extension, Router};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::{routing, Extension, Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::actor::ActorHandle;
 use crate::rest::ErrorBody;
+use zdb_core::error::ZettelError;
 
 #[derive(Deserialize)]
 pub struct ScanParams {
@@ -17,6 +20,18 @@ struct IdsResponse {
     ids: Vec<String>,
 }
 
+fn nosql_error(e: ZettelError) -> axum::response::Response {
+    let (code, message) = crate::error::classify(&e);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorBody {
+            error: code.into(),
+            message,
+        }),
+    )
+        .into_response()
+}
+
 pub fn router() -> Router {
     Router::new()
         .route("/{id}", routing::get(get_zettel))
@@ -28,10 +43,6 @@ async fn get_zettel(
     Extension(actor): Extension<ActorHandle>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::IntoResponse;
-    use axum::Json;
-
     match actor.nosql_get(id).await {
         Ok(Some(z)) => {
             let json = crate::rest::zettel_to_json(&z);
@@ -40,19 +51,12 @@ async fn get_zettel(
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(ErrorBody {
-                error: "not_found".into(),
+                error: "NOT_FOUND".into(),
                 message: "zettel not found".into(),
             }),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorBody {
-                error: "nosql_error".into(),
-                message: e.to_string(),
-            }),
-        )
-            .into_response(),
+        Err(e) => nosql_error(e),
     }
 }
 
@@ -60,16 +64,12 @@ async fn scan(
     Extension(actor): Extension<ActorHandle>,
     Query(params): Query<ScanParams>,
 ) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::IntoResponse;
-    use axum::Json;
-
     let result = match (params.zettel_type, params.tag) {
         (Some(_), Some(_)) => {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorBody {
-                    error: "bad_request".into(),
+                    error: "BAD_REQUEST".into(),
                     message: "specify ?type= or ?tag=, not both".into(),
                 }),
             )
@@ -81,7 +81,7 @@ async fn scan(
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorBody {
-                    error: "bad_request".into(),
+                    error: "BAD_REQUEST".into(),
                     message: "specify ?type= or ?tag=".into(),
                 }),
             )
@@ -91,14 +91,7 @@ async fn scan(
 
     match result {
         Ok(ids) => Json(IdsResponse { ids }).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorBody {
-                error: "nosql_error".into(),
-                message: e.to_string(),
-            }),
-        )
-            .into_response(),
+        Err(e) => nosql_error(e),
     }
 }
 
@@ -106,19 +99,8 @@ async fn backlinks(
     Extension(actor): Extension<ActorHandle>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::IntoResponse;
-    use axum::Json;
-
     match actor.nosql_backlinks(id).await {
         Ok(ids) => Json(IdsResponse { ids }).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorBody {
-                error: "nosql_error".into(),
-                message: e.to_string(),
-            }),
-        )
-            .into_response(),
+        Err(e) => nosql_error(e),
     }
 }

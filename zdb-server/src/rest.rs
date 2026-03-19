@@ -123,18 +123,18 @@ pub fn zettel_to_json(z: &ParsedZettel) -> ZettelJson {
 }
 
 fn rest_error(e: ZettelError) -> (StatusCode, Json<ErrorBody>) {
-    let (status, code) = match &e {
-        ZettelError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
-        ZettelError::Validation(_) => (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
-        ZettelError::InvalidPath(_) => (StatusCode::BAD_REQUEST, "INVALID_PATH"),
-        ZettelError::SqlEngine(_) => (StatusCode::UNPROCESSABLE_ENTITY, "SQL_ERROR"),
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
+    let status = match &e {
+        ZettelError::NotFound(_) => StatusCode::NOT_FOUND,
+        ZettelError::Validation(_) | ZettelError::InvalidPath(_) => StatusCode::BAD_REQUEST,
+        ZettelError::SqlEngine(_) => StatusCode::UNPROCESSABLE_ENTITY,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
+    let (code, message) = crate::error::classify(&e);
     (
         status,
         Json(ErrorBody {
             error: code.into(),
-            message: e.to_string(),
+            message,
         }),
     )
 }
