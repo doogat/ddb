@@ -1,0 +1,79 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-03-19
+
+### Added
+
+- CLI (`zdb`) with CRUD operations: `init`, `create`, `read`, `update`, `delete`, `list`, `status`
+- Git-backed storage layer with full version history
+- Three-zone Markdown parsing: YAML frontmatter, body, references
+- FTS5 full-text search with ranked results and snippets
+- SQL engine: DDL (`CREATE TABLE`, `DROP TABLE`, `ALTER TABLE`) and DML (`INSERT`, `SELECT`, `UPDATE`, `DELETE`) translated to zettel operations
+- Multi-row `INSERT` with single git commit
+- Quoted identifier support for hyphenated type names
+- Multi-device sync with CRDT conflict resolution (Automerge)
+- Hybrid Logical Clock for causal ordering
+- Compaction: CRDT temp cleanup, git gc, byte-level reporting
+- Type system: `_typedef` zettels, bundled types (project, contact), folder-aware namespaces
+- Link extraction: wikilinks, embeds, Markdown links, bare URLs with kind tracking
+- Hashtag extraction from body text with `source` column in `_zdb_tags`
+- Checkbox extraction with state tracking (`_zdb_checkboxes` table)
+- Section parsing (`extract_sections()`) for structured heading navigation
+- Sequence navigation: tree, breadcrumb, broken chain detection
+- Path navigation: dot/bracket notation for nested frontmatter values (`get_path`, `set_path`, `remove_path`)
+- Discovery queries: orphans, stale zettels, recent changes, link density
+- Consistency auto-fix: H1 alignment, tag dedup, migration framework
+- Broken backlink detection and reporting on delete
+- Resurrection tracking for deleted-then-recreated zettels
+- Wikilink resolution: path → ID → alias precedence
+- Post-rename unresolvable link detection
+- Parallel rebuild pipeline with rayon for multi-core parsing
+- Batch indexing with single transaction and error resilience
+- Incremental reindex on multi-change diffs
+- Criterion benchmarks: CRUD, search, sync, growth simulation at 1K–50K zettels
+- Performance threshold tests (NFR-01 query latency, NFR-02 growth, NFR-03 sync)
+- Property-based tests across parser, SQL engine, indexer, and sync subsystems
+- Cross-platform smoke tests (bash + PowerShell)
+- E2E test suite via `assert_cmd`
+- BSL-1.1 license
+- SECURITY.md vulnerability reporting policy
+- CONTRIBUTING.md with dev setup and PR guidelines
+- mdBook documentation site (architecture, technical guides, API reference)
+- **Experimental:** GraphQL server with dynamic schema from `_typedef` zettels
+- **Experimental:** REST API with field-level filtering (`field.*` query params)
+- **Experimental:** PgWire protocol for SQL client access
+- **Experimental:** WebSocket subscriptions with dual-path auth (header + payload)
+- **Experimental:** NoSQL storage backend (redb)
+- **Experimental:** UniFFI bindings for Swift and Kotlin (ZettelDriver facade)
+- **Experimental:** Delta bundle export/import for offline sync
+- **Experimental:** Tar-based bundle export/import
+- **Experimental:** Attachment support
+- **Experimental:** Auto-update mechanism
+- **Experimental:** Concurrent read path via ReadPool with semaphore
+- **Experimental:** Background maintenance with auto-trigger on high-write sessions
+- **Experimental:** Stability tier markers (`X-Experimental` header, CLI `--help` annotations)
+
+### Fixed
+
+- Error sanitization: internal details redacted from all API responses
+- Proper HTTP status codes for NoSQL error variants
+- Exhaustive error classification across REST, GraphQL, and NoSQL handlers
+- Windows compatibility: `USERPROFILE` fallback for config dir, file lock handling in smoke tests
+- SQLite cross-process safety via `busy_timeout`
+- Sync performance: deferred commit-graph writes, incremental reindex, single push
+
+### Security
+
+- cargo-deny checks for license compliance and dependency advisories
+- Error responses never leak internal paths, stack traces, or SQL details
+- quinn-proto upgraded to 0.11.14 (RUSTSEC-2026-0037)
+
+[Unreleased]: https://github.com/doogat/zdb/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/doogat/zdb/releases/tag/v0.1.0
