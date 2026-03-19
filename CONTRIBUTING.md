@@ -57,6 +57,10 @@ cargo test --workspace
 
 Keep PRs focused — one concern per PR.
 
+## Changelog
+
+Every PR with user-facing changes must add an entry under `## [Unreleased]` in CHANGELOG.md. Use the standard sections: Added, Changed, Deprecated, Removed, Fixed, Security. Not enforced by CI — enforced by code review convention.
+
 ## Architecture
 
 See [docs/src/](docs/src/) for architecture documentation, module boundaries, and design decisions.
