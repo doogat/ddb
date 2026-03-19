@@ -971,7 +971,7 @@ pass "hyphenated type SQL"
 
 # Clean up location stack
 while ($true) {
-    try { Pop-Location } catch { break }
+    try { Pop-Location -ErrorAction Stop } catch { break }
 }
 
 Cleanup
