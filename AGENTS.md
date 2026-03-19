@@ -170,6 +170,11 @@ cargo doc --no-deps --document-private-items   Generate rustdoc
 cd docs && mdbook build               Build documentation
 cd docs && mdbook serve               Serve documentation locally
 
+# Performance thresholds (require --release, local only — advisory in CI)
+cargo test --release -p zdb-core --test query_thresholds nfr01_
+cargo test --release -p zdb-core --test growth_thresholds nfr02_
+cargo test --release -p zdb-core --test sync_thresholds nfr03_
+
 # Property tests (thorough run, ~20 min at 5000 cases)
 PROPTEST_CASES=5000 cargo test -p zdb-core --test property_tests
 

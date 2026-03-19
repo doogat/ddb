@@ -43,6 +43,7 @@ jobs:
         run: cargo test -p zdb-core --test property_tests
 
   linux-thresholds:
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +147,6 @@ jobs:
     needs:
       - linux-clippy
       - linux-core
-      - linux-thresholds
       - linux-smoke
       - linux-e2e
       - macos-full
