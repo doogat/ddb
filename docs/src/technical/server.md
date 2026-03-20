@@ -66,6 +66,19 @@ read_pool_size = 4                    # default: min(available_parallelism, 4)
 
 CLI flags (`--port`, `--pg-port`, `--bind`) override config file values.
 
+## Logging
+
+The server uses `tracing` for structured logging. Default level: `info` for zdb crates, `warn` for dependencies.
+
+```bash
+zdb serve                             # default: info level
+zdb --log-level debug serve           # debug output (includes HTTP requests)
+RUST_LOG=zdb_server=trace zdb serve   # trace a specific crate
+zdb --log-dir /var/log/zdb serve      # NDJSON file logging
+```
+
+`RUST_LOG` takes precedence over `--log-level`. HTTP request/response tracing (method, path, status, latency) is logged at `debug` level via `tower-http`.
+
 ## Authentication
 
 On first start, the server generates a UUID v4 token at `~/.config/zetteldb/token` (chmod 0600 on Unix). All requests must include:
