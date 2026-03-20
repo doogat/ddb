@@ -79,6 +79,18 @@ zdb --log-dir /var/log/zdb serve      # NDJSON file logging
 
 `RUST_LOG` takes precedence over `--log-level`. HTTP request/response tracing (method, path, status, latency) is logged at `debug` level via `tower-http`.
 
+## Health Check
+
+Unauthenticated endpoints for monitoring and orchestration:
+
+| Endpoint | Purpose | Response |
+|----------|---------|----------|
+| `GET /health` | Readiness (alias for `/health/ready`) | 200 or 503 |
+| `GET /health/ready` | Actor alive + index reachable | 200 `{"status":"ok"}` or 503 `{"status":"degraded"}` |
+| `GET /health/live` | Process alive | Always 200 `{"status":"ok"}` |
+
+Ready response includes `version`, `uptime_seconds`, and `index_reachable` fields.
+
 ## Authentication
 
 On first start, the server generates a UUID v4 token at `~/.config/zetteldb/token` (chmod 0600 on Unix). All requests must include:
