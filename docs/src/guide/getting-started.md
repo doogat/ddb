@@ -111,7 +111,7 @@ See [Multi-Device Sync](./sync.md) for configuring remotes and registering nodes
 
 ## Updating
 
-`zdb` auto-updates in the background. Every hour (at most), a detached process checks for new releases and, if one exists, downloads, verifies, and replaces the binary. On your next command you'll see:
+`zdb` auto-updates in the background. Every hour (at most), a detached process checks for new releases and, if one exists, downloads, verifies (SHA-256), and replaces the binary. Before replacing, the current binary is backed up to `~/.config/zetteldb/zdb.previous`. On your next command you'll see:
 
 ```text
 zdb updated v0.1.1 -> v0.2.0. restart your shell to use the new version.
@@ -122,6 +122,27 @@ To update immediately:
 ```bash
 zdb update-bin
 ```
+
+### Rollback
+
+If an update causes problems, restore the previous binary:
+
+```bash
+zdb update-bin --rollback
+```
+
+Only the most recent pre-update binary is kept.
+
+### Disabling auto-update
+
+To prevent background auto-updates, add to `~/.config/zetteldb/config.toml`:
+
+```toml
+[update]
+auto = false
+```
+
+When disabled, `zdb` still checks for new versions but won't apply them. Manual updates via `zdb update-bin` always work regardless of this setting.
 
 ## Global Options
 
