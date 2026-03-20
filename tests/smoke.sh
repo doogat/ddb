@@ -741,9 +741,18 @@ $ZDB bundle import "$TMPDIR/delta-bundle.tar" | grep -q "imported"
 $ZDB read "$DELTA_ID" | grep -q "Delta note"
 pass "delta bundle export + import"
 
-# 29. update-bin help
+# 29. update-bin help + rollback
 $ZDB update-bin --help | grep -q "Update zdb"
-pass "update-bin --help"
+$ZDB update-bin --help | grep -q "\-\-rollback"
+pass "update-bin --help (includes --rollback)"
+
+# rollback with no backup should fail gracefully
+if $ZDB update-bin --rollback 2>&1 | grep -q "no backup"; then
+  pass "update-bin --rollback (no backup error)"
+else
+  echo "FAIL: update-bin --rollback should report 'no backup'" >&2
+  exit 1
+fi
 
 # 30. ALTER TABLE + DROP TABLE + bulk UPDATE/DELETE
 cd "$TMPDIR"

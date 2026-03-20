@@ -853,10 +853,16 @@ $output = zdb read $DELTA_ID
 if ($output -notmatch "Delta note") { throw "delta content missing" }
 pass "delta bundle export + import"
 
-# 29. update-bin help
+# 29. update-bin help + rollback
 $output = zdb update-bin --help
 if ($output -notmatch "Update zdb") { throw "update-bin help failed" }
-pass "update-bin --help"
+if ($output -notmatch "--rollback") { throw "update-bin help missing --rollback" }
+pass "update-bin --help (includes --rollback)"
+
+# rollback with no backup should fail gracefully
+$rollbackOutput = zdb update-bin --rollback 2>&1
+if ($rollbackOutput -notmatch "no backup") { throw "update-bin --rollback should report no backup" }
+pass "update-bin --rollback (no backup error)"
 
 # 30. ALTER TABLE + DROP TABLE + bulk UPDATE/DELETE
 Pop-Location  # back to TMPDIR
