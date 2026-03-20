@@ -317,6 +317,10 @@ $ZDB reindex >/dev/null
 $ZDB sequence broken | grep -q "not found"
 pass "sequence broken"
 
+# 16b. --log-level flag accepted
+$ZDB --log-level debug status >/dev/null 2>&1
+pass "--log-level flag accepted"
+
 if [ "$SMOKE_PROFILE" = "quick" ]; then
   pass "quick profile complete"
   exit 0

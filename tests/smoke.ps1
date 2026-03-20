@@ -391,6 +391,10 @@ $output = zdb sequence broken
 if ($output -notmatch "not found") { throw "sequence broken not detected" }
 pass "sequence broken"
 
+# 16b. --log-level flag accepted
+zdb --log-level debug status *>$null
+pass "--log-level flag accepted"
+
 if ($SmokeProfile -eq "quick") {
     pass "quick profile complete"
     exit 0
