@@ -3743,6 +3743,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -4784,7 +4785,6 @@ dependencies = [
  "criterion",
  "futures-util",
  "indexmap",
- "log",
  "pgwire",
  "rand 0.8.5",
  "reqwest",
@@ -4796,6 +4796,8 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml 0.8.23",
+ "tower-http",
+ "tracing",
  "uuid",
  "zdb-core",
 ]
