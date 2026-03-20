@@ -438,6 +438,7 @@ fn init_logging(log_dir: Option<&std::path::Path>, log_level: Option<&str>) {
                 }
                 Err(e) => {
                     fmt()
+                        .compact()
                         .with_writer(std::io::stderr)
                         .with_env_filter(filter)
                         .init();
@@ -450,6 +451,7 @@ fn init_logging(log_dir: Option<&std::path::Path>, log_level: Option<&str>) {
         }
         None => {
             fmt()
+                .compact()
                 .with_writer(std::io::stderr)
                 .with_env_filter(filter)
                 .init();
