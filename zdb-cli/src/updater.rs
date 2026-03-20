@@ -54,6 +54,27 @@ fn backup_path() -> PathBuf {
     config_dir().join("zdb.previous")
 }
 
+#[derive(Deserialize, Default)]
+struct UpdateSection {
+    auto: Option<bool>,
+}
+
+#[derive(Deserialize, Default)]
+struct CliConfig {
+    update: Option<UpdateSection>,
+}
+
+fn auto_update_enabled() -> bool {
+    let path = config_dir().join("config.toml");
+    let Ok(contents) = fs::read_to_string(path) else {
+        return true;
+    };
+    let Ok(cfg) = toml::from_str::<CliConfig>(&contents) else {
+        return true;
+    };
+    cfg.update.and_then(|u| u.auto).unwrap_or(true)
+}
+
 fn backup_current_binary() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("cannot locate current binary: {e}"))?;
     let dest = backup_path();
@@ -165,7 +186,7 @@ pub fn check_and_update() {
 
     match fetch_latest_release() {
         Ok((version, url)) => {
-            if version > current {
+            if version > current && auto_update_enabled() {
                 // Attempt auto-update
                 if download_and_replace(&url, &version).is_ok() {
                     let state = UpdateState {
