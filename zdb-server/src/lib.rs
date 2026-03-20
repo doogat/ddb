@@ -131,7 +131,10 @@ pub async fn run(
         .layer(Extension(rest_actor))
         .layer(Extension(read_pool))
         .layer(Extension(shared_schema))
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                .on_failure(tower_http::trace::DefaultOnFailure::new().level(tracing::Level::WARN)),
+        )
         .layer(axum::middleware::map_response(
             |mut res: axum::response::Response| async {
                 res.headers_mut().insert(
