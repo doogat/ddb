@@ -40,6 +40,8 @@ pub async fn run(
     // Auth
     let token = auth::load_or_create_token(&cfg.token_file)?;
     tracing::info!(path = %cfg.token_file.display(), "auth token");
+    // Readiness signal for process orchestration (e2e tests, scripts)
+    eprintln!("auth token: {}", cfg.token_file.display());
 
     // Attachment file serving
     let attachment_root = repo_path.join("reference");
@@ -143,6 +145,7 @@ pub async fn run(
     let addr = format!("{}:{}", cfg.bind, cfg.port);
     tracing::info!(%addr, "listening");
     tracing::info!(count = type_count, "type schemas loaded");
+    eprintln!("listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

@@ -237,6 +237,7 @@ pub async fn start(
     let addr = format!("{bind}:{port}");
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "pgwire listening");
+    eprintln!("pgwire listening on {addr}");
 
     loop {
         let (socket, _) = listener.accept().await?;
