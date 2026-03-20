@@ -53,6 +53,10 @@ struct Cli {
     #[arg(long, global = true, env = "ZDB_LOG_DIR")]
     log_dir: Option<PathBuf>,
 
+    /// Log level for zdb crates (trace, debug, info, warn, error)
+    #[arg(long, global = true, env = "ZDB_LOG_LEVEL")]
+    log_level: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -373,7 +377,7 @@ enum SequenceAction {
 
 fn main() {
     let cli = Cli::parse();
-    init_logging(cli.log_dir.as_deref());
+    init_logging(cli.log_dir.as_deref(), cli.log_level.as_deref());
 
     // Handle update commands before anything else
     match &cli.command {
@@ -403,11 +407,16 @@ fn main() {
     }
 }
 
-fn init_logging(log_dir: Option<&std::path::Path>) {
+fn init_logging(log_dir: Option<&std::path::Path>, log_level: Option<&str>) {
     use tracing_subscriber::fmt;
     use tracing_subscriber::EnvFilter;
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        let level = log_level.unwrap_or("info");
+        EnvFilter::new(format!(
+            "zdb_core={level},zdb_server={level},zdb_cli={level},warn"
+        ))
+    });
 
     match log_dir {
         Some(dir) => {
