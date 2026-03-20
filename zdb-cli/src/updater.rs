@@ -591,4 +591,90 @@ mod tests {
             .expect("CARGO_PKG_VERSION should be valid semver");
         assert!(v.major == 0 || v.major >= 1);
     }
+
+    #[test]
+    fn state_round_trip_with_previous_version() {
+        let state = UpdateState {
+            last_check: "2026-03-20T00:00:00Z".into(),
+            latest_version: "0.3.0".into(),
+            download_url: "https://example.com/zdb.tar.gz".into(),
+            updated_from: Some("0.2.0".into()),
+            previous_version: Some("0.2.0".into()),
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let parsed: UpdateState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.previous_version, Some("0.2.0".into()));
+        assert_eq!(parsed.updated_from, Some("0.2.0".into()));
+    }
+
+    #[test]
+    fn state_deserialize_without_previous_version() {
+        // Old state files won't have previous_version — should default to None
+        let json = r#"{"last_check":"2026-01-01T00:00:00Z","latest_version":"1.0.0","download_url":"https://x.com","updated_from":"0.9.0"}"#;
+        let state: UpdateState = serde_json::from_str(json).unwrap();
+        assert!(state.previous_version.is_none());
+        assert_eq!(state.updated_from, Some("0.9.0".into()));
+    }
+
+    #[test]
+    fn backup_copies_file_to_dest() {
+        let dir = std::env::temp_dir().join(format!("zdb-backup-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+
+        let src = dir.join("zdb-test-bin");
+        let dest = dir.join("zdb.previous");
+        fs::write(&src, b"fake binary content").unwrap();
+
+        // Simulate backup by copying
+        fs::copy(&src, &dest).unwrap();
+        assert!(dest.exists());
+        assert_eq!(
+            fs::read_to_string(&dest).unwrap(),
+            "fake binary content"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_parse_auto_false() {
+        let toml_str = "[update]\nauto = false\n";
+        let cfg: CliConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.update.unwrap().auto, Some(false));
+    }
+
+    #[test]
+    fn config_parse_auto_true() {
+        let toml_str = "[update]\nauto = true\n";
+        let cfg: CliConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.update.unwrap().auto, Some(true));
+    }
+
+    #[test]
+    fn config_parse_missing_update_section() {
+        let toml_str = "[server]\nport = 2891\n";
+        let cfg: CliConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.update.is_none());
+    }
+
+    #[test]
+    fn config_parse_empty_file() {
+        let cfg: CliConfig = toml::from_str("").unwrap();
+        assert!(cfg.update.is_none());
+    }
+
+    #[test]
+    fn config_parse_update_without_auto() {
+        let toml_str = "[update]\n";
+        let cfg: CliConfig = toml::from_str(toml_str).unwrap();
+        let section = cfg.update.unwrap();
+        assert!(section.auto.is_none());
+    }
+
+    #[test]
+    fn backup_path_under_config_dir() {
+        let bp = backup_path();
+        assert!(bp.ends_with("zdb.previous"));
+        assert!(bp.parent().unwrap().ends_with("zetteldb"));
+    }
 }
