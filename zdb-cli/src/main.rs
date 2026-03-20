@@ -240,7 +240,11 @@ enum Command {
         action: MaintenanceAction,
     },
     /// [experimental] Update zdb to the latest release
-    UpdateBin,
+    UpdateBin {
+        /// Restore the previously backed-up binary
+        #[arg(long)]
+        rollback: bool,
+    },
     /// Background update check (internal)
     #[command(name = "__update-check", hide = true)]
     UpdateCheck,
@@ -385,8 +389,13 @@ fn main() {
             updater::check_and_update();
             return;
         }
-        Command::UpdateBin => {
-            if let Err(e) = updater::run_update() {
+        Command::UpdateBin { rollback } => {
+            let result = if *rollback {
+                updater::rollback()
+            } else {
+                updater::run_update()
+            };
+            if let Err(e) = result {
                 eprintln!("error: {e}");
                 std::process::exit(1);
             }
@@ -1274,7 +1283,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
         }
 
         // Handled in main() before run() is called
-        Command::UpdateBin | Command::UpdateCheck => unreachable!(),
+        Command::UpdateBin { .. } | Command::UpdateCheck => unreachable!(),
 
         Command::Type { action } => match action {
             TypeAction::Suggest { name } => {

@@ -278,6 +278,32 @@ pub fn run_update() -> Result<(), String> {
     Ok(())
 }
 
+/// Restore the previously backed-up binary.
+pub fn rollback() -> Result<(), String> {
+    let backup = backup_path();
+    if !backup.exists() {
+        return Err("no backup found — nothing to roll back".into());
+    }
+
+    let prev_version = read_state()
+        .and_then(|s| s.previous_version.clone())
+        .unwrap_or_else(|| "unknown".into());
+
+    self_replace::self_replace(&backup).map_err(|e| {
+        format!("rollback failed: {e}. manually copy {} over the zdb binary", backup.display())
+    })?;
+
+    // Clear update-related state but keep the backup file
+    if let Some(mut state) = read_state() {
+        state.updated_from = None;
+        state.previous_version = None;
+        write_state(&state);
+    }
+
+    eprintln!("rolled back to v{prev_version}. restart your shell to use the restored version.");
+    Ok(())
+}
+
 fn download_and_replace(url: &str, expected_version: &Version) -> Result<(), String> {
     let client = http_client()?;
 
