@@ -146,7 +146,7 @@ Six primary paths move data through the system. Each path touches a specific sub
 
 ### Search
 
-1. `indexer::Index::ensure_fresh()` compares the stored HEAD OID in `_zdb_meta` against the actual Git HEAD. If they differ, a targeted incremental reindex runs for changed paths only (see `indexer.rs:incremental_reindex()`).
+1. `indexer::Index::ensure_fresh()` compares the stored HEAD OID in `_zdb_meta` against the actual Git HEAD. If they differ, a targeted incremental reindex runs for changed paths only (see `indexer/mod.rs:incremental_reindex()`).
 2. The FTS5 virtual table `_zdb_fts` is queried with `MATCH` using porter stemming and unicode61 tokenization.
 3. Results are ranked by BM25 score and returned with highlighted snippets.
 4. `search_paginated()` adds limit/offset support and a total count.
@@ -219,7 +219,7 @@ For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent 
 
 ### Indexer rebuild pipeline
 
-Full rebuilds (see `indexer.rs:rebuild()`) use a parallel pipeline powered by rayon:
+Full rebuilds (see `indexer/mod.rs:rebuild()`) use a parallel pipeline powered by rayon:
 
 1. `ZettelSource::list_zettels()` collects all zettel paths.
 2. `ZettelSource::read_files_batch()` reads file contents (the default implementation is sequential; `GitRepo` can batch).
@@ -228,7 +228,7 @@ Full rebuilds (see `indexer.rs:rebuild()`) use a parallel pipeline powered by ra
 5. Type definitions are collected and used to materialize typed tables.
 6. `RebuildReport` tallies indexed count, materialized tables, inferred types, and any consistency warnings.
 
-Incremental reindex (see `indexer.rs:incremental_reindex()`) uses `ZettelSource::diff_paths()` to find changed files since the last known HEAD, then parses and upserts only those files.
+Incremental reindex (see `indexer/mod.rs:incremental_reindex()`) uses `ZettelSource::diff_paths()` to find changed files since the last known HEAD, then parses and upserts only those files.
 
 ### Event bus and subscriptions
 
@@ -319,7 +319,7 @@ The `bundled_types` module (see `bundled_types.rs`) ships predefined typedef tem
 
 ### Dynamic GraphQL schema
 
-The server reads all `_typedef` zettels at startup via the actor, then builds a dynamic async-graphql schema (see `schema.rs:build_schema()`). Each typedef generates a GraphQL object type with fields matching the column definitions, plus standard zettel fields (id, title, body, tags, links, etc.). The schema includes queries for listing, filtering, searching, and counting typed zettels, plus mutations for CRUD and SQL execution. Subscriptions use the event bus for real-time push.
+The server reads all `_typedef` zettels at startup via the actor, then builds a dynamic async-graphql schema (see `schema/mod.rs:build_schema()`). Each typedef generates a GraphQL object type with fields matching the column definitions, plus standard zettel fields (id, title, body, tags, links, etc.). The schema includes queries for listing, filtering, searching, and counting typed zettels, plus mutations for CRUD and SQL execution. Subscriptions use the event bus for real-time push.
 
 When a typedef mutation occurs, the `SchemaReloader` rebuilds and atomically swaps in the new schema via `ArcSwap`, so clients see updated types without a server restart.
 
@@ -541,7 +541,7 @@ sequence: 20260315120000
 
 Children are discovered by reverse lookup: all zettels where `sequence == this.id`. No schema change is needed — the existing `_zdb_fields` table stores the `sequence` key.
 
-### Core queries (indexer.rs)
+### Core queries (indexer/)
 
 - `sequence_children(id)` — direct children sorted by ID (chronological)
 - `sequence_breadcrumb(id)` — walk up parent chain to root, return root-to-self path

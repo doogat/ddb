@@ -63,7 +63,7 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 | `parser` | Parse/serialize three-zone Markdown | regex, chrono, serde_yaml |
 | `git_ops` | Git repository CRUD + merge; implements ZettelSource/Store | git2 |
 | `crdt_resolver` | Automerge conflict resolution; implements ConflictResolver | automerge, similar |
-| `indexer` | SQLite FTS5 index, type inference, materialization, discovery queries (unlinked mentions, link suggestions, staleness, orphans); implements ZettelIndex | rusqlite |
+| `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/search, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements ZettelIndex | rusqlite |
 | `sql_engine` | SQL DDL/DML → zettel CRUD, _typedef management | sqlparser, rusqlite |
 | `bundled_types` | Built-in _typedef templates (project, contact) | — |
 | `sync_manager` | Multi-device sync orchestration | uuid, toml, chrono |
