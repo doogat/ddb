@@ -47,10 +47,15 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
   │
   ├──> nosql (depends: error, types — feature-gated redb key-value index)
   │
-  ├──> ffi (depends: error, types, git_ops, indexer, parser,
-  │         sync_manager, compaction, maintenance — UniFFI ZettelDriver facade)
+  ├──> service (depends: error, types, git_ops, indexer, parser,
+  │              sql_engine, sync_manager, compaction, maintenance,
+  │              consistency, attachments, bundle, nosql
+  │              — unified orchestration layer for CLI/FFI/server)
   │
-  └──> CLI (depends: all core modules)
+  ├──> ffi (depends: service — UniFFI ZettelDriver facade,
+  │         delegates to ZettelService)
+  │
+  └──> CLI (depends: service — delegates to ZettelService)
 ```
 
 ## Module Summary
@@ -74,8 +79,9 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 | `hlc` | Hybrid Logical Clock for causal ordering | — (std only) |
 | `bundle` | Air-gapped sync via tar archive export/import | tar, sha2, flate2 |
 | `nosql` | redb-based key-value index for fast lookups (feature-gated) | redb |
-| `ffi` | UniFFI facade (ZettelDriver) for Swift/Kotlin bindings | uniffi |
-| **CLI** | Command-line interface | clap |
+| `service` | Unified orchestration layer (ZettelService) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write | all core modules |
+| `ffi` | UniFFI facade (ZettelDriver) wrapping `Mutex<ZettelService>` for Swift/Kotlin | service, uniffi |
+| **CLI** | Command-line interface delegating to ZettelService | service, clap |
 | **updater** (CLI) | Self-update from GitHub releases | reqwest, semver, self_replace, sha2, flate2, tar |
 
 ## External Dependencies

@@ -19,6 +19,7 @@ zdb-core/src/       Library crate
   git_ops.rs        Git repository CRUD, merge, remote sync
   crdt_resolver.rs  Automerge CRDT conflict resolution
   indexer.rs        SQLite FTS5 index, type inference, materialization
+  service.rs        Unified orchestration layer (ZettelService) for CLI/FFI/server
   sql_engine.rs     SQL DDL/DML translation (tables as zettel types)
   bundled_types.rs  Built-in type templates (project, contact)
   sync_manager.rs   Multi-device sync orchestration
