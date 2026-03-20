@@ -40,6 +40,13 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
   │
   ├──> bundled_types (standalone, no deps)
   │
+  ├──> hlc (depends: error — Hybrid Logical Clock, no external crates)
+  │
+  ├──> bundle (depends: error, types, git_ops, sync_manager
+  │                      — air-gapped sync via tar archives)
+  │
+  ├──> nosql (depends: error, types — feature-gated redb key-value index)
+  │
   ├──> ffi (depends: error, types, git_ops, indexer, parser,
   │         sync_manager, compaction, maintenance — UniFFI ZettelDriver facade)
   │
@@ -64,6 +71,9 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 | `maintenance` | Git maintenance runner, auto-trigger | — |
 | `consistency` | Detect/apply/migrate auto-fixes (tags, titles, keys, types) | — |
 | `attachments` | File attachment CRUD (attach, detach, list) on `reference/{id}/` | — |
+| `hlc` | Hybrid Logical Clock for causal ordering | — (std only) |
+| `bundle` | Air-gapped sync via tar archive export/import | tar, sha2, flate2 |
+| `nosql` | redb-based key-value index for fast lookups (feature-gated) | redb |
 | `ffi` | UniFFI facade (ZettelDriver) for Swift/Kotlin bindings | uniffi |
 | **CLI** | Command-line interface | clap |
 | **updater** (CLI) | Self-update from GitHub releases | reqwest, semver, self_replace, sha2, flate2, tar |
