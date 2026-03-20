@@ -13,7 +13,7 @@ pub async fn maintenance_loop(actor: ActorHandle, interval_secs: u64) {
         tracing::debug!("maintenance: starting scheduled run");
         match actor.compact(false, false, None).await {
             Ok(_report) => tracing::debug!("maintenance: completed"),
-            Err(e) => tracing::warn!("maintenance: failed: {e}"),
+            Err(e) => tracing::warn!(%e, "maintenance: failed"),
         }
     }
 }
