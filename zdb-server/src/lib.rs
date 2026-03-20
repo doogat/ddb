@@ -15,6 +15,7 @@ pub mod ws;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use arc_swap::ArcSwap;
 use async_graphql::dynamic::Schema;
@@ -27,6 +28,9 @@ use auth::AuthToken;
 use config::ServerConfig;
 use events::EventBus;
 
+#[derive(Clone)]
+struct StartTime(Instant);
+
 /// Run the GraphQL server.
 pub async fn run(
     repo_path: PathBuf,
@@ -35,6 +39,7 @@ pub async fn run(
     bind: Option<&str>,
     playground: bool,
 ) -> std::io::Result<()> {
+    let start_time = Instant::now();
     let cfg = ServerConfig::load(port, pg_port, bind);
 
     // Auth
@@ -109,6 +114,15 @@ pub async fn run(
     // WebSocket route — auth handled in ws_handler via header or connection_init payload
     let ws_routes = Router::new().route("/ws", axum::routing::get(ws::ws_handler));
 
+    // Health routes — unauthenticated
+    let health_actor = rest_actor.clone();
+    let health_routes = Router::new()
+        .route("/health", axum::routing::get(health_ready))
+        .route("/health/ready", axum::routing::get(health_ready))
+        .route("/health/live", axum::routing::get(health_live))
+        .layer(Extension(health_actor))
+        .layer(Extension(StartTime(start_time)));
+
     // Background maintenance
     if cfg.maintenance_enabled {
         let maint_actor = rest_actor.clone();
@@ -127,6 +141,7 @@ pub async fn run(
     // Merge routers — shared extensions available to all routes
     let app = auth_routes
         .merge(ws_routes)
+        .merge(health_routes)
         .layer(Extension(AuthToken(token)))
         .layer(Extension(rest_actor))
         .layer(Extension(read_pool))
@@ -201,4 +216,39 @@ async fn serve_attachment(
         }
         Err(_) => (StatusCode::NOT_FOUND, "attachment not found").into_response(),
     }
+}
+
+async fn health_ready(
+    Extension(actor): Extension<ActorHandle>,
+    Extension(start): Extension<StartTime>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    let index_reachable = actor.health_check().await.unwrap_or(false);
+    let status = if index_reachable { "ok" } else { "degraded" };
+    let code = if index_reachable {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    let body = serde_json::json!({
+        "status": status,
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_seconds": start.0.elapsed().as_secs(),
+        "index_reachable": index_reachable,
+    });
+
+    (code, axum::Json(body)).into_response()
+}
+
+async fn health_live() -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    (
+        axum::http::StatusCode::OK,
+        axum::Json(serde_json::json!({"status": "ok"})),
+    )
+        .into_response()
 }
