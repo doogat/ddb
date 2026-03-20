@@ -130,6 +130,7 @@ pub enum ActorCommand {
         id: String,
     },
     BrokenSequences,
+    HealthCheck,
 }
 
 /// Replies from the actor.
@@ -158,6 +159,7 @@ pub enum ActorReply {
     SequenceInfoResult(ActorResult<SequenceInfo>),
     SequenceNodes(ActorResult<Vec<SequenceNode>>),
     BrokenSequences(ActorResult<Vec<BrokenSequence>>),
+    HealthStatus(ActorResult<bool>),
 }
 
 struct ActorMsg {
@@ -525,6 +527,13 @@ impl ActorHandle {
         }
     }
 
+    pub async fn health_check(&self) -> ActorResult<bool> {
+        match self.send(ActorCommand::HealthCheck).await {
+            ActorReply::HealthStatus(r) => r,
+            _ => Err(ZettelError::Validation("unexpected reply".into())),
+        }
+    }
+
     async fn send(&self, cmd: ActorCommand) -> ActorReply {
         let (reply_tx, reply_rx) = oneshot::channel();
         let msg = ActorMsg {
@@ -851,6 +860,10 @@ fn handle_command_shared(
             ActorReply::SequenceNodes(index.sequence_breadcrumb(&id))
         }
         ActorCommand::BrokenSequences => ActorReply::BrokenSequences(index.broken_sequences()),
+        ActorCommand::HealthCheck => {
+            let reachable = index.query_raw("SELECT 1").is_ok();
+            ActorReply::HealthStatus(Ok(reachable))
+        }
         // NoSQL variants are handled in handle_command before delegation
         ActorCommand::NoSqlGet { .. }
         | ActorCommand::NoSqlScanType { .. }
