@@ -236,14 +236,14 @@ pub async fn start(
 
     let addr = format!("{bind}:{port}");
     let listener = TcpListener::bind(&addr).await?;
-    eprintln!("pgwire listening on {addr}");
+    tracing::info!(%addr, "pgwire listening");
 
     loop {
         let (socket, _) = listener.accept().await?;
         let handlers = handlers.clone();
         tokio::spawn(async move {
             if let Err(e) = process_socket(socket, None, handlers).await {
-                log::warn!("pgwire connection error: {e}");
+                tracing::warn!(%e, "pgwire connection error");
             }
         });
     }

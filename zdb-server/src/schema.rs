@@ -1273,7 +1273,7 @@ pub fn build_schema(
     let mut dynamic_inputs: Vec<InputObject> = Vec::new();
     for schema in &type_schemas {
         if !is_valid_graphql_name(&schema.table_name) {
-            log::warn!(
+            tracing::warn!(
                 "skipping typedef '{}': not a valid GraphQL identifier",
                 schema.table_name
             );
@@ -2238,7 +2238,7 @@ fn build_typed_object(type_name: &str, schema: &TableSchema) -> Object {
 
     for col in &schema.columns {
         if !is_valid_graphql_name(&col.name) {
-            log::warn!(
+            tracing::warn!(
                 "skipping column '{}' in type {type_name}: not a valid GraphQL identifier",
                 col.name
             );
@@ -2295,7 +2295,7 @@ fn event_stream(
             match rx.recv().await {
                 Ok(event) => return Some((Ok(event), rx)),
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    log::warn!("subscription lagged, skipped {n} events");
+                    tracing::warn!("subscription lagged, skipped {n} events");
                     continue;
                 }
                 Err(broadcast::error::RecvError::Closed) => return None,

@@ -39,7 +39,7 @@ pub async fn run(
 
     // Auth
     let token = auth::load_or_create_token(&cfg.token_file)?;
-    eprintln!("auth token: {}", cfg.token_file.display());
+    tracing::info!(path = %cfg.token_file.display(), "auth token");
 
     // Attachment file serving
     let attachment_root = repo_path.join("reference");
@@ -52,7 +52,7 @@ pub async fn run(
     // Read pool for concurrent read-only queries
     let read_pool = read_pool::ReadPool::new(repo_path, cfg.read_pool_size)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
-    eprintln!("read pool: {} slots", cfg.read_pool_size);
+    tracing::info!(slots = cfg.read_pool_size, "read pool");
 
     // Fetch type schemas for dynamic schema generation
     let type_schemas = actor.get_type_schemas().await.unwrap_or_default();
@@ -69,7 +69,7 @@ pub async fn run(
     ) {
         Ok(s) => s,
         Err(e) => {
-            log::error!("failed to build initial GraphQL schema: {e}");
+            tracing::error!(%e, "failed to build initial GraphQL schema");
             return Err(std::io::Error::other(e));
         }
     };
@@ -114,10 +114,7 @@ pub async fn run(
         tokio::spawn(async move {
             maintenance::maintenance_loop(maint_actor, interval).await;
         });
-        eprintln!(
-            "maintenance: enabled (interval {}s)",
-            cfg.maintenance_interval_secs
-        );
+        tracing::info!(interval_secs = cfg.maintenance_interval_secs, "maintenance enabled");
     }
 
     let pg_actor = rest_actor.clone();
@@ -143,8 +140,8 @@ pub async fn run(
         ));
 
     let addr = format!("{}:{}", cfg.bind, cfg.port);
-    eprintln!("listening on {addr}");
-    eprintln!("{type_count} type schema(s) loaded");
+    tracing::info!(%addr, "listening");
+    tracing::info!(count = type_count, "type schemas loaded");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

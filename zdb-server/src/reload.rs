@@ -69,7 +69,7 @@ impl SchemaReloader {
             .await
             .is_err()
         {
-            log::warn!("schema reload timed out after 5s");
+            tracing::warn!("schema reload timed out after 5s");
             return false;
         }
         true
@@ -90,7 +90,7 @@ impl SchemaReloader {
             let type_schemas = match actor.get_type_schemas().await {
                 Ok(ts) => ts,
                 Err(e) => {
-                    log::error!("schema reload: failed to get type schemas: {e}");
+                    tracing::error!("schema reload: failed to get type schemas: {e}");
                     this.done.notify_waiters();
                     continue;
                 }
@@ -104,14 +104,14 @@ impl SchemaReloader {
             ) {
                 Ok(s) => s,
                 Err(e) => {
-                    log::error!("schema reload: build failed: {e}");
+                    tracing::error!("schema reload: build failed: {e}");
                     this.done.notify_waiters();
                     continue;
                 }
             };
             this.shared.store(Arc::new(new_schema));
             this.version.fetch_add(1, Ordering::Relaxed);
-            log::info!(
+            tracing::info!(
                 "schema reloaded (version {})",
                 this.version.load(Ordering::Relaxed)
             );

@@ -13,7 +13,7 @@ pub fn classify(e: &ZettelError) -> (&'static str, String) {
         ZettelError::InvalidPath(m) => ("INVALID_PATH", m.clone()),
         // SQL errors — redact raw details
         ZettelError::SqlEngine(_) => {
-            eprintln!("[zdb-server] internal error: {e}");
+            tracing::error!(%e, "internal error");
             ("SQL_ERROR", "query failed".into())
         }
         // All other variants are internal — redact completely.
@@ -27,7 +27,7 @@ pub fn classify(e: &ZettelError) -> (&'static str, String) {
         | ZettelError::Parse(_)
         | ZettelError::VersionMismatch { .. }
         | ZettelError::Redb(_) => {
-            eprintln!("[zdb-server] internal error: {e}");
+            tracing::error!(%e, "internal error");
             ("INTERNAL_ERROR", "internal error".into())
         }
     }

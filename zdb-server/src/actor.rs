@@ -548,7 +548,7 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
     let repo = match GitRepo::open(&repo_path) {
         Ok(r) => r,
         Err(e) => {
-            log::error!("actor: failed to open repo: {e}");
+            tracing::error!("actor: failed to open repo: {e}");
             return;
         }
     };
@@ -560,14 +560,14 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
     let index = match Index::open(&db_path) {
         Ok(i) => i,
         Err(e) => {
-            log::error!("actor: failed to open index: {e}");
+            tracing::error!("actor: failed to open index: {e}");
             return;
         }
     };
 
     // Ensure index is up to date
     if let Err(e) = index.rebuild_if_stale(&repo) {
-        log::warn!("actor: index rebuild on startup failed: {e}");
+        tracing::warn!("actor: index rebuild on startup failed: {e}");
     }
 
     // Open redb NoSQL index
@@ -577,12 +577,12 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
             Ok(ri) => {
                 // Rebuild redb on startup to ensure it's in sync
                 if let Err(e) = ri.rebuild(&repo) {
-                    log::warn!("actor: redb rebuild failed: {e}");
+                    tracing::warn!("actor: redb rebuild failed: {e}");
                 }
                 Some(ri)
             }
             Err(e) => {
-                log::warn!("actor: failed to open redb index: {e}");
+                tracing::warn!("actor: failed to open redb index: {e}");
                 None
             }
         }
@@ -644,14 +644,14 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
                 ActorReply::Zettel(r) if mutation_kind.is_some() => {
                     if let Ok(z) = r.as_ref() {
                         if let Err(e) = ri.index_zettel(z) {
-                            log::warn!("redb dual-write failed: {e}");
+                            tracing::warn!("redb dual-write failed: {e}");
                         }
                     }
                 }
                 ActorReply::Deleted(Ok(())) => {
                     if let Some(ref did) = delete_id {
                         if let Err(e) = ri.remove_zettel(did) {
-                            log::warn!("redb dual-write (delete) failed: {e}");
+                            tracing::warn!("redb dual-write (delete) failed: {e}");
                         }
                     }
                 }
@@ -1105,11 +1105,11 @@ pub(crate) fn get_type_schemas(repo: &GitRepo, index: &Index) -> ActorResult<Vec
                 Ok(content) => match parser::parse(&content, path) {
                     Ok(parsed) => match schema_from_parsed(&parsed) {
                         Ok(schema) => schemas.push(schema),
-                        Err(e) => log::warn!("typedef {path}: schema extraction failed: {e}"),
+                        Err(e) => tracing::warn!("typedef {path}: schema extraction failed: {e}"),
                     },
-                    Err(e) => log::warn!("typedef {path}: parse failed: {e}"),
+                    Err(e) => tracing::warn!("typedef {path}: parse failed: {e}"),
                 },
-                Err(e) => log::warn!("typedef {path}: read failed: {e}"),
+                Err(e) => tracing::warn!("typedef {path}: read failed: {e}"),
             }
         }
     }
@@ -1173,7 +1173,7 @@ fn handle_compact(
     let mgr = match zdb_core::sync_manager::SyncManager::open(repo) {
         Ok(m) => m,
         Err(ZettelError::NotFound(_)) => {
-            log::info!("maintenance: no node registered, skipping compaction");
+            tracing::info!("maintenance: no node registered, skipping compaction");
             return Ok(CompactionReport {
                 files_removed: 0,
                 crdt_docs_compacted: 0,
@@ -1196,7 +1196,7 @@ fn handle_compact(
         backup_path: backup_path.map(std::path::PathBuf::from),
     };
     let report = zdb_core::compaction::compact(repo, &mgr, &opts)?;
-    log::info!(
+    tracing::info!(
         "maintenance: compacted — files_removed={} crdt_compacted={} gc={} backup={}",
         report.files_removed,
         report.crdt_docs_compacted,
@@ -1214,11 +1214,11 @@ fn handle_compact(
     match mgr.detect_stale_nodes(config.compaction.stale_ttl_days) {
         Ok(stale) => {
             if !stale.is_empty() {
-                log::info!("maintenance: {} stale node(s) detected", stale.len());
+                tracing::info!("maintenance: {} stale node(s) detected", stale.len());
             }
         }
         Err(e) => {
-            log::warn!("maintenance: stale node detection failed: {e}");
+            tracing::warn!("maintenance: stale node detection failed: {e}");
         }
     }
 

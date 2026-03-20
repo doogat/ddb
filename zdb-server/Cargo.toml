@@ -21,7 +21,8 @@ futures-util = "0.3"
 async-trait = "0.1"
 pgwire = "0.25"
 indexmap = "2"
-log = "0.4"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
 rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 sqlparser = "0.55"
