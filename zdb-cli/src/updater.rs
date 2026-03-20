@@ -20,6 +20,9 @@ pub struct UpdateState {
     /// Set after a background auto-update; cleared after notification.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_from: Option<String>,
+    /// Version of the binary backed up at `config_dir()/zdb.previous`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +48,19 @@ fn config_dir() -> PathBuf {
 
 fn state_path() -> PathBuf {
     config_dir().join("update-check.json")
+}
+
+fn backup_path() -> PathBuf {
+    config_dir().join("zdb.previous")
+}
+
+fn backup_current_binary() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("cannot locate current binary: {e}"))?;
+    let dest = backup_path();
+    let dir = config_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create config dir: {e}"))?;
+    fs::copy(&exe, &dest).map_err(|e| format!("backup failed: {e}"))?;
+    Ok(())
 }
 
 fn read_state() -> Option<UpdateState> {
@@ -157,17 +173,20 @@ pub fn check_and_update() {
                         latest_version: version.to_string(),
                         download_url: url,
                         updated_from: Some(current.to_string()),
+                        previous_version: Some(current.to_string()),
                     };
                     write_state(&state);
                     return;
                 }
             }
             // No update needed or download failed — just record check
+            let prev = read_state();
             let state = UpdateState {
                 last_check: now,
                 latest_version: version.to_string(),
                 download_url: url,
-                updated_from: read_state().and_then(|s| s.updated_from),
+                updated_from: prev.as_ref().and_then(|s| s.updated_from.clone()),
+                previous_version: prev.and_then(|s| s.previous_version),
             };
             write_state(&state);
         }
@@ -182,6 +201,7 @@ pub fn check_and_update() {
                     latest_version: String::new(),
                     download_url: String::new(),
                     updated_from: None,
+                    previous_version: None,
                 };
                 write_state(&state);
             }
@@ -250,6 +270,7 @@ pub fn run_update() -> Result<(), String> {
         latest_version: latest.to_string(),
         download_url: url,
         updated_from: None, // explicit command, no deferred notification needed
+        previous_version: Some(current.to_string()),
     };
     write_state(&state);
 
@@ -355,6 +376,9 @@ fn download_and_replace(url: &str, expected_version: &Version) -> Result<(), Str
         ));
     }
 
+    // Back up current binary before replacing
+    backup_current_binary()?;
+
     // Replace self
     self_replace::self_replace(&binary_path).map_err(|e| {
         format!(
@@ -394,6 +418,7 @@ mod tests {
             latest_version: "0.2.0".into(),
             download_url: "https://example.com/zdb.tar.gz".into(),
             updated_from: None,
+            previous_version: None,
         };
         let json = serde_json::to_string(&state).unwrap();
         let parsed: UpdateState = serde_json::from_str(&json).unwrap();
@@ -401,6 +426,7 @@ mod tests {
         assert_eq!(parsed.latest_version, state.latest_version);
         assert_eq!(parsed.download_url, state.download_url);
         assert!(parsed.updated_from.is_none());
+        assert!(parsed.previous_version.is_none());
     }
 
     #[test]
@@ -410,6 +436,7 @@ mod tests {
             latest_version: "0.2.0".into(),
             download_url: "https://example.com/zdb.tar.gz".into(),
             updated_from: Some("0.1.1".into()),
+            previous_version: None,
         };
         let json = serde_json::to_string(&state).unwrap();
         let parsed: UpdateState = serde_json::from_str(&json).unwrap();
@@ -491,6 +518,7 @@ mod tests {
             latest_version: "0.3.0".into(),
             download_url: "https://example.com/zdb.tar.gz".into(),
             updated_from: None,
+            previous_version: Some("0.2.0".into()),
         };
 
         let data = serde_json::to_string_pretty(&state).unwrap();
@@ -499,6 +527,7 @@ mod tests {
         let read_data = fs::read_to_string(&path).unwrap();
         let parsed: UpdateState = serde_json::from_str(&read_data).unwrap();
         assert_eq!(parsed.latest_version, "0.3.0");
+        assert_eq!(parsed.previous_version, Some("0.2.0".into()));
 
         let _ = fs::remove_dir_all(&dir);
     }
