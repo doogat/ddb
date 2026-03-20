@@ -4,7 +4,7 @@ use zdb_core::error::ZettelError;
 /// Classify a ZettelError for external exposure.
 ///
 /// Returns `(error_code, user_safe_message)`. Internal errors are redacted
-/// to a generic message and the original is logged to stderr.
+/// to a generic message and the original is logged via tracing.
 pub fn classify(e: &ZettelError) -> (&'static str, String) {
     match e {
         // Safe to expose — user-actionable

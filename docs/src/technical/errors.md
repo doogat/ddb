@@ -58,7 +58,8 @@ Uses `tracing` (library) + `tracing-subscriber` (CLI) for structured observabili
 ### Configuration
 
 - `--log-dir <path>` or `ZDB_LOG_DIR=<path>` — write NDJSON logs to `{dir}/zdb-{date}.ndjson`
-- Without `--log-dir` — stderr with `RUST_LOG` env filter (default: `warn`)
+- Without `--log-dir` — stderr with `RUST_LOG` env filter (default: `info` for zdb crates, `warn` for dependencies)
+- `--log-level <level>` or `ZDB_LOG_LEVEL=<level>` — set log level for zdb crates (`RUST_LOG` takes precedence)
 
 ### NDJSON Format
 
