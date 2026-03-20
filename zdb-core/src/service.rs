@@ -536,3 +536,164 @@ impl ZettelService {
     #[cfg(not(feature = "nosql"))]
     fn nosql_remove_zettel(&self, _id: &str) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn fresh_svc() -> (TempDir, ZettelService) {
+        let tmp = TempDir::new().unwrap();
+        let svc = ZettelService::init(tmp.path()).unwrap();
+        svc.reindex().unwrap();
+        (tmp, svc)
+    }
+
+    #[test]
+    fn init_creates_repo_and_opens() {
+        let (_tmp, svc) = fresh_svc();
+        let list = svc.list_zettels().unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn crud_roundtrip() {
+        let (_tmp, svc) = fresh_svc();
+
+        let id = svc
+            .create_zettel("Test Note", &[], None, "Hello world")
+            .unwrap();
+        assert_eq!(id.len(), 14);
+
+        let content = svc.read_zettel(&id).unwrap();
+        assert!(content.contains("Test Note"));
+        assert!(content.contains("Hello world"));
+
+        svc.update_zettel(&id, Some("Updated"), None, None, Some("New body"))
+            .unwrap();
+        let content = svc.read_zettel(&id).unwrap();
+        assert!(content.contains("Updated"));
+        assert!(content.contains("New body"));
+
+        let broken = svc.delete_zettel(&id).unwrap();
+        assert!(broken.is_empty());
+
+        assert!(svc.read_zettel(&id).is_err());
+    }
+
+    #[test]
+    fn create_raw_and_read() {
+        let (_tmp, svc) = fresh_svc();
+
+        let raw = "---\ntitle: Raw Note\n---\nRaw body";
+        let id = svc.create_zettel_raw(raw, "add raw").unwrap();
+        assert_eq!(id.len(), 14);
+
+        let content = svc.read_zettel(&id).unwrap();
+        assert!(content.contains("Raw Note"));
+    }
+
+    #[test]
+    fn search_after_create() {
+        let (_tmp, svc) = fresh_svc();
+
+        svc.create_zettel("Searchable Zettel", &[], None, "unique content here")
+            .unwrap();
+
+        let results = svc.search("Searchable").unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].title.contains("Searchable"));
+    }
+
+    #[test]
+    fn sql_create_table_and_insert() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        let ddl = svc
+            .execute_sql("CREATE TABLE project (name TEXT, status TEXT)")
+            .unwrap();
+        assert!(matches!(ddl, SqlResult::Ok(_)));
+
+        let ins = svc
+            .execute_sql("INSERT INTO project (name, status) VALUES ('alpha', 'active')")
+            .unwrap();
+        assert!(matches!(ins, SqlResult::Ok(_)));
+
+        let sel = svc
+            .execute_sql("SELECT name, status FROM project")
+            .unwrap();
+        match sel {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "alpha");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn transaction_commit_persists() {
+        let (_tmp, mut svc) = fresh_svc();
+        svc.execute_sql("CREATE TABLE txtest (val TEXT)").unwrap();
+
+        svc.begin_transaction().unwrap();
+        svc.execute_sql("INSERT INTO txtest (val) VALUES ('in-txn')")
+            .unwrap();
+        svc.commit_transaction().unwrap();
+
+        let result = svc.execute_sql("SELECT val FROM txtest").unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "in-txn");
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn transaction_rollback_discards() {
+        let (_tmp, mut svc) = fresh_svc();
+        svc.execute_sql("CREATE TABLE rbtest (val TEXT)").unwrap();
+
+        svc.begin_transaction().unwrap();
+        svc.execute_sql("INSERT INTO rbtest (val) VALUES ('gone')")
+            .unwrap();
+        svc.rollback_transaction().unwrap();
+
+        let result = svc.execute_sql("SELECT val FROM rbtest").unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => assert_eq!(rows.len(), 0),
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn reindex_rebuilds() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_zettel("One", &[], None, "").unwrap();
+        svc.create_zettel("Two", &[], None, "").unwrap();
+
+        let report = svc.reindex().unwrap();
+        assert_eq!(report.indexed, 2);
+    }
+
+    #[test]
+    fn delete_returns_broken_backlinks() {
+        let (_tmp, svc) = fresh_svc();
+
+        let id_b = svc
+            .create_zettel("Target", &[], None, "target body")
+            .unwrap();
+
+        let body_a = format!("Links to [[{id_b}]]");
+        let id_a = svc
+            .create_zettel("Source", &[], None, &body_a)
+            .unwrap();
+        svc.reindex().unwrap();
+
+        let broken = svc.delete_zettel(&id_b).unwrap();
+        assert_eq!(broken.len(), 1);
+        assert_eq!(broken[0].0, id_a);
+    }
+}
