@@ -898,3 +898,55 @@ fn malformed_typedef_preserves_schema() {
         "server should still respond: {r}"
     );
 }
+
+// ── Health endpoint tests ───────────────────────────────────────
+
+#[test]
+fn health_returns_ok() {
+    let repo = ZdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let resp = reqwest::blocking::Client::new()
+        .get(format!("http://127.0.0.1:{}/health", server.port))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .expect("health request failed");
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    assert_eq!(body["status"].as_str().unwrap(), "ok");
+    assert!(body["version"].as_str().is_some());
+    assert!(body["uptime_seconds"].as_u64().is_some());
+    assert_eq!(body["index_reachable"].as_bool().unwrap(), true);
+}
+
+#[test]
+fn health_no_auth_required() {
+    let repo = ZdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // No Authorization header — should still get 200, not 401
+    let resp = reqwest::blocking::Client::new()
+        .get(format!("http://127.0.0.1:{}/health", server.port))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .expect("health request failed");
+
+    assert_eq!(resp.status(), 200);
+}
+
+#[test]
+fn health_live_always_ok() {
+    let repo = ZdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let resp = reqwest::blocking::Client::new()
+        .get(format!("http://127.0.0.1:{}/health/live", server.port))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .expect("health/live request failed");
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().unwrap();
+    assert_eq!(body["status"].as_str().unwrap(), "ok");
+}
