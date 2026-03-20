@@ -240,9 +240,8 @@ impl ZettelService {
         if let Some(buf) = self.txn.take() {
             engine.resume_transaction(buf);
         }
-        let result = engine.execute(sql).map_err(|e| {
+        let result = engine.execute(sql).inspect_err(|_| {
             self.txn = engine.suspend_transaction();
-            e
         })?;
         self.txn = engine.suspend_transaction();
         Ok(result)
@@ -253,9 +252,8 @@ impl ZettelService {
         if let Some(buf) = self.txn.take() {
             engine.resume_transaction(buf);
         }
-        let results = engine.execute_batch(sql).map_err(|e| {
+        let results = engine.execute_batch(sql).inspect_err(|_| {
             self.txn = engine.suspend_transaction();
-            e
         })?;
         self.txn = engine.suspend_transaction();
         Ok(results)
@@ -279,9 +277,8 @@ impl ZettelService {
         })?;
         let mut engine = SqlEngine::new(&self.index, &self.repo);
         engine.resume_transaction(buf);
-        engine.execute("COMMIT").map_err(|e| {
+        engine.execute("COMMIT").inspect_err(|_| {
             self.txn = engine.suspend_transaction();
-            e
         })?;
         Ok(())
     }
