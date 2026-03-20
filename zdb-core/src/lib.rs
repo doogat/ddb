@@ -23,7 +23,7 @@
 //! - [`types`] — Shared data structures
 //!
 //! Feature-gated:
-//! - [`nosql`] — redb-based key-value index for fast lookups (requires `nosql` feature)
+//! - `nosql` — redb-based key-value index for fast lookups (requires `nosql` feature)
 
 uniffi::setup_scaffolding!();
 
