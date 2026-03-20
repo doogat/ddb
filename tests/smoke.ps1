@@ -462,6 +462,11 @@ try {
 }
 pass "serve: auth rejects missing token"
 
+# Health endpoint (no auth required)
+$health = Invoke-RestMethod -Uri "http://127.0.0.1:$SERVER_PORT/health" -Method Get
+if ($health.status -ne "ok") { throw "health endpoint returned unexpected status: $($health.status)" }
+pass "serve: health endpoint"
+
 # Test query
 $result = gql '{"query":"{ typeDefs { name } }"}'
 if ($result -notmatch '"typeDefs"') { throw "graphql query failed" }

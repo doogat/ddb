@@ -364,6 +364,11 @@ HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$GQL_URL" \
 [ "$HTTP_CODE" = "401" ]
 pass "serve: auth rejects missing token"
 
+# Health endpoint (no auth required)
+HEALTH=$(curl -sf "http://127.0.0.1:$SERVER_PORT/health")
+echo "$HEALTH" | grep -q '"status":"ok"'
+pass "serve: health endpoint"
+
 # Test query
 RESULT=$(gql '{"query":"{ typeDefs { name } }"}')
 echo "$RESULT" | grep -q '"typeDefs"'
