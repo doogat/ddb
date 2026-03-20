@@ -917,7 +917,7 @@ fn health_returns_ok() {
     assert_eq!(body["status"].as_str().unwrap(), "ok");
     assert!(body["version"].as_str().is_some());
     assert!(body["uptime_seconds"].as_u64().is_some());
-    assert_eq!(body["index_reachable"].as_bool().unwrap(), true);
+    assert!(body["index_reachable"].as_bool().unwrap());
 }
 
 #[test]
