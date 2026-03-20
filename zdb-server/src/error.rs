@@ -33,6 +33,18 @@ pub fn classify(e: &ZettelError) -> (&'static str, String) {
     }
 }
 
+/// Convert ZettelError to ServerError for use in dynamic schema resolvers.
+pub fn to_server_error(e: ZettelError) -> ServerError {
+    let (code, message) = classify(&e);
+    let mut err = ServerError::new(message, None);
+    err.extensions = Some({
+        let mut map = async_graphql::ErrorExtensionValues::default();
+        map.set("code", code);
+        map
+    });
+    err
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,16 +155,4 @@ mod tests {
         let err = to_server_error(ZettelError::NotFound("zettel 20260319120000 not found".into()));
         assert_eq!(err.message, "zettel 20260319120000 not found");
     }
-}
-
-/// Convert ZettelError to ServerError for use in dynamic schema resolvers.
-pub fn to_server_error(e: ZettelError) -> ServerError {
-    let (code, message) = classify(&e);
-    let mut err = ServerError::new(message, None);
-    err.extensions = Some({
-        let mut map = async_graphql::ErrorExtensionValues::default();
-        map.set("code", code);
-        map
-    });
-    err
 }
