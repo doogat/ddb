@@ -2,11 +2,8 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::error::ZettelError;
-use crate::git_ops::GitRepo;
-use crate::indexer::Index;
-use crate::parser;
-use crate::sql_engine::TransactionBuffer;
-use crate::sync_manager::SyncManager;
+use crate::service::ZettelService;
+use crate::sql_engine::SqlResult;
 
 /// FFI error enum exposed to Swift/Kotlin via UniFFI.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -176,9 +173,8 @@ pub struct SqlResultRecord {
     pub message: String,
 }
 
-impl From<crate::sql_engine::SqlResult> for SqlResultRecord {
-    fn from(r: crate::sql_engine::SqlResult) -> Self {
-        use crate::sql_engine::SqlResult;
+impl From<SqlResult> for SqlResultRecord {
+    fn from(r: SqlResult) -> Self {
         match r {
             SqlResult::Rows { columns, rows } => {
                 let affected_rows = rows.len() as i64;
@@ -205,14 +201,12 @@ impl From<crate::sql_engine::SqlResult> for SqlResultRecord {
     }
 }
 
-/// High-level facade composing GitRepo + Index for mobile/desktop FFI consumers.
+/// High-level facade for mobile/desktop FFI consumers.
 ///
-/// Lock ordering (must be consistent across all methods): index → repo → txn.
+/// Wraps a single `Mutex<ZettelService>` for thread safety.
 #[derive(uniffi::Object)]
 pub struct ZettelDriver {
-    repo: Mutex<GitRepo>,
-    index: Mutex<Index>,
-    txn: Mutex<Option<TransactionBuffer>>,
+    svc: Mutex<ZettelService>,
 }
 
 #[uniffi::export]
@@ -220,63 +214,30 @@ impl ZettelDriver {
     /// Open an existing ZettelDB repository.
     #[uniffi::constructor]
     pub fn new(repo_path: String) -> Result<Self, ZdbError> {
-        let path = Path::new(&repo_path);
-        let repo = GitRepo::open(path).map_err(ZdbError::from)?;
-        let db_dir = path.join(".zdb");
-        std::fs::create_dir_all(&db_dir).map_err(|e| ZdbError::from(ZettelError::Io(e)))?;
-        let db_path = db_dir.join("index.db");
-        let index = Index::open(&db_path).map_err(ZdbError::from)?;
+        let svc = ZettelService::open(Path::new(&repo_path)).map_err(ZdbError::from)?;
         Ok(Self {
-            repo: Mutex::new(repo),
-            index: Mutex::new(index),
-            txn: Mutex::new(None),
+            svc: Mutex::new(svc),
         })
     }
 
     /// Initialize a new ZettelDB repository at `repo_path` and open it.
     #[uniffi::constructor]
     pub fn create_repo(repo_path: String) -> Result<Self, ZdbError> {
-        let path = Path::new(&repo_path);
-        GitRepo::init(path).map_err(ZdbError::from)?;
-        Self::new(repo_path)
+        let svc = ZettelService::init(Path::new(&repo_path)).map_err(ZdbError::from)?;
+        Ok(Self {
+            svc: Mutex::new(svc),
+        })
     }
 
     pub fn create_zettel(&self, content: String, message: String) -> Result<String, ZdbError> {
-        let parsed = parser::parse(&content, "new.md").map_err(ZdbError::from)?;
-        let id = parsed
-            .meta
-            .id
-            .as_ref()
-            .map(|z| z.0.clone())
-            .unwrap_or_else(|| parser::generate_id().0);
-
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-
-        let folder = parsed
-            .meta
-            .zettel_type
-            .as_deref()
-            .map(|t| index.type_uses_folder(t, &*repo))
-            .unwrap_or(false);
-        let rel_path = crate::git_ops::zettel_path(&id, parsed.meta.zettel_type.as_deref(), folder);
-
-        repo.commit_file(&rel_path, &content, &message)
-            .map_err(ZdbError::from)?;
-        // Re-parse with correct path so index stores the right path
-        let parsed = parser::parse(&content, &rel_path).map_err(ZdbError::from)?;
-        index.index_zettel(&parsed).map_err(ZdbError::from)?;
-
-        Ok(id)
+        let svc = self.svc.lock().unwrap();
+        svc.create_zettel_raw(&content, &message)
+            .map_err(ZdbError::from)
     }
 
     pub fn read_zettel(&self, id: String) -> Result<String, ZdbError> {
-        let index = self.index.lock().unwrap();
-        let path = index.resolve_path(&id).map_err(ZdbError::from)?;
-        drop(index);
-
-        let repo = self.repo.lock().unwrap();
-        repo.read_file(&path).map_err(ZdbError::from)
+        let svc = self.svc.lock().unwrap();
+        svc.read_zettel(&id).map_err(ZdbError::from)
     }
 
     pub fn update_zettel(
@@ -285,35 +246,23 @@ impl ZettelDriver {
         content: String,
         message: String,
     ) -> Result<(), ZdbError> {
-        let index = self.index.lock().unwrap();
-        let rel_path = index.resolve_path(&id).map_err(ZdbError::from)?;
-        drop(index);
-
-        let repo = self.repo.lock().unwrap();
-        repo.commit_file(&rel_path, &content, &message)
-            .map_err(ZdbError::from)?;
-
-        let parsed = parser::parse(&content, &rel_path).map_err(ZdbError::from)?;
-        let index = self.index.lock().unwrap();
-        index.index_zettel(&parsed).map_err(ZdbError::from)
+        let svc = self.svc.lock().unwrap();
+        svc.update_zettel_raw(&id, &content, &message)
+            .map_err(ZdbError::from)
     }
 
     pub fn delete_zettel(&self, id: String, message: String) -> Result<(), ZdbError> {
-        let index = self.index.lock().unwrap();
-        let rel_path = index.resolve_path(&id).map_err(ZdbError::from)?;
-        drop(index);
-
-        let repo = self.repo.lock().unwrap();
-        repo.delete_file(&rel_path, &message)
+        let svc = self.svc.lock().unwrap();
+        let rel_path = svc.resolve_path(&id).map_err(ZdbError::from)?;
+        svc.repo()
+            .delete_file(&rel_path, &message)
             .map_err(ZdbError::from)?;
-
-        let index = self.index.lock().unwrap();
-        index.remove_zettel(&id).map_err(ZdbError::from)
+        svc.index().remove_zettel(&id).map_err(ZdbError::from)
     }
 
     pub fn search(&self, query: String) -> Result<Vec<SearchResult>, ZdbError> {
-        let index = self.index.lock().unwrap();
-        let results = index.search(&query).map_err(ZdbError::from)?;
+        let svc = self.svc.lock().unwrap();
+        let results = svc.search(&query).map_err(ZdbError::from)?;
         Ok(results.into_iter().map(Into::into).collect())
     }
 
@@ -323,17 +272,16 @@ impl ZettelDriver {
         limit: u32,
         offset: u32,
     ) -> Result<PaginatedSearchResult, ZdbError> {
-        let index = self.index.lock().unwrap();
-        let result = index
+        let svc = self.svc.lock().unwrap();
+        let result = svc
             .search_paginated(&query, limit as usize, offset as usize)
             .map_err(ZdbError::from)?;
         Ok(result.into())
     }
 
     pub fn reindex(&self) -> Result<RebuildReport, ZdbError> {
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        let report = index.rebuild(&*repo).map_err(ZdbError::from)?;
+        let svc = self.svc.lock().unwrap();
+        let report = svc.reindex().map_err(ZdbError::from)?;
         Ok(RebuildReport {
             indexed: report.indexed as u64,
             tables_materialized: report.tables_materialized as u64,
@@ -342,140 +290,58 @@ impl ZettelDriver {
     }
 
     pub fn register_node(&self, name: String) -> Result<String, ZdbError> {
-        let repo = self.repo.lock().unwrap();
-        let node = crate::sync_manager::register_node(&repo, &name).map_err(ZdbError::from)?;
+        let svc = self.svc.lock().unwrap();
+        let node = svc.register_node(&name).map_err(ZdbError::from)?;
         Ok(node.uuid)
     }
 
     pub fn compact(&self) -> Result<(), ZdbError> {
-        let repo = self.repo.lock().unwrap();
-        let sync_mgr = SyncManager::open(&repo).map_err(ZdbError::from)?;
+        let svc = self.svc.lock().unwrap();
         let opts = crate::types::CompactOptions {
             force: true,
             skip_backup: true,
             ..Default::default()
         };
-        crate::compaction::compact(&repo, &sync_mgr, &opts).map_err(ZdbError::from)?;
+        svc.compact(&opts).map_err(ZdbError::from)?;
         Ok(())
     }
 
     pub fn run_maintenance(&self) -> Result<bool, ZdbError> {
-        let repo = self.repo.lock().unwrap();
-        let report = crate::maintenance::run(&repo.path, None).map_err(ZdbError::from)?;
+        let svc = self.svc.lock().unwrap();
+        let report = svc.run_maintenance(None).map_err(ZdbError::from)?;
         Ok(report.success)
     }
 
     pub fn list_zettels(&self) -> Result<Vec<String>, ZdbError> {
-        let repo = self.repo.lock().unwrap();
-        repo.list_zettels().map_err(ZdbError::from)
+        let svc = self.svc.lock().unwrap();
+        svc.list_zettels().map_err(ZdbError::from)
     }
 
     pub fn execute_sql(&self, sql: String) -> Result<SqlResultRecord, ZdbError> {
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        let mut engine = crate::sql_engine::SqlEngine::new(&index, &*repo);
-
-        // If a transaction is active, inject the buffered state.
-        let mut txn_guard = self.txn.lock().unwrap();
-        if let Some(buf) = txn_guard.take() {
-            engine.resume_transaction(buf);
-        }
-
-        let result = engine.execute(&sql).map_err(|e| {
-            // On error, preserve transaction state if still active.
-            *txn_guard = engine.suspend_transaction();
-            ZdbError::from(e)
-        })?;
-
-        // Preserve transaction state for subsequent calls.
-        *txn_guard = engine.suspend_transaction();
-
+        let mut svc = self.svc.lock().unwrap();
+        let result = svc.execute_sql(&sql).map_err(ZdbError::from)?;
         Ok(result.into())
     }
 
-    /// Lock order: index → repo → txn (must match all other methods).
     pub fn begin_transaction(&self) -> Result<(), ZdbError> {
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-
-        let mut txn_guard = self.txn.lock().unwrap();
-        if txn_guard.is_some() {
-            return Err(ZdbError::SqlEngine {
-                msg: "transaction already active".into(),
-            });
-        }
-
-        let mut engine = crate::sql_engine::SqlEngine::new(&index, &*repo);
-        engine.execute("BEGIN").map_err(ZdbError::from)?;
-        *txn_guard = engine.suspend_transaction();
-        Ok(())
+        let mut svc = self.svc.lock().unwrap();
+        svc.begin_transaction().map_err(ZdbError::from)
     }
 
     pub fn commit_transaction(&self) -> Result<(), ZdbError> {
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        let mut engine = crate::sql_engine::SqlEngine::new(&index, &*repo);
-
-        let mut txn_guard = self.txn.lock().unwrap();
-        let buf = txn_guard.take().ok_or_else(|| ZdbError::SqlEngine {
-            msg: "no active transaction".into(),
-        })?;
-        engine.resume_transaction(buf);
-        engine.execute("COMMIT").map_err(|e| {
-            // On commit failure, preserve transaction state for retry or rollback.
-            *txn_guard = engine.suspend_transaction();
-            ZdbError::from(e)
-        })?;
-        Ok(())
+        let mut svc = self.svc.lock().unwrap();
+        svc.commit_transaction().map_err(ZdbError::from)
     }
 
     pub fn rollback_transaction(&self) -> Result<(), ZdbError> {
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        let mut engine = crate::sql_engine::SqlEngine::new(&index, &*repo);
-
-        let mut txn_guard = self.txn.lock().unwrap();
-        let buf = txn_guard.take().ok_or_else(|| ZdbError::SqlEngine {
-            msg: "no active transaction".into(),
-        })?;
-        engine.resume_transaction(buf);
-        engine.execute("ROLLBACK").map_err(ZdbError::from)?;
-        Ok(())
+        let mut svc = self.svc.lock().unwrap();
+        svc.rollback_transaction().map_err(ZdbError::from)
     }
 
-    /// List all defined types (typedef zettels) with their schemas.
     pub fn list_type_schemas(&self) -> Result<Vec<TypeSchemaRecord>, ZdbError> {
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        let rows = index
-            .query_raw("SELECT path FROM zettels WHERE type = '_typedef'")
-            .map_err(ZdbError::from)?;
-        let mut schemas = Vec::new();
-        for row in rows {
-            if let Some(path) = row.first() {
-                let content = match repo.read_file(path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("typedef {path}: read failed: {e}");
-                        continue;
-                    }
-                };
-                let parsed = match parser::parse(&content, path) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        tracing::warn!("typedef {path}: parse failed: {e}");
-                        continue;
-                    }
-                };
-                match crate::sql_engine::schema_from_parsed(&parsed) {
-                    Ok(schema) => schemas.push(schema.into()),
-                    Err(e) => {
-                        tracing::warn!("typedef {path}: schema extraction failed: {e}");
-                    }
-                }
-            }
-        }
-        Ok(schemas)
+        let svc = self.svc.lock().unwrap();
+        let schemas = svc.list_type_schemas().map_err(ZdbError::from)?;
+        Ok(schemas.into_iter().map(Into::into).collect())
     }
 
     pub fn attach_file(
@@ -483,7 +349,8 @@ impl ZettelDriver {
         zettel_id: String,
         file_path: String,
     ) -> Result<AttachmentInfo, ZdbError> {
-        let bytes = std::fs::read(&file_path).map_err(|e| ZdbError::from(ZettelError::Io(e)))?;
+        let bytes =
+            std::fs::read(&file_path).map_err(|e| ZdbError::from(ZettelError::Io(e)))?;
         let filename = Path::new(&file_path)
             .file_name()
             .and_then(|n| n.to_str())
@@ -492,32 +359,31 @@ impl ZettelDriver {
             })?
             .to_owned();
         let mime = crate::types::AttachmentInfo::mime_from_filename(&filename).to_owned();
-        let id = crate::types::ZettelId(zettel_id);
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        let info = crate::attachments::attach_file(&repo, &index, &id, &filename, &bytes, &mime)
+        let svc = self.svc.lock().unwrap();
+        let info = svc
+            .attach_file(&zettel_id, &filename, &bytes, &mime)
             .map_err(ZdbError::from)?;
         Ok(info.into())
     }
 
     pub fn detach_file(&self, zettel_id: String, filename: String) -> Result<(), ZdbError> {
-        let id = crate::types::ZettelId(zettel_id);
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        crate::attachments::detach_file(&repo, &index, &id, &filename).map_err(ZdbError::from)
+        let svc = self.svc.lock().unwrap();
+        svc.detach_file(&zettel_id, &filename)
+            .map_err(ZdbError::from)
     }
 
     pub fn list_attachments(&self, zettel_id: String) -> Result<Vec<AttachmentInfo>, ZdbError> {
-        let id = crate::types::ZettelId(zettel_id);
-        let repo = self.repo.lock().unwrap();
-        let list = crate::attachments::list_attachments(&repo, &id).map_err(ZdbError::from)?;
+        let svc = self.svc.lock().unwrap();
+        let list = svc
+            .list_attachments(&zettel_id)
+            .map_err(ZdbError::from)?;
         Ok(list.into_iter().map(AttachmentInfo::from).collect())
     }
 
     pub fn export_full_bundle(&self, output_path: String) -> Result<String, ZdbError> {
-        let repo = self.repo.lock().unwrap();
-        let sync_mgr = SyncManager::open(&repo).map_err(ZdbError::from)?;
-        let path = crate::bundle::export_full_bundle(&repo, &sync_mgr, Path::new(&output_path))
+        let svc = self.svc.lock().unwrap();
+        let path = svc
+            .export_full_bundle(Path::new(&output_path))
             .map_err(ZdbError::from)?;
         Ok(path.to_string_lossy().into_owned())
     }
@@ -527,23 +393,16 @@ impl ZettelDriver {
         target_node_uuid: String,
         output_path: String,
     ) -> Result<String, ZdbError> {
-        let repo = self.repo.lock().unwrap();
-        let sync_mgr = SyncManager::open(&repo).map_err(ZdbError::from)?;
-        let path = crate::bundle::export_bundle(
-            &repo,
-            &sync_mgr,
-            &target_node_uuid,
-            Path::new(&output_path),
-        )
-        .map_err(ZdbError::from)?;
+        let svc = self.svc.lock().unwrap();
+        let path = svc
+            .export_delta_bundle(&target_node_uuid, Path::new(&output_path))
+            .map_err(ZdbError::from)?;
         Ok(path.to_string_lossy().into_owned())
     }
 
     pub fn import_bundle(&self, bundle_path: String) -> Result<(), ZdbError> {
-        let index = self.index.lock().unwrap();
-        let repo = self.repo.lock().unwrap();
-        let mut sync_mgr = SyncManager::open(&repo).map_err(ZdbError::from)?;
-        crate::bundle::import_bundle(&repo, &mut sync_mgr, &index, Path::new(&bundle_path))
+        let svc = self.svc.lock().unwrap();
+        svc.import_bundle(Path::new(&bundle_path))
             .map_err(ZdbError::from)?;
         Ok(())
     }
@@ -896,8 +755,8 @@ mod tests {
 
         // Capture head as remote's sync point
         let sync_point = {
-            let repo = driver.repo.lock().unwrap();
-            repo.head_oid().unwrap().0.clone()
+            let svc = driver.svc.lock().unwrap();
+            svc.head_oid().unwrap().0.clone()
         };
 
         // Register a remote node with known_heads at sync_point
@@ -907,13 +766,14 @@ mod tests {
              status = \"Active\"\n"
         );
         {
-            let repo = driver.repo.lock().unwrap();
-            repo.commit_file(
-                &format!(".nodes/{node2_uuid}.toml"),
-                &node2_config,
-                "register node2",
-            )
-            .unwrap();
+            let svc = driver.svc.lock().unwrap();
+            svc.repo()
+                .commit_file(
+                    &format!(".nodes/{node2_uuid}.toml"),
+                    &node2_config,
+                    "register node2",
+                )
+                .unwrap();
         }
 
         // Add new content after remote's sync point
@@ -957,8 +817,8 @@ mod tests {
 
         // Capture head as remote's sync point
         let sync_point = {
-            let repo = driver.repo.lock().unwrap();
-            repo.head_oid().unwrap().0.clone()
+            let svc = driver.svc.lock().unwrap();
+            svc.head_oid().unwrap().0.clone()
         };
 
         // Register remote node with known_heads
@@ -968,13 +828,14 @@ mod tests {
              status = \"Active\"\n"
         );
         {
-            let repo = driver.repo.lock().unwrap();
-            repo.commit_file(
-                &format!(".nodes/{node2_uuid}.toml"),
-                &node2_config,
-                "register node2",
-            )
-            .unwrap();
+            let svc = driver.svc.lock().unwrap();
+            svc.repo()
+                .commit_file(
+                    &format!(".nodes/{node2_uuid}.toml"),
+                    &node2_config,
+                    "register node2",
+                )
+                .unwrap();
         }
 
         // Add more content after sync point
