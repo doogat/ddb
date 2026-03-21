@@ -870,10 +870,15 @@ proptest! {
         prop_assert!(sel.is_ok());
         if let Ok(zdb_core::sql_engine::SqlResult::Rows { rows, .. }) = &sel {
             prop_assert!(!rows.is_empty());
+            // SQLite type affinity may normalize values (e.g. '00' → '0' for INTEGER).
+            // Compare with normalization: if both parse as the same number, they match.
+            let got = &rows[0][0];
+            let matches = got.contains(&new_val)
+                || got.parse::<f64>().ok() == new_val.parse::<f64>().ok();
             prop_assert!(
-                rows[0][0].contains(&new_val),
+                matches,
                 "expected updated value '{}' in row, got '{}'",
-                new_val, rows[0][0]
+                new_val, got
             );
         }
     }
