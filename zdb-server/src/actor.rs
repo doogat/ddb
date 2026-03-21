@@ -560,6 +560,11 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
         }
     };
 
+    // Ensure index is up to date on startup (catches external changes)
+    if let Err(e) = svc.rebuild_if_stale() {
+        tracing::warn!(%e, "actor: index rebuild on startup failed");
+    }
+
     while let Some(msg) = rx.blocking_recv() {
         // Capture delete ID and type before cmd is moved (zettel won't exist after delete)
         let (delete_id, delete_type) = match &msg.cmd {

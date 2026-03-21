@@ -272,16 +272,12 @@ impl ZettelService {
     }
 
     fn ensure_fresh(&self) -> Result<()> {
-        if self.skip_stale_check {
-            // ReadPool path: skip PRAGMA integrity_check (causes lock
-            // contention on Windows) but still do a lightweight stale
-            // check so the reader sees the latest WAL data.
-            if self.index.is_stale(&self.repo)? {
-                self.index.rebuild(&self.repo)?;
-            }
-        } else {
+        if !self.skip_stale_check {
             self.index.rebuild_if_stale(&self.repo)?;
         }
+        // skip_stale_check: ReadPool path — actor keeps the index
+        // current, so readers trust WAL visibility without querying
+        // _zdb_meta (avoids SQLite lock contention on Windows).
         Ok(())
     }
 
