@@ -273,7 +273,7 @@ impl ZettelService {
 
     fn ensure_fresh(&self) -> Result<()> {
         if !self.skip_stale_check {
-            self.ensure_fresh()?;
+            self.index.rebuild_if_stale(&self.repo)?;
         }
         Ok(())
     }
