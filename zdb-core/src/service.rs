@@ -25,6 +25,7 @@ pub struct ZettelService {
     index: Index,
     txn: Option<TransactionBuffer>,
     repo_path: PathBuf,
+    skip_stale_check: bool,
 }
 
 impl ZettelService {
@@ -39,6 +40,7 @@ impl ZettelService {
             index,
             txn: None,
             repo_path: path.to_path_buf(),
+            skip_stale_check: false,
         })
     }
 
@@ -51,6 +53,12 @@ impl ZettelService {
     /// Path to the repository root.
     pub fn repo_path(&self) -> &Path {
         &self.repo_path
+    }
+
+    /// Skip rebuild_if_stale checks. Use for read-only connections
+    /// where another writer (e.g. actor) keeps the index fresh.
+    pub fn set_skip_stale_check(&mut self, skip: bool) {
+        self.skip_stale_check = skip;
     }
 
     // ── CRUD ────────────────────────────────────────────────────────────
@@ -148,7 +156,7 @@ impl ZettelService {
 
     /// Read a zettel's raw content by ID.
     pub fn read_zettel(&self, id: &str) -> Result<String> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
         self.repo.read_file(&path)
     }
@@ -160,7 +168,7 @@ impl ZettelService {
 
     /// Read and parse a zettel by ID, returning a fully parsed zettel.
     pub fn get_zettel_parsed(&self, id: &str) -> Result<ParsedZettel> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
         let content = self.repo.read_file(&path)?;
         parser::parse(&content, &path)
@@ -188,7 +196,7 @@ impl ZettelService {
         zettel_type: Option<&str>,
         body: Option<&str>,
     ) -> Result<ParsedZettel> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
         let content = self.repo.read_file(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
@@ -228,7 +236,7 @@ impl ZettelService {
 
     /// Delete a zettel by ID. Returns broken backlinks `(source_id, source_path)`.
     pub fn delete_zettel(&self, id: &str, message: &str) -> Result<Vec<(String, String)>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
         let broken = self.index.backlinking_zettel_paths(id)?;
         self.repo.delete_file(&path, message)?;
@@ -240,7 +248,7 @@ impl ZettelService {
     // ── Search ──────────────────────────────────────────────────────────
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.search(query)
     }
 
@@ -250,7 +258,7 @@ impl ZettelService {
         limit: usize,
         offset: usize,
     ) -> Result<PaginatedSearchResult> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.search_paginated(query, limit, offset)
     }
 
@@ -259,7 +267,14 @@ impl ZettelService {
     }
 
     pub fn rebuild_if_stale(&self) -> Result<()> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
+        Ok(())
+    }
+
+    fn ensure_fresh(&self) -> Result<()> {
+        if !self.skip_stale_check {
+            self.ensure_fresh()?;
+        }
         Ok(())
     }
 
@@ -327,7 +342,7 @@ impl ZettelService {
 
     /// Query zettels matching filter criteria, returning parsed zettels.
     pub fn list_zettels_filtered(&self, filter: &ListFilter) -> Result<Vec<ParsedZettel>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let sql = build_filtered_sql(
             filter.zettel_type.as_deref(),
             filter.tag.as_deref(),
@@ -353,7 +368,7 @@ impl ZettelService {
 
     /// Count zettels matching filter criteria.
     pub fn count_zettels_filtered(&self, filter: &ListFilter) -> Result<i64> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let select_sql = build_filtered_sql(
             filter.zettel_type.as_deref(),
             filter.tag.as_deref(),
@@ -378,7 +393,7 @@ impl ZettelService {
         sql: &str,
         params: &[rusqlite::types::Value],
     ) -> Result<Vec<String>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let rows = self.index.query_raw_with_params(sql, params)?;
         Ok(rows.into_iter().next().unwrap_or_default())
     }
@@ -389,13 +404,13 @@ impl ZettelService {
         sql: &str,
         params: &[rusqlite::types::Value],
     ) -> Result<Vec<Vec<String>>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.query_raw_with_params(sql, params)
     }
 
     /// Query a materialized type table with WHERE/ORDER/LIMIT, returning parsed zettels.
     pub fn typed_filtered_list(&self, query: &TypedListQuery) -> Result<Vec<ParsedZettel>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
 
         let mut conditions = Vec::new();
         if !query.where_sql.is_empty() {
@@ -537,22 +552,22 @@ impl ZettelService {
     // ── Discovery / Sequences ───────────────────────────────────────────
 
     pub fn unlinked_mentions(&self, id: &str) -> Result<Vec<UnlinkedMention>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.unlinked_mentions(id)
     }
 
     pub fn suggest_links(&self, id: &str, limit: usize) -> Result<Vec<Suggestion>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.suggest_links(id, limit)
     }
 
     pub fn stale_zettels(&self, type_filter: Option<&str>) -> Result<Vec<StaleZettel>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.stale_zettels(&self.repo, type_filter)
     }
 
     pub fn orphan_zettels(&self, type_filter: Option<&str>) -> Result<Vec<OrphanZettel>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.orphan_zettels(type_filter)
     }
 
@@ -561,33 +576,33 @@ impl ZettelService {
         id: &str,
         max_depth: usize,
     ) -> Result<Vec<(SequenceNode, usize)>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.sequence_tree(id, max_depth)
     }
 
     pub fn sequence_breadcrumb(&self, id: &str) -> Result<Vec<SequenceNode>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.sequence_breadcrumb(id)
     }
 
     pub fn broken_sequences(&self) -> Result<Vec<BrokenSequence>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.broken_sequences()
     }
 
     pub fn sequence_info(&self, id: &str) -> Result<SequenceInfo> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.sequence_info(id)
     }
 
     pub fn sequence_children(&self, id: &str) -> Result<Vec<SequenceNode>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.sequence_children(id)
     }
 
     /// Return backlink source IDs for a given zettel path/ID.
     pub fn backlink_ids(&self, id: &str) -> Result<Vec<String>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.backlinks(id)
     }
 
@@ -619,7 +634,7 @@ impl ZettelService {
 
     /// List all non-typedef zettel IDs.
     pub fn all_zettel_ids(&self) -> Result<Vec<String>> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         let rows = self.index.query_raw(
             "SELECT id FROM zettels WHERE path NOT LIKE 'zettelkasten/_typedef/%'",
         )?;
@@ -686,7 +701,7 @@ impl ZettelService {
     }
 
     pub fn infer_schema(&self, name: &str) -> Result<TableSchema> {
-        self.index.rebuild_if_stale(&self.repo)?;
+        self.ensure_fresh()?;
         self.index.infer_schema(name, &self.repo)
     }
 

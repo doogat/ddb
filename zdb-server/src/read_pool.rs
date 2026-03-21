@@ -240,7 +240,10 @@ impl ReadPool {
         let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let svc = ZettelService::open(&inner.repo_path)?;
+            let mut svc = ZettelService::open(&inner.repo_path)?;
+            // Actor keeps index fresh; skip integrity/staleness checks
+            // to avoid PRAGMA integrity_check lock contention on Windows.
+            svc.set_skip_stale_check(true);
             f(&svc)
         })
         .await
@@ -257,6 +260,7 @@ impl ReadPool {
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let mut svc = ZettelService::open(&inner.repo_path)?;
+            svc.set_skip_stale_check(true);
             f(&mut svc)
         })
         .await
