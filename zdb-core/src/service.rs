@@ -272,7 +272,14 @@ impl ZettelService {
     }
 
     fn ensure_fresh(&self) -> Result<()> {
-        if !self.skip_stale_check {
+        if self.skip_stale_check {
+            // ReadPool path: skip PRAGMA integrity_check (causes lock
+            // contention on Windows) but still do a lightweight stale
+            // check so the reader sees the latest WAL data.
+            if self.index.is_stale(&self.repo)? {
+                self.index.rebuild(&self.repo)?;
+            }
+        } else {
             self.index.rebuild_if_stale(&self.repo)?;
         }
         Ok(())
