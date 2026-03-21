@@ -141,6 +141,11 @@ impl ZettelService {
         self.repo.read_file(&path)
     }
 
+    /// Read raw content by git-relative path, skipping index freshness check.
+    pub fn read_zettel_raw(&self, path: &str) -> Result<String> {
+        self.repo.read_file(path)
+    }
+
     /// Read and parse a zettel by ID, returning a fully parsed zettel.
     pub fn get_zettel_parsed(&self, id: &str) -> Result<ParsedZettel> {
         self.index.rebuild_if_stale(&self.repo)?;

@@ -661,8 +661,10 @@ fn handle_command(svc: &mut ZettelService, cmd: ActorCommand) -> ActorReply {
             let result = svc
                 .create_zettel(&title, &tags, zettel_type.as_deref(), &body.unwrap_or_default())
                 .and_then(|id| {
-                    let content = svc.read_zettel(&id)?;
+                    // Skip rebuild_if_stale — we just indexed; avoids write-lock
+                    // contention with concurrent ReadPool readers.
                     let path = svc.resolve_path(&id)?;
+                    let content = svc.read_zettel_raw(&path)?;
                     parser::parse(&content, &path)
                 });
             ActorReply::Zettel(Box::new(result))
@@ -683,8 +685,8 @@ fn handle_command(svc: &mut ZettelService, cmd: ActorCommand) -> ActorReply {
                     body.as_deref(),
                 )
                 .and_then(|()| {
-                    let content = svc.read_zettel(&id)?;
                     let path = svc.resolve_path(&id)?;
+                    let content = svc.read_zettel_raw(&path)?;
                     parser::parse(&content, &path)
                 });
             ActorReply::Zettel(Box::new(result))
