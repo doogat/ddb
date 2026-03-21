@@ -487,7 +487,7 @@ HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$NOSQL_URL/$ID1" \
 pass "nosql-api: auth rejects missing token"
 
 # error sanitization — SQL error must not leak raw details
-RESULT=$(gql '{"query":"{ executeSQL(sql: \"SELCT * FORM oops\") { columns rows } }"}')
+RESULT=$(gql '{"query":"mutation { executeSql(sql: \"SELCT * FORM oops\") { message } }"}')
 echo "$RESULT" | grep -q '"errors"'
 echo "$RESULT" | grep -qi "query failed\|internal error"
 ! echo "$RESULT" | grep -qi "SELCT\|syntax error\|sqlite"
@@ -747,12 +747,9 @@ $ZDB update-bin --help | grep -q "\-\-rollback"
 pass "update-bin --help (includes --rollback)"
 
 # rollback with no backup should fail gracefully
-if $ZDB update-bin --rollback 2>&1 | grep -q "no backup"; then
-  pass "update-bin --rollback (no backup error)"
-else
-  echo "FAIL: update-bin --rollback should report 'no backup'" >&2
-  exit 1
-fi
+ROLLBACK_OUT=$($ZDB update-bin --rollback 2>&1 || true)
+echo "$ROLLBACK_OUT" | grep -q "no backup"
+pass "update-bin --rollback (no backup error)"
 
 # 30. ALTER TABLE + DROP TABLE + bulk UPDATE/DELETE
 cd "$TMPDIR"

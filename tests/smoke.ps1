@@ -590,7 +590,7 @@ try {
 pass "nosql-api: auth rejects missing token"
 
 # error sanitization — SQL error must not leak raw details
-$result = gql '{"query":"{ executeSQL(sql: \"SELCT * FORM oops\") { columns rows } }"}'
+$result = gql '{"query":"mutation { executeSql(sql: \"SELCT * FORM oops\") { message } }"}'
 if ($result -notmatch "errors") { throw "expected errors in response" }
 if ($result -notmatch "(?i)query failed|internal error") { throw "expected sanitized message" }
 if ($result -match "(?i)SELCT|syntax error|sqlite") { throw "raw SQL details leaked" }
