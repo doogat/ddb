@@ -67,6 +67,18 @@ impl ZettelService {
         zettel_type: Option<&str>,
         body: &str,
     ) -> Result<String> {
+        self.create_zettel_parsed(title, tags, zettel_type, body)
+            .map(|p| p.meta.id.map(|z| z.0).unwrap_or_default())
+    }
+
+    /// Create a new zettel, returning the full `ParsedZettel`.
+    pub fn create_zettel_parsed(
+        &self,
+        title: &str,
+        tags: &[String],
+        zettel_type: Option<&str>,
+        body: &str,
+    ) -> Result<ParsedZettel> {
         let id = self.unique_id();
         let id_str = id.to_string();
 
@@ -102,7 +114,7 @@ impl ZettelService {
         self.index.index_zettel(&parsed)?;
         self.nosql_index_zettel(&parsed);
 
-        Ok(id_str)
+        Ok(parsed)
     }
 
     /// Create a zettel from raw Markdown content (for FFI consumers).
@@ -163,6 +175,19 @@ impl ZettelService {
         zettel_type: Option<&str>,
         body: Option<&str>,
     ) -> Result<()> {
+        self.update_zettel_parsed(id, title, tags, zettel_type, body)?;
+        Ok(())
+    }
+
+    /// Update a zettel, returning the updated `ParsedZettel`.
+    pub fn update_zettel_parsed(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        tags: Option<&[String]>,
+        zettel_type: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<ParsedZettel> {
         self.index.rebuild_if_stale(&self.repo)?;
         let path = self.index.resolve_path(id)?;
         let content = self.repo.read_file(&path)?;
@@ -184,9 +209,11 @@ impl ZettelService {
         let new_content = parser::serialize(&parsed);
         self.repo
             .commit_file(&path, &new_content, &format!("update zettel {id}"))?;
+        // Re-parse to capture updated inline fields/wikilinks
+        let parsed = parser::parse(&new_content, &path)?;
         self.index.index_zettel(&parsed)?;
         self.nosql_index_zettel(&parsed);
-        Ok(())
+        Ok(parsed)
     }
 
     /// Update a zettel from raw content (for FFI consumers).

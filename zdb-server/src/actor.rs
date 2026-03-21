@@ -658,15 +658,12 @@ fn handle_command(svc: &mut ZettelService, cmd: ActorCommand) -> ActorReply {
             tags,
             zettel_type,
         } => {
-            let result = svc
-                .create_zettel(&title, &tags, zettel_type.as_deref(), &body.unwrap_or_default())
-                .and_then(|id| {
-                    // Skip rebuild_if_stale — we just indexed; avoids write-lock
-                    // contention with concurrent ReadPool readers.
-                    let path = svc.resolve_path(&id)?;
-                    let content = svc.read_zettel_raw(&path)?;
-                    parser::parse(&content, &path)
-                });
+            let result = svc.create_zettel_parsed(
+                &title,
+                &tags,
+                zettel_type.as_deref(),
+                &body.unwrap_or_default(),
+            );
             ActorReply::Zettel(Box::new(result))
         }
         ActorCommand::UpdateZettel {
@@ -676,19 +673,13 @@ fn handle_command(svc: &mut ZettelService, cmd: ActorCommand) -> ActorReply {
             tags,
             zettel_type,
         } => {
-            let result = svc
-                .update_zettel(
-                    &id,
-                    title.as_deref(),
-                    tags.as_deref(),
-                    zettel_type.as_deref(),
-                    body.as_deref(),
-                )
-                .and_then(|()| {
-                    let path = svc.resolve_path(&id)?;
-                    let content = svc.read_zettel_raw(&path)?;
-                    parser::parse(&content, &path)
-                });
+            let result = svc.update_zettel_parsed(
+                &id,
+                title.as_deref(),
+                tags.as_deref(),
+                zettel_type.as_deref(),
+                body.as_deref(),
+            );
             ActorReply::Zettel(Box::new(result))
         }
         ActorCommand::DeleteZettel { id } => {
