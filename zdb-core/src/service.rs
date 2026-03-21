@@ -418,7 +418,24 @@ impl ZettelService {
     }
 
     pub fn compact(&self, opts: &CompactOptions) -> Result<CompactionReport> {
-        let mgr = SyncManager::open(&self.repo)?;
+        let mgr = match SyncManager::open(&self.repo) {
+            Ok(m) => m,
+            Err(ZettelError::NotFound(_)) => {
+                return Ok(CompactionReport {
+                    files_removed: 0,
+                    crdt_docs_compacted: 0,
+                    gc_success: false,
+                    crdt_temp_bytes_before: 0,
+                    crdt_temp_bytes_after: 0,
+                    crdt_temp_files_before: 0,
+                    crdt_temp_files_after: 0,
+                    repo_bytes_before: 0,
+                    repo_bytes_after: 0,
+                    backup_path: None,
+                });
+            }
+            Err(e) => return Err(e),
+        };
         crate::compaction::compact(&self.repo, &mgr, opts)
     }
 

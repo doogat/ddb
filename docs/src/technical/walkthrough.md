@@ -213,9 +213,9 @@ The SQL engine translates relational operations into zettel file operations. DDL
 
 ### Server actor bridge
 
-The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns the `GitRepo`, `Index`, and `SqlEngine`, executing operations sequentially to maintain write consistency.
+The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `ZettelService` instance, delegating all operations to it. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
 
-For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent read-only access. Each read acquires a semaphore permit and runs on `spawn_blocking` with its own `Index` and `GitRepo` handles, bypassing the single-writer actor entirely. The pool size is configurable via server config.
+For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent read-only access. Each read acquires a semaphore permit and runs on `spawn_blocking` with a fresh `ZettelService` instance, bypassing the single-writer actor entirely. The pool size is configurable via server config.
 
 ### Indexer rebuild pipeline
 

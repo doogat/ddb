@@ -92,7 +92,7 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 |-------|---------|---------|
 | `automerge` | 0.7 | CRDT conflict resolution |
 | `chrono` | 0.4 | Timestamps and date formatting |
-| `git2` | 0.19 | libgit2 bindings for Git operations |
+| `git2` | 0.20 | libgit2 bindings for Git operations |
 | `regex` | 1 | Inline field and wikilink extraction |
 | `rusqlite` | 0.32 | SQLite with FTS5 (bundled) |
 | `serde` | 1 | Serialization framework |
