@@ -65,7 +65,7 @@ pub enum ActorCommand {
         backlinks_of: Option<String>,
         field_filters: Vec<(String, String)>,
     },
-    FilteredList(crate::read_pool::FilteredListQuery),
+    FilteredList(zdb_core::types::TypedListQuery),
     AggregateQuery {
         sql: String,
         params: Vec<rusqlite::types::Value>,
@@ -226,7 +226,7 @@ impl ActorHandle {
 
     pub async fn filtered_list(
         &self,
-        q: crate::read_pool::FilteredListQuery,
+        q: zdb_core::types::TypedListQuery,
     ) -> ActorResult<Vec<ParsedZettel>> {
         match self.send(ActorCommand::FilteredList(q)).await {
             ActorReply::ZettelList(r) => r,
@@ -971,7 +971,7 @@ fn build_filtered_sql(
 pub(crate) fn filtered_list(
     repo: &GitRepo,
     index: &Index,
-    q: &crate::read_pool::FilteredListQuery,
+    q: &zdb_core::types::TypedListQuery,
 ) -> ActorResult<Vec<ParsedZettel>> {
     // Combine where_sql and tag filter
     let mut conditions = Vec::new();

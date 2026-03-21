@@ -997,7 +997,7 @@ pub fn build_schema(
 
                             // Fetch items (always use filtered_list — supports where + tag + orderBy)
                             let zettels = pool
-                                .filtered_list(crate::read_pool::FilteredListQuery {
+                                .filtered_list(zdb_core::types::TypedListQuery {
                                     table_name: table_name.clone(),
                                     where_sql: wc.sql.clone(),
                                     params: wc.params.clone(),

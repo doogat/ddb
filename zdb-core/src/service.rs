@@ -151,6 +151,14 @@ impl ZettelService {
         self.repo.read_file(&path)
     }
 
+    /// Read and parse a zettel by ID, returning a fully parsed zettel.
+    pub fn get_zettel_parsed(&self, id: &str) -> Result<ParsedZettel> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        let path = self.index.resolve_path(id)?;
+        let content = self.repo.read_file(&path)?;
+        parser::parse(&content, &path)
+    }
+
     /// Update a zettel, merging provided fields into the existing content.
     pub fn update_zettel(
         &self,
@@ -351,6 +359,16 @@ impl ZettelService {
         self.index.rebuild_if_stale(&self.repo)?;
         let rows = self.index.query_raw_with_params(sql, params)?;
         Ok(rows.into_iter().next().unwrap_or_default())
+    }
+
+    /// Execute a raw SQL query with params, returning all result rows.
+    pub fn query_raw_with_params(
+        &self,
+        sql: &str,
+        params: &[rusqlite::types::Value],
+    ) -> Result<Vec<Vec<String>>> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        self.index.query_raw_with_params(sql, params)
     }
 
     /// Query a materialized type table with WHERE/ORDER/LIMIT, returning parsed zettels.

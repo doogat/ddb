@@ -1,41 +1,27 @@
 //! Read-only connection pool for concurrent query execution.
 //!
 //! Routes read operations to `spawn_blocking` tasks with fresh
-//! `Index` and `GitRepo` handles, bypassing the single-writer actor.
+//! `ZettelService` handles, bypassing the single-writer actor.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use zdb_core::error::ZettelError;
-use zdb_core::git_ops::GitRepo;
-use zdb_core::indexer::Index;
-use zdb_core::sql_engine::{SqlEngine, SqlResult};
+use zdb_core::service::ZettelService;
+use zdb_core::sql_engine::SqlResult;
 use zdb_core::types::{
-    BrokenSequence, OrphanZettel, PaginatedSearchResult, ParsedZettel, SequenceInfo, SequenceNode,
-    StaleZettel, Suggestion, TableSchema, UnlinkedMention,
+    BrokenSequence, ListFilter, OrphanZettel, PaginatedSearchResult, ParsedZettel, SequenceInfo,
+    SequenceNode, StaleZettel, Suggestion, TableSchema, TypedListQuery, UnlinkedMention,
 };
 
-use crate::actor;
-
 type Result<T> = std::result::Result<T, ZettelError>;
-
-/// Query parameters for [`ReadPool::filtered_list`].
-pub struct FilteredListQuery {
-    pub table_name: String,
-    pub where_sql: String,
-    pub params: Vec<rusqlite::types::Value>,
-    pub order_sql: Option<String>,
-    pub tag: Option<String>,
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
 
 /// Pool of read-only connections for concurrent query execution.
 ///
 /// Each read acquires a semaphore permit and runs on `spawn_blocking`
-/// with its own `Index` + `GitRepo` handles. Write operations must
-/// still go through [`crate::actor::ActorHandle`].
+/// with its own `ZettelService` handle. Write operations must still
+/// go through [`crate::actor::ActorHandle`].
 #[derive(Clone)]
 pub struct ReadPool {
     inner: Arc<Inner>,
@@ -43,19 +29,16 @@ pub struct ReadPool {
 
 struct Inner {
     repo_path: PathBuf,
-    db_path: PathBuf,
     semaphore: Arc<Semaphore>,
 }
 
 impl ReadPool {
     pub fn new(repo_path: PathBuf, pool_size: usize) -> Result<Self> {
         let pool_size = pool_size.max(1);
-        let db_path = repo_path.join(".zdb/index.db");
 
         Ok(Self {
             inner: Arc::new(Inner {
                 repo_path,
-                db_path,
                 semaphore: Arc::new(Semaphore::new(pool_size)),
             }),
         })
@@ -67,10 +50,10 @@ impl ReadPool {
             .unwrap_or(2)
     }
 
-    // --- Index + GitRepo reads ---
+    // --- ZettelService reads ---
 
     pub async fn get_zettel(&self, id: String) -> Result<ParsedZettel> {
-        self.with_index_repo(move |index, repo| actor::get_zettel(repo, index, &id))
+        self.with_service(move |svc| svc.get_zettel_parsed(&id))
             .await
     }
 
@@ -83,42 +66,33 @@ impl ReadPool {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> Result<Vec<ParsedZettel>> {
-        self.with_index_repo(move |index, repo| {
-            actor::list_zettels(
-                repo,
-                index,
-                actor::ListQuery {
-                    zettel_type,
-                    tag,
-                    backlinks_of,
-                    field_filters,
-                    limit,
-                    offset,
-                },
-            )
+        self.with_service(move |svc| {
+            svc.list_zettels_filtered(&ListFilter {
+                zettel_type,
+                tag,
+                backlinks_of,
+                field_filters,
+                limit,
+                offset,
+            })
         })
         .await
     }
 
-    pub async fn filtered_list(&self, q: FilteredListQuery) -> Result<Vec<ParsedZettel>> {
-        self.with_index_repo(move |index, repo| actor::filtered_list(repo, index, &q))
+    pub async fn filtered_list(&self, q: TypedListQuery) -> Result<Vec<ParsedZettel>> {
+        self.with_service(move |svc| svc.typed_filtered_list(&q))
             .await
     }
 
     pub async fn get_type_schemas(&self) -> Result<Vec<TableSchema>> {
-        self.with_index_repo(move |index, repo| actor::get_type_schemas(repo, index))
+        self.with_service(move |svc| svc.list_type_schemas())
             .await
     }
 
     pub async fn execute_select(&self, sql: String) -> Result<SqlResult> {
-        self.with_index_repo(move |index, repo| {
-            let mut engine = SqlEngine::new(index, repo);
-            engine.execute(&sql)
-        })
-        .await
+        self.with_service_mut(move |svc| svc.execute_sql(&sql))
+            .await
     }
-
-    // --- Index-only reads ---
 
     pub async fn search(
         &self,
@@ -126,7 +100,7 @@ impl ReadPool {
         limit: usize,
         offset: usize,
     ) -> Result<PaginatedSearchResult> {
-        self.with_index(move |index| index.search_paginated(&query, limit, offset))
+        self.with_service(move |svc| svc.search_paginated(&query, limit, offset))
             .await
     }
 
@@ -137,14 +111,21 @@ impl ReadPool {
         backlinks_of: Option<String>,
         field_filters: Vec<(String, String)>,
     ) -> Result<i64> {
-        self.with_index(move |index| {
-            actor::count_zettels(index, zettel_type, tag, backlinks_of, &field_filters)
+        self.with_service(move |svc| {
+            svc.count_zettels_filtered(&ListFilter {
+                zettel_type,
+                tag,
+                backlinks_of,
+                field_filters,
+                limit: None,
+                offset: None,
+            })
         })
         .await
     }
 
     pub async fn get_backlinks(&self, id: String) -> Result<Vec<String>> {
-        self.with_index(move |index| index.backlinks(&id)).await
+        self.with_service(move |svc| svc.backlink_ids(&id)).await
     }
 
     pub async fn query_checkboxes(
@@ -154,7 +135,7 @@ impl ReadPool {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> Result<Vec<Vec<String>>> {
-        self.with_index(move |index| {
+        self.with_service(move |svc| {
             let mut conditions = Vec::new();
             let mut params: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -187,7 +168,7 @@ impl ReadPool {
                  ORDER BY c.zettel_id DESC, c.line_number ASC{limit_clause}"
             );
 
-            index.query_raw_with_params(&sql, &params)
+            svc.query_raw_with_params(&sql, &params)
         })
         .await
     }
@@ -197,52 +178,48 @@ impl ReadPool {
         sql: String,
         params: Vec<rusqlite::types::Value>,
     ) -> Result<Vec<String>> {
-        self.with_index(move |index| {
-            index
-                .query_raw_with_params(&sql, &params)
-                .map(|rows| rows.into_iter().next().unwrap_or_default())
-        })
-        .await
+        self.with_service(move |svc| svc.aggregate_query(&sql, &params))
+            .await
     }
 
     // --- Discovery reads ---
 
     pub async fn unlinked_mentions(&self, id: String) -> Result<Vec<UnlinkedMention>> {
-        self.with_index(move |index| index.unlinked_mentions(&id))
+        self.with_service(move |svc| svc.unlinked_mentions(&id))
             .await
     }
 
     pub async fn suggest_links(&self, id: String, limit: usize) -> Result<Vec<Suggestion>> {
-        self.with_index(move |index| index.suggest_links(&id, limit))
+        self.with_service(move |svc| svc.suggest_links(&id, limit))
             .await
     }
 
     pub async fn stale_zettels(&self, type_filter: Option<String>) -> Result<Vec<StaleZettel>> {
-        self.with_index_repo(move |index, repo| index.stale_zettels(repo, type_filter.as_deref()))
+        self.with_service(move |svc| svc.stale_zettels(type_filter.as_deref()))
             .await
     }
 
     pub async fn orphan_zettels(&self, type_filter: Option<String>) -> Result<Vec<OrphanZettel>> {
-        self.with_index(move |index| index.orphan_zettels(type_filter.as_deref()))
+        self.with_service(move |svc| svc.orphan_zettels(type_filter.as_deref()))
             .await
     }
 
     pub async fn sequence_info(&self, id: String) -> Result<SequenceInfo> {
-        self.with_index(move |index| index.sequence_info(&id)).await
+        self.with_service(move |svc| svc.sequence_info(&id)).await
     }
 
     pub async fn sequence_children(&self, id: String) -> Result<Vec<SequenceNode>> {
-        self.with_index(move |index| index.sequence_children(&id))
+        self.with_service(move |svc| svc.sequence_children(&id))
             .await
     }
 
     pub async fn sequence_breadcrumb(&self, id: String) -> Result<Vec<SequenceNode>> {
-        self.with_index(move |index| index.sequence_breadcrumb(&id))
+        self.with_service(move |svc| svc.sequence_breadcrumb(&id))
             .await
     }
 
     pub async fn broken_sequences(&self) -> Result<Vec<BrokenSequence>> {
-        self.with_index(move |index| index.broken_sequences()).await
+        self.with_service(move |svc| svc.broken_sequences()).await
     }
 
     // --- Dispatch helpers ---
@@ -254,34 +231,33 @@ impl ReadPool {
             .map_err(|_| ZettelError::Validation("read pool closed".into()))
     }
 
-    async fn with_index<F, T>(&self, f: F) -> Result<T>
+    async fn with_service<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&Index) -> Result<T> + Send + 'static,
+        F: FnOnce(&ZettelService) -> Result<T> + Send + 'static,
         T: Send + 'static,
     {
         let permit = self.acquire().await?;
         let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let index = Index::open(&inner.db_path)?;
-            f(&index)
+            let svc = ZettelService::open(&inner.repo_path)?;
+            f(&svc)
         })
         .await
         .map_err(|e| ZettelError::Validation(format!("read task panicked: {e}")))?
     }
 
-    async fn with_index_repo<F, T>(&self, f: F) -> Result<T>
+    async fn with_service_mut<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&Index, &GitRepo) -> Result<T> + Send + 'static,
+        F: FnOnce(&mut ZettelService) -> Result<T> + Send + 'static,
         T: Send + 'static,
     {
         let permit = self.acquire().await?;
         let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let index = Index::open(&inner.db_path)?;
-            let repo = GitRepo::open(&inner.repo_path)?;
-            f(&index, &repo)
+            let mut svc = ZettelService::open(&inner.repo_path)?;
+            f(&mut svc)
         })
         .await
         .map_err(|e| ZettelError::Validation(format!("read task panicked: {e}")))?
@@ -303,12 +279,9 @@ mod tests {
 
     fn setup_repo() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = GitRepo::init(dir.path()).unwrap();
-        // Create index so ReadPool can validate
-        let db_path = dir.path().join(".zdb/index.db");
-        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
-        let index = Index::open(&db_path).unwrap();
-        index.rebuild(&repo).unwrap();
+        let svc = ZettelService::init(dir.path()).unwrap();
+        // Ensure index is built
+        svc.reindex().unwrap();
         let path = dir.path().to_path_buf();
         (dir, path)
     }
@@ -397,18 +370,15 @@ mod tests {
     async fn read_after_write_visible() {
         let (_dir, path) = setup_repo();
 
-        // Write a zettel via git + index (the actor/writer path)
-        let repo = GitRepo::open(&path).unwrap();
+        // Write a zettel via ZettelService (the writer path)
+        let svc = ZettelService::open(&path).unwrap();
         let id = "20260314120000";
         let rel_path = format!("zettelkasten/{id}.md");
         let content =
             format!("---\ntitle: ReadAfterWrite\ntype: note\ncreated: {id}\n---\nBody text.\n");
-        repo.commit_file(&rel_path, &content, "add test zettel")
-            .unwrap();
-        let db_path = path.join(".zdb/index.db");
-        let index = Index::open(&db_path).unwrap();
+        svc.repo().commit_file(&rel_path, &content, "add test zettel").unwrap();
         let parsed = zdb_core::parser::parse(&content, &rel_path).unwrap();
-        index.index_zettel(&parsed).unwrap();
+        svc.index().index_zettel(&parsed).unwrap();
 
         // Read via ReadPool — should see the write immediately (WAL)
         let pool = ReadPool::new(path, 2).unwrap();
@@ -425,12 +395,12 @@ mod tests {
 
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let p1 = pool.clone();
-        // Occupy the single slot with a blocking search
+        // Occupy the single slot with a blocking service call
         let slow = tokio::spawn(async move {
-            p1.with_index(move |index| {
+            p1.with_service(move |svc| {
                 // Hold the permit until signaled
                 rx.blocking_recv().ok();
-                index.search("hold").map(|_| ())
+                svc.search("hold").map(|_| ())
             })
             .await
         });
