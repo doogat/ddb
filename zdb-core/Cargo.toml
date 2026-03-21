@@ -13,7 +13,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 automerge = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
-git2 = "0.19"
+git2 = "0.20"
 rayon = "1"
 tracing = "0.1"
 regex = "1"
