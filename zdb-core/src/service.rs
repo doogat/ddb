@@ -7,10 +7,11 @@ use crate::parser;
 use crate::sql_engine::{SqlEngine, SqlResult, TransactionBuffer};
 use crate::sync_manager::SyncManager;
 use crate::types::{
-    AttachmentInfo, BrokenSequence, CommitHash, CompactOptions, CompactionReport, FixReport,
-    ListFilter, MaintenanceReport, NodeConfig, OrphanZettel, PaginatedSearchResult, ParsedZettel,
-    RebuildReport, RenameReport, SearchResult, SequenceInfo, SequenceNode, StaleZettel, Suggestion,
-    SyncReport, TableSchema, TypedListQuery, UnlinkedMention, ZettelId, ZettelMeta,
+    AttachmentInfo, BrokenSequence, CommitHash, CompactDryRunInfo, CompactOptions,
+    CompactionReport, FixReport, ListFilter, MaintenanceReport, NodeConfig, OrphanZettel,
+    PaginatedSearchResult, ParsedZettel, RebuildReport, RenameReport, SearchResult, SequenceInfo,
+    SequenceNode, StaleZettel, Suggestion, SyncReport, TableSchema, TypedListQuery,
+    UnlinkedMention, ZettelId, ZettelMeta,
 };
 
 /// Unified orchestration layer composing GitRepo, Index, and optional NoSQL
@@ -413,6 +414,51 @@ impl ZettelService {
         crate::compaction::compact(&self.repo, &mgr, opts)
     }
 
+    /// Dry-run compaction: return info without modifying anything.
+    pub fn compact_dry_run(&self) -> Result<CompactDryRunInfo> {
+        let nodes = self.list_nodes()?;
+        let shared_head = crate::compaction::shared_head(&self.repo, &nodes)?
+            .map(|oid| oid.to_string());
+        let temp_dir = self.repo_path.join(".crdt/temp");
+        let crdt_temp_files = if temp_dir.exists() {
+            std::fs::read_dir(&temp_dir)
+                .map(|d| {
+                    d.filter_map(|e| e.ok())
+                        .filter(|e| e.file_name().to_string_lossy() != ".gitkeep")
+                        .count()
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let default_backup_path = crate::compaction::default_backup_path(&self.repo);
+        Ok(CompactDryRunInfo {
+            shared_head,
+            crdt_temp_files,
+            default_backup_path,
+        })
+    }
+
+    /// Enable or disable auto-maintenance, persisted in .zetteldb.toml.
+    pub fn set_auto_maintenance(&self, enabled: bool) -> Result<()> {
+        let mut config = self.repo.load_config().unwrap_or_default();
+        config.maintenance.auto_enabled = enabled;
+        let toml_str = toml::to_string_pretty(&config)
+            .map_err(|e| ZettelError::Toml(e.to_string()))?;
+        self.repo.commit_file(
+            ".zetteldb.toml",
+            &toml_str,
+            &format!("maintenance auto {}", if enabled { "on" } else { "off" }),
+        )?;
+        Ok(())
+    }
+
+    /// Check if auto-maintenance is enabled.
+    pub fn auto_maintenance_enabled(&self) -> Result<bool> {
+        let config = self.load_config()?;
+        Ok(config.maintenance.auto_enabled)
+    }
+
     pub fn run_maintenance(&self, tasks: Option<&[&str]>) -> Result<MaintenanceReport> {
         crate::maintenance::run(&self.repo.path, tasks)
     }
@@ -691,6 +737,70 @@ impl ZettelService {
 
     #[cfg(not(feature = "nosql"))]
     fn nosql_remove_zettel(&self, _id: &str) {}
+
+    // ── NoSQL reads ─────────────────────────────────────────────────────
+
+    #[cfg(feature = "nosql")]
+    fn open_nosql(&self) -> Result<crate::nosql::RedbIndex> {
+        let redb_path = self.repo_path.join(".zdb/nosql.redb");
+        crate::nosql::RedbIndex::open(&redb_path)
+    }
+
+    /// Get a zettel by ID from the NoSQL index.
+    #[cfg(feature = "nosql")]
+    pub fn nosql_get(&self, id: &str) -> Result<Option<ParsedZettel>> {
+        self.open_nosql()?.get(id)
+    }
+
+    #[cfg(not(feature = "nosql"))]
+    pub fn nosql_get(&self, _id: &str) -> Result<Option<ParsedZettel>> {
+        Err(ZettelError::NotFound("nosql not available".into()))
+    }
+
+    /// Scan by type in the NoSQL index.
+    #[cfg(feature = "nosql")]
+    pub fn nosql_scan_type(&self, type_name: &str) -> Result<Vec<String>> {
+        self.open_nosql()?.scan_by_type(type_name)
+    }
+
+    #[cfg(not(feature = "nosql"))]
+    pub fn nosql_scan_type(&self, _type_name: &str) -> Result<Vec<String>> {
+        Err(ZettelError::NotFound("nosql not available".into()))
+    }
+
+    /// Scan by tag in the NoSQL index.
+    #[cfg(feature = "nosql")]
+    pub fn nosql_scan_tag(&self, tag: &str) -> Result<Vec<String>> {
+        self.open_nosql()?.scan_by_tag(tag)
+    }
+
+    #[cfg(not(feature = "nosql"))]
+    pub fn nosql_scan_tag(&self, _tag: &str) -> Result<Vec<String>> {
+        Err(ZettelError::NotFound("nosql not available".into()))
+    }
+
+    /// Get backlinks from the NoSQL index.
+    #[cfg(feature = "nosql")]
+    pub fn nosql_backlinks(&self, id: &str) -> Result<Vec<String>> {
+        self.open_nosql()?.backlinks(id)
+    }
+
+    #[cfg(not(feature = "nosql"))]
+    pub fn nosql_backlinks(&self, _id: &str) -> Result<Vec<String>> {
+        Err(ZettelError::NotFound("nosql not available".into()))
+    }
+
+    /// Rebuild the NoSQL index from git.
+    #[cfg(feature = "nosql")]
+    pub fn nosql_rebuild(&self) -> Result<usize> {
+        let ri = self.open_nosql()?;
+        Ok(ri.rebuild(&self.repo)?)
+    }
+
+    #[cfg(not(feature = "nosql"))]
+    pub fn nosql_rebuild(&self) -> Result<usize> {
+        Err(ZettelError::NotFound("nosql not available".into()))
+    }
 }
 
 /// Build SQL query with filters for zettel listing.

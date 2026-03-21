@@ -1209,6 +1209,14 @@ pub struct BrokenSequence {
     pub broken_parent_id: String,
 }
 
+/// Dry-run compaction info returned by `ZettelService::compact_dry_run`.
+#[derive(Debug, Clone)]
+pub struct CompactDryRunInfo {
+    pub shared_head: Option<String>,
+    pub crdt_temp_files: usize,
+    pub default_backup_path: std::path::PathBuf,
+}
+
 /// Filter parameters for querying zettels by type, tag, backlinks, and fields.
 #[derive(Debug, Clone, Default)]
 pub struct ListFilter {
