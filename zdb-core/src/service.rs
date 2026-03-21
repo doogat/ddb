@@ -8,9 +8,9 @@ use crate::sql_engine::{SqlEngine, SqlResult, TransactionBuffer};
 use crate::sync_manager::SyncManager;
 use crate::types::{
     AttachmentInfo, BrokenSequence, CommitHash, CompactOptions, CompactionReport, FixReport,
-    MaintenanceReport, NodeConfig, OrphanZettel, PaginatedSearchResult, ParsedZettel, RebuildReport,
-    RenameReport, SearchResult, SequenceNode, StaleZettel, Suggestion, SyncReport, TableSchema,
-    UnlinkedMention, ZettelId, ZettelMeta,
+    ListFilter, MaintenanceReport, NodeConfig, OrphanZettel, PaginatedSearchResult, ParsedZettel,
+    RebuildReport, RenameReport, SearchResult, SequenceNode, StaleZettel, Suggestion, SyncReport,
+    TableSchema, TypedListQuery, UnlinkedMention, ZettelId, ZettelMeta,
 };
 
 /// Unified orchestration layer composing GitRepo, Index, and optional NoSQL
@@ -292,6 +292,115 @@ impl ZettelService {
         Ok(())
     }
 
+    // ── Filtered Queries ─────────────────────────────────────────────────
+
+    /// Query zettels matching filter criteria, returning parsed zettels.
+    pub fn list_zettels_filtered(&self, filter: &ListFilter) -> Result<Vec<ParsedZettel>> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        let sql = build_filtered_sql(
+            filter.zettel_type.as_deref(),
+            filter.tag.as_deref(),
+            filter.backlinks_of.as_deref(),
+            &filter.field_filters,
+            filter.limit,
+            filter.offset,
+        );
+        let rows = self.index.query_raw(&sql)?;
+        let mut zettels = Vec::new();
+        for row in rows {
+            if row.len() >= 2 {
+                let path = &row[1];
+                if let Ok(content) = self.repo.read_file(path) {
+                    if let Ok(parsed) = parser::parse(&content, path) {
+                        zettels.push(parsed);
+                    }
+                }
+            }
+        }
+        Ok(zettels)
+    }
+
+    /// Count zettels matching filter criteria.
+    pub fn count_zettels_filtered(&self, filter: &ListFilter) -> Result<i64> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        let select_sql = build_filtered_sql(
+            filter.zettel_type.as_deref(),
+            filter.tag.as_deref(),
+            filter.backlinks_of.as_deref(),
+            &filter.field_filters,
+            None,
+            None,
+        );
+        let count_sql = format!("SELECT COUNT(*) FROM ({select_sql})");
+        let rows = self.index.query_raw(&count_sql)?;
+        let count = rows
+            .first()
+            .and_then(|r| r.first())
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0);
+        Ok(count)
+    }
+
+    /// Execute a raw SQL query with params, returning the first result row.
+    pub fn aggregate_query(
+        &self,
+        sql: &str,
+        params: &[rusqlite::types::Value],
+    ) -> Result<Vec<String>> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        let rows = self.index.query_raw_with_params(sql, params)?;
+        Ok(rows.into_iter().next().unwrap_or_default())
+    }
+
+    /// Query a materialized type table with WHERE/ORDER/LIMIT, returning parsed zettels.
+    pub fn typed_filtered_list(&self, query: &TypedListQuery) -> Result<Vec<ParsedZettel>> {
+        self.index.rebuild_if_stale(&self.repo)?;
+
+        let mut conditions = Vec::new();
+        if !query.where_sql.is_empty() {
+            conditions.push(query.where_sql.to_string());
+        }
+        if let Some(t) = &query.tag {
+            conditions.push(format!(
+                "id IN (SELECT zettel_id FROM _zdb_tags WHERE tag = '{}')",
+                t.replace('\'', "''")
+            ));
+        }
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+
+        let order = query.order_sql.as_deref().unwrap_or("id DESC");
+        let limit_clause = match (query.limit, query.offset) {
+            (Some(l), Some(o)) => format!(" LIMIT {l} OFFSET {o}"),
+            (Some(l), None) => format!(" LIMIT {l}"),
+            (None, Some(o)) => format!(" LIMIT -1 OFFSET {o}"),
+            (None, None) => String::new(),
+        };
+
+        let sql = format!(
+            "SELECT id FROM \"{}\"{where_clause} ORDER BY {order}{limit_clause}",
+            query.table_name
+        );
+
+        let rows = self.index.query_raw_with_params(&sql, &query.params)?;
+        let mut zettels = Vec::new();
+        for row in rows {
+            if let Some(id) = row.first() {
+                if let Ok(path) = self.index.resolve_path(id) {
+                    if let Ok(content) = self.repo.read_file(&path) {
+                        if let Ok(parsed) = parser::parse(&content, &path) {
+                            zettels.push(parsed);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(zettels)
+    }
+
     // ── Sync / Compact / Maintenance ────────────────────────────────────
 
     pub fn sync(&self, remote: &str, branch: &str) -> Result<SyncReport> {
@@ -533,6 +642,56 @@ impl ZettelService {
     fn nosql_remove_zettel(&self, _id: &str) {}
 }
 
+/// Build SQL query with filters for zettel listing.
+fn build_filtered_sql(
+    zettel_type: Option<&str>,
+    tag: Option<&str>,
+    backlinks_of: Option<&str>,
+    field_filters: &[(String, String)],
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> String {
+    let mut conditions = Vec::new();
+
+    if let Some(t) = zettel_type {
+        conditions.push(format!("z.type = '{}'", t.replace('\'', "''")));
+    }
+    if let Some(t) = tag {
+        conditions.push(format!(
+            "z.id IN (SELECT zettel_id FROM _zdb_tags WHERE tag = '{}')",
+            t.replace('\'', "''")
+        ));
+    }
+    if let Some(bl) = backlinks_of {
+        conditions.push(format!(
+            "z.id IN (SELECT source_id FROM _zdb_links WHERE target_path = '{}')",
+            bl.replace('\'', "''")
+        ));
+    }
+    for (key, value) in field_filters {
+        conditions.push(format!(
+            "z.id IN (SELECT zettel_id FROM _zdb_fields WHERE key = '{}' AND value = '{}')",
+            key.replace('\'', "''"),
+            value.replace('\'', "''")
+        ));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+
+    let limit_clause = match (limit, offset) {
+        (Some(l), Some(o)) => format!(" LIMIT {l} OFFSET {o}"),
+        (Some(l), None) => format!(" LIMIT {l}"),
+        (None, Some(o)) => format!(" LIMIT -1 OFFSET {o}"),
+        (None, None) => String::new(),
+    };
+
+    format!("SELECT z.id, z.path FROM zettels z{where_clause} ORDER BY z.id DESC{limit_clause}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -691,5 +850,74 @@ mod tests {
         let broken = svc.delete_zettel(&id_b, "delete test").unwrap();
         assert_eq!(broken.len(), 1);
         assert_eq!(broken[0].0, id_a);
+    }
+
+    #[test]
+    fn list_zettels_filtered_no_filter() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_zettel("A", &[], None, "").unwrap();
+        svc.create_zettel("B", &[], None, "").unwrap();
+
+        let filter = crate::types::ListFilter::default();
+        let results = svc.list_zettels_filtered(&filter).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn list_zettels_filtered_by_tag() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_zettel("Tagged", &["rust".into()], None, "").unwrap();
+        svc.create_zettel("Untagged", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter {
+            tag: Some("rust".into()),
+            ..Default::default()
+        };
+        let results = svc.list_zettels_filtered(&filter).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].meta.title.as_deref(), Some("Tagged"));
+    }
+
+    #[test]
+    fn list_zettels_filtered_with_limit() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_zettel("A", &[], None, "").unwrap();
+        svc.create_zettel("B", &[], None, "").unwrap();
+        svc.create_zettel("C", &[], None, "").unwrap();
+
+        let filter = crate::types::ListFilter {
+            limit: Some(2),
+            ..Default::default()
+        };
+        let results = svc.list_zettels_filtered(&filter).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn count_zettels_filtered_all() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_zettel("A", &[], None, "").unwrap();
+        svc.create_zettel("B", &[], None, "").unwrap();
+
+        let filter = crate::types::ListFilter::default();
+        let count = svc.count_zettels_filtered(&filter).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn aggregate_query_select_one() {
+        let (_tmp, svc) = fresh_svc();
+        let row = svc.aggregate_query("SELECT 1 AS n", &[]).unwrap();
+        assert_eq!(row, vec!["1"]);
+    }
+
+    #[test]
+    fn aggregate_query_empty() {
+        let (_tmp, svc) = fresh_svc();
+        let row = svc
+            .aggregate_query("SELECT id FROM zettels WHERE 1=0", &[])
+            .unwrap();
+        assert!(row.is_empty());
     }
 }

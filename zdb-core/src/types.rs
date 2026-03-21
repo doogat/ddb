@@ -1209,6 +1209,29 @@ pub struct BrokenSequence {
     pub broken_parent_id: String,
 }
 
+/// Filter parameters for querying zettels by type, tag, backlinks, and fields.
+#[derive(Debug, Clone, Default)]
+pub struct ListFilter {
+    pub zettel_type: Option<String>,
+    pub tag: Option<String>,
+    pub backlinks_of: Option<String>,
+    pub field_filters: Vec<(String, String)>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// Query parameters for typed (materialized) table queries.
+#[derive(Debug, Clone)]
+pub struct TypedListQuery {
+    pub table_name: String,
+    pub where_sql: String,
+    pub params: Vec<rusqlite::types::Value>,
+    pub order_sql: Option<String>,
+    pub tag: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
 /// Metadata for a file attached to a zettel, stored in `reference/{zettel_id}/`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AttachmentInfo {
