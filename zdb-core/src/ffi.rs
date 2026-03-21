@@ -253,11 +253,8 @@ impl ZettelDriver {
 
     pub fn delete_zettel(&self, id: String, message: String) -> Result<(), ZdbError> {
         let svc = self.svc.lock().unwrap();
-        let rel_path = svc.resolve_path(&id).map_err(ZdbError::from)?;
-        svc.repo()
-            .delete_file(&rel_path, &message)
-            .map_err(ZdbError::from)?;
-        svc.index().remove_zettel(&id).map_err(ZdbError::from)
+        svc.delete_zettel(&id, &message).map_err(ZdbError::from)?;
+        Ok(())
     }
 
     pub fn search(&self, query: String) -> Result<Vec<SearchResult>, ZdbError> {

@@ -196,12 +196,11 @@ impl ZettelService {
     }
 
     /// Delete a zettel by ID. Returns broken backlinks `(source_id, source_path)`.
-    pub fn delete_zettel(&self, id: &str) -> Result<Vec<(String, String)>> {
+    pub fn delete_zettel(&self, id: &str, message: &str) -> Result<Vec<(String, String)>> {
         self.index.rebuild_if_stale(&self.repo)?;
         let path = self.index.resolve_path(id)?;
         let broken = self.index.backlinking_zettel_paths(id)?;
-        self.repo
-            .delete_file(&path, &format!("delete zettel {id}"))?;
+        self.repo.delete_file(&path, message)?;
         self.index.remove_zettel(id)?;
         self.nosql_remove_zettel(id);
         Ok(broken)
@@ -572,7 +571,7 @@ mod tests {
         assert!(content.contains("Updated"));
         assert!(content.contains("New body"));
 
-        let broken = svc.delete_zettel(&id).unwrap();
+        let broken = svc.delete_zettel(&id, "delete test").unwrap();
         assert!(broken.is_empty());
 
         assert!(svc.read_zettel(&id).is_err());
@@ -689,7 +688,7 @@ mod tests {
             .unwrap();
         svc.reindex().unwrap();
 
-        let broken = svc.delete_zettel(&id_b).unwrap();
+        let broken = svc.delete_zettel(&id_b, "delete test").unwrap();
         assert_eq!(broken.len(), 1);
         assert_eq!(broken[0].0, id_a);
     }

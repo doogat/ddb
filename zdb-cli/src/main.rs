@@ -529,7 +529,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
 
         Command::Delete { id } => {
             let svc = ZettelService::open(&cli.repo)?;
-            let broken = svc.delete_zettel(&id)?;
+            let broken = svc.delete_zettel(&id, &format!("delete zettel {id}"))?;
             if !broken.is_empty() {
                 eprintln!(
                     "warning: {} zettel(s) have broken backlinks after deleting {id}:",
