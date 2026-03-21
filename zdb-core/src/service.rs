@@ -9,8 +9,8 @@ use crate::sync_manager::SyncManager;
 use crate::types::{
     AttachmentInfo, BrokenSequence, CommitHash, CompactOptions, CompactionReport, FixReport,
     ListFilter, MaintenanceReport, NodeConfig, OrphanZettel, PaginatedSearchResult, ParsedZettel,
-    RebuildReport, RenameReport, SearchResult, SequenceNode, StaleZettel, Suggestion, SyncReport,
-    TableSchema, TypedListQuery, UnlinkedMention, ZettelId, ZettelMeta,
+    RebuildReport, RenameReport, SearchResult, SequenceInfo, SequenceNode, StaleZettel, Suggestion,
+    SyncReport, TableSchema, TypedListQuery, UnlinkedMention, ZettelId, ZettelMeta,
 };
 
 /// Unified orchestration layer composing GitRepo, Index, and optional NoSQL
@@ -472,6 +472,57 @@ impl ZettelService {
         self.index.broken_sequences()
     }
 
+    pub fn sequence_info(&self, id: &str) -> Result<SequenceInfo> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        self.index.sequence_info(id)
+    }
+
+    pub fn sequence_children(&self, id: &str) -> Result<Vec<SequenceNode>> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        self.index.sequence_children(id)
+    }
+
+    /// Return backlink source IDs for a given zettel path/ID.
+    pub fn backlink_ids(&self, id: &str) -> Result<Vec<String>> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        self.index.backlinks(id)
+    }
+
+    /// Verify index is reachable.
+    pub fn health_check(&self) -> Result<bool> {
+        Ok(self.index.query_raw("SELECT 1").is_ok())
+    }
+
+    /// Install a bundled type definition, returning the new zettel ID.
+    pub fn install_bundled_type(&self, name: &str) -> Result<String> {
+        let content =
+            crate::bundled_types::get_bundled_type(name).ok_or_else(|| {
+                ZettelError::SqlEngine(format!(
+                    "unknown bundled type \"{name}\". available: {:?}",
+                    crate::bundled_types::list_bundled_types()
+                ))
+            })?;
+
+        let id = parser::generate_id();
+        let full_content = content.replacen("---\n", &format!("---\nid: {}\n", id), 1);
+        let path = format!("zettelkasten/_typedef/{}.md", id);
+        self.repo
+            .commit_file(&path, &full_content, &format!("install type {name}"))?;
+        let parsed = parser::parse(&full_content, &path)?;
+        self.index.index_zettel(&parsed)?;
+
+        Ok(id.to_string())
+    }
+
+    /// List all non-typedef zettel IDs.
+    pub fn all_zettel_ids(&self) -> Result<Vec<String>> {
+        self.index.rebuild_if_stale(&self.repo)?;
+        let rows = self.index.query_raw(
+            "SELECT id FROM zettels WHERE path NOT LIKE 'zettelkasten/_typedef/%'",
+        )?;
+        Ok(rows.into_iter().filter_map(|r| r.into_iter().next()).collect())
+    }
+
     // ── Utility ─────────────────────────────────────────────────────────
 
     pub fn list_zettels(&self) -> Result<Vec<String>> {
@@ -919,5 +970,44 @@ mod tests {
             .aggregate_query("SELECT id FROM zettels WHERE 1=0", &[])
             .unwrap();
         assert!(row.is_empty());
+    }
+
+    #[test]
+    fn health_check_returns_true() {
+        let (_tmp, svc) = fresh_svc();
+        assert!(svc.health_check().unwrap());
+    }
+
+    #[test]
+    fn backlink_ids_empty() {
+        let (_tmp, svc) = fresh_svc();
+        let links = svc.backlink_ids("nonexistent").unwrap();
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn install_bundled_type_project() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.install_bundled_type("project").unwrap();
+        assert_eq!(id.len(), 14);
+        let content = svc.read_zettel(&id).unwrap();
+        assert!(content.contains("project"));
+    }
+
+    #[test]
+    fn install_bundled_type_unknown_fails() {
+        let (_tmp, svc) = fresh_svc();
+        assert!(svc.install_bundled_type("nonexistent").is_err());
+    }
+
+    #[test]
+    fn all_zettel_ids_excludes_typedefs() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_zettel("Normal", &[], None, "").unwrap();
+        svc.install_bundled_type("project").unwrap();
+        svc.reindex().unwrap();
+
+        let ids = svc.all_zettel_ids().unwrap();
+        assert_eq!(ids.len(), 1);
     }
 }
