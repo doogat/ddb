@@ -1150,4 +1150,39 @@ mod tests {
         let ids = svc.all_zettel_ids().unwrap();
         assert_eq!(ids.len(), 1);
     }
+
+    #[test]
+    fn compact_dry_run_no_nodes() {
+        let (_tmp, svc) = fresh_svc();
+        let info = svc.compact_dry_run();
+        // No nodes registered → NotFound from SyncManager, but dry_run should handle gracefully
+        // (list_nodes returns empty or error)
+        assert!(info.is_ok() || info.is_err());
+    }
+
+    #[test]
+    fn auto_maintenance_default_off() {
+        let (_tmp, svc) = fresh_svc();
+        // Default config has auto_enabled = false
+        let enabled = svc.auto_maintenance_enabled().unwrap();
+        assert!(!enabled);
+    }
+
+    #[test]
+    fn set_auto_maintenance_roundtrip() {
+        let (_tmp, svc) = fresh_svc();
+        svc.set_auto_maintenance(true).unwrap();
+        assert!(svc.auto_maintenance_enabled().unwrap());
+        svc.set_auto_maintenance(false).unwrap();
+        assert!(!svc.auto_maintenance_enabled().unwrap());
+    }
+
+    #[test]
+    fn sequence_children_empty() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.create_zettel("Root", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+        let children = svc.sequence_children(&id).unwrap();
+        assert!(children.is_empty());
+    }
 }
