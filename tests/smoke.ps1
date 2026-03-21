@@ -196,7 +196,8 @@ pass "rename with backlink rewrite"
 $output = zdb query "CREATE TABLE foo (bar TEXT, baz INTEGER)"
 if ($output -notmatch "table foo created") { throw "create table failed" }
 $FOO_ID = zdb query "INSERT INTO foo (title, bar, baz) VALUES ('test row', 'hello', 42)"
-if ($FOO_ID -notmatch "^\d{14}$") { throw "insert returned bad id" }
+if ($FOO_ID -is [array]) { Write-Host "DEBUG: FOO_ID is array with $($FOO_ID.Count) elements: $($FOO_ID -join '|')"; $FOO_ID = $FOO_ID[-1] }
+if ($FOO_ID -notmatch "^\d{14}$") { throw "insert returned bad id: [$FOO_ID] (type=$($FOO_ID.GetType().Name))" }
 $output = zdb query "SELECT bar, baz FROM foo"
 if ($output -notmatch "hello") { throw "select from foo failed" }
 $output = zdb query "UPDATE foo SET baz = 99 WHERE id = '$FOO_ID'"

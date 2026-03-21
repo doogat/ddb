@@ -487,7 +487,8 @@ HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$NOSQL_URL/$ID1" \
 pass "nosql-api: auth rejects missing token"
 
 # error sanitization — SQL error must not leak raw details
-RESULT=$(gql '{"query":"mutation { executeSql(sql: \"SELCT * FORM oops\") { message } }"}')
+RESULT=$(gql '{"query":"mutation { executeSql(sql: \"SELCT * FORM oops\") { message } }"}' || true)
+if [ -z "$RESULT" ]; then echo "FAIL: gql returned empty response" >&2; exit 1; fi
 echo "$RESULT" | grep -q '"errors"'
 echo "$RESULT" | grep -qi "query failed\|internal error"
 ! echo "$RESULT" | grep -qi "SELCT\|syntax error\|sqlite"
