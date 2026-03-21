@@ -764,8 +764,7 @@ mod tests {
         );
         {
             let svc = driver.svc.lock().unwrap();
-            svc.repo()
-                .commit_file(
+            svc.commit_file(
                     &format!(".nodes/{node2_uuid}.toml"),
                     &node2_config,
                     "register node2",
@@ -826,8 +825,7 @@ mod tests {
         );
         {
             let svc = driver.svc.lock().unwrap();
-            svc.repo()
-                .commit_file(
+            svc.commit_file(
                     &format!(".nodes/{node2_uuid}.toml"),
                     &node2_config,
                     "register node2",

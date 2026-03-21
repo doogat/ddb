@@ -53,16 +53,6 @@ impl ZettelService {
         &self.repo_path
     }
 
-    /// Borrow the underlying `GitRepo`.
-    pub fn repo(&self) -> &GitRepo {
-        &self.repo
-    }
-
-    /// Borrow the underlying `Index`.
-    pub fn index(&self) -> &Index {
-        &self.index
-    }
-
     // ── CRUD ────────────────────────────────────────────────────────────
 
     /// Create a new zettel from individual fields.
@@ -599,6 +589,11 @@ impl ZettelService {
 
     pub fn head_oid(&self) -> Result<CommitHash> {
         self.repo.head_oid()
+    }
+
+    /// Commit an arbitrary file to the git repository.
+    pub fn commit_file(&self, path: &str, content: &str, message: &str) -> Result<CommitHash> {
+        self.repo.commit_file(path, content, message)
     }
 
     pub fn is_index_stale(&self) -> Result<bool> {

@@ -372,18 +372,14 @@ mod tests {
 
         // Write a zettel via ZettelService (the writer path)
         let svc = ZettelService::open(&path).unwrap();
-        let id = "20260314120000";
-        let rel_path = format!("zettelkasten/{id}.md");
-        let content =
-            format!("---\ntitle: ReadAfterWrite\ntype: note\ncreated: {id}\n---\nBody text.\n");
-        svc.repo().commit_file(&rel_path, &content, "add test zettel").unwrap();
-        let parsed = zdb_core::parser::parse(&content, &rel_path).unwrap();
-        svc.index().index_zettel(&parsed).unwrap();
+        let id = svc
+            .create_zettel("ReadAfterWrite", &[], Some("note"), "Body text.")
+            .unwrap();
 
         // Read via ReadPool — should see the write immediately (WAL)
         let pool = ReadPool::new(path, 2).unwrap();
-        let result = pool.get_zettel(id.to_string()).await.unwrap();
-        assert_eq!(result.meta.id.as_ref().map(|z| z.0.as_str()), Some(id));
+        let result = pool.get_zettel(id.clone()).await.unwrap();
+        assert_eq!(result.meta.id.as_ref().map(|z| z.0.as_str()), Some(id.as_str()));
         assert_eq!(result.meta.title.as_deref(), Some("ReadAfterWrite"));
     }
 
