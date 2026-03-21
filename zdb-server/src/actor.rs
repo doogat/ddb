@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use chrono::Utc;
 use tokio::sync::{mpsc, oneshot};
 use zdb_core::error::ZettelError;
-use zdb_core::parser;
 use zdb_core::service::ZettelService;
 use zdb_core::sql_engine::SqlResult;
 use zdb_core::types::{
