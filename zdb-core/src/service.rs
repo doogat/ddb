@@ -812,7 +812,7 @@ impl ZettelService {
     #[cfg(feature = "nosql")]
     pub fn nosql_rebuild(&self) -> Result<usize> {
         let ri = self.open_nosql()?;
-        Ok(ri.rebuild(&self.repo)?)
+        ri.rebuild(&self.repo)
     }
 
     #[cfg(not(feature = "nosql"))]

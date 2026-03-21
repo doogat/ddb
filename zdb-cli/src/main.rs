@@ -672,31 +672,15 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
         } => {
             let svc = ZettelService::open(&cli.repo)?;
             if dry_run {
-                let nodes = svc.list_nodes()?;
-                let head =
-                    zdb_core::compaction::shared_head(svc.repo(), &nodes)?;
-                let temp_dir = cli.repo.join(".crdt/temp");
-                let temp_count = if temp_dir.exists() {
-                    std::fs::read_dir(&temp_dir)
-                        .map(|d| {
-                            d.filter_map(|e| e.ok())
-                                .filter(|e| e.file_name().to_string_lossy() != ".gitkeep")
-                                .count()
-                        })
-                        .unwrap_or(0)
-                } else {
-                    0
-                };
-                outln!("shared head: {:?}", head)?;
-                outln!("crdt temp files: {temp_count}")?;
+                let info = svc.compact_dry_run()?;
+                outln!("shared head: {:?}", info.shared_head)?;
+                outln!("crdt temp files: {}", info.crdt_temp_files)?;
                 if no_backup {
                     outln!("backup: skipped")?;
                 } else {
                     let bp = backup_path
                         .clone()
-                        .unwrap_or_else(|| {
-                            zdb_core::compaction::default_backup_path(svc.repo())
-                        });
+                        .unwrap_or(info.default_backup_path);
                     outln!("backup would write: {}", bp.display())?;
                 }
                 outln!("(dry run — no changes made)")?;
@@ -890,30 +874,16 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
 
         Command::Get { id } => {
             let svc = ZettelService::open(&cli.repo)?;
-            let redb_path = cli.repo.join(".zdb/nosql.redb");
-            let ri = zdb_core::nosql::RedbIndex::open(&redb_path)?;
-            ri.rebuild(svc.repo())?;
-            match ri.get(&id)? {
-                Some(z) => {
-                    let content = parser::serialize(&z);
-                    out!("{content}")?;
-                }
-                None => {
-                    eprintln!("not found: {id}");
-                    std::process::exit(1);
-                }
-            }
+            let content = svc.read_zettel(&id)?;
+            out!("{content}")?;
         }
 
         Command::Scan { r#type, tag } => {
             let svc = ZettelService::open(&cli.repo)?;
-            let redb_path = cli.repo.join(".zdb/nosql.redb");
-            let ri = zdb_core::nosql::RedbIndex::open(&redb_path)?;
-            ri.rebuild(svc.repo())?;
             let ids = if let Some(t) = r#type {
-                ri.scan_by_type(&t)?
+                svc.nosql_scan_type(&t)?
             } else if let Some(t) = tag {
-                ri.scan_by_tag(&t)?
+                svc.nosql_scan_tag(&t)?
             } else {
                 return Err(zdb_core::error::ZettelError::Validation(
                     "specify --type or --tag".into(),
@@ -926,10 +896,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
 
         Command::Backlinks { id } => {
             let svc = ZettelService::open(&cli.repo)?;
-            let redb_path = cli.repo.join(".zdb/nosql.redb");
-            let ri = zdb_core::nosql::RedbIndex::open(&redb_path)?;
-            ri.rebuild(svc.repo())?;
-            let ids = ri.backlinks(&id)?;
+            let ids = svc.backlink_ids(&id)?;
             for bl in &ids {
                 outln!("{bl}")?;
             }
@@ -995,15 +962,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                     }
                     AutoAction::On | AutoAction::Off => {
                         let enabled = matches!(auto, AutoAction::On);
-                        let mut config = svc.load_config()?;
-                        config.maintenance.auto_enabled = enabled;
-                        let toml_str = toml::to_string_pretty(&config)
-                            .map_err(|e| zdb_core::error::ZettelError::Toml(e.to_string()))?;
-                        svc.repo().commit_file(
-                            ".zetteldb.toml",
-                            &toml_str,
-                            &format!("maintenance auto {}", if enabled { "on" } else { "off" }),
-                        )?;
+                        svc.set_auto_maintenance(enabled)?;
                         outln!(
                             "auto-maintenance {}",
                             if enabled { "enabled" } else { "disabled" }
@@ -1020,12 +979,9 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             match action {
                 DiscoverAction::Mentions { id, all } => {
                     if all {
-                        let ids = svc.index().query_raw(
-                            "SELECT id FROM zettels WHERE path NOT LIKE 'zettelkasten/_typedef/%'",
-                        )?;
+                        let all_ids = svc.all_zettel_ids()?;
                         let mut total = 0usize;
-                        for row in &ids {
-                            let zid = &row[0];
+                        for zid in &all_ids {
                             let mentions = svc.unlinked_mentions(zid)?;
                             if !mentions.is_empty() {
                                 total += mentions.len();
@@ -1150,22 +1106,7 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             }
             TypeAction::Install { name } => {
                 let svc = ZettelService::open(&cli.repo)?;
-                let content =
-                    zdb_core::bundled_types::get_bundled_type(&name).ok_or_else(|| {
-                        zdb_core::error::ZettelError::SqlEngine(format!(
-                            "unknown bundled type \"{name}\". available: {:?}",
-                            zdb_core::bundled_types::list_bundled_types()
-                        ))
-                    })?;
-
-                let id = parser::generate_id();
-                let full_content = content.replacen("---\n", &format!("---\nid: {}\n", id), 1);
-                let path = format!("zettelkasten/_typedef/{}.md", id);
-                svc.repo()
-                    .commit_file(&path, &full_content, &format!("install type {name}"))?;
-                let parsed = parser::parse(&full_content, &path)?;
-                svc.index().index_zettel(&parsed)?;
-
+                let id = svc.install_bundled_type(&name)?;
                 outln!("installed type \"{name}\" as {id}")?;
             }
         },
