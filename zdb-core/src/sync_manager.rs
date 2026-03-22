@@ -88,6 +88,73 @@ fn write_fm_crdt_files(
     Ok(())
 }
 
+/// Info stashed during collision resolution for post-merge loser reassignment.
+struct CollisionLoser {
+    old_id: String,
+    old_path: String,
+    content: String,
+    folder: bool,
+    type_name: Option<String>,
+}
+
+/// Pick winner from an add-add collision. Later HLC wins; theirs on tie/missing.
+fn resolve_add_add_collision(
+    conflict: &ConflictFile,
+) -> (crate::types::ResolvedFile, CollisionLoser) {
+    let theirs_wins = match (&conflict.ours_hlc, &conflict.theirs_hlc) {
+        (Some(ours_hlc), Some(theirs_hlc)) => theirs_hlc >= ours_hlc,
+        _ => true,
+    };
+
+    let (winner_content, loser_content) = if theirs_wins {
+        (conflict.theirs.clone(), conflict.ours.clone())
+    } else {
+        (conflict.ours.clone(), conflict.theirs.clone())
+    };
+
+    let old_id = std::path::Path::new(&conflict.path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Infer folder mode from path depth: zettelkasten/{type}/{id}.md = 3 parts
+    let parts: Vec<&str> = conflict.path.split('/').collect();
+    let folder = parts.len() > 2;
+    let type_name = if folder {
+        parts.get(1).map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    let resolved = crate::types::ResolvedFile {
+        path: conflict.path.clone(),
+        content: winner_content,
+        fm_crdt_bytes: None,
+    };
+
+    let loser = CollisionLoser {
+        old_id,
+        old_path: conflict.path.clone(),
+        content: loser_content,
+        folder,
+        type_name,
+    };
+
+    (resolved, loser)
+}
+
+/// Update the `id` field in a zettel's frontmatter, or add it if missing.
+fn update_frontmatter_id(content: &str, new_id: &str) -> String {
+    if let Ok(mut parsed) = parser::parse(content, "collision-loser") {
+        parsed.meta.id = Some(crate::types::ZettelId(new_id.to_string()));
+        parser::serialize(&parsed)
+    } else {
+        // Fallback: regex-based replacement if parse fails
+        content.to_string()
+    }
+}
+
 /// Ensures `skip_commit_graph` is reset when sync exits (success or error).
 struct SkipCommitGraphResetGuard<'a> {
     repo: &'a GitRepo,
@@ -183,12 +250,23 @@ impl<'a> SyncManager<'a> {
             MergeResult::Conflicts(conflicts, theirs_oid) => {
                 let count = conflicts.len();
                 tracing::info!(count, "merge_result: conflicts");
-                // Separate delete-vs-edit from normal conflicts
-                let (delete_edit, normal): (Vec<_>, Vec<_>) = conflicts
-                    .into_iter()
-                    .partition(|c| c.ours.is_empty() || c.theirs.is_empty());
+
+                // Three-bucket partition
+                let mut delete_edit = Vec::new();
+                let mut add_add = Vec::new();
+                let mut normal = Vec::new();
+                for c in conflicts {
+                    if c.ours.is_empty() || c.theirs.is_empty() {
+                        delete_edit.push(c);
+                    } else if c.ancestor.is_none() {
+                        add_add.push(c);
+                    } else {
+                        normal.push(c);
+                    }
+                }
 
                 let mut resolved = Vec::new();
+                let mut collision_losers: Vec<CollisionLoser> = Vec::new();
 
                 // Delete-vs-edit: edit wins, add resurrected marker
                 for conflict in &delete_edit {
@@ -219,6 +297,13 @@ impl<'a> SyncManager<'a> {
                     tracing::info!(count = report.resurrected, "delete_edit_resolved");
                 }
 
+                // Add-add collisions: winner keeps ID, loser stashed for reassignment
+                for conflict in &add_add {
+                    let (winner, loser) = resolve_add_add_collision(conflict);
+                    resolved.push(winner);
+                    collision_losers.push(loser);
+                }
+
                 // Normal conflicts: cascade resolve (CRDT → LWW fallback)
                 if !normal.is_empty() {
                     let strategy = self.lookup_crdt_strategy_for_conflicts(&normal, index);
@@ -240,6 +325,10 @@ impl<'a> SyncManager<'a> {
                 // Persist frontmatter CRDT state for compaction
                 let commit_oid = self.repo.head_oid()?;
                 write_fm_crdt_files(&self.repo.path, &commit_oid, &resolved)?;
+
+                // Post-merge: reassign collision losers
+                report.collisions_reassigned =
+                    self.reassign_collision_losers(collision_losers)?;
 
                 report.conflicts_resolved = count;
                 report.commits_transferred = 1;
@@ -479,6 +568,91 @@ impl<'a> SyncManager<'a> {
             .get("crdt_strategy")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
+    }
+
+    /// After the merge commit, reassign IDs for collision losers and rewrite links.
+    fn reassign_collision_losers(&self, losers: Vec<CollisionLoser>) -> Result<usize> {
+        let mut count = 0;
+        for loser in &losers {
+            let winner_id = loser.old_id.clone();
+            let new_id = parser::generate_unique_id(|candidate| {
+                let path = crate::git_ops::zettel_path(candidate, None, false);
+                self.repo.read_file(&path).is_ok() || candidate == winner_id
+            });
+
+            let updated_content = update_frontmatter_id(&loser.content, &new_id.0);
+            let new_path = crate::git_ops::zettel_path(
+                &new_id.0,
+                loser.type_name.as_deref(),
+                loser.folder,
+            );
+
+            // Scan HEAD tree for files referencing the old ID and rewrite links
+            let old_path_no_ext = loser.old_path.trim_end_matches(".md");
+            let new_path_no_ext = new_path.trim_end_matches(".md");
+            let rewrites = self.scan_and_rewrite_links(
+                &loser.old_id,
+                old_path_no_ext,
+                &new_id.0,
+                new_path_no_ext,
+            )?;
+
+            let mut files: Vec<(String, String)> = vec![(new_path.clone(), updated_content)];
+            files.extend(rewrites);
+
+            let file_refs: Vec<(&str, &str)> =
+                files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+            self.repo.commit_files(
+                &file_refs,
+                &format!("fix: reassign collided zettel ID {} -> {}", loser.old_id, new_id.0),
+            )?;
+
+            tracing::warn!(
+                old_id = %loser.old_id,
+                new_id = %new_id.0,
+                old_path = %loser.old_path,
+                new_path = %new_path,
+                "collision resolved: zettel ID reassigned"
+            );
+
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// Walk the HEAD tree and rewrite wikilinks from old ID/path to new ID/path.
+    fn scan_and_rewrite_links(
+        &self,
+        old_id: &str,
+        old_path_no_ext: &str,
+        new_id: &str,
+        new_path_no_ext: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let head = self.repo.repo.head()?.peel_to_commit()?;
+        let tree = head.tree()?;
+        let mut rewrites = Vec::new();
+
+        tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
+            let full_path = format!("{}{}", dir, entry.name().unwrap_or(""));
+            if !full_path.starts_with("zettelkasten/") || !full_path.ends_with(".md") {
+                return git2::TreeWalkResult::Ok;
+            }
+            if let Ok(blob) = self.repo.repo.find_blob(entry.id()) {
+                if let Ok(content) = std::str::from_utf8(blob.content()) {
+                    if content.contains(old_id) {
+                        let rewritten = parser::rewrite_links(content, old_id, new_id);
+                        let rewritten =
+                            parser::rewrite_links(&rewritten, old_path_no_ext, new_path_no_ext);
+                        if rewritten != content {
+                            rewrites.push((full_path, rewritten));
+                        }
+                    }
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+
+        Ok(rewrites)
     }
 
     /// Detect and mark nodes as stale if they haven't synced within `stale_ttl_days`.
