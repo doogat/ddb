@@ -157,11 +157,13 @@ Six primary paths move data through the system. Each path touches a specific sub
 2. `git_ops::GitRepo::merge_remote()` attempts a merge. Three outcomes:
    - **Fast-forward** or **clean merge** -- commit directly and update the index.
    - **Conflicts** -- collect `ConflictFile` structs for each conflicted path.
-3. For conflicts, `crdt_resolver::resolve_conflicts()` runs per-zone CRDT merge (see Module Connections below).
-4. Resolved files are committed, and the sync manager pushes to the remote.
-5. The HLC is updated via `Hlc::recv()` to maintain causal ordering.
-6. `indexer::Index::rebuild()` or an incremental reindex refreshes the SQLite index.
-7. Node known-heads and last-sync timestamps are updated in `.nodes/{uuid}.toml`.
+3. Conflicts are partitioned into three buckets: **delete-vs-edit** (one side empty), **add-add** (no ancestor, both sides non-empty), and **normal** (everything else). Each bucket has its own resolution strategy.
+4. For add-add collisions, the later HLC wins; the loser is stashed for post-merge ID reassignment. Delete-vs-edit conflicts resurrect the surviving edit. Normal conflicts go through `crdt_resolver::resolve_conflicts()` (see Module Connections below).
+5. All resolved files are committed in a single merge commit.
+6. Post-merge: collision losers get new IDs, wikilinks are rewritten across the tree, and each reassignment is committed atomically.
+7. The HLC is updated via `Hlc::recv()` to maintain causal ordering.
+8. `indexer::Index::rebuild()` or an incremental reindex refreshes the SQLite index.
+9. Node known-heads and last-sync timestamps are updated in `.nodes/{uuid}.toml`.
 
 ### SQL
 
@@ -265,7 +267,7 @@ When a typedef zettel is created, updated, or deleted, the actor triggers a sche
 - **MergeResult** -- Outcome of `git_ops::merge_remote()`: AlreadyUpToDate, FastForward, Clean, or Conflicts. See `types.rs:MergeResult`.
 - **ConflictFile** -- All three versions of a conflicted file plus optional HLC timestamps. See `types.rs:ConflictFile`.
 - **ResolvedFile** -- Merged content after CRDT resolution, with optional serialized CRDT bytes. See `types.rs:ResolvedFile`.
-- **SyncReport** -- Summary of a sync operation: direction, commits transferred, conflicts resolved, resurrected files. See `types.rs:SyncReport`.
+- **SyncReport** -- Summary of a sync operation: direction, commits transferred, conflicts resolved, resurrected files, and collisions reassigned. See `types.rs:SyncReport`.
 
 ### Schema types
 

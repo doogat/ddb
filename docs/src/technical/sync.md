@@ -43,15 +43,46 @@ Reads the UUID from `.git/zdb-node`, then loads the corresponding `.nodes/{uuid}
    - `AlreadyUpToDate` → report "up-to-date", skip push
    - `FastForward` → report 1 commit transferred
    - `Clean` → report 1 commit transferred (Git auto-committed)
-   - `Conflicts` → three-step merge cascade (see below)
+   - `Conflicts` → three-bucket partition and resolution (see below)
 4. **Update state**: set `known_heads = [current HEAD]`, `last_sync = now`, commit `.nodes/{uuid}.toml`
 5. **Push**: single `git push {remote} {branch}` carries both merge result and node state
 6. **Commit-graph**: write once (deferred from per-commit writes during sync)
 7. **Reindex**: `index.rebuild_if_stale(repo)` — incremental reindex via `diff_paths` processes only changed files
 
+### Three-Bucket Conflict Partition
+
+When `merge_remote()` returns `Conflicts`, the conflict list is partitioned into three buckets before resolution:
+
+| Bucket | Condition | Handling |
+|--------|-----------|----------|
+| **delete-vs-edit** | `ours` or `theirs` is empty | Edit wins; `resurrected: true` marker added |
+| **add-add** | `ancestor.is_none()` and both sides non-empty | Winner keeps ID; loser reassigned (see below) |
+| **normal** | Everything else | Three-step merge cascade |
+
+Each bucket is resolved independently. The resolved files from all three are collected into a single merge commit.
+
+### Add-Add Collision Detection
+
+When two devices independently create a zettel with the same ID (same-second creation), Git sees a content conflict at that path with no common ancestor. Previously, the CRDT/LWW cascade would pick one version and silently lose the other. Now both zettels survive.
+
+**Winner selection**: Compare HLC timestamps from the conflicting commits. Later HLC wins. On tie or missing HLC, "theirs" (remote) wins. Rationale: the remote zettel may already be linked from other synced devices; reassigning the local zettel minimizes cross-device link breakage.
+
+**Merge commit**: The winner's content goes into the resolved vec alongside other conflict resolutions, keeping the original path.
+
+**Post-merge loser reassignment** (`reassign_collision_losers()`):
+
+1. Generate a new unique ID via `generate_unique_id()`, checking both filesystem and the winner's ID for collisions.
+2. Update the loser's frontmatter `id` field to the new ID.
+3. Compute the new path via `zettel_path(new_id, type_name, folder)`, respecting folder-typed storage (e.g., `zettelkasten/contact/{new_id}.md`).
+4. Walk the HEAD tree scanning all `.md` files for references to the old ID. For each file containing the old ID, call `rewrite_links()` twice: once for the bare ID form, once for the path form (minus `.md`).
+5. Commit the loser at its new path plus all rewritten files atomically: `fix: reassign collided zettel ID {old} -> {new}`.
+6. Emit `tracing::warn!` with old/new IDs and paths.
+
+**Reporting**: `SyncReport.collisions_reassigned` counts reassigned zettels. The CLI displays this when > 0.
+
 ### Three-Step Merge Cascade
 
-When conflicts occur (or a clean merge produces invalid output):
+Normal conflicts (those with a common ancestor and both sides present) go through a three-step cascade:
 
 1. **Step 1: Git merge** — already performed by `merge_remote()`. If clean, validate affected files with `parser::parse()`. Invalid → extract pre-merge versions, fall through.
 2. **Step 2: CRDT resolve** — call `resolve_conflicts()` with the typedef's `crdt_strategy` (or repo `default_strategy`). Validate result. Invalid or error → fall through.
@@ -216,6 +247,7 @@ If the reconstructed merge produces invalid markdown (rare edge case), the casca
 | Non-overlapping edits | Both edits preserved |
 | Same field edited on both sides | CRDT picks one deterministically (not random) |
 | One side deletes, other edits | Edit wins; `resurrected: true` added to frontmatter |
+| Both devices create same ID | Both zettels survive; loser gets new ID, links rewritten |
 | Stale node returns after compaction | Step 2 runs from Git content; usually succeeds |
 | CRDT error + no HLC | Falls back to local version (ours-wins) |
 
@@ -227,11 +259,19 @@ If the reconstructed merge produces invalid markdown (rare edge case), the casca
 
 ## Test Coverage
 
-### Sync Manager (4 tests)
+### Sync Manager (12 unit tests)
 - Register and open node
 - List nodes
 - Open without registration fails
 - Sync state update
+- Node status defaults to active
+- Retire and list nodes
+- Backward compat: old TOML without status field
+- Resurrected marker added (delete-vs-edit)
+- Resurrected marker not duplicated
+- Clean merge validation falls back to CRDT
+- LWW fallback when CRDT produces invalid output
+- Sync error resets skip-commit-graph flag
 
 ### Compaction (4 tests)
 - GC runs successfully
