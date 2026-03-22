@@ -59,8 +59,11 @@ Push-Location $TMPDIR
 function pass($msg) { Write-Host "  ✓ $msg" }
 
 function zdb {
-    $output = & $ZDB @args 2>&1
-    $text = [string]::Join("`n", @($output))
+    $raw = & $ZDB @args 2>&1
+    # Filter out tracing log lines (timestamps like 2026-03-22T...) that
+    # leak from stderr via 2>&1 on Windows and contaminate captured output.
+    $lines = @($raw) | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}' }
+    $text = [string]::Join("`n", @($lines))
     if ($LASTEXITCODE -ne 0) { throw "zdb $($args -join ' ') failed: $text" }
     return $text
 }
