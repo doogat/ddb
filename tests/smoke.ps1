@@ -865,9 +865,9 @@ if ($output -notmatch "Update zdb") { throw "update-bin help failed" }
 if ($output -notmatch "--rollback") { throw "update-bin help missing --rollback" }
 pass "update-bin --help (includes --rollback)"
 
-# rollback with no backup should fail gracefully
-$rollbackOutput = zdb update-bin --rollback 2>&1
-if ($rollbackOutput -notmatch "no backup") { throw "update-bin --rollback should report no backup" }
+# rollback with no backup should fail gracefully (expected failure — bypass zdb wrapper)
+$rollbackOutput = & $ZDB update-bin --rollback 2>&1 | ForEach-Object { "$_" }
+if (($rollbackOutput -join "`n") -notmatch "no backup") { throw "update-bin --rollback should report no backup" }
 pass "update-bin --rollback (no backup error)"
 
 # 30. ALTER TABLE + DROP TABLE + bulk UPDATE/DELETE
