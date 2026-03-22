@@ -826,10 +826,18 @@ impl ZettelService {
         crate::nosql::RedbIndex::open(&redb_path)
     }
 
+    /// Open and rebuild the NoSQL index, returning a ready-to-query handle.
+    #[cfg(feature = "nosql")]
+    fn open_nosql_fresh(&self) -> Result<crate::nosql::RedbIndex> {
+        let ri = self.open_nosql()?;
+        ri.rebuild(&self.repo)?;
+        Ok(ri)
+    }
+
     /// Get a zettel by ID from the NoSQL index.
     #[cfg(feature = "nosql")]
     pub fn nosql_get(&self, id: &str) -> Result<Option<ParsedZettel>> {
-        self.open_nosql()?.get(id)
+        self.open_nosql_fresh()?.get(id)
     }
 
     #[cfg(not(feature = "nosql"))]
@@ -840,7 +848,7 @@ impl ZettelService {
     /// Scan by type in the NoSQL index.
     #[cfg(feature = "nosql")]
     pub fn nosql_scan_type(&self, type_name: &str) -> Result<Vec<String>> {
-        self.open_nosql()?.scan_by_type(type_name)
+        self.open_nosql_fresh()?.scan_by_type(type_name)
     }
 
     #[cfg(not(feature = "nosql"))]
@@ -851,7 +859,7 @@ impl ZettelService {
     /// Scan by tag in the NoSQL index.
     #[cfg(feature = "nosql")]
     pub fn nosql_scan_tag(&self, tag: &str) -> Result<Vec<String>> {
-        self.open_nosql()?.scan_by_tag(tag)
+        self.open_nosql_fresh()?.scan_by_tag(tag)
     }
 
     #[cfg(not(feature = "nosql"))]
@@ -862,7 +870,7 @@ impl ZettelService {
     /// Get backlinks from the NoSQL index.
     #[cfg(feature = "nosql")]
     pub fn nosql_backlinks(&self, id: &str) -> Result<Vec<String>> {
-        self.open_nosql()?.backlinks(id)
+        self.open_nosql_fresh()?.backlinks(id)
     }
 
     #[cfg(not(feature = "nosql"))]
