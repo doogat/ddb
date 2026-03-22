@@ -1058,4 +1058,184 @@ mod tests {
 
         assert!(commit_graph.exists());
     }
+
+    #[test]
+    fn add_add_collision_detected() {
+        let conflict = ConflictFile {
+            path: "zettelkasten/20260101120000.md".into(),
+            ancestor: None,
+            ours: "---\nid: 20260101120000\ntitle: Ours\n---\nBody ours\n".into(),
+            theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nBody theirs\n".into(),
+            ours_hlc: None,
+            theirs_hlc: None,
+        };
+        assert!(conflict.ancestor.is_none());
+        assert!(!conflict.ours.is_empty());
+        assert!(!conflict.theirs.is_empty());
+
+        let (winner, loser) = resolve_add_add_collision(&conflict);
+        assert_eq!(winner.path, conflict.path);
+        assert!(!loser.content.is_empty());
+        assert_eq!(loser.old_id, "20260101120000");
+    }
+
+    #[test]
+    fn add_add_winner_by_hlc() {
+        let earlier = crate::hlc::Hlc {
+            wall_ms: 1000,
+            counter: 0,
+            node: "nodeA".into(),
+        };
+        let later = crate::hlc::Hlc {
+            wall_ms: 2000,
+            counter: 0,
+            node: "nodeB".into(),
+        };
+        let conflict = ConflictFile {
+            path: "zettelkasten/20260101120000.md".into(),
+            ancestor: None,
+            ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n".into(),
+            theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
+            ours_hlc: Some(earlier),
+            theirs_hlc: Some(later),
+        };
+        let (winner, loser) = resolve_add_add_collision(&conflict);
+        // Theirs has later HLC, so theirs wins
+        assert!(winner.content.contains("Theirs body"));
+        assert!(loser.content.contains("Ours body"));
+    }
+
+    #[test]
+    fn add_add_hlc_tie_theirs_wins() {
+        // Both HLCs None → theirs wins
+        let conflict = ConflictFile {
+            path: "zettelkasten/20260101120000.md".into(),
+            ancestor: None,
+            ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n".into(),
+            theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
+            ours_hlc: None,
+            theirs_hlc: None,
+        };
+        let (winner, _loser) = resolve_add_add_collision(&conflict);
+        assert!(winner.content.contains("Theirs body"));
+
+        // Equal HLCs → theirs wins
+        let hlc = crate::hlc::Hlc {
+            wall_ms: 1000,
+            counter: 0,
+            node: "nodeA".into(),
+        };
+        let conflict2 = ConflictFile {
+            path: "zettelkasten/20260101120000.md".into(),
+            ancestor: None,
+            ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs\n".into(),
+            theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs\n".into(),
+            ours_hlc: Some(hlc.clone()),
+            theirs_hlc: Some(hlc),
+        };
+        let (winner2, _) = resolve_add_add_collision(&conflict2);
+        assert!(winner2.content.contains("Theirs"));
+    }
+
+    #[test]
+    fn update_frontmatter_id_replaces_id() {
+        let content = "---\nid: 20260101120000\ntitle: Test\n---\nBody\n";
+        let updated = update_frontmatter_id(content, "20260301120000");
+        assert!(updated.contains("id: 20260301120000"));
+        assert!(!updated.contains("id: 20260101120000"));
+        assert!(updated.contains("title: Test"));
+        assert!(updated.contains("Body"));
+    }
+
+    #[test]
+    fn add_add_full_sync_both_survive() {
+        // Two repos, bare remote, same-ID collision, both survive after sync.
+        let bare_dir = tempfile::TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        let (dir_a, repo_a) = temp_repo();
+        repo_a
+            .add_remote("origin", bare_dir.path().to_str().unwrap())
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+        register_node(&repo_a, "A").unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        let dir_b = tempfile::TempDir::new().unwrap();
+        git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
+        let repo_b = GitRepo::open(dir_b.path()).unwrap();
+        register_node(&repo_b, "B").unwrap();
+        repo_b.push("origin", "master").unwrap();
+
+        // Sync A to get B's node
+        repo_a.fetch("origin", "master").unwrap();
+        repo_a.merge_remote("origin", "master").unwrap();
+
+        // Both create the same-ID zettel
+        let id = "20260101120000";
+        repo_a
+            .commit_file(
+                &format!("zettelkasten/{id}.md"),
+                &format!("---\nid: {id}\ntitle: From A\n---\nA body\n"),
+                "A creates",
+            )
+            .unwrap();
+        repo_b
+            .commit_file(
+                &format!("zettelkasten/{id}.md"),
+                &format!("---\nid: {id}\ntitle: From B\n---\nB body\n"),
+                "B creates",
+            )
+            .unwrap();
+
+        // A pushes, B syncs
+        repo_a.push("origin", "master").unwrap();
+        let db_b = dir_b.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        assert_eq!(report.collisions_reassigned, 1);
+
+        // Both zettels should exist with distinct IDs
+        let zk = dir_b.path().join("zettelkasten");
+        let files: Vec<String> = std::fs::read_dir(&zk)
+            .unwrap()
+            .filter_map(|e| {
+                let name = e.unwrap().file_name().to_string_lossy().to_string();
+                if name.ends_with(".md") && !name.starts_with('_') {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(files.len(), 2, "both zettels should survive: {files:?}");
+
+        // Verify convergence: push B, sync A
+        repo_b.push("origin", "master").unwrap();
+        let db_a = dir_a.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
+        let index_a = crate::indexer::Index::open(&db_a).unwrap();
+        let mut mgr_a = SyncManager::open(&repo_a).unwrap();
+        mgr_a.sync("origin", "master", &index_a).unwrap();
+
+        let files_a: Vec<String> = std::fs::read_dir(dir_a.path().join("zettelkasten"))
+            .unwrap()
+            .filter_map(|e| {
+                let name = e.unwrap().file_name().to_string_lossy().to_string();
+                if name.ends_with(".md") && !name.starts_with('_') {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let mut sorted_a = files_a;
+        sorted_a.sort();
+        let mut sorted_b = files;
+        sorted_b.sort();
+        assert_eq!(sorted_a, sorted_b, "nodes should converge");
+    }
 }
