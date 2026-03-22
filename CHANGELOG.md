@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cross-device ID collision detection: when two devices create a zettel in the same second, both survive sync with distinct IDs
+- `SyncReport.collisions_reassigned` field and CLI display
+- `collisionsReassigned` field in GraphQL `SyncResult`
+
+### Fixed
+
+- Merge commits now include non-conflicting Added and Modified files from the remote side (previously silently dropped during conflict resolution)
+- Wikilink rewriting during collision resolution skips references from the winner's side
+- `update_frontmatter_id` returns an error on parse failure instead of silently preserving the old ID
+- Collision loser ID generation checks both flat and folder-typed paths
+
 ## [0.1.0] - 2026-03-19
 
 ### Added
