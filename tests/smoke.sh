@@ -848,7 +848,7 @@ echo "=== stale node resync ==="
 STALE_REMOTE="$(mktemp -d)"
 STALE_N1="$(mktemp -d)"
 STALE_N2="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR" "$REMOTE_DIR" "$NODE1_DIR" "$NODE2_DIR" "$NODE3_DIR" "$STALE_REMOTE" "$STALE_N1" "$STALE_N2"' EXIT
+trap 'rm -rf "$TMPDIR" "$REMOTE_DIR" "$NODE1_DIR" "$NODE2_DIR" "$NODE3_DIR" "$STALE_REMOTE" "$STALE_N1" "$STALE_N2" "$COLL_REMOTE" "$COLL_A" "$COLL_B_PARENT"' EXIT
 
 git init --bare "$STALE_REMOTE" >/dev/null 2>&1
 

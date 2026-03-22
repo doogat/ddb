@@ -1317,7 +1317,11 @@ pub fn build_schema(
             "conflictsResolved",
             TypeRef::named_nn(TypeRef::INT),
         ))
-        .field(simple_field("resurrected", TypeRef::named_nn(TypeRef::INT)));
+        .field(simple_field("resurrected", TypeRef::named_nn(TypeRef::INT)))
+        .field(simple_field(
+            "collisionsReassigned",
+            TypeRef::named_nn(TypeRef::INT),
+        ));
 
     // -- CompactResult output type --
     let compact_result_type = Object::new("CompactResult")
@@ -1394,6 +1398,10 @@ pub fn build_schema(
                     obj.insert(
                         Name::new("resurrected"),
                         GqlValue::from(report.resurrected as i64),
+                    );
+                    obj.insert(
+                        Name::new("collisionsReassigned"),
+                        GqlValue::from(report.collisions_reassigned as i64),
                     );
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })

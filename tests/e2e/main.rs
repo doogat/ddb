@@ -1,5 +1,6 @@
 mod attachments;
 mod checkboxes;
+mod collision;
 mod common;
 mod delete_backlinks;
 mod discover;
@@ -17,5 +18,4 @@ mod serve;
 mod server_mutations;
 mod sql_lifecycle;
 mod subscriptions;
-mod collision;
 mod sync_crdt;
