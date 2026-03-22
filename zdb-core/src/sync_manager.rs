@@ -144,15 +144,11 @@ fn resolve_add_add_collision(
     (resolved, loser)
 }
 
-/// Update the `id` field in a zettel's frontmatter, or add it if missing.
-fn update_frontmatter_id(content: &str, new_id: &str) -> String {
-    if let Ok(mut parsed) = parser::parse(content, "collision-loser") {
-        parsed.meta.id = Some(crate::types::ZettelId(new_id.to_string()));
-        parser::serialize(&parsed)
-    } else {
-        // Fallback: regex-based replacement if parse fails
-        content.to_string()
-    }
+/// Update the `id` field in a zettel's frontmatter.
+fn update_frontmatter_id(content: &str, new_id: &str) -> Result<String> {
+    let mut parsed = parser::parse(content, "collision-loser")?;
+    parsed.meta.id = Some(crate::types::ZettelId(new_id.to_string()));
+    Ok(parser::serialize(&parsed))
 }
 
 /// Ensures `skip_commit_graph` is reset when sync exits (success or error).
@@ -584,12 +580,27 @@ impl<'a> SyncManager<'a> {
         let mut count = 0;
         for loser in &losers {
             let winner_id = loser.old_id.clone();
+            let loser_type = loser.type_name.as_deref();
+            let loser_folder = loser.folder;
             let new_id = parser::generate_unique_id(|candidate| {
-                let path = crate::git_ops::zettel_path(candidate, None, false);
-                self.repo.read_file(&path).is_ok() || candidate == winner_id
+                if candidate == winner_id {
+                    return true;
+                }
+                let flat = crate::git_ops::zettel_path(candidate, None, false);
+                if self.repo.read_file(&flat).is_ok() {
+                    return true;
+                }
+                if loser_folder {
+                    let typed =
+                        crate::git_ops::zettel_path(candidate, loser_type, true);
+                    if self.repo.read_file(&typed).is_ok() {
+                        return true;
+                    }
+                }
+                false
             });
 
-            let updated_content = update_frontmatter_id(&loser.content, &new_id.0);
+            let updated_content = update_frontmatter_id(&loser.content, &new_id.0)?;
             let new_path = crate::git_ops::zettel_path(
                 &new_id.0,
                 loser.type_name.as_deref(),
@@ -1140,7 +1151,7 @@ mod tests {
     #[test]
     fn update_frontmatter_id_replaces_id() {
         let content = "---\nid: 20260101120000\ntitle: Test\n---\nBody\n";
-        let updated = update_frontmatter_id(content, "20260301120000");
+        let updated = update_frontmatter_id(content, "20260301120000").unwrap();
         assert!(updated.contains("id: 20260301120000"));
         assert!(!updated.contains("id: 20260101120000"));
         assert!(updated.contains("title: Test"));

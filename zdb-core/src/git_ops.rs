@@ -328,9 +328,9 @@ impl GitRepo {
             std::fs::write(&full_path, content)?;
         }
 
-        // Write non-conflicting files from theirs that don't exist in ours.
-        // Without this, files added only on the remote side are missing
-        // from the merge commit tree.
+        // Write non-conflicting files from theirs (Added or Modified on
+        // theirs while unchanged on ours). Without this, remote-only
+        // changes are missing from the merge commit tree.
         let ours_tree = our_commit.tree()?;
         let theirs_tree = their_commit.tree()?;
         let diff =
@@ -340,7 +340,11 @@ impl GitRepo {
             files.iter().map(|(p, _)| *p).collect();
         let mut theirs_only = Vec::new();
         for delta in diff.deltas() {
-            if delta.status() == git2::Delta::Added {
+            let dominated = matches!(
+                delta.status(),
+                git2::Delta::Added | git2::Delta::Modified
+            );
+            if dominated {
                 if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
                     if !resolved_set.contains(path) {
                         if let Ok(blob) = self.repo.find_blob(delta.new_file().id()) {
