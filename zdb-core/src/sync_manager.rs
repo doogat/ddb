@@ -328,7 +328,7 @@ impl<'a> SyncManager<'a> {
 
                 // Post-merge: reassign collision losers
                 report.collisions_reassigned =
-                    self.reassign_collision_losers(collision_losers)?;
+                    self.reassign_collision_losers(collision_losers, &theirs_oid)?;
 
                 report.conflicts_resolved = count;
                 report.commits_transferred = 1;
@@ -571,7 +571,16 @@ impl<'a> SyncManager<'a> {
     }
 
     /// After the merge commit, reassign IDs for collision losers and rewrite links.
-    fn reassign_collision_losers(&self, losers: Vec<CollisionLoser>) -> Result<usize> {
+    fn reassign_collision_losers(
+        &self,
+        losers: Vec<CollisionLoser>,
+        theirs_oid: &CommitHash,
+    ) -> Result<usize> {
+        let theirs_commit = self
+            .repo
+            .repo
+            .find_commit(git2::Oid::from_str(&theirs_oid.0)?)?;
+
         let mut count = 0;
         for loser in &losers {
             let winner_id = loser.old_id.clone();
@@ -587,7 +596,9 @@ impl<'a> SyncManager<'a> {
                 loser.folder,
             );
 
-            // Scan HEAD tree for files referencing the old ID and rewrite links
+            // Scan HEAD tree for files referencing the old ID and rewrite links.
+            // Skip files where theirs' version already contains the old ID —
+            // those references are to the winner (which keeps the ID).
             let old_path_no_ext = loser.old_path.trim_end_matches(".md");
             let new_path_no_ext = new_path.trim_end_matches(".md");
             let rewrites = self.scan_and_rewrite_links(
@@ -595,6 +606,7 @@ impl<'a> SyncManager<'a> {
                 old_path_no_ext,
                 &new_id.0,
                 new_path_no_ext,
+                &theirs_commit,
             )?;
 
             let mut files: Vec<(String, String)> = vec![(new_path.clone(), updated_content)];
@@ -621,15 +633,19 @@ impl<'a> SyncManager<'a> {
     }
 
     /// Walk the HEAD tree and rewrite wikilinks from old ID/path to new ID/path.
+    /// Skips files where theirs' (winner's) tree version already references the
+    /// old ID — those links point to the winner and should remain unchanged.
     fn scan_and_rewrite_links(
         &self,
         old_id: &str,
         old_path_no_ext: &str,
         new_id: &str,
         new_path_no_ext: &str,
+        theirs_commit: &git2::Commit,
     ) -> Result<Vec<(String, String)>> {
         let head = self.repo.repo.head()?.peel_to_commit()?;
         let tree = head.tree()?;
+        let theirs_tree = theirs_commit.tree()?;
         let mut rewrites = Vec::new();
 
         tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
@@ -640,6 +656,24 @@ impl<'a> SyncManager<'a> {
             if let Ok(blob) = self.repo.repo.find_blob(entry.id()) {
                 if let Ok(content) = std::str::from_utf8(blob.content()) {
                     if content.contains(old_id) {
+                        // Skip if theirs' version of this file also references the
+                        // old ID — that reference is to the winner, not the loser.
+                        if let Ok(theirs_entry) =
+                            theirs_tree.get_path(std::path::Path::new(&full_path))
+                        {
+                            if let Ok(theirs_blob) =
+                                self.repo.repo.find_blob(theirs_entry.id())
+                            {
+                                if let Ok(theirs_content) =
+                                    std::str::from_utf8(theirs_blob.content())
+                                {
+                                    if theirs_content.contains(old_id) {
+                                        return git2::TreeWalkResult::Ok;
+                                    }
+                                }
+                            }
+                        }
+
                         let rewritten = parser::rewrite_links(content, old_id, new_id);
                         let rewritten =
                             parser::rewrite_links(&rewritten, old_path_no_ext, new_path_no_ext);
