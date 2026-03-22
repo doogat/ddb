@@ -165,6 +165,7 @@ impl<'a> SyncManager<'a> {
             commits_transferred: 0,
             conflicts_resolved: 0,
             resurrected: 0,
+            collisions_reassigned: 0,
         };
 
         match merge_result {

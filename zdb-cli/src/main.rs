@@ -550,6 +550,12 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                 report.commits_transferred,
                 report.conflicts_resolved
             )?;
+            if report.collisions_reassigned > 0 {
+                outln!(
+                    "  collisions reassigned: {}",
+                    report.collisions_reassigned
+                )?;
+            }
         }
 
         Command::Query { sql } => {

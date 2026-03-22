@@ -887,6 +887,7 @@ pub struct SyncReport {
     pub commits_transferred: usize,
     pub conflicts_resolved: usize,
     pub resurrected: usize,
+    pub collisions_reassigned: usize,
 }
 
 #[derive(Debug, Clone)]

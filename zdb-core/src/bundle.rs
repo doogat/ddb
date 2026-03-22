@@ -172,6 +172,7 @@ pub fn import_bundle(
         commits_transferred: 0, // can't easily count from unbundle
         conflicts_resolved,
         resurrected: 0,
+        collisions_reassigned: 0,
     })
 }
 
