@@ -60,9 +60,11 @@ function pass($msg) { Write-Host "  ✓ $msg" }
 
 function zdb {
     $raw = & $ZDB @args 2>&1
-    # Filter out tracing log lines (timestamps like 2026-03-22T...) that
-    # leak from stderr via 2>&1 on Windows and contaminate captured output.
-    $lines = @($raw) | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}' }
+    # Filter out tracing log lines that leak from stderr via 2>&1 on Windows.
+    # ErrorRecord objects from stderr may contain ANSI escapes, so strip those
+    # before matching the timestamp pattern.
+    $lines = @($raw) | ForEach-Object { "$_" -replace '\x1b\[[0-9;]*m', '' } |
+        Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}' -and $_ -ne '' }
     $text = [string]::Join("`n", @($lines))
     if ($LASTEXITCODE -ne 0) { throw "zdb $($args -join ' ') failed: $text" }
     return $text
