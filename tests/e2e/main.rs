@@ -17,4 +17,5 @@ mod serve;
 mod server_mutations;
 mod sql_lifecycle;
 mod subscriptions;
+mod collision;
 mod sync_crdt;

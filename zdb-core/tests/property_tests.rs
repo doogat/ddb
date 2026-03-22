@@ -1837,3 +1837,153 @@ proptest! {
         prop_assert!(result.is_ok(), "panicked on mixed-type extras");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Collision detection properties (sync_manager)
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(3))]
+
+    /// Two nodes each create 3-5 zettels with identical IDs. After sync,
+    /// no duplicate IDs exist — every zettel has a unique ID.
+    #[test]
+    fn concurrent_creation_no_duplicate_ids(count in 3usize..=5) {
+        use zdb_core::git_ops::GitRepo;
+        use zdb_core::indexer::Index;
+        use zdb_core::sync_manager::{self, SyncManager};
+        use std::collections::HashSet;
+
+        // Bare remote
+        let bare_dir = tempfile::TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        // Node A
+        let dir_a = tempfile::TempDir::new().unwrap();
+        let repo_a = GitRepo::init(dir_a.path()).unwrap();
+        repo_a.add_remote("origin", bare_dir.path().to_str().unwrap()).unwrap();
+        repo_a.push("origin", "master").unwrap();
+        sync_manager::register_node(&repo_a, "NodeA").unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        // Node B (clone)
+        let dir_b = tempfile::TempDir::new().unwrap();
+        git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
+        let repo_b = GitRepo::open(dir_b.path()).unwrap();
+        sync_manager::register_node(&repo_b, "NodeB").unwrap();
+        repo_b.push("origin", "master").unwrap();
+
+        // Sync A to get B's node file
+        repo_a.fetch("origin", "master").unwrap();
+        repo_a.merge_remote("origin", "master").unwrap();
+
+        // Both nodes create `count` zettels with identical IDs
+        let base_ids: Vec<String> = (0..count)
+            .map(|i| format!("2026010112{:04}", i))
+            .collect();
+
+        for id in &base_ids {
+            let content_a = format!(
+                "---\nid: {id}\ntitle: From A {id}\ndate: 2026-01-01\n---\nBody A {id}\n"
+            );
+            repo_a.commit_file(
+                &format!("zettelkasten/{id}.md"),
+                &content_a,
+                &format!("A creates {id}"),
+            ).unwrap();
+
+            let content_b = format!(
+                "---\nid: {id}\ntitle: From B {id}\ndate: 2026-01-01\n---\nBody B {id}\n"
+            );
+            repo_b.commit_file(
+                &format!("zettelkasten/{id}.md"),
+                &content_b,
+                &format!("B creates {id}"),
+            ).unwrap();
+        }
+
+        // A pushes
+        repo_a.push("origin", "master").unwrap();
+
+        // B syncs (triggers collision detection)
+        let db_b = dir_b.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        prop_assert_eq!(
+            report.collisions_reassigned, count,
+            "should reassign all {} collisions", count
+        );
+
+        // Collect all zettel IDs from B's repo
+        let zk_dir = dir_b.path().join("zettelkasten");
+        let files: Vec<String> = std::fs::read_dir(&zk_dir)
+            .unwrap()
+            .filter_map(|e| {
+                let e = e.unwrap();
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.ends_with(".md") && !name.starts_with('_') {
+                    Some(name.trim_end_matches(".md").to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Should have 2 * count zettels (each original ID + reassigned)
+        prop_assert_eq!(
+            files.len(), count * 2,
+            "expected {} zettels, got {}: {:?}", count * 2, files.len(), files
+        );
+
+        // No duplicate IDs
+        let unique: HashSet<&String> = files.iter().collect();
+        prop_assert_eq!(
+            unique.len(), files.len(),
+            "duplicate IDs found: {:?}", files
+        );
+
+        // Verify each zettel file has a valid id in frontmatter matching its filename
+        for filename_id in &files {
+            let path = format!("zettelkasten/{filename_id}.md");
+            let content = repo_b.read_file(&path).unwrap();
+            prop_assert!(
+                content.contains(&format!("id: {filename_id}")),
+                "zettel {filename_id} frontmatter id mismatch: {content}"
+            );
+        }
+
+        // Sync back to A and verify convergence
+        repo_b.push("origin", "master").unwrap();
+        let db_a = dir_a.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
+        let index_a = Index::open(&db_a).unwrap();
+        let mut mgr_a = SyncManager::open(&repo_a).unwrap();
+        mgr_a.sync("origin", "master", &index_a).unwrap();
+
+        // A should have same files as B
+        let files_a: Vec<String> = std::fs::read_dir(dir_a.path().join("zettelkasten"))
+            .unwrap()
+            .filter_map(|e| {
+                let e = e.unwrap();
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.ends_with(".md") && !name.starts_with('_') {
+                    Some(name.trim_end_matches(".md").to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut sorted_a = files_a.clone();
+        sorted_a.sort();
+        let mut sorted_b = files.clone();
+        sorted_b.sort();
+        prop_assert_eq!(
+            sorted_a, sorted_b,
+            "nodes A and B should converge to same zettel set"
+        );
+    }
+}
