@@ -828,6 +828,55 @@ $output = zdb status
 if ($output -notmatch "resurrected") { throw "resurrected missing" }
 pass "delete-vs-edit conflict (edit wins, resurrected)"
 
+Write-Host "=== id collision detection ==="
+
+# 27a. add-add collision: both zettels survive
+$COLL_REMOTE = New-Item -ItemType Directory -Path "$env:TEMP\zdb-coll-remote-$(Get-Random)" -Force
+git init --bare $COLL_REMOTE 2>&1 | Out-Null
+
+$COLL_A = New-Item -ItemType Directory -Path "$env:TEMP\zdb-coll-a-$(Get-Random)" -Force
+Push-Location $COLL_A
+zdb init . | Out-Null
+git remote add origin $COLL_REMOTE
+zdb register-node "CollA" | Out-Null
+git push -u origin master 2>&1 | Out-Null
+
+$COLL_B_PARENT = "$env:TEMP\zdb-coll-b-$(Get-Random)"
+git clone $COLL_REMOTE $COLL_B_PARENT 2>&1 | Out-Null
+Push-Location $COLL_B_PARENT
+zdb reindex | Out-Null
+zdb register-node "CollB" | Out-Null
+git push origin master 2>&1 | Out-Null
+
+# Sync A to pick up B's node
+Pop-Location  # back to COLL_A
+zdb sync origin master | Out-Null
+
+# Both create same-ID zettel independently
+$COLL_ID = "20260101120000"
+$collContent = "---`nid: $COLL_ID`ntitle: From A`ndate: 2026-01-01`n---`nBody A`n"
+New-Item -ItemType Directory -Path "zettelkasten" -Force | Out-Null
+Set-Content -Path "zettelkasten/$COLL_ID.md" -Value $collContent -NoNewline
+git add "zettelkasten/$COLL_ID.md" 2>&1 | Out-Null
+git commit -m "A creates $COLL_ID" 2>&1 | Out-Null
+git push origin master 2>&1 | Out-Null
+
+Push-Location $COLL_B_PARENT
+$collContentB = "---`nid: $COLL_ID`ntitle: From B`ndate: 2026-01-01`n---`nBody B`n"
+New-Item -ItemType Directory -Path "zettelkasten" -Force | Out-Null
+Set-Content -Path "zettelkasten/$COLL_ID.md" -Value $collContentB -NoNewline
+git add "zettelkasten/$COLL_ID.md" 2>&1 | Out-Null
+git commit -m "B creates $COLL_ID" 2>&1 | Out-Null
+
+$collOut = zdb sync origin master
+if ($collOut -notmatch "collisions reassigned: 1") { throw "collision not detected: $collOut" }
+$collFiles = @(Get-ChildItem "zettelkasten/*.md" | Where-Object { $_.Name -notmatch "^_" })
+if ($collFiles.Count -ne 2) { throw "expected 2 zettels after collision, got $($collFiles.Count)" }
+pass "add-add collision: both zettels survive"
+Pop-Location  # leave COLL_B
+
+Pop-Location  # leave COLL_A
+
 Write-Host "=== bundle sync ==="
 
 # 27. bundle export --full + import

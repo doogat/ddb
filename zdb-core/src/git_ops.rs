@@ -319,36 +319,55 @@ impl GitRepo {
         let theirs_oid = Oid::from_str(&theirs.0)?;
         let their_commit = self.repo.find_commit(theirs_oid)?;
 
-        // Re-compute the merge index so non-conflicting files from both
-        // parents are included in the tree (not just ours + resolved).
-        let mut merge_index = self.repo.merge_commits(&our_commit, &their_commit, None)?;
-
-        // Replace conflict entries with resolved content
+        // Write resolved files to disk
         for (rel_path, content) in files {
-            merge_index
-                .remove_all([*rel_path], None)
-                .map_err(|e| ZettelError::Git(e.message().to_string()))?;
-            let blob_oid = self.repo.blob(content.as_bytes())?;
-            let entry = git2::IndexEntry {
-                ctime: git2::IndexTime::new(0, 0),
-                mtime: git2::IndexTime::new(0, 0),
-                dev: 0,
-                ino: 0,
-                mode: 0o100644,
-                uid: 0,
-                gid: 0,
-                file_size: content.len() as u32,
-                id: blob_oid,
-                flags: 0,
-                flags_extended: 0,
-                path: rel_path.as_bytes().to_vec(),
-            };
-            merge_index.add(&entry)?;
+            let full_path = self.path.join(rel_path);
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&full_path, content)?;
         }
 
-        let tree_oid = merge_index.write_tree_to(&self.repo)?;
+        // Write non-conflicting files from theirs that don't exist in ours.
+        // Without this, files added only on the remote side are missing
+        // from the merge commit tree.
+        let ours_tree = our_commit.tree()?;
+        let theirs_tree = their_commit.tree()?;
+        let diff =
+            self.repo
+                .diff_tree_to_tree(Some(&ours_tree), Some(&theirs_tree), None)?;
+        let resolved_set: std::collections::HashSet<&str> =
+            files.iter().map(|(p, _)| *p).collect();
+        let mut theirs_only = Vec::new();
+        for delta in diff.deltas() {
+            if delta.status() == git2::Delta::Added {
+                if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
+                    if !resolved_set.contains(path) {
+                        if let Ok(blob) = self.repo.find_blob(delta.new_file().id()) {
+                            let full = self.path.join(path);
+                            if let Some(parent) = full.parent() {
+                                std::fs::create_dir_all(parent)?;
+                            }
+                            std::fs::write(&full, blob.content())?;
+                            theirs_only.push(path.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut index = self.repo.index()?;
+        for (rel_path, _) in files {
+            index.add_path(Path::new(rel_path))?;
+        }
+        for path in &theirs_only {
+            index.add_path(Path::new(path))?;
+        }
+        index.write()?;
+        let tree_oid = index.write_tree()?;
         let tree = self.repo.find_tree(tree_oid)?;
         let sig = self.signature()?;
+
         let oid = self.repo.commit(
             Some("HEAD"),
             &sig,
@@ -357,18 +376,6 @@ impl GitRepo {
             &tree,
             &[&our_commit, &their_commit],
         )?;
-
-        // Write resolved files to disk and checkout
-        for (rel_path, content) in files {
-            let full_path = self.path.join(rel_path);
-            if let Some(parent) = full_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&full_path, content)?;
-        }
-        self.repo
-            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
-
         self.write_commit_graph();
         Ok(CommitHash(oid.to_string()))
     }

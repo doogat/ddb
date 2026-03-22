@@ -715,6 +715,56 @@ $ZDB read "$DEL_ID" | grep -q "Edited on desktop"
 $ZDB status | grep -q "resurrected"
 pass "delete-vs-edit conflict (edit wins, resurrected)"
 
+echo "=== id collision detection ==="
+
+# 27a. add-add collision: both zettels survive
+# Use a fresh pair of repos to avoid interference with earlier sync state.
+COLL_REMOTE="$(mktemp -d)"
+COLL_A="$(mktemp -d)"
+COLL_B_PARENT="$(mktemp -d)"
+git init --bare "$COLL_REMOTE" >/dev/null 2>&1
+
+# Node A: init, push, register
+cd "$COLL_A"
+$ZDB init . >/dev/null
+git remote add origin "$COLL_REMOTE"
+$ZDB register-node "CollA" >/dev/null
+git push -u origin master >/dev/null 2>&1
+
+# Node B: clone, register
+git clone "$COLL_REMOTE" "$COLL_B_PARENT/repo" >/dev/null 2>&1
+COLL_B="$COLL_B_PARENT/repo"
+cd "$COLL_B"
+$ZDB reindex >/dev/null
+$ZDB register-node "CollB" >/dev/null
+git push origin master >/dev/null 2>&1
+
+# Sync A to pick up B's node
+cd "$COLL_A"
+$ZDB sync origin master >/dev/null
+
+# Both create the same-ID zettel independently
+COLL_ID="20260101120000"
+cd "$COLL_A"
+mkdir -p zettelkasten
+printf -- '---\nid: %s\ntitle: From A\ndate: 2026-01-01\n---\nBody A\n' "$COLL_ID" > "zettelkasten/${COLL_ID}.md"
+git add "zettelkasten/${COLL_ID}.md"
+git commit -m "A creates $COLL_ID" >/dev/null 2>&1
+git push origin master >/dev/null 2>&1
+
+cd "$COLL_B"
+mkdir -p zettelkasten
+printf -- '---\nid: %s\ntitle: From B\ndate: 2026-01-01\n---\nBody B\n' "$COLL_ID" > "zettelkasten/${COLL_ID}.md"
+git add "zettelkasten/${COLL_ID}.md"
+git commit -m "B creates $COLL_ID" >/dev/null 2>&1
+
+# B syncs — collision detected and resolved
+COLL_OUT=$($ZDB sync origin master)
+echo "$COLL_OUT" | grep -q "collisions reassigned: 1"
+COLL_COUNT=$(find zettelkasten -name '*.md' ! -name '_*' | wc -l | tr -d ' ')
+[ "$COLL_COUNT" -eq 2 ]
+pass "add-add collision: both zettels survive"
+
 echo "=== bundle sync ==="
 
 # 27. bundle export --full + import
