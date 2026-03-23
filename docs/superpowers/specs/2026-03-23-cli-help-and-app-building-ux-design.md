@@ -34,7 +34,7 @@ Rule of thumb: "If it points somewhere else, it's a reference. If it describes t
 |----------|-----------|--------------|
 | CHAR(n), VARCHAR(n≤255), TINYTEXT | ≤255 | frontmatter |
 | VARCHAR(n>255) | >255 | body |
-| TEXT, TEXT(n>255) | 65535 | body |
+| TEXT | 65535 | body |
 | MEDIUMTEXT, LONGTEXT | >64K | body |
 | ENUM('a','b','c') | short | frontmatter |
 | SET('a','b','c') | short | frontmatter |
@@ -69,8 +69,8 @@ columns:
 
 **Code changes in sql_engine.rs:**
 
-- Expand `data_type_to_string` to preserve size info and distinguish short/long string types
-- Extract ENUM/SET values into `allowed_values` in the _typedef column definition
+- Expand `data_type_to_string` to handle new `DataType` variants: `Char`, `Character`, `TinyText`, `MediumText`, `LongText`, `Enum`, `Set`, `Blob`, `TinyBlob`, `MediumBlob`, `LongBlob`, `Binary`, `Varbinary`. Preserve size info for VARCHAR to distinguish short (≤255) vs long (>255).
+- Extract ENUM values from `DataType::Enum(Vec<EnumMember>, ...)` — handle both `EnumMember::Name(String)` and `EnumMember::NamedValue(String, Expr)` variants. SET uses `DataType::Set(Vec<String>)` directly.
 - Zone inference uses type length threshold: ≤255 chars → frontmatter, >255 → body
 - REFERENCES → reference (unchanged)
 
@@ -84,6 +84,8 @@ ALTER TABLE bookmark SET ZONE body FOR description;
 ALTER TABLE bookmark SET ZONE reference FOR related;
 ```
 
+**Parsing strategy:** These are custom DDL that `sqlparser` cannot parse. Handle via pre-parse interception: before passing SQL to `sqlparser`, match against `ALTER TABLE <table> SET ZONE <zone> FOR <column>` (and the TITLE TEMPLATE variants from Section 3) with a regex. If matched, dispatch directly to the handler without going through sqlparser's AST. Same approach for `SET TITLE TEMPLATE` and `DROP TITLE TEMPLATE`. The interception lives in `SqlEngine::execute()` before the `sqlparser::parse_sql()` call.
+
 **Behavior:**
 
 1. Validates column exists in the typedef
@@ -91,6 +93,8 @@ ALTER TABLE bookmark SET ZONE reference FOR related;
 3. Warns to stderr if moving a column to frontmatter or reference: "Warning: frontmatter/reference zones are best for short values. Long text may hurt readability of the underlying Markdown file."
 4. Re-materializes the SQLite table
 5. Existing zettels are not migrated — their Markdown stays as-is until next update. `zdb fix --migrate` rewrites them.
+
+**Zone migration via `zdb fix --migrate`:** For each zettel of the affected type, re-derive the Markdown from the current zone assignments. Moving body→frontmatter: parse the `## column_name` section, extract content, add as YAML field (multi-line values use YAML literal block scalars `|`), remove body section. Moving frontmatter→body: reverse. Moving to/from reference: format/parse as `- key:: value` wikilink lines. Sub-headings within a body section are preserved as-is within the section content.
 
 ### 3. Title Resolution
 
@@ -108,8 +112,8 @@ Templates interpolate column values by name. Missing values produce empty string
 |----------|--------|---------|
 | 1 | Explicit `title` in INSERT | `INSERT INTO contact (title, name) VALUES ('Dr. Alice', 'Alice')` → "Dr. Alice" |
 | 2 | `title_template` in _typedef | `"{name} ({relationship})"` → "Alice Chen (friend)" |
-| 3 | First body-zone TEXT column value | `description TEXT` → "Meeting notes about..." |
-| 4 | First frontmatter TEXT column value | `url TEXT` → "https://..." |
+| 3 | First body-zone column value | `description TEXT` → "Meeting notes about..." |
+| 4 | First frontmatter string column value | `status VARCHAR(50)` → "todo" |
 | 5 | `{type} {id}` fallback | "contact 20260301130000" |
 
 **Direct title INSERT with a template defined:** The explicit title is used but flagged as non-compliant. `zdb fix` can auto-repair by re-deriving from the template. Health checks surface these.
@@ -121,7 +125,13 @@ ALTER TABLE contact SET TITLE TEMPLATE '{name} ({relationship})';
 ALTER TABLE contact DROP TITLE TEMPLATE;
 ```
 
-**Code change in sql_engine.rs:** Fix `build_data_zettel()` to check for explicit `title` in INSERT column values before the column loop, instead of always overwriting with the first body TEXT value. Implement the full cascade.
+**Code change in sql_engine.rs:** In `build_data_zettel()`, before the column loop:
+1. Check `col_values.get("title")` — if present, use as title (Priority 1)
+2. If not, check `schema.title_template` — if present, interpolate column values (Priority 2)
+3. Otherwise, fall through to the existing column loop which sets title from the first body-zone column (Priority 3), then first frontmatter string column (Priority 4)
+4. After the loop, if `title_value` is still `None`, fall back to `"{type} {id}"` (Priority 5)
+
+This requires `TableSchema` to carry the `title_template` field (see Section 7).
 
 ### 4. Typedef Origin Tracking
 
@@ -196,7 +206,7 @@ Available guides:
 
 **docs/src/guide/building-apps.md:**
 
-1. Fix line 86: replace wrong "TEXT defaults to frontmatter" with the SQL type→zone inference table
+1. Fix the claim that "TEXT defaults to frontmatter" in the zone assignment rules — replace with the SQL type→zone inference table
 2. Replace zone mapping table with the full SQL type → zone table
 3. Add ENUM/SET examples to the Constraints section, replacing hand-edited YAML approach
 4. Add title resolution section documenting the cascade, `title_template`, and non-compliance
@@ -209,6 +219,7 @@ Available guides:
 
 - Add `title_template: Option<String>` to typedef schema struct
 - Add `origin: Option<String>` to typedef schema struct
+- `TableSchema` uses manual YAML parsing via `schema_from_parsed()`, not serde derive. Both new fields use `.get("title_template").and_then(|v| v.as_str()).map(String::from)` pattern — absent fields naturally resolve to `None`
 
 ## Code Locations
 
@@ -225,7 +236,7 @@ Available guides:
 
 - Zone inference for each SQL type (CHAR, VARCHAR with sizes, TEXT, TINYTEXT, MEDIUMTEXT, LONGTEXT, ENUM, SET, BLOB variants)
 - ENUM/SET → allowed_values extraction
-- Title cascade: explicit title, template, first body TEXT, first frontmatter TEXT, type+id fallback
+- Title cascade: explicit title in INSERT column list produces that title (not auto-derived), template interpolation, first body column, first frontmatter string column, type+id fallback
 - Title non-compliance detection when template exists but explicit title used
 - ALTER TABLE SET ZONE: valid zone, invalid column, warning on long TEXT to frontmatter
 - ALTER TABLE SET/DROP TITLE TEMPLATE
