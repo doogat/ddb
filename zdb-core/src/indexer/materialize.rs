@@ -578,6 +578,30 @@ impl Index {
         schemas
     }
 
+    /// Re-materialize a single zettel row (main table + junction tables).
+    /// Clears old junction rows before inserting fresh ones.
+    pub(crate) fn materialize_single(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        zettel: &crate::types::ParsedZettel,
+    ) -> Result<()> {
+        // Clear old junction rows for this zettel
+        for col in &schema.columns {
+            if col.references.is_some() {
+                self.conn.execute(
+                    &format!(
+                        "DELETE FROM \"{t}_{c}\" WHERE \"{t}_id\" = ?1",
+                        t = schema.table_name,
+                        c = col.name
+                    ),
+                    params![id],
+                )?;
+            }
+        }
+        self.materialize_row(schema, id, zettel)
+    }
+
     /// Insert a single data zettel's values into a materialized table.
     fn materialize_row(
         &self,

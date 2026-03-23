@@ -509,6 +509,21 @@ impl<'a> SqlEngine<'a> {
             col_defs.join(", ")
         );
         self.index.conn.execute(&sql, [])?;
+
+        // Create junction tables for REFERENCES columns
+        for col in &schema.columns {
+            if col.references.is_some() {
+                self.index.conn.execute(
+                    &format!(
+                        "CREATE TABLE IF NOT EXISTS \"{t}_{c}\" (\"{t}_id\" TEXT NOT NULL, \"{c}_id\" TEXT NOT NULL, PRIMARY KEY (\"{t}_id\", \"{c}_id\"))",
+                        t = schema.table_name,
+                        c = col.name
+                    ),
+                    [],
+                )?;
+            }
+        }
+
         Ok(())
     }
 
@@ -531,6 +546,12 @@ impl<'a> SqlEngine<'a> {
         }
 
         let table_name = unquote_identifier(&ins.table.to_string());
+
+        // Check if this is a junction table INSERT
+        if let Some((type_name, col_name)) = self.resolve_junction_table(&table_name)? {
+            return self.handle_junction_insert(ins, &type_name, &col_name);
+        }
+
         let schema = self.load_schema(&table_name)?;
 
         // Extract column names from INSERT
@@ -1204,6 +1225,223 @@ impl<'a> SqlEngine<'a> {
         let content = self.repo.read_file(&path)?;
         let parsed = parser::parse(&content, &path)?;
         schema_from_parsed(&parsed)
+    }
+
+    /// Check if `table_name` is a junction table (`{type}_{col}` where type is
+    /// a known typedef and col is a REFERENCES column in that typedef).
+    /// Returns `Some((type_name, col_name))` if it is.
+    fn resolve_junction_table(&mut self, table_name: &str) -> Result<Option<(String, String)>> {
+        // Try each possible split point of `type_col`
+        for (i, _) in table_name.match_indices('_') {
+            let candidate_type = &table_name[..i];
+            let candidate_col = &table_name[i + 1..];
+            if candidate_type.is_empty() || candidate_col.is_empty() {
+                continue;
+            }
+            // Check if candidate_type is a known typedef
+            if self.load_typedef_location(candidate_type).is_ok() {
+                let schema = self.load_schema(candidate_type)?;
+                // Check if candidate_col is a REFERENCES column
+                if schema
+                    .columns
+                    .iter()
+                    .any(|c| c.name == candidate_col && c.references.is_some())
+                {
+                    return Ok(Some((candidate_type.to_string(), candidate_col.to_string())));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Handle INSERT into a junction table by appending reference lines to the
+    /// parent zettel and re-indexing.
+    fn handle_junction_insert(
+        &mut self,
+        ins: &sqlparser::ast::Insert,
+        type_name: &str,
+        col_name: &str,
+    ) -> Result<SqlResult> {
+        let col_names: Vec<String> = ins.columns.iter().map(|c| c.value.to_lowercase()).collect();
+        let type_id_col = format!("{type_name}_id");
+        let ref_id_col = format!("{col_name}_id");
+
+        let rows = match ins.source.as_ref() {
+            Some(query) => match query.body.as_ref() {
+                SetExpr::Values(v) => {
+                    let mut rows = Vec::with_capacity(v.rows.len());
+                    for row in &v.rows {
+                        rows.push(extract_values(row)?);
+                    }
+                    rows
+                }
+                _ => {
+                    return Err(ZettelError::SqlEngine(
+                        "only VALUES clause supported for junction INSERT".into(),
+                    ))
+                }
+            },
+            None => {
+                return Err(ZettelError::SqlEngine(
+                    "missing VALUES clause".into(),
+                ))
+            }
+        };
+
+        let schema = self.load_schema(type_name)?;
+        let ref_col = schema
+            .columns
+            .iter()
+            .find(|c| c.name == col_name && c.references.is_some())
+            .ok_or_else(|| {
+                ZettelError::SqlEngine(format!(
+                    "column {col_name} not found or not a REFERENCES column"
+                ))
+            })?;
+        let ref_folder_types: std::collections::HashSet<String> = schema
+            .columns
+            .iter()
+            .filter_map(|c| c.references.as_ref())
+            .filter(|ref_table| self.index.type_uses_folder(ref_table, self.repo))
+            .cloned()
+            .collect();
+
+        let mut affected = 0;
+        for row_values in &rows {
+            let parent_id_idx = col_names
+                .iter()
+                .position(|c| *c == type_id_col)
+                .ok_or_else(|| {
+                    ZettelError::SqlEngine(format!("missing {type_id_col} column in INSERT"))
+                })?;
+            let target_id_idx = col_names
+                .iter()
+                .position(|c| *c == ref_id_col)
+                .ok_or_else(|| {
+                    ZettelError::SqlEngine(format!("missing {ref_id_col} column in INSERT"))
+                })?;
+
+            let parent_id = &row_values[parent_id_idx];
+            let target_id = &row_values[target_id_idx];
+
+            // Read parent zettel
+            let path = self.index.resolve_path(parent_id)?;
+            let content = self.repo.read_file(&path)?;
+            let mut parsed = parser::parse(&content, &path)?;
+
+            // Build the reference line with folder-qualified link if needed
+            let link_target =
+                if let Some(ref ref_table) = ref_col.references {
+                    if ref_folder_types.contains(ref_table) {
+                        format!("zettelkasten/{ref_table}/{target_id}.md")
+                    } else {
+                        target_id.clone()
+                    }
+                } else {
+                    target_id.clone()
+                };
+            let ref_line = format!("- {}:: [[{}]]", col_name, link_target);
+
+            // Append to reference section
+            let trimmed = parsed.reference_section.trim_end();
+            parsed.reference_section = if trimmed.is_empty() {
+                format!("{ref_line}\n")
+            } else {
+                format!("{trimmed}\n{ref_line}\n")
+            };
+
+            // Serialize and commit
+            let new_content = parser::serialize(&parsed);
+            self.repo.commit_file(
+                &path,
+                &new_content,
+                &format!("add {col_name} ref {target_id} to {type_name} {parent_id}"),
+            )?;
+
+            // Re-index this zettel
+            let re_parsed = parser::parse(&new_content, &path)?;
+            self.index.index_zettel(&re_parsed)?;
+            self.index
+                .materialize_single(&schema, parent_id, &re_parsed)?;
+
+            affected += 1;
+        }
+
+        Ok(SqlResult::Affected(affected))
+    }
+
+    /// Handle DELETE from a junction table by removing matching reference lines
+    /// from the parent zettel and re-indexing.
+    fn handle_junction_delete(
+        &mut self,
+        type_name: &str,
+        col_name: &str,
+        parent_id: &str,
+        target_id: &str,
+    ) -> Result<SqlResult> {
+        let schema = self.load_schema(type_name)?;
+        let ref_col = schema
+            .columns
+            .iter()
+            .find(|c| c.name == col_name && c.references.is_some())
+            .ok_or_else(|| {
+                ZettelError::SqlEngine(format!(
+                    "column {col_name} not found or not a REFERENCES column"
+                ))
+            })?;
+        let ref_folder_types: std::collections::HashSet<String> = schema
+            .columns
+            .iter()
+            .filter_map(|c| c.references.as_ref())
+            .filter(|ref_table| self.index.type_uses_folder(ref_table, self.repo))
+            .cloned()
+            .collect();
+
+        // Read parent zettel
+        let path = self.index.resolve_path(parent_id)?;
+        let content = self.repo.read_file(&path)?;
+        let mut parsed = parser::parse(&content, &path)?;
+
+        // Build the reference line pattern to remove
+        let link_target =
+            if let Some(ref ref_table) = ref_col.references {
+                if ref_folder_types.contains(ref_table) {
+                    format!("zettelkasten/{ref_table}/{target_id}.md")
+                } else {
+                    target_id.to_string()
+                }
+            } else {
+                target_id.to_string()
+            };
+        let ref_line = format!("- {}:: [[{}]]", col_name, link_target);
+
+        // Remove matching line from reference section
+        let old_section = parsed.reference_section.clone();
+        let new_lines: Vec<&str> = old_section
+            .lines()
+            .filter(|line| line.trim() != ref_line.trim())
+            .collect();
+        parsed.reference_section = if new_lines.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", new_lines.join("\n"))
+        };
+
+        // Serialize and commit
+        let new_content = parser::serialize(&parsed);
+        self.repo.commit_file(
+            &path,
+            &new_content,
+            &format!("remove {col_name} ref {target_id} from {type_name} {parent_id}"),
+        )?;
+
+        // Re-index
+        let re_parsed = parser::parse(&new_content, &path)?;
+        self.index.index_zettel(&re_parsed)?;
+        self.index
+            .materialize_single(&schema, parent_id, &re_parsed)?;
+
+        Ok(SqlResult::Affected(1))
     }
 
     fn insert_materialized_row(
@@ -3969,5 +4207,64 @@ mod tests {
             .unwrap();
         let schema = engine.load_schema("origalter").unwrap();
         assert_eq!(schema.origin.as_deref(), Some("ddl"), "origin should survive ALTER TABLE");
+    }
+
+    #[test]
+    fn insert_into_junction_writes_through() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // Create a type with a REFERENCES column
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        // Create a category type
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+
+        // Insert a bookmark
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Insert a category
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // INSERT into junction table
+        let result = engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+            ))
+            .unwrap();
+        assert!(matches!(result, SqlResult::Affected(1)));
+
+        // Verify reference line in zettel
+        let path = index.resolve_path(&bm_id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(
+            content.contains(&format!("- category:: [[{cat_id}]]")),
+            "zettel should contain reference line: {content}"
+        );
+
+        // Verify junction table row
+        let rows = index
+            .query_raw(&format!(
+                "SELECT category_id FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+            ))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], cat_id);
     }
 }
