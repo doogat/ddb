@@ -1089,6 +1089,15 @@ if ($jtDrop -notmatch "dropped") { throw "cascade drop failed: $jtDrop" }
 if (-not (zdb-fails query "SELECT * FROM jpost_jtag")) { throw "junction table should not exist after cascade" }
 pass "junction table CRUD"
 
+# 38. title template compliance check
+Push-Location $TMPDIR
+zdb query "CREATE TABLE smwidget (name VARCHAR(100), description TEXT)" | Out-Null
+zdb query "ALTER TABLE smwidget SET TITLE TEMPLATE '{name} Widget'" | Out-Null
+zdb query "INSERT INTO smwidget (name, description) VALUES ('Foo', 'A foo widget')" | Out-Null
+$fixVerbose = zdb fix --verbose --dry-run
+if ($fixVerbose -notmatch "title does not match template") { throw "title compliance not reported" }
+pass "title template compliance check"
+
 # Return to original directory
 Set-Location $TMPDIR
 

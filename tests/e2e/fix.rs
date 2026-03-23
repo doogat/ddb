@@ -119,3 +119,101 @@ fn fix_verbose_output() {
         .success()
         .stdout(predicate::str::contains("[info]"));
 }
+
+#[test]
+fn fix_verbose_reports_title_noncompliant() {
+    let repo = ZdbTestRepo::init();
+
+    // Create typedef with title_template
+    repo.zdb()
+        .args(["query", "CREATE TABLE widget (name TEXT, description TEXT)"])
+        .assert()
+        .success();
+    repo.zdb()
+        .args([
+            "query",
+            "ALTER TABLE widget SET TITLE TEMPLATE '{name} Widget'",
+        ])
+        .assert()
+        .success();
+
+    // Insert a zettel — its auto-derived title won't match the template
+    let out = repo
+        .zdb()
+        .args([
+            "query",
+            "INSERT INTO widget (name, description) VALUES ('Foo', 'A foo widget')",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "insert failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    // Verbose dry-run should report title non-compliance
+    repo.zdb()
+        .args(["fix", "--verbose", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("title does not match template"));
+}
+
+#[test]
+fn fix_migrate_rewrites_zones() {
+    let repo = ZdbTestRepo::init();
+
+    // Create typedef with a TEXT column (defaults to body zone)
+    repo.zdb()
+        .args([
+            "query",
+            "CREATE TABLE gadget (name VARCHAR(100), notes TEXT)",
+        ])
+        .assert()
+        .success();
+
+    // Insert zettel — `notes` (TEXT) goes to body zone as ## section
+    let out = repo
+        .zdb()
+        .args([
+            "query",
+            "INSERT INTO gadget (name, notes) VALUES ('Gizmo', 'Some important notes')",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "insert failed: {}", String::from_utf8_lossy(&out.stderr));
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    // Verify notes is currently in body zone (## notes section)
+    let before = repo.zdb().args(["read", &id]).output().unwrap();
+    let before_content = String::from_utf8_lossy(&before.stdout);
+    assert!(
+        before_content.contains("## notes"),
+        "notes should be in body zone before migration: {before_content}"
+    );
+
+    // Change zone assignment: move notes to frontmatter
+    repo.zdb()
+        .args([
+            "query",
+            "ALTER TABLE gadget SET ZONE frontmatter FOR notes",
+        ])
+        .assert()
+        .success();
+
+    // Run zone migration
+    repo.zdb()
+        .args(["fix", "--migrate"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("zone-migrated"));
+
+    // Verify notes moved to frontmatter
+    let after = repo.zdb().args(["read", &id]).output().unwrap();
+    let after_content = String::from_utf8_lossy(&after.stdout);
+    assert!(
+        after_content.contains("notes: Some important notes"),
+        "notes should be in frontmatter after migration: {after_content}"
+    );
+    assert!(
+        !after_content.contains("## notes"),
+        "body section should be removed after migration: {after_content}"
+    );
+}

@@ -891,11 +891,11 @@ fn detect_current_zone(parsed: &ParsedZettel, col_name: &str) -> Option<Zone> {
 /// Extract value from its current zone.
 fn extract_from_zone(parsed: &ParsedZettel, col_name: &str, zone: &Zone) -> Option<String> {
     match zone {
-        Zone::Frontmatter => parsed.meta.extra.get(col_name).and_then(|v| match v {
-            crate::types::Value::String(s) => Some(s.clone()),
-            crate::types::Value::Number(n) => Some(n.to_string()),
-            crate::types::Value::Bool(b) => Some(b.to_string()),
-            _ => Some(format!("{v:?}")),
+        Zone::Frontmatter => parsed.meta.extra.get(col_name).map(|v| match v {
+            crate::types::Value::String(s) => s.clone(),
+            crate::types::Value::Number(n) => n.to_string(),
+            crate::types::Value::Bool(b) => b.to_string(),
+            _ => format!("{v:?}"),
         }),
         Zone::Body => extract_body_section(&parsed.body, col_name),
         Zone::Reference => parsed

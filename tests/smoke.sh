@@ -941,4 +941,12 @@ $ZDB query "DROP TABLE jpost CASCADE" | grep -q "dropped"
 ! $ZDB query "SELECT * FROM jpost_jtag" 2>/dev/null
 pass "junction table CRUD"
 
+# 38. title template compliance check
+cd "$TMPDIR"
+$ZDB query "CREATE TABLE smwidget (name VARCHAR(100), description TEXT)" >/dev/null
+$ZDB query "ALTER TABLE smwidget SET TITLE TEMPLATE '{name} Widget'" >/dev/null
+$ZDB query "INSERT INTO smwidget (name, description) VALUES ('Foo', 'A foo widget')" >/dev/null
+$ZDB fix --verbose --dry-run | grep -q "title does not match template"
+pass "title template compliance check"
+
 echo "=== all passed ==="

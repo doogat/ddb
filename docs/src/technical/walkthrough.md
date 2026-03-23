@@ -395,7 +395,7 @@ The `consistency` module (`consistency.rs`) provides a detect-then-apply pipelin
 `detect_fixes(parsed, schema)` inspects a `ParsedZettel` and returns a `Vec<Fix>` with severity-ordered issues:
 
 - **Error**: cross-zone duplicate fields (same key in frontmatter and body inline fields)
-- **Warning**: missing type default, missing title (derived from H1 or filename)
+- **Warning**: missing type default, missing title (derived from H1 or filename), title doesn't match typedef `title_template`
 - **Info**: duplicate tags, unsorted tags, `#`-prefixed tags, non-kebab-case keys, untrimmed/uncapitalized title, H1-title mismatch
 
 ### Application
@@ -409,6 +409,10 @@ The `consistency` module (`consistency.rs`) provides a detect-then-apply pipelin
 ### Migration
 
 `migrate_all(repo, dry_run)` runs versioned field-level migrations: `zkn-id` -> `id`, `tag` (singular) -> `tags`, type normalization (`loop` -> `project`, `zettel`/`wiki-article` -> `note`). Version tracked in `.zdb/migration-version`. Invoked via `zdb fix --migrate`.
+
+### Zone migration
+
+`zone_migrate_all(repo, index, dry_run)` compares each column's current zone (frontmatter, body, or reference) against the typedef's `effective_zone()` and rewrites the zettel to move data to the correct zone. For example, if a column was changed from body to frontmatter via `ALTER TABLE ... SET ZONE frontmatter FOR ...`, zone migration extracts the `## column_name` body section and places the value in frontmatter YAML. Also invoked via `zdb fix --migrate`.
 
 ### CLI
 
