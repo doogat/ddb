@@ -70,6 +70,8 @@ pub struct ZettelJson {
     zettel_type: Option<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     frontmatter: BTreeMap<String, serde_json::Value>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    references: BTreeMap<String, Vec<String>>,
     reference_section: String,
 }
 
@@ -106,6 +108,17 @@ fn zdb_value_to_json(v: ZdbValue) -> serde_json::Value {
 }
 
 pub fn zettel_to_json(z: &ParsedZettel) -> ZettelJson {
+    // Group reference-zone inline fields by key into arrays
+    let mut references: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for field in &z.inline_fields {
+        if matches!(field.zone, zdb_core::types::Zone::Reference) {
+            references
+                .entry(field.key.clone())
+                .or_default()
+                .push(field.value.clone());
+        }
+    }
+
     ZettelJson {
         id: z.meta.id.as_ref().map(|i| i.0.clone()).unwrap_or_default(),
         title: z.meta.title.clone().unwrap_or_default(),
@@ -118,6 +131,7 @@ pub fn zettel_to_json(z: &ParsedZettel) -> ZettelJson {
             .iter()
             .map(|(k, v)| (k.clone(), zdb_value_to_json(v.clone())))
             .collect(),
+        references,
         reference_section: z.reference_section.clone(),
     }
 }
@@ -306,4 +320,58 @@ async fn delete_zettel(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
     actor.delete_zettel(id).await.map_err(rest_error)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zdb_core::types::{InlineField, Zone, ZettelId, ZettelMeta};
+
+    #[test]
+    fn rest_json_reference_arrays() {
+        let z = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(ZettelId("20260301140100".into())),
+                title: Some("Test".into()),
+                date: None,
+                tags: vec![],
+                zettel_type: Some("bookmark".into()),
+                extra: std::collections::BTreeMap::new(),
+            },
+            body: String::new(),
+            sections: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            inline_fields: vec![
+                InlineField {
+                    key: "category".into(),
+                    value: "20260301120100".into(),
+                    zone: Zone::Reference,
+                },
+                InlineField {
+                    key: "category".into(),
+                    value: "20260301120101".into(),
+                    zone: Zone::Reference,
+                },
+                InlineField {
+                    key: "author".into(),
+                    value: "20260301120200".into(),
+                    zone: Zone::Reference,
+                },
+            ],
+            reference_section: String::new(),
+            path: "zettelkasten/20260301140100.md".into(),
+        };
+
+        let json = zettel_to_json(&z);
+        assert_eq!(
+            json.references.get("category").unwrap(),
+            &vec!["20260301120100".to_string(), "20260301120101".to_string()]
+        );
+        assert_eq!(
+            json.references.get("author").unwrap(),
+            &vec!["20260301120200".to_string()]
+        );
+    }
 }
