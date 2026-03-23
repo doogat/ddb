@@ -294,7 +294,14 @@ pub fn extract_inline_fields(
         if let Some(caps) = ref_re.captures(line) {
             let key = caps[1].trim().to_string();
             match seen.get(&key) {
-                Some(Zone::Reference) => {} // same-zone dup, first wins
+                Some(Zone::Reference) => {
+                    // Multi-value: allow repeated keys in reference zone
+                    fields.push(InlineField {
+                        key,
+                        value: strip_wikilink(&caps[2]).to_string(),
+                        zone: Zone::Reference,
+                    });
+                }
                 Some(_) => {
                     return Err(crate::error::ZettelError::Validation(format!(
                         "duplicate inline field '{key}' across body and reference zones"
@@ -1980,5 +1987,40 @@ Original body.
         assert_eq!(z2.body, modified_body);
         // Verify references survived
         assert!(z2.reference_section.contains("- source:: Wikipedia"));
+    }
+
+    #[test]
+    fn multi_value_reference_fields_preserved() {
+        let content = "---\nid: '20260301120000'\ntitle: test\ntype: bookmark\n---\n\n---\n- category:: [[20260301120100]]\n- category:: [[20260301120101]]\n- category:: [[20260301120102]]\n";
+        let parsed = parse(content, "zettelkasten/20260301120000.md").unwrap();
+        let cat_fields: Vec<_> = parsed
+            .inline_fields
+            .iter()
+            .filter(|f| f.key == "category")
+            .collect();
+        assert_eq!(cat_fields.len(), 3);
+        assert_eq!(cat_fields[0].value, "20260301120100");
+        assert_eq!(cat_fields[1].value, "20260301120101");
+        assert_eq!(cat_fields[2].value, "20260301120102");
+        assert!(cat_fields.iter().all(|f| f.zone == Zone::Reference));
+    }
+
+    #[test]
+    fn body_zone_dedup_unchanged() {
+        let body = "status:: active\nstatus:: inactive\n";
+        let fields = extract_inline_fields(body, "").unwrap();
+        let status_fields: Vec<_> = fields.iter().filter(|f| f.key == "status").collect();
+        assert_eq!(status_fields.len(), 1, "body zone should still first-wins");
+        assert_eq!(status_fields[0].value, "active");
+    }
+
+    #[test]
+    fn cross_zone_error_unchanged() {
+        let body = "category:: something\n";
+        let reference = "- category:: [[20260301120100]]\n";
+        let result = extract_inline_fields(body, reference);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("duplicate inline field"));
     }
 }
