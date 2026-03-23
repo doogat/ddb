@@ -796,15 +796,26 @@ impl<'a> SqlEngine<'a> {
                             "column already exists: {col_name}"
                         )));
                     }
+                    let dt = data_type_to_string(&column_def.data_type);
+                    let refs = extract_references(&column_def.options);
+                    let zone = if refs.is_some() {
+                        Some(Zone::Reference)
+                    } else if is_numeric_type(&dt)
+                        || is_short_string_type(&column_def.data_type)
+                    {
+                        Some(Zone::Frontmatter)
+                    } else {
+                        Some(Zone::Body)
+                    };
                     schema.columns.push(ColumnDef {
                         name: col_name,
-                        data_type: data_type_to_string(&column_def.data_type),
-                        zone: None,
+                        data_type: dt,
+                        zone,
                         required: false,
                         search_boost: None,
-                        references: None,
-                        allowed_values: None,
-                        default_value: None,
+                        references: refs,
+                        allowed_values: extract_allowed_values(&column_def.data_type),
+                        default_value: extract_default(&column_def.options),
                     });
                 }
                 AlterTableOperation::DropColumn {
@@ -2531,6 +2542,37 @@ mod tests {
             }
             _ => panic!("expected Rows"),
         }
+    }
+
+    #[test]
+    fn alter_table_add_column_infers_zone_and_allowed_values() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE altadd (name VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute(
+                "ALTER TABLE altadd ADD COLUMN status ENUM('todo','doing','done') DEFAULT 'todo'",
+            )
+            .unwrap();
+        engine
+            .execute("ALTER TABLE altadd ADD COLUMN notes TEXT")
+            .unwrap();
+
+        let schema = engine.load_schema("altadd").unwrap();
+
+        let status = schema.columns.iter().find(|c| c.name == "status").unwrap();
+        assert_eq!(status.zone, Some(Zone::Frontmatter));
+        assert_eq!(
+            status.allowed_values,
+            Some(vec!["todo".into(), "doing".into(), "done".into()])
+        );
+        assert_eq!(status.default_value.as_deref(), Some("todo"));
+
+        let notes = schema.columns.iter().find(|c| c.name == "notes").unwrap();
+        assert_eq!(notes.zone, Some(Zone::Body));
     }
 
     #[test]
