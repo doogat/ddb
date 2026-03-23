@@ -30,6 +30,11 @@ fn re_drop_title_template() -> &'static Regex {
     })
 }
 
+fn re_unfilled_placeholder() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\{[^}]+\}").unwrap())
+}
+
 use crate::error::{Result, ZettelError};
 use crate::indexer::Index;
 use crate::parser;
@@ -1515,7 +1520,29 @@ fn build_data_zettel(
     let mut ref_lines: Vec<String> = Vec::new();
     let mut links: Vec<Link> = Vec::new();
     let mut inline_fields: Vec<InlineField> = Vec::new();
-    let mut title_value: Option<String> = None;
+
+    // Priority 1: explicit title from INSERT column list
+    let mut title_value: Option<String> = col_values.get("title").cloned();
+
+    // Priority 2: title_template interpolation
+    if title_value.is_none() {
+        if let Some(ref tmpl) = schema.title_template {
+            let mut rendered = tmpl.clone();
+            for (key, val) in col_values {
+                rendered = rendered.replace(&format!("{{{key}}}"), val);
+            }
+            let rendered = re_unfilled_placeholder()
+                .replace_all(&rendered, "")
+                .trim()
+                .to_string();
+            if !rendered.is_empty() {
+                title_value = Some(rendered);
+            }
+        }
+    }
+
+    // Track first frontmatter string column for Priority 4 fallback
+    let mut first_fm_string: Option<String> = None;
 
     for col in &schema.columns {
         let val = match col_values.get(&col.name) {
@@ -1549,15 +1576,30 @@ fn build_data_zettel(
                 });
             }
             Zone::Frontmatter => {
+                // Priority 4: track first frontmatter string column
+                if first_fm_string.is_none() && !is_numeric_type(&col.data_type) {
+                    first_fm_string = Some(val.clone());
+                }
                 extra.insert(col.name.clone(), to_yaml_value(&val, &col.data_type));
             }
             Zone::Body => {
+                // Priority 3: first body column value
                 if title_value.is_none() {
                     title_value = Some(val.clone());
                 }
                 body_sections.push(format!("## {}\n\n{}", col.name, val));
             }
         }
+    }
+
+    // Priority 4: first frontmatter string column
+    if title_value.is_none() {
+        title_value = first_fm_string;
+    }
+
+    // Priority 5: "{type} {id}" fallback
+    if title_value.is_none() {
+        title_value = Some(format!("{} {}", schema.table_name, id.0));
     }
 
     let body = if body_sections.is_empty() {
