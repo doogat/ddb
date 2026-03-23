@@ -318,18 +318,11 @@ pub(crate) fn extract_typed_field(z: &ParsedZettel, col: &ColumnDef) -> GqlValue
             extract_body_section(&z.body, &col.name)
         }
         Zone::Reference => {
-            // Collect ALL matching reference fields and comma-concatenate
-            let vals: Vec<&str> = z
-                .inline_fields
+            // Return first matching reference value (list field has all)
+            z.inline_fields
                 .iter()
-                .filter(|f| f.key == col.name && matches!(f.zone, Zone::Reference))
-                .map(|f| f.value.as_str())
-                .collect();
-            if vals.is_empty() {
-                None
-            } else {
-                Some(vals.join(","))
-            }
+                .find(|f| f.key == col.name && matches!(f.zone, Zone::Reference))
+                .map(|f| f.value.clone())
         }
     };
 
