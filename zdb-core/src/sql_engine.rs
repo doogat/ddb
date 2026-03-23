@@ -3926,4 +3926,48 @@ mod tests {
         let content = repo.read_file(&path).unwrap();
         assert!(content.contains("title: Explicit Title"), "explicit overrides template: {content}");
     }
+
+    #[test]
+    fn create_table_stamps_origin_ddl() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE origtest (name VARCHAR(100))")
+            .unwrap();
+        let schema = engine.load_schema("origtest").unwrap();
+        assert_eq!(schema.origin.as_deref(), Some("ddl"));
+    }
+
+    #[test]
+    fn origin_ddl_persists_in_yaml() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE origpersist (name VARCHAR(100))")
+            .unwrap();
+
+        // Read the typedef zettel content directly
+        let (_, path) = engine.load_typedef_location("origpersist").unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(content.contains("origin: ddl"), "YAML should contain origin: ddl\n{content}");
+    }
+
+    #[test]
+    fn origin_preserved_after_alter() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE origalter (name VARCHAR(100), desc TEXT)")
+            .unwrap();
+
+        // ALTER TABLE should preserve origin
+        engine
+            .execute("ALTER TABLE origalter SET ZONE frontmatter FOR desc")
+            .unwrap();
+        let schema = engine.load_schema("origalter").unwrap();
+        assert_eq!(schema.origin.as_deref(), Some("ddl"), "origin should survive ALTER TABLE");
+    }
 }
