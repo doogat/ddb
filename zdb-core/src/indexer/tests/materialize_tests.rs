@@ -1013,3 +1013,77 @@ columns:
         assert!(col_names.contains(&"category_id"), "should have category_id column");
     }
 
+    #[test]
+    fn multi_value_refs_populate_junction_and_main() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        let schema_content = "\
+---
+id: 20260301140000
+title: bookmark
+type: _typedef
+columns:
+  - name: url
+    data_type: TEXT
+    zone: body
+  - name: category
+    data_type: TEXT
+    references: category
+    zone: reference
+---\n";
+        repo.commit_file(
+            "zettelkasten/_typedef/20260301140000.md",
+            schema_content,
+            "add typedef",
+        )
+        .unwrap();
+
+        let data_content = "\
+---
+id: 20260301140100
+title: My Bookmark
+type: bookmark
+---
+
+## url
+
+https://example.com
+
+---
+- category:: [[20260301120100]]
+- category:: [[20260301120101]]
+- category:: [[20260301120102]]
+";
+        repo.commit_file(
+            "zettelkasten/20260301140100.md",
+            data_content,
+            "add bookmark",
+        )
+        .unwrap();
+
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        // Junction table should have 3 rows
+        let junc_rows = idx
+            .query_raw("SELECT bookmark_id, category_id FROM bookmark_category ORDER BY category_id")
+            .unwrap();
+        assert_eq!(junc_rows.len(), 3, "junction table should have 3 rows");
+        assert_eq!(junc_rows[0][1], "20260301120100");
+        assert_eq!(junc_rows[1][1], "20260301120101");
+        assert_eq!(junc_rows[2][1], "20260301120102");
+
+        // Main table should have comma-separated value
+        let main_rows = idx
+            .query_raw("SELECT category FROM bookmark WHERE id = '20260301140100'")
+            .unwrap();
+        assert_eq!(main_rows.len(), 1);
+        assert_eq!(
+            main_rows[0][0], "20260301120100,20260301120101,20260301120102",
+            "main table should have comma-separated refs"
+        );
+    }
+

@@ -608,6 +608,24 @@ impl Index {
             .map(|v| v as &dyn rusqlite::types::ToSql)
             .collect();
         self.conn.execute(&sql, params.as_slice())?;
+
+        // Populate junction tables for REFERENCES columns
+        for col in &schema.columns {
+            if col.references.is_some() {
+                let ref_values = extract_multi_reference_values(zettel, &col.name);
+                for ref_id in &ref_values {
+                    self.conn.execute(
+                        &format!(
+                            "INSERT OR IGNORE INTO \"{t}_{c}\" (\"{t}_id\", \"{c}_id\") VALUES (?1, ?2)",
+                            t = schema.table_name,
+                            c = col.name
+                        ),
+                        params![id, ref_id],
+                    )?;
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -634,12 +652,8 @@ fn extract_column_value(
 
     match zone {
         Zone::Reference => {
-            for field in &zettel.inline_fields {
-                if field.key == col.name {
-                    return field.value.trim().to_string();
-                }
-            }
-            String::new()
+            let values = extract_multi_reference_values(zettel, &col.name);
+            values.join(",")
         }
         Zone::Frontmatter => {
             // Use path navigation for dot/bracket names, flat lookup otherwise
@@ -663,6 +677,19 @@ fn extract_column_value(
             .map(|s| s.content.trim().to_string())
             .unwrap_or_default(),
     }
+}
+
+/// Extract all reference values for a given column name from a parsed zettel.
+fn extract_multi_reference_values(
+    zettel: &crate::types::ParsedZettel,
+    col_name: &str,
+) -> Vec<String> {
+    zettel
+        .inline_fields
+        .iter()
+        .filter(|f| f.key == col_name && f.zone == crate::types::Zone::Reference)
+        .map(|f| f.value.trim().to_string())
+        .collect()
 }
 
 /// Infer a SQL data type from a domain Value.
