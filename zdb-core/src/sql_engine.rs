@@ -3244,4 +3244,180 @@ mod tests {
             _ => panic!("expected Rows"),
         }
     }
+
+    #[test]
+    fn schema_roundtrips_title_template_and_origin() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE widgets (name VARCHAR(100), weight REAL)")
+            .unwrap();
+
+        // Load the typedef, patch in title_template and origin, rewrite, reload
+        let (_td_id, td_path) = engine.load_typedef_location("widgets").unwrap();
+        let content = repo.read_file(&td_path).unwrap();
+        let mut parsed = parser::parse(&content, &td_path).unwrap();
+        parsed.meta.extra.insert(
+            "title_template".to_string(),
+            Value::String("name-widget".into()),
+        );
+        parsed.meta.extra.insert(
+            "origin".to_string(),
+            Value::String("prd-00030".into()),
+        );
+        let new_content = parser::serialize(&parsed);
+        repo.commit_file(&td_path, &new_content, "add title_template and origin")
+            .unwrap();
+        let reparsed = parser::parse(&new_content, &td_path).unwrap();
+        index.index_zettel(&reparsed).unwrap();
+
+        let schema = engine.load_schema("widgets").unwrap();
+        assert_eq!(schema.title_template.as_deref(), Some("name-widget"));
+        assert_eq!(schema.origin.as_deref(), Some("prd-00030"));
+    }
+
+    #[test]
+    fn zone_inference_by_sql_type() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute(
+                "CREATE TABLE items (\
+                 short_name VARCHAR(100), \
+                 description TEXT, \
+                 priority INTEGER, \
+                 active BOOLEAN, \
+                 score REAL, \
+                 bio MEDIUMTEXT\
+                 )",
+            )
+            .unwrap();
+
+        let schema = engine.load_schema("items").unwrap();
+        let zone_of = |name: &str| -> Zone {
+            schema
+                .columns
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap()
+                .zone
+                .clone()
+                .unwrap()
+        };
+
+        assert_eq!(zone_of("short_name"), Zone::Frontmatter); // VARCHAR(100) → frontmatter
+        assert_eq!(zone_of("description"), Zone::Body); // TEXT → body
+        assert_eq!(zone_of("priority"), Zone::Frontmatter); // INTEGER → frontmatter
+        assert_eq!(zone_of("active"), Zone::Frontmatter); // BOOLEAN → frontmatter
+        assert_eq!(zone_of("score"), Zone::Frontmatter); // REAL → frontmatter
+        assert_eq!(zone_of("bio"), Zone::Body); // MEDIUMTEXT → body
+    }
+
+    #[test]
+    fn varchar_255_boundary() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE boundary (short VARCHAR(255), long VARCHAR(256))")
+            .unwrap();
+
+        let schema = engine.load_schema("boundary").unwrap();
+        let short = schema.columns.iter().find(|c| c.name == "short").unwrap();
+        let long = schema.columns.iter().find(|c| c.name == "long").unwrap();
+
+        assert_eq!(short.zone, Some(Zone::Frontmatter));
+        assert_eq!(short.data_type, "VARCHAR(255)");
+        assert_eq!(long.zone, Some(Zone::Body));
+        assert_eq!(long.data_type, "VARCHAR(256)");
+    }
+
+    #[test]
+    fn char_types_frontmatter() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE chars (code CHAR(10), tiny TINYTEXT)")
+            .unwrap();
+
+        let schema = engine.load_schema("chars").unwrap();
+        let code = schema.columns.iter().find(|c| c.name == "code").unwrap();
+        let tiny = schema.columns.iter().find(|c| c.name == "tiny").unwrap();
+
+        assert_eq!(code.zone, Some(Zone::Frontmatter));
+        assert_eq!(code.data_type, "CHAR(10)");
+        assert_eq!(tiny.zone, Some(Zone::Frontmatter));
+        assert_eq!(tiny.data_type, "TINYTEXT");
+    }
+
+    #[test]
+    fn enum_creates_allowed_values() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute(
+                "CREATE TABLE tasks (summary VARCHAR(200), status ENUM('todo','doing','done') DEFAULT 'todo')",
+            )
+            .unwrap();
+
+        let schema = engine.load_schema("tasks").unwrap();
+        let status = schema.columns.iter().find(|c| c.name == "status").unwrap();
+
+        assert_eq!(status.zone, Some(Zone::Frontmatter));
+        assert_eq!(
+            status.allowed_values,
+            Some(vec!["todo".into(), "doing".into(), "done".into()])
+        );
+        assert_eq!(status.default_value.as_deref(), Some("todo"));
+    }
+
+    #[test]
+    fn set_creates_allowed_values() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE prefs (tags SET('x','y','z'))")
+            .unwrap();
+
+        let schema = engine.load_schema("prefs").unwrap();
+        let tags = schema.columns.iter().find(|c| c.name == "tags").unwrap();
+
+        assert_eq!(tags.zone, Some(Zone::Frontmatter));
+        assert_eq!(
+            tags.allowed_values,
+            Some(vec!["x".into(), "y".into(), "z".into()])
+        );
+    }
+
+    #[test]
+    fn data_type_to_string_preserves_sizes() {
+        use sqlparser::ast::{CharacterLength, DataType};
+
+        let cases = vec![
+            (DataType::Varchar(Some(CharacterLength::IntegerLength { length: 100, unit: None })), "VARCHAR(100)"),
+            (DataType::Varchar(None), "VARCHAR"),
+            (DataType::Char(Some(CharacterLength::IntegerLength { length: 1, unit: None })), "CHAR(1)"),
+            (DataType::Char(None), "CHAR"),
+            (DataType::Text, "TEXT"),
+            (DataType::TinyText, "TINYTEXT"),
+            (DataType::MediumText, "MEDIUMTEXT"),
+            (DataType::LongText, "LONGTEXT"),
+            (DataType::Blob(None), "BLOB"),
+            (DataType::TinyBlob, "TINYBLOB"),
+            (DataType::MediumBlob, "MEDIUMBLOB"),
+            (DataType::LongBlob, "LONGBLOB"),
+            (DataType::Boolean, "BOOLEAN"),
+            (DataType::Integer(None), "INTEGER"),
+            (DataType::Real, "REAL"),
+        ];
+
+        for (dt, expected) in cases {
+            assert_eq!(super::data_type_to_string(&dt), expected, "for {dt:?}");
+        }
+    }
 }
