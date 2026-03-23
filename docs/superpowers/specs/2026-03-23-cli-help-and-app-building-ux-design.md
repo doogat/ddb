@@ -264,34 +264,42 @@ JOIN bookmark_category bc ON bc.bookmark_id = b.id
 WHERE bc.category_id = '20260301120100';
 ```
 
-**Inserting:**
+**Inserting and deleting:**
 
 ```sql
--- Single reference (populates both main table and junction)
+-- Single reference (populates both main table and junction, writes to Git)
 INSERT INTO bookmark (url, category) VALUES ('https://...', '20260301120100');
 
--- Additional references via junction table
+-- Add another reference (write-through: appends `- category:: [[...]]` to zettel, commits, re-indexes)
 INSERT INTO bookmark_category (bookmark_id, category_id)
 VALUES ('20260301120200', '20260301120101');
+
+-- Remove a reference (write-through: removes matching `- category:: [[...]]` line, commits, re-indexes)
+DELETE FROM bookmark_category
+WHERE bookmark_id = '20260301120200' AND category_id = '20260301120101';
 ```
 
-**Indexing from disk:** When a zettel has multiple `- category::` lines, all values go into the junction table. The main table column gets the comma-separated concatenation.
+Junction table writes are **write-through**: they modify the zettel's reference section in Git (source of truth), commit, then re-index. This is consistent with how INSERT INTO the main table works — SQL writes always go through Git.
+
+**Indexing from disk:** When a zettel has multiple `- category::` lines, all values go into the junction table. The main table column gets the comma-separated concatenation. Reference values are always ZettelIDs (14-digit timestamps) — commas cannot appear in IDs, so the concatenation is unambiguous.
+
+**DROP TABLE cascade:** `DROP TABLE bookmark` also drops all junction tables for that type (e.g. `bookmark_category`).
 
 **Impact across all API surfaces:**
 
 | Surface | Change |
 |---------|--------|
 | **SQL/materialized** | Main table column: comma-separated. Junction table for filtering/JOINs. |
-| **GraphQL typed queries** | Keep scalar field (concatenated string). Add list field via junction: `categories: [Category!]!` |
+| **GraphQL typed queries** | Keep scalar field (concatenated string). Add list field (pluralized column name, e.g. `categories: [Category!]!` resolving to the referenced type's GraphQL object, or `[String!]!` of IDs if the referenced type has no typedef). |
 | **GraphQL mutations** | `executeSql` supports INSERT INTO junction table for additional refs |
 | **REST JSON** | Replace raw `reference_section` string with structured multi-value fields: `"category": ["20260301120100", "20260301120101"]` |
-| **NoSQL JSON** | Same structured field as REST |
+| **NoSQL JSON** | Gets structured fields for free — `nosql_api.rs` delegates to `rest::zettel_to_json()` |
 | **FFI** | Junction tables queryable via same `execute_sql` SQL interface — no FFI API change |
 | **CLI read/get** | No change — raw Markdown naturally shows all `- category::` lines |
 
 **Sync is unaffected** — junction tables are derived index data, rebuilt on reindex like all materialized tables.
 
-**Parser already supports it** — `extract_inline_fields()` in parser.rs already extracts multiple `- key:: value` lines with the same key as separate `InlineField` entries.
+**Parser change required** — `extract_inline_fields()` in parser.rs currently deduplicates same-key reference fields via a `seen` HashMap ("first wins"). This must change: for `Zone::Reference`, collect ALL same-key entries into the `Vec<InlineField>` instead of discarding duplicates. Body zone keeps first-wins behavior. This parser change is a prerequisite for junction tables.
 
 **`_zdb_fields` stays internal** — junction tables are the public API for multi-valued references. Documentation and `zdb help create-app` never reference `_zdb_fields`.
 
@@ -299,26 +307,28 @@ VALUES ('20260301120200', '20260301120101');
 
 | File | Change |
 |------|--------|
-| `zdb-core/src/sql_engine.rs` | On CREATE TABLE with REFERENCES column, also create junction table. On INSERT, populate both main column (concatenated) and junction table. On INSERT INTO junction table directly, validate both IDs exist. |
-| `zdb-core/src/indexer/materialize.rs` | `extract_column_value()` for Zone::Reference: collect ALL matching inline_fields, concatenate for main table, insert each into junction table. `create_materialized_table()`: also create junction table DDL. |
+| `zdb-core/src/parser.rs` | `extract_inline_fields()`: remove first-wins dedup for `Zone::Reference` — collect all same-key entries. Prerequisite for all junction table work. |
+| `zdb-core/src/sql_engine.rs` | On CREATE TABLE with REFERENCES column, also create junction table. On INSERT, populate both main column (concatenated) and junction table. INSERT/DELETE on junction table: write-through to zettel Git + re-index. On DROP TABLE, cascade to junction tables. |
+| `zdb-core/src/indexer/materialize.rs` | `extract_column_value()` for Zone::Reference: collect ALL matching inline_fields, concatenate for main table, insert each into junction table. `create_materialized_table()`: also create junction table DDL. `drop_and_create_materialized_table()` and `rematerialize_type()`: include junction table drop/create/populate in the same flow. |
 | `zdb-server/src/schema/mod.rs` | For REFERENCES columns, generate both scalar field (concatenated) and list field (junction query). |
 | `zdb-server/src/schema/base_types.rs` | `zettel_to_value()`: map multi-valued reference fields to arrays. |
 | `zdb-server/src/rest.rs` | `zettel_to_json()`: structured multi-value arrays for reference fields instead of raw Markdown. |
-| `zdb-server/src/nosql_api.rs` | Same structured output as REST. |
+| `zdb-server/src/nosql_api.rs` | No change needed — delegates to `rest::zettel_to_json()`. |
 | `zdb-core/src/types.rs` | No struct changes needed — `InlineField` already supports multiple entries per key. |
 
 ## Code Locations
 
 | Change | File |
 |--------|------|
-| Zone inference, ALTER TABLE SET ZONE, ALTER TABLE SET/DROP TITLE TEMPLATE, title cascade, ENUM/SET extraction, origin stamping, junction table DDL, junction INSERT | `zdb-core/src/sql_engine.rs` |
+| Reference zone dedup removal (prerequisite) | `zdb-core/src/parser.rs` |
+| Zone inference, ALTER TABLE SET ZONE, ALTER TABLE SET/DROP TITLE TEMPLATE, title cascade, ENUM/SET extraction, origin stamping, junction table DDL, junction INSERT/DELETE write-through, DROP TABLE cascade | `zdb-core/src/sql_engine.rs` |
 | Schema struct fields (title_template, origin) | `zdb-core/src/types.rs` |
 | Help subcommand, after_long_help, typedef warning | `zdb-cli/src/main.rs` |
 | Title compliance check, manual typedef flag | `zdb-core/src/indexer/` (fix module) |
 | Zone migration on fix --migrate | `zdb-core/src/indexer/` |
 | Multi-value reference materialization, junction table population, concatenated main column | `zdb-core/src/indexer/materialize.rs` |
 | GraphQL list fields for REFERENCES columns, junction query resolution | `zdb-server/src/schema/mod.rs`, `zdb-server/src/schema/base_types.rs` |
-| Structured multi-value JSON for reference fields | `zdb-server/src/rest.rs`, `zdb-server/src/nosql_api.rs` |
+| Structured multi-value JSON for reference fields | `zdb-server/src/rest.rs` (nosql_api.rs gets it for free via delegation) |
 | Doc corrections | `docs/src/guide/building-apps.md` |
 
 ## Tests
@@ -333,10 +343,13 @@ VALUES ('20260301120200', '20260301120101');
 - `zdb fix` title compliance repair
 - `zdb fix` manual typedef warning
 - `zdb fix --migrate` zone rewrites
+- Parser: multiple `- category::` lines with same key produce multiple InlineField entries (not deduped)
 - Junction table auto-creation on CREATE TABLE with REFERENCES
 - Junction table population from multiple `- key::` lines during indexing
-- Main table REFERENCES column contains comma-separated concatenation
-- INSERT into main table populates junction; INSERT into junction table directly works
+- Main table REFERENCES column contains comma-separated concatenation of ZettelIDs
+- INSERT into main table populates junction; INSERT into junction table write-through appends reference line to zettel
+- DELETE from junction table write-through removes reference line from zettel
+- DROP TABLE cascades to junction tables
 - GraphQL list field resolves via junction table query
 - REST/NoSQL JSON returns structured arrays for reference fields
-- Reindex rebuilds junction tables from zettel Markdown
+- Reindex rebuilds junction tables (drop/create/populate) from zettel Markdown
