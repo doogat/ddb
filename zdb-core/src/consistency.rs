@@ -413,6 +413,8 @@ pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
                 parsed.meta.zettel_type = Some(new.clone());
             }
             Fix::ManualTypedef { .. } => {} // informational only, no mutation
+            Fix::TitleNonCompliant { .. } => {} // handled in task 3
+            Fix::ZoneMigrated { .. } => {}      // zone migration applied separately
         }
     }
 

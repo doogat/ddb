@@ -1053,15 +1053,19 @@ pub enum Fix {
     FieldRenamed { old: String, new: String },
     TypeNormalized { old: String, new: String },
     ManualTypedef { type_name: String },
+    TitleNonCompliant { expected: String },
+    ZoneMigrated { column: String, from: Zone, to: Zone },
 }
 
 impl Fix {
     pub fn severity(&self) -> Severity {
         match self {
             Fix::CrossZoneResolved { .. } => Severity::Error,
-            Fix::DefaultSet { .. } | Fix::TitleDerived { .. } | Fix::FieldRenamed { .. } => {
-                Severity::Warning
-            }
+            Fix::DefaultSet { .. }
+            | Fix::TitleDerived { .. }
+            | Fix::FieldRenamed { .. }
+            | Fix::TitleNonCompliant { .. }
+            | Fix::ZoneMigrated { .. } => Severity::Warning,
             Fix::TagsDeduped { .. }
             | Fix::TagsSorted
             | Fix::TagsStrippedHash { .. }
@@ -1106,6 +1110,12 @@ impl fmt::Display for Fix {
                 f,
                 "manual typedef '{type_name}' — consider recreating with: zdb query \"CREATE TABLE {type_name} (...)\""
             ),
+            Fix::TitleNonCompliant { expected } => {
+                write!(f, "title does not match template (expected: {expected})")
+            }
+            Fix::ZoneMigrated { column, from, to } => {
+                write!(f, "migrated column '{column}' from {from:?} to {to:?}")
+            }
         }
     }
 }
