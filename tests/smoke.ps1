@@ -1068,6 +1068,27 @@ $hDel = zdb query "DELETE FROM `"my-type`" WHERE id = '$MY_ID'"
 if ($hDel -notmatch "1 row") { throw "hyphenated delete failed: $hDel" }
 pass "hyphenated type SQL"
 
+# 37. junction table CRUD (multi-value references)
+Push-Location $TMPDIR
+zdb query "CREATE TABLE jtag (name VARCHAR(100))" | Out-Null
+zdb query "CREATE TABLE jpost (url TEXT, jtag TEXT REFERENCES jtag)" | Out-Null
+$JT_TAG_ID = zdb query "INSERT INTO jtag (name) VALUES ('rust')"
+Start-Sleep -Seconds 1
+$JT_POST_ID = zdb query "INSERT INTO jpost (url) VALUES ('https://example.com')"
+$jtIns = zdb query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')"
+if ($jtIns -notmatch "1 row") { throw "junction insert failed: $jtIns" }
+$jtSel = zdb query "SELECT jtag_id FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID'"
+if ($jtSel -notmatch $JT_TAG_ID) { throw "junction select failed: $jtSel" }
+$jtDel = zdb query "DELETE FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID' AND jtag_id = '$JT_TAG_ID'"
+if ($jtDel -notmatch "1 row") { throw "junction delete failed: $jtDel" }
+$jtCount = zdb query "SELECT COUNT(*) FROM jpost_jtag"
+if ($jtCount -notmatch "0") { throw "junction not empty after delete: $jtCount" }
+zdb query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')" | Out-Null
+$jtDrop = zdb query "DROP TABLE jpost CASCADE"
+if ($jtDrop -notmatch "dropped") { throw "cascade drop failed: $jtDrop" }
+if (-not (zdb-fails query "SELECT * FROM jpost_jtag")) { throw "junction table should not exist after cascade" }
+pass "junction table CRUD"
+
 # Return to original directory
 Set-Location $TMPDIR
 

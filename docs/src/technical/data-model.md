@@ -107,6 +107,19 @@ pub struct InlineField {
 }
 ```
 
+### Multi-Value Reference Fields
+
+A zettel's reference section can contain multiple lines with the same key, representing a many-to-many relationship:
+
+```markdown
+## References
+- category:: [[20260310120000]]
+- category:: [[20260310120001]]
+- category:: [[20260310120002]]
+```
+
+All lines are preserved through parse/serialize round-trips. During materialization, each line becomes a row in the corresponding junction table (e.g. `bookmark_category`). The SQL engine's INSERT and DELETE write-through operations on junction tables add and remove individual reference lines.
+
 ### LinkKind
 
 Discriminant for the four supported link syntaxes:

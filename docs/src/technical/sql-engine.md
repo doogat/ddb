@@ -186,6 +186,51 @@ COMMIT;
 -- Single git commit with message "transaction"
 ```
 
+## Junction Tables (Multi-Value References)
+
+Columns declared with `REFERENCES` produce junction tables that enable many-to-many relationships between zettel types. A single zettel can reference multiple targets for the same column, stored as multiple `- col:: [[target]]` lines in the reference section.
+
+### Naming Convention
+
+Junction tables follow the pattern `{type}_{column}`. For example:
+
+```sql
+CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)
+```
+
+produces a junction table named `bookmark_category`.
+
+### DDL Auto-Creation
+
+Junction tables are created automatically during `materialize_tables()` for every column with a `references` field in the typedef schema. Each junction table has two columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `{type}_id` | TEXT | Foreign key to the owning zettel |
+| `{column}_id` | TEXT | Foreign key to the referenced zettel |
+
+Both columns together form the effective composite key. The junction table is populated during materialization by scanning each data zettel's reference section for matching `- col:: [[id]]` lines.
+
+### INSERT Write-Through
+
+```sql
+INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('20260310120000', '20260310120001')
+```
+
+Appends a `- category:: [[20260310120001]]` line to the bookmark zettel's reference section and inserts a row into the materialized junction table. Multiple inserts add multiple reference lines.
+
+### DELETE Write-Through
+
+```sql
+DELETE FROM bookmark_category WHERE bookmark_id = '20260310120000' AND category_id = '20260310120001'
+```
+
+Removes the matching `- category:: [[id]]` line from the bookmark zettel's reference section and deletes the row from the materialized junction table.
+
+### DROP CASCADE
+
+`DROP TABLE bookmark CASCADE` deletes all bookmark data zettels, the bookmark typedef, the materialized `bookmark` table, **and** all associated junction tables (`bookmark_category`, etc.).
+
 ## Not Supported
 
 These SQL features are explicitly rejected with descriptive error messages. They either operate only on the materialized cache (lost on reindex) or bypass git storage (causing zettel-cache divergence).
@@ -204,4 +249,4 @@ These SQL features are explicitly rejected with descriptive error messages. They
 
 ## Test Coverage
 
-65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 9 rejection tests for unsupported SQL features, and 7 type-aware inference tests. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`.
+65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 9 rejection tests for unsupported SQL features, and 7 type-aware inference tests. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns).

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Junction tables for multi-value references: `REFERENCES` columns auto-create `{type}_{col}` junction tables with INSERT/DELETE write-through and DROP CASCADE support
+- Pluralized GraphQL list fields and REST `references` JSON object for multi-value reference columns
 - Cross-device ID collision detection: when two devices create a zettel in the same second, both survive sync with distinct IDs
 - `SyncReport.collisions_reassigned` field and CLI display
 - `collisionsReassigned` field in GraphQL `SyncResult`

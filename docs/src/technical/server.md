@@ -281,6 +281,22 @@ Column type mapping:
 | TEXT | body | `String` (section content) |
 | TEXT | reference | `String` (wikilink target) |
 
+#### Multi-Value Reference Fields
+
+Columns with `REFERENCES` produce a pluralized `[String!]!` list field on the GraphQL type instead of a scalar `String`. For example, a `category TEXT REFERENCES category` column generates a `categories: [String!]!` field that returns all referenced IDs from the junction table. The pluralization follows English rules (category → categories, tag → tags).
+
+The REST API exposes multi-value references via a `references` JSON object on each zettel. Each key maps to an array of referenced IDs:
+
+```json
+{
+  "id": "20260310120000",
+  "url": "https://example.com",
+  "references": {
+    "category": ["20260310120001", "20260310120002"]
+  }
+}
+```
+
 ### Filtering
 
 Each per-type query accepts a `where` argument with field-level filters. Filter types match column data types:

@@ -925,4 +925,20 @@ $ZDB query 'SELECT label FROM "my-type"' | grep -q "test"
 $ZDB query "DELETE FROM \"my-type\" WHERE id = '$MY_ID'" | grep -q "1 row(s) affected"
 pass "hyphenated type SQL"
 
+# 37. junction table CRUD (multi-value references)
+cd "$TMPDIR"
+$ZDB query "CREATE TABLE jtag (name VARCHAR(100))" | grep -q "table jtag created"
+$ZDB query "CREATE TABLE jpost (url TEXT, jtag TEXT REFERENCES jtag)" | grep -q "table jpost created"
+JT_TAG_ID=$($ZDB query "INSERT INTO jtag (name) VALUES ('rust')")
+sleep 1
+JT_POST_ID=$($ZDB query "INSERT INTO jpost (url) VALUES ('https://example.com')")
+$ZDB query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')" | grep -q "1 row"
+$ZDB query "SELECT jtag_id FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID'" | grep -q "$JT_TAG_ID"
+$ZDB query "DELETE FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID' AND jtag_id = '$JT_TAG_ID'" | grep -q "1 row"
+$ZDB query "SELECT COUNT(*) FROM jpost_jtag" | grep -q "0"
+$ZDB query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')" >/dev/null
+$ZDB query "DROP TABLE jpost CASCADE" | grep -q "dropped"
+! $ZDB query "SELECT * FROM jpost_jtag" 2>/dev/null
+pass "junction table CRUD"
+
 echo "=== all passed ==="

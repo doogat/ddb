@@ -286,7 +286,7 @@ pub(crate) fn typed_zettel_to_value(z: &ParsedZettel, schema: &TableSchema) -> G
                 .map(|f| GqlValue::from(f.value.clone()))
                 .collect();
             obj.insert(
-                Name::new(&pluralize(&col.name)),
+                Name::new(pluralize(&col.name)),
                 GqlValue::List(ref_values),
             );
         }
