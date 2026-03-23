@@ -9,6 +9,19 @@ use super::Index;
 impl Index {
     /// Drop and recreate a materialized SQLite table from a schema.
     fn drop_and_create_materialized_table(&self, schema: &crate::types::TableSchema) -> Result<()> {
+        // Drop junction tables first (before main table)
+        for col in &schema.columns {
+            if col.references.is_some() {
+                self.conn.execute(
+                    &format!(
+                        "DROP TABLE IF EXISTS \"{}_{}\""  ,
+                        schema.table_name, col.name
+                    ),
+                    [],
+                )?;
+            }
+        }
+
         self.conn.execute(
             &format!("DROP TABLE IF EXISTS \"{}\"", schema.table_name),
             [],
@@ -46,6 +59,21 @@ impl Index {
             ),
             [],
         )?;
+
+        // Create junction tables for REFERENCES columns
+        for col in &schema.columns {
+            if col.references.is_some() {
+                self.conn.execute(
+                    &format!(
+                        "CREATE TABLE IF NOT EXISTS \"{t}_{c}\" (\"{t}_id\" TEXT NOT NULL, \"{c}_id\" TEXT NOT NULL, PRIMARY KEY (\"{t}_id\", \"{c}_id\"))",
+                        t = schema.table_name,
+                        c = col.name
+                    ),
+                    [],
+                )?;
+            }
+        }
+
         Ok(())
     }
 

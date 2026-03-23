@@ -969,3 +969,47 @@ Widget
         );
     }
 
+    #[test]
+    fn create_table_creates_junction_table_for_references() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        let schema_content = "\
+---
+id: 20260301140000
+title: bookmark
+type: _typedef
+columns:
+  - name: url
+    data_type: TEXT
+    zone: body
+  - name: category
+    data_type: TEXT
+    references: category
+    zone: reference
+---\n";
+        repo.commit_file(
+            "zettelkasten/_typedef/20260301140000.md",
+            schema_content,
+            "add typedef",
+        )
+        .unwrap();
+
+        let db_path = dir.path().join(".zdb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        // Junction table should exist in sqlite_master
+        let rows = idx
+            .query_raw("SELECT name FROM sqlite_master WHERE type='table' AND name='bookmark_category'")
+            .unwrap();
+        assert_eq!(rows.len(), 1, "junction table bookmark_category should exist");
+
+        // Verify junction table schema has correct columns
+        let info = idx.query_raw("PRAGMA table_info('bookmark_category')").unwrap();
+        let col_names: Vec<&str> = info.iter().map(|r| r[1].as_str()).collect();
+        assert!(col_names.contains(&"bookmark_id"), "should have bookmark_id column");
+        assert!(col_names.contains(&"category_id"), "should have category_id column");
+    }
+
