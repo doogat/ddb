@@ -36,6 +36,7 @@ fn re_unfilled_placeholder() -> &'static Regex {
 }
 
 use crate::error::{Result, ZettelError};
+use crate::indexer::materialize::junction_table_ddl;
 use crate::indexer::Index;
 use crate::parser;
 use crate::traits::ZettelStore;
@@ -514,11 +515,7 @@ impl<'a> SqlEngine<'a> {
         for col in &schema.columns {
             if col.references.is_some() {
                 self.index.conn.execute(
-                    &format!(
-                        "CREATE TABLE IF NOT EXISTS \"{t}_{c}\" (\"{t}_id\" TEXT NOT NULL, \"{c}_id\" TEXT NOT NULL, PRIMARY KEY (\"{t}_id\", \"{c}_id\"))",
-                        t = schema.table_name,
-                        c = col.name
-                    ),
+                    &junction_table_ddl(&schema.table_name, &col.name),
                     [],
                 )?;
             }
@@ -580,13 +577,7 @@ impl<'a> SqlEngine<'a> {
         let ids = self.unique_ids(rows.len())?;
 
         // Collect which referenced types use folder storage (for path-qualified wikilinks)
-        let ref_folder_types: std::collections::HashSet<String> = schema
-            .columns
-            .iter()
-            .filter_map(|c| c.references.as_ref())
-            .filter(|ref_table| self.index.type_uses_folder(ref_table, self.repo))
-            .cloned()
-            .collect();
+        let ref_folder_types = self.ref_folder_types(&schema);
 
         let mut created_ids = Vec::with_capacity(rows.len());
         let mut files: Vec<(String, String)> = Vec::with_capacity(rows.len());
@@ -1256,6 +1247,17 @@ impl<'a> SqlEngine<'a> {
     /// Check if `table_name` is a junction table (`{type}_{col}` where type is
     /// a known typedef and col is a REFERENCES column in that typedef).
     /// Returns `Some((type_name, col_name))` if it is.
+    /// Collect referenced types that use folder storage (for path-qualified wikilinks).
+    fn ref_folder_types(&self, schema: &TableSchema) -> std::collections::HashSet<String> {
+        schema
+            .columns
+            .iter()
+            .filter_map(|c| c.references.as_ref())
+            .filter(|ref_table| self.index.type_uses_folder(ref_table, self.repo))
+            .cloned()
+            .collect()
+    }
+
     fn resolve_junction_table(&mut self, table_name: &str) -> Result<Option<(String, String)>> {
         // Try each possible split point of `type_col`
         for (i, _) in table_name.match_indices('_') {
@@ -1324,13 +1326,7 @@ impl<'a> SqlEngine<'a> {
                     "column {col_name} not found or not a REFERENCES column"
                 ))
             })?;
-        let ref_folder_types: std::collections::HashSet<String> = schema
-            .columns
-            .iter()
-            .filter_map(|c| c.references.as_ref())
-            .filter(|ref_table| self.index.type_uses_folder(ref_table, self.repo))
-            .cloned()
-            .collect();
+        let ref_folder_types = self.ref_folder_types(&schema);
 
         let mut affected = 0;
         for row_values in &rows {
@@ -1368,6 +1364,16 @@ impl<'a> SqlEngine<'a> {
                 };
             let ref_line = format!("- {}:: [[{}]]", col_name, link_target);
 
+            // Skip if reference line already exists (idempotent)
+            if parsed
+                .reference_section
+                .lines()
+                .any(|line| line.trim() == ref_line.trim())
+            {
+                affected += 1;
+                continue;
+            }
+
             // Append to reference section
             let trimmed = parsed.reference_section.trim_end();
             parsed.reference_section = if trimmed.is_empty() {
@@ -1376,19 +1382,27 @@ impl<'a> SqlEngine<'a> {
                 format!("{trimmed}\n{ref_line}\n")
             };
 
-            // Serialize and commit
+            // Serialize
             let new_content = parser::serialize(&parsed);
-            self.repo.commit_file(
-                &path,
-                &new_content,
-                &format!("add {col_name} ref {target_id} to {type_name} {parent_id}"),
-            )?;
 
             // Re-index this zettel
             let re_parsed = parser::parse(&new_content, &path)?;
             self.index.index_zettel(&re_parsed)?;
             self.index
                 .materialize_single(&schema, parent_id, &re_parsed)?;
+
+            if let Some(ref mut buf) = self.txn {
+                buf.writes.push(PendingWrite {
+                    path,
+                    content: new_content,
+                });
+            } else {
+                self.repo.commit_file(
+                    &path,
+                    &new_content,
+                    &format!("add {col_name} ref {target_id} to {type_name} {parent_id}"),
+                )?;
+            }
 
             affected += 1;
         }
@@ -1415,13 +1429,7 @@ impl<'a> SqlEngine<'a> {
                     "column {col_name} not found or not a REFERENCES column"
                 ))
             })?;
-        let ref_folder_types: std::collections::HashSet<String> = schema
-            .columns
-            .iter()
-            .filter_map(|c| c.references.as_ref())
-            .filter(|ref_table| self.index.type_uses_folder(ref_table, self.repo))
-            .cloned()
-            .collect();
+        let ref_folder_types = self.ref_folder_types(&schema);
 
         // Read parent zettel
         let path = self.index.resolve_path(parent_id)?;
@@ -1447,25 +1455,39 @@ impl<'a> SqlEngine<'a> {
             .lines()
             .filter(|line| line.trim() != ref_line.trim())
             .collect();
-        parsed.reference_section = if new_lines.is_empty() {
+        let new_section = if new_lines.is_empty() {
             String::new()
         } else {
             format!("{}\n", new_lines.join("\n"))
         };
 
-        // Serialize and commit
+        // Skip commit if nothing changed
+        if new_section == old_section {
+            return Ok(SqlResult::Affected(0));
+        }
+        parsed.reference_section = new_section;
+
+        // Serialize
         let new_content = parser::serialize(&parsed);
-        self.repo.commit_file(
-            &path,
-            &new_content,
-            &format!("remove {col_name} ref {target_id} from {type_name} {parent_id}"),
-        )?;
 
         // Re-index
         let re_parsed = parser::parse(&new_content, &path)?;
         self.index.index_zettel(&re_parsed)?;
         self.index
             .materialize_single(&schema, parent_id, &re_parsed)?;
+
+        if let Some(ref mut buf) = self.txn {
+            buf.writes.push(PendingWrite {
+                path,
+                content: new_content,
+            });
+        } else {
+            self.repo.commit_file(
+                &path,
+                &new_content,
+                &format!("remove {col_name} ref {target_id} from {type_name} {parent_id}"),
+            )?;
+        }
 
         Ok(SqlResult::Affected(1))
     }

@@ -6,6 +6,15 @@ use crate::types::ParsedZettel;
 
 use super::Index;
 
+/// DDL for creating a junction table for a REFERENCES column.
+pub fn junction_table_ddl(table_name: &str, col_name: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS \"{t}_{c}\" (\"{t}_id\" TEXT NOT NULL, \"{c}_id\" TEXT NOT NULL, PRIMARY KEY (\"{t}_id\", \"{c}_id\"))",
+        t = table_name,
+        c = col_name
+    )
+}
+
 impl Index {
     /// Drop and recreate a materialized SQLite table from a schema.
     fn drop_and_create_materialized_table(&self, schema: &crate::types::TableSchema) -> Result<()> {
@@ -14,7 +23,7 @@ impl Index {
             if col.references.is_some() {
                 self.conn.execute(
                     &format!(
-                        "DROP TABLE IF EXISTS \"{}_{}\""  ,
+                        "DROP TABLE IF EXISTS \"{}_{}\"",
                         schema.table_name, col.name
                     ),
                     [],
@@ -63,14 +72,8 @@ impl Index {
         // Create junction tables for REFERENCES columns
         for col in &schema.columns {
             if col.references.is_some() {
-                self.conn.execute(
-                    &format!(
-                        "CREATE TABLE IF NOT EXISTS \"{t}_{c}\" (\"{t}_id\" TEXT NOT NULL, \"{c}_id\" TEXT NOT NULL, PRIMARY KEY (\"{t}_id\", \"{c}_id\"))",
-                        t = schema.table_name,
-                        c = col.name
-                    ),
-                    [],
-                )?;
+                self.conn
+                    .execute(&junction_table_ddl(&schema.table_name, &col.name), [])?;
             }
         }
 

@@ -1,5 +1,5 @@
 mod graph;
-mod materialize;
+pub(crate) mod materialize;
 mod resolve;
 
 use std::path::Path;
