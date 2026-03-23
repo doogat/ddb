@@ -205,6 +205,11 @@ impl<'a> SqlEngine<'a> {
     }
 
     pub fn execute_batch(&mut self, sql: &str) -> Result<Vec<SqlResult>> {
+        // Pre-parse interception for custom DDL that sqlparser can't handle
+        if let Some(result) = self.try_custom_ddl(sql)? {
+            return Ok(vec![result]);
+        }
+
         let dialect = GenericDialect {};
         let statements = Parser::parse_sql(&dialect, sql)
             .map_err(|e| ZettelError::SqlEngine(format!("parse: {e}")))?;
