@@ -1112,6 +1112,9 @@ impl<'a> SqlEngine<'a> {
         };
         let (typedef_id, typedef_path) = typedef_loc;
 
+        // Load schema before git deletes (needed for junction table cleanup)
+        let schema = self.load_schema(table_name).ok();
+
         // Find all data zettels of this type
         let data_zettels: Vec<(String, String)> = {
             let mut stmt = self
@@ -1169,6 +1172,18 @@ impl<'a> SqlEngine<'a> {
             }
             // Remove typedef from index
             self.index.remove_zettel(&typedef_id)?;
+        }
+
+        // Drop junction tables for REFERENCES columns
+        if let Some(ref schema) = schema {
+            for col in &schema.columns {
+                if col.references.is_some() {
+                    self.index.conn.execute(
+                        &format!("DROP TABLE IF EXISTS \"{table_name}_{col_name}\"", col_name = col.name),
+                        [],
+                    )?;
+                }
+            }
         }
 
         // Drop materialized SQLite table
@@ -4383,5 +4398,41 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(rows.len(), 0, "junction table should be empty");
+    }
+
+    #[test]
+    fn drop_table_cascades_junction_tables() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+
+        // Verify junction table exists
+        let tables = index
+            .query_raw("SELECT name FROM sqlite_master WHERE type='table' AND name='bookmark_category'")
+            .unwrap();
+        assert_eq!(tables.len(), 1, "junction table should exist before drop");
+
+        // DROP TABLE CASCADE
+        engine
+            .execute("DROP TABLE bookmark CASCADE")
+            .unwrap();
+
+        // Junction table should be gone
+        let tables = index
+            .query_raw("SELECT name FROM sqlite_master WHERE type='table' AND name='bookmark_category'")
+            .unwrap();
+        assert_eq!(tables.len(), 0, "junction table should be dropped after cascade");
+
+        // Main table should also be gone
+        let tables = index
+            .query_raw("SELECT name FROM sqlite_master WHERE type='table' AND name='bookmark'")
+            .unwrap();
+        assert_eq!(tables.len(), 0, "main table should be dropped");
     }
 }
