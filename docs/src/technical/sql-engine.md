@@ -1,6 +1,6 @@
 # SQL Engine
 
-**Source**: `zdb-core/src/sql_engine.rs` (~2,400 lines)
+**Source**: `zdb-core/src/sql_engine.rs` (~3,400 lines)
 
 Translates SQL DDL/DML statements into zettel CRUD operations. Tables map to zettel types — `CREATE TABLE` produces a `_typedef` zettel, `INSERT` produces a typed data zettel, etc.
 
@@ -30,7 +30,9 @@ All methods take `&mut self`. The CLI creates `SqlEngine` per invocation; the se
 | `DROP TABLE foo CASCADE` | Deletes typedef + all data zettels |
 | `DROP TABLE IF EXISTS foo` | No-op if table doesn't exist |
 
-Column types: `TEXT`, `INTEGER`, `REAL`, `BOOLEAN`. Foreign keys via `REFERENCES other_type(id)`.
+Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTEXT`, `INTEGER`, `REAL`, `BOOLEAN`, `BLOB` variants, `BINARY`, `VARBINARY`, `ENUM('a','b')`, `SET('x','y')`. Foreign keys via `REFERENCES other_type(id)`.
+
+`ENUM` and `SET` columns extract `allowed_values` into the typedef schema and store as `TEXT` in SQLite.
 
 ### DML
 
@@ -63,11 +65,11 @@ Each column maps to a zettel zone based on explicit `zone` field or inference:
 
 | Zone | Storage | Examples |
 |------|---------|----------|
-| `frontmatter` | YAML `extra` fields | INTEGER, REAL, BOOLEAN values |
-| `body` | `## heading` sections | TEXT content |
+| `frontmatter` | YAML `extra` fields | INTEGER, REAL, BOOLEAN, CHAR(n), VARCHAR(n<=255), TINYTEXT, ENUM, SET |
+| `body` | `## heading` sections | TEXT, VARCHAR(n>255), MEDIUMTEXT, LONGTEXT, BLOB variants |
 | `reference` | `- key:: value` lines | Wikilinks, FK references |
 
-The `effective_zone()` helper resolves the zone: explicit zone from `_typedef` wins, otherwise inferred from data type and references.
+Zone inference uses `is_short_string_type()` (AST-based) at CREATE TABLE time and `is_short_string_type_str()` (string-based) at runtime in `effective_zone()`. The 255-char boundary follows MySQL convention. `effective_zone()` resolves: explicit zone from `_typedef` wins, then references, then numeric/short-string → frontmatter, else body. Columns with `allowed_values` always infer frontmatter.
 
 ## _typedef Zettel Format
 
@@ -90,6 +92,8 @@ crdt_strategy: preset:append-log
 template_sections:
   - Description
   - Log
+title_template: name-template
+origin: prd-00030
 ---
 ```
 
@@ -97,6 +101,9 @@ template_sections:
 
 - `build_typedef_zettel(id, schema)` — serialize a `TableSchema` to a `ParsedZettel`
 - `schema_from_parsed(zettel)` — deserialize a `_typedef` zettel back to `TableSchema`
+- `data_type_to_string(dt)` — convert AST `DataType` to stored string (preserves VARCHAR size)
+- `is_short_string_type(dt)` — AST-based check for frontmatter-eligible string types
+- `extract_allowed_values(dt)` — extract ENUM/SET variant names from AST
 
 ## Bulk Operations
 
@@ -188,4 +195,4 @@ These SQL features are explicitly rejected with descriptive error messages. They
 
 ## Test Coverage
 
-48+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping, duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, and 9 rejection tests for unsupported SQL features. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`.
+65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 9 rejection tests for unsupported SQL features, and 7 type-aware inference tests. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`.

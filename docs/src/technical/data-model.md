@@ -266,6 +266,9 @@ pub struct TableSchema {
     pub crdt_strategy: Option<String>,   // e.g. "preset:append-log"
     pub template_sections: Vec<String>,  // expected body section headings
     pub folder: bool,                    // store instances in zettelkasten/{type}/ subdirectory
+    pub stale_after_days: Option<u32>,   // stale discovery threshold
+    pub title_template: Option<String>,  // title pattern for new instances
+    pub origin: Option<String>,          // tracking label (e.g. PRD that created this type)
 }
 ```
 
