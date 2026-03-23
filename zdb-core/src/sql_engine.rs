@@ -1520,7 +1520,10 @@ fn effective_zone(col: &ColumnDef) -> Zone {
     }
     if col.references.is_some() {
         Zone::Reference
-    } else if is_numeric_type(&col.data_type) || is_short_string_type_str(&col.data_type) {
+    } else if is_numeric_type(&col.data_type)
+        || is_short_string_type_str(&col.data_type)
+        || col.allowed_values.is_some()
+    {
         Zone::Frontmatter
     } else {
         Zone::Body
@@ -3392,6 +3395,30 @@ mod tests {
             tags.allowed_values,
             Some(vec!["x".into(), "y".into(), "z".into()])
         );
+    }
+
+    #[test]
+    fn blob_types_body() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE binaries (data BLOB, big MEDIUMBLOB, huge LONGBLOB)")
+            .unwrap();
+
+        let schema = engine.load_schema("binaries").unwrap();
+        for col_name in &["data", "big", "huge"] {
+            let col = schema
+                .columns
+                .iter()
+                .find(|c| c.name == *col_name)
+                .unwrap_or_else(|| panic!("missing column {col_name}"));
+            assert_eq!(
+                col.zone,
+                Some(Zone::Body),
+                "{col_name} should be body zone"
+            );
+        }
     }
 
     #[test]
