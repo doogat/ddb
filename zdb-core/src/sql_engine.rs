@@ -804,6 +804,17 @@ impl<'a> SqlEngine<'a> {
             .first()
             .map(|f| unquote_identifier(&f.relation.to_string()))
             .ok_or_else(|| ZettelError::SqlEngine("missing table in DELETE".into()))?;
+
+        // Check if this is a junction table DELETE
+        if let Some((type_name, col_name)) = self.resolve_junction_table(&table_name)? {
+            let type_id_col = format!("{type_name}_id");
+            let ref_id_col = format!("{col_name}_id");
+            // Extract both IDs from WHERE clause: {type}_id = '...' AND {col}_id = '...'
+            let (parent_id, target_id) =
+                extract_junction_where(&del.selection, &type_id_col, &ref_id_col)?;
+            return self.handle_junction_delete(&type_name, &col_name, &parent_id, &target_id);
+        }
+
         let _schema = self.load_schema(&table_name)?;
 
         // Fast path: single-row WHERE id = '...'
@@ -1648,6 +1659,49 @@ fn extract_where_id(selection: &Option<Expr>) -> Result<String> {
         _ => Err(ZettelError::SqlEngine(
             "WHERE id = '<value>' required".into(),
         )),
+    }
+}
+
+/// Extract two column values from a WHERE clause like
+/// `{col1} = 'val1' AND {col2} = 'val2'`.
+fn extract_junction_where(
+    selection: &Option<Expr>,
+    col1_name: &str,
+    col2_name: &str,
+) -> Result<(String, String)> {
+    match selection {
+        Some(Expr::BinaryOp { left, op, right }) if format!("{op}") == "AND" => {
+            let mut val1 = None;
+            let mut val2 = None;
+            for side in [left.as_ref(), right.as_ref()] {
+                if let Expr::BinaryOp {
+                    left: inner_left,
+                    op: inner_op,
+                    right: inner_right,
+                } = side
+                {
+                    if format!("{inner_op}") == "=" {
+                        if let Expr::Identifier(ident) = inner_left.as_ref() {
+                            let col = ident.value.to_lowercase();
+                            if col == col1_name {
+                                val1 = Some(expr_to_string(inner_right)?);
+                            } else if col == col2_name {
+                                val2 = Some(expr_to_string(inner_right)?);
+                            }
+                        }
+                    }
+                }
+            }
+            match (val1, val2) {
+                (Some(v1), Some(v2)) => Ok((v1, v2)),
+                _ => Err(ZettelError::SqlEngine(format!(
+                    "junction DELETE requires WHERE {col1_name} = '...' AND {col2_name} = '...'"
+                ))),
+            }
+        }
+        _ => Err(ZettelError::SqlEngine(format!(
+            "junction DELETE requires WHERE {col1_name} = '...' AND {col2_name} = '...'"
+        ))),
     }
 }
 
@@ -4266,5 +4320,68 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], cat_id);
+    }
+
+    #[test]
+    fn delete_from_junction_writes_through() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Add reference via junction INSERT
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+            ))
+            .unwrap();
+
+        // Verify it's there
+        let path = index.resolve_path(&bm_id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(content.contains(&format!("- category:: [[{cat_id}]]")));
+
+        // DELETE from junction
+        let result = engine
+            .execute(&format!(
+                "DELETE FROM bookmark_category WHERE bookmark_id = '{bm_id}' AND category_id = '{cat_id}'"
+            ))
+            .unwrap();
+        assert!(matches!(result, SqlResult::Affected(1)));
+
+        // Verify reference line removed from zettel
+        let content = repo.read_file(&path).unwrap();
+        assert!(
+            !content.contains(&format!("- category:: [[{cat_id}]]")),
+            "reference line should be removed: {content}"
+        );
+
+        // Verify junction table empty
+        let rows = index
+            .query_raw(&format!(
+                "SELECT category_id FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+            ))
+            .unwrap();
+        assert_eq!(rows.len(), 0, "junction table should be empty");
     }
 }
