@@ -501,7 +501,18 @@ pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
                 parsed.meta.zettel_type = Some(new.clone());
             }
             Fix::ManualTypedef { .. } => {} // informational only, no mutation
-            Fix::TitleNonCompliant { .. } => {} // handled in task 3
+            Fix::TitleNonCompliant { expected } => {
+                // Update H1 in body if present
+                if let Some(ref old_title) = parsed.meta.title {
+                    let old_h1 = format!("# {old_title}");
+                    let new_h1 = format!("# {expected}");
+                    if let Some(pos) = parsed.body.find(&old_h1) {
+                        let end = pos + old_h1.len();
+                        parsed.body.replace_range(pos..end, &new_h1);
+                    }
+                }
+                parsed.meta.title = Some(expected.clone());
+            }
             Fix::ZoneMigrated { .. } => {}      // zone migration applied separately
         }
     }
