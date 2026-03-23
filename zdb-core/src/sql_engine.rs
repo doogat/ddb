@@ -1,3 +1,4 @@
+use regex::Regex;
 use rusqlite::params;
 use sqlparser::ast::{
     AlterTableOperation, AssignmentTarget, CharacterLength, ColumnOption, DataType, Expr,
@@ -6,6 +7,28 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
+fn re_set_zone() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+SET\s+ZONE\s+(frontmatter|body|reference)\s+FOR\s+(?:"([^"]+)"|(\w[\w-]*))\s*;?\s*$"#).unwrap()
+    })
+}
+
+fn re_set_title_template() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+SET\s+TITLE\s+TEMPLATE\s+'([^']+)'\s*;?\s*$"#).unwrap()
+    })
+}
+
+fn re_drop_title_template() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+TITLE\s+TEMPLATE\s*;?\s*$"#).unwrap()
+    })
+}
 
 use crate::error::{Result, ZettelError};
 use crate::indexer::Index;
@@ -148,6 +171,11 @@ impl<'a> SqlEngine<'a> {
 
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn execute(&mut self, sql: &str) -> Result<SqlResult> {
+        // Pre-parse interception for custom DDL that sqlparser can't handle
+        if let Some(result) = self.try_custom_ddl(sql)? {
+            return Ok(result);
+        }
+
         let mut results = self.execute_batch(sql)?;
         if results.len() != 1 {
             return Err(ZettelError::SqlEngine(
@@ -155,6 +183,25 @@ impl<'a> SqlEngine<'a> {
             ));
         }
         Ok(results.remove(0))
+    }
+
+    fn try_custom_ddl(&mut self, sql: &str) -> Result<Option<SqlResult>> {
+        if let Some(caps) = re_set_zone().captures(sql) {
+            let table = caps.get(1).or(caps.get(2)).unwrap().as_str();
+            let zone = caps.get(3).unwrap().as_str();
+            let column = caps.get(4).or(caps.get(5)).unwrap().as_str();
+            return Ok(Some(self.handle_set_zone(table, zone, column)?));
+        }
+        if let Some(caps) = re_set_title_template().captures(sql) {
+            let table = caps.get(1).or(caps.get(2)).unwrap().as_str();
+            let template = caps.get(3).unwrap().as_str();
+            return Ok(Some(self.handle_title_template(table, Some(template))?));
+        }
+        if let Some(caps) = re_drop_title_template().captures(sql) {
+            let table = caps.get(1).or(caps.get(2)).unwrap().as_str();
+            return Ok(Some(self.handle_title_template(table, None)?));
+        }
+        Ok(None)
     }
 
     pub fn execute_batch(&mut self, sql: &str) -> Result<Vec<SqlResult>> {
@@ -878,6 +925,53 @@ impl<'a> SqlEngine<'a> {
         let parsed = parser::parse(&content, &typedef_path)?;
         self.index.index_zettel(&parsed)?;
         Ok(())
+    }
+
+    fn handle_set_zone(
+        &mut self,
+        table_name: &str,
+        zone_str: &str,
+        column_name: &str,
+    ) -> Result<SqlResult> {
+        let mut schema = self.load_schema(table_name)?;
+        let col_lower = column_name.to_lowercase();
+        let col = schema
+            .columns
+            .iter_mut()
+            .find(|c| c.name == col_lower)
+            .ok_or_else(|| {
+                ZettelError::SqlEngine(format!("column not found: {column_name}"))
+            })?;
+        let zone = match zone_str.to_lowercase().as_str() {
+            "frontmatter" => Zone::Frontmatter,
+            "body" => Zone::Body,
+            "reference" => Zone::Reference,
+            _ => {
+                return Err(ZettelError::SqlEngine(format!(
+                    "invalid zone: {zone_str} (use frontmatter, body, or reference)"
+                )))
+            }
+        };
+        col.zone = Some(zone);
+        self.update_typedef(table_name, &schema)?;
+        self.index.rematerialize_type(table_name, self.repo)?;
+        Ok(SqlResult::Ok(format!(
+            "zone set to {zone_str} for {col_lower} in {table_name}"
+        )))
+    }
+
+    fn handle_title_template(
+        &mut self,
+        table_name: &str,
+        template: Option<&str>,
+    ) -> Result<SqlResult> {
+        let mut schema = self.load_schema(table_name)?;
+        schema.title_template = template.map(String::from);
+        self.update_typedef(table_name, &schema)?;
+        let action = if template.is_some() { "set" } else { "dropped" };
+        Ok(SqlResult::Ok(format!(
+            "title template {action} for {table_name}"
+        )))
     }
 
     fn handle_rename_column(
