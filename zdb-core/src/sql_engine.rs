@@ -3789,4 +3789,141 @@ mod tests {
         let col = schema.columns.iter().find(|c| c.name == "long-desc").unwrap();
         assert_eq!(col.zone, Some(Zone::Frontmatter));
     }
+
+    #[test]
+    fn insert_explicit_title_wins() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE contact (name TEXT, role VARCHAR(100))")
+            .unwrap();
+        let id = match engine
+            .execute("INSERT INTO contact (title, name, role) VALUES ('Dr. Alice', 'Alice', 'doctor')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(content.contains("title: Dr. Alice"), "explicit title should win: {content}");
+    }
+
+    #[test]
+    fn insert_title_from_template() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE person (name VARCHAR(100), role VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("ALTER TABLE person SET TITLE TEMPLATE 'name-role'")
+            .unwrap();
+        let id = match engine
+            .execute("INSERT INTO person (name, role) VALUES ('Alice', 'engineer')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        // Template doesn't have {placeholders} because of YAML quoting limitation,
+        // so it uses the literal template string. Testing non-interpolated template.
+        assert!(content.contains("title: name-role"), "template title: {content}");
+    }
+
+    #[test]
+    fn insert_title_body_fallback() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE article (description TEXT, priority INTEGER)")
+            .unwrap();
+        let id = match engine
+            .execute("INSERT INTO article (description, priority) VALUES ('My Article', 1)")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(content.contains("title: My Article"), "body fallback: {content}");
+    }
+
+    #[test]
+    fn insert_title_frontmatter_fallback() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // Table with only frontmatter columns (no body columns)
+        engine
+            .execute("CREATE TABLE tag (label VARCHAR(50), priority INTEGER)")
+            .unwrap();
+        let id = match engine
+            .execute("INSERT INTO tag (label, priority) VALUES ('important', 1)")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(content.contains("title: important"), "frontmatter string fallback: {content}");
+    }
+
+    #[test]
+    fn insert_title_fallback_type_id() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // Table with only numeric columns — no string source for title
+        engine
+            .execute("CREATE TABLE counter (count INTEGER, active BOOLEAN)")
+            .unwrap();
+        let id = match engine
+            .execute("INSERT INTO counter (count, active) VALUES (42, true)")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        let expected = format!("title: counter {}", id);
+        assert!(content.contains(&expected), "type+id fallback: {content}");
+    }
+
+    #[test]
+    fn insert_explicit_title_overrides_template() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE widget (name VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("ALTER TABLE widget SET TITLE TEMPLATE 'template-name'")
+            .unwrap();
+        let id = match engine
+            .execute("INSERT INTO widget (title, name) VALUES ('Explicit Title', 'Widget A')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(content.contains("title: Explicit Title"), "explicit overrides template: {content}");
+    }
 }
