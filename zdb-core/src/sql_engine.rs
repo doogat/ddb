@@ -1507,7 +1507,7 @@ fn is_short_string_type_str(dt: &str) -> bool {
     }
     if let Some(rest) = upper.strip_prefix("VARCHAR(") {
         if let Some(num_str) = rest.strip_suffix(')') {
-            return num_str.parse::<u64>().map_or(false, |n| n <= 255);
+            return num_str.parse::<u64>().is_ok_and(|n| n <= 255);
         }
     }
     false

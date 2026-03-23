@@ -567,6 +567,8 @@ mod tests {
             template_sections: Vec::new(),
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         }
     }
 
@@ -855,6 +857,8 @@ mod tests {
             template_sections: Vec::new(),
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
         let wc = WhereClause::empty();
         let (sql, names) = build_aggregate_sql("note", &schema, &wc);
