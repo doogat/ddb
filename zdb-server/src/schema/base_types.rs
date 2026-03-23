@@ -276,6 +276,20 @@ pub(crate) fn typed_zettel_to_value(z: &ParsedZettel, schema: &TableSchema) -> G
     for col in &schema.columns {
         let val = extract_typed_field(z, col);
         obj.insert(Name::new(&col.name), val);
+
+        // Add pluralized list for REFERENCES columns
+        if col.references.is_some() {
+            let ref_values: Vec<GqlValue> = z
+                .inline_fields
+                .iter()
+                .filter(|f| f.key == col.name && matches!(f.zone, Zone::Reference))
+                .map(|f| GqlValue::from(f.value.clone()))
+                .collect();
+            obj.insert(
+                Name::new(&pluralize(&col.name)),
+                GqlValue::List(ref_values),
+            );
+        }
     }
 
     GqlValue::Object(obj)
@@ -468,6 +482,25 @@ pub(crate) fn build_typed_object(type_name: &str, schema: &TableSchema) -> Objec
                 Ok(obj_field(obj, &col_name))
             })
         }));
+
+        // Add pluralized list field for REFERENCES columns
+        if col.references.is_some() {
+            let list_name = pluralize(&col.name);
+            if is_valid_graphql_name(&list_name) {
+                let list_col_name = list_name.clone();
+                obj = obj.field(Field::new(
+                    &list_name,
+                    TypeRef::named_nn_list_nn(TypeRef::STRING),
+                    move |ctx| {
+                        let list_col_name = list_col_name.clone();
+                        FieldFuture::new(async move {
+                            let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                            Ok(obj_field(obj, &list_col_name))
+                        })
+                    },
+                ));
+            }
+        }
     }
 
     obj
@@ -540,5 +573,82 @@ mod tests {
         assert!(!is_valid_graphql_name("has-dash"));
         assert!(!is_valid_graphql_name("has.dot"));
         assert!(!is_valid_graphql_name("special!"));
+    }
+
+    #[test]
+    fn typed_zettel_multi_ref_list_field() {
+        use zdb_core::types::{InlineField, Zone, TableSchema, ColumnDef, ZettelMeta};
+        use zdb_core::types::ParsedZettel;
+
+        let z = ParsedZettel {
+            meta: ZettelMeta {
+                id: Some(zdb_core::types::ZettelId("20260301140100".into())),
+                title: Some("Test".into()),
+                date: None,
+                tags: vec![],
+                zettel_type: Some("bookmark".into()),
+                extra: std::collections::BTreeMap::new(),
+            },
+            body: String::new(),
+            sections: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            inline_fields: vec![
+                InlineField {
+                    key: "category".into(),
+                    value: "20260301120100".into(),
+                    zone: Zone::Reference,
+                },
+                InlineField {
+                    key: "category".into(),
+                    value: "20260301120101".into(),
+                    zone: Zone::Reference,
+                },
+            ],
+            reference_section: String::new(),
+            path: "zettelkasten/20260301140100.md".into(),
+        };
+
+        let schema = TableSchema {
+            table_name: "bookmark".into(),
+            columns: vec![ColumnDef {
+                name: "category".into(),
+                data_type: "TEXT".into(),
+                references: Some("category".into()),
+                zone: Some(Zone::Reference),
+                required: false,
+                search_boost: None,
+                allowed_values: None,
+                default_value: None,
+            }],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+        };
+
+        let val = typed_zettel_to_value(&z, &schema);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+
+        // Scalar field should have comma-separated (first found)
+        let scalar = obj.get("category").unwrap();
+        assert_eq!(scalar, &GqlValue::from("20260301120100".to_string()));
+
+        // List field should have both values
+        let list = obj.get("categories").unwrap();
+        match list {
+            GqlValue::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0], GqlValue::from("20260301120100".to_string()));
+                assert_eq!(items[1], GqlValue::from("20260301120101".to_string()));
+            }
+            _ => panic!("expected list, got {list:?}"),
+        }
     }
 }
