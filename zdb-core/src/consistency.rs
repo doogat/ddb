@@ -1521,4 +1521,145 @@ mod tests {
             Ok(vec![])
         }
     }
+
+    fn make_schema_with_template(template: &str, columns: Vec<ColumnDef>) -> TableSchema {
+        TableSchema {
+            table_name: "widget".into(),
+            columns,
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: Some(template.into()),
+            origin: Some("ddl".into()),
+        }
+    }
+
+    #[test]
+    fn title_noncompliant_detected() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("Foo".into());
+        parsed.meta.zettel_type = Some("widget".into());
+        parsed
+            .meta
+            .extra
+            .insert("name".into(), crate::types::Value::String("Bar".into()));
+        let schema = make_schema_with_template("{name} Widget", vec![ColumnDef {
+            name: "name".into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: Some(Zone::Frontmatter),
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        }]);
+        let fixes = detect_fixes(&parsed, Some(&schema));
+        assert!(
+            fixes
+                .iter()
+                .any(|f| matches!(f, Fix::TitleNonCompliant { expected } if expected == "Bar Widget")),
+            "should detect title mismatch: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn title_compliant_not_flagged() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("Bar Widget".into());
+        parsed.meta.zettel_type = Some("widget".into());
+        parsed
+            .meta
+            .extra
+            .insert("name".into(), crate::types::Value::String("Bar".into()));
+        let schema = make_schema_with_template("{name} Widget", vec![ColumnDef {
+            name: "name".into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: Some(Zone::Frontmatter),
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        }]);
+        let fixes = detect_fixes(&parsed, Some(&schema));
+        assert!(
+            !fixes.iter().any(|f| matches!(f, Fix::TitleNonCompliant { .. })),
+            "compliant title should not be flagged: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn title_template_unfilled_placeholders_stripped() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("Wrong".into());
+        parsed.meta.zettel_type = Some("widget".into());
+        parsed
+            .meta
+            .extra
+            .insert("name".into(), crate::types::Value::String("Bar".into()));
+        let schema = make_schema_with_template("{name} {missing}", vec![
+            ColumnDef {
+                name: "name".into(),
+                data_type: "TEXT".into(),
+                references: None,
+                zone: Some(Zone::Frontmatter),
+                required: false,
+                search_boost: None,
+                allowed_values: None,
+                default_value: None,
+            },
+            ColumnDef {
+                name: "missing".into(),
+                data_type: "TEXT".into(),
+                references: None,
+                zone: Some(Zone::Frontmatter),
+                required: false,
+                search_boost: None,
+                allowed_values: None,
+                default_value: None,
+            },
+        ]);
+        let fixes = detect_fixes(&parsed, Some(&schema));
+        assert!(
+            fixes
+                .iter()
+                .any(|f| matches!(f, Fix::TitleNonCompliant { expected } if expected == "Bar")),
+            "unfilled placeholders should be stripped: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn title_compliance_no_template_skipped() {
+        let mut parsed = empty_parsed();
+        parsed.meta.zettel_type = Some("widget".into());
+        let schema = TableSchema {
+            table_name: "widget".into(),
+            columns: vec![],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+        };
+        let fixes = detect_fixes(&parsed, Some(&schema));
+        assert!(
+            !fixes.iter().any(|f| matches!(f, Fix::TitleNonCompliant { .. })),
+            "no template means no compliance check: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn title_noncompliant_applied() {
+        let mut parsed = empty_parsed();
+        parsed.meta.title = Some("Old Title".into());
+        parsed.body = "# Old Title\n\nSome content".into();
+        let fixes = vec![Fix::TitleNonCompliant {
+            expected: "New Title".into(),
+        }];
+        let result = apply_fixes(&mut parsed, &fixes).unwrap();
+        assert_eq!(parsed.meta.title.as_deref(), Some("New Title"));
+        assert!(result.contains("# New Title"), "H1 should be updated in body");
+    }
 }
