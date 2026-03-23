@@ -1052,6 +1052,7 @@ pub enum Fix {
     CrossZoneResolved { key: String, kept_zone: Zone },
     FieldRenamed { old: String, new: String },
     TypeNormalized { old: String, new: String },
+    ManualTypedef { type_name: String },
 }
 
 impl Fix {
@@ -1068,7 +1069,8 @@ impl Fix {
             | Fix::TitleTrimmed
             | Fix::TitleCapitalized
             | Fix::H1Aligned { .. }
-            | Fix::TypeNormalized { .. } => Severity::Info,
+            | Fix::TypeNormalized { .. }
+            | Fix::ManualTypedef { .. } => Severity::Info,
         }
     }
 }
@@ -1100,6 +1102,10 @@ impl fmt::Display for Fix {
             }
             Fix::FieldRenamed { old, new } => write!(f, "renamed field {old} -> {new}"),
             Fix::TypeNormalized { old, new } => write!(f, "normalized type {old} -> {new}"),
+            Fix::ManualTypedef { type_name } => write!(
+                f,
+                "manual typedef '{type_name}' — consider recreating with: zdb query \"CREATE TABLE {type_name} (...)\""
+            ),
         }
     }
 }

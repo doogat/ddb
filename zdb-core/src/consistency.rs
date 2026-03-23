@@ -88,6 +88,20 @@ pub fn detect_fixes(parsed: &ParsedZettel, schema: Option<&TableSchema>) -> Vec<
         detect_schema_issues(parsed, s, &mut fixes);
     }
 
+    // Flag manual typedefs
+    if parsed.meta.zettel_type.as_deref() == Some("_typedef") {
+        if let Some(origin) = parsed.meta.extra.get("origin") {
+            if origin.as_str() == Some("manual") {
+                let type_name = parsed
+                    .meta
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| "unknown".into());
+                fixes.push(Fix::ManualTypedef { type_name });
+            }
+        }
+    }
+
     // Stable sort: errors first, then warnings, then info
     fixes.sort_by_key(|f| std::cmp::Reverse(f.severity()));
     fixes
@@ -398,6 +412,7 @@ pub fn apply_fixes(parsed: &mut ParsedZettel, fixes: &[Fix]) -> Result<String> {
             Fix::TypeNormalized { new, .. } => {
                 parsed.meta.zettel_type = Some(new.clone());
             }
+            Fix::ManualTypedef { .. } => {} // informational only, no mutation
         }
     }
 
