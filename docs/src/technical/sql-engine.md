@@ -26,6 +26,9 @@ All methods take `&mut self`. The CLI creates `SqlEngine` per invocation; the se
 | `ALTER TABLE foo ADD COLUMN bar TEXT` | Adds column to typedef schema; existing rows get NULL |
 | `ALTER TABLE foo DROP COLUMN bar` | Removes column from typedef schema; orphaned data keys ignored |
 | `ALTER TABLE foo RENAME COLUMN old TO new` | Renames column in typedef + rewrites all data zettels |
+| `ALTER TABLE foo SET ZONE frontmatter FOR col` | Override column zone (custom DDL, pre-parse intercepted) |
+| `ALTER TABLE foo SET TITLE TEMPLATE 'tpl'` | Set title template on typedef |
+| `ALTER TABLE foo DROP TITLE TEMPLATE` | Remove title template from typedef |
 | `DROP TABLE foo` | Strips `type:` from data zettels, deletes typedef |
 | `DROP TABLE foo CASCADE` | Deletes typedef + all data zettels |
 | `DROP TABLE IF EXISTS foo` | No-op if table doesn't exist |
@@ -120,6 +123,12 @@ Bare UPDATE/DELETE (no WHERE) operates on all rows of the table.
 - **ADD COLUMN**: Appends to typedef schema, rematerializes. Existing data zettels untouched (NULL for new column).
 - **DROP COLUMN**: Removes from typedef schema, rematerializes. Orphaned data keys in zettels are ignored.
 - **RENAME COLUMN**: Rewrites typedef + all data zettels in a single commit. Uses `rename_key_in_zettel` for zone-aware renaming (frontmatter extra keys, body `## heading`, reference `- key::` lines).
+- **SET ZONE**: Custom DDL (pre-parse intercepted). Updates column zone in typedef, rematerializes. Existing data zettels are NOT migrated — they stay in the old zone until next update.
+- **SET/DROP TITLE TEMPLATE**: Custom DDL. Sets or removes `title_template` on the typedef. No rematerialization needed.
+
+## Pre-Parse Interception
+
+Three custom DDL statements are intercepted via regex before sqlparser parsing: `SET ZONE`, `SET TITLE TEMPLATE`, `DROP TITLE TEMPLATE`. These use `try_custom_ddl()` in `execute()` with OnceLock-cached regexes. Supports quoted identifiers for hyphenated names.
 
 ## DROP TABLE
 

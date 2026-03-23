@@ -154,6 +154,12 @@ $ZDB query "SELECT baz FROM foo WHERE id = '$FOO_ID'" | grep -q "99"
 $ZDB query "DELETE FROM foo WHERE id = '$FOO_ID'" | grep -q "1 row(s) affected"
 pass "sql ddl/dml"
 
+# 11a. ALTER TABLE SET ZONE and TITLE TEMPLATE
+$ZDB query "ALTER TABLE foo SET ZONE frontmatter FOR bar" | grep -q "zone set to frontmatter"
+$ZDB query "ALTER TABLE foo SET TITLE TEMPLATE 'my-template'" | grep -q "title template set"
+$ZDB query "ALTER TABLE foo DROP TITLE TEMPLATE" | grep -q "title template dropped"
+pass "alter table zone overrides and title template"
+
 # 11b. CREATE TABLE IF NOT EXISTS (idempotent)
 $ZDB query "CREATE TABLE IF NOT EXISTS foo (bar TEXT, baz INTEGER)" | grep -q "already exists"
 $ZDB query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)" | grep -q "table newifne created"

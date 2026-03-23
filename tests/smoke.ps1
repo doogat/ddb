@@ -213,6 +213,15 @@ $output = zdb query "DELETE FROM foo WHERE id = '$FOO_ID'"
 if ($output -notmatch "1 row\(s\) affected") { throw "delete failed" }
 pass "sql ddl/dml"
 
+# 11a. ALTER TABLE SET ZONE and TITLE TEMPLATE
+$output = zdb query "ALTER TABLE foo SET ZONE frontmatter FOR bar"
+if ($output -notmatch "zone set to frontmatter") { throw "SET ZONE failed" }
+$output = zdb query "ALTER TABLE foo SET TITLE TEMPLATE 'my-template'"
+if ($output -notmatch "title template set") { throw "SET TITLE TEMPLATE failed" }
+$output = zdb query "ALTER TABLE foo DROP TITLE TEMPLATE"
+if ($output -notmatch "title template dropped") { throw "DROP TITLE TEMPLATE failed" }
+pass "alter table zone overrides and title template"
+
 # 11b. CREATE TABLE IF NOT EXISTS (idempotent)
 $output = zdb query "CREATE TABLE IF NOT EXISTS foo (bar TEXT, baz INTEGER)"
 if ($output -notmatch "already exists") { throw "IF NOT EXISTS on existing table failed" }
