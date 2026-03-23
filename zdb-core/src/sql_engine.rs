@@ -1346,9 +1346,9 @@ impl<'a> SqlEngine<'a> {
             let parent_id = &row_values[parent_id_idx];
             let target_id = &row_values[target_id_idx];
 
-            // Read parent zettel
+            // Read parent zettel (txn-aware: picks up buffered writes)
             let path = self.index.resolve_path(parent_id)?;
-            let content = self.repo.read_file(&path)?;
+            let content = self.read_content(&path)?;
             let mut parsed = parser::parse(&content, &path)?;
 
             // Build the reference line with folder-qualified link if needed
@@ -1364,13 +1364,12 @@ impl<'a> SqlEngine<'a> {
                 };
             let ref_line = format!("- {}:: [[{}]]", col_name, link_target);
 
-            // Skip if reference line already exists (idempotent)
+            // Skip if reference line already exists (idempotent, 0 affected)
             if parsed
                 .reference_section
                 .lines()
                 .any(|line| line.trim() == ref_line.trim())
             {
-                affected += 1;
                 continue;
             }
 
@@ -1431,9 +1430,9 @@ impl<'a> SqlEngine<'a> {
             })?;
         let ref_folder_types = self.ref_folder_types(&schema);
 
-        // Read parent zettel
+        // Read parent zettel (txn-aware: picks up buffered writes)
         let path = self.index.resolve_path(parent_id)?;
-        let content = self.repo.read_file(&path)?;
+        let content = self.read_content(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
 
         // Build the reference line pattern to remove
