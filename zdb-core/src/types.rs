@@ -984,6 +984,8 @@ pub struct TableSchema {
     pub template_sections: Vec<String>,
     pub folder: bool,
     pub stale_after_days: Option<u32>,
+    pub title_template: Option<String>,
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -1,7 +1,7 @@
 use rusqlite::params;
 use sqlparser::ast::{
-    AlterTableOperation, AssignmentTarget, ColumnOption, DataType, Expr, FromTable, ObjectType,
-    SetExpr, Statement, Value as SqlValue,
+    AlterTableOperation, AssignmentTarget, CharacterLength, ColumnOption, DataType, Expr,
+    FromTable, ObjectType, SetExpr, Statement, Value as SqlValue,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -367,6 +367,8 @@ impl<'a> SqlEngine<'a> {
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
 
         // Build and commit typedef zettel
@@ -1155,7 +1157,30 @@ impl<'a> SqlEngine<'a> {
 
 fn data_type_to_string(dt: &DataType) -> String {
     match dt {
-        DataType::Text | DataType::Varchar(_) | DataType::CharVarying(_) => "TEXT".into(),
+        DataType::Char(Some(CharacterLength::IntegerLength { length, .. })) => {
+            format!("CHAR({length})")
+        }
+        DataType::Char(None) => "CHAR".into(),
+        DataType::Character(Some(CharacterLength::IntegerLength { length, .. })) => {
+            format!("CHAR({length})")
+        }
+        DataType::Character(None) => "CHAR".into(),
+        DataType::Varchar(Some(CharacterLength::IntegerLength { length, .. }))
+        | DataType::CharVarying(Some(CharacterLength::IntegerLength { length, .. })) => {
+            format!("VARCHAR({length})")
+        }
+        DataType::Varchar(_) | DataType::CharVarying(_) => "VARCHAR".into(),
+        DataType::TinyText => "TINYTEXT".into(),
+        DataType::Text => "TEXT".into(),
+        DataType::MediumText => "MEDIUMTEXT".into(),
+        DataType::LongText => "LONGTEXT".into(),
+        DataType::TinyBlob => "TINYBLOB".into(),
+        DataType::Blob(_) => "BLOB".into(),
+        DataType::MediumBlob => "MEDIUMBLOB".into(),
+        DataType::LongBlob => "LONGBLOB".into(),
+        DataType::Binary(_) => "BINARY".into(),
+        DataType::Varbinary(_) => "VARBINARY".into(),
+        DataType::Enum(..) | DataType::Set(_) => "TEXT".into(),
         DataType::Integer(_) | DataType::Int(_) | DataType::BigInt(_) | DataType::SmallInt(_) => {
             "INTEGER".into()
         }
@@ -1554,6 +1579,8 @@ pub fn schema_from_parsed(zettel: &ParsedZettel) -> Result<TableSchema> {
         template_sections,
         folder,
         stale_after_days,
+        title_template: None,
+        origin: None,
     })
 }
 

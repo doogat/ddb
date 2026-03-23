@@ -1008,6 +1008,8 @@ mod tests {
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
         let fixes = detect_fixes(&parsed, Some(&schema));
         assert!(
@@ -1041,6 +1043,8 @@ mod tests {
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
         let fixes = detect_fixes(&parsed, Some(&schema));
         assert!(

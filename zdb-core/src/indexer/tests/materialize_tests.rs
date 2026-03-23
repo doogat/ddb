@@ -450,6 +450,8 @@ Widget
             template_sections: vec!["A".into()],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
         let inferred = TableSchema {
             table_name: "foo".to_string(),
@@ -458,6 +460,8 @@ Widget
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -485,6 +489,8 @@ Widget
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
 
         let merged = Index::merge_schemas(None, inferred);
@@ -512,6 +518,8 @@ Widget
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
         let inferred = TableSchema {
             table_name: "baz".to_string(),
@@ -541,6 +549,8 @@ Widget
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -571,6 +581,8 @@ Widget
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
         let inferred = TableSchema {
             table_name: "qux".to_string(),
@@ -600,6 +612,8 @@ Widget
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);

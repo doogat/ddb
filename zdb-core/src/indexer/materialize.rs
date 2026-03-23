@@ -223,6 +223,8 @@ impl Index {
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         }
     }
 
@@ -378,6 +380,8 @@ impl Index {
             template_sections: vec![],
             folder: false,
             stale_after_days: None,
+            title_template: None,
+            origin: None,
         })
     }
 
