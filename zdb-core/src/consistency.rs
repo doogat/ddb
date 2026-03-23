@@ -1904,4 +1904,167 @@ mod tests {
         assert_eq!(parsed.meta.title.as_deref(), Some("New Title"));
         assert!(result.contains("# New Title"), "H1 should be updated in body");
     }
+
+    // ── Zone migration tests ────────────────────────────────────────
+
+    #[test]
+    fn migrate_body_to_frontmatter() {
+        let mut parsed = empty_parsed();
+        parsed.body = "## description\n\nSome content here\n".into();
+        let col = ColumnDef {
+            name: "description".into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: Some(Zone::Frontmatter),
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        };
+
+        let current = detect_current_zone(&parsed, "description");
+        assert_eq!(current, Some(Zone::Body));
+
+        let value = extract_from_zone(&parsed, "description", &Zone::Body).unwrap();
+        assert_eq!(value, "Some content here");
+
+        remove_from_zone(&mut parsed, "description", &Zone::Body);
+        insert_into_zone(&mut parsed, "description", &value, &col.effective_zone());
+
+        assert_eq!(
+            parsed.meta.extra.get("description"),
+            Some(&crate::types::Value::String("Some content here".into()))
+        );
+        assert!(!parsed.body.contains("## description"));
+    }
+
+    #[test]
+    fn migrate_frontmatter_to_body() {
+        let mut parsed = empty_parsed();
+        parsed.meta.extra.insert(
+            "notes".into(),
+            crate::types::Value::String("Important stuff".into()),
+        );
+
+        let current = detect_current_zone(&parsed, "notes");
+        assert_eq!(current, Some(Zone::Frontmatter));
+
+        let value = extract_from_zone(&parsed, "notes", &Zone::Frontmatter).unwrap();
+        remove_from_zone(&mut parsed, "notes", &Zone::Frontmatter);
+        insert_into_zone(&mut parsed, "notes", &value, &Zone::Body);
+
+        assert!(parsed.meta.extra.get("notes").is_none());
+        assert!(parsed.body.contains("## notes"));
+        assert!(parsed.body.contains("Important stuff"));
+    }
+
+    #[test]
+    fn migrate_to_reference() {
+        let mut parsed = empty_parsed();
+        parsed.meta.extra.insert(
+            "category".into(),
+            crate::types::Value::String("20260301120000".into()),
+        );
+
+        let value = extract_from_zone(&parsed, "category", &Zone::Frontmatter).unwrap();
+        remove_from_zone(&mut parsed, "category", &Zone::Frontmatter);
+        insert_into_zone(&mut parsed, "category", &value, &Zone::Reference);
+
+        assert!(parsed.meta.extra.get("category").is_none());
+        assert!(parsed.reference_section.contains("- category:: [[20260301120000]]"));
+        assert!(parsed
+            .inline_fields
+            .iter()
+            .any(|f| f.key == "category" && f.value == "20260301120000"));
+    }
+
+    #[test]
+    fn migrate_from_reference() {
+        let mut parsed = empty_parsed();
+        parsed.reference_section = "- source:: [[20260301120000]]\n".into();
+        parsed.inline_fields.push(InlineField {
+            key: "source".into(),
+            value: "20260301120000".into(),
+            zone: Zone::Reference,
+        });
+
+        let current = detect_current_zone(&parsed, "source");
+        assert_eq!(current, Some(Zone::Reference));
+
+        let value = extract_from_zone(&parsed, "source", &Zone::Reference).unwrap();
+        remove_from_zone(&mut parsed, "source", &Zone::Reference);
+        insert_into_zone(&mut parsed, "source", &value, &Zone::Frontmatter);
+
+        assert!(parsed.reference_section.trim().is_empty() || !parsed.reference_section.contains("source"));
+        assert_eq!(
+            parsed.meta.extra.get("source"),
+            Some(&crate::types::Value::String("20260301120000".into()))
+        );
+    }
+
+    #[test]
+    fn migrate_preserves_subheadings() {
+        let mut parsed = empty_parsed();
+        parsed.body = "## notes\n\nTop content\n\n### Sub-heading\n\nSub content\n\n## other\n\nOther stuff\n".into();
+
+        let value = extract_from_zone(&parsed, "notes", &Zone::Body).unwrap();
+        assert!(value.contains("### Sub-heading"), "sub-headings preserved in extraction");
+        assert!(value.contains("Sub content"));
+
+        remove_from_zone(&mut parsed, "notes", &Zone::Body);
+        assert!(!parsed.body.contains("## notes"));
+        assert!(parsed.body.contains("## other"), "other section preserved");
+    }
+
+    #[test]
+    fn migrate_multiline_body_to_frontmatter() {
+        let mut parsed = empty_parsed();
+        parsed.body = "## bio\n\nLine one\nLine two\nLine three\n".into();
+
+        let value = extract_from_zone(&parsed, "bio", &Zone::Body).unwrap();
+        assert!(value.contains("Line one\nLine two\nLine three"));
+
+        remove_from_zone(&mut parsed, "bio", &Zone::Body);
+        insert_into_zone(&mut parsed, "bio", &value, &Zone::Frontmatter);
+
+        let stored = parsed.meta.extra.get("bio").unwrap();
+        match stored {
+            crate::types::Value::String(s) => {
+                assert!(s.contains("Line one"));
+                assert!(s.contains("Line three"));
+            }
+            _ => panic!("expected String value"),
+        }
+    }
+
+    #[test]
+    fn migrate_idempotent() {
+        let mut parsed = empty_parsed();
+        parsed.meta.extra.insert(
+            "status".into(),
+            crate::types::Value::String("active".into()),
+        );
+        let col = ColumnDef {
+            name: "status".into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: Some(Zone::Frontmatter),
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        };
+
+        // Data already in correct zone
+        let current = detect_current_zone(&parsed, "status").unwrap();
+        assert_eq!(current, col.effective_zone(), "already in correct zone");
+    }
+
+    #[test]
+    fn migrate_no_data_no_changes() {
+        let parsed = empty_parsed();
+        // Column exists in schema but zettel has no data for it
+        let current = detect_current_zone(&parsed, "nonexistent");
+        assert_eq!(current, None);
+    }
 }
