@@ -976,6 +976,39 @@ pub struct ColumnDef {
     pub default_value: Option<String>,
 }
 
+impl ColumnDef {
+    /// Resolve the effective zone, falling back to type-based inference.
+    pub fn effective_zone(&self) -> Zone {
+        if let Some(ref zone) = self.zone {
+            return zone.clone();
+        }
+        if self.references.is_some() {
+            Zone::Reference
+        } else if self.is_numeric_or_short_string() {
+            Zone::Frontmatter
+        } else {
+            Zone::Body
+        }
+    }
+
+    fn is_numeric_or_short_string(&self) -> bool {
+        let upper = self.data_type.to_uppercase();
+        if matches!(
+            upper.as_str(),
+            "INTEGER" | "REAL" | "BOOLEAN" | "CHAR" | "TINYTEXT" | "VARCHAR"
+        ) {
+            return true;
+        }
+        if upper.starts_with("CHAR(") || upper.starts_with("VARCHAR(") {
+            return true;
+        }
+        if self.allowed_values.is_some() {
+            return true;
+        }
+        false
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TableSchema {
     pub table_name: String,

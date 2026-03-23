@@ -1026,7 +1026,7 @@ impl<'a> SqlEngine<'a> {
             .iter_mut()
             .find(|c| c.name == old_name)
             .ok_or_else(|| ZettelError::SqlEngine(format!("column not found: {old_name}")))?;
-        let zone = effective_zone(col);
+        let zone = col.effective_zone();
         col.name = new_name.to_string();
 
         let id = ZettelId(typedef_id.to_string());
@@ -1878,7 +1878,7 @@ fn build_data_zettel(
             None => continue,
         };
 
-        match effective_zone(col) {
+        match col.effective_zone() {
             Zone::Reference => {
                 let link_target = if let Some(ref ref_table) = col.references {
                     if ref_folder_types.contains(ref_table) {
@@ -1982,39 +1982,6 @@ fn is_short_string_type(dt: &DataType) -> bool {
     }
 }
 
-/// Check if a stringified data type represents a short string (for effective_zone fallback).
-fn is_short_string_type_str(dt: &str) -> bool {
-    let upper = dt.to_uppercase();
-    if matches!(upper.as_str(), "CHAR" | "TINYTEXT" | "VARCHAR") {
-        return true;
-    }
-    if let Some(rest) = upper.strip_prefix("CHAR(") {
-        return rest.ends_with(')');
-    }
-    if let Some(rest) = upper.strip_prefix("VARCHAR(") {
-        if let Some(num_str) = rest.strip_suffix(')') {
-            return num_str.parse::<u64>().is_ok_and(|n| n <= 255);
-        }
-    }
-    false
-}
-
-/// Resolve the effective zone for a column, falling back to type-based inference.
-fn effective_zone(col: &ColumnDef) -> Zone {
-    if let Some(ref zone) = col.zone {
-        return zone.clone();
-    }
-    if col.references.is_some() {
-        Zone::Reference
-    } else if is_numeric_type(&col.data_type)
-        || is_short_string_type_str(&col.data_type)
-        || col.allowed_values.is_some()
-    {
-        Zone::Frontmatter
-    } else {
-        Zone::Body
-    }
-}
 
 fn to_yaml_value(val: &str, data_type: &str) -> Value {
     match data_type.to_uppercase().as_str() {
@@ -2179,7 +2146,7 @@ fn apply_updates_to_zettel(
             None => continue,
         };
 
-        match effective_zone(col_def) {
+        match col_def.effective_zone() {
             Zone::Reference => {
                 update_reference_line(&mut zettel.reference_section, col_name, new_val);
             }
@@ -2194,7 +2161,7 @@ fn apply_updates_to_zettel(
                 if let Some(first_body) = schema
                     .columns
                     .iter()
-                    .find(|c| effective_zone(c) == Zone::Body)
+                    .find(|c| c.effective_zone() == Zone::Body)
                 {
                     if first_body.name == *col_name {
                         zettel.meta.title = Some(new_val.clone());

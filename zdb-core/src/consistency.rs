@@ -3,7 +3,11 @@ use std::collections::HashSet;
 use crate::error::Result;
 use crate::indexer::Index;
 use crate::traits::ZettelStore;
-use crate::types::{Fix, FixReport, ParsedZettel, TableSchema, TitleSource, ZettelFix, Zone};
+use crate::types::{
+    ColumnDef, Fix, FixReport, ParsedZettel, TableSchema, TitleSource, ZettelFix, Zone,
+};
+use regex::Regex;
+use std::sync::OnceLock;
 
 /// Convert a string to kebab-case.
 ///
@@ -72,6 +76,89 @@ fn is_kebab_case(s: &str) -> bool {
         && !s.ends_with('-')
 }
 
+fn re_unfilled_placeholder() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\{[^}]+\}").unwrap())
+}
+
+/// Extract content under a `## heading` in the body, returning lines between that heading
+/// and the next `## ` heading (or end of body).
+pub fn extract_body_section(body: &str, heading: &str) -> Option<String> {
+    let target = format!("## {heading}");
+    let mut lines = body.lines();
+    let found = lines.by_ref().any(|l| l.trim() == target);
+    if !found {
+        return None;
+    }
+    let mut content = Vec::new();
+    for line in lines {
+        if line.starts_with("## ") {
+            break;
+        }
+        content.push(line);
+    }
+    let text = content.join("\n").trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Extract a column's value from a parsed zettel based on its effective zone.
+fn extract_column_value(parsed: &ParsedZettel, col: &ColumnDef) -> Option<String> {
+    match col.effective_zone() {
+        Zone::Frontmatter => parsed.meta.extra.get(&col.name).and_then(|v| {
+            match v {
+                crate::types::Value::String(s) => Some(s.clone()),
+                crate::types::Value::Number(n) => Some(n.to_string()),
+                crate::types::Value::Bool(b) => Some(b.to_string()),
+                _ => None,
+            }
+        }),
+        Zone::Body => extract_body_section(&parsed.body, &col.name),
+        Zone::Reference => parsed
+            .inline_fields
+            .iter()
+            .find(|f| f.key == col.name && matches!(f.zone, Zone::Reference))
+            .map(|f| f.value.clone()),
+    }
+}
+
+/// Interpolate a title template with column values, stripping unfilled placeholders.
+fn interpolate_title_template(template: &str, parsed: &ParsedZettel, schema: &TableSchema) -> Option<String> {
+    let mut rendered = template.to_string();
+    for col in &schema.columns {
+        if let Some(val) = extract_column_value(parsed, col) {
+            rendered = rendered.replace(&format!("{{{}}}", col.name), &val);
+        }
+    }
+    let rendered = re_unfilled_placeholder()
+        .replace_all(&rendered, "")
+        .trim()
+        .to_string();
+    if rendered.is_empty() {
+        None
+    } else {
+        Some(rendered)
+    }
+}
+
+fn detect_title_compliance(parsed: &ParsedZettel, schema: &TableSchema, fixes: &mut Vec<Fix>) {
+    let template = match schema.title_template {
+        Some(ref t) => t,
+        None => return,
+    };
+    let expected = match interpolate_title_template(template, parsed, schema) {
+        Some(e) => e,
+        None => return,
+    };
+    let actual = parsed.meta.title.as_deref().unwrap_or("");
+    if actual != expected {
+        fixes.push(Fix::TitleNonCompliant { expected });
+    }
+}
+
 /// Detect consistency fixes needed for a parsed zettel.
 ///
 /// Returns a list of fixes ordered by severity (errors first, then warnings, then info).
@@ -86,6 +173,7 @@ pub fn detect_fixes(parsed: &ParsedZettel, schema: Option<&TableSchema>) -> Vec<
     detect_cross_zone_issues(parsed, &mut fixes);
     if let Some(s) = schema {
         detect_schema_issues(parsed, s, &mut fixes);
+        detect_title_compliance(parsed, s, &mut fixes);
     }
 
     // Flag manual typedefs
