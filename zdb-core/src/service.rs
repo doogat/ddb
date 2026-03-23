@@ -733,6 +733,10 @@ impl ZettelService {
         crate::consistency::migrate_all(&self.repo, dry_run)
     }
 
+    pub fn zone_migrate_all(&self, dry_run: bool) -> Result<FixReport> {
+        crate::consistency::zone_migrate_all(&self.repo, &self.index, dry_run)
+    }
+
     pub fn resurrected_zettels(&self) -> Result<Vec<(String, String)>> {
         self.index.resurrected_zettels()
     }

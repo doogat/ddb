@@ -783,6 +783,33 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                         )?;
                     }
                 }
+
+                let zone_report = svc.zone_migrate_all(dry_run)?;
+                let zone_fixes: usize =
+                    zone_report.fixes.iter().map(|f| f.applied.len()).sum();
+                if zone_fixes > 0 {
+                    if verbose {
+                        for zf in &zone_report.fixes {
+                            outln!("  {}", zf.path)?;
+                            for fix in &zf.applied {
+                                outln!("    [{}] {fix}", fix.severity())?;
+                            }
+                        }
+                    }
+                    if dry_run {
+                        outln!(
+                            "would zone-migrate {} columns in {} zettels",
+                            zone_fixes,
+                            zone_report.files_fixed
+                        )?;
+                    } else {
+                        outln!(
+                            "zone-migrated {} columns in {} zettels",
+                            zone_fixes,
+                            zone_report.files_fixed
+                        )?;
+                    }
+                }
             }
 
             let report = svc.fix_all(dry_run)?;
