@@ -3589,4 +3589,157 @@ mod tests {
             assert_eq!(super::data_type_to_string(&dt), expected, "for {dt:?}");
         }
     }
+
+    #[test]
+    fn alter_table_set_zone() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE ztest (description TEXT, priority INTEGER)")
+            .unwrap();
+
+        // TEXT defaults to body; change to frontmatter
+        engine
+            .execute("ALTER TABLE ztest SET ZONE frontmatter FOR description")
+            .unwrap();
+
+        let schema = engine.load_schema("ztest").unwrap();
+        let desc = schema.columns.iter().find(|c| c.name == "description").unwrap();
+        assert_eq!(desc.zone, Some(Zone::Frontmatter));
+    }
+
+    #[test]
+    fn alter_table_set_zone_invalid_column() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE ztest2 (name TEXT)")
+            .unwrap();
+        let err = engine
+            .execute("ALTER TABLE ztest2 SET ZONE frontmatter FOR nonexistent")
+            .unwrap_err();
+        assert!(format!("{err}").contains("column not found"));
+    }
+
+    #[test]
+    fn alter_table_set_zone_to_reference() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE ztest3 (link VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("ALTER TABLE ztest3 SET ZONE reference FOR link")
+            .unwrap();
+
+        let schema = engine.load_schema("ztest3").unwrap();
+        let link = schema.columns.iter().find(|c| c.name == "link").unwrap();
+        assert_eq!(link.zone, Some(Zone::Reference));
+    }
+
+    #[test]
+    fn alter_table_set_zone_case_insensitive() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE ztest4 (notes TEXT)")
+            .unwrap();
+        engine
+            .execute("alter table ztest4 set zone FRONTMATTER for notes")
+            .unwrap();
+
+        let schema = engine.load_schema("ztest4").unwrap();
+        let notes = schema.columns.iter().find(|c| c.name == "notes").unwrap();
+        assert_eq!(notes.zone, Some(Zone::Frontmatter));
+    }
+
+    #[test]
+    fn alter_table_set_zone_rematerializes() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE ztest5 (url VARCHAR(100), priority INTEGER)")
+            .unwrap();
+
+        // Insert with url in frontmatter zone (VARCHAR(100) → frontmatter)
+        engine
+            .execute("INSERT INTO ztest5 (url, priority) VALUES ('https://example.com', 1)")
+            .unwrap();
+
+        // Change url to body — this triggers rematerialization
+        engine
+            .execute("ALTER TABLE ztest5 SET ZONE body FOR url")
+            .unwrap();
+
+        // Materialized table should still exist (rematerialize succeeded)
+        let result = engine.execute("SELECT COUNT(*) FROM ztest5").unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => assert_eq!(rows[0][0], "1"),
+            _ => panic!("expected Rows"),
+        }
+    }
+
+    #[test]
+    fn alter_table_title_template() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE tmpl (name VARCHAR(100))")
+            .unwrap();
+
+        // SET
+        engine
+            .execute("ALTER TABLE tmpl SET TITLE TEMPLATE 'name-template'")
+            .unwrap();
+        let schema = engine.load_schema("tmpl").unwrap();
+        assert_eq!(schema.title_template.as_deref(), Some("name-template"));
+
+        // DROP
+        engine
+            .execute("ALTER TABLE tmpl DROP TITLE TEMPLATE")
+            .unwrap();
+        let schema = engine.load_schema("tmpl").unwrap();
+        assert_eq!(schema.title_template, None);
+    }
+
+    #[test]
+    fn alter_table_title_template_persists() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE tmpl2 (name VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("ALTER TABLE tmpl2 SET TITLE TEMPLATE 'my-template'")
+            .unwrap();
+
+        // Create a new engine to verify persistence
+        let mut engine2 = SqlEngine::new(&index, &repo);
+        let schema = engine2.load_schema("tmpl2").unwrap();
+        assert_eq!(schema.title_template.as_deref(), Some("my-template"));
+    }
+
+    #[test]
+    fn alter_table_set_zone_quoted_identifiers() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE \"my-items\" (\"long-desc\" TEXT)")
+            .unwrap();
+        engine
+            .execute("ALTER TABLE \"my-items\" SET ZONE frontmatter FOR \"long-desc\"")
+            .unwrap();
+
+        let schema = engine.load_schema("my-items").unwrap();
+        let col = schema.columns.iter().find(|c| c.name == "long-desc").unwrap();
+        assert_eq!(col.zone, Some(Zone::Frontmatter));
+    }
 }
