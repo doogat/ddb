@@ -425,7 +425,7 @@ impl<'a> SqlEngine<'a> {
             folder: false,
             stale_after_days: None,
             title_template: None,
-            origin: None,
+            origin: Some("ddl".into()),
         };
 
         // Build and commit typedef zettel

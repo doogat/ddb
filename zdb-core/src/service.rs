@@ -75,7 +75,7 @@ impl ZettelService {
         zettel_type: Option<&str>,
         body: &str,
     ) -> Result<String> {
-        self.create_zettel_parsed(title, tags, zettel_type, body)
+        self.create_zettel_with_extra(title, tags, zettel_type, body, Default::default())
             .map(|p| p.meta.id.map(|z| z.0).unwrap_or_default())
     }
 
@@ -86,6 +86,18 @@ impl ZettelService {
         tags: &[String],
         zettel_type: Option<&str>,
         body: &str,
+    ) -> Result<ParsedZettel> {
+        self.create_zettel_with_extra(title, tags, zettel_type, body, Default::default())
+    }
+
+    /// Create a new zettel with optional extra frontmatter fields.
+    pub fn create_zettel_with_extra(
+        &self,
+        title: &str,
+        tags: &[String],
+        zettel_type: Option<&str>,
+        body: &str,
+        extra: std::collections::BTreeMap<String, crate::types::Value>,
     ) -> Result<ParsedZettel> {
         let id = self.unique_id();
         let id_str = id.to_string();
@@ -101,7 +113,7 @@ impl ZettelService {
             date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
             zettel_type: zettel_type.map(str::to_owned),
             tags: tags.to_vec(),
-            extra: Default::default(),
+            extra,
         };
 
         let parsed = ParsedZettel {

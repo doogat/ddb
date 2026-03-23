@@ -497,8 +497,27 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
                 .unwrap_or_default();
             let body_text = body.unwrap_or_default();
 
-            let id = svc.create_zettel(&title, &tags_list, r#type.as_deref(), &body_text)?;
-            outln!("{id}")?;
+            if r#type.as_deref() == Some("_typedef") {
+                eprintln!("Warning: type definitions should be created with CREATE TABLE via 'zdb query'.");
+                eprintln!("Manual typedefs are not CRDT-tracked and may be stripped by 'zdb fix'.");
+                eprintln!("See: zdb help create-app");
+                let mut extra = std::collections::BTreeMap::new();
+                extra.insert(
+                    "origin".to_string(),
+                    zdb_core::types::Value::String("manual".into()),
+                );
+                let parsed = svc.create_zettel_with_extra(
+                    &title,
+                    &tags_list,
+                    r#type.as_deref(),
+                    &body_text,
+                    extra,
+                )?;
+                outln!("{}", parsed.meta.id.map(|z| z.0).unwrap_or_default())?;
+            } else {
+                let id = svc.create_zettel(&title, &tags_list, r#type.as_deref(), &body_text)?;
+                outln!("{id}")?;
+            }
         }
 
         Command::Read { id } => {
