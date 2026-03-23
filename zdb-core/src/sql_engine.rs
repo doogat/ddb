@@ -858,9 +858,17 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
-        // Rebuild and commit typedef
+        self.update_typedef(&table_name, &schema)?;
+        self.index.rematerialize_type(&table_name, self.repo)?;
+
+        Ok(SqlResult::Ok(format!("table {table_name} altered")))
+    }
+
+    /// Serialize a modified TableSchema back to its typedef zettel, commit to Git, re-index.
+    fn update_typedef(&mut self, table_name: &str, schema: &TableSchema) -> Result<()> {
+        let (typedef_id, typedef_path) = self.load_typedef_location(table_name)?;
         let id = ZettelId(typedef_id);
-        let schema_zettel = build_typedef_zettel(&id, &schema);
+        let schema_zettel = build_typedef_zettel(&id, schema);
         let content = parser::serialize(&schema_zettel);
         self.repo.commit_file(
             &typedef_path,
@@ -869,9 +877,7 @@ impl<'a> SqlEngine<'a> {
         )?;
         let parsed = parser::parse(&content, &typedef_path)?;
         self.index.index_zettel(&parsed)?;
-        self.index.rematerialize_type(&table_name, self.repo)?;
-
-        Ok(SqlResult::Ok(format!("table {table_name} altered")))
+        Ok(())
     }
 
     fn handle_rename_column(
