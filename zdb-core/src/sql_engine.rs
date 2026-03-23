@@ -400,11 +400,13 @@ impl<'a> SqlEngine<'a> {
             let references = extract_references(&col.options);
             let zone = if references.is_some() {
                 Some(Zone::Reference)
-            } else if is_numeric_type(&data_type) {
+            } else if is_numeric_type(&data_type) || is_short_string_type(&col.data_type) {
                 Some(Zone::Frontmatter)
             } else {
                 Some(Zone::Body)
             };
+            let allowed_values = extract_allowed_values(&col.data_type);
+            let default_value = extract_default(&col.options);
             out.push(ColumnDef {
                 name,
                 data_type,
@@ -412,8 +414,8 @@ impl<'a> SqlEngine<'a> {
                 zone,
                 required: false,
                 search_boost: None,
-                allowed_values: None,
-                default_value: None,
+                allowed_values,
+                default_value,
             });
         }
         Ok(out)
@@ -1201,6 +1203,42 @@ fn extract_references(options: &[sqlparser::ast::ColumnOptionDef]) -> Option<Str
     None
 }
 
+fn extract_allowed_values(dt: &DataType) -> Option<Vec<String>> {
+    match dt {
+        DataType::Enum(members, _) => {
+            let vals: Vec<String> = members
+                .iter()
+                .map(|m| match m {
+                    sqlparser::ast::EnumMember::Name(n) => n.clone(),
+                    sqlparser::ast::EnumMember::NamedValue(n, _) => n.clone(),
+                })
+                .collect();
+            if vals.is_empty() {
+                None
+            } else {
+                Some(vals)
+            }
+        }
+        DataType::Set(vals) => {
+            if vals.is_empty() {
+                None
+            } else {
+                Some(vals.clone())
+            }
+        }
+        _ => None,
+    }
+}
+
+fn extract_default(options: &[sqlparser::ast::ColumnOptionDef]) -> Option<String> {
+    for opt in options {
+        if let ColumnOption::Default(expr) = &opt.option {
+            return expr_to_string(expr).ok();
+        }
+    }
+    None
+}
+
 fn extract_values(exprs: &[Expr]) -> Result<Vec<String>> {
     exprs.iter().map(expr_to_string).collect()
 }
@@ -1321,6 +1359,14 @@ pub fn build_typedef_zettel(id: &ZettelId, schema: &TableSchema) -> ParsedZettel
         extra.insert("folder".to_string(), Value::Bool(true));
     }
 
+    if let Some(ref tt) = schema.title_template {
+        extra.insert("title_template".to_string(), Value::String(tt.clone()));
+    }
+
+    if let Some(ref o) = schema.origin {
+        extra.insert("origin".to_string(), Value::String(o.clone()));
+    }
+
     ParsedZettel {
         meta: ZettelMeta {
             id: Some(id.clone()),
@@ -1434,6 +1480,39 @@ fn is_numeric_type(dt: &str) -> bool {
     matches!(dt.to_uppercase().as_str(), "INTEGER" | "REAL" | "BOOLEAN")
 }
 
+/// Determine if a SQL data type represents a short string (<=255 chars) that
+/// should default to frontmatter zone rather than body.
+fn is_short_string_type(dt: &DataType) -> bool {
+    match dt {
+        DataType::Char(_) | DataType::Character(_) | DataType::TinyText => true,
+        DataType::Varchar(Some(CharacterLength::IntegerLength { length, .. }))
+        | DataType::CharVarying(Some(CharacterLength::IntegerLength { length, .. })) => {
+            *length <= 255
+        }
+        // No size specified — assume short
+        DataType::Varchar(None) | DataType::CharVarying(None) => true,
+        DataType::Enum(..) | DataType::Set(_) => true,
+        _ => false,
+    }
+}
+
+/// Check if a stringified data type represents a short string (for effective_zone fallback).
+fn is_short_string_type_str(dt: &str) -> bool {
+    let upper = dt.to_uppercase();
+    if matches!(upper.as_str(), "CHAR" | "TINYTEXT" | "VARCHAR") {
+        return true;
+    }
+    if let Some(rest) = upper.strip_prefix("CHAR(") {
+        return rest.ends_with(')');
+    }
+    if let Some(rest) = upper.strip_prefix("VARCHAR(") {
+        if let Some(num_str) = rest.strip_suffix(')') {
+            return num_str.parse::<u64>().map_or(false, |n| n <= 255);
+        }
+    }
+    false
+}
+
 /// Resolve the effective zone for a column, falling back to type-based inference.
 fn effective_zone(col: &ColumnDef) -> Zone {
     if let Some(ref zone) = col.zone {
@@ -1441,7 +1520,7 @@ fn effective_zone(col: &ColumnDef) -> Zone {
     }
     if col.references.is_some() {
         Zone::Reference
-    } else if is_numeric_type(&col.data_type) {
+    } else if is_numeric_type(&col.data_type) || is_short_string_type_str(&col.data_type) {
         Zone::Frontmatter
     } else {
         Zone::Body
@@ -1572,6 +1651,20 @@ pub fn schema_from_parsed(zettel: &ParsedZettel) -> Result<TableSchema> {
         .and_then(|v| v.as_f64())
         .map(|n| n as u32);
 
+    let title_template = zettel
+        .meta
+        .extra
+        .get("title_template")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let origin = zettel
+        .meta
+        .extra
+        .get("origin")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     Ok(TableSchema {
         table_name,
         columns,
@@ -1579,8 +1672,8 @@ pub fn schema_from_parsed(zettel: &ParsedZettel) -> Result<TableSchema> {
         template_sections,
         folder,
         stale_after_days,
-        title_template: None,
-        origin: None,
+        title_template,
+        origin,
     })
 }
 
