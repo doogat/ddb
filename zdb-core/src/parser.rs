@@ -90,6 +90,22 @@ fn to_serde_yaml(v: &Value) -> serde_yaml::Value {
     }
 }
 
+/// Strip outer `[[...]]` wikilink syntax from a value, discarding any `|display` portion.
+/// Returns the inner target unchanged when brackets are present; returns the original value otherwise.
+fn strip_wikilink(val: &str) -> &str {
+    let v = val.trim();
+    let v = match v.strip_prefix("[[") {
+        Some(inner) => inner,
+        None => return v,
+    };
+    let v = match v.strip_suffix("]]") {
+        Some(inner) => inner,
+        None => return val.trim(),
+    };
+    // Drop display portion: [[target|display]] → target
+    v.split('|').next().unwrap_or(v)
+}
+
 /// Reference line pattern: `- key:: value` or `- key::` (empty value)
 fn is_reference_line(line: &str) -> bool {
     lazy_static_regex().is_match(line)
@@ -288,7 +304,7 @@ pub fn extract_inline_fields(
                     seen.insert(key.clone(), Zone::Reference);
                     fields.push(InlineField {
                         key,
-                        value: caps[2].to_string(),
+                        value: strip_wikilink(&caps[2]).to_string(),
                         zone: Zone::Reference,
                     });
                 }
@@ -936,6 +952,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn strip_wikilink_cases() {
+        assert_eq!(strip_wikilink("[[20260226120000]]"), "20260226120000");
+        assert_eq!(strip_wikilink("[[people/jane|Jane Doe]]"), "people/jane");
+        assert_eq!(strip_wikilink("Wikipedia"), "Wikipedia");
+        assert_eq!(strip_wikilink(""), "");
+        assert_eq!(strip_wikilink("  [[spaced]]  "), "spaced");
+        // Malformed: only opening bracket
+        assert_eq!(strip_wikilink("[[broken"), "[[broken");
+    }
+
+    #[test]
     fn basic_three_zone_split() {
         let content = "\
 ---
@@ -1118,6 +1145,22 @@ Body here.
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].key, "emptykey");
         assert_eq!(fields[0].value, "");
+    }
+
+    #[test]
+    fn inline_fields_reference_strips_wikilinks() {
+        let fields = extract_inline_fields(
+            "",
+            "- related:: [[20260226120000]]\n- author:: [[people/jane|Jane Doe]]\n- source:: Wikipedia",
+        )
+        .unwrap();
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0].key, "related");
+        assert_eq!(fields[0].value, "20260226120000");
+        assert_eq!(fields[1].key, "author");
+        assert_eq!(fields[1].value, "people/jane");
+        assert_eq!(fields[2].key, "source");
+        assert_eq!(fields[2].value, "Wikipedia");
     }
 
     #[test]

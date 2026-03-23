@@ -604,11 +604,7 @@ fn extract_column_value(
         Zone::Reference => {
             for field in &zettel.inline_fields {
                 if field.key == col.name {
-                    let val = field.value.trim();
-                    let val = val.strip_prefix("[[").unwrap_or(val);
-                    let val = val.strip_suffix("]]").unwrap_or(val);
-                    let val = val.split('|').next().unwrap_or(val);
-                    return val.to_string();
+                    return field.value.trim().to_string();
                 }
             }
             String::new()

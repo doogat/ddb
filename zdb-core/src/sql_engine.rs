@@ -1357,7 +1357,7 @@ fn build_data_zettel(
                 });
                 inline_fields.push(InlineField {
                     key: col.name.clone(),
-                    value: format!("[[{link_target}]]"),
+                    value: link_target.clone(),
                     zone: Zone::Reference,
                 });
             }
