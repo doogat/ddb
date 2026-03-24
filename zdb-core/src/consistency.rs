@@ -907,11 +907,20 @@ fn extract_from_zone(parsed: &ParsedZettel, col_name: &str, zone: &Zone) -> Opti
                     .map(|f| f.value.clone())
             })
         }
-        Zone::Reference => parsed
-            .inline_fields
-            .iter()
-            .find(|f| f.key == col_name && matches!(f.zone, Zone::Reference))
-            .map(|f| f.value.clone()),
+        Zone::Reference => {
+            // Collect ALL matching values (multi-value references)
+            let vals: Vec<&str> = parsed
+                .inline_fields
+                .iter()
+                .filter(|f| f.key == col_name && matches!(f.zone, Zone::Reference))
+                .map(|f| f.value.as_str())
+                .collect();
+            if vals.is_empty() {
+                None
+            } else {
+                Some(vals.join(","))
+            }
+        }
     }
 }
 
@@ -960,21 +969,23 @@ fn insert_into_zone(parsed: &mut ParsedZettel, col_name: &str, value: &str, zone
                 .push_str(&format!("## {col_name}\n\n{value}\n"));
         }
         Zone::Reference => {
-            // Add as `- col:: [[value]]` line
-            let line = format!("- {col_name}:: [[{value}]]");
-            if !parsed.reference_section.is_empty()
-                && !parsed.reference_section.ends_with('\n')
-            {
+            // Handle comma-separated multi-values from migration
+            let values: Vec<&str> = value.split(',').collect();
+            for val in &values {
+                let line = format!("- {col_name}:: [[{val}]]");
+                if !parsed.reference_section.is_empty()
+                    && !parsed.reference_section.ends_with('\n')
+                {
+                    parsed.reference_section.push('\n');
+                }
+                parsed.reference_section.push_str(&line);
                 parsed.reference_section.push('\n');
+                parsed.inline_fields.push(crate::types::InlineField {
+                    key: col_name.to_string(),
+                    value: val.to_string(),
+                    zone: Zone::Reference,
+                });
             }
-            parsed.reference_section.push_str(&line);
-            parsed.reference_section.push('\n');
-            // Also add to inline_fields for consistency
-            parsed.inline_fields.push(crate::types::InlineField {
-                key: col_name.to_string(),
-                value: value.to_string(),
-                zone: Zone::Reference,
-            });
         }
     }
 }
@@ -2078,6 +2089,35 @@ mod tests {
         // Column exists in schema but zettel has no data for it
         let current = detect_current_zone(&parsed, "nonexistent");
         assert_eq!(current, None);
+    }
+
+    #[test]
+    fn migrate_multi_value_reference_preserves_all() {
+        let mut parsed = empty_parsed();
+        parsed.reference_section =
+            "- tag:: [[20260301120000]]\n- tag:: [[20260301120001]]\n".into();
+        parsed.inline_fields.push(InlineField {
+            key: "tag".into(),
+            value: "20260301120000".into(),
+            zone: Zone::Reference,
+        });
+        parsed.inline_fields.push(InlineField {
+            key: "tag".into(),
+            value: "20260301120001".into(),
+            zone: Zone::Reference,
+        });
+
+        let value = extract_from_zone(&parsed, "tag", &Zone::Reference).unwrap();
+        assert_eq!(value, "20260301120000,20260301120001");
+
+        remove_from_zone(&mut parsed, "tag", &Zone::Reference);
+        assert!(parsed.inline_fields.is_empty());
+
+        // Re-insert into Reference zone — should produce two lines
+        insert_into_zone(&mut parsed, "tag", &value, &Zone::Reference);
+        assert_eq!(parsed.inline_fields.len(), 2);
+        assert!(parsed.reference_section.contains("- tag:: [[20260301120000]]"));
+        assert!(parsed.reference_section.contains("- tag:: [[20260301120001]]"));
     }
 
     #[test]
