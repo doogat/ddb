@@ -105,6 +105,17 @@ zdb type suggest mytype
 
 See [Type Definitions](./types.md) for details.
 
+## In-Depth Guides
+
+`zdb` includes built-in guides for common workflows:
+
+```bash
+zdb help              # list available guides
+zdb help create-app   # data modeling, zones, title resolution, API access
+```
+
+The `create-app` guide covers `CREATE TABLE` usage, zone inference, ENUM/SET constraints, title templates, junction tables, and API access patterns. See [Building Apps](./building-apps.md) for the full documentation.
+
 ## Set Up for Multi-Device Sync
 
 See [Multi-Device Sync](./sync.md) for configuring remotes and registering nodes.

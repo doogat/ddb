@@ -21,7 +21,7 @@ fn help_unknown_topic_fails() {
         .args(["help", "nonexistent"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Unknown guide"));
+        .stderr(predicate::str::contains("unknown guide"));
 }
 
 #[test]

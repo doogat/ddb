@@ -140,7 +140,7 @@ UniFFI (Swift/Kotlin, embedded):
   * Title overwrite: Setting --title on a typed zettel overwrites the
     title_template result. Omit --title to let the template work.
 
-Full documentation: docs/guide/building-apps.html
+Full documentation: docs/src/guide/building-apps.md
 ";
 
 macro_rules! out {
@@ -638,12 +638,11 @@ fn run(cli: Cli) -> zdb_core::error::Result<()> {
             match topic.as_deref() {
                 Some("create-app") => outln!("{CREATE_APP_GUIDE}")?,
                 Some(other) => {
-                    eprintln!("Unknown guide: {other}");
-                    eprintln!("Available guides:");
-                    eprintln!(
-                        "  create-app    Data modeling, zones, title resolution, and API access"
-                    );
-                    std::process::exit(1);
+                    return Err(zdb_core::error::ZettelError::Validation(
+                        format!(
+                            "unknown guide: {other}\n\nAvailable guides:\n  create-app    Data modeling, zones, title resolution, and API access"
+                        ),
+                    ));
                 }
                 None => {
                     outln!("Available guides:")?;
