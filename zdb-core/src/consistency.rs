@@ -891,13 +891,22 @@ fn detect_current_zone(parsed: &ParsedZettel, col_name: &str) -> Option<Zone> {
 /// Extract value from its current zone.
 fn extract_from_zone(parsed: &ParsedZettel, col_name: &str, zone: &Zone) -> Option<String> {
     match zone {
-        Zone::Frontmatter => parsed.meta.extra.get(col_name).map(|v| match v {
-            crate::types::Value::String(s) => s.clone(),
-            crate::types::Value::Number(n) => n.to_string(),
-            crate::types::Value::Bool(b) => b.to_string(),
-            _ => format!("{v:?}"),
+        Zone::Frontmatter => parsed.meta.extra.get(col_name).and_then(|v| match v {
+            crate::types::Value::String(s) => Some(s.clone()),
+            crate::types::Value::Number(n) => Some(n.to_string()),
+            crate::types::Value::Bool(b) => Some(b.to_string()),
+            _ => None,
         }),
-        Zone::Body => extract_body_section(&parsed.body, col_name),
+        Zone::Body => {
+            // Check ## heading sections first, then body inline fields
+            extract_body_section(&parsed.body, col_name).or_else(|| {
+                parsed
+                    .inline_fields
+                    .iter()
+                    .find(|f| f.key == col_name && matches!(f.zone, Zone::Body))
+                    .map(|f| f.value.clone())
+            })
+        }
         Zone::Reference => parsed
             .inline_fields
             .iter()
@@ -914,13 +923,16 @@ fn remove_from_zone(parsed: &mut ParsedZettel, col_name: &str, zone: &Zone) {
         }
         Zone::Body => {
             remove_body_section(&mut parsed.body, col_name);
+            // Also remove body inline fields and their text
+            parsed
+                .inline_fields
+                .retain(|f| !(f.key == col_name && matches!(f.zone, Zone::Body)));
+            remove_inline_field_from_body(&mut parsed.body, col_name);
         }
         Zone::Reference => {
-            // Remove from inline_fields
             parsed
                 .inline_fields
                 .retain(|f| !(f.key == col_name && matches!(f.zone, Zone::Reference)));
-            // Remove from reference_section text
             remove_reference_line(&mut parsed.reference_section, col_name);
         }
     }
@@ -2066,5 +2078,31 @@ mod tests {
         // Column exists in schema but zettel has no data for it
         let current = detect_current_zone(&parsed, "nonexistent");
         assert_eq!(current, None);
+    }
+
+    #[test]
+    fn migrate_body_inline_field_to_frontmatter() {
+        let mut parsed = empty_parsed();
+        parsed.body = "Some text\nstatus:: active\nMore text".into();
+        parsed.inline_fields.push(InlineField {
+            key: "status".into(),
+            value: "active".into(),
+            zone: Zone::Body,
+        });
+
+        let current = detect_current_zone(&parsed, "status");
+        assert_eq!(current, Some(Zone::Body));
+
+        let value = extract_from_zone(&parsed, "status", &Zone::Body).unwrap();
+        assert_eq!(value, "active");
+
+        remove_from_zone(&mut parsed, "status", &Zone::Body);
+        insert_into_zone(&mut parsed, "status", &value, &Zone::Frontmatter);
+
+        assert_eq!(
+            parsed.meta.extra.get("status"),
+            Some(&crate::types::Value::String("active".into()))
+        );
+        assert!(!parsed.body.contains("status::"));
     }
 }
