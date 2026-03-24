@@ -570,6 +570,27 @@ wait "$WRITE_PID"
 grep -q '"id"' "$WRITE_TMP"
 pass "serve: read-under-write (concurrent read + write)"
 
+# 38b. multi-value references via GraphQL + REST
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvcategory (name VARCHAR(100))\"){message}}"}'
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)\"){message}}"}'
+sleep 1
+MV_CAT1=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (\\\"Science\\\")\"){message}}"}' | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+MV_CAT2=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (\\\"Math\\\")\"){message}}"}' | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+[ -n "$MV_CAT1" ] && [ -n "$MV_CAT2" ]
+MV_BM=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO mvbookmark (mvcategory) VALUES ('$MV_CAT1')\\\"){message}}\"}" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+[ -n "$MV_BM" ]
+gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO mvbookmark_mvcategory (mvbookmark_id, mvcategory_id) VALUES ('$MV_BM', '$MV_CAT2')\\\"){message}}\"}" >/dev/null
+# GraphQL typed query — pluralized list field returns both categories
+RESULT=$(gql '{"query":"{ mvbookmarks { items { id mvcategories } } }"}')
+echo "$RESULT" | grep -q "$MV_CAT1"
+echo "$RESULT" | grep -q "$MV_CAT2"
+pass "serve: graphql multi-value ref list field"
+# REST — structured references object
+RESULT=$(rest "/zettels/$MV_BM")
+echo "$RESULT" | grep -q '"references"'
+echo "$RESULT" | grep -q '"mvcategory"'
+pass "serve: rest multi-value ref structured json"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

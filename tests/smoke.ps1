@@ -675,6 +675,22 @@ if ($writeResult -notmatch "id") { throw "read-under-write: write failed" }
 Remove-Job $writeJob
 pass "serve: read-under-write (concurrent read + write)"
 
+# 38b. multi-value references via GraphQL + REST
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvcategory (name VARCHAR(100))\"){message}}"}' | Out-Null
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)\"){message}}"}' | Out-Null
+$mvCat1 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (''Science'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
+$mvCat2 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (''Math'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
+$mvBm = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvbookmark (mvcategory) VALUES (''$mvCat1'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
+gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO mvbookmark_mvcategory (mvbookmark_id, mvcategory_id) VALUES ('$mvBm', '$mvCat2')\`"){message}}`"}" | Out-Null
+$mvResult = gql '{"query":"{ mvbookmarks { items { id mvcategories } } }"}'
+if ($mvResult -notmatch $mvCat1) { throw "multi-value ref: cat1 not in graphql list field" }
+if ($mvResult -notmatch $mvCat2) { throw "multi-value ref: cat2 not in graphql list field" }
+pass "serve: graphql multi-value ref list field"
+$mvRest = rest "/zettels/$mvBm"
+if ($mvRest -notmatch '"references"') { throw "multi-value ref: no references in rest json" }
+if ($mvRest -notmatch '"mvcategory"') { throw "multi-value ref: no category key in references" }
+pass "serve: rest multi-value ref structured json"
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
