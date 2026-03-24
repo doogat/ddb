@@ -949,4 +949,13 @@ $ZDB query "INSERT INTO smwidget (name, description) VALUES ('Foo', 'A foo widge
 $ZDB fix --verbose --dry-run | grep -q "title does not match template"
 pass "title template compliance check"
 
+# 39. zone migration
+cd "$TMPDIR"
+$ZDB query "CREATE TABLE gadget (notes TEXT)" | grep -q "table gadget created"
+$ZDB query "INSERT INTO gadget (notes) VALUES ('Some notes')" >/dev/null
+$ZDB query "ALTER TABLE gadget SET ZONE frontmatter FOR notes" >/dev/null
+FIX_OUT=$($ZDB fix --migrate --verbose)
+echo "$FIX_OUT" | grep -q "zone-migrated"
+pass "zone migration"
+
 echo "=== all passed ==="

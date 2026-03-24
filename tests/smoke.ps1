@@ -1098,6 +1098,15 @@ $fixVerbose = zdb fix --verbose --dry-run
 if ($fixVerbose -notmatch "title does not match template") { throw "title compliance not reported" }
 pass "title template compliance check"
 
+# 39. zone migration
+Push-Location $TMPDIR
+zdb query "CREATE TABLE gadget (notes TEXT)" | Out-Null
+zdb query "INSERT INTO gadget (notes) VALUES ('Some notes')" | Out-Null
+zdb query "ALTER TABLE gadget SET ZONE frontmatter FOR notes" | Out-Null
+$fixMigrate = zdb fix --migrate --verbose
+if ($fixMigrate -notmatch "zone-migrated") { throw "zone migration not reported: $fixMigrate" }
+pass "zone migration"
+
 # Return to original directory
 Set-Location $TMPDIR
 
