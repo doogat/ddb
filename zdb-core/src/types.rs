@@ -999,8 +999,13 @@ impl ColumnDef {
         ) {
             return true;
         }
-        if upper.starts_with("CHAR(") || upper.starts_with("VARCHAR(") {
+        if upper.starts_with("CHAR(") {
             return true;
+        }
+        if let Some(rest) = upper.strip_prefix("VARCHAR(") {
+            if let Some(num_str) = rest.strip_suffix(')') {
+                return num_str.parse::<u64>().is_ok_and(|n| n <= 255);
+            }
         }
         if self.allowed_values.is_some() {
             return true;
@@ -1617,5 +1622,26 @@ mod tests {
         v.set_path("data.items", val.clone()).unwrap();
         assert_eq!(v.get_path("data.items").unwrap(), &val);
         assert_eq!(v.f64_at("data.items[0]").unwrap(), 1.0);
+    }
+
+    #[test]
+    fn effective_zone_varchar_length_cap() {
+        let col = |dt: &str| ColumnDef {
+            name: "x".into(),
+            data_type: dt.into(),
+            references: None,
+            zone: None,
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        };
+        assert_eq!(col("VARCHAR").effective_zone(), Zone::Frontmatter);
+        assert_eq!(col("VARCHAR(100)").effective_zone(), Zone::Frontmatter);
+        assert_eq!(col("VARCHAR(255)").effective_zone(), Zone::Frontmatter);
+        assert_eq!(col("VARCHAR(256)").effective_zone(), Zone::Body);
+        assert_eq!(col("VARCHAR(1000)").effective_zone(), Zone::Body);
+        assert_eq!(col("INTEGER").effective_zone(), Zone::Frontmatter);
+        assert_eq!(col("TEXT").effective_zone(), Zone::Body);
     }
 }
