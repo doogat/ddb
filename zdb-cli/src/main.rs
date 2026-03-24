@@ -8,6 +8,141 @@ use zdb_core::sql_engine::SqlResult;
 
 mod updater;
 
+const CREATE_APP_GUIDE: &str = "\
+CREATE-APP GUIDE
+================
+
+Build structured apps on ZettelDB. Define schemas with SQL, query via
+GraphQL/CLI/UniFFI. Data lives in Git-backed Markdown with CRDT sync.
+
+1. USE CREATE TABLE, NOT MANUAL TYPEDEFS
+----------------------------------------
+
+Define entity schemas with SQL:
+
+  zdb query \"CREATE TABLE bookmark (
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    category TEXT REFERENCES category(id)
+  )\"
+
+This creates a _typedef zettel, a materialized SQLite table, and a
+GraphQL type. Manual _typedef zettels lack CRDT tracking and may be
+flagged by 'zdb fix'.
+
+2. SQL TYPES DETERMINE ZONE PLACEMENT
+--------------------------------------
+
+Each column maps to a Markdown zone based on its SQL type:
+
+  frontmatter   INTEGER, REAL, BOOLEAN, CHAR(n), VARCHAR(n<=255),
+                TINYTEXT, ENUM, SET
+  body          TEXT, VARCHAR(n>255), MEDIUMTEXT, LONGTEXT
+  reference     Columns with REFERENCES
+
+3. THREE-ZONE MENTAL MODEL
+--------------------------
+
+Every zettel has three zones:
+
+  ---                          <- frontmatter (YAML metadata)
+  title: My Record
+  type: bookmark
+  url: https://example.com
+  ---
+                               <- body (Markdown content)
+  ## Description
+  Long-form text goes here.
+
+  ---                          <- references (wikilinks)
+  - category:: [[20260301120000]]
+
+Frontmatter holds filterable scalars. Body holds rich text.
+References hold links between entities.
+
+4. ENUM AND SET FOR VALUE CONSTRAINTS
+-------------------------------------
+
+Constrain column values with ENUM or SET types:
+
+  zdb query \"CREATE TABLE task (
+    title TEXT NOT NULL,
+    status ENUM('todo','doing','done') DEFAULT 'todo',
+    priority ENUM('low','medium','high')
+  )\"
+
+ENUM extracts allowed_values into the typedef schema. Values are
+validated on INSERT.
+
+5. TITLE RESOLUTION AND title_template
+--------------------------------------
+
+Zettel titles are resolved in this order:
+
+  1. Explicit --title on create/update
+  2. title_template on the typedef (pattern with {column} placeholders)
+  3. The zettel ID as fallback
+
+Set a title template:
+
+  zdb query \"ALTER TABLE contact SET TITLE TEMPLATE '{name}'\"
+
+Remove it:
+
+  zdb query \"ALTER TABLE contact DROP TITLE TEMPLATE\"
+
+6. ZONE OVERRIDES WITH ALTER TABLE SET ZONE
+--------------------------------------------
+
+Override the default zone for a column:
+
+  zdb query \"ALTER TABLE bookmark SET ZONE body FOR description\"
+
+This moves the column from frontmatter to body. Existing zettels are
+migrated on the next 'zdb fix --migrate'.
+
+7. JUNCTION TABLES FOR MULTI-VALUED REFERENCES
+-----------------------------------------------
+
+A REFERENCES column supports multiple values. Each INSERT appends a
+reference line:
+
+  zdb query \"INSERT INTO bookmark_category (bookmark_id, category_id)
+    VALUES ('20260301120200', '20260301120100')\"
+
+Junction tables ({type}_{column}) are created automatically during
+materialization. DELETE removes the reference line.
+
+8. API ACCESS
+-------------
+
+CLI:
+  zdb query \"SELECT id, title, url FROM bookmark\"
+  zdb search \"rust programming\"
+
+GraphQL (zdb serve --port 2891):
+  query { bookmarks { id, title, url, category } }
+  mutation { executeSql(sql: \"INSERT INTO ...\") { message } }
+
+UniFFI (Swift/Kotlin, embedded):
+  let driver = try ZettelDriver.createRepo(repoPath: path)
+  try driver.executeSql(\"SELECT name FROM contact\")
+
+9. COMMON MISTAKES
+------------------
+
+  * Manual typedefs: Use CREATE TABLE instead. Manual _typedef zettels
+    are not CRDT-tracked and will be flagged by 'zdb fix'.
+
+  * Zone surprise: A TEXT column defaults to body, not frontmatter.
+    Use VARCHAR(255) for short strings or SET ZONE to override.
+
+  * Title overwrite: Setting --title on a typed zettel overwrites the
+    title_template result. Omit --title to let the template work.
+
+Full documentation: docs/guide/building-apps.html
+";
+
 macro_rules! out {
     ($($arg:tt)*) => {
         write_stdout(format_args!($($arg)*))
@@ -40,7 +175,13 @@ fn is_broken_pipe(err: &zdb_core::error::ZettelError) -> bool {
 }
 
 #[derive(Parser)]
-#[command(name = "zdb", version, about = "Decentralized Zettelkasten")]
+#[command(
+    name = "zdb",
+    version,
+    about = "Decentralized Zettelkasten",
+    disable_help_subcommand = true,
+    after_help = "GUIDES:\n  help <topic>    In-depth guides (try: zdb help create-app)"
+)]
 struct Cli {
     /// Repository path (default: current directory)
     #[arg(short, long, default_value = ".")]
@@ -65,7 +206,15 @@ enum Command {
         /// Path to create the repository
         path: Option<PathBuf>,
     },
+    /// In-depth guides
+    Help {
+        /// Guide topic (e.g. create-app)
+        topic: Option<String>,
+    },
     /// Create a new zettel
+    #[command(
+        after_long_help = "Note: for type definitions, prefer CREATE TABLE via 'zdb query'. See: zdb help create-app"
+    )]
     Create {
         #[arg(long)]
         title: String,
@@ -109,6 +258,9 @@ enum Command {
         branch: String,
     },
     /// Execute SQL (DDL/DML routed through SQL engine; SELECT queries index)
+    #[command(
+        after_long_help = "For app data modeling, see: zdb help create-app"
+    )]
     Query {
         /// SQL statement
         sql: String,
@@ -168,6 +320,9 @@ enum Command {
         new_path: String,
     },
     /// Type definition management
+    #[command(
+        after_long_help = "To define types, use CREATE TABLE via 'zdb query'. See: zdb help create-app"
+    )]
     Type {
         #[command(subcommand)]
         action: TypeAction,
@@ -479,6 +634,28 @@ fn fmt_bytes(b: u64) -> String {
 
 fn run(cli: Cli) -> zdb_core::error::Result<()> {
     match cli.command {
+        Command::Help { topic } => {
+            match topic.as_deref() {
+                Some("create-app") => outln!("{CREATE_APP_GUIDE}")?,
+                Some(other) => {
+                    eprintln!("Unknown guide: {other}");
+                    eprintln!("Available guides:");
+                    eprintln!(
+                        "  create-app    Data modeling, zones, title resolution, and API access"
+                    );
+                    std::process::exit(1);
+                }
+                None => {
+                    outln!("Available guides:")?;
+                    outln!(
+                        "  create-app    Data modeling, zones, title resolution, and API access"
+                    )?;
+                    outln!("")?;
+                    outln!("Usage: zdb help <topic>")?;
+                }
+            }
+        }
+
         Command::Init { path } => {
             let p = path.unwrap_or_else(|| cli.repo.clone());
             ZettelService::init(&p)?;

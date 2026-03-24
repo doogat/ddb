@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `collisionsReassigned` field in GraphQL `SyncResult`
 - Title template compliance checking in `zdb fix --verbose` — flags zettels whose title doesn't match their typedef's `title_template`
 - Zone migration via `zdb fix --migrate` — moves zettel data between frontmatter/body/reference zones to match typedef schema
+- `zdb help` subcommand with in-depth guides (start with `zdb help create-app` for data modeling, zones, title resolution, and API access)
+- Contextual hints on `zdb query --help`, `zdb type --help`, `zdb create --help` pointing to the create-app guide
+- GUIDES section in `zdb --help` output
 
 ### Fixed
 

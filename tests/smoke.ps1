@@ -1107,6 +1107,21 @@ $fixMigrate = zdb fix --migrate --verbose
 if ($fixMigrate -notmatch "zone-migrated") { throw "zone migration not reported: $fixMigrate" }
 pass "zone migration"
 
+# 40. help guides
+$helpOut = zdb help create-app
+if ($helpOut -notmatch "CREATE TABLE") { throw "help create-app missing CREATE TABLE" }
+pass "help create-app"
+$helpList = zdb help
+if ($helpList -notmatch "create-app") { throw "help list missing create-app" }
+pass "help list"
+$helpFail = $null
+try { zdb help nonexistent 2>$null } catch { $helpFail = $true }
+if (-not $helpFail) {
+    # Also check exit code via $LASTEXITCODE for native commands
+    if ($LASTEXITCODE -eq 0) { throw "help unknown should fail" }
+}
+pass "help unknown fails"
+
 # Return to original directory
 Set-Location $TMPDIR
 

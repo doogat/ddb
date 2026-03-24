@@ -12,7 +12,7 @@ use tungstenite::{connect, Message};
 /// `CARGO_BIN_EXE_zdb` is only set for same-package binaries, and the
 /// `assert_cmd::cargo::cargo_bin` function is deprecated, so we resolve
 /// the path ourselves.
-fn zdb_bin() -> PathBuf {
+pub(crate) fn zdb_bin() -> PathBuf {
     if let Ok(p) = std::env::var("CARGO_BIN_EXE_zdb") {
         return PathBuf::from(p);
     }

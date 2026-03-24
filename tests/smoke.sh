@@ -327,6 +327,15 @@ pass "sequence broken"
 $ZDB --log-level debug status >/dev/null 2>&1
 pass "--log-level flag accepted"
 
+# 16c. help guides (no repo needed)
+HELP_OUT=$($ZDB help create-app)
+echo "$HELP_OUT" | grep -q "CREATE TABLE"
+pass "help create-app"
+$ZDB help | grep -q "create-app"
+pass "help list"
+! $ZDB help nonexistent 2>/dev/null
+pass "help unknown fails"
+
 if [ "$SMOKE_PROFILE" = "quick" ]; then
   pass "quick profile complete"
   exit 0
