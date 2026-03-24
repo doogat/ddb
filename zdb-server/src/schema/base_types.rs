@@ -346,30 +346,7 @@ pub(crate) fn extract_typed_field(z: &ParsedZettel, col: &ColumnDef) -> GqlValue
     }
 }
 
-/// Extract content under a ## heading in the body.
-pub(crate) fn extract_body_section(body: &str, heading: &str) -> Option<String> {
-    let target = format!("## {heading}");
-    let mut lines = body.lines();
-    // Find the heading
-    let found = lines.by_ref().any(|l| l.trim() == target);
-    if !found {
-        return None;
-    }
-    // Collect lines until next heading or end
-    let mut content = Vec::new();
-    for line in lines {
-        if line.starts_with("## ") {
-            break;
-        }
-        content.push(line);
-    }
-    let text = content.join("\n").trim().to_string();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
-}
+pub(crate) use zdb_core::consistency::extract_body_section;
 
 // -- Type builders & helpers --
 
