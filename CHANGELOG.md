@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-device ID collision detection: when two devices create a zettel in the same second, both survive sync with distinct IDs
 - `SyncReport.collisions_reassigned` field and CLI display
 - `collisionsReassigned` field in GraphQL `SyncResult`
+- Title template compliance checking in `zdb fix --verbose` — flags zettels whose title doesn't match their typedef's `title_template`
+- Zone migration via `zdb fix --migrate` — moves zettel data between frontmatter/body/reference zones to match typedef schema
 
 ### Fixed
 
@@ -21,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wikilink rewriting during collision resolution skips references from the winner's side
 - `update_frontmatter_id` returns an error on parse failure instead of silently preserving the old ID
 - Collision loser ID generation checks both flat and folder-typed paths
+- Scalar GraphQL field for REFERENCES columns returns first value instead of all comma-joined
 
 ## [0.1.0] - 2026-03-19
 
