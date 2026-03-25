@@ -1976,7 +1976,7 @@ mod tests {
         remove_from_zone(&mut parsed, "notes", &Zone::Frontmatter);
         insert_into_zone(&mut parsed, "notes", &value, &Zone::Body);
 
-        assert!(parsed.meta.extra.get("notes").is_none());
+        assert!(!parsed.meta.extra.contains_key("notes"));
         assert!(parsed.body.contains("## notes"));
         assert!(parsed.body.contains("Important stuff"));
     }
@@ -1993,7 +1993,7 @@ mod tests {
         remove_from_zone(&mut parsed, "category", &Zone::Frontmatter);
         insert_into_zone(&mut parsed, "category", &value, &Zone::Reference);
 
-        assert!(parsed.meta.extra.get("category").is_none());
+        assert!(!parsed.meta.extra.contains_key("category"));
         assert!(parsed.reference_section.contains("- category:: [[20260301120000]]"));
         assert!(parsed
             .inline_fields
