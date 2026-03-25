@@ -410,6 +410,44 @@ pass "sequence broken"
 zdb --log-level debug status *>$null
 pass "--log-level flag accepted"
 
+# 16d. app-building end-to-end flow
+$output = zdb query "CREATE TABLE abcategory (name VARCHAR(100))"
+if ($output -notmatch "table abcategory created") { throw "create abcategory failed" }
+$AB_CAT_ID = zdb query "INSERT INTO abcategory (name) VALUES ('work')"
+if ($AB_CAT_ID -notmatch "^\d{14}$") { throw "insert abcategory bad id: $AB_CAT_ID" }
+$output = zdb query "CREATE TABLE abbookmark (url VARCHAR(2048), description TEXT, abcategory TEXT REFERENCES abcategory)"
+if ($output -notmatch "table abbookmark created") { throw "create abbookmark failed" }
+$output = zdb query "ALTER TABLE abbookmark SET ZONE reference FOR url"
+if ($output -notmatch "zone set to reference") { throw "SET ZONE failed" }
+$output = zdb query "ALTER TABLE abbookmark SET TITLE TEMPLATE '{url}'"
+if ($output -notmatch "title template set") { throw "SET TITLE TEMPLATE failed" }
+# Insert with explicit title
+Start-Sleep -Seconds 1
+$AB_BM1 = zdb query "INSERT INTO abbookmark (title, url, description) VALUES ('Rust Book', 'https://doc.rust-lang.org', 'The official Rust book')"
+if ($AB_BM1 -notmatch "^\d{14}$") { throw "insert bookmark1 bad id: $AB_BM1" }
+# Insert with template-derived title (no explicit title)
+Start-Sleep -Seconds 1
+$AB_BM2 = zdb query "INSERT INTO abbookmark (url, description) VALUES ('https://crates.io', 'Rust package registry')"
+if ($AB_BM2 -notmatch "^\d{14}$") { throw "insert bookmark2 bad id: $AB_BM2" }
+# Link bookmark to category via junction table
+$output = zdb query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM1', '$AB_CAT_ID')"
+if ($output -notmatch "1 row") { throw "junction insert failed: $output" }
+# SELECT from main table
+$output = zdb query "SELECT url FROM abbookmark"
+if ($output -notmatch "rust-lang") { throw "select bookmark failed" }
+# SELECT from junction table
+$output = zdb query "SELECT abcategory_id FROM abbookmark_abcategory WHERE abbookmark_id = '$AB_BM1'"
+if ($output -notmatch $AB_CAT_ID) { throw "junction select failed" }
+# help create-app guide available
+$output = zdb help create-app
+if ($output -notmatch "CREATE TABLE") { throw "help create-app failed" }
+# Clean up
+$output = zdb query "DROP TABLE abbookmark CASCADE"
+if ($output -notmatch "dropped") { throw "drop abbookmark failed" }
+$output = zdb query "DROP TABLE abcategory CASCADE"
+if ($output -notmatch "dropped") { throw "drop abcategory failed" }
+pass "app-building end-to-end flow"
+
 if ($SmokeProfile -eq "quick") {
     pass "quick profile complete"
     exit 0
