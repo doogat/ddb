@@ -21,7 +21,7 @@ import com.doogat.hostshell.contacts.ContactListScreen
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val driver = (application as ZDBApplication).driver
+        val driver = (application as DDBApplication).driver
 
         setContent {
             MaterialTheme {
@@ -37,9 +37,9 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun HostShellScaffold(
-    onQueryBookmarks: (String) -> uniffi.zdb_core.SqlResultRecord,
-    onQueryContacts: (String) -> uniffi.zdb_core.SqlResultRecord,
-    onSearch: (String) -> List<uniffi.zdb_core.SearchResult>,
+    onQueryBookmarks: (String) -> uniffi.ddb_core.SqlResultRecord,
+    onQueryContacts: (String) -> uniffi.ddb_core.SqlResultRecord,
+    onSearch: (String) -> List<uniffi.ddb_core.SearchResult>,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -87,10 +87,10 @@ fun HostShellScaffold(
 @Composable
 fun SearchScreen(
     modifier: Modifier = Modifier,
-    onSearch: (String) -> List<uniffi.zdb_core.SearchResult>,
+    onSearch: (String) -> List<uniffi.ddb_core.SearchResult>,
 ) {
     var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf(emptyList<uniffi.zdb_core.SearchResult>()) }
+    var results by remember { mutableStateOf(emptyList<uniffi.ddb_core.SearchResult>()) }
 
     Column(modifier = modifier) {
         OutlinedTextField(
@@ -103,7 +103,7 @@ fun SearchScreen(
                     results = emptyList()
                 }
             },
-            label = { Text("Search all zettels") },
+            label = { Text("Search all doogats") },
             modifier = Modifier.fillMaxWidth().padding(16.dp)
         )
         LazyColumn {

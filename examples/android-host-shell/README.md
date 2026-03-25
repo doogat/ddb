@@ -1,6 +1,6 @@
 # Android Host-Shell Example
 
-A Jetpack Compose host-shell app demonstrating two mini-app modules (Bookmarks and Contacts) sharing one embedded ZettelDB core.
+A Jetpack Compose host-shell app demonstrating two mini-app modules (Bookmarks and Contacts) sharing one embedded Doogat DB core.
 
 ## Prerequisites
 
@@ -12,9 +12,9 @@ A Jetpack Compose host-shell app demonstrating two mini-app modules (Bookmarks a
 
 2. Generate Kotlin bindings:
    ```bash
-   cargo run -p zdb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-     --library target/debug/libzdb_core.dylib \
-     --language kotlin --out-dir examples/android-host-shell/core-zdb/src/main/java
+   cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
+     --library target/debug/libddb_core.dylib \
+     --language kotlin --out-dir examples/android-host-shell/core-ddb/src/main/java
    ```
 
 3. Open in Android Studio and sync Gradle.
@@ -23,15 +23,15 @@ A Jetpack Compose host-shell app demonstrating two mini-app modules (Bookmarks a
 
 ```
 HostShellApp (Application)
-├── ZettelDriver (one instance, app-scoped)
+├── DoogatDriver (one instance, app-scoped)
 ├── :feature-bookmarks
 │   ├── BookmarksModule.bootstrap()
 │   └── BookmarkListScreen
 ├── :feature-contacts
 │   ├── ContactsModule.bootstrap()
 │   └── ContactListScreen
-└── :core-zdb
-    └── ZDBModule interface + shared ZettelDriver access
+└── :core-ddb
+    └── DDBModule interface + shared DoogatDriver access
 ```
 
 ## Module structure
@@ -39,7 +39,7 @@ HostShellApp (Application)
 ```
 android-host-shell/
 ├── app/                      Main app module
-├── core-zdb/                 Shared ZettelDriver wrapper + module interface
+├── core-ddb/                 Shared DoogatDriver wrapper + module interface
 ├── feature-bookmarks/        Bookmarks mini-app
 ├── feature-contacts/         Contacts mini-app
 ├── build.gradle.kts          Root build file
@@ -49,6 +49,6 @@ android-host-shell/
 ## Key patterns
 
 - **Schema bootstrap**: each module uses `CREATE TABLE IF NOT EXISTS` for idempotent setup
-- **Shared driver**: provided by `ZDBApplication`, accessed via `(application as ZDBApplication).driver`
+- **Shared driver**: provided by `DDBApplication`, accessed via `(application as DDBApplication).driver`
 - **Bottom navigation**: each module is a destination
-- **Cross-module search**: FTS5 search spans all zettel types
+- **Cross-module search**: FTS5 search spans all doogat types

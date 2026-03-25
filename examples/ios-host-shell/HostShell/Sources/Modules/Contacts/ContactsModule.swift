@@ -1,9 +1,9 @@
 import Foundation
 
-struct ContactsModule: ZDBModule {
+struct ContactsModule: DDBModule {
     static let tables = ["contact"]
 
-    static func bootstrap(_ driver: ZettelDriver) throws {
+    static func bootstrap(_ driver: DoogatDriver) throws {
         _ = try driver.executeSql(sql: """
             CREATE TABLE IF NOT EXISTS contact (
                 name TEXT NOT NULL,

@@ -23,7 +23,7 @@ android {
 }
 
 dependencies {
-    implementation(project(":core-zdb"))
+    implementation(project(":core-ddb"))
     implementation(project(":feature-bookmarks"))
     implementation(project(":feature-contacts"))
 

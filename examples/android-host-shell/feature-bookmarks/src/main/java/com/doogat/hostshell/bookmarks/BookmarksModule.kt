@@ -1,12 +1,12 @@
 package com.doogat.hostshell.bookmarks
 
-import com.doogat.hostshell.ZDBModule
-import uniffi.zdb_core.ZettelDriver
+import com.doogat.hostshell.DDBModule
+import uniffi.ddb_core.DoogatDriver
 
-object BookmarksModule : ZDBModule {
+object BookmarksModule : DDBModule {
     override val tables = listOf("category", "bookmark")
 
-    override fun bootstrap(driver: ZettelDriver) {
+    override fun bootstrap(driver: DoogatDriver) {
         driver.executeSql("CREATE TABLE IF NOT EXISTS category (name TEXT NOT NULL)")
         driver.executeSql("""
             CREATE TABLE IF NOT EXISTS bookmark (

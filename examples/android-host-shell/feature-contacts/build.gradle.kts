@@ -19,6 +19,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":core-zdb"))
+    implementation(project(":core-ddb"))
     implementation("androidx.compose.material3:material3:1.3.0")
 }

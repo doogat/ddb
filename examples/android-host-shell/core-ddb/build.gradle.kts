@@ -20,5 +20,5 @@ android {
 dependencies {
     // UniFFI-generated Kotlin bindings expect JNA
     api("net.java.dev.jna:jna:5.16.0@aar")
-    // The generated zdb_core.kt and libzdb_core.so go in src/main/java and jniLibs/
+    // The generated ddb_core.kt and libddb_core.so go in src/main/java and jniLibs/
 }

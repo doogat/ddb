@@ -7,7 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.doogat.hostshell.columnValue
-import uniffi.zdb_core.SqlResultRecord
+import uniffi.ddb_core.SqlResultRecord
 
 @Composable
 fun BookmarkListScreen(

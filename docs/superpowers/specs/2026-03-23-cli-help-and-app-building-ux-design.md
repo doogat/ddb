@@ -4,12 +4,12 @@ Improve the app-building experience by fixing zone defaults, title resolution, t
 
 ## Problem
 
-Users building apps with zdb hit five traps:
+Users building apps with ddb hit five traps:
 
-1. **No CLI bridge** — nothing in `zdb --help` points to app-building guidance
+1. **No CLI bridge** — nothing in `ddb --help` points to app-building guidance
 2. **Zone confusion** — building-apps.md claims TEXT defaults to frontmatter; code defaults TEXT to body; neither is universally correct
 3. **Title overwrite** — SQL INSERT ignores explicit `title` column, auto-derives from first body-zone TEXT column
-4. **Typedef trap** — users create _typedef zettels via `zdb create --type _typedef` then hand-edit; CRDT doesn't track manual edits, `zdb fix` strips them
+4. **Typedef trap** — users create _typedef doogats via `ddb create --type _typedef` then hand-edit; CRDT doesn't track manual edits, `ddb fix` strips them
 5. **No zone control** — once a column's zone is set via CREATE TABLE, there's no way to change it
 
 ## Design
@@ -24,9 +24,9 @@ Replace the current blanket TEXT→body default with type-aware zone inference b
 |------|-----------|---------|
 | frontmatter | Metadata about the content | status, priority, date, name, boolean flags |
 | body | The content itself | description, notes, log, bio |
-| reference | Pointers outside the zettel | FK to other zettels, URLs, emails, external links |
+| reference | Pointers outside the doogat | FK to other doogats, URLs, emails, external links |
 
-Rule of thumb: "If it points somewhere else, it's a reference. If it describes the zettel, it's metadata. If it IS the zettel, it's body."
+Rule of thumb: "If it points somewhere else, it's a reference. If it describes the doogat, it's metadata. If it IS the doogat, it's body."
 
 **SQL type to zone mapping:**
 
@@ -89,12 +89,12 @@ ALTER TABLE bookmark SET ZONE reference FOR related;
 **Behavior:**
 
 1. Validates column exists in the typedef
-2. Updates the `zone` field in the _typedef zettel YAML
+2. Updates the `zone` field in the _typedef doogat YAML
 3. Warns to stderr if moving a column to frontmatter or reference: "Warning: frontmatter/reference zones are best for short values. Long text may hurt readability of the underlying Markdown file."
 4. Re-materializes the SQLite table
-5. Existing zettels are not migrated — their Markdown stays as-is until next update. `zdb fix --migrate` rewrites them.
+5. Existing doogats are not migrated — their Markdown stays as-is until next update. `ddb fix --migrate` rewrites them.
 
-**Zone migration via `zdb fix --migrate`:** For each zettel of the affected type, re-derive the Markdown from the current zone assignments. Moving body→frontmatter: parse the `## column_name` section, extract content, add as YAML field (multi-line values use YAML literal block scalars `|`), remove body section. Moving frontmatter→body: reverse. Moving to/from reference: format/parse as `- key:: value` wikilink lines. Sub-headings within a body section are preserved as-is within the section content.
+**Zone migration via `ddb fix --migrate`:** For each doogat of the affected type, re-derive the Markdown from the current zone assignments. Moving body→frontmatter: parse the `## column_name` section, extract content, add as YAML field (multi-line values use YAML literal block scalars `|`), remove body section. Moving frontmatter→body: reverse. Moving to/from reference: format/parse as `- key:: value` wikilink lines. Sub-headings within a body section are preserved as-is within the section content.
 
 ### 3. Title Resolution
 
@@ -116,7 +116,7 @@ Templates interpolate column values by name. Missing values produce empty string
 | 4 | First frontmatter string column value | `status VARCHAR(50)` → "todo" |
 | 5 | `{type} {id}` fallback | "contact 20260301130000" |
 
-**Direct title INSERT with a template defined:** The explicit title is used but flagged as non-compliant. `zdb fix` can auto-repair by re-deriving from the template. Health checks surface these.
+**Direct title INSERT with a template defined:** The explicit title is used but flagged as non-compliant. `ddb fix` can auto-repair by re-deriving from the template. Health checks surface these.
 
 **New DDL:**
 
@@ -125,7 +125,7 @@ ALTER TABLE contact SET TITLE TEMPLATE '{name} ({relationship})';
 ALTER TABLE contact DROP TITLE TEMPLATE;
 ```
 
-**Code change in sql_engine.rs:** In `build_data_zettel()`, before the column loop:
+**Code change in sql_engine.rs:** In `build_data_doogat()`, before the column loop:
 1. Check `col_values.get("title")` — if present, use as title (Priority 1)
 2. If not, check `schema.title_template` — if present, interpolate column values (Priority 2)
 3. Otherwise, fall through to the existing column loop which sets title from the first body-zone column (Priority 3), then first frontmatter string column (Priority 4)
@@ -138,7 +138,7 @@ This requires `TableSchema` to carry the `title_template` field (see Section 7).
 **_typedef frontmatter gains `origin` field:**
 
 - `origin: ddl` — created via `CREATE TABLE`
-- `origin: manual` — created via `zdb create --type _typedef`
+- `origin: manual` — created via `ddb create --type _typedef`
 
 ```yaml
 ---
@@ -151,40 +151,40 @@ columns:
 ---
 ```
 
-**Runtime warning on `zdb create --type _typedef`:** Emit to stderr:
+**Runtime warning on `ddb create --type _typedef`:** Emit to stderr:
 
 ```
-Warning: type definitions should be created with CREATE TABLE via 'zdb query'.
-Manual typedefs are not CRDT-tracked and may be stripped by 'zdb fix'.
-See: zdb help create-app
+Warning: type definitions should be created with CREATE TABLE via 'ddb query'.
+Manual typedefs are not CRDT-tracked and may be stripped by 'ddb fix'.
+See: ddb help create-app
 ```
 
 The create still proceeds — not blocked.
 
-**`zdb fix --verbose` flags manual typedefs:**
+**`ddb fix --verbose` flags manual typedefs:**
 
 ```
 Warning: _typedef/20260301120000.md (bookmark) has origin: manual.
-Consider recreating with: zdb query "CREATE TABLE bookmark (...)"
+Consider recreating with: ddb query "CREATE TABLE bookmark (...)"
 ```
 
-### 5. `zdb help` Subcommand
+### 5. `ddb help` Subcommand
 
-**Top-level `zdb --help` output gains:**
+**Top-level `ddb --help` output gains:**
 
 ```
 GUIDES:
-  help <topic>    In-depth guides (try: zdb help create-app)
+  help <topic>    In-depth guides (try: ddb help create-app)
 ```
 
-**`zdb help` with no topic** lists available guides:
+**`ddb help` with no topic** lists available guides:
 
 ```
 Available guides:
   create-app    Data modeling, zones, title resolution, and API access
 ```
 
-**`zdb help create-app`** prints a focused tutorial to stdout:
+**`ddb help create-app`** prints a focused tutorial to stdout:
 
 1. Use `CREATE TABLE`, not manual typedefs
 2. Choose SQL types for zone inference (type→zone table, ENUM/SET for constraints)
@@ -196,9 +196,9 @@ Available guides:
 
 **`after_long_help` on existing commands:**
 
-- `zdb query --help`: "For app data modeling, see: zdb help create-app"
-- `zdb type --help`: "To define types, use CREATE TABLE via 'zdb query'. See: zdb help create-app"
-- `zdb create --help`: "Note: for type definitions, prefer CREATE TABLE via 'zdb query'. See: zdb help create-app"
+- `ddb query --help`: "For app data modeling, see: ddb help create-app"
+- `ddb type --help`: "To define types, use CREATE TABLE via 'ddb query'. See: ddb help create-app"
+- `ddb create --help`: "Note: for type definitions, prefer CREATE TABLE via 'ddb query'. See: ddb help create-app"
 
 **Implementation:** Guide text is a `const &str` in the CLI crate, printed directly. No pager, no external dependency.
 
@@ -211,7 +211,7 @@ Available guides:
 3. Add ENUM/SET examples to the Constraints section, replacing hand-edited YAML approach
 4. Add title resolution section documenting the cascade, `title_template`, and non-compliance
 5. Fix worked examples: url → reference zone (via ALTER TABLE), description → body, status → frontmatter
-6. Add typedef workflow callout: "Always use CREATE TABLE. Do not create _typedef zettels manually."
+6. Add typedef workflow callout: "Always use CREATE TABLE. Do not create _typedef doogats manually."
 7. Add ALTER TABLE SET ZONE and SET TITLE TEMPLATE to zone mapping section
 8. Add three-zone mental model explanation (metadata / content / pointers)
 
@@ -223,14 +223,14 @@ Available guides:
 
 ### 8. Junction Tables for Multi-Valued References
 
-**Problem:** The zettel format naturally supports multiple reference lines for the same key:
+**Problem:** The doogat format naturally supports multiple reference lines for the same key:
 
 ```markdown
 - category:: [[20260301120100]]
 - category:: [[20260301120101]]
 ```
 
-But the materialized table has a single `category TEXT` column. Only one value survives, losing data. Users are forced to query `_zdb_fields` directly — a leaky internal abstraction.
+But the materialized table has a single `category TEXT` column. Only one value survives, losing data. Users are forced to query `_ddb_fields` directly — a leaky internal abstraction.
 
 **Solution:** Every REFERENCES column auto-generates a junction table alongside the main table.
 
@@ -270,7 +270,7 @@ WHERE bc.category_id = '20260301120100';
 -- Single reference (populates both main table and junction, writes to Git)
 INSERT INTO bookmark (url, category) VALUES ('https://...', '20260301120100');
 
--- Add another reference (write-through: appends `- category:: [[...]]` to zettel, commits, re-indexes)
+-- Add another reference (write-through: appends `- category:: [[...]]` to doogat, commits, re-indexes)
 INSERT INTO bookmark_category (bookmark_id, category_id)
 VALUES ('20260301120200', '20260301120101');
 
@@ -279,9 +279,9 @@ DELETE FROM bookmark_category
 WHERE bookmark_id = '20260301120200' AND category_id = '20260301120101';
 ```
 
-Junction table writes are **write-through**: they modify the zettel's reference section in Git (source of truth), commit, then re-index. This is consistent with how INSERT INTO the main table works — SQL writes always go through Git.
+Junction table writes are **write-through**: they modify the doogat's reference section in Git (source of truth), commit, then re-index. This is consistent with how INSERT INTO the main table works — SQL writes always go through Git.
 
-**Indexing from disk:** When a zettel has multiple `- category::` lines, all values go into the junction table. The main table column gets the comma-separated concatenation. Reference values are always ZettelIDs (14-digit timestamps) — commas cannot appear in IDs, so the concatenation is unambiguous.
+**Indexing from disk:** When a doogat has multiple `- category::` lines, all values go into the junction table. The main table column gets the comma-separated concatenation. Reference values are always DoogatIDs (14-digit timestamps) — commas cannot appear in IDs, so the concatenation is unambiguous.
 
 **DROP TABLE cascade:** `DROP TABLE bookmark` also drops all junction tables for that type (e.g. `bookmark_category`).
 
@@ -293,7 +293,7 @@ Junction table writes are **write-through**: they modify the zettel's reference 
 | **GraphQL typed queries** | Keep scalar field (concatenated string). Add list field (pluralized column name, e.g. `categories: [Category!]!` resolving to the referenced type's GraphQL object, or `[String!]!` of IDs if the referenced type has no typedef). |
 | **GraphQL mutations** | `executeSql` supports INSERT INTO junction table for additional refs |
 | **REST JSON** | Replace raw `reference_section` string with structured multi-value fields: `"category": ["20260301120100", "20260301120101"]` |
-| **NoSQL JSON** | Gets structured fields for free — `nosql_api.rs` delegates to `rest::zettel_to_json()` |
+| **NoSQL JSON** | Gets structured fields for free — `nosql_api.rs` delegates to `rest::doogat_to_json()` |
 | **FFI** | Junction tables queryable via same `execute_sql` SQL interface — no FFI API change |
 | **CLI read/get** | No change — raw Markdown naturally shows all `- category::` lines |
 
@@ -301,34 +301,34 @@ Junction table writes are **write-through**: they modify the zettel's reference 
 
 **Parser change required** — `extract_inline_fields()` in parser.rs currently deduplicates same-key reference fields via a `seen` HashMap ("first wins"). This must change: for `Zone::Reference`, collect ALL same-key entries into the `Vec<InlineField>` instead of discarding duplicates. Body zone keeps first-wins behavior. This parser change is a prerequisite for junction tables.
 
-**`_zdb_fields` stays internal** — junction tables are the public API for multi-valued references. Documentation and `zdb help create-app` never reference `_zdb_fields`.
+**`_ddb_fields` stays internal** — junction tables are the public API for multi-valued references. Documentation and `ddb help create-app` never reference `_ddb_fields`.
 
 **Code changes:**
 
 | File | Change |
 |------|--------|
-| `zdb-core/src/parser.rs` | `extract_inline_fields()`: remove first-wins dedup for `Zone::Reference` — collect all same-key entries. Prerequisite for all junction table work. |
-| `zdb-core/src/sql_engine.rs` | On CREATE TABLE with REFERENCES column, also create junction table. On INSERT, populate both main column (concatenated) and junction table. INSERT/DELETE on junction table: write-through to zettel Git + re-index. On DROP TABLE, cascade to junction tables. |
-| `zdb-core/src/indexer/materialize.rs` | `extract_column_value()` for Zone::Reference: collect ALL matching inline_fields, concatenate for main table, insert each into junction table. `create_materialized_table()`: also create junction table DDL. `drop_and_create_materialized_table()` and `rematerialize_type()`: include junction table drop/create/populate in the same flow. |
-| `zdb-server/src/schema/mod.rs` | For REFERENCES columns, generate both scalar field (concatenated) and list field (junction query). |
-| `zdb-server/src/schema/base_types.rs` | `zettel_to_value()`: map multi-valued reference fields to arrays. |
-| `zdb-server/src/rest.rs` | `zettel_to_json()`: structured multi-value arrays for reference fields instead of raw Markdown. |
-| `zdb-server/src/nosql_api.rs` | No change needed — delegates to `rest::zettel_to_json()`. |
-| `zdb-core/src/types.rs` | No struct changes needed — `InlineField` already supports multiple entries per key. |
+| `ddb-core/src/parser.rs` | `extract_inline_fields()`: remove first-wins dedup for `Zone::Reference` — collect all same-key entries. Prerequisite for all junction table work. |
+| `ddb-core/src/sql_engine.rs` | On CREATE TABLE with REFERENCES column, also create junction table. On INSERT, populate both main column (concatenated) and junction table. INSERT/DELETE on junction table: write-through to doogat Git + re-index. On DROP TABLE, cascade to junction tables. |
+| `ddb-core/src/indexer/materialize.rs` | `extract_column_value()` for Zone::Reference: collect ALL matching inline_fields, concatenate for main table, insert each into junction table. `create_materialized_table()`: also create junction table DDL. `drop_and_create_materialized_table()` and `rematerialize_type()`: include junction table drop/create/populate in the same flow. |
+| `ddb-server/src/schema/mod.rs` | For REFERENCES columns, generate both scalar field (concatenated) and list field (junction query). |
+| `ddb-server/src/schema/base_types.rs` | `doogat_to_value()`: map multi-valued reference fields to arrays. |
+| `ddb-server/src/rest.rs` | `doogat_to_json()`: structured multi-value arrays for reference fields instead of raw Markdown. |
+| `ddb-server/src/nosql_api.rs` | No change needed — delegates to `rest::doogat_to_json()`. |
+| `ddb-core/src/types.rs` | No struct changes needed — `InlineField` already supports multiple entries per key. |
 
 ## Code Locations
 
 | Change | File |
 |--------|------|
-| Reference zone dedup removal (prerequisite) | `zdb-core/src/parser.rs` |
-| Zone inference, ALTER TABLE SET ZONE, ALTER TABLE SET/DROP TITLE TEMPLATE, title cascade, ENUM/SET extraction, origin stamping, junction table DDL, junction INSERT/DELETE write-through, DROP TABLE cascade | `zdb-core/src/sql_engine.rs` |
-| Schema struct fields (title_template, origin) | `zdb-core/src/types.rs` |
-| Help subcommand, after_long_help, typedef warning | `zdb-cli/src/main.rs` |
-| Title compliance check, manual typedef flag | `zdb-core/src/indexer/` (fix module) |
-| Zone migration on fix --migrate | `zdb-core/src/indexer/` |
-| Multi-value reference materialization, junction table population, concatenated main column | `zdb-core/src/indexer/materialize.rs` |
-| GraphQL list fields for REFERENCES columns, junction query resolution | `zdb-server/src/schema/mod.rs`, `zdb-server/src/schema/base_types.rs` |
-| Structured multi-value JSON for reference fields | `zdb-server/src/rest.rs` (nosql_api.rs gets it for free via delegation) |
+| Reference zone dedup removal (prerequisite) | `ddb-core/src/parser.rs` |
+| Zone inference, ALTER TABLE SET ZONE, ALTER TABLE SET/DROP TITLE TEMPLATE, title cascade, ENUM/SET extraction, origin stamping, junction table DDL, junction INSERT/DELETE write-through, DROP TABLE cascade | `ddb-core/src/sql_engine.rs` |
+| Schema struct fields (title_template, origin) | `ddb-core/src/types.rs` |
+| Help subcommand, after_long_help, typedef warning | `ddb-cli/src/main.rs` |
+| Title compliance check, manual typedef flag | `ddb-core/src/indexer/` (fix module) |
+| Zone migration on fix --migrate | `ddb-core/src/indexer/` |
+| Multi-value reference materialization, junction table population, concatenated main column | `ddb-core/src/indexer/materialize.rs` |
+| GraphQL list fields for REFERENCES columns, junction query resolution | `ddb-server/src/schema/mod.rs`, `ddb-server/src/schema/base_types.rs` |
+| Structured multi-value JSON for reference fields | `ddb-server/src/rest.rs` (nosql_api.rs gets it for free via delegation) |
 | Doc corrections | `docs/src/guide/building-apps.md` |
 
 ## Tests
@@ -339,17 +339,17 @@ Junction table writes are **write-through**: they modify the zettel's reference 
 - Title non-compliance detection when template exists but explicit title used
 - ALTER TABLE SET ZONE: valid zone, invalid column, warning on long TEXT to frontmatter
 - ALTER TABLE SET/DROP TITLE TEMPLATE
-- Typedef origin: ddl via CREATE TABLE, manual via zdb create --type _typedef
-- `zdb fix` title compliance repair
-- `zdb fix` manual typedef warning
-- `zdb fix --migrate` zone rewrites
+- Typedef origin: ddl via CREATE TABLE, manual via ddb create --type _typedef
+- `ddb fix` title compliance repair
+- `ddb fix` manual typedef warning
+- `ddb fix --migrate` zone rewrites
 - Parser: multiple `- category::` lines with same key produce multiple InlineField entries (not deduped)
 - Junction table auto-creation on CREATE TABLE with REFERENCES
 - Junction table population from multiple `- key::` lines during indexing
-- Main table REFERENCES column contains comma-separated concatenation of ZettelIDs
-- INSERT into main table populates junction; INSERT into junction table write-through appends reference line to zettel
-- DELETE from junction table write-through removes reference line from zettel
+- Main table REFERENCES column contains comma-separated concatenation of DoogatIDs
+- INSERT into main table populates junction; INSERT into junction table write-through appends reference line to doogat
+- DELETE from junction table write-through removes reference line from doogat
 - DROP TABLE cascades to junction tables
 - GraphQL list field resolves via junction table query
 - REST/NoSQL JSON returns structured arrays for reference fields
-- Reindex rebuilds junction tables (drop/create/populate) from zettel Markdown
+- Reindex rebuilds junction tables (drop/create/populate) from doogat Markdown

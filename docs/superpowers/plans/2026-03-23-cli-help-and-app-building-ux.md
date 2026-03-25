@@ -35,15 +35,15 @@ Task 19 (changelog) ─────────→ last
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `zdb-core/src/types.rs` | Modify | Add `title_template`, `origin` to `TableSchema` |
-| `zdb-core/src/parser.rs` | Modify | Remove reference-zone dedup for same-key fields |
-| `zdb-core/src/sql_engine.rs` | Modify | Zone inference, ENUM/SET, pre-parse interception, title cascade, origin, junction DDL/DML |
-| `zdb-core/src/indexer/materialize.rs` | Modify | Junction table creation/population, multi-value reference extraction |
-| `zdb-core/src/consistency.rs` | Modify | Title compliance, manual typedef warning, zone migration |
-| `zdb-cli/src/main.rs` | Modify | Help subcommand, after_long_help, typedef warning |
-| `zdb-server/src/schema/mod.rs` | Modify | GraphQL list fields for REFERENCES columns |
-| `zdb-server/src/schema/base_types.rs` | Modify | Multi-value reference arrays in zettel_to_value |
-| `zdb-server/src/rest.rs` | Modify | Structured multi-value JSON for reference fields |
+| `ddb-core/src/types.rs` | Modify | Add `title_template`, `origin` to `TableSchema` |
+| `ddb-core/src/parser.rs` | Modify | Remove reference-zone dedup for same-key fields |
+| `ddb-core/src/sql_engine.rs` | Modify | Zone inference, ENUM/SET, pre-parse interception, title cascade, origin, junction DDL/DML |
+| `ddb-core/src/indexer/materialize.rs` | Modify | Junction table creation/population, multi-value reference extraction |
+| `ddb-core/src/consistency.rs` | Modify | Title compliance, manual typedef warning, zone migration |
+| `ddb-cli/src/main.rs` | Modify | Help subcommand, after_long_help, typedef warning |
+| `ddb-server/src/schema/mod.rs` | Modify | GraphQL list fields for REFERENCES columns |
+| `ddb-server/src/schema/base_types.rs` | Modify | Multi-value reference arrays in doogat_to_value |
+| `ddb-server/src/rest.rs` | Modify | Structured multi-value JSON for reference fields |
 | `docs/src/guide/building-apps.md` | Modify | Fix zone docs, add ENUM/SET, title, junction table sections |
 
 ---
@@ -53,20 +53,20 @@ Task 19 (changelog) ─────────→ last
 **Depends on:** none
 
 **Files:**
-- Modify: `zdb-core/src/types.rs:980-987` (TableSchema struct)
-- Modify: `zdb-core/src/sql_engine.rs:1445+` (schema_from_parsed)
-- Modify: `zdb-core/src/sql_engine.rs:1233-1317` (build_typedef_zettel)
-- Test: `zdb-core/src/sql_engine.rs` (test module at bottom)
+- Modify: `ddb-core/src/types.rs:980-987` (TableSchema struct)
+- Modify: `ddb-core/src/sql_engine.rs:1445+` (schema_from_parsed)
+- Modify: `ddb-core/src/sql_engine.rs:1233-1317` (build_typedef_doogat)
+- Test: `ddb-core/src/sql_engine.rs` (test module at bottom)
 
 - [ ] **Step 1: Write test — schema round-trips title_template and origin**
 
-In the sql_engine test module, add a test that creates a typedef zettel with `title_template` and `origin` fields, parses it back via `schema_from_parsed()`, and asserts both fields survive.
+In the sql_engine test module, add a test that creates a typedef doogat with `title_template` and `origin` fields, parses it back via `schema_from_parsed()`, and asserts both fields survive.
 
 ```rust
 #[test]
 fn schema_roundtrips_title_template_and_origin() {
     let typedef = "---\nid: 20260301110000\ntitle: task\ntype: _typedef\norigin: ddl\ntitle_template: \"{name} ({status})\"\ncolumns:\n  - name: name\n    data_type: TEXT\n    zone: frontmatter\n  - name: status\n    data_type: TEXT\n    zone: frontmatter\n---\n";
-    let parsed = parser::parse(typedef, "zettelkasten/_typedef/20260301110000.md").unwrap();
+    let parsed = parser::parse(typedef, "ddb/_typedef/20260301110000.md").unwrap();
     let schema = schema_from_parsed(&parsed).unwrap();
     assert_eq!(schema.title_template.as_deref(), Some("{name} ({status})"));
     assert_eq!(schema.origin.as_deref(), Some("ddl"));
@@ -75,12 +75,12 @@ fn schema_roundtrips_title_template_and_origin() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core schema_roundtrips_title_template_and_origin`
+Run: `cargo test -p ddb-core schema_roundtrips_title_template_and_origin`
 Expected: FAIL — `title_template` and `origin` fields don't exist on TableSchema
 
 - [ ] **Step 3: Add fields to TableSchema**
 
-In `zdb-core/src/types.rs`, add to the `TableSchema` struct:
+In `ddb-core/src/types.rs`, add to the `TableSchema` struct:
 
 ```rust
 pub title_template: Option<String>,
@@ -91,7 +91,7 @@ Update all existing `TableSchema` construction sites to include `title_template:
 
 - [ ] **Step 4: Update schema_from_parsed to read new fields**
 
-In `zdb-core/src/sql_engine.rs` `schema_from_parsed()`, add after existing field parsing:
+In `ddb-core/src/sql_engine.rs` `schema_from_parsed()`, add after existing field parsing:
 
 ```rust
 let title_template = map
@@ -106,24 +106,24 @@ let origin = map
 
 Wire both into the returned TableSchema.
 
-- [ ] **Step 5: Update build_typedef_zettel to serialize new fields**
+- [ ] **Step 5: Update build_typedef_doogat to serialize new fields**
 
-In `build_typedef_zettel()`, add `origin` and `title_template` to the frontmatter YAML output when present.
+In `build_typedef_doogat()`, add `origin` and `title_template` to the frontmatter YAML output when present.
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core schema_roundtrips_title_template_and_origin`
+Run: `cargo test -p ddb-core schema_roundtrips_title_template_and_origin`
 Expected: PASS
 
 - [ ] **Step 7: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: All existing tests pass (no regressions from adding Option fields with None defaults)
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add zdb-core/src/types.rs zdb-core/src/sql_engine.rs
+git add ddb-core/src/types.rs ddb-core/src/sql_engine.rs
 git commit -m "feat(core): add title_template and origin to TableSchema"
 ```
 
@@ -134,8 +134,8 @@ git commit -m "feat(core): add title_template and origin to TableSchema"
 **Depends on:** none
 
 **Files:**
-- Modify: `zdb-core/src/parser.rs:260-315` (extract_inline_fields dedup logic)
-- Test: `zdb-core/src/parser.rs` (test module)
+- Modify: `ddb-core/src/parser.rs:260-315` (extract_inline_fields dedup logic)
+- Test: `ddb-core/src/parser.rs` (test module)
 
 - [ ] **Step 1: Write test — multiple same-key reference fields preserved**
 
@@ -145,7 +145,7 @@ Add to parser's test module:
 #[test]
 fn multi_value_reference_fields_preserved() {
     let content = "---\nid: 20260301120000\ntitle: test\ntype: bookmark\n---\n\n---\n- category:: [[20260301120100]]\n- category:: [[20260301120101]]\n- category:: [[20260301120102]]\n";
-    let parsed = parse(content, "zettelkasten/20260301120000.md").unwrap();
+    let parsed = parse(content, "ddb/20260301120000.md").unwrap();
     let cat_fields: Vec<_> = parsed
         .inline_fields
         .iter()
@@ -160,7 +160,7 @@ fn multi_value_reference_fields_preserved() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core multi_value_reference_fields_preserved`
+Run: `cargo test -p ddb-core multi_value_reference_fields_preserved`
 Expected: FAIL — only 1 field (first-wins dedup)
 
 - [ ] **Step 3: Modify extract_inline_fields to keep all reference-zone duplicates**
@@ -171,18 +171,18 @@ Keep the body-zone first-wins behavior and cross-zone error unchanged.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core multi_value_reference_fields_preserved`
+Run: `cargo test -p ddb-core multi_value_reference_fields_preserved`
 Expected: PASS
 
 - [ ] **Step 5: Run full parser tests + core tests**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: All pass. Existing tests that relied on dedup only tested single-value references, so no regressions.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add zdb-core/src/parser.rs
+git add ddb-core/src/parser.rs
 git commit -m "feat(core): preserve multi-value reference fields in parser"
 ```
 
@@ -193,9 +193,9 @@ git commit -m "feat(core): preserve multi-value reference fields in parser"
 **Depends on:** none
 
 **Files:**
-- Modify: `zdb-core/src/sql_engine.rs:1156-1168` (data_type_to_string)
-- Modify: `zdb-core/src/sql_engine.rs:390-418` (extract_columns zone logic)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/sql_engine.rs:1156-1168` (data_type_to_string)
+- Modify: `ddb-core/src/sql_engine.rs:390-418` (extract_columns zone logic)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — VARCHAR(100) infers frontmatter, TEXT infers body**
 
@@ -219,7 +219,7 @@ fn zone_inference_by_sql_type() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core zone_inference_by_sql_type`
+Run: `cargo test -p ddb-core zone_inference_by_sql_type`
 Expected: FAIL — VARCHAR(100) currently maps to TEXT which defaults to Zone::Body
 
 - [ ] **Step 3: Expand data_type_to_string**
@@ -292,18 +292,18 @@ let zone = if references.is_some() {
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core zone_inference_by_sql_type`
+Run: `cargo test -p ddb-core zone_inference_by_sql_type`
 Expected: PASS
 
 - [ ] **Step 7: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: Some existing tests may need zone expectation updates since TEXT now goes to body but VARCHAR(255) would go to frontmatter. Fix any broken tests to match the new behavior.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add zdb-core/src/sql_engine.rs
+git add ddb-core/src/sql_engine.rs
 git commit -m "feat(core): type-aware zone inference (short string → frontmatter, long → body)"
 ```
 
@@ -314,8 +314,8 @@ git commit -m "feat(core): type-aware zone inference (short string → frontmatt
 **Depends on:** Task 3 (uses `is_short_string_type` for zone inference)
 
 **Files:**
-- Modify: `zdb-core/src/sql_engine.rs:390-418` (extract_columns)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/sql_engine.rs:390-418` (extract_columns)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — ENUM creates allowed_values in typedef**
 
@@ -347,7 +347,7 @@ assert_eq!(
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core enum_creates_allowed_values`
+Run: `cargo test -p ddb-core enum_creates_allowed_values`
 Expected: FAIL — ENUM values not extracted
 
 - [ ] **Step 3: Add ENUM/SET extraction to extract_columns**
@@ -375,18 +375,18 @@ Wire `allowed_values` into the ColumnDef construction. Ensure ColumnDef has an `
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core enum_creates_allowed_values`
+Run: `cargo test -p ddb-core enum_creates_allowed_values`
 Expected: PASS
 
 - [ ] **Step 5: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add zdb-core/src/sql_engine.rs
+git add ddb-core/src/sql_engine.rs
 git commit -m "feat(core): extract ENUM/SET values into allowed_values"
 ```
 
@@ -397,8 +397,8 @@ git commit -m "feat(core): extract ENUM/SET values into allowed_values"
 **Depends on:** none
 
 **Files:**
-- Modify: `zdb-core/src/sql_engine.rs:150-157` (execute method)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/sql_engine.rs:150-157` (execute method)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — ALTER TABLE SET ZONE changes column zone**
 
@@ -425,7 +425,7 @@ fn alter_table_set_zone() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core alter_table_set_zone`
+Run: `cargo test -p ddb-core alter_table_set_zone`
 Expected: FAIL — custom DDL not recognized
 
 - [ ] **Step 3: Add pre-parse regex interception in execute()**
@@ -457,20 +457,20 @@ fn handle_set_zone(&self, table: &str, zone_str: &str, column: &str) -> Result<S
         "frontmatter" => Zone::Frontmatter,
         "body" => Zone::Body,
         "reference" => Zone::Reference,
-        _ => return Err(ZettelError::SqlEngine(format!("invalid zone: {zone_str}"))),
+        _ => return Err(DdbError::SqlEngine(format!("invalid zone: {zone_str}"))),
     };
     // Load existing schema
     let mut schema = self.load_schema(table)?;
     // Find column
     let col = schema.columns.iter_mut()
         .find(|c| c.name == column)
-        .ok_or_else(|| ZettelError::SqlEngine(format!("column {column} not found in {table}")))?;
+        .ok_or_else(|| DdbError::SqlEngine(format!("column {column} not found in {table}")))?;
     // Warn if moving to frontmatter/reference
     if matches!(zone, Zone::Frontmatter | Zone::Reference) {
         eprintln!("Warning: frontmatter/reference zones are best for short values. Long text may hurt readability of the underlying Markdown file.");
     }
     col.zone = Some(zone);
-    // Update typedef zettel
+    // Update typedef doogat
     self.update_typedef(&schema)?;
     // Rematerialize
     self.index.rematerialize_type(&schema.table_name, &self.repo)?;
@@ -478,13 +478,13 @@ fn handle_set_zone(&self, table: &str, zone_str: &str, column: &str) -> Result<S
 }
 ```
 
-There is no existing `update_typedef` method. Create one following the pattern in `handle_alter_table` (lines 777-920) which: (1) serializes the schema back to a typedef zettel via `build_typedef_zettel`, (2) commits the updated file via `self.repo.commit_file(...)`, (3) re-indexes via `self.index.index_zettel(...)`. This method will be reused by Tasks 5, 6, and 8.
+There is no existing `update_typedef` method. Create one following the pattern in `handle_alter_table` (lines 777-920) which: (1) serializes the schema back to a typedef doogat via `build_typedef_doogat`, (2) commits the updated file via `self.repo.commit_file(...)`, (3) re-indexes via `self.index.index_doogat(...)`. This method will be reused by Tasks 5, 6, and 8.
 
 Note: `self.index.rematerialize_type()` takes two arguments: `(&self, table_name: &str, repo: &GitRepo)`. Call as `self.index.rematerialize_type(&schema.table_name, &self.repo)?`.
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core alter_table_set_zone`
+Run: `cargo test -p ddb-core alter_table_set_zone`
 Expected: PASS
 
 - [ ] **Step 6: Write test — SET ZONE rejects invalid column**
@@ -501,18 +501,18 @@ fn alter_table_set_zone_invalid_column() {
 
 - [ ] **Step 7: Run test, verify it passes**
 
-Run: `cargo test -p zdb-core alter_table_set_zone_invalid_column`
+Run: `cargo test -p ddb-core alter_table_set_zone_invalid_column`
 Expected: PASS
 
 - [ ] **Step 8: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add zdb-core/src/sql_engine.rs
+git add ddb-core/src/sql_engine.rs
 git commit -m "feat(core): ALTER TABLE SET ZONE for column zone overrides"
 ```
 
@@ -523,8 +523,8 @@ git commit -m "feat(core): ALTER TABLE SET ZONE for column zone overrides"
 **Depends on:** Task 1 (`title_template` field on TableSchema)
 
 **Files:**
-- Modify: `zdb-core/src/sql_engine.rs` (execute, new handler)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/sql_engine.rs` (execute, new handler)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — SET/DROP TITLE TEMPLATE**
 
@@ -546,7 +546,7 @@ fn alter_table_title_template() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core alter_table_title_template`
+Run: `cargo test -p ddb-core alter_table_title_template`
 Expected: FAIL
 
 - [ ] **Step 3: Add regex interception for TITLE TEMPLATE**
@@ -589,30 +589,30 @@ fn handle_set_title_template(&self, table: &str, template: Option<&str>) -> Resu
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core alter_table_title_template`
+Run: `cargo test -p ddb-core alter_table_title_template`
 Expected: PASS
 
 - [ ] **Step 6: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add zdb-core/src/sql_engine.rs
+git add ddb-core/src/sql_engine.rs
 git commit -m "feat(core): ALTER TABLE SET/DROP TITLE TEMPLATE"
 ```
 
 ---
 
-### Task 7: Title resolution cascade in build_data_zettel
+### Task 7: Title resolution cascade in build_data_doogat
 
 **Depends on:** Task 1 (`title_template` field), Task 6 (SET TITLE TEMPLATE DDL)
 
 **Files:**
-- Modify: `zdb-core/src/sql_engine.rs:1320-1406` (build_data_zettel)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/sql_engine.rs:1320-1406` (build_data_doogat)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — explicit title in INSERT wins over auto-derive**
 
@@ -623,7 +623,7 @@ fn insert_explicit_title_wins() {
     engine.execute("CREATE TABLE tittest (description TEXT)").unwrap();
     let result = engine.execute("INSERT INTO tittest (title, description) VALUES ('My Title', 'some long text')").unwrap();
     let id = &result.rows[0]["id"];
-    let content = engine.repo.read_zettel(id).unwrap();
+    let content = engine.repo.read_doogat(id).unwrap();
     assert!(content.contains("title: My Title"));
 }
 ```
@@ -638,7 +638,7 @@ fn insert_title_from_template() {
     engine.execute("ALTER TABLE tmpltest SET TITLE TEMPLATE '{name} ({role})'").unwrap();
     let result = engine.execute("INSERT INTO tmpltest (name, role) VALUES ('Alice', 'dev')").unwrap();
     let id = &result.rows[0]["id"];
-    let content = engine.repo.read_zettel(id).unwrap();
+    let content = engine.repo.read_doogat(id).unwrap();
     assert!(content.contains("title: Alice (dev)"));
 }
 ```
@@ -652,19 +652,19 @@ fn insert_title_fallback_type_id() {
     engine.execute("CREATE TABLE numonly (count INTEGER, active BOOLEAN)").unwrap();
     let result = engine.execute("INSERT INTO numonly (count, active) VALUES (42, true)").unwrap();
     let id = &result.rows[0]["id"];
-    let content = engine.repo.read_zettel(id).unwrap();
+    let content = engine.repo.read_doogat(id).unwrap();
     assert!(content.contains(&format!("title: numonly {id}")));
 }
 ```
 
 - [ ] **Step 4: Run tests to verify they fail**
 
-Run: `cargo test -p zdb-core insert_explicit_title_wins insert_title_from_template insert_title_fallback_type_id`
+Run: `cargo test -p ddb-core insert_explicit_title_wins insert_title_from_template insert_title_fallback_type_id`
 Expected: FAIL
 
-- [ ] **Step 5: Implement title cascade in build_data_zettel**
+- [ ] **Step 5: Implement title cascade in build_data_doogat**
 
-In `build_data_zettel()`, before the column loop:
+In `build_data_doogat()`, before the column loop:
 
 ```rust
 // Priority 1: explicit title from INSERT
@@ -712,18 +712,18 @@ if title_value.is_none() {
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cargo test -p zdb-core insert_explicit_title_wins insert_title_from_template insert_title_fallback_type_id`
+Run: `cargo test -p ddb-core insert_explicit_title_wins insert_title_from_template insert_title_fallback_type_id`
 Expected: PASS
 
 - [ ] **Step 7: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS (existing INSERT tests may need title expectation updates)
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add zdb-core/src/sql_engine.rs
+git add ddb-core/src/sql_engine.rs
 git commit -m "fix(core): title resolution cascade (explicit > template > body > frontmatter > fallback)"
 ```
 
@@ -734,9 +734,9 @@ git commit -m "fix(core): title resolution cascade (explicit > template > body >
 **Depends on:** Task 1 (`origin` field on TableSchema)
 
 **Files:**
-- Modify: `zdb-core/src/sql_engine.rs:331-388` (handle_create_table)
-- Modify: `zdb-cli/src/main.rs` (Create command handler)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/sql_engine.rs:331-388` (handle_create_table)
+- Modify: `ddb-cli/src/main.rs` (Create command handler)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — CREATE TABLE stamps origin: ddl**
 
@@ -752,41 +752,41 @@ fn create_table_stamps_origin_ddl() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core create_table_stamps_origin_ddl`
+Run: `cargo test -p ddb-core create_table_stamps_origin_ddl`
 Expected: FAIL
 
 - [ ] **Step 3: Set origin in handle_create_table**
 
-In `handle_create_table()`, after building the TableSchema, set `schema.origin = Some("ddl".to_string())` before passing to `build_typedef_zettel`.
+In `handle_create_table()`, after building the TableSchema, set `schema.origin = Some("ddl".to_string())` before passing to `build_typedef_doogat`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core create_table_stamps_origin_ddl`
+Run: `cargo test -p ddb-core create_table_stamps_origin_ddl`
 Expected: PASS
 
 - [ ] **Step 5: Add typedef warning to CLI**
 
-In `zdb-cli/src/main.rs`, in the Create command handler, after parsing `--type`:
+In `ddb-cli/src/main.rs`, in the Create command handler, after parsing `--type`:
 
 ```rust
 if r#type.as_deref() == Some("_typedef") {
-    eprintln!("Warning: type definitions should be created with CREATE TABLE via 'zdb query'.");
-    eprintln!("Manual typedefs are not CRDT-tracked and may be stripped by 'zdb fix'.");
-    eprintln!("See: zdb help create-app");
+    eprintln!("Warning: type definitions should be created with CREATE TABLE via 'ddb query'.");
+    eprintln!("Manual typedefs are not CRDT-tracked and may be stripped by 'ddb fix'.");
+    eprintln!("See: ddb help create-app");
 }
 ```
 
-When creating the zettel with type `_typedef`, add `origin: manual` to the frontmatter extra fields.
+When creating the doogat with type `_typedef`, add `origin: manual` to the frontmatter extra fields.
 
 - [ ] **Step 6: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add zdb-core/src/sql_engine.rs zdb-cli/src/main.rs
+git add ddb-core/src/sql_engine.rs ddb-cli/src/main.rs
 git commit -m "feat(core): stamp origin on typedefs (ddl/manual), warn on manual creation"
 ```
 
@@ -797,9 +797,9 @@ git commit -m "feat(core): stamp origin on typedefs (ddl/manual), warn on manual
 **Depends on:** Task 2 (parser multi-value reference support)
 
 **Files:**
-- Modify: `zdb-core/src/indexer/materialize.rs` (create_materialized_table, materialize_row, extract_column_value, drop_and_create_materialized_table, rematerialize_type)
-- Modify: `zdb-core/src/sql_engine.rs:420-452` (create_materialized_table call)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/indexer/materialize.rs` (create_materialized_table, materialize_row, extract_column_value, drop_and_create_materialized_table, rematerialize_type)
+- Modify: `ddb-core/src/sql_engine.rs:420-452` (create_materialized_table call)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — CREATE TABLE with REFERENCES creates junction table**
 
@@ -817,7 +817,7 @@ fn create_table_creates_junction_table() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core create_table_creates_junction_table`
+Run: `cargo test -p ddb-core create_table_creates_junction_table`
 Expected: FAIL — junction table not created
 
 - [ ] **Step 3: Add junction table creation to materialize.rs**
@@ -850,7 +850,7 @@ for col in &schema.columns {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core create_table_creates_junction_table`
+Run: `cargo test -p ddb-core create_table_creates_junction_table`
 Expected: PASS
 
 - [ ] **Step 5: Write test — multi-value references populate junction table**
@@ -869,14 +869,14 @@ fn multi_value_refs_populate_junction() {
     let r3 = engine.execute(&format!("INSERT INTO bm (url, category) VALUES ('https://example.com', '{cat1}')")).unwrap();
     let bm_id = &r3.rows[0]["id"];
 
-    // Manually add second reference line to the zettel and reindex
+    // Manually add second reference line to the doogat and reindex
     // (This tests materialization from disk with multi-value refs)
-    let content = engine.repo.read_zettel(bm_id).unwrap();
+    let content = engine.repo.read_doogat(bm_id).unwrap();
     let updated = content.replace(
         &format!("- category:: [[{cat1}]]"),
         &format!("- category:: [[{cat1}]]\n- category:: [[{cat2}]]"),
     );
-    engine.repo.update_zettel(bm_id, &updated).unwrap();
+    engine.repo.update_doogat(bm_id, &updated).unwrap();
     engine.reindex().unwrap();
 
     // Junction table should have 2 rows
@@ -893,7 +893,7 @@ fn multi_value_refs_populate_junction() {
 
 - [ ] **Step 6: Run test to verify it fails**
 
-Run: `cargo test -p zdb-core multi_value_refs_populate_junction`
+Run: `cargo test -p ddb-core multi_value_refs_populate_junction`
 Expected: FAIL
 
 - [ ] **Step 7: Update extract_column_value and materialize_row for multi-value references**
@@ -906,7 +906,7 @@ In `materialize_row()`: after extracting values and inserting the main row, iter
 // After main row INSERT
 for col in &schema.columns {
     if col.references.is_some() {
-        let vals = extract_multi_reference_values(zettel, col);
+        let vals = extract_multi_reference_values(doogat, col);
         for val in &vals {
             conn.execute(
                 &format!(
@@ -924,18 +924,18 @@ Add `extract_multi_reference_values` helper that filters `inline_fields` by key 
 
 - [ ] **Step 8: Run test to verify it passes**
 
-Run: `cargo test -p zdb-core multi_value_refs_populate_junction`
+Run: `cargo test -p ddb-core multi_value_refs_populate_junction`
 Expected: PASS
 
 - [ ] **Step 9: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add zdb-core/src/indexer/materialize.rs zdb-core/src/sql_engine.rs
+git add ddb-core/src/indexer/materialize.rs ddb-core/src/sql_engine.rs
 git commit -m "feat(core): auto-generate junction tables for REFERENCES columns"
 ```
 
@@ -946,8 +946,8 @@ git commit -m "feat(core): auto-generate junction tables for REFERENCES columns"
 **Depends on:** Task 9 (junction table creation)
 
 **Files:**
-- Modify: `zdb-core/src/sql_engine.rs` (execute, handle_drop_table)
-- Test: `zdb-core/src/sql_engine.rs` (test module)
+- Modify: `ddb-core/src/sql_engine.rs` (execute, handle_drop_table)
+- Test: `ddb-core/src/sql_engine.rs` (test module)
 
 - [ ] **Step 1: Write test — INSERT INTO junction table appends reference line**
 
@@ -965,8 +965,8 @@ fn insert_into_junction_writes_through() {
     // INSERT into junction table
     engine.execute(&format!("INSERT INTO bm_category (bm_id, category_id) VALUES ('{bm_id}', '{cat_id}')")).unwrap();
 
-    // Verify reference line was added to zettel on disk
-    let content = engine.repo.read_zettel(bm_id).unwrap();
+    // Verify reference line was added to doogat on disk
+    let content = engine.repo.read_doogat(bm_id).unwrap();
     assert!(content.contains(&format!("- category:: [[{cat_id}]]")));
 }
 ```
@@ -987,8 +987,8 @@ fn delete_from_junction_writes_through() {
     // DELETE from junction table
     engine.execute(&format!("DELETE FROM bm2_category WHERE bm2_id = '{bm_id}' AND category_id = '{cat_id}'")).unwrap();
 
-    // Verify reference line was removed from zettel
-    let content = engine.repo.read_zettel(bm_id).unwrap();
+    // Verify reference line was removed from doogat
+    let content = engine.repo.read_doogat(bm_id).unwrap();
     assert!(!content.contains(&format!("- category:: [[{cat_id}]]")));
 }
 ```
@@ -1010,7 +1010,7 @@ fn drop_table_cascades_junction() {
 
 - [ ] **Step 4: Run tests to verify they fail**
 
-Run: `cargo test -p zdb-core insert_into_junction_writes_through delete_from_junction_writes_through drop_table_cascades_junction`
+Run: `cargo test -p ddb-core insert_into_junction_writes_through delete_from_junction_writes_through drop_table_cascades_junction`
 Expected: FAIL
 
 - [ ] **Step 5: Add pre-parse interception for junction table INSERT/DELETE**
@@ -1018,10 +1018,10 @@ Expected: FAIL
 In `execute()`, detect if the target table is a junction table (name contains `_` and matches `{table}_{column}` pattern for a known type). Route to `handle_junction_insert` or `handle_junction_delete`.
 
 These handlers:
-1. Parse the statement to get the parent zettel ID and reference target ID
-2. Read the parent zettel from git
+1. Parse the statement to get the parent doogat ID and reference target ID
+2. Read the parent doogat from git
 3. Append/remove the `- key:: [[target_id]]` line in the reference section
-4. Commit the updated zettel
+4. Commit the updated doogat
 5. Re-index
 
 - [ ] **Step 6: Add junction table drop to handle_drop_table**
@@ -1041,18 +1041,18 @@ for col in &schema.columns {
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `cargo test -p zdb-core insert_into_junction_writes_through delete_from_junction_writes_through drop_table_cascades_junction`
+Run: `cargo test -p ddb-core insert_into_junction_writes_through delete_from_junction_writes_through drop_table_cascades_junction`
 Expected: PASS
 
 - [ ] **Step 8: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add zdb-core/src/sql_engine.rs
+git add ddb-core/src/sql_engine.rs
 git commit -m "feat(core): junction table INSERT/DELETE write-through and DROP CASCADE"
 ```
 
@@ -1062,12 +1062,12 @@ git commit -m "feat(core): junction table INSERT/DELETE write-through and DROP C
 
 **Depends on:** Task 1 (title_template, origin), Task 7 (title cascade)
 
-Note: the spec's Code Locations table says "fix module in `zdb-core/src/indexer/`" — this is wrong. The fix logic lives in `zdb-core/src/consistency.rs`, called from `service.rs:716`.
+Note: the spec's Code Locations table says "fix module in `ddb-core/src/indexer/`" — this is wrong. The fix logic lives in `ddb-core/src/consistency.rs`, called from `service.rs:716`.
 
 **Files:**
-- Modify: `zdb-core/src/consistency.rs` (fix_all, apply_fix)
-- Modify: `zdb-core/src/types.rs:1040-1053` (Fix enum)
-- Test: `zdb-core/src/consistency.rs` or integration test file
+- Modify: `ddb-core/src/consistency.rs` (fix_all, apply_fix)
+- Modify: `ddb-core/src/types.rs:1040-1053` (Fix enum)
+- Test: `ddb-core/src/consistency.rs` or integration test file
 
 - [ ] **Step 1: Add Fix variants for new checks**
 
@@ -1081,47 +1081,47 @@ ZoneMigrated { column: String, from: Zone, to: Zone },
 
 - [ ] **Step 2: Write test — non-compliant title detected**
 
-Test that a zettel with explicit title that differs from what the template would produce gets flagged.
+Test that a doogat with explicit title that differs from what the template would produce gets flagged.
 
 - [ ] **Step 3: Implement title compliance check in fix_all**
 
-In `consistency.rs`, during the fix scan: for each typed zettel, if the typedef has a `title_template`, interpolate the template from the zettel's fields and compare to the actual title. If different, emit `Fix::TitleNonCompliant`.
+In `consistency.rs`, during the fix scan: for each typed doogat, if the typedef has a `title_template`, interpolate the template from the doogat's fields and compare to the actual title. If different, emit `Fix::TitleNonCompliant`.
 
 - [ ] **Step 4: Write test — manual typedef flagged**
 
-Test that a _typedef zettel with `origin: manual` produces `Fix::ManualTypedef` in verbose mode.
+Test that a _typedef doogat with `origin: manual` produces `Fix::ManualTypedef` in verbose mode.
 
 - [ ] **Step 5: Implement manual typedef check**
 
-In `fix_all`, when scanning _typedef zettels: if `origin` is `"manual"`, add `Fix::ManualTypedef` to the report.
+In `fix_all`, when scanning _typedef doogats: if `origin` is `"manual"`, add `Fix::ManualTypedef` to the report.
 
 - [ ] **Step 6: Implement zone migration in migrate_all**
 
-In `migrate_all()`, for each zettel of a typed type: compare the column's current zone in the typedef with where the data actually lives in the zettel. If mismatched, move the data:
+In `migrate_all()`, for each doogat of a typed type: compare the column's current zone in the typedef with where the data actually lives in the doogat. If mismatched, move the data:
 - body→frontmatter: parse section, add YAML field, remove section
 - frontmatter→body: remove YAML field, add section
 - to/from reference: format/parse wikilink lines
 
 - [ ] **Step 7: Run full test suite**
 
-Run: `cargo test -p zdb-core`
+Run: `cargo test -p ddb-core`
 Expected: PASS
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add zdb-core/src/types.rs zdb-core/src/consistency.rs
+git add ddb-core/src/types.rs ddb-core/src/consistency.rs
 git commit -m "feat(core): title compliance, manual typedef flag, zone migration in fix"
 ```
 
 ---
 
-### Task 12: `zdb help` subcommand and after_long_help
+### Task 12: `ddb help` subcommand and after_long_help
 
 **Depends on:** all feature tasks (Tasks 1-11) so guide text is accurate
 
 **Files:**
-- Modify: `zdb-cli/src/main.rs` (Command enum, main fn)
+- Modify: `ddb-cli/src/main.rs` (Command enum, main fn)
 - Test: `tests/e2e/`
 
 - [ ] **Step 1: Add Help subcommand to Command enum**
@@ -1163,7 +1163,7 @@ Command::Help { topic } => {
             outln!("Available guides:")?;
             outln!("  create-app    Data modeling, zones, title resolution, and API access")?;
             outln!("")?;
-            outln!("Usage: zdb help <topic>")?;
+            outln!("Usage: ddb help <topic>")?;
         }
     }
 }
@@ -1173,24 +1173,24 @@ Command::Help { topic } => {
 
 ```rust
 /// Execute SQL (DDL/DML routed through SQL engine; SELECT queries index)
-#[command(after_long_help = "For app data modeling, see: zdb help create-app")]
+#[command(after_long_help = "For app data modeling, see: ddb help create-app")]
 Query { ... },
 
 /// Type definition management
-#[command(after_long_help = "To define types, use CREATE TABLE via 'zdb query'. See: zdb help create-app")]
+#[command(after_long_help = "To define types, use CREATE TABLE via 'ddb query'. See: ddb help create-app")]
 Type { ... },
 
-/// Create a new zettel
-#[command(after_long_help = "Note: for type definitions, prefer CREATE TABLE via 'zdb query'. See: zdb help create-app")]
+/// Create a new doogat
+#[command(after_long_help = "Note: for type definitions, prefer CREATE TABLE via 'ddb query'. See: ddb help create-app")]
 Create { ... },
 ```
 
 - [ ] **Step 5: Add GUIDES section to top-level help**
 
-Use `after_help` (not `after_long_help`) so the GUIDES section appears on both `zdb -h` and `zdb --help`:
+Use `after_help` (not `after_long_help`) so the GUIDES section appears on both `ddb -h` and `ddb --help`:
 
 ```rust
-#[command(name = "zdb", version, about = "Decentralized Zettelkasten", after_help = "GUIDES:\n  help <topic>    In-depth guides (try: zdb help create-app)")]
+#[command(name = "ddb", version, about = "Decentralized Doogat DB", after_help = "GUIDES:\n  help <topic>    In-depth guides (try: ddb help create-app)")]
 struct Cli { ... }
 ```
 
@@ -1198,17 +1198,17 @@ The per-command hints on Query/Type/Create use `after_long_help` (only visible w
 
 - [ ] **Step 6: Build and manually verify**
 
-Run: `cargo build -p zdb-cli`
-Then: `./target/debug/zdb --help`, `./target/debug/zdb help`, `./target/debug/zdb help create-app`, `./target/debug/zdb query --help`
+Run: `cargo build -p ddb-cli`
+Then: `./target/debug/ddb --help`, `./target/debug/ddb help`, `./target/debug/ddb help create-app`, `./target/debug/ddb query --help`
 
 - [ ] **Step 7: Write e2e test for help subcommand**
 
-In `tests/e2e/`, add a test that verifies `zdb help create-app` exits 0 and output contains key sections (e.g. "CREATE TABLE", "Zone", "title"). Also test `zdb help unknown-topic` exits non-zero.
+In `tests/e2e/`, add a test that verifies `ddb help create-app` exits 0 and output contains key sections (e.g. "CREATE TABLE", "Zone", "title"). Also test `ddb help unknown-topic` exits non-zero.
 
 ```rust
 #[test]
 fn help_create_app_prints_guide() {
-    Command::cargo_bin("zdb")
+    Command::cargo_bin("ddb")
         .unwrap()
         .args(&["help", "create-app"])
         .assert()
@@ -1219,7 +1219,7 @@ fn help_create_app_prints_guide() {
 
 #[test]
 fn help_unknown_topic_fails() {
-    Command::cargo_bin("zdb")
+    Command::cargo_bin("ddb")
         .unwrap()
         .args(&["help", "nonexistent"])
         .assert()
@@ -1229,14 +1229,14 @@ fn help_unknown_topic_fails() {
 
 - [ ] **Step 8: Run e2e tests**
 
-Run: `cargo build -p zdb-cli && cargo test -p zdb-e2e help_`
+Run: `cargo build -p ddb-cli && cargo test -p ddb-e2e help_`
 Expected: PASS
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add zdb-cli/src/main.rs
-git commit -m "feat(cli): add zdb help create-app guide and after_long_help hints"
+git add ddb-cli/src/main.rs
+git commit -m "feat(cli): add ddb help create-app guide and after_long_help hints"
 ```
 
 ---
@@ -1246,9 +1246,9 @@ git commit -m "feat(cli): add zdb help create-app guide and after_long_help hint
 **Depends on:** Task 2 (parser multi-value), Task 9 (junction tables)
 
 **Files:**
-- Modify: `zdb-server/src/schema/mod.rs` (typed query generation)
-- Modify: `zdb-server/src/schema/base_types.rs` (zettel_to_value)
-- Test: `zdb-server/` test module or integration test
+- Modify: `ddb-server/src/schema/mod.rs` (typed query generation)
+- Modify: `ddb-server/src/schema/base_types.rs` (doogat_to_value)
+- Test: `ddb-server/` test module or integration test
 
 - [ ] **Step 1: Write test — GraphQL type has both scalar and list field for REFERENCES**
 
@@ -1282,9 +1282,9 @@ if col.references.is_some() {
 }
 ```
 
-- [ ] **Step 4: Update zettel_to_value for multi-valued reference arrays**
+- [ ] **Step 4: Update doogat_to_value for multi-valued reference arrays**
 
-In `base_types.rs` `zettel_to_value()`: for reference-zone fields, group by key and produce arrays instead of single values.
+In `base_types.rs` `doogat_to_value()`: for reference-zone fields, group by key and produce arrays instead of single values.
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -1292,13 +1292,13 @@ Expected: PASS
 
 - [ ] **Step 6: Run server tests**
 
-Run: `cargo test -p zdb-server`
+Run: `cargo test -p ddb-server`
 Expected: PASS
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add zdb-server/src/schema/mod.rs zdb-server/src/schema/base_types.rs
+git add ddb-server/src/schema/mod.rs ddb-server/src/schema/base_types.rs
 git commit -m "feat(server): GraphQL list fields for multi-valued REFERENCES"
 ```
 
@@ -1309,20 +1309,20 @@ git commit -m "feat(server): GraphQL list fields for multi-valued REFERENCES"
 **Depends on:** Task 2 (parser multi-value)
 
 **Files:**
-- Modify: `zdb-server/src/rest.rs` (ZettelJson, zettel_to_json)
-- Test: `zdb-server/` test module
+- Modify: `ddb-server/src/rest.rs` (DoogatJson, doogat_to_json)
+- Test: `ddb-server/` test module
 
 - [ ] **Step 1: Write test — REST JSON returns structured reference arrays**
 
-Test that `zettel_to_json()` for a zettel with multiple reference-zone fields of the same key returns them as an array.
+Test that `doogat_to_json()` for a doogat with multiple reference-zone fields of the same key returns them as an array.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Expected: FAIL — currently returns raw `reference_section` string
 
-- [ ] **Step 3: Modify ZettelJson and zettel_to_json**
+- [ ] **Step 3: Modify DoogatJson and doogat_to_json**
 
-Add a `references: HashMap<String, Vec<String>>` field to ZettelJson. In `zettel_to_json()`:
+Add a `references: HashMap<String, Vec<String>>` field to DoogatJson. In `doogat_to_json()`:
 
 ```rust
 let mut refs: HashMap<String, Vec<String>> = HashMap::new();
@@ -1341,13 +1341,13 @@ Expected: PASS
 
 - [ ] **Step 5: Run server tests**
 
-Run: `cargo test -p zdb-server`
+Run: `cargo test -p ddb-server`
 Expected: PASS (nosql_api gets the change for free)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add zdb-server/src/rest.rs
+git add ddb-server/src/rest.rs
 git commit -m "feat(server): structured multi-value reference arrays in REST JSON"
 ```
 
@@ -1366,7 +1366,7 @@ Replace the wrong "TEXT defaults to frontmatter" claim with the SQL type→zone 
 
 - [ ] **Step 2: Add three-zone mental model**
 
-Add the rule-of-thumb paragraph: "If it points somewhere else, it's a reference. If it describes the zettel, it's metadata. If it IS the zettel, it's body."
+Add the rule-of-thumb paragraph: "If it points somewhere else, it's a reference. If it describes the doogat, it's metadata. If it IS the doogat, it's body."
 
 - [ ] **Step 3: Add ENUM/SET examples**
 
@@ -1390,7 +1390,7 @@ Update bookmark example: `url` → reference zone (via ALTER TABLE), `descriptio
 
 - [ ] **Step 8: Add typedef workflow callout**
 
-"Always use CREATE TABLE. Do not create _typedef zettels manually."
+"Always use CREATE TABLE. Do not create _typedef doogats manually."
 
 - [ ] **Step 9: Build docs and verify**
 
@@ -1421,15 +1421,15 @@ In `tests/smoke.sh`, add a numbered section that exercises the full app-building
 
 ```bash
 # Section N: App building
-zdb query "CREATE TABLE category (name VARCHAR(100))"
-zdb query "INSERT INTO category (name) VALUES ('work')"
-CAT_ID=$(zdb query "SELECT id FROM category" | tail -1 | awk '{print $1}')
-zdb query "CREATE TABLE bookmark (url VARCHAR(2048), category TEXT REFERENCES category(id))"
-zdb query "ALTER TABLE bookmark SET ZONE reference FOR url"
-zdb query "INSERT INTO bookmark (title, url, category) VALUES ('Rust Book', 'https://doc.rust-lang.org', '$CAT_ID')"
-zdb query "SELECT * FROM bookmark"
-zdb query "SELECT * FROM bookmark_category"
-zdb help create-app | head -5
+ddb query "CREATE TABLE category (name VARCHAR(100))"
+ddb query "INSERT INTO category (name) VALUES ('work')"
+CAT_ID=$(ddb query "SELECT id FROM category" | tail -1 | awk '{print $1}')
+ddb query "CREATE TABLE bookmark (url VARCHAR(2048), category TEXT REFERENCES category(id))"
+ddb query "ALTER TABLE bookmark SET ZONE reference FOR url"
+ddb query "INSERT INTO bookmark (title, url, category) VALUES ('Rust Book', 'https://doc.rust-lang.org', '$CAT_ID')"
+ddb query "SELECT * FROM bookmark"
+ddb query "SELECT * FROM bookmark_category"
+ddb help create-app | head -5
 pass "App building"
 ```
 
@@ -1497,8 +1497,8 @@ Per AGENTS.md Definition of Done: "if the task adds a CLI command, server endpoi
 - [ ] **Step 1: Initialize walkthrough**
 
 ```bash
-WD=/tmp/zdb-demo-app-building
-showboat init .local/walkthroughs/00002-app-building.md "Building Apps with ZettelDB"
+WD=/tmp/ddb-demo-app-building
+showboat init .local/walkthroughs/00002-app-building.md "Building Apps with Doogat DB"
 ```
 
 (Adjust the 5-digit prefix to be the next available number.)
@@ -1507,32 +1507,32 @@ showboat init .local/walkthroughs/00002-app-building.md "Building Apps with Zett
 
 ```bash
 showboat note .local/walkthroughs/00002-app-building.md "Initialize a repo and create a typed table."
-showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "mkdir -p $WD && zdb init"
-showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "zdb query \"CREATE TABLE bookmark (url VARCHAR(2048), description TEXT)\""
+showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "mkdir -p $WD && ddb init"
+showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "ddb query \"CREATE TABLE bookmark (url VARCHAR(2048), description TEXT)\""
 ```
 
 - [ ] **Step 3: Demo ENUM, title template, zone override**
 
 ```bash
 showboat note .local/walkthroughs/00002-app-building.md "Use ENUM for constraints, set a title template, and override a zone."
-showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "zdb query \"CREATE TABLE task (name VARCHAR(100), status ENUM('todo','doing','done') DEFAULT 'todo')\""
-showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "zdb query \"ALTER TABLE task SET TITLE TEMPLATE '{name} ({status})'\""
-showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "zdb query \"ALTER TABLE bookmark SET ZONE reference FOR url\""
+showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "ddb query \"CREATE TABLE task (name VARCHAR(100), status ENUM('todo','doing','done') DEFAULT 'todo')\""
+showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "ddb query \"ALTER TABLE task SET TITLE TEMPLATE '{name} ({status})'\""
+showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "ddb query \"ALTER TABLE bookmark SET ZONE reference FOR url\""
 ```
 
 - [ ] **Step 4: Demo INSERT with title cascade and junction tables**
 
 ```bash
 showboat note .local/walkthroughs/00002-app-building.md "Insert data showing title resolution and multi-valued references."
-showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "zdb query \"INSERT INTO task (name, status) VALUES ('Ship v1', 'doing')\""
-showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "zdb query \"SELECT id, title, status FROM task\""
+showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "ddb query \"INSERT INTO task (name, status) VALUES ('Ship v1', 'doing')\""
+showboat exec --workdir $WD .local/walkthroughs/00002-app-building.md bash "ddb query \"SELECT id, title, status FROM task\""
 ```
 
-- [ ] **Step 5: Demo zdb help create-app**
+- [ ] **Step 5: Demo ddb help create-app**
 
 ```bash
 showboat note .local/walkthroughs/00002-app-building.md "The built-in guide covers all of this."
-showboat exec .local/walkthroughs/00002-app-building.md bash "zdb help create-app | head -20"
+showboat exec .local/walkthroughs/00002-app-building.md bash "ddb help create-app | head -20"
 ```
 
 - [ ] **Step 6: Cleanup and verify**
@@ -1557,7 +1557,7 @@ showboat verify .local/walkthroughs/00002-app-building.md
 
 ```markdown
 ### Added
-- `zdb help create-app` in-CLI guide for app builders
+- `ddb help create-app` in-CLI guide for app builders
 - Type-aware zone inference: SQL types (VARCHAR, TEXT, ENUM, etc.) determine zone placement
 - ENUM/SET in CREATE TABLE maps to `allowed_values` constraints
 - `ALTER TABLE ... SET ZONE` for column zone overrides

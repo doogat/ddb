@@ -1,9 +1,9 @@
 import Foundation
 
-struct BookmarksModule: ZDBModule {
+struct BookmarksModule: DDBModule {
     static let tables = ["category", "bookmark"]
 
-    static func bootstrap(_ driver: ZettelDriver) throws {
+    static func bootstrap(_ driver: DoogatDriver) throws {
         _ = try driver.executeSql(sql: "CREATE TABLE IF NOT EXISTS category (name TEXT NOT NULL)")
         _ = try driver.executeSql(sql: """
             CREATE TABLE IF NOT EXISTS bookmark (

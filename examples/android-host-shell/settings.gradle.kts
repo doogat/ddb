@@ -1,6 +1,6 @@
 rootProject.name = "HostShell"
 
 include(":app")
-include(":core-zdb")
+include(":core-ddb")
 include(":feature-bookmarks")
 include(":feature-contacts")

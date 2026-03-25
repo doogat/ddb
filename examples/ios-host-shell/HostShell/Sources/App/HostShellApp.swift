@@ -8,7 +8,7 @@ struct HostShellApp: App {
         do {
             _appState = StateObject(wrappedValue: try AppState())
         } catch {
-            fatalError("Failed to initialize ZettelDB: \(error)")
+            fatalError("Failed to initialize Doogat DB: \(error)")
         }
     }
 

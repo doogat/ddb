@@ -5,7 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.doogat.hostshell.columnValue
-import uniffi.zdb_core.SqlResultRecord
+import uniffi.ddb_core.SqlResultRecord
 
 @Composable
 fun ContactListScreen(

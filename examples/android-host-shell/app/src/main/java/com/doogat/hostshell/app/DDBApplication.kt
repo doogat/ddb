@@ -3,21 +3,21 @@ package com.doogat.hostshell.app
 import android.app.Application
 import com.doogat.hostshell.bookmarks.BookmarksModule
 import com.doogat.hostshell.contacts.ContactsModule
-import uniffi.zdb_core.ZettelDriver
+import uniffi.ddb_core.DoogatDriver
 import java.io.File
 
-class ZDBApplication : Application() {
-    lateinit var driver: ZettelDriver
+class DDBApplication : Application() {
+    lateinit var driver: DoogatDriver
         private set
 
     override fun onCreate() {
         super.onCreate()
 
-        val repoPath = File(filesDir, "zettelkasten").path
+        val repoPath = File(filesDir, "ddb").path
         driver = if (File(repoPath, ".git").exists()) {
-            ZettelDriver(repoPath)
+            DoogatDriver(repoPath)
         } else {
-            ZettelDriver.createRepo(repoPath).also {
+            DoogatDriver.createRepo(repoPath).also {
                 it.registerNode("android-host-shell")
             }
         }

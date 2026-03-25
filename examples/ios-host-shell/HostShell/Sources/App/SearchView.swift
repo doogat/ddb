@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Cross-module full-text search across all zettel types.
+/// Cross-module full-text search across all doogat types.
 struct SearchView: View {
     @EnvironmentObject private var appState: AppState
     @State private var query = ""
