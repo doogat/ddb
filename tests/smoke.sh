@@ -336,6 +336,34 @@ pass "help list"
 ! $ZDB help nonexistent 2>/dev/null
 pass "help unknown fails"
 
+# 16d. app-building end-to-end flow
+$ZDB query "CREATE TABLE abcategory (name VARCHAR(100))" | grep -q "table abcategory created"
+AB_CAT_ID=$($ZDB query "INSERT INTO abcategory (name) VALUES ('work')")
+echo "$AB_CAT_ID" | grep -qE "^[0-9]{14}$"
+$ZDB query "CREATE TABLE abbookmark (url VARCHAR(2048), description TEXT, abcategory TEXT REFERENCES abcategory)" | grep -q "table abbookmark created"
+$ZDB query "ALTER TABLE abbookmark SET ZONE reference FOR url" | grep -q "zone set to reference"
+$ZDB query "ALTER TABLE abbookmark SET TITLE TEMPLATE '{url}'" | grep -q "title template set"
+# Insert with explicit title
+sleep 1
+AB_BM1=$($ZDB query "INSERT INTO abbookmark (title, url, description) VALUES ('Rust Book', 'https://doc.rust-lang.org', 'The official Rust book')")
+echo "$AB_BM1" | grep -qE "^[0-9]{14}$"
+# Insert with template-derived title (no explicit title)
+sleep 1
+AB_BM2=$($ZDB query "INSERT INTO abbookmark (url, description) VALUES ('https://crates.io', 'Rust package registry')")
+echo "$AB_BM2" | grep -qE "^[0-9]{14}$"
+# Link bookmark to category via junction table
+$ZDB query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM1', '$AB_CAT_ID')" | grep -q "1 row"
+# SELECT from main table
+$ZDB query "SELECT url FROM abbookmark" | grep -q "rust-lang"
+# SELECT from junction table
+$ZDB query "SELECT abcategory_id FROM abbookmark_abcategory WHERE abbookmark_id = '$AB_BM1'" | grep -q "$AB_CAT_ID"
+# help create-app guide available
+$ZDB help create-app | grep -q "CREATE TABLE"
+# Clean up
+$ZDB query "DROP TABLE abbookmark CASCADE" | grep -q "dropped"
+$ZDB query "DROP TABLE abcategory CASCADE" | grep -q "dropped"
+pass "app-building end-to-end flow"
+
 if [ "$SMOKE_PROFILE" = "quick" ]; then
   pass "quick profile complete"
   exit 0
