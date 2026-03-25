@@ -574,41 +574,26 @@ Track contacts, life events, and interactions.
 
 ```sql
 CREATE TABLE contact (
-  name TEXT NOT NULL,
-  relationship TEXT,
-  email TEXT,
-  phone TEXT
+  name VARCHAR(255) NOT NULL,
+  relationship ENUM('family', 'friend', 'colleague', 'business', 'acquaintance'),
+  email VARCHAR(255),
+  phone VARCHAR(100)
 );
 
 CREATE TABLE life_event (
-  event_type TEXT NOT NULL,
-  event_date TEXT,
+  event_type ENUM('birthday', 'married', 'graduated', 'moved', 'other') NOT NULL,
+  event_date VARCHAR(10),
   contact TEXT REFERENCES contact(id)
 );
 
 CREATE TABLE interaction (
-  interaction_date TEXT NOT NULL,
-  location TEXT,
+  interaction_date VARCHAR(10) NOT NULL,
+  location VARCHAR(255),
   contact TEXT REFERENCES contact(id)
 );
 ```
 
-Enhance with enum constraints via `_typedef` YAML:
-
-```yaml
-# Relationship enum on contact type
-columns:
-  - name: relationship
-    data_type: TEXT
-    zone: frontmatter
-    allowed_values: [family, friend, colleague, business, acquaintance]
-  - name: email
-    data_type: TEXT
-    zone: frontmatter
-    search_boost: 1.5
-```
-
-Add body sections for rich notes:
+Add body sections for rich notes via the typedef:
 
 ```yaml
 template_sections:
