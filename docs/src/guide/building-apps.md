@@ -593,7 +593,7 @@ CREATE TABLE interaction (
 );
 ```
 
-Add body sections for rich notes via the typedef:
+Body section headings are defined in the typedef YAML (no SQL DDL for this yet):
 
 ```yaml
 template_sections:
@@ -688,6 +688,8 @@ She recommended the Ink & Switch essay on local-first.
 ---
 - contact:: [[20260301130000]]
 ```
+
+Body content (Bio, Notes, free-form text) is added after creation by editing the Markdown file directly or via a frontend text editor.
 
 ## Schema design checklist
 
