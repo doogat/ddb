@@ -723,7 +723,7 @@ gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvcategory (name VARCHAR(1
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)\"){message}}"}' | Out-Null
 $mvCat1 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (''Science'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
 $mvCat2 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (''Math'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
-$mvBm = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvbookmark (mvcategory) VALUES (''$mvCat1'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
+$mvBm = (gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO mvbookmark (mvcategory) VALUES ('$mvCat1')\`"){message}}`"}") -replace '.*"message":"(\d+)".*','$1'
 gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO mvbookmark_mvcategory (mvbookmark_id, mvcategory_id) VALUES ('$mvBm', '$mvCat2')\`"){message}}`"}" | Out-Null
 $mvResult = gql '{"query":"{ mvbookmarks { items { id mvcategories } } }"}'
 if ($mvResult -notmatch $mvCat1) { throw "multi-value ref: cat1 not in graphql list field" }
