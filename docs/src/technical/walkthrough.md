@@ -683,7 +683,6 @@ The CLI includes an embedded guide system via `zdb help <topic>`. When called wi
 
 The implementation lives in the `Command::Help` arm of `main.rs`. Guide text is returned inline (not loaded from files). Several subcommands include `after_help` or `after_long_help` hints that point users to relevant guides.
 
-
 For deeper detail on any module, see the corresponding document in `docs/src/technical/`:
 
 - `technical/parser.md` -- three-zone Markdown parsing

@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Collision loser ID generation checks both flat and folder-typed paths
 - Scalar GraphQL field for REFERENCES columns returns first value instead of all comma-joined
 - SQL INSERT respects explicit `title` column instead of always generating from template
+- Body section removal no longer leaves orphan blank lines between remaining sections
+- Zone migration preserves Map and List frontmatter values instead of silently dropping them
 
 ## [0.1.0] - 2026-03-19
 
