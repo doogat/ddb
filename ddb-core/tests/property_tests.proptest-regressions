@@ -1,8 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc fd424fc2f96a591905485c2f77e76cfa18b0d1eb2459015a7d44b23cdb3e6b42 # shrinks to zettels = [("zettelkasten/20250101000000.md", "---\nid: 20250101000000\ntype: ztA\nxP: a\nxp: A\n---\n?")], commit_x = "0aaaa00a00aa000aa00a00a00000000aaaa00a0a", commit_y = "00a00aaa0aaa00aa00a0aaa00aa0a0a0a00aaa00"
-cc fcb0ee154fbf6a15f2fbb5cf0bbadcbd3742628133bd3260accf062c71b6b957 # shrinks to (create_sql, _, cols) = ("CREATE TABLE tbl_A (col_P TEXT, col_p TEXT)", "tbl_A", [("col_P", "TEXT"), ("col_p", "TEXT")])
