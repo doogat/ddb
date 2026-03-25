@@ -46,6 +46,8 @@ Frontend (React, Swift, Kotlin, etc.)
 
 ## Data modeling
 
+> **Always use `CREATE TABLE` via `zdb query` to define types.** Do not create `_typedef` zettels manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
+
 ### Entities become tables
 
 Each entity in your app maps to a SQL table, which maps to a `_typedef` zettel, which auto-generates a GraphQL type.
