@@ -155,7 +155,7 @@ ALTER TABLE task ADD COLUMN tags SET('urgent', 'blocked', 'review');
 
 ### Body sections for rich content
 
-Use `template_sections` to define expected body headings:
+Use `template_sections` to define expected body headings. Note: `template_sections` must be set by editing the typedef YAML directly - there is no SQL DDL syntax for this yet.
 
 ```yaml
 template_sections:

@@ -677,6 +677,13 @@ For each column with a `REFERENCES` target, the dynamic GraphQL schema adds a pl
 - Otherwise -> add 's' (e.g., `assignee` -> `assignees`)
 
 
+## 16. Help Guides
+
+The CLI includes an embedded guide system via `zdb help <topic>`. When called without a topic, it lists available guides. Each guide is a prose walkthrough of a workflow (e.g., data modeling, zone configuration, API access).
+
+The implementation lives in the `Command::Help` arm of `main.rs`. Guide text is returned inline (not loaded from files). Several subcommands include `after_help` or `after_long_help` hints that point users to relevant guides.
+
+
 For deeper detail on any module, see the corresponding document in `docs/src/technical/`:
 
 - `technical/parser.md` -- three-zone Markdown parsing
