@@ -79,11 +79,22 @@ Each column maps to a zone in the zettel Markdown file:
 | `body` | `## Heading` section | Long-form text, notes, descriptions |
 | `reference` | `- key:: value` line | Links between entities (FK references, wikilinks) |
 
-Zone assignment rules:
-- Explicit `zone` in the typedef wins
-- `REFERENCES` columns default to `reference`
-- `INTEGER`, `REAL`, `BOOLEAN` default to `frontmatter`
-- `TEXT` defaults to `frontmatter` (use explicit zone for body/reference)
+**Zone assignment rules** (in priority order):
+
+1. Explicit `zone` in the typedef always wins
+2. Otherwise, the SQL type determines the default:
+
+| SQL Type | Default Zone |
+|----------|-------------|
+| `REFERENCES` column | reference |
+| `CHAR(n)`, `VARCHAR(n≤255)`, `VARCHAR` (no size), `TINYTEXT` | frontmatter |
+| `INTEGER`, `REAL`, `BOOLEAN` | frontmatter |
+| `ENUM(...)`, `SET(...)` | frontmatter |
+| Column with `allowed_values` | frontmatter |
+| `VARCHAR(n>255)`, `TEXT`, `MEDIUMTEXT`, `LONGTEXT` | body |
+| Everything else | body |
+
+Rule of thumb: if it points somewhere else, it's a reference. If it describes the zettel, it's frontmatter. If it IS the zettel, it's body.
 
 ### Relationships
 
