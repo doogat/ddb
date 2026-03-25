@@ -489,11 +489,14 @@ CREATE TABLE category (
 
 CREATE TABLE bookmark (
   title TEXT NOT NULL,
-  url TEXT NOT NULL,
+  url VARCHAR(255) NOT NULL,
   description TEXT,
+  status ENUM('active', 'archived') DEFAULT 'active',
   category TEXT REFERENCES category(id)
 );
 ```
+
+Zone assignments: `url` is `VARCHAR(255)` (≤255, frontmatter). `description` is `TEXT` (body). `status` is `ENUM` (frontmatter). `category` has `REFERENCES` (reference zone).
 
 ### Sample data
 
@@ -550,13 +553,16 @@ title: Rust Book
 type: bookmark
 date: 2026-03-01
 url: https://doc.rust-lang.org/book/
+status: active
 ---
+
+A comprehensive guide to the Rust programming language.
 
 ---
 - category:: [[20260301120100]]
 ```
 
-Editable in any text editor or Obsidian.
+Three zones visible: frontmatter (url, status), body (description text), references (category wikilink). Editable in any text editor or Obsidian.
 
 ## Worked example: personal CRM
 
