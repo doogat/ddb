@@ -1009,6 +1009,9 @@ fn remove_body_section(body: &mut String, heading: &str) {
         }
     }
     let mut new_body = result.join("\n");
+    while new_body.contains("\n\n\n") {
+        new_body = new_body.replace("\n\n\n", "\n\n");
+    }
     if body.ends_with('\n') && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
@@ -2144,5 +2147,18 @@ mod tests {
             Some(&crate::types::Value::String("active".into()))
         );
         assert!(!parsed.body.contains("status::"));
+    }
+
+    #[test]
+    fn remove_body_section_collapses_blank_lines() {
+        let mut body =
+            "## A\ncontent a\n\n## B\ncontent b\n\n## C\ncontent c\n".to_string();
+        remove_body_section(&mut body, "B");
+        assert!(
+            !body.contains("\n\n\n"),
+            "body should not contain triple+ newlines: {body:?}"
+        );
+        assert!(body.contains("## A\ncontent a\n"));
+        assert!(body.contains("## C\ncontent c\n"));
     }
 }
