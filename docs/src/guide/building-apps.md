@@ -185,6 +185,84 @@ Additional notes.
 
 Body sections are stored as `TEXT` columns in the body zone, queryable via SQL and exposed in GraphQL.
 
+### Title resolution
+
+By default, a zettel's title comes from the `title` frontmatter field. For typed zettels, you can set a **title template** that auto-generates titles from column values:
+
+```sql
+ALTER TABLE contact SET TITLE TEMPLATE '{name} ({relationship})';
+```
+
+Template syntax: `{column_name}` placeholders are interpolated from frontmatter values. Unfilled placeholders (missing values) are stripped automatically.
+
+Remove a template:
+
+```sql
+ALTER TABLE contact DROP TITLE TEMPLATE;
+```
+
+`zdb fix` detects zettels whose titles don't match their type's template and offers to correct them.
+
+### Zone overrides
+
+Override the default zone for any column:
+
+```sql
+ALTER TABLE bookmark SET ZONE reference FOR url;
+```
+
+This moves `url` from its default zone (body, since `TEXT` defaults to body) into the reference zone. Available zones: `frontmatter`, `body`, `reference`.
+
+After changing a zone, existing zettels need migration to move data to the new zone:
+
+```bash
+zdb fix --migrate
+```
+
+### Multi-valued references
+
+When a `CREATE TABLE` includes a `REFERENCES` column, the engine auto-creates a **junction table** named `{type}_{column}` for storing multiple references:
+
+```sql
+CREATE TABLE bookmark (
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  category TEXT REFERENCES category(id)
+);
+-- Auto-creates junction table: bookmark_category
+```
+
+**Insert** a reference:
+
+```sql
+INSERT INTO bookmark_category (bookmark_id, category_id)
+VALUES ('20260301120200', '20260301120100');
+```
+
+This appends a `- category:: [[20260301120100]]` line to the bookmark's reference section.
+
+**Delete** a reference:
+
+```sql
+DELETE FROM bookmark_category
+WHERE bookmark_id = '20260301120200' AND category_id = '20260301120100';
+```
+
+**Query** references:
+
+```sql
+-- Display view (comma-separated IDs)
+SELECT id, title, category FROM bookmark;
+
+-- Relational query (JOIN for filtering)
+SELECT b.title, c.name
+FROM bookmark b
+JOIN bookmark_category bc ON bc.bookmark_id = b.id
+JOIN category c ON c.id = bc.category_id;
+```
+
+Dropping a table cascades to its junction tables.
+
 ## API access
 
 ### GraphQL
