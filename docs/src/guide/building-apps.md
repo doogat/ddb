@@ -130,17 +130,17 @@ CREATE TABLE task (
 );
 ```
 
-The engine translates `ENUM`/`SET` into `allowed_values` in the typedef YAML:
+The engine translates `ENUM`/`SET` into `allowed_values` in the typedef YAML (stored as `TEXT` with constraints):
 
 ```yaml
 columns:
   - name: status
-    data_type: ENUM
+    data_type: TEXT
     zone: frontmatter
     allowed_values: [todo, doing, done]
     default_value: todo
   - name: priority
-    data_type: ENUM
+    data_type: TEXT
     zone: frontmatter
     allowed_values: [low, medium, high]
 ```
