@@ -1,10 +1,10 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
 fn full_text_search() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -15,7 +15,7 @@ fn full_text_search() {
         .assert()
         .success();
     std::thread::sleep(std::time::Duration::from_secs(1));
-    repo.zdb()
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -26,7 +26,7 @@ fn full_text_search() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["search", "uniquekeywordalpha"])
         .assert()
         .success()
@@ -36,9 +36,9 @@ fn full_text_search() {
 
 #[test]
 fn wikilink_indexed_in_links_table() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let parent_out = repo
-        .zdb()
+        .ddb()
         .args([
             "create",
             "--title",
@@ -53,7 +53,7 @@ fn wikilink_indexed_in_links_table() {
         .to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -64,10 +64,10 @@ fn wikilink_indexed_in_links_table() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
-            "SELECT source_id, target_path, display FROM _zdb_links",
+            "SELECT source_id, target_path, display FROM _ddb_links",
         ])
         .assert()
         .success()
@@ -77,14 +77,14 @@ fn wikilink_indexed_in_links_table() {
 
 #[test]
 fn tags_indexed() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["create", "--title", "Tagged", "--tags", "rust,testing"])
         .assert()
         .success();
 
-    repo.zdb()
-        .args(["query", "SELECT tag FROM _zdb_tags ORDER BY tag"])
+    repo.ddb()
+        .args(["query", "SELECT tag FROM _ddb_tags ORDER BY tag"])
         .assert()
         .success()
         .stdout(predicate::str::contains("rust"))
@@ -92,15 +92,15 @@ fn tags_indexed() {
 }
 
 #[test]
-fn zettels_table_queryable() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+fn doogats_table_queryable() {
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["create", "--title", "Queryable", "--body", "test"])
         .assert()
         .success();
 
-    repo.zdb()
-        .args(["query", "SELECT id, title FROM zettels"])
+    repo.ddb()
+        .args(["query", "SELECT id, title FROM doogats"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Queryable"));
@@ -108,8 +108,8 @@ fn zettels_table_queryable() {
 
 #[test]
 fn search_returns_snippet_with_highlight() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -120,7 +120,7 @@ fn search_returns_snippet_with_highlight() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["search", "searchterm"])
         .assert()
         .success()
@@ -129,9 +129,9 @@ fn search_returns_snippet_with_highlight() {
 
 #[test]
 fn paginated_search_shows_header() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     for i in 0..5 {
-        repo.zdb()
+        repo.ddb()
             .args([
                 "create",
                 "--title",
@@ -144,7 +144,7 @@ fn paginated_search_shows_header() {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "search",
             "paginatedsearchword",
@@ -160,8 +160,8 @@ fn paginated_search_shows_header() {
 
 #[test]
 fn paginated_search_offset_beyond() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -172,7 +172,7 @@ fn paginated_search_offset_beyond() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "search",
             "offsetbeyondword",

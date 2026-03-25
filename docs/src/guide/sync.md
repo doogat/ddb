@@ -1,6 +1,6 @@
 # Multi-Device Sync
 
-ZettelDB syncs across devices using Git remotes. No server or cloud required — any Git remote works (bare repo, SSH, local path).
+Doogat DB syncs across devices using Git remotes. No server or cloud required — any Git remote works (bare repo, SSH, local path).
 
 ## Setup
 
@@ -9,7 +9,7 @@ ZettelDB syncs across devices using Git remotes. No server or cloud required —
 On a shared location (NAS, USB drive, SSH server):
 
 ```bash
-git init --bare /path/to/zdb-remote.git
+git init --bare /path/to/ddb-remote.git
 ```
 
 ### 2. Add the Remote
@@ -17,8 +17,8 @@ git init --bare /path/to/zdb-remote.git
 On each device:
 
 ```bash
-cd ~/my-zettelkasten
-git remote add origin /path/to/zdb-remote.git
+cd ~/my-ddb
+git remote add origin /path/to/ddb-remote.git
 # or: git remote add origin ssh://user@host/path/to/repo.git
 ```
 
@@ -27,13 +27,13 @@ git remote add origin /path/to/zdb-remote.git
 On each device:
 
 ```bash
-zdb register-node "Laptop"
+ddb register-node "Laptop"
 ```
 
 This:
 - Generates a UUID for this device
 - Creates `.nodes/{uuid}.toml` in the repository
-- Stores the UUID locally in `.git/zdb-node`
+- Stores the UUID locally in `.git/ddb-node`
 
 Each device needs a unique name. The node registry is Git-tracked, so all devices learn about each other through sync.
 
@@ -48,7 +48,7 @@ git push -u origin master
 ## Syncing
 
 ```bash
-zdb sync [remote] [branch]
+ddb sync [remote] [branch]
 ```
 
 Defaults: `origin` remote, `master` branch.
@@ -68,7 +68,7 @@ sync: bidirectional | commits: 1 | conflicts resolved: 0
 
 ## Conflict Resolution
 
-When both devices edit the same zettel between syncs, ZettelDB resolves conflicts automatically:
+When both devices edit the same doogat between syncs, Doogat DB resolves conflicts automatically:
 
 - **Frontmatter**: Each field is merged independently. Different fields → both kept. Same field changed on both sides → CRDT picks one deterministically.
 - **Body**: Character-level merge. Non-overlapping edits → both applied. Overlapping edits → CRDT merges at character granularity.
@@ -121,7 +121,7 @@ Body text.
 Over time, the Git repository accumulates objects. Run compaction periodically:
 
 ```bash
-zdb compact
+ddb compact
 ```
 
 This:
@@ -142,7 +142,7 @@ repo (.git): 8.4 MB → 6.1 MB
 | Field | Meaning |
 |-------|---------|
 | files removed | CRDT temp files older than the shared head, safely deleted |
-| crdt compacted | Zettels whose multiple CRDT docs were merged into one |
+| crdt compacted | Doogats whose multiple CRDT docs were merged into one |
 | gc | Whether `git gc` succeeded |
 | crdt temp | Total size and file count of `.crdt/temp/` before and after cleanup |
 | repo (.git) | Git directory size before and after `git gc` |
@@ -155,7 +155,7 @@ For measured growth data, see [Storage Budget](../technical/storage-budget.md).
 ## Checking Status
 
 ```bash
-zdb status
+ddb status
 ```
 
 Shows the current HEAD, node registration, index staleness, and number of registered nodes.

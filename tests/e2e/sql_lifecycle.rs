@@ -1,10 +1,10 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
 fn create_table() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE tasks (status TEXT, priority INTEGER, assignee TEXT)",
@@ -16,8 +16,8 @@ fn create_table() {
 
 #[test]
 fn insert_and_select() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE tasks (status TEXT, priority INTEGER)",
@@ -27,7 +27,7 @@ fn insert_and_select() {
 
     // Insert rows (sleep between to avoid ID collision)
     let id1 = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO tasks (status, priority) VALUES ('open', 1)",
@@ -39,7 +39,7 @@ fn insert_and_select() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     let id2 = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO tasks (status, priority) VALUES ('closed', 2)",
@@ -49,7 +49,7 @@ fn insert_and_select() {
     let id2 = String::from_utf8_lossy(&id2.stdout).trim().to_string();
 
     // All rows present
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT id, status, priority FROM tasks"])
         .assert()
         .success()
@@ -61,13 +61,13 @@ fn insert_and_select() {
 
 #[test]
 fn select_with_where() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE tasks (status TEXT, assignee TEXT)"])
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "INSERT INTO tasks (status, assignee) VALUES ('open', 'alice')",
@@ -75,7 +75,7 @@ fn select_with_where() {
         .assert()
         .success();
     std::thread::sleep(std::time::Duration::from_secs(1));
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "INSERT INTO tasks (status, assignee) VALUES ('closed', 'bob')",
@@ -83,7 +83,7 @@ fn select_with_where() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "SELECT status, assignee FROM tasks WHERE assignee = 'alice'",
@@ -96,8 +96,8 @@ fn select_with_where() {
 
 #[test]
 fn update_row() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE tasks (status TEXT, priority INTEGER)",
@@ -106,7 +106,7 @@ fn update_row() {
         .success();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO tasks (status, priority) VALUES ('open', 1)",
@@ -115,7 +115,7 @@ fn update_row() {
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!("UPDATE tasks SET status = 'done', priority = 10 WHERE id = '{id}'"),
@@ -124,7 +124,7 @@ fn update_row() {
         .success()
         .stdout("1 row(s) affected\n");
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!("SELECT status, priority FROM tasks WHERE id = '{id}'"),
@@ -136,14 +136,14 @@ fn update_row() {
 
 #[test]
 fn delete_row() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE tasks (status TEXT)"])
         .assert()
         .success();
 
     let out1 = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO tasks (status) VALUES ('keep')"])
         .output()
         .unwrap();
@@ -151,19 +151,19 @@ fn delete_row() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     let out2 = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO tasks (status) VALUES ('delete-me')"])
         .output()
         .unwrap();
     let id2 = String::from_utf8_lossy(&out2.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", &format!("DELETE FROM tasks WHERE id = '{id2}'")])
         .assert()
         .success()
         .stdout("1 row(s) affected\n");
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT id, status FROM tasks"])
         .assert()
         .success()
@@ -173,19 +173,19 @@ fn delete_row() {
 
 #[test]
 fn reindex_preserves_table() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE tasks (status TEXT)"])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "INSERT INTO tasks (status) VALUES ('open')"])
         .assert()
         .success();
 
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT status FROM tasks"])
         .assert()
         .success()
@@ -193,9 +193,9 @@ fn reindex_preserves_table() {
 }
 
 #[test]
-fn data_zettel_readable_as_markdown() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+fn data_doogat_readable_as_markdown() {
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE tasks (status TEXT, priority INTEGER)",
@@ -204,7 +204,7 @@ fn data_zettel_readable_as_markdown() {
         .success();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO tasks (status, priority) VALUES ('open', 1)",
@@ -213,7 +213,7 @@ fn data_zettel_readable_as_markdown() {
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args(["read", &id])
         .assert()
         .success()
@@ -223,8 +223,8 @@ fn data_zettel_readable_as_markdown() {
 
 #[test]
 fn install_literature_note_type() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["type", "install", "literature-note"])
         .assert()
         .success()
@@ -235,8 +235,8 @@ fn install_literature_note_type() {
 
 #[test]
 fn install_meeting_minutes_type() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["type", "install", "meeting-minutes"])
         .assert()
         .success()
@@ -246,7 +246,7 @@ fn install_meeting_minutes_type() {
 
     // Hyphenated type names must work in SQL (requires quoted identifiers)
     let out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             r#"INSERT INTO "meeting-minutes" (date, attendees) VALUES ('2026-03-10', 'alice,bob')"#,
@@ -260,14 +260,14 @@ fn install_meeting_minutes_type() {
     );
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args(["read", &id])
         .assert()
         .success()
         .stdout(predicate::str::contains("attendees: alice,bob"));
 
     // DELETE on hyphenated table must work (requires quoted identifiers in SQL)
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(r#"DELETE FROM "meeting-minutes" WHERE id = '{id}'"#),
@@ -278,15 +278,15 @@ fn install_meeting_minutes_type() {
 
 #[test]
 fn install_kanban_type_and_create_with_default() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["type", "install", "kanban"])
         .assert()
         .success();
 
     // Insert with omitted status → should get default "backlog"
     let out = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO kanban (assignee) VALUES ('alice')"])
         .output()
         .unwrap();
@@ -297,7 +297,7 @@ fn install_kanban_type_and_create_with_default() {
     );
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args(["read", &id])
         .assert()
         .success()
@@ -306,13 +306,13 @@ fn install_kanban_type_and_create_with_default() {
 
 #[test]
 fn kanban_rejects_invalid_status() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["type", "install", "kanban"])
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "INSERT INTO kanban (status) VALUES ('invalid')"])
         .assert()
         .failure()
@@ -321,24 +321,24 @@ fn kanban_rejects_invalid_status() {
 
 #[test]
 fn alter_table_add_column() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE projects (name TEXT)"])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "INSERT INTO projects (name) VALUES ('alpha')"])
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "ALTER TABLE projects ADD COLUMN priority INTEGER"])
         .assert()
         .success()
         .stdout(predicate::str::contains("altered"));
 
     // New column shows NULL for existing row
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT name, priority FROM projects"])
         .assert()
         .success()
@@ -348,23 +348,23 @@ fn alter_table_add_column() {
 
 #[test]
 fn alter_table_rename_column() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE items (name TEXT, score INTEGER)"])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "INSERT INTO items (name, score) VALUES ('x', 42)"])
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "ALTER TABLE items RENAME COLUMN score TO rating"])
         .assert()
         .success()
         .stdout(predicate::str::contains("renamed"));
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT name, rating FROM items"])
         .assert()
         .success()
@@ -374,24 +374,24 @@ fn alter_table_rename_column() {
 
 #[test]
 fn drop_table_cascade() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE droptest (name TEXT)"])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "INSERT INTO droptest (name) VALUES ('gone')"])
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "DROP TABLE droptest CASCADE"])
         .assert()
         .success()
         .stdout(predicate::str::contains("dropped"));
 
     // Table no longer exists
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT * FROM droptest"])
         .assert()
         .failure();
@@ -399,15 +399,15 @@ fn drop_table_cascade() {
 
 #[test]
 fn bulk_update() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE bulktest (status TEXT, priority INTEGER)",
         ])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "INSERT INTO bulktest (status, priority) VALUES ('open', 1)",
@@ -415,7 +415,7 @@ fn bulk_update() {
         .assert()
         .success();
     std::thread::sleep(std::time::Duration::from_secs(1));
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "INSERT INTO bulktest (status, priority) VALUES ('open', 2)",
@@ -423,7 +423,7 @@ fn bulk_update() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "UPDATE bulktest SET status = 'closed' WHERE priority = 1",
@@ -432,7 +432,7 @@ fn bulk_update() {
         .success()
         .stdout(predicate::str::contains("1 row(s) affected"));
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "SELECT status, priority FROM bulktest ORDER BY priority",
@@ -445,12 +445,12 @@ fn bulk_update() {
 
 #[test]
 fn bulk_delete() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE delbulk (status TEXT, name TEXT)"])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "INSERT INTO delbulk (status, name) VALUES ('done', 'a')",
@@ -458,7 +458,7 @@ fn bulk_delete() {
         .assert()
         .success();
     std::thread::sleep(std::time::Duration::from_secs(1));
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "INSERT INTO delbulk (status, name) VALUES ('todo', 'b')",
@@ -466,7 +466,7 @@ fn bulk_delete() {
         .assert()
         .success();
     std::thread::sleep(std::time::Duration::from_secs(1));
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "INSERT INTO delbulk (status, name) VALUES ('done', 'c')",
@@ -474,13 +474,13 @@ fn bulk_delete() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "DELETE FROM delbulk WHERE status = 'done'"])
         .assert()
         .success()
         .stdout(predicate::str::contains("2 row(s) affected"));
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT name FROM delbulk"])
         .assert()
         .success()
@@ -491,14 +491,14 @@ fn bulk_delete() {
 
 #[test]
 fn transaction_commit_via_cli() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE items (name TEXT)"])
         .assert()
         .success();
 
     // Multi-statement transaction via semicolons
-    repo.zdb()
+    repo.ddb()
         .args(["query", "BEGIN; INSERT INTO items (name) VALUES ('a'); INSERT INTO items (name) VALUES ('b'); COMMIT"])
         .assert()
         .success()
@@ -506,7 +506,7 @@ fn transaction_commit_via_cli() {
         .stdout(predicate::str::contains("COMMIT"));
 
     // Both rows should be visible
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT name FROM items ORDER BY name"])
         .assert()
         .success()
@@ -516,13 +516,13 @@ fn transaction_commit_via_cli() {
 
 #[test]
 fn transaction_rollback_via_cli() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE items (name TEXT)"])
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "BEGIN; INSERT INTO items (name) VALUES ('gone'); ROLLBACK",
@@ -532,7 +532,7 @@ fn transaction_rollback_via_cli() {
         .stdout(predicate::str::contains("ROLLBACK"));
 
     // No rows should be visible
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT COUNT(*) FROM items"])
         .assert()
         .success()
@@ -541,8 +541,8 @@ fn transaction_rollback_via_cli() {
 
 #[test]
 fn single_git_commit_for_transaction() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE items (name TEXT)"])
         .assert()
         .success();
@@ -558,7 +558,7 @@ fn single_git_commit_for_transaction() {
         .parse()
         .unwrap();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "BEGIN; INSERT INTO items (name) VALUES ('x'); INSERT INTO items (name) VALUES ('y'); COMMIT"])
         .assert()
         .success();
@@ -594,26 +594,26 @@ fn single_git_commit_for_transaction() {
 #[test]
 fn multi_table_schema_prd_scenario() {
     // PRD acceptance scenario: workspace/section/link multi-table schema
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE workspace (description TEXT)"])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE section (name TEXT, workspace TEXT REFERENCES workspace(id))",
         ])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE link (url TEXT NOT NULL, title TEXT)"])
         .assert()
         .success();
 
     // Insert workspace
     let ws_out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO workspace (description) VALUES ('My Board')",
@@ -627,7 +627,7 @@ fn multi_table_schema_prd_scenario() {
 
     // Insert section referencing workspace
     let sec_out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             &format!("INSERT INTO section (name, workspace) VALUES ('Dev', '{ws_id}')"),
@@ -641,7 +641,7 @@ fn multi_table_schema_prd_scenario() {
 
     // Insert link
     let link_out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO link (url, title) VALUES ('https://example.com', 'Example')",
@@ -652,14 +652,14 @@ fn multi_table_schema_prd_scenario() {
     assert!(!link_id.is_empty());
 
     // Typed list query
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT description FROM workspace"])
         .assert()
         .success()
         .stdout(predicate::str::contains("My Board"));
 
     // Cross-table join
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "SELECT s.name, w.description FROM section s JOIN workspace w ON s.workspace = w.id",
@@ -670,7 +670,7 @@ fn multi_table_schema_prd_scenario() {
         .stdout(predicate::str::contains("My Board"));
 
     // PRD table 4: section-link (hyphenated name, quoted identifier)
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE \"section-link\" (section TEXT REFERENCES section(id), link TEXT REFERENCES link(id))",
@@ -681,7 +681,7 @@ fn multi_table_schema_prd_scenario() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     // Insert section-link connecting section and link
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -692,22 +692,22 @@ fn multi_table_schema_prd_scenario() {
         .success();
 
     // Verify section-link is queryable
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT section, link FROM \"section-link\""])
         .assert()
         .success()
         .stdout(predicate::str::contains(&sec_id))
         .stdout(predicate::str::contains(&link_id));
 
-    // Search: FTS5 should find the workspace zettel
-    repo.zdb()
+    // Search: FTS5 should find the workspace doogat
+    repo.ddb()
         .args(["search", "Board"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Board"));
 
     // Transaction: update workspace + insert another link atomically
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -718,30 +718,30 @@ fn multi_table_schema_prd_scenario() {
         .success();
 
     // Verify both changes persisted
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT description FROM workspace"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Updated Board"));
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT COUNT(*) FROM link"])
         .assert()
         .success()
         .stdout(predicate::str::contains("2"));
 
     // Schema metadata: verify all 4 typedef types exist
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
-            "SELECT type, COUNT(*) FROM zettels WHERE type = '_typedef' GROUP BY type",
+            "SELECT type, COUNT(*) FROM doogats WHERE type = '_typedef' GROUP BY type",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains("4"));
 
-    // Verify on-disk: workspace zettel has the FK backlink
-    let sec_content = repo.zdb().args(["read", &sec_id]).output().unwrap();
+    // Verify on-disk: workspace doogat has the FK backlink
+    let sec_content = repo.ddb().args(["read", &sec_id]).output().unwrap();
     let sec_str = String::from_utf8_lossy(&sec_content.stdout);
     assert!(
         sec_str.contains(&ws_id),
@@ -751,15 +751,15 @@ fn multi_table_schema_prd_scenario() {
 
 #[test]
 fn multi_row_insert() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["query", "CREATE TABLE items (name TEXT, score INTEGER)"])
         .assert()
         .success();
 
     // Multi-row INSERT
     let out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO items (name, score) VALUES ('alpha', 10), ('beta', 20), ('gamma', 30)",
@@ -778,7 +778,7 @@ fn multi_row_insert() {
     assert_eq!(ids.len(), 3, "expected 3 IDs, got: {ids_str}");
 
     // All rows present
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT name, score FROM items ORDER BY name"])
         .assert()
         .success()

@@ -16,12 +16,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$RELEASE_TYPE" in
-  release) cargo build --release -p zdb-cli --quiet ;;
-  debug)   cargo build -p zdb-cli --quiet ;;
+  release) cargo build --release -p ddb-cli --quiet ;;
+  debug)   cargo build -p ddb-cli --quiet ;;
   *)       usage ;;
 esac
 
-BINARY="target/${RELEASE_TYPE}/zdb"
+BINARY="target/${RELEASE_TYPE}/ddb"
 if [[ ! -f "$BINARY" ]]; then
   echo "error: binary not found at ${BINARY}" >&2
   exit 1

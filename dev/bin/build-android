@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build ZettelDB .aar for Android.
+# Build Doogat DB .aar for Android.
 # Requires: cargo-ndk, Android NDK (via ANDROID_NDK_HOME), kotlinc (for classes.jar).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/out/kotlin"
 AAR_STAGE="$OUT/aar-stage"
-AAR_OUT="$OUT/zetteldb.aar"
+AAR_OUT="$OUT/doogatdb.aar"
 
 TARGETS=(
     aarch64-linux-android
@@ -39,13 +39,13 @@ done
 
 echo "==> Building for ${#TARGETS[@]} Android targets..."
 for t in "${TARGETS[@]}"; do
-    cargo ndk --target "$t" --platform 21 -- build -p zdb-core --release --features vendored
+    cargo ndk --target "$t" --platform 21 -- build -p ddb-core --release --features vendored
 done
 
 echo "==> Generating Kotlin bindings..."
-cargo build -p zdb-core --release
-cargo run -p zdb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-    --library "$ROOT/target/release/libzdb_core.dylib" \
+cargo build -p ddb-core --release
+cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
+    --library "$ROOT/target/release/libddb_core.dylib" \
     --language kotlin \
     --out-dir "$OUT"
 
@@ -57,14 +57,14 @@ mkdir -p "$AAR_STAGE"
 cat > "$AAR_STAGE/AndroidManifest.xml" <<'MANIFEST'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.doogat.zetteldb" />
+    package="com.doogat.ddb" />
 MANIFEST
 
 # JNI shared libraries
 for t in "${TARGETS[@]}"; do
     abi="${ABI_MAP[$t]}"
     mkdir -p "$AAR_STAGE/jni/$abi"
-    cp "$ROOT/target/$t/release/libzdb_core.so" "$AAR_STAGE/jni/$abi/"
+    cp "$ROOT/target/$t/release/libddb_core.so" "$AAR_STAGE/jni/$abi/"
 done
 
 # Compile Kotlin bindings → classes.jar

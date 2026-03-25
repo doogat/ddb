@@ -25,30 +25,30 @@ Run `dev/bin/profile-binary-size` to measure on your platform.
 
 | Scale | Operation | Target | Measured |
 |-------|-----------|--------|----------|
-| 5K zettels | FTS search | < 10ms | ~3.0ms |
-| 5K zettels | SQL SELECT | < 10ms | ~6.1µs |
-| 50K zettels | FTS search | < 50ms | not yet measured |
-| 50K zettels | SQL SELECT | < 50ms | not yet measured |
+| 5K doogats | FTS search | < 10ms | ~3.0ms |
+| 5K doogats | SQL SELECT | < 10ms | ~6.1µs |
+| 50K doogats | FTS search | < 50ms | not yet measured |
+| 50K doogats | SQL SELECT | < 50ms | not yet measured |
 
-Run 5K benchmarks: `cargo bench -p zdb-core --bench search -- "5k"`
+Run 5K benchmarks: `cargo bench -p ddb-core --bench search -- "5k"`
 
-Run 50K benchmarks: `cargo bench -p zdb-core --bench large_scale`
+Run 50K benchmarks: `cargo bench -p ddb-core --bench large_scale`
 
-5K threshold tests: `cargo test --release -p zdb-core --test query_thresholds nfr01_`
+5K threshold tests: `cargo test --release -p ddb-core --test query_thresholds nfr01_`
 
 The local release script (`dev/bin/release`) runs the 5K release-profile threshold tests before it bumps versions, creates a tag, or pushes.
 
-50K threshold tests (slow): `cargo test --release -p zdb-core --test query_thresholds -- --ignored`
+50K threshold tests (slow): `cargo test --release -p ddb-core --test query_thresholds -- --ignored`
 
 ## Repo Growth (NFR-02 / AC-08)
 
 | Scale | Target | Status |
 |-------|--------|--------|
-| 5K zettels, 365 days × 10 edits/day | < 50MB | PASS |
+| 5K doogats, 365 days × 10 edits/day | < 50MB | PASS |
 
-Benchmark: `cargo bench -p zdb-core --bench growth -- --test`
+Benchmark: `cargo bench -p ddb-core --bench growth -- --test`
 
-Release threshold test: `cargo test --release -p zdb-core --test growth_thresholds nfr02_`
+Release threshold test: `cargo test --release -p ddb-core --test growth_thresholds nfr02_`
 
 The local release script (`dev/bin/release`) runs the repo-growth release threshold before it bumps versions, creates a tag, or pushes.
 
@@ -56,43 +56,43 @@ The local release script (`dev/bin/release`) runs the repo-growth release thresh
 
 | Scale | Target | Measured | Status |
 |-------|--------|----------|--------|
-| 5K zettels, localhost | < 2s | ~12.6s | FAIL |
+| 5K doogats, localhost | < 2s | ~12.6s | FAIL |
 
 Sync latency exceeds the NFR-03 target by ~6x. This needs optimization work (likely in `SyncManager::sync` or the underlying git fetch/merge path).
 
-Run: `cargo bench -p zdb-core --bench sync -- "5k"`
+Run: `cargo bench -p ddb-core --bench sync -- "5k"`
 
-Threshold test (ignored): `cargo test --release -p zdb-core --test sync_thresholds -- --ignored`
+Threshold test (ignored): `cargo test --release -p ddb-core --test sync_thresholds -- --ignored`
 
 ## Server Read-Path (NFR-01 under load)
 
 | Workload | Latency | Status |
 |----------|---------|--------|
-| Single read (get zettel) | 60–276 µs | PASS |
+| Single read (get doogat) | 60–276 µs | PASS |
 | 16 concurrent readers | ~44 ms (list 20) | PASS |
 | Reads during sustained writes | ~500 ms (list 20) | Degraded |
 
 The actor serializes all operations. Reads meet NFR-01 targets under normal use but degrade 45x under sustained write load. Decision: keep single actor; see [Server Read-Path Decision](./server-read-path.md) for full analysis and operating envelope.
 
-Run: `cargo build -p zdb-cli --release && cargo bench -p zdb-server`
+Run: `cargo build -p ddb-cli --release && cargo bench -p ddb-server`
 
-## Mobile FFI Baseline (UniFFI / ZettelDriver)
+## Mobile FFI Baseline (UniFFI / DoogatDriver)
 
 Measured via platform-native timing on Darwin/arm64 (Apple Silicon), debug build.
 
 | Metric | Swift (ContinuousClock) | Kotlin/JVM (measureTimeMillis) |
 |--------|------------------------|-------------------------------|
-| Cold start (ZettelDriver init) | 3.08 ms | 4 ms |
-| Single zettel create | 971.97 ms | 966 ms |
-| FTS search (100 zettels) | 0.83 ms | 1 ms |
-| Reindex (100 zettels) | 47.72 ms | 41 ms |
+| Cold start (DoogatDriver init) | 3.08 ms | 4 ms |
+| Single doogat create | 971.97 ms | 966 ms |
+| FTS search (100 doogats) | 0.83 ms | 1 ms |
+| Reindex (100 doogats) | 47.72 ms | 41 ms |
 
 **Notes:**
 
 - Swift tests run via `swift test` (SPM, macOS host, debug build)
 - Kotlin tests run via `./gradlew test` (JVM host, release native lib)
-- Create latency is dominated by git commit per zettel (~1s each)
-- Search and reindex are fast; both scale sub-linearly with zettel count
+- Create latency is dominated by git commit per doogat (~1s each)
+- Search and reindex are fast; both scale sub-linearly with doogat count
 - Cold start is negligible (<5ms) — SQLite + git repo open
 
 Run Swift: `cd tests/swift && swift test --filter testPerformanceMetrics`

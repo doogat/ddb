@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build ZettelDB XCFramework for iOS/macOS.
+# Build Doogat DB XCFramework for iOS/macOS.
 # Requires: Xcode, rustup iOS targets.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/out/swift"
-LIB_NAME="libzdb_core.a"
+LIB_NAME="libddb_core.a"
 
 TARGETS=(
     aarch64-apple-ios
@@ -27,14 +27,14 @@ command -v xcodebuild >/dev/null 2>&1 || { echo "xcodebuild not found — instal
 
 echo "==> Building for ${#TARGETS[@]} targets..."
 for t in "${TARGETS[@]}"; do
-    cargo build -p zdb-core --release --features vendored --target "$t"
+    cargo build -p ddb-core --release --features vendored --target "$t"
 done
 
 echo "==> Generating Swift bindings..."
 # Build for host first (uniffi-bindgen needs host dylib)
-cargo build -p zdb-core --release
-cargo run -p zdb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-    --library "$ROOT/target/release/libzdb_core.dylib" \
+cargo build -p ddb-core --release
+cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
+    --library "$ROOT/target/release/libddb_core.dylib" \
     --language swift \
     --out-dir "$OUT"
 
@@ -42,8 +42,8 @@ echo "==> Preparing headers..."
 HEADERS="$OUT/headers"
 rm -rf "$HEADERS"
 mkdir -p "$HEADERS"
-cp "$OUT/zdb_coreFFI.h" "$HEADERS/"
-cp "$OUT/zdb_coreFFI.modulemap" "$HEADERS/module.modulemap"
+cp "$OUT/ddb_coreFFI.h" "$HEADERS/"
+cp "$OUT/ddb_coreFFI.modulemap" "$HEADERS/module.modulemap"
 
 echo "==> Creating fat library for simulator (arm64 + x86_64)..."
 mkdir -p "$OUT/sim-fat"
@@ -53,14 +53,14 @@ lipo -create \
     -output "$OUT/sim-fat/$LIB_NAME"
 
 echo "==> Creating XCFramework..."
-rm -rf "$OUT/ZettelDB.xcframework"
+rm -rf "$OUT/DoogatDB.xcframework"
 xcodebuild -create-xcframework \
     -library "$ROOT/target/aarch64-apple-ios/release/$LIB_NAME" -headers "$HEADERS" \
     -library "$OUT/sim-fat/$LIB_NAME" -headers "$HEADERS" \
     -library "$ROOT/target/aarch64-apple-darwin/release/$LIB_NAME" -headers "$HEADERS" \
-    -output "$OUT/ZettelDB.xcframework"
+    -output "$OUT/DoogatDB.xcframework"
 
 rm -rf "$OUT/sim-fat" "$HEADERS"
 
-echo "==> Done: $OUT/ZettelDB.xcframework"
-echo "   Swift source: $OUT/zdb_core.swift"
+echo "==> Done: $OUT/DoogatDB.xcframework"
+echo "   Swift source: $OUT/ddb_core.swift"

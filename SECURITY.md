@@ -10,7 +10,7 @@
 
 **Do not open a public issue for security vulnerabilities.**
 
-Use [GitHub Security Advisories](https://github.com/doogat/zdb/security/advisories/new) to report vulnerabilities privately. If you cannot use GitHub, email tomas@buvis.net with "ZDB Security" in the subject.
+Use [GitHub Security Advisories](https://github.com/doogat/ddb/security/advisories/new) to report vulnerabilities privately. If you cannot use GitHub, email tomas@buvis.net with "DDB Security" in the subject.
 
 Include:
 

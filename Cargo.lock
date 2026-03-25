@@ -958,6 +958,112 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
+name = "ddb-cli"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "ddb-core",
+ "ddb-server",
+ "dirs",
+ "flate2",
+ "reqwest",
+ "self-replace",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tokio",
+ "toml 0.8.23",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "ddb-core"
+version = "0.2.0"
+dependencies = [
+ "automerge",
+ "chrono",
+ "criterion",
+ "git2",
+ "proptest",
+ "rayon",
+ "redb",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "similar",
+ "sqlparser",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "uniffi",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
+name = "ddb-e2e"
+version = "0.2.0"
+dependencies = [
+ "assert_cmd",
+ "predicates",
+ "rand 0.8.5",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
+ "tungstenite",
+ "url",
+]
+
+[[package]]
+name = "ddb-server"
+version = "0.2.0"
+dependencies = [
+ "arc-swap",
+ "async-graphql",
+ "async-graphql-axum",
+ "async-trait",
+ "axum",
+ "base64",
+ "chrono",
+ "criterion",
+ "ddb-core",
+ "futures-util",
+ "indexmap",
+ "pgwire",
+ "rand 0.8.5",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sqlparser",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
+ "toml 0.8.23",
+ "tower-http",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ddb-uniffi-bindgen"
+version = "0.2.0"
+dependencies = [
+ "uniffi",
+]
+
+[[package]]
 name = "derive-new"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4701,112 +4807,6 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
-]
-
-[[package]]
-name = "zdb-cli"
-version = "0.2.0"
-dependencies = [
- "chrono",
- "clap",
- "dirs",
- "flate2",
- "reqwest",
- "self-replace",
- "semver",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tar",
- "tokio",
- "toml 0.8.23",
- "tracing-subscriber",
- "zdb-core",
- "zdb-server",
-]
-
-[[package]]
-name = "zdb-core"
-version = "0.2.0"
-dependencies = [
- "automerge",
- "chrono",
- "criterion",
- "git2",
- "proptest",
- "rayon",
- "redb",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2 0.10.9",
- "similar",
- "sqlparser",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
- "toml 0.8.23",
- "tracing",
- "tracing-subscriber",
- "uniffi",
- "uuid",
- "walkdir",
-]
-
-[[package]]
-name = "zdb-e2e"
-version = "0.2.0"
-dependencies = [
- "assert_cmd",
- "predicates",
- "rand 0.8.5",
- "reqwest",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-postgres",
- "tungstenite",
- "url",
-]
-
-[[package]]
-name = "zdb-server"
-version = "0.2.0"
-dependencies = [
- "arc-swap",
- "async-graphql",
- "async-graphql-axum",
- "async-trait",
- "axum",
- "base64",
- "chrono",
- "criterion",
- "futures-util",
- "indexmap",
- "pgwire",
- "rand 0.8.5",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sqlparser",
- "tempfile",
- "tokio",
- "tokio-postgres",
- "toml 0.8.23",
- "tower-http",
- "tracing",
- "uuid",
- "zdb-core",
-]
-
-[[package]]
-name = "zdb-uniffi-bindgen"
-version = "0.2.0"
-dependencies = [
- "uniffi",
 ]
 
 [[package]]

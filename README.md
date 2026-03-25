@@ -1,21 +1,21 @@
-# Doogat ZettelDB
+# Doogat DB
 
-Doogat ZettelDB is a database engine that pairs decentralized Git-backed storage with conflict-free sync and flexible multi-protocol data access.
+Doogat DB is a database engine that pairs decentralized Git-backed storage with conflict-free sync and flexible multi-protocol data access.
 
 ## Stability
 
 ### Stable (v0.1.0 API contract)
 
 - CLI: init, create, read, update, delete, search, query, rename, type, sync
-- Git storage format (zettel Markdown, frontmatter schema)
+- Git storage format (doogat Markdown, frontmatter schema)
 - SQLite FTS5 search
 - SQL SELECT, CREATE TABLE, INSERT, UPDATE, DELETE
 - Multi-device sync (push, pull, merge)
-- `zdb-core` public Rust API for the above
+- `ddb-core` public Rust API for the above
 
 ### Experimental (may change in v0.2.0)
 
-- GraphQL server (`zdb serve`)
+- GraphQL server (`ddb serve`)
 - REST API, PgWire protocol, WebSocket subscriptions
 - NoSQL API (`get`, `scan`, `backlinks`)
 - UniFFI bindings (Swift/Kotlin)
@@ -44,7 +44,7 @@ cargo build --release      # release build (default dev crates)
 ```bash
 cargo test                 # fast local tier
 cargo test-ci              # bounded CI matrix tier (unit/bin targets only)
-cargo test-full            # full cargo suite (includes zdb-e2e)
+cargo test-full            # full cargo suite (includes ddb-e2e)
 cargo clippy --workspace   # lint
 SMOKE_PROFILE=quick ./tests/smoke.sh   # quick CLI smoke
 ./tests/smoke.sh           # full CLI + server + sync smoke

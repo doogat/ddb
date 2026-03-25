@@ -1,18 +1,18 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
 fn discover_stale() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create a typedef via SQL DDL, which places it in zettelkasten/_typedef/
-    repo.zdb()
+    // Create a typedef via SQL DDL, which places it in ddb/_typedef/
+    repo.ddb()
         .args(["query", "CREATE TABLE expiring (dummy TEXT)"])
         .assert()
         .success();
 
     // Find the typedef file and patch it to add stale_after_days
-    let typedef_dir = repo.path().join("zettelkasten/_typedef");
+    let typedef_dir = repo.path().join("ddb/_typedef");
     let typedef_entry = std::fs::read_dir(&typedef_dir)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -40,8 +40,8 @@ fn discover_stale() {
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Create a zettel of that type
-    repo.zdb()
+    // Create a doogat of that type
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -54,25 +54,25 @@ fn discover_stale() {
         .assert()
         .success();
 
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
-    // The zettel was just committed, so its git revision date is "now".
+    // The doogat was just committed, so its git revision date is "now".
     // With stale_after_days=1, it won't be stale yet.
-    // Verify the command runs without error and reports no stale zettels.
-    repo.zdb()
+    // Verify the command runs without error and reports no stale doogats.
+    repo.ddb()
         .args(["discover", "stale"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("no stale zettels"));
+        .stdout(predicate::str::contains("no stale doogats"));
 }
 
 #[test]
 fn discover_mentions() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create zettel A with a distinctive title
+    // Create doogat A with a distinctive title
     let a_out = repo
-        .zdb()
+        .ddb()
         .args([
             "create",
             "--title",
@@ -85,9 +85,9 @@ fn discover_mentions() {
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Create zettel B whose body mentions "Meeting Notes" but doesn't link to A
+    // Create doogat B whose body mentions "Meeting Notes" but doesn't link to A
     let b_out = repo
-        .zdb()
+        .ddb()
         .args([
             "create",
             "--title",
@@ -100,10 +100,10 @@ fn discover_mentions() {
     let b_id = String::from_utf8_lossy(&b_out.stdout).trim().to_string();
 
     // Reindex so FTS picks up the body text
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // discover mentions should find B as an unlinked mention of A
-    repo.zdb()
+    repo.ddb()
         .args(["discover", "mentions", &a_id])
         .assert()
         .success()
@@ -112,19 +112,19 @@ fn discover_mentions() {
 
 #[test]
 fn discover_mentions_excludes_linked() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create zettel A
+    // Create doogat A
     let a_out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Meeting Notes", "--body", "Agenda."])
         .output()
         .unwrap();
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Create zettel C that mentions "Meeting Notes" AND links to A
-    repo.zdb()
+    // Create doogat C that mentions "Meeting Notes" AND links to A
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -135,10 +135,10 @@ fn discover_mentions_excludes_linked() {
         .assert()
         .success();
 
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // C should NOT appear because it already links to A
-    repo.zdb()
+    repo.ddb()
         .args(["discover", "mentions", &a_id])
         .assert()
         .success()
@@ -147,11 +147,11 @@ fn discover_mentions_excludes_linked() {
 
 #[test]
 fn discover_similar() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create two zettels with shared tags
+    // Create two doogats with shared tags
     let a_out = repo
-        .zdb()
+        .ddb()
         .args([
             "create",
             "--title",
@@ -166,7 +166,7 @@ fn discover_similar() {
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -179,10 +179,10 @@ fn discover_similar() {
         .assert()
         .success();
 
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // discover similar should return at least one result (not "no suggestions")
-    repo.zdb()
+    repo.ddb()
         .args(["discover", "similar", &a_id])
         .assert()
         .success()
@@ -192,11 +192,11 @@ fn discover_similar() {
 
 #[test]
 fn discover_orphans() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create zettel with no incoming links
+    // Create doogat with no incoming links
     let out = repo
-        .zdb()
+        .ddb()
         .args([
             "create",
             "--title",
@@ -208,10 +208,10 @@ fn discover_orphans() {
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // discover orphans should find it
-    repo.zdb()
+    repo.ddb()
         .args(["discover", "orphans"])
         .assert()
         .success()
@@ -221,19 +221,19 @@ fn discover_orphans() {
 
 #[test]
 fn discover_orphans_excludes_linked() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create target zettel
+    // Create target doogat
     let a_out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Target", "--body", "I am linked."])
         .output()
         .unwrap();
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Create zettel that links to target
-    repo.zdb()
+    // Create doogat that links to target
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -244,10 +244,10 @@ fn discover_orphans_excludes_linked() {
         .assert()
         .success();
 
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // Target should NOT be an orphan (it has an incoming link)
-    repo.zdb()
+    repo.ddb()
         .args(["discover", "orphans"])
         .assert()
         .success()

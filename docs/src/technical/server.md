@@ -2,7 +2,7 @@
 
 > **Experimental**: The server and all its protocols (GraphQL, REST, PgWire, WebSocket, NoSQL) are experimental and may change in future releases.
 
-ZettelDB exposes a GraphQL API via `zdb serve`, enabling mobile, desktop, and web clients to interact with the zettelkasten over HTTP. All responses include an `X-Experimental: true` header.
+Doogat DB exposes a GraphQL API via `ddb serve`, enabling mobile, desktop, and web clients to interact with the ddb over HTTP. All responses include an `X-Experimental: true` header.
 
 ## Architecture
 
@@ -35,25 +35,25 @@ The `sql` query field uses `sqlparser` to classify queries: pure `SELECT` statem
 
 ## Shared Application Contract
 
-Both the server and embedded (`ZettelDriver`) paths delegate typed SQL execution to the same `SqlEngine` in `zdb-core`. The server actor constructs `SqlEngine::new(index, repo)` per command; `ZettelDriver` does the same per `execute_sql` call. This ensures identical semantics for single statements: DDL creates typedef zettels via Git, DML reads/writes Git-backed zettels.
+Both the server and embedded (`DoogatDriver`) paths delegate typed SQL execution to the same `SqlEngine` in `ddb-core`. The server actor constructs `SqlEngine::new(index, repo)` per command; `DoogatDriver` does the same per `execute_sql` call. This ensures identical semantics for single statements: DDL creates typedef doogats via Git, DML reads/writes Git-backed doogats.
 
-**Transaction difference**: The embedded path (`ZettelDriver`) supports multi-statement transactions via `begin_transaction`/`commit_transaction`/`rollback_transaction`, which suspend and resume a `TransactionBuffer` across calls. The server path creates a fresh `SqlEngine` per `executeSql` command, so BEGIN/COMMIT/ROLLBACK cannot span multiple GraphQL or pgwire calls — each statement executes atomically in isolation. Multi-statement transactions are an embedded-only capability.
+**Transaction difference**: The embedded path (`DoogatDriver`) supports multi-statement transactions via `begin_transaction`/`commit_transaction`/`rollback_transaction`, which suspend and resume a `TransactionBuffer` across calls. The server path creates a fresh `SqlEngine` per `executeSql` command, so BEGIN/COMMIT/ROLLBACK cannot span multiple GraphQL or pgwire calls — each statement executes atomically in isolation. Multi-statement transactions are an embedded-only capability.
 
 See [FFI Bindings](./ffi.md) for the embedded side of this contract.
 
 ## Running
 
 ```bash
-zdb serve                           # default: HTTP 2891, pgwire 2892
-zdb serve --port 8080               # custom HTTP port
-zdb serve --pg-port 5432            # custom pgwire port
-zdb serve --bind 0.0.0.0            # all interfaces
-zdb serve --playground              # enable GraphQL Playground at GET /graphql
+ddb serve                           # default: HTTP 2891, pgwire 2892
+ddb serve --port 8080               # custom HTTP port
+ddb serve --pg-port 5432            # custom pgwire port
+ddb serve --bind 0.0.0.0            # all interfaces
+ddb serve --playground              # enable GraphQL Playground at GET /graphql
 ```
 
 ## Configuration
 
-Server config lives at `~/.config/zetteldb/config.toml`:
+Server config lives at `~/.config/ddb/config.toml`:
 
 ```toml
 [server]
@@ -68,13 +68,13 @@ CLI flags (`--port`, `--pg-port`, `--bind`) override config file values.
 
 ## Logging
 
-The server uses `tracing` for structured logging. Default level: `info` for zdb crates, `warn` for dependencies.
+The server uses `tracing` for structured logging. Default level: `info` for ddb crates, `warn` for dependencies.
 
 ```bash
-zdb serve                             # default: info level
-zdb --log-level debug serve           # debug output (includes HTTP requests)
-RUST_LOG=zdb_server=trace zdb serve   # trace a specific crate
-zdb --log-dir /var/log/zdb serve      # NDJSON file logging
+ddb serve                             # default: info level
+ddb --log-level debug serve           # debug output (includes HTTP requests)
+RUST_LOG=ddb_server=trace ddb serve   # trace a specific crate
+ddb --log-dir /var/log/ddb serve      # NDJSON file logging
 ```
 
 `RUST_LOG` takes precedence over `--log-level`. HTTP request/response tracing (method, path, status, latency) is logged at `debug` level via `tower-http`.
@@ -93,7 +93,7 @@ Ready response includes `version`, `uptime_seconds`, and `index_reachable` field
 
 ## Authentication
 
-On first start, the server generates a UUID v4 token at `~/.config/zetteldb/token` (chmod 0600 on Unix). All requests must include:
+On first start, the server generates a UUID v4 token at `~/.config/ddb/token` (chmod 0600 on Unix). All requests must include:
 
 ```
 Authorization: Bearer <token>
@@ -103,12 +103,12 @@ Missing or invalid tokens return HTTP 401.
 
 ## Schema
 
-The schema has two components: base types (always present) and dynamic types (generated from `_typedef` zettels at startup).
+The schema has two components: base types (always present) and dynamic types (generated from `_typedef` doogats at startup).
 
 ### Base Types
 
 ```graphql
-type Zettel {
+type Doogat {
   id: ID!
   title: String
   date: String
@@ -131,8 +131,8 @@ type TypeDef { name: String!, columns: [ColumnInfo!]!, crdtStrategy: String, tem
 type ColumnInfo { name: String!, dataType: String!, zone: String, required: Boolean!, references: String }
 type SqlResult { rows: [String!], affected: Int, message: String }
 type CheckboxItem {
-  zettelId: ID!
-  zettelTitle: String
+  doogatId: ID!
+  doogatTitle: String
   state: String!        # "open", "done", "info"
   content: String!
   date: String
@@ -148,13 +148,13 @@ Note: `SqlResult.rows` encodes each row as a JSON string to avoid nested list li
 
 ```graphql
 type Query {
-  zettel(id: ID!): Zettel
-  zettels(type: String, tag: String, backlinksOf: ID, limit: Int, offset: Int): [Zettel!]!
+  doogat(id: ID!): Doogat
+  doogats(type: String, tag: String, backlinksOf: ID, limit: Int, offset: Int): [Doogat!]!
   search(query: String!, limit: Int, offset: Int): SearchConnection!
   typeDefs: [TypeDef!]!
   sql(query: String!): SqlResult!
   schemaVersion: Int!
-  checkboxItems(state: String, zettelId: ID, limit: Int, offset: Int): [CheckboxItem!]!
+  checkboxItems(state: String, doogatId: ID, limit: Int, offset: Int): [CheckboxItem!]!
   openActions(limit: Int): [CheckboxItem!]!
 }
 ```
@@ -163,19 +163,19 @@ type Query {
 
 ```graphql
 type Mutation {
-  createZettel(input: CreateZettelInput!): Zettel!
-  updateZettel(input: UpdateZettelInput!): Zettel!
-  deleteZettel(id: ID!): Boolean!
+  createDoogat(input: CreateDoogatInput!): Doogat!
+  updateDoogat(input: UpdateDoogatInput!): Doogat!
+  deleteDoogat(id: ID!): Boolean!
   executeSql(sql: String!): SqlResult!
   attachFile(input: AttachFileInput!): Attachment!
-  detachFile(zettelId: ID!, filename: String!): Boolean!
+  detachFile(doogatId: ID!, filename: String!): Boolean!
   sync(remote: String, branch: String): SyncResult!
   compact(force: Boolean): CompactResult!
 }
 
-input CreateZettelInput { title: String!, content: String, tags: [String!], type: String }
-input UpdateZettelInput { id: ID!, title: String, content: String, tags: [String!], type: String }
-input AttachFileInput { zettelId: ID!, filename: String!, dataBase64: String!, mime: String }
+input CreateDoogatInput { title: String!, content: String, tags: [String!], type: String }
+input UpdateDoogatInput { id: ID!, title: String, content: String, tags: [String!], type: String }
+input AttachFileInput { doogatId: ID!, filename: String!, dataBase64: String!, mime: String }
 
 type SyncResult {
   direction: String!
@@ -200,17 +200,17 @@ Real-time push notifications over WebSocket using the `graphql-transport-ws` pro
 
 ```graphql
 type Subscription {
-  zettelChanged: ZettelChangeEvent!
-  zettelCreated: Zettel!
-  zettelUpdated: Zettel!
-  zettelDeleted: ID!
+  doogatChanged: DoogatChangeEvent!
+  doogatCreated: Doogat!
+  doogatUpdated: Doogat!
+  doogatDeleted: ID!
   # per-type fields (e.g. contactChanged, bookmarkChanged)
 }
 
-type ZettelChangeEvent {
+type DoogatChangeEvent {
   action: String!    # "created", "updated", "deleted"
-  zettel: Zettel     # null for deletions
-  zettelId: ID!
+  doogat: Doogat     # null for deletions
+  doogatId: ID!
 }
 ```
 
@@ -255,13 +255,13 @@ const client = createClient({
 
 **Event bus**: The actor emits events to a `tokio::sync::broadcast` channel (capacity 256) after successful mutations. Each subscription stream receives events from this bus and filters by kind/type. When no subscribers exist, events are dropped with zero overhead. Slow clients that lag behind the buffer lose events (acceptable for MVP — clients can refetch on reconnect).
 
-**Per-type subscriptions**: For each `_typedef`, a `{typeName}Changed` subscription field is generated (e.g. `contactChanged`). These filter events server-side by `zettel_type`, so clients only receive events for the types they care about.
+**Per-type subscriptions**: For each `_typedef`, a `{typeName}Changed` subscription field is generated (e.g. `contactChanged`). These filter events server-side by `doogat_type`, so clients only receive events for the types they care about.
 
 **Keepalive**: The server sends periodic pings per the `graphql-ws` protocol. If a client doesn't respond to a ping within 30 seconds, the connection is closed. Idle connections survive indefinitely as long as the client responds to pings.
 
 ### Dynamic Types
 
-For each `_typedef` zettel (e.g. "project"), the server generates:
+For each `_typedef` doogat (e.g. "project"), the server generates:
 - A typed GraphQL object (e.g. `Project`) with native fields from the typedef columns
 - A `{Type}Connection` wrapper with `items` and `totalCount`
 - A `{Type}Where` input for field-level filtering
@@ -285,7 +285,7 @@ Column type mapping:
 
 Columns with `REFERENCES` produce a pluralized `[String!]!` list field on the GraphQL type instead of a scalar `String`. For example, a `category TEXT REFERENCES category` column generates a `categories: [String!]!` field that returns all referenced IDs from the junction table. The pluralization follows English rules (category → categories, tag → tags).
 
-The REST API exposes multi-value references via a `references` JSON object on each zettel. Each key maps to an array of referenced IDs:
+The REST API exposes multi-value references via a `references` JSON object on each doogat. Each key maps to an array of referenced IDs:
 
 ```json
 {
@@ -371,11 +371,11 @@ No server restart is needed. Clients can poll the `schemaVersion` query field to
 
 ## Attachment Downloads
 
-`GET /attachments/{zettel_id}/{filename}` serves raw attachment bytes from the `reference/` directory with the correct `Content-Type` header (detected via `AttachmentInfo::mime_from_filename`). Protected by the same bearer auth middleware. Returns 404 if the file does not exist, 400 if the path contains traversal characters.
+`GET /attachments/{doogat_id}/{filename}` serves raw attachment bytes from the `reference/` directory with the correct `Content-Type` header (detected via `AttachmentInfo::mime_from_filename`). Protected by the same bearer auth middleware. Returns 404 if the file does not exist, 400 if the path contains traversal characters.
 
 ## Error Mapping
 
-| ZettelError variant | GraphQL `code` extension |
+| DoogatError variant | GraphQL `code` extension |
 |---|---|
 | `NotFound` | `NOT_FOUND` |
 | `Validation` | `VALIDATION_ERROR` |
@@ -384,20 +384,20 @@ No server restart is needed. Clients can poll the `schemaVersion` query field to
 
 ## PostgreSQL Wire Protocol
 
-The server also speaks the PostgreSQL wire protocol (simple query mode), so standard tools like `psql`, DBeaver, or any Postgres client library can query ZettelDB directly.
+The server also speaks the PostgreSQL wire protocol (simple query mode), so standard tools like `psql`, DBeaver, or any Postgres client library can query Doogat DB directly.
 
 ### Usage
 
 ```bash
-psql -h 127.0.0.1 -p 2892 -U zdb -d zdb
-# password prompt → paste the auth token from ~/.config/zetteldb/token
+psql -h 127.0.0.1 -p 2892 -U ddb -d ddb
+# password prompt → paste the auth token from ~/.config/ddb/token
 ```
 
-Or from any Postgres client library (e.g. `tokio-postgres`, `psycopg2`, `node-postgres`) — connect to `127.0.0.1:2892`, user `zdb`, password = auth token.
+Or from any Postgres client library (e.g. `tokio-postgres`, `psycopg2`, `node-postgres`) — connect to `127.0.0.1:2892`, user `ddb`, password = auth token.
 
 ### Authentication
 
-Uses PostgreSQL MD5 password authentication. The password is the same bearer token used for HTTP/GraphQL auth (`~/.config/zetteldb/token`). The username can be anything (conventionally `zdb`).
+Uses PostgreSQL MD5 password authentication. The password is the same bearer token used for HTTP/GraphQL auth (`~/.config/ddb/token`). The username can be anything (conventionally `ddb`).
 
 ### DDL propagation
 
@@ -422,7 +422,7 @@ enabled = true         # default: true
 interval_secs = 3600   # default: 3600 (1 hour)
 ```
 
-Set `enabled = false` to disable. CLI flags don't override maintenance config — edit `~/.config/zetteldb/config.toml`.
+Set `enabled = false` to disable. CLI flags don't override maintenance config — edit `~/.config/ddb/config.toml`.
 
 ### Behavior
 
@@ -440,10 +440,10 @@ When built with the `nosql` feature (enabled by default), the server exposes key
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/nosql/:id` | Fetch zettel by ID (O(1) redb lookup) |
-| `GET` | `/nosql?type=<type>` | Prefix scan by zettel type |
+| `GET` | `/nosql/:id` | Fetch doogat by ID (O(1) redb lookup) |
+| `GET` | `/nosql?type=<type>` | Prefix scan by doogat type |
 | `GET` | `/nosql?tag=<tag>` | Prefix scan by tag |
-| `GET` | `/nosql/:id/backlinks` | Backlinks for a zettel |
+| `GET` | `/nosql/:id/backlinks` | Backlinks for a doogat |
 
 The actor holds an `Option<RedbIndex>` alongside `Index`. Every create/update/delete that touches SQLite also writes to redb (dual-write). The redb index is rebuilt once at startup and kept in sync via dual-writes.
 
@@ -454,20 +454,20 @@ In addition to GraphQL, the server exposes a REST API at `/rest/*`. Both interfa
 ## Crate Structure
 
 ```
-zdb-server/src/
+ddb-server/src/
 ├── lib.rs           # pub async fn run() entrypoint
 ├── actor.rs         # RepoActor: thread-safe GitRepo+Index bridge, emits events
 ├── read_pool.rs     # Semaphore-gated concurrent read dispatch (spawn_blocking)
 ├── schema.rs        # Dynamic GraphQL schema builder (query, mutation, subscription)
 ├── filter.rs        # Filter/sort/aggregate: input types, SQL builders, Connection wrapper
-├── events.rs        # ZettelEvent, EventKind, EventBus (broadcast channel)
+├── events.rs        # DoogatEvent, EventKind, EventBus (broadcast channel)
 ├── ws.rs            # WebSocket upgrade handler for graphql-ws subscriptions
 ├── pgwire.rs        # PostgreSQL wire protocol (simple query, MD5 auth, SELECT routing)
 ├── reload.rs        # Hot schema reload orchestration (ArcSwap + Notify)
-├── rest.rs          # REST API handlers (/rest/zettels CRUD)
+├── rest.rs          # REST API handlers (/rest/doogats CRUD)
 ├── nosql_api.rs     # NoSQL REST handlers (/nosql/ key-value queries)
 ├── maintenance.rs   # Background maintenance loop (compaction + stale detection)
 ├── auth.rs          # Token generation + Bearer middleware
 ├── config.rs        # ServerConfig from config.toml
-└── error.rs         # ZettelError → GraphQL error mapping
+└── error.rs         # DoogatError → GraphQL error mapping
 ```

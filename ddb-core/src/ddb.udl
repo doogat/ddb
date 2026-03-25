@@ -1,0 +1,107 @@
+namespace ddb {};
+
+[Error]
+interface DdbError {
+    Git(string msg);
+    Yaml(string msg);
+    Sql(string msg);
+    Automerge(string msg);
+    Io(string msg);
+    Parse(string msg);
+    NotFound(string msg);
+    Config(string msg);
+    Validation(string msg);
+    SqlEngine(string msg);
+    VersionMismatch(string msg);
+};
+
+dictionary SearchResult {
+    string id;
+    string title;
+    string path;
+    string snippet;
+    double rank;
+};
+
+dictionary RebuildReport {
+    u64 indexed;
+    u64 tables_materialized;
+    sequence<string> types_inferred;
+};
+
+dictionary SqlResultRecord {
+    sequence<string> columns;
+    sequence<sequence<string>> rows;
+    i64 affected_rows;
+    string message;
+};
+
+dictionary ColumnDefRecord {
+    string name;
+    string data_type;
+    string? references;
+    boolean required;
+};
+
+dictionary TypeSchemaRecord {
+    string table_name;
+    sequence<ColumnDefRecord> columns;
+    string? crdt_strategy;
+    sequence<string> template_sections;
+};
+
+interface DoogatDriver {
+    [Throws=DdbError]
+    constructor(string repo_path);
+
+    [Throws=DdbError]
+    string create_doogat(string content, string message);
+
+    [Throws=DdbError]
+    string read_doogat(string id);
+
+    [Throws=DdbError]
+    void update_doogat(string id, string content, string message);
+
+    [Throws=DdbError]
+    void delete_doogat(string id, string message);
+
+    [Throws=DdbError]
+    sequence<SearchResult> search(string query);
+
+    [Throws=DdbError]
+    RebuildReport reindex();
+
+    [Throws=DdbError]
+    void compact();
+
+    [Throws=DdbError]
+    boolean run_maintenance();
+
+    [Throws=DdbError]
+    sequence<string> list_doogats();
+
+    [Throws=DdbError]
+    SqlResultRecord execute_sql(string sql);
+
+    [Throws=DdbError]
+    void begin_transaction();
+
+    [Throws=DdbError]
+    void commit_transaction();
+
+    [Throws=DdbError]
+    void rollback_transaction();
+
+    [Throws=DdbError]
+    sequence<TypeSchemaRecord> list_type_schemas();
+
+    [Throws=DdbError]
+    string export_full_bundle(string output_path);
+
+    [Throws=DdbError]
+    string export_delta_bundle(string target_node_uuid, string output_path);
+
+    [Throws=DdbError]
+    void import_bundle(string bundle_path);
+};

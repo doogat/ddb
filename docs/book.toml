@@ -2,7 +2,7 @@
 authors = ["Tomáš Bouška"]
 language = "en"
 src = "src"
-title = "Doogat ZettelDB Documentation"
+title = "Doogat DB Documentation"
 
 [build]
 build-dir = "book"
@@ -10,4 +10,4 @@ build-dir = "book"
 [output.html]
 default-theme = "coal"
 preferred-dark-theme = "coal"
-git-repository-url = "https://github.com/doogat/zetteldb"
+git-repository-url = "https://github.com/doogat/ddb"

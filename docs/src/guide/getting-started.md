@@ -10,47 +10,47 @@
 Clone the repository and build:
 
 ```bash
-git clone https://github.com/doogat/zetteldb.git
-cd zetteldb
+git clone https://github.com/doogat/ddb.git
+cd ddb
 cargo build --release
 ```
 
-The binary is at `target/release/zdb`. Add it to your `PATH` or symlink it.
+The binary is at `target/release/ddb`. Add it to your `PATH` or symlink it.
 
-## Initialize a Zettelkasten
+## Initialize a Repository
 
 ```bash
-zdb init ~/my-zettelkasten
+ddb init ~/my-ddb
 ```
 
 This creates:
 
 ```text
-my-zettelkasten/
+my-ddb/
 ├── .git/                   # Git repository
-├── zettelkasten/           # Your zettels go here
+├── ddb/           # Your doogats go here
 ├── reference/              # Binary/asset files
 ├── .nodes/                 # Device registry
 ├── .crdt/temp/             # Temporary merge files
-├── .gitignore              # Excludes .zdb/
+├── .gitignore              # Excludes .ddb/
 └── (initial commit)
 ```
 
-## Create Your First Zettel
+## Create Your First Doogat
 
 ```bash
-cd ~/my-zettelkasten
-zdb create --title "My first note" --tags "personal,learning"
+cd ~/my-ddb
+ddb create --title "My first note" --tags "personal,learning"
 ```
 
 Output: a 14-digit timestamp ID (e.g., `20260226153042`).
 
-The zettel is saved as `zettelkasten/20260226153042.md` and committed to Git.
+The doogat is saved as `ddb/20260226153042.md` and committed to Git.
 
 ## Read It Back
 
 ```bash
-zdb read 20260226153042
+ddb read 20260226153042
 ```
 
 Output:
@@ -69,7 +69,7 @@ tags:
 ## Check Status
 
 ```bash
-zdb status
+ddb status
 ```
 
 Output:
@@ -84,34 +84,34 @@ registered nodes: 0
 ## Build the Search Index
 
 ```bash
-zdb reindex
+ddb reindex
 ```
 
-This parses all zettels and populates the SQLite FTS5 index at `.zdb/index.db`.
+This parses all doogats and populates the SQLite FTS5 index at `.ddb/index.db`.
 
 ## Type Definitions
 
 Install a bundled type definition:
 
 ```bash
-zdb type install project
+ddb type install project
 ```
 
 Or infer a typedef from existing data:
 
 ```bash
-zdb type suggest mytype
+ddb type suggest mytype
 ```
 
 See [Type Definitions](./types.md) for details.
 
 ## In-Depth Guides
 
-`zdb` includes built-in guides for common workflows:
+`ddb` includes built-in guides for common workflows:
 
 ```bash
-zdb help              # list available guides
-zdb help create-app   # data modeling, zones, title resolution, API access
+ddb help              # list available guides
+ddb help create-app   # data modeling, zones, title resolution, API access
 ```
 
 The `create-app` guide covers `CREATE TABLE` usage, zone inference, ENUM/SET constraints, title templates, junction tables, and API access patterns. See [Building Apps](./building-apps.md) for the full documentation.
@@ -122,16 +122,16 @@ See [Multi-Device Sync](./sync.md) for configuring remotes and registering nodes
 
 ## Updating
 
-`zdb` auto-updates in the background. Every hour (at most), a detached process checks for new releases and, if one exists, downloads, verifies (SHA-256), and replaces the binary. Before replacing, the current binary is backed up to `~/.config/zetteldb/zdb.previous`. On your next command you'll see:
+`ddb` auto-updates in the background. Every hour (at most), a detached process checks for new releases and, if one exists, downloads, verifies (SHA-256), and replaces the binary. Before replacing, the current binary is backed up to `~/.config/ddb/ddb.previous`. On your next command you'll see:
 
 ```text
-zdb updated v0.1.1 -> v0.2.0. restart your shell to use the new version.
+ddb updated v0.1.1 -> v0.2.0. restart your shell to use the new version.
 ```
 
 To update immediately:
 
 ```bash
-zdb update-bin
+ddb update-bin
 ```
 
 ### Rollback
@@ -139,24 +139,24 @@ zdb update-bin
 If an update causes problems, restore the previous binary:
 
 ```bash
-zdb update-bin --rollback
+ddb update-bin --rollback
 ```
 
 Only the most recent pre-update binary is kept.
 
 ### Disabling auto-update
 
-To prevent background auto-updates, add to `~/.config/zetteldb/config.toml`:
+To prevent background auto-updates, add to `~/.config/ddb/config.toml`:
 
 ```toml
 [update]
 auto = false
 ```
 
-When disabled, `zdb` still checks for new versions but won't apply them. Manual updates via `zdb update-bin` always work regardless of this setting.
+When disabled, `ddb` still checks for new versions but won't apply them. Manual updates via `ddb update-bin` always work regardless of this setting.
 
 ## Global Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--repo PATH` | `.` (current directory) | Path to the zettelkasten repository |
+| `--repo PATH` | `.` (current directory) | Path to the ddb repository |

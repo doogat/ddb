@@ -4,12 +4,12 @@ Clean Architecture's core idea: **dependencies point inward**. Outer layers know
 
 ## Layer mapping
 
-| Layer | ZettelDB equivalent | Depends on |
+| Layer | Doogat DB equivalent | Depends on |
 |---|---|---|
 | Domain | `types.rs`, `error.rs` — pure data structures, no I/O | Nothing |
 | Use cases | Business logic — parsing rules, type inference, conflict resolution | Domain only |
 | Adapters | `git_ops.rs`, `indexer.rs`, `crdt_resolver.rs` — external system integration | Domain + traits |
-| Entry point | `zdb-cli` — wires everything together | All layers |
+| Entry point | `ddb-cli` — wires everything together | All layers |
 
 ## Domain layer
 
@@ -17,9 +17,9 @@ Pure data structures with no I/O dependencies. These types are the lingua franca
 
 ```rust
 // types.rs — no imports from git2, rusqlite, automerge
-pub struct ZettelId(String);
-pub struct ParsedZettel { /* ... */ }
-pub struct ZettelMeta { /* ... */ }
+pub struct DoogatId(String);
+pub struct ParsedDoogat { /* ... */ }
+pub struct DoogatMeta { /* ... */ }
 ```
 
 Rules:
@@ -31,7 +31,7 @@ Rules:
 
 Business logic that operates on domain types. Should be testable without touching disk, git, or SQLite.
 
-Examples in ZettelDB:
+Examples in Doogat DB:
 - Parser logic (frontmatter extraction, reference detection)
 - Type inference rules
 - Conflict resolution strategy (which field wins)
@@ -44,13 +44,13 @@ Implements trait abstractions using external systems. Each adapter translates be
 
 | Adapter | External dependency | Domain interface |
 |---|---|---|
-| `git_ops.rs` | `git2` | Zettel storage/retrieval |
+| `git_ops.rs` | `git2` | Doogat storage/retrieval |
 | `indexer.rs` | `rusqlite` | Search and query |
 | `crdt_resolver.rs` | `automerge` | Conflict resolution state |
 
 ## Entry point
 
-`zdb-cli/src/main.rs` constructs concrete implementations and wires them together. This is the only place that knows about all concrete types.
+`ddb-cli/src/main.rs` constructs concrete implementations and wires them together. This is the only place that knows about all concrete types.
 
 ## Clean Code principles in Rust
 

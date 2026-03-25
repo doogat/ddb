@@ -1,23 +1,23 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
-/// Create a zettel with nested YAML frontmatter, then verify that
-/// dot-notation keys are flattened into the `_zdb_fields` index.
+/// Create a doogat with nested YAML frontmatter, then verify that
+/// dot-notation keys are flattened into the `_ddb_fields` index.
 #[test]
 fn nested_frontmatter_indexed_with_dot_notation() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create a zettel, get its ID
+    // Create a doogat, get its ID
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Nested Test"])
         .output()
         .unwrap();
     assert!(out.status.success());
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    // Overwrite the zettel file with nested frontmatter
-    let zettel_path = repo.path().join(format!("zettelkasten/{id}.md"));
+    // Overwrite the doogat file with nested frontmatter
+    let doogat_path = repo.path().join(format!("ddb/{id}.md"));
     let content = format!(
         "---\n\
          id: {id}\n\
@@ -32,7 +32,7 @@ fn nested_frontmatter_indexed_with_dot_notation() {
          \n\
          Body content here.\n"
     );
-    std::fs::write(&zettel_path, &content).unwrap();
+    std::fs::write(&doogat_path, &content).unwrap();
 
     // Git-commit the change so the index sees it
     std::process::Command::new("git")
@@ -47,14 +47,14 @@ fn nested_frontmatter_indexed_with_dot_notation() {
         .unwrap();
 
     // Force reindex
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
-    // Query _zdb_fields for dot-notation keys
-    repo.zdb()
+    // Query _ddb_fields for dot-notation keys
+    repo.ddb()
         .args([
             "query",
             &format!(
-                "SELECT key, value FROM _zdb_fields WHERE zettel_id = '{id}' AND key LIKE 'author.%' ORDER BY key"
+                "SELECT key, value FROM _ddb_fields WHERE doogat_id = '{id}' AND key LIKE 'author.%' ORDER BY key"
             ),
         ])
         .assert()
@@ -65,11 +65,11 @@ fn nested_frontmatter_indexed_with_dot_notation() {
         .stdout(predicate::str::contains("Alice"));
 
     // Query for list items with bracket notation
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
-                "SELECT key, value FROM _zdb_fields WHERE zettel_id = '{id}' AND key LIKE 'scores%' ORDER BY key"
+                "SELECT key, value FROM _ddb_fields WHERE doogat_id = '{id}' AND key LIKE 'scores%' ORDER BY key"
             ),
         ])
         .assert()

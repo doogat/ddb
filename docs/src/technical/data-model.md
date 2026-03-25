@@ -1,10 +1,10 @@
 # Data Model
 
-All types are defined in `zdb-core/src/types.rs`.
+All types are defined in `ddb-core/src/types.rs`.
 
 ## Repository Config
 
-Repository-level settings stored in `.zetteldb.toml`:
+Repository-level settings stored in `.ddb.toml`:
 
 ```rust
 pub struct RepoConfig {
@@ -17,26 +17,26 @@ Written on `init()` with defaults. Loaded via `GitRepo::load_config()` with serd
 
 ## Identity
 
-### ZettelId
+### DoogatId
 
 ```rust
-pub struct ZettelId(pub String);
+pub struct DoogatId(pub String);
 ```
 
 A 14-digit timestamp string (`YYYYMMDDHHmmss`), e.g. `"20260226120000"`. Custom `Deserialize` implementation accepts both YAML integer and string representations for backward compatibility.
 
-## Zettel Structures
+## Doogat Structures
 
-### ZettelMeta
+### DoogatMeta
 
 Core metadata from YAML frontmatter:
 
 ```rust
-pub struct ZettelMeta {
-    pub id: Option<ZettelId>,
+pub struct DoogatMeta {
+    pub id: Option<DoogatId>,
     pub title: Option<String>,
     pub date: Option<String>,
-    pub zettel_type: Option<String>,  // serialized as "type"
+    pub doogat_type: Option<String>,  // serialized as "type"
     pub tags: Vec<String>,
     pub extra: BTreeMap<String, serde_yaml::Value>,  // arbitrary additional fields
 }
@@ -72,7 +72,7 @@ pub struct AttachmentInfo {
 
 ### File Storage
 
-Attachment blobs live in the Git repository under `reference/{zettel_id}/`:
+Attachment blobs live in the Git repository under `reference/{doogat_id}/`:
 
 ```
 reference/
@@ -81,11 +81,11 @@ reference/
     spec.pdf
 ```
 
-These are committed as binary files alongside the zettel's frontmatter update. The `reference/` directory is a peer of `zettelkasten/` in the repo root.
+These are committed as binary files alongside the doogat's frontmatter update. The `reference/` directory is a peer of `ddb/` in the repo root.
 
 ### Zone
 
-Identifies which part of the zettel a piece of data comes from:
+Identifies which part of the doogat a piece of data comes from:
 
 ```rust
 pub enum Zone {
@@ -109,7 +109,7 @@ pub struct InlineField {
 
 ### Multi-Value Reference Fields
 
-A zettel's reference section can contain multiple lines with the same key, representing a many-to-many relationship:
+A doogat's reference section can contain multiple lines with the same key, representing a many-to-many relationship:
 
 ```markdown
 ## References
@@ -135,7 +135,7 @@ pub enum LinkKind {
 
 ### Link
 
-A reference extracted from zettel content:
+A reference extracted from doogat content:
 
 ```rust
 pub struct Link {
@@ -147,13 +147,13 @@ pub struct Link {
 }
 ```
 
-### ParsedZettel
+### ParsedDoogat
 
-Full parsed representation of a zettel:
+Full parsed representation of a doogat:
 
 ```rust
-pub struct ParsedZettel {
-    pub meta: ZettelMeta,
+pub struct ParsedDoogat {
+    pub meta: DoogatMeta,
     pub body: String,
     pub sections: Vec<Section>,       // parsed body sections
     pub reference_section: String,
@@ -165,12 +165,12 @@ pub struct ParsedZettel {
 }
 ```
 
-### Zettel
+### Doogat
 
 Raw three-zone split before metadata extraction:
 
 ```rust
-pub struct Zettel {
+pub struct Doogat {
     pub raw_frontmatter: String,
     pub body: String,
     pub reference_section: String,
@@ -240,7 +240,7 @@ pub struct ColumnDef {
     pub name: String,
     pub data_type: String,          // INTEGER, REAL, BOOLEAN, TEXT
     pub references: Option<String>, // FK target type name
-    pub zone: Option<Zone>,         // which zettel zone this maps to
+    pub zone: Option<Zone>,         // which doogat zone this maps to
     pub required: bool,             // enforced during consistency checks
     pub search_boost: Option<f64>,  // FTS boost weight (future)
     pub allowed_values: Option<Vec<String>>, // enum constraint
@@ -278,7 +278,7 @@ pub struct TableSchema {
     pub columns: Vec<ColumnDef>,
     pub crdt_strategy: Option<String>,   // e.g. "preset:append-log"
     pub template_sections: Vec<String>,  // expected body section headings
-    pub folder: bool,                    // store instances in zettelkasten/{type}/ subdirectory
+    pub folder: bool,                    // store instances in ddb/{type}/ subdirectory
     pub stale_after_days: Option<u32>,   // stale discovery threshold
     pub title_template: Option<String>,  // title pattern for new instances
     pub origin: Option<String>,          // tracking label (e.g. PRD that created this type)
@@ -334,34 +334,34 @@ pub struct CompactionReport {
 The search index (`indexer.rs`) uses these core tables:
 
 ```sql
--- Core zettel data
-zettels(id TEXT PK, title, date, type, path UNIQUE, body, updated_at)
+-- Core doogat data
+doogats(id TEXT PK, title, date, type, path UNIQUE, body, updated_at)
 
--- Tags (one row per tag per zettel)
-_zdb_tags(zettel_id FK, tag)
+-- Tags (one row per tag per doogat)
+_ddb_tags(doogat_id FK, tag)
 
 -- Inline fields with zone tracking
-_zdb_fields(zettel_id FK, key, value, zone)
+_ddb_fields(doogat_id FK, key, value, zone)
 
 -- Links with zone and kind tracking
-_zdb_links(source_id FK, target_path, display, zone, kind TEXT DEFAULT 'wikilink')
+_ddb_links(source_id FK, target_path, display, zone, kind TEXT DEFAULT 'wikilink')
 
--- Attachments (one row per file per zettel)
-_zdb_attachments(zettel_id FK, name, mime, size INTEGER, path)
+-- Attachments (one row per file per doogat)
+_ddb_attachments(doogat_id FK, name, mime, size INTEGER, path)
 
 -- FTS5 full-text search (porter stemming, unicode61 tokenizer)
-_zdb_fts(title, body, tags)
+_ddb_fts(title, body, tags)
 
 -- Staleness tracking
-_zdb_meta(key PK, value)  -- key="head", value=current Git HEAD OID
+_ddb_meta(key PK, value)  -- key="head", value=current Git HEAD OID
 ```
 
 ### Materialized Type Tables
 
-During rebuild, the indexer creates additional tables for each typed zettel collection. For a type named `project`, the materialized table is:
+During rebuild, the indexer creates additional tables for each typed doogat collection. For a type named `project`, the materialized table is:
 
 ```sql
 project(id TEXT PK, completed INTEGER, deliverable TEXT, parent TEXT, ...)
 ```
 
-Column types are derived from `_typedef` zettels (explicit) or inferred from data. These tables are ephemeral — dropped and recreated on each rebuild.
+Column types are derived from `_typedef` doogats (explicit) or inferred from data. These tables are ephemeral — dropped and recreated on each rebuild.

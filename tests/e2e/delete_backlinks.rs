@@ -1,21 +1,21 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
 fn delete_reports_broken_backlinks() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create target zettel A
+    // Create target doogat A
     let a_out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Target"])
         .output()
         .unwrap();
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Create zettel B that links to A
-    repo.zdb()
+    // Create doogat B that links to A
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -26,11 +26,11 @@ fn delete_reports_broken_backlinks() {
         .assert()
         .success();
 
-    // Reindex so wikilinks are in _zdb_links
-    repo.zdb().arg("reindex").assert().success();
+    // Reindex so wikilinks are in _ddb_links
+    repo.ddb().arg("reindex").assert().success();
 
     // Delete A — should warn about B's broken backlink
-    repo.zdb()
+    repo.ddb()
         .args(["delete", &a_id])
         .assert()
         .success()
@@ -39,19 +39,19 @@ fn delete_reports_broken_backlinks() {
 
 #[test]
 fn status_reports_broken_backlinks_after_delete() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create target zettel A
+    // Create target doogat A
     let a_out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Target"])
         .output()
         .unwrap();
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Create zettel B that links to A
-    repo.zdb()
+    // Create doogat B that links to A
+    repo.ddb()
         .args([
             "create",
             "--title",
@@ -62,14 +62,14 @@ fn status_reports_broken_backlinks_after_delete() {
         .assert()
         .success();
 
-    // Reindex so wikilinks are in _zdb_links
-    repo.zdb().arg("reindex").assert().success();
+    // Reindex so wikilinks are in _ddb_links
+    repo.ddb().arg("reindex").assert().success();
 
     // Delete A
-    repo.zdb().args(["delete", &a_id]).assert().success();
+    repo.ddb().args(["delete", &a_id]).assert().success();
 
     // Status should report broken backlinks
-    repo.zdb()
+    repo.ddb()
         .arg("status")
         .assert()
         .success()
@@ -78,16 +78,16 @@ fn status_reports_broken_backlinks_after_delete() {
 
 #[test]
 fn delete_no_backlinks_no_warning() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Lonely"])
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args(["delete", &id])
         .assert()
         .success()

@@ -1,6 +1,6 @@
-# Zettel Format Reference
+# Doogat Format Reference
 
-Every zettel is a Markdown file with three zones separated by `---`.
+Every doogat is a Markdown file with three zones separated by `---`.
 
 ## Structure
 
@@ -36,7 +36,7 @@ Delimited by the first pair of `---` lines.
 | `title` | String | Note title |
 | `date` | String | Creation date (`YYYY-MM-DD`) |
 | `tags` | List | YAML list of tag strings |
-| `type` | String | Zettel type (e.g., `permanent`, `literature`, `fleeting`) |
+| `type` | String | Doogat type (e.g., `permanent`, `literature`, `fleeting`) |
 
 ### Extra Fields
 
@@ -95,7 +95,7 @@ A `---` followed by non-reference prose is treated as a thematic break in the bo
 [[target|Display Text]]
 ```
 
-- `target` is typically a zettel ID (e.g., `20260226120000`)
+- `target` is typically a doogat ID (e.g., `20260226120000`)
 - `display` is optional alternative text
 - Work in all three zones (in frontmatter, must be inside quoted strings)
 - Indexed for backlink queries
@@ -112,12 +112,12 @@ A `---` followed by non-reference prose is treated as a thematic break in the bo
 
 14-digit timestamp: `YYYYMMDDHHmmss`
 
-Generated from the local system clock at creation time. Serves as both the unique identifier and the filename (e.g., `zettelkasten/20260226120000.md`).
+Generated from the local system clock at creation time. Serves as both the unique identifier and the filename (e.g., `ddb/20260226120000.md`).
 
 ## Filename Convention
 
 ```text
-zettelkasten/{id}.md
+ddb/{id}.md
 ```
 
 ID-only filenames ensure wikilinks remain stable when titles change.

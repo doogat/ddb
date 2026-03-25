@@ -1,13 +1,13 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
 fn all_link_kinds_indexed() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create target zettels so wikilink/embed targets exist
+    // Create target doogats so wikilink/embed targets exist
     let wiki_out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Wiki Target", "--body", "target"])
         .output()
         .unwrap();
@@ -15,7 +15,7 @@ fn all_link_kinds_indexed() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     let embed_out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Embed Target", "--body", "embedded"])
         .output()
         .unwrap();
@@ -24,7 +24,7 @@ fn all_link_kinds_indexed() {
         .to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Create a zettel with all 4 link types in body
+    // Create a doogat with all 4 link types in body
     let body = format!(
         "See [[{wiki_id}]] for wiki.\n\
          Read [md title](md_target.md) for more.\n\
@@ -32,7 +32,7 @@ fn all_link_kinds_indexed() {
          Visit https://example.com for info."
     );
     let linker_out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Link Kinds Test", "--body", &body])
         .output()
         .unwrap();
@@ -40,15 +40,15 @@ fn all_link_kinds_indexed() {
         .trim()
         .to_string();
 
-    // Reindex to populate _zdb_links
-    repo.zdb().args(["reindex"]).assert().success();
+    // Reindex to populate _ddb_links
+    repo.ddb().args(["reindex"]).assert().success();
 
-    // Query all link kinds for this zettel
-    repo.zdb()
+    // Query all link kinds for this doogat
+    repo.ddb()
         .args([
             "query",
             &format!(
-                "SELECT target_path, kind FROM _zdb_links WHERE source_id = '{}' ORDER BY kind",
+                "SELECT target_path, kind FROM _ddb_links WHERE source_id = '{}' ORDER BY kind",
                 linker_id
             ),
         ])

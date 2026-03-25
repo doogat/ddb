@@ -1,51 +1,51 @@
 # Data Flow
 
-## Creating a Zettel
+## Creating a Doogat
 
 ```text
-zdb create --title "Example" --tags "tag1,tag2"
+ddb create --title "Example" --tags "tag1,tag2"
   │
   v
-parser::generate_id()  ──>  ZettelId("20260226153042")
+parser::generate_id()  ──>  DoogatId("20260226153042")
   │
   v
 parser::serialize()  ──>  Markdown string with frontmatter
   │
   v
-git_ops::commit_file("zettelkasten/20260226153042.md", ...)
+git_ops::commit_file("ddb/20260226153042.md", ...)
   │
   v
-indexer::index_zettel()  ──>  Upsert into SQLite + FTS5
+indexer::index_doogat()  ──>  Upsert into SQLite + FTS5
   │
   v
 stdout: "20260226153042"
 ```
 
-## Reading a Zettel
+## Reading a Doogat
 
 ```text
-zdb read 20260226153042
+ddb read 20260226153042
   │
   v
-git_ops::read_file("zettelkasten/20260226153042.md")
+git_ops::read_file("ddb/20260226153042.md")
   │
   v
 stdout: raw Markdown content
 ```
 
-## Updating a Zettel
+## Updating a Doogat
 
 ```text
-zdb update 20260226153042 --title "New Title"
+ddb update 20260226153042 --title "New Title"
   │
   v
 git_ops::read_file()  ──>  existing content
   │
   v
-parser::parse()  ──>  ParsedZettel
+parser::parse()  ──>  ParsedDoogat
   │
   v
-modify fields on ParsedZettel
+modify fields on ParsedDoogat
   │
   v
 parser::serialize()  ──>  updated Markdown
@@ -54,13 +54,13 @@ parser::serialize()  ──>  updated Markdown
 git_ops::commit_file()  ──>  new Git commit
   │
   v
-indexer::index_zettel()  ──>  update SQLite
+indexer::index_doogat()  ──>  update SQLite
 ```
 
 ## Searching
 
 ```text
-zdb search "learning"
+ddb search "learning"
   │
   v
 indexer::is_stale()?  ──>  if yes: rebuild from Git
@@ -78,7 +78,7 @@ stdout: results with highlighted snippets
 This is the most complex flow. Suppose Node B syncs after both A and B have made edits:
 
 ```text
-Node B: zdb sync origin master
+Node B: ddb sync origin master
   │
   v
 git_ops::fetch("origin", "master")
@@ -114,7 +114,7 @@ git_ops::merge_remote("origin", "master")
   git_ops::push()  ──>  propagate node registry
         │
         v
-  indexer::rebuild()  ──>  reindex all zettels
+  indexer::rebuild()  ──>  reindex all doogats
         │
         v
   stdout: SyncReport { conflicts_resolved: N, ... }
@@ -125,7 +125,7 @@ After this, when Node A syncs, it fast-forwards to the resolved commit.
 ## Compaction
 
 ```text
-zdb compact
+ddb compact
   │
   v
 sync_manager::list_nodes()  ──>  all NodeConfig entries

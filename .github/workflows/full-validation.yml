@@ -33,14 +33,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - name: Configure git identity
         run: |
-          git config --global user.email "ci@zetteldb.dev"
-          git config --global user.name "ZettelDB CI"
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
       - name: Sync integration tests
-        run: cargo test -p zdb-core --test sync_test
+        run: cargo test -p ddb-core --test sync_test
       - name: Property tests
         env:
           PROPTEST_CASES: 50
-        run: cargo test -p zdb-core --test property_tests
+        run: cargo test -p ddb-core --test property_tests
 
   linux-thresholds:
     continue-on-error: true
@@ -53,14 +53,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - name: Configure git identity
         run: |
-          git config --global user.email "ci@zetteldb.dev"
-          git config --global user.name "ZettelDB CI"
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
       - name: Query thresholds
-        run: cargo test --release -p zdb-core --test query_thresholds nfr01_
+        run: cargo test --release -p ddb-core --test query_thresholds nfr01_
       - name: Growth thresholds
-        run: cargo test --release -p zdb-core --test growth_thresholds nfr02_
+        run: cargo test --release -p ddb-core --test growth_thresholds nfr02_
       - name: Sync thresholds
-        run: cargo test --release -p zdb-core --test sync_thresholds nfr03_
+        run: cargo test --release -p ddb-core --test sync_thresholds nfr03_
 
   linux-smoke:
     runs-on: ubuntu-latest
@@ -72,13 +72,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - name: Configure git identity
         run: |
-          git config --global user.email "ci@zetteldb.dev"
-          git config --global user.name "ZettelDB CI"
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
       - name: Build CLI binary
-        run: cargo build -p zdb-cli --bin zdb
+        run: cargo build -p ddb-cli --bin ddb
       - name: Full smoke test
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
         run: ./tests/smoke.sh
 
   linux-e2e:
@@ -91,14 +91,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - name: Configure git identity
         run: |
-          git config --global user.email "ci@zetteldb.dev"
-          git config --global user.name "ZettelDB CI"
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
       - name: Build CLI binary
-        run: cargo build -p zdb-cli --bin zdb
+        run: cargo build -p ddb-cli --bin ddb
       - name: Full e2e tests
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
-        run: cargo test -p zdb-e2e
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
+        run: cargo test -p ddb-e2e
 
   macos-full:
     runs-on: macos-latest
@@ -108,17 +108,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Configure git identity
         run: |
-          git config --global user.email "ci@zetteldb.dev"
-          git config --global user.name "ZettelDB CI"
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
       - name: Build CLI binary
-        run: cargo build -p zdb-cli --bin zdb
+        run: cargo build -p ddb-cli --bin ddb
       - name: Full cargo test suite
         env:
           PROPTEST_CASES: 50
         run: cargo test-full
       - name: Full smoke test
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
         run: ./tests/smoke.sh
 
   windows-full:
@@ -129,10 +129,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Configure git identity
         run: |
-          git config --global user.email "ci@zetteldb.dev"
-          git config --global user.name "ZettelDB CI"
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
       - name: Build CLI binary
-        run: cargo build -p zdb-cli --bin zdb
+        run: cargo build -p ddb-cli --bin ddb
       - name: Full cargo test suite
         env:
           PROPTEST_CASES: 50
@@ -140,7 +140,7 @@ jobs:
       - name: Full smoke test
         timeout-minutes: 15
         env:
-          ZDB_BIN: ${{ github.workspace }}\target\debug\zdb.exe
+          DDB_BIN: ${{ github.workspace }}\target\debug\ddb.exe
         run: pwsh -File tests/smoke.ps1
 
   mark-validated:

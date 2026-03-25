@@ -2,26 +2,26 @@
 import PackageDescription
 
 let package = Package(
-    name: "ZettelDBTests",
+    name: "DoogatDBTests",
     platforms: [.macOS(.v14), .iOS(.v16)],
     targets: [
         .binaryTarget(
-            name: "ZettelDBFFI",
-            path: "../../out/swift/ZettelDB.xcframework"
+            name: "DoogatDBFFI",
+            path: "../../out/swift/DoogatDB.xcframework"
         ),
         .target(
-            name: "ZettelDB",
-            dependencies: ["ZettelDBFFI"],
-            path: "Sources/ZettelDB",
+            name: "DoogatDB",
+            dependencies: ["DoogatDBFFI"],
+            path: "Sources/DoogatDB",
             linkerSettings: [
                 .linkedLibrary("z"),
                 .linkedLibrary("iconv"),
             ]
         ),
         .testTarget(
-            name: "ZettelDBTests",
-            dependencies: ["ZettelDB"],
-            path: "Tests/ZettelDBTests"
+            name: "DoogatDBTests",
+            dependencies: ["DoogatDB"],
+            path: "Tests/DoogatDBTests"
         ),
     ]
 )

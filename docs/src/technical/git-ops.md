@@ -1,6 +1,6 @@
 # Git Operations
 
-**Source**: `zdb-core/src/git_ops.rs` (454 lines)
+**Source**: `ddb-core/src/git_ops.rs` (454 lines)
 
 Wraps libgit2 (`git2` crate) for all Git repository interactions. `GitRepo` is the central handle.
 
@@ -21,20 +21,20 @@ Creates a new Git repository with the standard directory structure:
 
 | Directory | Purpose |
 |-----------|---------|
-| `zettelkasten/` | Zettel Markdown files |
+| `ddb/` | Doogat Markdown files |
 | `reference/` | Binary/asset files |
 | `.nodes/` | Node registry (TOML configs) |
 | `.crdt/temp/` | Temporary CRDT files |
 
-Each directory gets a `.gitkeep` file. A `.gitignore` is created/updated to exclude `.zdb/` (the local SQLite index directory). A `.zetteldb-version` file is written with the current format version (currently `1`). An initial commit is made with all scaffolding.
+Each directory gets a `.gitkeep` file. A `.gitignore` is created/updated to exclude `.ddb/` (the local SQLite index directory). A `.ddb-version` file is written with the current format version (currently `1`). An initial commit is made with all scaffolding.
 
 ## Format Versioning
 
-The `.zetteldb-version` file at the repository root tracks the on-disk format version (currently `1`).
+The `.ddb-version` file at the repository root tracks the on-disk format version (currently `1`).
 
 - **On init**: written with `CURRENT_FORMAT_VERSION`
 - **On open**: read and checked:
-  - Repo version > driver version → `VersionMismatch` error (upgrade zdb)
+  - Repo version > driver version → `VersionMismatch` error (upgrade ddb)
   - Repo version < driver version → auto-migrate (e.g. v0→v1 writes the version file)
   - Missing file → treated as v0, auto-upgraded
 
@@ -48,7 +48,7 @@ Future format changes increment `CURRENT_FORMAT_VERSION` and add a migration ste
 | `commit_files(files, msg)` | Write, stage, and commit multiple files atomically |
 | `commit_merge(files, msg, theirs_oid)` | Write files and create a merge commit with two parents |
 | `read_file(rel_path)` | Read file content from HEAD tree (not working directory) |
-| `list_zettels()` | Walk HEAD tree, return all `zettelkasten/*.md` paths |
+| `list_doogats()` | Walk HEAD tree, return all `ddb/*.md` paths |
 | `head_oid()` | Get current HEAD commit OID |
 
 Note: `read_file` reads from the Git tree, not the filesystem. This ensures consistency with the committed state and avoids platform-specific working-tree transforms such as CRLF checkout conversion on Windows.
@@ -91,7 +91,7 @@ For each conflict entry in the merge index, reads the blob content for ancestor 
 
 ## Signature
 
-Uses the repository's configured `user.name` and `user.email`. Falls back to `"zdb"` / `"zdb@local"` if not configured.
+Uses the repository's configured `user.name` and `user.email`. Falls back to `"ddb"` / `"ddb@local"` if not configured.
 
 ## Test Coverage
 
@@ -100,7 +100,7 @@ Uses the repository's configured `user.name` and `user.email`. Falls back to `"z
 - Open existing repo
 - Commit and read file round-trip
 - Multi-file commits
-- List zettels (filters to `zettelkasten/*.md`)
+- List doogats (filters to `ddb/*.md`)
 - Push/fetch cycle between two repos
 - Merge already-up-to-date
 - Merge conflict detection with blob extraction

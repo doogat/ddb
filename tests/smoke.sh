@@ -10,9 +10,9 @@ case "$SMOKE_PROFILE" in
     ;;
 esac
 
-# Build and lint for the full profile when ZDB_BIN is not injected.
+# Build and lint for the full profile when DDB_BIN is not injected.
 PREP_LABEL="prebuilt binary"
-if [ -z "${ZDB_BIN:-}" ]; then
+if [ -z "${DDB_BIN:-}" ]; then
   cargo build --quiet
   if [ "$SMOKE_PROFILE" = "full" ]; then
     cargo clippy --workspace --quiet
@@ -22,7 +22,7 @@ if [ -z "${ZDB_BIN:-}" ]; then
     PREP_LABEL="build"
   fi
 fi
-ZDB="${ZDB_BIN:-$(cargo metadata --format-version=1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')/debug/zdb}"
+DDB="${DDB_BIN:-$(cargo metadata --format-version=1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')/debug/ddb}"
 
 # Work in temp directories, clean up on exit
 TMPDIR="$(mktemp -d)"
@@ -40,96 +40,96 @@ echo "=== smoke test ($SMOKE_PROFILE) ==="
 pass "$PREP_LABEL"
 
 # 1. init
-$ZDB init . >/dev/null
+$DDB init . >/dev/null
 pass "init"
 
-# 2. create zettels (no sleeps — tests cross-process ID uniqueness)
-ID1=$($ZDB create --title "First note" --tags "test,smoke" --body "Hello world")
-ID2=$($ZDB create --title "Links to first" --body "See [[$ID1]]")
-ID3=$($ZDB create --title "Project Alpha" --type project --tags "active" --body "A project zettel")
+# 2. create doogats (no sleeps — tests cross-process ID uniqueness)
+ID1=$($DDB create --title "First note" --tags "test,smoke" --body "Hello world")
+ID2=$($DDB create --title "Links to first" --body "See [[$ID1]]")
+ID3=$($DDB create --title "Project Alpha" --type project --tags "active" --body "A project doogat")
 [ "$ID1" != "$ID2" ] && [ "$ID2" != "$ID3" ] && [ "$ID1" != "$ID3" ]
 pass "create (3 unique IDs: $ID1 $ID2 $ID3)"
 
 # 3. read
-OUTPUT=$($ZDB read "$ID1")
+OUTPUT=$($DDB read "$ID1")
 echo "$OUTPUT" | grep -q "First note"
 pass "read"
 
 # 4. update
-$ZDB update "$ID1" --title "First note (edited)" --tags "test,smoke,updated"
-$ZDB read "$ID1" | grep -q "First note (edited)"
+$DDB update "$ID1" --title "First note (edited)" --tags "test,smoke,updated"
+$DDB read "$ID1" | grep -q "First note (edited)"
 pass "update"
 
 # 5. delete
-$ZDB delete "$ID3"
-! $ZDB read "$ID3" 2>/dev/null
-! $ZDB delete "99999999999999" 2>/dev/null
+$DDB delete "$ID3"
+! $DDB read "$ID3" 2>/dev/null
+! $DDB delete "99999999999999" 2>/dev/null
 pass "delete"
 
 # 6. status
-$ZDB status | grep -q "^head:"
+$DDB status | grep -q "^head:"
 pass "status"
 
 # 6b. broken backlink report on delete
-BL_TARGET=$($ZDB create --title "Backlink Target" --body "I will be deleted")
+BL_TARGET=$($DDB create --title "Backlink Target" --body "I will be deleted")
 sleep 1
-BL_SOURCE=$($ZDB create --title "Backlink Source" --body "See [[$BL_TARGET]]")
-$ZDB reindex >/dev/null
-$ZDB delete "$BL_TARGET" 2>&1 | grep -q "broken backlinks"
-$ZDB status 2>/dev/null | grep -q "broken backlinks"
+BL_SOURCE=$($DDB create --title "Backlink Source" --body "See [[$BL_TARGET]]")
+$DDB reindex >/dev/null
+$DDB delete "$BL_TARGET" 2>&1 | grep -q "broken backlinks"
+$DDB status 2>/dev/null | grep -q "broken backlinks"
 # Clean up: delete source so broken backlinks don't affect later tests
-$ZDB delete "$BL_SOURCE" >/dev/null 2>&1
+$DDB delete "$BL_SOURCE" >/dev/null 2>&1
 pass "broken backlink report on delete"
 
 # 7. reindex
-$ZDB reindex | grep -q "indexed 2 zettels"
+$DDB reindex | grep -q "indexed 2 doogats"
 pass "reindex"
 
 # 7b. hashtag extraction
-$ZDB update "$ID1" --body "Updated with #gtd/act/next hashtag"
-$ZDB reindex >/dev/null
-$ZDB query "SELECT tag, source FROM _zdb_tags WHERE tag = 'gtd/act/next'" | grep -q "body"
+$DDB update "$ID1" --body "Updated with #gtd/act/next hashtag"
+$DDB reindex >/dev/null
+$DDB query "SELECT tag, source FROM _ddb_tags WHERE tag = 'gtd/act/next'" | grep -q "body"
 pass "hashtag extraction and indexing"
 
 # 7c. checkbox parsing
-$ZDB update "$ID1" --body "- [ ] open task\n- [x] done task\n- [i] 2026-01-01 10:00 - info note"
-$ZDB reindex >/dev/null
-$ZDB query "SELECT state, content FROM _zdb_checkboxes WHERE state = 'open'" | grep -q "open task"
+$DDB update "$ID1" --body "- [ ] open task\n- [x] done task\n- [i] 2026-01-01 10:00 - info note"
+$DDB reindex >/dev/null
+$DDB query "SELECT state, content FROM _ddb_checkboxes WHERE state = 'open'" | grep -q "open task"
 pass "checkbox parsing and indexing"
 
 # 7d. folder namespace
-$ZDB query "CREATE TABLE widget (color TEXT)" >/dev/null
+$DDB query "CREATE TABLE widget (color TEXT)" >/dev/null
 # Add folder: true to the widget typedef
-WIDGET_TYPEDEF=$(find "$TMPDIR/zettelkasten/_typedef" -name "*.md" -exec grep -l "title: widget" {} \;)
+WIDGET_TYPEDEF=$(find "$TMPDIR/ddb/_typedef" -name "*.md" -exec grep -l "title: widget" {} \;)
 sed -i.bak 's/type: _typedef/type: _typedef\nfolder: true/' "$WIDGET_TYPEDEF" && rm -f "${WIDGET_TYPEDEF}.bak"
 git -C "$TMPDIR" add -A && git -C "$TMPDIR" commit -m "add folder to widget" >/dev/null
-$ZDB reindex >/dev/null
-WIDGET_ID=$($ZDB query "INSERT INTO widget (color) VALUES ('red')")
-test -f "$TMPDIR/zettelkasten/widget/${WIDGET_ID}.md"
-pass "folder namespace: typed zettel in subdirectory"
+$DDB reindex >/dev/null
+WIDGET_ID=$($DDB query "INSERT INTO widget (color) VALUES ('red')")
+test -f "$TMPDIR/ddb/widget/${WIDGET_ID}.md"
+pass "folder namespace: typed doogat in subdirectory"
 
 # 8. full-text search
-$ZDB search "First note" | grep -q "$ID1"
+$DDB search "First note" | grep -q "$ID1"
 pass "search"
 
 # 8b. paginated search
-$ZDB search "First note" --limit 1 --offset 0 | grep -q "Showing 1-1 of"
+$DDB search "First note" --limit 1 --offset 0 | grep -q "Showing 1-1 of"
 pass "paginated search"
 
 # 9. SQL queries
-$ZDB query "SELECT id, title FROM zettels" | grep -q "First note (edited)"
-$ZDB query "SELECT z.id, z.title FROM zettels z JOIN _zdb_tags t ON t.zettel_id = z.id WHERE t.tag LIKE '%smoke%'" | grep -q "$ID1"
+$DDB query "SELECT id, title FROM doogats" | grep -q "First note (edited)"
+$DDB query "SELECT z.id, z.title FROM doogats z JOIN _ddb_tags t ON t.doogat_id = z.id WHERE t.tag LIKE '%smoke%'" | grep -q "$ID1"
 pass "sql queries"
 
 # 10. wikilinks
-$ZDB query "SELECT * FROM _zdb_links" | grep -q "$ID1"
+$DDB query "SELECT * FROM _ddb_links" | grep -q "$ID1"
 pass "wikilinks"
 
 # 10a. link kinds (wikilink, markdown, embed, url)
 LKBODY=$(printf 'See [[%s]] wiki.\n[md link](target.md)\n![[%s]]\nhttps://example.com' "$ID1" "$ID2")
-LK_ID=$($ZDB create --title "Link Kinds" --body "$LKBODY")
-$ZDB reindex >/dev/null
-LK_OUT=$($ZDB query "SELECT kind FROM _zdb_links WHERE source_id = '$LK_ID' ORDER BY kind")
+LK_ID=$($DDB create --title "Link Kinds" --body "$LKBODY")
+$DDB reindex >/dev/null
+LK_OUT=$($DDB query "SELECT kind FROM _ddb_links WHERE source_id = '$LK_ID' ORDER BY kind")
 echo "$LK_OUT" | grep -q "url"
 echo "$LK_OUT" | grep -q "embed"
 echo "$LK_OUT" | grep -q "markdown"
@@ -137,55 +137,55 @@ echo "$LK_OUT" | grep -q "wikilink"
 pass "link kinds (4 types indexed)"
 
 # 10b. rename with backlink rewrite
-RENAME_TARGET=$($ZDB create --title "Rename Target" --body "I will move.")
-$ZDB create --title "Rename Linker" --body "See [[$RENAME_TARGET|Target]]." >/dev/null
-$ZDB reindex >/dev/null
-$ZDB rename "$RENAME_TARGET" "zettelkasten/contact/${RENAME_TARGET}.md" | grep -q "1 backlinks updated"
-[ -f "zettelkasten/contact/${RENAME_TARGET}.md" ]
+RENAME_TARGET=$($DDB create --title "Rename Target" --body "I will move.")
+$DDB create --title "Rename Linker" --body "See [[$RENAME_TARGET|Target]]." >/dev/null
+$DDB reindex >/dev/null
+$DDB rename "$RENAME_TARGET" "ddb/contact/${RENAME_TARGET}.md" | grep -q "1 backlinks updated"
+[ -f "ddb/contact/${RENAME_TARGET}.md" ]
 pass "rename with backlink rewrite"
 
 # 11. SQL DDL/DML
-$ZDB query "CREATE TABLE foo (bar TEXT, baz INTEGER)" | grep -q "table foo created"
-FOO_ID=$($ZDB query "INSERT INTO foo (title, bar, baz) VALUES ('test row', 'hello', 42)")
+$DDB query "CREATE TABLE foo (bar TEXT, baz INTEGER)" | grep -q "table foo created"
+FOO_ID=$($DDB query "INSERT INTO foo (title, bar, baz) VALUES ('test row', 'hello', 42)")
 echo "$FOO_ID" | grep -qE "^[0-9]{14}$"
-$ZDB query "SELECT bar, baz FROM foo" | grep -q "hello"
-$ZDB query "UPDATE foo SET baz = 99 WHERE id = '$FOO_ID'" | grep -q "1 row(s) affected"
-$ZDB query "SELECT baz FROM foo WHERE id = '$FOO_ID'" | grep -q "99"
-$ZDB query "DELETE FROM foo WHERE id = '$FOO_ID'" | grep -q "1 row(s) affected"
+$DDB query "SELECT bar, baz FROM foo" | grep -q "hello"
+$DDB query "UPDATE foo SET baz = 99 WHERE id = '$FOO_ID'" | grep -q "1 row(s) affected"
+$DDB query "SELECT baz FROM foo WHERE id = '$FOO_ID'" | grep -q "99"
+$DDB query "DELETE FROM foo WHERE id = '$FOO_ID'" | grep -q "1 row(s) affected"
 pass "sql ddl/dml"
 
 # 11a. ALTER TABLE SET ZONE and TITLE TEMPLATE
-$ZDB query "ALTER TABLE foo SET ZONE frontmatter FOR bar" | grep -q "zone set to frontmatter"
-$ZDB query "ALTER TABLE foo SET TITLE TEMPLATE 'my-template'" | grep -q "title template set"
-$ZDB query "ALTER TABLE foo DROP TITLE TEMPLATE" | grep -q "title template dropped"
+$DDB query "ALTER TABLE foo SET ZONE frontmatter FOR bar" | grep -q "zone set to frontmatter"
+$DDB query "ALTER TABLE foo SET TITLE TEMPLATE 'my-template'" | grep -q "title template set"
+$DDB query "ALTER TABLE foo DROP TITLE TEMPLATE" | grep -q "title template dropped"
 pass "alter table zone overrides and title template"
 
 # 11b. CREATE TABLE IF NOT EXISTS (idempotent)
-$ZDB query "CREATE TABLE IF NOT EXISTS foo (bar TEXT, baz INTEGER)" | grep -q "already exists"
-$ZDB query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)" | grep -q "table newifne created"
-$ZDB query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)" | grep -q "already exists"
+$DDB query "CREATE TABLE IF NOT EXISTS foo (bar TEXT, baz INTEGER)" | grep -q "already exists"
+$DDB query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)" | grep -q "table newifne created"
+$DDB query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)" | grep -q "already exists"
 pass "create table if not exists (idempotent)"
 
 # 12. install bundled type
-$ZDB type install contact | grep -q "installed type"
+$DDB type install contact | grep -q "installed type"
 pass "type install"
 
 # 12a. hyphenated type SQL (quoted identifiers)
-$ZDB type install meeting-minutes | grep -q "installed type"
-HYP_ID=$($ZDB query 'INSERT INTO "meeting-minutes" (date, attendees) VALUES ('\''2026-03-10'\'', '\''alice,bob'\'')' | tr -d '[:space:]')
-$ZDB query "SELECT date FROM \"meeting-minutes\" WHERE id = '$HYP_ID'" | grep -q "2026-03-10"
-$ZDB query "DELETE FROM \"meeting-minutes\" WHERE id = '$HYP_ID'" | grep -q "1 row(s) affected"
+$DDB type install meeting-minutes | grep -q "installed type"
+HYP_ID=$($DDB query 'INSERT INTO "meeting-minutes" (date, attendees) VALUES ('\''2026-03-10'\'', '\''alice,bob'\'')' | tr -d '[:space:]')
+$DDB query "SELECT date FROM \"meeting-minutes\" WHERE id = '$HYP_ID'" | grep -q "2026-03-10"
+$DDB query "DELETE FROM \"meeting-minutes\" WHERE id = '$HYP_ID'" | grep -q "1 row(s) affected"
 pass "hyphenated type sql (quoted identifiers)"
 
 # 13. type suggest
-$ZDB query "INSERT INTO foo (title, bar, baz) VALUES ('for suggest', 'val', 1)" >/dev/null
-$ZDB type suggest foo | grep -q "bar"
+$DDB query "INSERT INTO foo (title, bar, baz) VALUES ('for suggest', 'val', 1)" >/dev/null
+$DDB type suggest foo | grep -q "bar"
 pass "type suggest"
 
 # 14. register node + compact
-$ZDB register-node "smoke-test-laptop" | grep -q "registered node"
-$ZDB status | grep -q "registered nodes: 1"
-COMPACT_OUT=$($ZDB compact --force)
+$DDB register-node "smoke-test-laptop" | grep -q "registered node"
+$DDB status | grep -q "registered nodes: 1"
+COMPACT_OUT=$($DDB compact --force)
 echo "$COMPACT_OUT" | grep -q "backup:"
 echo "$COMPACT_OUT" | grep -q "gc: ok"
 echo "$COMPACT_OUT" | grep -q "crdt temp:"
@@ -193,20 +193,20 @@ echo "$COMPACT_OUT" | grep -q "repo (.git):"
 pass "register-node + compact"
 
 # 15. node list + retire
-$ZDB node list | grep -q "smoke-test-laptop"
-NODE_UUID=$($ZDB node list | grep "smoke-test-laptop" | awk '{print $1}')
-$ZDB node retire "$NODE_UUID" | grep -q "retired node"
+$DDB node list | grep -q "smoke-test-laptop"
+NODE_UUID=$($DDB node list | grep "smoke-test-laptop" | awk '{print $1}')
+$DDB node retire "$NODE_UUID" | grep -q "retired node"
 pass "node list + retire"
 
 # 16. compact --dry-run
-DRYRUN_OUT=$($ZDB compact --dry-run)
+DRYRUN_OUT=$($DDB compact --dry-run)
 echo "$DRYRUN_OUT" | grep -q "dry run"
 echo "$DRYRUN_OUT" | grep -q "backup would write:"
 pass "compact --dry-run"
 
 # 16a. compact --no-backup
-$ZDB register-node "no-backup-test" >/dev/null
-NOBACKUP_OUT=$($ZDB compact --no-backup --force)
+$DDB register-node "no-backup-test" >/dev/null
+NOBACKUP_OUT=$($DDB compact --no-backup --force)
 echo "$NOBACKUP_OUT" | grep -q "gc: ok"
 # Should NOT contain backup path
 if echo "$NOBACKUP_OUT" | grep -q "backup:"; then
@@ -216,65 +216,65 @@ pass "compact --no-backup"
 
 # 16b. compact --backup-path
 CUSTOM_BACKUP="$TMPDIR/custom-backup.bundle.tar"
-BKPATH_OUT=$($ZDB compact --force --backup-path "$CUSTOM_BACKUP")
+BKPATH_OUT=$($DDB compact --force --backup-path "$CUSTOM_BACKUP")
 echo "$BKPATH_OUT" | grep -q "backup:"
 echo "$BKPATH_OUT" | grep -q "$CUSTOM_BACKUP"
 [ -f "$CUSTOM_BACKUP" ]
 pass "compact --backup-path"
 
 # 16c. maintenance
-$ZDB maintenance run | grep -q "maintenance:"
+$DDB maintenance run | grep -q "maintenance:"
 pass "maintenance run"
 
-MAINT_STATUS=$($ZDB maintenance auto status)
+MAINT_STATUS=$($DDB maintenance auto status)
 echo "$MAINT_STATUS" | grep -q "off"
 pass "maintenance auto status (default off)"
 
-$ZDB maintenance auto on | grep -q "enabled"
-$ZDB maintenance auto status | grep -q "on"
+$DDB maintenance auto on | grep -q "enabled"
+$DDB maintenance auto status | grep -q "on"
 pass "maintenance auto on"
 
-$ZDB maintenance auto off | grep -q "disabled"
-$ZDB maintenance auto status | grep -q "off"
+$DDB maintenance auto off | grep -q "disabled"
+$DDB maintenance auto status | grep -q "off"
 pass "maintenance auto off"
 
 # 16d. discover
-$ZDB discover stale >/dev/null
+$DDB discover stale >/dev/null
 pass "discover stale"
 
-$ZDB discover orphans | head -1 | grep -q "."
+$DDB discover orphans | head -1 | grep -q "."
 pass "discover orphans"
 
-# Create a zettel that mentions ID1's title without linking
-MENTION_ID=$($ZDB create --title "Review notes" --body "About First note (edited) topic")
-$ZDB reindex >/dev/null
-$ZDB discover mentions "$ID1" | grep -q "$MENTION_ID"
+# Create a doogat that mentions ID1's title without linking
+MENTION_ID=$($DDB create --title "Review notes" --body "About First note (edited) topic")
+$DDB reindex >/dev/null
+$DDB discover mentions "$ID1" | grep -q "$MENTION_ID"
 pass "discover mentions"
 
-$ZDB discover similar "$ID1" | head -1 | grep -q "."
+$DDB discover similar "$ID1" | head -1 | grep -q "."
 pass "discover similar"
 
 # 16e. consistency fix
-FIX_ID=$($ZDB create --title "Fix Test" --tags "#gtd,zebra,apple")
+FIX_ID=$($DDB create --title "Fix Test" --tags "#gtd,zebra,apple")
 BEFORE_HEAD=$(git rev-parse HEAD)
-$ZDB fix --dry-run | grep -q "would fix"
+$DDB fix --dry-run | grep -q "would fix"
 [ "$(git rev-parse HEAD)" = "$BEFORE_HEAD" ]
 pass "fix dry-run"
 
-$ZDB fix | grep -q "fixed"
+$DDB fix | grep -q "fixed"
 pass "fix apply"
 
-$ZDB fix | grep -q "no issues"
+$DDB fix | grep -q "no issues"
 pass "fix idempotent"
 
-$ZDB read "$FIX_ID" | grep -q "  - apple"
+$DDB read "$FIX_ID" | grep -q "  - apple"
 pass "fix result verified"
 
 # 16f. sequence navigation
-SEQ_ROOT=$($ZDB create --title "Seq Root")
-# Patch child zettel to have sequence field
-SEQ_CHILD1=$($ZDB create --title "Seq Child 1")
-SEQ_CHILD1_PATH="zettelkasten/${SEQ_CHILD1}.md"
+SEQ_ROOT=$($DDB create --title "Seq Root")
+# Patch child doogat to have sequence field
+SEQ_CHILD1=$($DDB create --title "Seq Child 1")
+SEQ_CHILD1_PATH="ddb/${SEQ_CHILD1}.md"
 cat > "$SEQ_CHILD1_PATH" <<SEQEOF
 ---
 id: $SEQ_CHILD1
@@ -286,8 +286,8 @@ SEQEOF
 git add "$SEQ_CHILD1_PATH"
 git commit -m "add sequence field" --quiet
 
-SEQ_CHILD2=$($ZDB create --title "Seq Child 2")
-SEQ_CHILD2_PATH="zettelkasten/${SEQ_CHILD2}.md"
+SEQ_CHILD2=$($DDB create --title "Seq Child 2")
+SEQ_CHILD2_PATH="ddb/${SEQ_CHILD2}.md"
 cat > "$SEQ_CHILD2_PATH" <<SEQEOF
 ---
 id: $SEQ_CHILD2
@@ -299,16 +299,16 @@ SEQEOF
 git add "$SEQ_CHILD2_PATH"
 git commit -m "add sequence field" --quiet
 
-$ZDB reindex >/dev/null
-$ZDB sequence tree "$SEQ_ROOT" | grep -q "$SEQ_CHILD1"
+$DDB reindex >/dev/null
+$DDB sequence tree "$SEQ_ROOT" | grep -q "$SEQ_CHILD1"
 pass "sequence tree"
 
-$ZDB sequence breadcrumb "$SEQ_CHILD1" | grep -q "$SEQ_ROOT"
+$DDB sequence breadcrumb "$SEQ_CHILD1" | grep -q "$SEQ_ROOT"
 pass "sequence breadcrumb"
 
 # Broken sequence ref
-SEQ_BROKEN=$($ZDB create --title "Seq Broken")
-SEQ_BROKEN_PATH="zettelkasten/${SEQ_BROKEN}.md"
+SEQ_BROKEN=$($DDB create --title "Seq Broken")
+SEQ_BROKEN_PATH="ddb/${SEQ_BROKEN}.md"
 cat > "$SEQ_BROKEN_PATH" <<SEQEOF
 ---
 id: $SEQ_BROKEN
@@ -319,52 +319,52 @@ sequence: "99999999999999"
 SEQEOF
 git add "$SEQ_BROKEN_PATH"
 git commit -m "broken sequence ref" --quiet
-$ZDB reindex >/dev/null
-$ZDB sequence broken | grep -q "not found"
+$DDB reindex >/dev/null
+$DDB sequence broken | grep -q "not found"
 pass "sequence broken"
 
 # 16b. --log-level flag accepted
-$ZDB --log-level debug status >/dev/null 2>&1
+$DDB --log-level debug status >/dev/null 2>&1
 pass "--log-level flag accepted"
 
 # 16c. help guides (no repo needed)
-HELP_OUT=$($ZDB help create-app)
+HELP_OUT=$($DDB help create-app)
 echo "$HELP_OUT" | grep -q "CREATE TABLE"
 pass "help create-app"
-$ZDB help | grep -q "create-app"
+$DDB help | grep -q "create-app"
 pass "help list"
-! $ZDB help nonexistent 2>/dev/null
+! $DDB help nonexistent 2>/dev/null
 pass "help unknown fails"
 
 # 16d. app-building end-to-end flow
-$ZDB query "CREATE TABLE abcategory (name VARCHAR(100), priority ENUM('low','medium','high'))" | grep -q "table abcategory created"
-AB_CAT_ID=$($ZDB query "INSERT INTO abcategory (name, priority) VALUES ('work', 'high')")
+$DDB query "CREATE TABLE abcategory (name VARCHAR(100), priority ENUM('low','medium','high'))" | grep -q "table abcategory created"
+AB_CAT_ID=$($DDB query "INSERT INTO abcategory (name, priority) VALUES ('work', 'high')")
 echo "$AB_CAT_ID" | grep -qE "^[0-9]{14}$"
-$ZDB query "CREATE TABLE abbookmark (url VARCHAR(2048), description TEXT, abcategory TEXT REFERENCES abcategory)" | grep -q "table abbookmark created"
-$ZDB query "ALTER TABLE abbookmark SET ZONE reference FOR url" | grep -q "zone set to reference"
-$ZDB query "ALTER TABLE abbookmark SET TITLE TEMPLATE '{url}'" | grep -q "title template set"
+$DDB query "CREATE TABLE abbookmark (url VARCHAR(2048), description TEXT, abcategory TEXT REFERENCES abcategory)" | grep -q "table abbookmark created"
+$DDB query "ALTER TABLE abbookmark SET ZONE reference FOR url" | grep -q "zone set to reference"
+$DDB query "ALTER TABLE abbookmark SET TITLE TEMPLATE '{url}'" | grep -q "title template set"
 # Insert with explicit title
 sleep 1
-AB_BM1=$($ZDB query "INSERT INTO abbookmark (title, url, description) VALUES ('Rust Book', 'https://doc.rust-lang.org', 'The official Rust book')")
+AB_BM1=$($DDB query "INSERT INTO abbookmark (title, url, description) VALUES ('Rust Book', 'https://doc.rust-lang.org', 'The official Rust book')")
 echo "$AB_BM1" | grep -qE "^[0-9]{14}$"
 # Insert with template-derived title (no explicit title)
 sleep 1
-AB_BM2=$($ZDB query "INSERT INTO abbookmark (url, description) VALUES ('https://crates.io', 'Rust package registry')")
+AB_BM2=$($DDB query "INSERT INTO abbookmark (url, description) VALUES ('https://crates.io', 'Rust package registry')")
 echo "$AB_BM2" | grep -qE "^[0-9]{14}$"
 # Link both bookmarks to category via junction table
-$ZDB query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM1', '$AB_CAT_ID')" | grep -q "1 row"
-$ZDB query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM2', '$AB_CAT_ID')" | grep -q "1 row"
+$DDB query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM1', '$AB_CAT_ID')" | grep -q "1 row"
+$DDB query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM2', '$AB_CAT_ID')" | grep -q "1 row"
 # SELECT from main table
-$ZDB query "SELECT url FROM abbookmark" | grep -q "rust-lang"
+$DDB query "SELECT url FROM abbookmark" | grep -q "rust-lang"
 # SELECT from junction table — both bookmarks linked
-$ZDB query "SELECT COUNT(*) FROM abbookmark_abcategory" | grep -q "2"
+$DDB query "SELECT COUNT(*) FROM abbookmark_abcategory" | grep -q "2"
 # Verify ENUM allowed_values stored in typedef
-$ZDB query "SELECT priority FROM abcategory" | grep -q "high"
+$DDB query "SELECT priority FROM abcategory" | grep -q "high"
 # help create-app guide available
-$ZDB help create-app | grep -q "CREATE TABLE"
+$DDB help create-app | grep -q "CREATE TABLE"
 # Clean up
-$ZDB query "DROP TABLE abbookmark CASCADE" | grep -q "dropped"
-$ZDB query "DROP TABLE abcategory CASCADE" | grep -q "dropped"
+$DDB query "DROP TABLE abbookmark CASCADE" | grep -q "dropped"
+$DDB query "DROP TABLE abcategory CASCADE" | grep -q "dropped"
 pass "app-building end-to-end flow"
 
 if [ "$SMOKE_PROFILE" = "quick" ]; then
@@ -375,19 +375,19 @@ fi
 # 17. GraphQL server
 SERVER_PORT=$((19200 + (RANDOM % 800)))
 PG_PORT=$((SERVER_PORT + 1))
-$ZDB serve --port "$SERVER_PORT" --pg-port "$PG_PORT" &
+$DDB serve --port "$SERVER_PORT" --pg-port "$PG_PORT" &
 SERVER_PID=$!
 # Wait for server to start
 for i in $(seq 1 20); do
   if curl -sf "http://127.0.0.1:$SERVER_PORT/graphql" \
-    -H "Authorization: Bearer $(cat ~/.config/zetteldb/token 2>/dev/null || echo '')" \
+    -H "Authorization: Bearer $(cat ~/.config/ddb/token 2>/dev/null || echo '')" \
     -H "Content-Type: application/json" \
     -d '{"query":"{ typeDefs { name } }"}' >/dev/null 2>&1; then
     break
   fi
   sleep 0.2
 done
-TOKEN=$(cat ~/.config/zetteldb/token 2>/dev/null || echo '')
+TOKEN=$(cat ~/.config/ddb/token 2>/dev/null || echo '')
 GQL_URL="http://127.0.0.1:$SERVER_PORT/graphql"
 REST_URL="http://127.0.0.1:$SERVER_PORT/rest"
 gql() {
@@ -421,13 +421,13 @@ echo "$RESULT" | grep -q '"typeDefs"'
 pass "serve: graphql query"
 
 # Test mutation — create
-RESULT=$(gql '{"query":"mutation { createZettel(input: { title: \"Smoke Server\" }) { id title } }"}')
+RESULT=$(gql '{"query":"mutation { createDoogat(input: { title: \"Smoke Server\" }) { id title } }"}')
 echo "$RESULT" | grep -q '"Smoke Server"'
 GQL_ID=$(echo "$RESULT" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 pass "serve: graphql create"
 
 # 18. expanded GraphQL operations
-RESULT=$(gql "{\"query\":\"mutation { updateZettel(input: { id: \\\"$GQL_ID\\\", title: \\\"Smoke Updated\\\" }) { id title } }\"}")
+RESULT=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$GQL_ID\\\", title: \\\"Smoke Updated\\\" }) { id title } }\"}")
 echo "$RESULT" | grep -q '"Smoke Updated"'
 pass "serve: graphql update"
 
@@ -435,11 +435,11 @@ RESULT=$(gql '{"query":"{ search(query: \"Smoke\") { totalCount hits { id title 
 echo "$RESULT" | grep -q '"search"'
 pass "serve: graphql search"
 
-RESULT=$(gql '{"query":"{ zettels { id title } }"}')
-echo "$RESULT" | grep -q '"zettels"'
-pass "serve: graphql zettels"
+RESULT=$(gql '{"query":"{ doogats { id title } }"}')
+echo "$RESULT" | grep -q '"doogats"'
+pass "serve: graphql doogats"
 
-RESULT=$(gql "{\"query\":\"mutation { deleteZettel(id: \\\"$GQL_ID\\\") }\"}")
+RESULT=$(gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$GQL_ID\\\") }\"}")
 echo "$RESULT" | grep -q "true"
 pass "serve: graphql delete"
 
@@ -449,13 +449,13 @@ echo "$RESULT" | grep -q '"openActions"'
 pass "serve: graphql openActions"
 
 # 19. REST API CRUD
-HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/zettels" \
+HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
   -d '{"title":"REST No Auth"}')
 [ "$HTTP_CODE" = "401" ]
 pass "rest: auth rejects missing token"
 
-RESULT=$(curl -sf -w "\n%{http_code}" "$REST_URL/zettels" \
+RESULT=$(curl -sf -w "\n%{http_code}" "$REST_URL/doogats" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"REST Smoke","body":"rest body","tags":["rest"]}')
@@ -465,45 +465,45 @@ BODY=$(echo "$RESULT" | sed '$d')
 REST_ID=$(echo "$BODY" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 pass "rest: create"
 
-RESULT=$(rest "/zettels/$REST_ID")
+RESULT=$(rest "/doogats/$REST_ID")
 echo "$RESULT" | grep -q "REST Smoke"
 pass "rest: get"
 
-rest "/zettels/$REST_ID" -X PUT -d '{"title":"REST Updated"}' | grep -q "REST Updated"
+rest "/doogats/$REST_ID" -X PUT -d '{"title":"REST Updated"}' | grep -q "REST Updated"
 pass "rest: update"
 
-RESULT=$(rest "/zettels?tag=rest")
+RESULT=$(rest "/doogats?tag=rest")
 echo "$RESULT" | grep -q "$REST_ID"
 pass "rest: list with filter"
 
-# Field filtering: create typed zettel via SQL, filter by field
+# Field filtering: create typed doogat via SQL, filter by field
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokeitem (label TEXT NOT NULL, priority INTEGER)\"){message}}"}'
 gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokeitem (label, priority) VALUES ('\''Smoke1'\'', 7)\"){message}}"}'
-RESULT=$(rest "/zettels?field.priority=7")
+RESULT=$(rest "/doogats?field.priority=7")
 echo "$RESULT" | grep -q "Smoke1"
 pass "rest: field filter"
 
 # Field filter with nonexistent value returns empty
-RESULT=$(rest "/zettels?field.priority=999")
+RESULT=$(rest "/doogats?field.priority=999")
 echo "$RESULT" | grep -q '"data":\[\]'
 pass "rest: field filter no match"
 
-HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/zettels/$REST_ID" \
+HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats/$REST_ID" \
   -H "Authorization: Bearer $TOKEN" -X DELETE)
 [ "$HTTP_CODE" = "204" ]
 pass "rest: delete"
 
-HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/zettels/$REST_ID" \
+HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats/$REST_ID" \
   -H "Authorization: Bearer $TOKEN")
 [ "$HTTP_CODE" = "404" ]
 pass "rest: get after delete returns 404"
 
 # 20. PgWire basic query
 if command -v psql >/dev/null 2>&1; then
-  PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U zdb -d zdb -t -c "SELECT id, title FROM zettels" | grep -q "First note"
+  PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -t -c "SELECT id, title FROM doogats" | grep -q "First note"
   pass "pgwire: select"
 
-  ! PGPASSWORD="wrong" psql -h 127.0.0.1 -p "$PG_PORT" -U zdb -d zdb -c "SELECT 1" 2>/dev/null
+  ! PGPASSWORD="wrong" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -c "SELECT 1" 2>/dev/null
   pass "pgwire: auth rejection"
 else
   pass "pgwire: skipped (no psql)"
@@ -541,7 +541,7 @@ echo "$RESULT" | grep -qi "query failed\|internal error"
 pass "serve: sql error sanitized (no raw details)"
 
 # error sanitization — not-found returns descriptive message
-HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/zettels/99990101000000" \
+HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats/99990101000000" \
   -H "Authorization: Bearer $TOKEN")
 [ "$HTTP_CODE" = "404" ]
 pass "serve: not-found returns 404"
@@ -593,10 +593,10 @@ fi
 
 # 38. read-under-write: concurrent read + write
 WRITE_TMP="$TMPDIR/write_result.json"
-gql '{"query":"mutation { createZettel(input: { title: \"ReadPoolWrite\" }) { id } }"}' > "$WRITE_TMP" &
+gql '{"query":"mutation { createDoogat(input: { title: \"ReadPoolWrite\" }) { id } }"}' > "$WRITE_TMP" &
 WRITE_PID=$!
-READ_RESULT=$(gql '{"query":"{ zettels { id title } }"}')
-echo "$READ_RESULT" | grep -q '"zettels"'
+READ_RESULT=$(gql '{"query":"{ doogats { id title } }"}')
+echo "$READ_RESULT" | grep -q '"doogats"'
 wait "$WRITE_PID"
 grep -q '"id"' "$WRITE_TMP"
 pass "serve: read-under-write (concurrent read + write)"
@@ -617,7 +617,7 @@ echo "$RESULT" | grep -q "$MV_CAT1"
 echo "$RESULT" | grep -q "$MV_CAT2"
 pass "serve: graphql multi-value ref list field"
 # REST — structured references object
-RESULT=$(rest "/zettels/$MV_BM")
+RESULT=$(rest "/doogats/$MV_BM")
 echo "$RESULT" | grep -q '"references"'
 echo "$RESULT" | grep -q '"mvcategory"'
 pass "serve: rest multi-value ref structured json"
@@ -634,157 +634,157 @@ git init --bare "$REMOTE_DIR" >/dev/null 2>&1
 
 # node1: init + push
 cd "$NODE1_DIR"
-$ZDB init . >/dev/null
+$DDB init . >/dev/null
 git remote add origin "$REMOTE_DIR"
-$ZDB register-node "Laptop" >/dev/null
+$DDB register-node "Laptop" >/dev/null
 
 # 21. fast-forward sync
-SYNC_ID=$($ZDB create --title "Shared note" --tags "shared" --body "Original body")
+SYNC_ID=$($DDB create --title "Shared note" --tags "shared" --body "Original body")
 git push -u origin master >/dev/null 2>&1
 
 # clone to node2
 git clone "$REMOTE_DIR" "$NODE2_DIR" >/dev/null 2>&1
 cd "$NODE2_DIR"
-# init zdb index without reinitializing git
-$ZDB reindex >/dev/null
-$ZDB register-node "Desktop" >/dev/null
+# init ddb index without reinitializing git
+$DDB reindex >/dev/null
+$DDB register-node "Desktop" >/dev/null
 
-$ZDB read "$SYNC_ID" | grep -q "Shared note"
+$DDB read "$SYNC_ID" | grep -q "Shared note"
 pass "fast-forward sync"
 
 # 22. non-overlapping edits (clean git merge, no CRDT)
 cd "$NODE1_DIR"
-$ZDB update "$SYNC_ID" --title "Updated Title" --tags "shared,laptop"
+$DDB update "$SYNC_ID" --title "Updated Title" --tags "shared,laptop"
 
 cd "$NODE2_DIR"
-$ZDB update "$SYNC_ID" --body "Modified body"
+$DDB update "$SYNC_ID" --body "Modified body"
 
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
-SYNC_OUT=$($ZDB sync origin master)
+SYNC_OUT=$($DDB sync origin master)
 echo "$SYNC_OUT" | grep -q "conflicts resolved: 0"
 
-$ZDB read "$SYNC_ID" | grep -q "Updated Title"
-$ZDB read "$SYNC_ID" | grep -q "Modified body"
+$DDB read "$SYNC_ID" | grep -q "Updated Title"
+$DDB read "$SYNC_ID" | grep -q "Modified body"
 pass "non-overlapping edits (clean merge)"
 
 # 23. frontmatter scalar conflict (title) — CRDT resolves
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
-$ZDB update "$SYNC_ID" --title "Laptop Title"
+$DDB sync origin master >/dev/null
+$DDB update "$SYNC_ID" --title "Laptop Title"
 
 cd "$NODE2_DIR"
-$ZDB update "$SYNC_ID" --title "Desktop Title"
+$DDB update "$SYNC_ID" --title "Desktop Title"
 
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
-SYNC_OUT=$($ZDB sync origin master)
+SYNC_OUT=$($DDB sync origin master)
 echo "$SYNC_OUT" | grep -q "conflicts resolved: 1"
 
-TITLE=$($ZDB read "$SYNC_ID" | grep "^title:")
+TITLE=$($DDB read "$SYNC_ID" | grep "^title:")
 echo "$TITLE" | grep -qE "(Laptop Title|Desktop Title)"
 pass "frontmatter scalar conflict (CRDT)"
 
 # 24. frontmatter list conflict (tags) — CRDT set-union
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
-$ZDB update "$SYNC_ID" --tags "base,alpha"
+$DDB sync origin master >/dev/null
+$DDB update "$SYNC_ID" --tags "base,alpha"
 
 cd "$NODE2_DIR"
-$ZDB update "$SYNC_ID" --tags "base,beta"
+$DDB update "$SYNC_ID" --tags "base,beta"
 
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
-READ_OUT=$($ZDB read "$SYNC_ID")
+READ_OUT=$($DDB read "$SYNC_ID")
 echo "$READ_OUT" | grep -q "alpha"
 echo "$READ_OUT" | grep -q "beta"
 pass "frontmatter list conflict (tag union)"
 
 # 25. body conflict — Automerge Text CRDT
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
-$ZDB update "$SYNC_ID" --body $'Line one LAPTOP.\nLine two.\nLine three.'
+$DDB sync origin master >/dev/null
+$DDB update "$SYNC_ID" --body $'Line one LAPTOP.\nLine two.\nLine three.'
 
 cd "$NODE2_DIR"
-$ZDB update "$SYNC_ID" --body $'Line one.\nLine two DESKTOP.\nLine three.'
+$DDB update "$SYNC_ID" --body $'Line one.\nLine two DESKTOP.\nLine three.'
 
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
-SYNC_OUT=$($ZDB sync origin master)
+SYNC_OUT=$($DDB sync origin master)
 echo "$SYNC_OUT" | grep -q "conflicts resolved: 1"
 
-READ_OUT=$($ZDB read "$SYNC_ID")
+READ_OUT=$($DDB read "$SYNC_ID")
 echo "$READ_OUT" | grep -q "LAPTOP"
 echo "$READ_OUT" | grep -q "DESKTOP"
 pass "body conflict (CRDT text merge)"
 
 # 26. reference section conflict — write files directly, CRDT union
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
-ZETTEL_FILE="zettelkasten/${SYNC_ID}.md"
+DOOGAT_FILE="ddb/${SYNC_ID}.md"
 
 # node1: append reference section with laptop-specific field
-CONTENT=$(cat "$ZETTEL_FILE")
-printf '%s\n---\n- laptop note:: Added from laptop\n' "$CONTENT" > "$ZETTEL_FILE"
-git add "$ZETTEL_FILE" && git commit -m "node1 add reference" >/dev/null 2>&1
+CONTENT=$(cat "$DOOGAT_FILE")
+printf '%s\n---\n- laptop note:: Added from laptop\n' "$CONTENT" > "$DOOGAT_FILE"
+git add "$DOOGAT_FILE" && git commit -m "node1 add reference" >/dev/null 2>&1
 git push origin master >/dev/null 2>&1
 
 # node2: append different reference field (from its pre-push version)
 cd "$NODE2_DIR"
-CONTENT=$(cat "$ZETTEL_FILE")
-printf '%s\n---\n- desktop note:: Added from desktop\n' "$CONTENT" > "$ZETTEL_FILE"
-git add "$ZETTEL_FILE" && git commit -m "node2 add reference" >/dev/null 2>&1
+CONTENT=$(cat "$DOOGAT_FILE")
+printf '%s\n---\n- desktop note:: Added from desktop\n' "$CONTENT" > "$DOOGAT_FILE"
+git add "$DOOGAT_FILE" && git commit -m "node2 add reference" >/dev/null 2>&1
 
-SYNC_OUT=$($ZDB sync origin master)
+SYNC_OUT=$($DDB sync origin master)
 echo "$SYNC_OUT" | grep -q "conflicts resolved: 1"
 
-READ_OUT=$($ZDB read "$SYNC_ID")
+READ_OUT=$($DDB read "$SYNC_ID")
 echo "$READ_OUT" | grep -q "laptop note"
 echo "$READ_OUT" | grep -q "desktop note"
 pass "reference section conflict (CRDT union)"
 
-# 27b. delete-vs-edit conflict — edit wins, zettel resurrected
+# 27b. delete-vs-edit conflict — edit wins, doogat resurrected
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
-DEL_ID=$($ZDB create --title "To be deleted" --body "Original content")
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
+DEL_ID=$($DDB create --title "To be deleted" --body "Original content")
+$DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
-$ZDB sync origin master >/dev/null
-$ZDB read "$DEL_ID" | grep -q "To be deleted"
+$DDB sync origin master >/dev/null
+$DDB read "$DEL_ID" | grep -q "To be deleted"
 
 # node1 deletes, node2 edits
 cd "$NODE1_DIR"
-$ZDB delete "$DEL_ID"
+$DDB delete "$DEL_ID"
 
 cd "$NODE2_DIR"
-$ZDB update "$DEL_ID" --body "Edited on desktop"
+$DDB update "$DEL_ID" --body "Edited on desktop"
 
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
-# Edit wins: zettel exists and is marked resurrected
-$ZDB read "$DEL_ID" | grep -q "Edited on desktop"
-$ZDB status | grep -q "resurrected"
+# Edit wins: doogat exists and is marked resurrected
+$DDB read "$DEL_ID" | grep -q "Edited on desktop"
+$DDB status | grep -q "resurrected"
 pass "delete-vs-edit conflict (edit wins, resurrected)"
 
 echo "=== id collision detection ==="
 
-# 27a. add-add collision: both zettels survive
+# 27a. add-add collision: both doogats survive
 # Use a fresh pair of repos to avoid interference with earlier sync state.
 COLL_REMOTE="$(mktemp -d)"
 COLL_A="$(mktemp -d)"
@@ -793,121 +793,121 @@ git init --bare "$COLL_REMOTE" >/dev/null 2>&1
 
 # Node A: init, push, register
 cd "$COLL_A"
-$ZDB init . >/dev/null
+$DDB init . >/dev/null
 git remote add origin "$COLL_REMOTE"
-$ZDB register-node "CollA" >/dev/null
+$DDB register-node "CollA" >/dev/null
 git push -u origin master >/dev/null 2>&1
 
 # Node B: clone, register
 git clone "$COLL_REMOTE" "$COLL_B_PARENT/repo" >/dev/null 2>&1
 COLL_B="$COLL_B_PARENT/repo"
 cd "$COLL_B"
-$ZDB reindex >/dev/null
-$ZDB register-node "CollB" >/dev/null
+$DDB reindex >/dev/null
+$DDB register-node "CollB" >/dev/null
 git push origin master >/dev/null 2>&1
 
 # Sync A to pick up B's node
 cd "$COLL_A"
-$ZDB sync origin master >/dev/null
+$DDB sync origin master >/dev/null
 
-# Both create the same-ID zettel independently
+# Both create the same-ID doogat independently
 COLL_ID="20260101120000"
 cd "$COLL_A"
-mkdir -p zettelkasten
-printf -- '---\nid: %s\ntitle: From A\ndate: 2026-01-01\n---\nBody A\n' "$COLL_ID" > "zettelkasten/${COLL_ID}.md"
-git add "zettelkasten/${COLL_ID}.md"
+mkdir -p ddb
+printf -- '---\nid: %s\ntitle: From A\ndate: 2026-01-01\n---\nBody A\n' "$COLL_ID" > "ddb/${COLL_ID}.md"
+git add "ddb/${COLL_ID}.md"
 git commit -m "A creates $COLL_ID" >/dev/null 2>&1
 git push origin master >/dev/null 2>&1
 
 cd "$COLL_B"
-mkdir -p zettelkasten
-printf -- '---\nid: %s\ntitle: From B\ndate: 2026-01-01\n---\nBody B\n' "$COLL_ID" > "zettelkasten/${COLL_ID}.md"
-git add "zettelkasten/${COLL_ID}.md"
+mkdir -p ddb
+printf -- '---\nid: %s\ntitle: From B\ndate: 2026-01-01\n---\nBody B\n' "$COLL_ID" > "ddb/${COLL_ID}.md"
+git add "ddb/${COLL_ID}.md"
 git commit -m "B creates $COLL_ID" >/dev/null 2>&1
 
 # B syncs — collision detected and resolved
-COLL_OUT=$($ZDB sync origin master)
+COLL_OUT=$($DDB sync origin master)
 echo "$COLL_OUT" | grep -q "collisions reassigned: 1"
-COLL_COUNT=$(find zettelkasten -name '*.md' ! -name '_*' | wc -l | tr -d ' ')
+COLL_COUNT=$(find ddb -name '*.md' ! -name '_*' | wc -l | tr -d ' ')
 [ "$COLL_COUNT" -eq 2 ]
-pass "add-add collision: both zettels survive"
+pass "add-add collision: both doogats survive"
 
 echo "=== bundle sync ==="
 
 # 27. bundle export --full + import
 cd "$NODE1_DIR"
-$ZDB sync origin master >/dev/null
-$ZDB bundle export --full --output "$TMPDIR/full-bundle.tar"
+$DDB sync origin master >/dev/null
+$DDB bundle export --full --output "$TMPDIR/full-bundle.tar"
 echo "$TMPDIR/full-bundle.tar" | grep -q "full-bundle.tar"
 
 cd "$NODE3_DIR"
-$ZDB init . >/dev/null
-$ZDB register-node "Tablet" >/dev/null
-$ZDB bundle import "$TMPDIR/full-bundle.tar" | grep -q "imported"
-$ZDB read "$SYNC_ID" | grep -q "laptop note"
+$DDB init . >/dev/null
+$DDB register-node "Tablet" >/dev/null
+$DDB bundle import "$TMPDIR/full-bundle.tar" | grep -q "imported"
+$DDB read "$SYNC_ID" | grep -q "laptop note"
 pass "bundle export --full + import"
 
 # 28. delta bundle export + import
 cd "$NODE1_DIR"
-DELTA_ID=$($ZDB create --title "Delta note" --body "only in delta")
+DELTA_ID=$($DDB create --title "Delta note" --body "only in delta")
 
-NODE2_UUID=$(cd "$NODE2_DIR" && cat .git/zdb-node)
-$ZDB bundle export --target "$NODE2_UUID" --output "$TMPDIR/delta-bundle.tar"
+NODE2_UUID=$(cd "$NODE2_DIR" && cat .git/ddb-node)
+$DDB bundle export --target "$NODE2_UUID" --output "$TMPDIR/delta-bundle.tar"
 
 cd "$NODE2_DIR"
-$ZDB bundle import "$TMPDIR/delta-bundle.tar" | grep -q "imported"
-$ZDB read "$DELTA_ID" | grep -q "Delta note"
+$DDB bundle import "$TMPDIR/delta-bundle.tar" | grep -q "imported"
+$DDB read "$DELTA_ID" | grep -q "Delta note"
 pass "delta bundle export + import"
 
 # 29. update-bin help + rollback
-$ZDB update-bin --help | grep -q "Update zdb"
-$ZDB update-bin --help | grep -q "\-\-rollback"
+$DDB update-bin --help | grep -q "Update ddb"
+$DDB update-bin --help | grep -q "\-\-rollback"
 pass "update-bin --help (includes --rollback)"
 
 # rollback with no backup should fail gracefully
-ROLLBACK_OUT=$($ZDB update-bin --rollback 2>&1 || true)
+ROLLBACK_OUT=$($DDB update-bin --rollback 2>&1 || true)
 echo "$ROLLBACK_OUT" | grep -q "no backup"
 pass "update-bin --rollback (no backup error)"
 
 # 30. ALTER TABLE + DROP TABLE + bulk UPDATE/DELETE
 cd "$TMPDIR"
-$ZDB query "CREATE TABLE smokealt (name TEXT, score INTEGER)" | grep -q "table smokealt created"
-$ZDB query "INSERT INTO smokealt (name, score) VALUES ('a', 1)" >/dev/null
+$DDB query "CREATE TABLE smokealt (name TEXT, score INTEGER)" | grep -q "table smokealt created"
+$DDB query "INSERT INTO smokealt (name, score) VALUES ('a', 1)" >/dev/null
 sleep 1
-$ZDB query "INSERT INTO smokealt (name, score) VALUES ('b', 2)" >/dev/null
-$ZDB query "ALTER TABLE smokealt ADD COLUMN tag TEXT" | grep -q "altered"
-$ZDB query "SELECT name, tag FROM smokealt" | grep -q "NULL"
-$ZDB query "ALTER TABLE smokealt RENAME COLUMN tag TO label" | grep -q "renamed"
-$ZDB query "SELECT name, label FROM smokealt" | grep -q "a"
-$ZDB query "UPDATE smokealt SET score = 99 WHERE name = 'a'" | grep -q "1 row(s) affected"
-$ZDB query "DELETE FROM smokealt WHERE name = 'b'" | grep -q "1 row(s) affected"
-$ZDB query "DROP TABLE smokealt CASCADE" | grep -q "dropped"
+$DDB query "INSERT INTO smokealt (name, score) VALUES ('b', 2)" >/dev/null
+$DDB query "ALTER TABLE smokealt ADD COLUMN tag TEXT" | grep -q "altered"
+$DDB query "SELECT name, tag FROM smokealt" | grep -q "NULL"
+$DDB query "ALTER TABLE smokealt RENAME COLUMN tag TO label" | grep -q "renamed"
+$DDB query "SELECT name, label FROM smokealt" | grep -q "a"
+$DDB query "UPDATE smokealt SET score = 99 WHERE name = 'a'" | grep -q "1 row(s) affected"
+$DDB query "DELETE FROM smokealt WHERE name = 'b'" | grep -q "1 row(s) affected"
+$DDB query "DROP TABLE smokealt CASCADE" | grep -q "dropped"
 pass "alter/drop table + bulk ops"
 
 # 31. file attachments
 cd "$TMPDIR"
-echo "hello attachment" > $TMPDIR/zdb-smoke-attach.txt
-$ZDB attach "$ID1" $TMPDIR/zdb-smoke-attach.txt | grep -q "attached"
-$ZDB attachments "$ID1" | grep -q "zdb-smoke-attach.txt"
-$ZDB attachments "$ID1" | grep -q "text/plain"
-$ZDB query "SELECT name, mime FROM _zdb_attachments WHERE zettel_id = '$ID1'" | grep -q "zdb-smoke-attach.txt"
-$ZDB detach "$ID1" "zdb-smoke-attach.txt" | grep -q "detached"
-$ZDB attachments "$ID1" | grep -q "no attachments"
-rm -f $TMPDIR/zdb-smoke-attach.txt
+echo "hello attachment" > $TMPDIR/ddb-smoke-attach.txt
+$DDB attach "$ID1" $TMPDIR/ddb-smoke-attach.txt | grep -q "attached"
+$DDB attachments "$ID1" | grep -q "ddb-smoke-attach.txt"
+$DDB attachments "$ID1" | grep -q "text/plain"
+$DDB query "SELECT name, mime FROM _ddb_attachments WHERE doogat_id = '$ID1'" | grep -q "ddb-smoke-attach.txt"
+$DDB detach "$ID1" "ddb-smoke-attach.txt" | grep -q "detached"
+$DDB attachments "$ID1" | grep -q "no attachments"
+rm -f $TMPDIR/ddb-smoke-attach.txt
 pass "file attachments (attach/list/query/detach)"
 
 # 32. NoSQL CLI commands
 cd "$TMPDIR"
-$ZDB get "$ID1" | grep -q "First note (edited)"
+$DDB get "$ID1" | grep -q "First note (edited)"
 pass "nosql: get"
 
-$ZDB scan --tag test | grep -q "$ID1"
+$DDB scan --tag test | grep -q "$ID1"
 pass "nosql: scan --tag"
 
-$ZDB scan --type foo | grep -qE "^[0-9]{14}$"
+$DDB scan --type foo | grep -qE "^[0-9]{14}$"
 pass "nosql: scan --type"
 
-$ZDB backlinks "$ID1" | grep -q "$ID2"
+$DDB backlinks "$ID1" | grep -q "$ID2"
 pass "nosql: backlinks"
 
 # 33. stale node resync after compaction
@@ -920,102 +920,102 @@ trap 'rm -rf "$TMPDIR" "$REMOTE_DIR" "$NODE1_DIR" "$NODE2_DIR" "$NODE3_DIR" "$ST
 git init --bare "$STALE_REMOTE" >/dev/null 2>&1
 
 cd "$STALE_N1"
-$ZDB init . >/dev/null
+$DDB init . >/dev/null
 git remote add origin "$STALE_REMOTE"
-$ZDB register-node "StaleNode1" >/dev/null
-STALE_ID=$($ZDB create --title "Stale shared" --body "original content")
+$DDB register-node "StaleNode1" >/dev/null
+STALE_ID=$($DDB create --title "Stale shared" --body "original content")
 git push -u origin master >/dev/null 2>&1
 
 git clone "$STALE_REMOTE" "$STALE_N2" >/dev/null 2>&1
 cd "$STALE_N2"
-$ZDB reindex >/dev/null
-$ZDB register-node "StaleNode2" >/dev/null
+$DDB reindex >/dev/null
+$DDB register-node "StaleNode2" >/dev/null
 
-# Both nodes edit the same zettel → conflict
+# Both nodes edit the same doogat → conflict
 cd "$STALE_N1"
-$ZDB update "$STALE_ID" --body "body from node1"
+$DDB update "$STALE_ID" --body "body from node1"
 git push origin master >/dev/null 2>&1
 
 cd "$STALE_N2"
-$ZDB update "$STALE_ID" --body "body from node2"
-$ZDB sync origin master >/dev/null
+$DDB update "$STALE_ID" --body "body from node2"
+$DDB sync origin master >/dev/null
 
 # Compact to remove CRDT temp files — verify report includes byte stats
-COMPACT_OUT=$($ZDB compact --force)
+COMPACT_OUT=$($DDB compact --force)
 echo "$COMPACT_OUT" | grep -q "crdt temp:"
 echo "$COMPACT_OUT" | grep -q "repo (.git):"
 
 # Create another conflict without CRDT state
 cd "$STALE_N1"
-$ZDB sync origin master >/dev/null
-$ZDB update "$STALE_ID" --body "second edit node1"
+$DDB sync origin master >/dev/null
+$DDB update "$STALE_ID" --body "second edit node1"
 git push origin master >/dev/null 2>&1
 
 cd "$STALE_N2"
-$ZDB update "$STALE_ID" --body "second edit node2"
-$ZDB sync origin master >/dev/null
+$DDB update "$STALE_ID" --body "second edit node2"
+$DDB sync origin master >/dev/null
 
-# Verify zettel is readable and valid
-$ZDB read "$STALE_ID" | grep -q "title:"
+# Verify doogat is readable and valid
+$DDB read "$STALE_ID" | grep -q "title:"
 pass "stale node resync after compaction"
 
 # 34. multi-row INSERT
 cd "$TMPDIR"
-$ZDB query "CREATE TABLE multirow (name TEXT, val INTEGER)" | grep -q "table multirow created"
-MULTI_IDS=$($ZDB query "INSERT INTO multirow (name, val) VALUES ('a', 1), ('b', 2), ('c', 3)")
+$DDB query "CREATE TABLE multirow (name TEXT, val INTEGER)" | grep -q "table multirow created"
+MULTI_IDS=$($DDB query "INSERT INTO multirow (name, val) VALUES ('a', 1), ('b', 2), ('c', 3)")
 echo "$MULTI_IDS" | grep -qE "^[0-9]{14},[0-9]{14},[0-9]{14}$"
-$ZDB query "SELECT COUNT(*) FROM multirow" | grep -q "3"
+$DDB query "SELECT COUNT(*) FROM multirow" | grep -q "3"
 pass "multi-row insert"
 
 # 35. transaction commit + rollback
 cd "$TMPDIR"
-$ZDB query "CREATE TABLE txntest (val TEXT)" | grep -q "table txntest created"
-$ZDB query "BEGIN; INSERT INTO txntest (val) VALUES ('committed'); COMMIT" | grep -q "COMMIT"
-$ZDB query "SELECT val FROM txntest" | grep -q "committed"
-$ZDB query "BEGIN; INSERT INTO txntest (val) VALUES ('rolled-back'); ROLLBACK" | grep -q "ROLLBACK"
+$DDB query "CREATE TABLE txntest (val TEXT)" | grep -q "table txntest created"
+$DDB query "BEGIN; INSERT INTO txntest (val) VALUES ('committed'); COMMIT" | grep -q "COMMIT"
+$DDB query "SELECT val FROM txntest" | grep -q "committed"
+$DDB query "BEGIN; INSERT INTO txntest (val) VALUES ('rolled-back'); ROLLBACK" | grep -q "ROLLBACK"
 # rolled-back row should not appear
-TXNCOUNT=$($ZDB query "SELECT COUNT(*) FROM txntest")
+TXNCOUNT=$($DDB query "SELECT COUNT(*) FROM txntest")
 echo "$TXNCOUNT" | grep -q "1"
 pass "transaction commit + rollback"
 
 # 36. hyphenated type SQL via quoted identifiers
 cd "$TMPDIR"
-$ZDB query 'CREATE TABLE "my-type" (label TEXT)' | grep -q "table my-type created"
-MY_ID=$($ZDB query 'INSERT INTO "my-type" (label) VALUES ('\''test'\'')')
-$ZDB query 'SELECT label FROM "my-type"' | grep -q "test"
-$ZDB query "DELETE FROM \"my-type\" WHERE id = '$MY_ID'" | grep -q "1 row(s) affected"
+$DDB query 'CREATE TABLE "my-type" (label TEXT)' | grep -q "table my-type created"
+MY_ID=$($DDB query 'INSERT INTO "my-type" (label) VALUES ('\''test'\'')')
+$DDB query 'SELECT label FROM "my-type"' | grep -q "test"
+$DDB query "DELETE FROM \"my-type\" WHERE id = '$MY_ID'" | grep -q "1 row(s) affected"
 pass "hyphenated type SQL"
 
 # 37. junction table CRUD (multi-value references)
 cd "$TMPDIR"
-$ZDB query "CREATE TABLE jtag (name VARCHAR(100))" | grep -q "table jtag created"
-$ZDB query "CREATE TABLE jpost (url TEXT, jtag TEXT REFERENCES jtag)" | grep -q "table jpost created"
-JT_TAG_ID=$($ZDB query "INSERT INTO jtag (name) VALUES ('rust')")
+$DDB query "CREATE TABLE jtag (name VARCHAR(100))" | grep -q "table jtag created"
+$DDB query "CREATE TABLE jpost (url TEXT, jtag TEXT REFERENCES jtag)" | grep -q "table jpost created"
+JT_TAG_ID=$($DDB query "INSERT INTO jtag (name) VALUES ('rust')")
 sleep 1
-JT_POST_ID=$($ZDB query "INSERT INTO jpost (url) VALUES ('https://example.com')")
-$ZDB query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')" | grep -q "1 row"
-$ZDB query "SELECT jtag_id FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID'" | grep -q "$JT_TAG_ID"
-$ZDB query "DELETE FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID' AND jtag_id = '$JT_TAG_ID'" | grep -q "1 row"
-$ZDB query "SELECT COUNT(*) FROM jpost_jtag" | grep -q "0"
-$ZDB query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')" >/dev/null
-$ZDB query "DROP TABLE jpost CASCADE" | grep -q "dropped"
-! $ZDB query "SELECT * FROM jpost_jtag" 2>/dev/null
+JT_POST_ID=$($DDB query "INSERT INTO jpost (url) VALUES ('https://example.com')")
+$DDB query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')" | grep -q "1 row"
+$DDB query "SELECT jtag_id FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID'" | grep -q "$JT_TAG_ID"
+$DDB query "DELETE FROM jpost_jtag WHERE jpost_id = '$JT_POST_ID' AND jtag_id = '$JT_TAG_ID'" | grep -q "1 row"
+$DDB query "SELECT COUNT(*) FROM jpost_jtag" | grep -q "0"
+$DDB query "INSERT INTO jpost_jtag (jpost_id, jtag_id) VALUES ('$JT_POST_ID', '$JT_TAG_ID')" >/dev/null
+$DDB query "DROP TABLE jpost CASCADE" | grep -q "dropped"
+! $DDB query "SELECT * FROM jpost_jtag" 2>/dev/null
 pass "junction table CRUD"
 
 # 38. title template compliance check
 cd "$TMPDIR"
-$ZDB query "CREATE TABLE smwidget (name VARCHAR(100), description TEXT)" >/dev/null
-$ZDB query "ALTER TABLE smwidget SET TITLE TEMPLATE '{name} Widget'" >/dev/null
-$ZDB query "INSERT INTO smwidget (name, description) VALUES ('Foo', 'A foo widget')" >/dev/null
-$ZDB fix --verbose --dry-run | grep -q "title does not match template"
+$DDB query "CREATE TABLE smwidget (name VARCHAR(100), description TEXT)" >/dev/null
+$DDB query "ALTER TABLE smwidget SET TITLE TEMPLATE '{name} Widget'" >/dev/null
+$DDB query "INSERT INTO smwidget (name, description) VALUES ('Foo', 'A foo widget')" >/dev/null
+$DDB fix --verbose --dry-run | grep -q "title does not match template"
 pass "title template compliance check"
 
 # 39. zone migration
 cd "$TMPDIR"
-$ZDB query "CREATE TABLE gadget (notes TEXT)" | grep -q "table gadget created"
-$ZDB query "INSERT INTO gadget (notes) VALUES ('Some notes')" >/dev/null
-$ZDB query "ALTER TABLE gadget SET ZONE frontmatter FOR notes" >/dev/null
-FIX_OUT=$($ZDB fix --migrate --verbose)
+$DDB query "CREATE TABLE gadget (notes TEXT)" | grep -q "table gadget created"
+$DDB query "INSERT INTO gadget (notes) VALUES ('Some notes')" >/dev/null
+$DDB query "ALTER TABLE gadget SET ZONE frontmatter FOR notes" >/dev/null
+FIX_OUT=$($DDB fix --migrate --verbose)
 echo "$FIX_OUT" | grep -q "zone-migrated"
 pass "zone migration"
 

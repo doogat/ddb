@@ -1,12 +1,12 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
 fn junction_table_round_trip() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     // Create tables: bookmark with REFERENCES column, and the referenced category table
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)",
@@ -15,7 +15,7 @@ fn junction_table_round_trip() {
         .success()
         .stdout(predicate::str::contains("table bookmark created"));
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE category (label VARCHAR(100))"])
         .assert()
         .success()
@@ -23,7 +23,7 @@ fn junction_table_round_trip() {
 
     // Insert a category
     let cat_out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO category (label) VALUES ('tech')",
@@ -42,7 +42,7 @@ fn junction_table_round_trip() {
 
     // Insert a bookmark
     let bm_out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO bookmark (url) VALUES ('https://example.com')",
@@ -58,7 +58,7 @@ fn junction_table_round_trip() {
     assert!(!bm_id.is_empty(), "bookmark ID should not be empty");
 
     // Insert into junction table
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -69,7 +69,7 @@ fn junction_table_round_trip() {
         .success();
 
     // Verify junction row exists
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!("SELECT category_id FROM bookmark_category WHERE bookmark_id = '{bm_id}'"),
@@ -79,7 +79,7 @@ fn junction_table_round_trip() {
         .stdout(predicate::str::contains(&cat_id));
 
     // Delete junction row
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -90,7 +90,7 @@ fn junction_table_round_trip() {
         .success();
 
     // Verify junction table is empty
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "SELECT COUNT(*) FROM bookmark_category",
@@ -101,7 +101,7 @@ fn junction_table_round_trip() {
 
     // DROP TABLE CASCADE should remove junction table too
     // Re-insert a junction row first so there's data to cascade
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -111,14 +111,14 @@ fn junction_table_round_trip() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args(["query", "DROP TABLE bookmark CASCADE"])
         .assert()
         .success()
         .stdout(predicate::str::contains("dropped"));
 
     // Junction table should no longer exist
-    repo.zdb()
+    repo.ddb()
         .args(["query", "SELECT * FROM bookmark_category"])
         .assert()
         .failure();
@@ -126,22 +126,22 @@ fn junction_table_round_trip() {
 
 #[test]
 fn junction_table_survives_reindex() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE article (title TEXT, tag TEXT REFERENCES tag)",
         ])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE tag (name VARCHAR(50))"])
         .assert()
         .success();
 
     let tag_out = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO tag (name) VALUES ('rust')"])
         .output()
         .unwrap();
@@ -150,7 +150,7 @@ fn junction_table_survives_reindex() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     let art_out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO article (title) VALUES ('Rust Guide')",
@@ -159,7 +159,7 @@ fn junction_table_survives_reindex() {
         .unwrap();
     let art_id = String::from_utf8_lossy(&art_out.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -170,10 +170,10 @@ fn junction_table_survives_reindex() {
         .success();
 
     // Reindex
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // Junction data should survive reindex
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!("SELECT tag_id FROM article_tag WHERE article_id = '{art_id}'"),
@@ -186,26 +186,26 @@ fn junction_table_survives_reindex() {
 #[test]
 fn junction_table_multiple_references() {
     // A type with two REFERENCES columns gets two junction tables
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             "CREATE TABLE task (title TEXT, assignee TEXT REFERENCES person, project TEXT REFERENCES project)",
         ])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE person (name VARCHAR(100))"])
         .assert()
         .success();
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE project (name VARCHAR(100))"])
         .assert()
         .success();
 
     let person_out = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO person (name) VALUES ('alice')"])
         .output()
         .unwrap();
@@ -216,7 +216,7 @@ fn junction_table_multiple_references() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     let proj_out = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO project (name) VALUES ('alpha')"])
         .output()
         .unwrap();
@@ -227,7 +227,7 @@ fn junction_table_multiple_references() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     let task_out = repo
-        .zdb()
+        .ddb()
         .args([
             "query",
             "INSERT INTO task (title) VALUES ('implement feature')",
@@ -239,7 +239,7 @@ fn junction_table_multiple_references() {
         .to_string();
 
     // Insert into both junction tables
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -249,7 +249,7 @@ fn junction_table_multiple_references() {
         .assert()
         .success();
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!(
@@ -260,7 +260,7 @@ fn junction_table_multiple_references() {
         .success();
 
     // Verify both junction tables
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!("SELECT assignee_id FROM task_assignee WHERE task_id = '{task_id}'"),
@@ -269,7 +269,7 @@ fn junction_table_multiple_references() {
         .success()
         .stdout(predicate::str::contains(&person_id));
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
             &format!("SELECT project_id FROM task_project WHERE task_id = '{task_id}'"),

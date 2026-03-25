@@ -1,4 +1,4 @@
-use crate::common::{MultiNodeSetup, ZdbTestRepo};
+use crate::common::{MultiNodeSetup, DdbTestRepo};
 use rand::prelude::*;
 
 /// Round-robin sync: push from one node, pull on all others
@@ -17,7 +17,7 @@ fn sync_round_robin(setup: &MultiNodeSetup) {
 fn three_node_convergence() {
     let setup = MultiNodeSetup::new(3);
 
-    // Each node creates a zettel
+    // Each node creates a doogat
     let id0 = MultiNodeSetup::create(&setup.nodes[0], "Note from 0", "body0");
     MultiNodeSetup::push(&setup.nodes[0]);
 
@@ -32,14 +32,14 @@ fn three_node_convergence() {
     // Sync all
     sync_round_robin(&setup);
 
-    // Verify all nodes see all 3 zettels
+    // Verify all nodes see all 3 doogats
     for node in &setup.nodes {
         let out0 = MultiNodeSetup::read(node, &id0);
-        assert!(out0.contains("Note from 0"), "node missing zettel 0");
+        assert!(out0.contains("Note from 0"), "node missing doogat 0");
         let out1 = MultiNodeSetup::read(node, &id1);
-        assert!(out1.contains("Note from 1"), "node missing zettel 1");
+        assert!(out1.contains("Note from 1"), "node missing doogat 1");
         let out2 = MultiNodeSetup::read(node, &id2);
-        assert!(out2.contains("Note from 2"), "node missing zettel 2");
+        assert!(out2.contains("Note from 2"), "node missing doogat 2");
     }
 }
 
@@ -49,8 +49,8 @@ fn three_node_convergence() {
 fn concurrent_creates() {
     let setup = MultiNodeSetup::new(3);
 
-    // All nodes create different zettels without syncing first.
-    // Sleep between creates to ensure distinct ZettelIDs (timestamp-based).
+    // All nodes create different doogats without syncing first.
+    // Sleep between creates to ensure distinct DoogatIDs (timestamp-based).
     let id0 = MultiNodeSetup::create(&setup.nodes[0], "Concurrent 0", "c0");
     std::thread::sleep(std::time::Duration::from_secs(1));
     let id1 = MultiNodeSetup::create(&setup.nodes[1], "Concurrent 1", "c1");
@@ -72,15 +72,15 @@ fn concurrent_creates() {
     for (i, node) in setup.nodes.iter().enumerate() {
         assert!(
             MultiNodeSetup::read(node, &id0).contains("Concurrent 0"),
-            "node {i} missing zettel from node 0"
+            "node {i} missing doogat from node 0"
         );
         assert!(
             MultiNodeSetup::read(node, &id1).contains("Concurrent 1"),
-            "node {i} missing zettel from node 1"
+            "node {i} missing doogat from node 1"
         );
         assert!(
             MultiNodeSetup::read(node, &id2).contains("Concurrent 2"),
-            "node {i} missing zettel from node 2"
+            "node {i} missing doogat from node 2"
         );
     }
 }
@@ -168,7 +168,7 @@ fn stale_node_resync_after_compaction() {
     MultiNodeSetup::sync(&setup.nodes[1]);
 
     // Compact on node1 to remove CRDT temp files
-    ZdbTestRepo::zdb_at(&setup.nodes[1])
+    DdbTestRepo::ddb_at(&setup.nodes[1])
         .args(["compact", "--force"])
         .assert()
         .success();
@@ -180,39 +180,39 @@ fn stale_node_resync_after_compaction() {
     // This sync should succeed even without CRDT state (LWW fallback)
     MultiNodeSetup::sync(&setup.nodes[2]);
 
-    // Verify the zettel is readable (valid markdown, no panic)
+    // Verify the doogat is readable (valid markdown, no panic)
     let out = MultiNodeSetup::read(&setup.nodes[2], &id);
     assert!(
         out.contains("Edit from") || out.contains("Shared"),
-        "stale node should have a resolved zettel after resync"
+        "stale node should have a resolved doogat after resync"
     );
 }
 
-// ── Test: stale node returns with edits to deleted zettel after compaction ──
+// ── Test: stale node returns with edits to deleted doogat after compaction ──
 
 #[test]
-fn stale_node_edits_deleted_zettel_after_compaction() {
+fn stale_node_edits_deleted_doogat_after_compaction() {
     let setup = MultiNodeSetup::new(3);
 
-    // All nodes share a zettel
+    // All nodes share a doogat
     let id = MultiNodeSetup::create(&setup.nodes[0], "Will be deleted", "original body");
     MultiNodeSetup::push(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
     MultiNodeSetup::sync(&setup.nodes[2]);
 
-    // Node2 goes offline. Node1 deletes the zettel.
+    // Node2 goes offline. Node1 deletes the doogat.
     MultiNodeSetup::delete(&setup.nodes[1], &id);
     MultiNodeSetup::sync(&setup.nodes[1]);
 
     // Compact on node0 to remove CRDT state
     MultiNodeSetup::sync(&setup.nodes[0]);
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["compact", "--force"])
         .assert()
         .success();
     MultiNodeSetup::push(&setup.nodes[0]);
 
-    // Node2 comes back online with an edit to the deleted zettel
+    // Node2 comes back online with an edit to the deleted doogat
     MultiNodeSetup::update(&setup.nodes[2], &id, "Edited while offline", "stale edit");
     MultiNodeSetup::sync(&setup.nodes[2]);
 
@@ -231,10 +231,10 @@ fn stale_node_edits_deleted_zettel_after_compaction() {
     }
 }
 
-// ── Test: stale node creates new zettels after compaction ────────
+// ── Test: stale node creates new doogats after compaction ────────
 
 #[test]
-fn stale_node_new_zettels_after_compaction() {
+fn stale_node_new_doogats_after_compaction() {
     let setup = MultiNodeSetup::new(2);
 
     // Initial sync
@@ -242,7 +242,7 @@ fn stale_node_new_zettels_after_compaction() {
     MultiNodeSetup::push(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
 
-    // Node1 goes offline and creates new zettels
+    // Node1 goes offline and creates new doogats
     let offline_id = MultiNodeSetup::create(&setup.nodes[1], "Created offline", "offline body");
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -255,7 +255,7 @@ fn stale_node_new_zettels_after_compaction() {
             &format!("body edit {i}"),
         );
     }
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["compact", "--force"])
         .assert()
         .success();
@@ -266,16 +266,16 @@ fn stale_node_new_zettels_after_compaction() {
     MultiNodeSetup::push(&setup.nodes[1]);
     MultiNodeSetup::sync(&setup.nodes[0]);
 
-    // Both nodes should see the offline-created zettel
+    // Both nodes should see the offline-created doogat
     let out0 = MultiNodeSetup::read(&setup.nodes[0], &offline_id);
     assert!(
         out0.contains("Created offline"),
-        "node0 missing stale node's zettel: {out0}"
+        "node0 missing stale node's doogat: {out0}"
     );
     let out1 = MultiNodeSetup::read(&setup.nodes[1], &offline_id);
     assert!(
         out1.contains("Created offline"),
-        "node1 should still have its own zettel: {out1}"
+        "node1 should still have its own doogat: {out1}"
     );
 }
 
@@ -293,7 +293,7 @@ fn multiple_stale_nodes_return_sequentially() {
 
     // Node1 and Node2 go offline. Node0 edits and compacts.
     MultiNodeSetup::update(&setup.nodes[0], &id, "Node0 edit", "body from node0");
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["compact", "--force"])
         .assert()
         .success();
@@ -306,7 +306,7 @@ fn multiple_stale_nodes_return_sequentially() {
 
     // Compact again after node1's return
     MultiNodeSetup::sync(&setup.nodes[0]);
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["compact", "--force"])
         .assert()
         .success();
@@ -349,16 +349,16 @@ fn hlc_lww_picks_later_writer() {
     let setup = MultiNodeSetup::new(2);
 
     // Install kanban type on node0 (uses preset:last-writer-wins), sync to both
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["type", "install", "kanban"])
         .assert()
         .success();
     MultiNodeSetup::sync(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
 
-    // Create a kanban zettel on node0, sync to both
+    // Create a kanban doogat on node0, sync to both
     let id = MultiNodeSetup::create(&setup.nodes[0], "LWW task", "original body");
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["update", &id, "--type", "kanban"])
         .assert()
         .success();
@@ -403,7 +403,7 @@ fn bundle_full_bootstrap() {
 
     // Export full bundle from node0
     let bundle_path = setup.remote_dir.path().join("full.bundle.tar");
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["bundle", "export", "--full", "--output"])
         .arg(&bundle_path)
         .assert()
@@ -414,28 +414,28 @@ fn bundle_full_bootstrap() {
     // Create a fresh node3 (not cloned from remote)
     let dir3 = tempfile::TempDir::new().unwrap();
     let path3 = dir3.path().to_path_buf();
-    ZdbTestRepo::zdb_at(&path3)
+    DdbTestRepo::ddb_at(&path3)
         .arg("init")
         .arg(&path3)
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&path3)
+    DdbTestRepo::ddb_at(&path3)
         .args(["register-node", "Node-3"])
         .assert()
         .success();
 
     // Import the full bundle
-    ZdbTestRepo::zdb_at(&path3)
+    DdbTestRepo::ddb_at(&path3)
         .args(["bundle", "import"])
         .arg(&bundle_path)
         .assert()
         .success();
 
-    // Verify the zettel exists on node3
+    // Verify the doogat exists on node3
     let out = MultiNodeSetup::read(&path3, &id);
     assert!(
         out.contains("Bundle test"),
-        "bootstrapped node should have the zettel"
+        "bootstrapped node should have the doogat"
     );
 }
 
@@ -459,7 +459,7 @@ fn bundle_recovery_after_compaction() {
             &format!("body {i}"),
         );
     }
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["compact", "--force"])
         .assert()
         .success();
@@ -467,7 +467,7 @@ fn bundle_recovery_after_compaction() {
 
     // Export bundle from node0 (after compaction)
     let bundle_path = setup.remote_dir.path().join("recovery.bundle.tar");
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["bundle", "export", "--full", "--output"])
         .arg(&bundle_path)
         .assert()
@@ -476,24 +476,24 @@ fn bundle_recovery_after_compaction() {
     // Create a fresh node that never synced with remote
     let dir3 = tempfile::TempDir::new().unwrap();
     let path3 = dir3.path().to_path_buf();
-    ZdbTestRepo::zdb_at(&path3)
+    DdbTestRepo::ddb_at(&path3)
         .arg("init")
         .arg(&path3)
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&path3)
+    DdbTestRepo::ddb_at(&path3)
         .args(["register-node", "Recovery-Node"])
         .assert()
         .success();
 
     // Import the post-compaction bundle
-    ZdbTestRepo::zdb_at(&path3)
+    DdbTestRepo::ddb_at(&path3)
         .args(["bundle", "import"])
         .arg(&bundle_path)
         .assert()
         .success();
 
-    // Verify the zettel exists with latest content
+    // Verify the doogat exists with latest content
     let out = MultiNodeSetup::read(&path3, &id);
     assert!(
         out.contains("Post-compact edit"),
@@ -521,7 +521,7 @@ fn compact_creates_recoverable_backup() {
             &format!("body {i}"),
         );
     }
-    let compact_out = ZdbTestRepo::zdb_at(&setup.nodes[0])
+    let compact_out = DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["compact", "--force"])
         .output()
         .expect("compact failed");
@@ -546,15 +546,15 @@ fn compact_creates_recoverable_backup() {
     // Import backup into a fresh node to verify it's recoverable
     let fresh = tempfile::TempDir::new().unwrap();
     let fresh_path = fresh.path().to_path_buf();
-    ZdbTestRepo::zdb_at(&fresh_path)
+    DdbTestRepo::ddb_at(&fresh_path)
         .args(["init"])
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&fresh_path)
+    DdbTestRepo::ddb_at(&fresh_path)
         .args(["register-node", "RecoveryNode"])
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&fresh_path)
+    DdbTestRepo::ddb_at(&fresh_path)
         .args(["bundle", "import", backup_path])
         .assert()
         .success();
@@ -571,7 +571,7 @@ fn compact_no_backup_flag() {
     let setup = MultiNodeSetup::new(2);
 
     MultiNodeSetup::create(&setup.nodes[0], "No-backup test", "body");
-    let compact_out = ZdbTestRepo::zdb_at(&setup.nodes[0])
+    let compact_out = DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["compact", "--force", "--no-backup"])
         .output()
         .expect("compact failed");
@@ -585,8 +585,8 @@ fn compact_no_backup_flag() {
         "compact --no-backup should not show backup path: {stdout}"
     );
 
-    // Verify no backup file was created in .zdb/backups/
-    let backups_dir = setup.nodes[0].join(".zdb/backups");
+    // Verify no backup file was created in .ddb/backups/
+    let backups_dir = setup.nodes[0].join(".ddb/backups");
     if backups_dir.exists() {
         let entries: Vec<_> = std::fs::read_dir(&backups_dir)
             .unwrap()
@@ -607,7 +607,7 @@ fn compact_backup_path_flag() {
     let custom_backup = tempfile::NamedTempFile::new().unwrap();
     let custom_path = custom_backup.path().with_extension("bundle.tar");
 
-    let compact_out = ZdbTestRepo::zdb_at(&setup.nodes[0])
+    let compact_out = DdbTestRepo::ddb_at(&setup.nodes[0])
         .args([
             "compact",
             "--force",
@@ -643,7 +643,7 @@ fn airgapped_delta_transfer() {
     MultiNodeSetup::push(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
 
-    // Node0 creates a new zettel (node1 doesn't know about it yet)
+    // Node0 creates a new doogat (node1 doesn't know about it yet)
     let id1 = MultiNodeSetup::create(&setup.nodes[0], "Delta note", "delta");
     MultiNodeSetup::push(&setup.nodes[0]);
 
@@ -651,14 +651,14 @@ fn airgapped_delta_transfer() {
     let bundle_path = setup.remote_dir.path().join("delta.bundle.tar");
 
     // Export as full (delta requires knowing remote UUID; full is simpler for testing)
-    ZdbTestRepo::zdb_at(&setup.nodes[0])
+    DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["bundle", "export", "--full", "--output"])
         .arg(&bundle_path)
         .assert()
         .success();
 
     // Import on node1
-    ZdbTestRepo::zdb_at(&setup.nodes[1])
+    DdbTestRepo::ddb_at(&setup.nodes[1])
         .args(["bundle", "import"])
         .arg(&bundle_path)
         .assert()
@@ -668,23 +668,23 @@ fn airgapped_delta_transfer() {
     let out = MultiNodeSetup::read(&setup.nodes[1], &id1);
     assert!(
         out.contains("Delta note"),
-        "delta transfer should bring new zettel"
+        "delta transfer should bring new doogat"
     );
 }
 
-// ── Test: concurrent edits to same zettel ────────────────────────
+// ── Test: concurrent edits to same doogat ────────────────────────
 
 #[test]
-fn concurrent_edits_same_zettel() {
+fn concurrent_edits_same_doogat() {
     let setup = MultiNodeSetup::new(3);
 
-    // Node0 creates a zettel, sync to all
-    let id = MultiNodeSetup::create(&setup.nodes[0], "Shared zettel", "original body");
+    // Node0 creates a doogat, sync to all
+    let id = MultiNodeSetup::create(&setup.nodes[0], "Shared doogat", "original body");
     MultiNodeSetup::push(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
     MultiNodeSetup::sync(&setup.nodes[2]);
 
-    // All 3 nodes edit the same zettel without syncing between edits
+    // All 3 nodes edit the same doogat without syncing between edits
     MultiNodeSetup::update(&setup.nodes[0], &id, "Edit from node0", "body from node0");
     MultiNodeSetup::update(&setup.nodes[1], &id, "Edit from node1", "body from node1");
     MultiNodeSetup::update(&setup.nodes[2], &id, "Edit from node2", "body from node2");
@@ -709,16 +709,16 @@ fn concurrent_edits_same_zettel() {
 fn delete_vs_edit_multi_node() {
     let setup = MultiNodeSetup::new(3);
 
-    // Node0 creates a zettel, sync to all
+    // Node0 creates a doogat, sync to all
     let id = MultiNodeSetup::create(&setup.nodes[0], "Will conflict", "original body");
     MultiNodeSetup::push(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
     MultiNodeSetup::sync(&setup.nodes[2]);
 
-    // Node1 deletes the zettel
+    // Node1 deletes the doogat
     MultiNodeSetup::delete(&setup.nodes[1], &id);
 
-    // Node2 edits the zettel
+    // Node2 edits the doogat
     MultiNodeSetup::update(
         &setup.nodes[2],
         &id,
@@ -735,7 +735,7 @@ fn delete_vs_edit_multi_node() {
         sync_round_robin(&setup);
     }
 
-    // Edit wins: zettel should exist on all nodes with node2's content
+    // Edit wins: doogat should exist on all nodes with node2's content
     for (i, node) in setup.nodes.iter().enumerate() {
         let out = MultiNodeSetup::read(node, &id);
         assert!(
@@ -754,9 +754,9 @@ fn delete_vs_edit_multi_node() {
 
 // ── Test: chaos convergence with 4 nodes ─────────────────────────
 
-/// List zettel files in a node's zettelkasten directory, sorted.
-fn list_zettels(node: &std::path::Path) -> Vec<String> {
-    let zk_dir = node.join("zettelkasten");
+/// List doogat files in a node's ddb directory, sorted.
+fn list_doogats(node: &std::path::Path) -> Vec<String> {
+    let zk_dir = node.join("ddb");
     let mut files: Vec<String> = std::fs::read_dir(&zk_dir)
         .unwrap()
         .filter_map(|e| {
@@ -773,9 +773,9 @@ fn list_zettels(node: &std::path::Path) -> Vec<String> {
     files
 }
 
-/// Read a zettel file directly from disk for comparison.
-fn read_zettel_file(node: &std::path::Path, filename: &str) -> String {
-    // Compare canonical zettel content instead of raw working tree bytes so
+/// Read a doogat file directly from disk for comparison.
+fn read_doogat_file(node: &std::path::Path, filename: &str) -> String {
+    // Compare canonical doogat content instead of raw working tree bytes so
     // platform-specific checkout EOL conversion does not look like divergence.
     let id = filename.strip_suffix(".md").unwrap_or(filename);
     MultiNodeSetup::read(node, id).replace("\r\n", "\n")
@@ -786,17 +786,17 @@ fn chaos_convergence() {
     let setup = MultiNodeSetup::new(4);
     let mut rng = StdRng::seed_from_u64(42);
 
-    // Each node tracks its locally-known zettel IDs (for updates)
+    // Each node tracks its locally-known doogat IDs (for updates)
     let mut local_ids: Vec<Vec<String>> = vec![vec![]; 4];
 
-    // Phase 1: each node creates an initial zettel so there's something to operate on
+    // Phase 1: each node creates an initial doogat so there's something to operate on
     for (i, node) in setup.nodes.iter().enumerate() {
         let id = MultiNodeSetup::create(node, &format!("Init {i}"), &format!("body {i}"));
         local_ids[i].push(id);
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    // Sync all so every node knows every zettel
+    // Sync all so every node knows every doogat
     for _ in 0..3 {
         sync_round_robin(&setup);
     }
@@ -823,7 +823,7 @@ fn chaos_convergence() {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
                 1 if !ids.is_empty() => {
-                    // Update a random known zettel
+                    // Update a random known doogat
                     let idx = rng.gen_range(0..ids.len());
                     let id = ids[idx].clone();
                     MultiNodeSetup::update(
@@ -852,23 +852,23 @@ fn chaos_convergence() {
         sync_round_robin(&setup);
     }
 
-    // Phase 4: verify all nodes have identical zettel set and content
-    let files_node0 = list_zettels(&setup.nodes[0]);
-    assert!(!files_node0.is_empty(), "node 0 should have zettels");
+    // Phase 4: verify all nodes have identical doogat set and content
+    let files_node0 = list_doogats(&setup.nodes[0]);
+    assert!(!files_node0.is_empty(), "node 0 should have doogats");
 
     for (i, node) in setup.nodes.iter().enumerate().skip(1) {
-        let files = list_zettels(node);
+        let files = list_doogats(node);
         assert_eq!(
             files_node0, files,
-            "node 0 and node {i} have different zettel sets"
+            "node 0 and node {i} have different doogat sets"
         );
     }
 
     // Verify file contents match across all nodes
     for filename in &files_node0 {
-        let content0 = read_zettel_file(&setup.nodes[0], filename);
+        let content0 = read_doogat_file(&setup.nodes[0], filename);
         for (i, node) in setup.nodes.iter().enumerate().skip(1) {
-            let content = read_zettel_file(node, filename);
+            let content = read_doogat_file(node, filename);
             assert_eq!(
                 content0, content,
                 "node 0 and node {i} diverged on {filename}"

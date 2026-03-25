@@ -1,14 +1,14 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 use predicates::prelude::*;
 
 #[test]
 fn attach_and_list() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create a zettel
+    // Create a doogat
     let out = repo
-        .zdb()
-        .args(["create", "--title", "Test Zettel", "--body", "Some body"])
+        .ddb()
+        .args(["create", "--title", "Test Doogat", "--body", "Some body"])
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -20,14 +20,14 @@ fn attach_and_list() {
     std::fs::copy(tmp.path(), &tmp_with_ext).unwrap();
 
     // Attach
-    repo.zdb()
+    repo.ddb()
         .args(["attach", &id, tmp_with_ext.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("attached test-doc.txt"));
 
     // List
-    repo.zdb()
+    repo.ddb()
         .args(["attachments", &id])
         .assert()
         .success()
@@ -35,10 +35,10 @@ fn attach_and_list() {
         .stdout(predicate::str::contains("text/plain"));
 
     // Verify via SQL
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
-            &format!("SELECT name, mime FROM _zdb_attachments WHERE zettel_id = '{id}'"),
+            &format!("SELECT name, mime FROM _ddb_attachments WHERE doogat_id = '{id}'"),
         ])
         .assert()
         .success()
@@ -49,10 +49,10 @@ fn attach_and_list() {
 
 #[test]
 fn detach_removes_file() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Detach Test", "--body", "body"])
         .output()
         .unwrap();
@@ -63,20 +63,20 @@ fn detach_removes_file() {
     let tmp_path = tmp.path().parent().unwrap().join("remove-me.bin");
     std::fs::copy(tmp.path(), &tmp_path).unwrap();
 
-    repo.zdb()
+    repo.ddb()
         .args(["attach", &id, tmp_path.to_str().unwrap()])
         .assert()
         .success();
 
     // Detach
-    repo.zdb()
+    repo.ddb()
         .args(["detach", &id, "remove-me.bin"])
         .assert()
         .success()
         .stdout(predicate::str::contains("detached"));
 
     // List should be empty
-    repo.zdb()
+    repo.ddb()
         .args(["attachments", &id])
         .assert()
         .success()
@@ -91,10 +91,10 @@ fn detach_removes_file() {
 
 #[test]
 fn multiple_attachments() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Multi", "--body", "body"])
         .output()
         .unwrap();
@@ -104,23 +104,23 @@ fn multiple_attachments() {
     for name in &["a.txt", "b.pdf", "c.png"] {
         let p = dir.path().join(name);
         std::fs::write(&p, format!("content of {name}").as_bytes()).unwrap();
-        repo.zdb()
+        repo.ddb()
             .args(["attach", &id, p.to_str().unwrap()])
             .assert()
             .success();
     }
 
     // All three listed
-    let out = repo.zdb().args(["attachments", &id]).output().unwrap();
+    let out = repo.ddb().args(["attachments", &id]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("a.txt"));
     assert!(stdout.contains("b.pdf"));
     assert!(stdout.contains("c.png"));
 
     // Detach one
-    repo.zdb().args(["detach", &id, "b.pdf"]).assert().success();
+    repo.ddb().args(["detach", &id, "b.pdf"]).assert().success();
 
-    let out = repo.zdb().args(["attachments", &id]).output().unwrap();
+    let out = repo.ddb().args(["attachments", &id]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("a.txt"));
     assert!(!stdout.contains("b.pdf"));
@@ -129,10 +129,10 @@ fn multiple_attachments() {
 
 #[test]
 fn reindex_preserves_attachments() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Reindex Test", "--body", "body"])
         .output()
         .unwrap();
@@ -143,19 +143,19 @@ fn reindex_preserves_attachments() {
     let tmp_path = tmp.path().parent().unwrap().join("reindex.txt");
     std::fs::copy(tmp.path(), &tmp_path).unwrap();
 
-    repo.zdb()
+    repo.ddb()
         .args(["attach", &id, tmp_path.to_str().unwrap()])
         .assert()
         .success();
 
     // Reindex
-    repo.zdb().args(["reindex"]).assert().success();
+    repo.ddb().args(["reindex"]).assert().success();
 
     // Attachment still queryable
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
-            &format!("SELECT name FROM _zdb_attachments WHERE zettel_id = '{id}'"),
+            &format!("SELECT name FROM _ddb_attachments WHERE doogat_id = '{id}'"),
         ])
         .assert()
         .success()
@@ -166,10 +166,10 @@ fn reindex_preserves_attachments() {
 
 #[test]
 fn attach_overwrites_same_name() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Overwrite", "--body", "body"])
         .output()
         .unwrap();
@@ -179,19 +179,19 @@ fn attach_overwrites_same_name() {
     let p = dir.path().join("file.txt");
 
     std::fs::write(&p, b"v1").unwrap();
-    repo.zdb()
+    repo.ddb()
         .args(["attach", &id, p.to_str().unwrap()])
         .assert()
         .success();
 
     std::fs::write(&p, b"v2-longer").unwrap();
-    repo.zdb()
+    repo.ddb()
         .args(["attach", &id, p.to_str().unwrap()])
         .assert()
         .success();
 
     // Only one attachment, with updated size
-    let out = repo.zdb().args(["attachments", &id]).output().unwrap();
+    let out = repo.ddb().args(["attachments", &id]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 1);
@@ -200,30 +200,30 @@ fn attach_overwrites_same_name() {
 
 #[test]
 fn detach_nonexistent_errors() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "No attach", "--body", "body"])
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    repo.zdb()
+    repo.ddb()
         .args(["detach", &id, "missing.txt"])
         .assert()
         .failure();
 }
 
 #[test]
-fn attach_nonexistent_zettel_errors() {
-    let repo = ZdbTestRepo::init();
+fn attach_nonexistent_doogat_errors() {
+    let repo = DdbTestRepo::init();
 
     let dir = tempfile::TempDir::new().unwrap();
     let p = dir.path().join("file.txt");
     std::fs::write(&p, b"data").unwrap();
 
-    repo.zdb()
+    repo.ddb()
         .args(["attach", "99999999999999", p.to_str().unwrap()])
         .assert()
         .failure();

@@ -1,12 +1,12 @@
 # Parser
 
-**Source**: `zdb-core/src/parser.rs` (726 lines)
+**Source**: `ddb-core/src/parser.rs` (726 lines)
 
-The parser handles splitting Markdown into three zones, extracting metadata, and serializing back to Markdown. It's the largest module because the zettel format has several edge cases.
+The parser handles splitting Markdown into three zones, extracting metadata, and serializing back to Markdown. It's the largest module because the doogat format has several edge cases.
 
 ## Three-Zone Splitting
 
-`split_zones(content) -> Result<Zettel>`
+`split_zones(content) -> Result<Doogat>`
 
 ### Algorithm
 
@@ -26,9 +26,9 @@ The parser handles splitting Markdown into three zones, extracting metadata, and
 
 ## Frontmatter Parsing
 
-`parse_frontmatter(yaml, path) -> Result<ZettelMeta>`
+`parse_frontmatter(yaml, path) -> Result<DoogatMeta>`
 
-Deserializes YAML into `ZettelMeta`. If the `id` field is missing, falls back to extracting a numeric ID from the filename stem (e.g., `zettelkasten/20260226130000.md` → `ZettelId("20260226130000")`).
+Deserializes YAML into `DoogatMeta`. If the `id` field is missing, falls back to extracting a numeric ID from the filename stem (e.g., `ddb/20260226130000.md` → `DoogatId("20260226130000")`).
 
 ## Inline Field Extraction
 
@@ -86,7 +86,7 @@ Extracts `#tag` tokens from body text. Respects the same exclusion zones as inli
 
 Pattern: `(?:^|\s)#([\w][\w/-]*)` — matches hierarchical tags like `#gtd/act/next` and `#client/100-acme-corp`.
 
-Results stored in `ParsedZettel.body_tags` and indexed in `_zdb_tags` with `source = 'body'`.
+Results stored in `ParsedDoogat.body_tags` and indexed in `_ddb_tags` with `source = 'body'`.
 
 ## Checkbox Extraction
 
@@ -101,11 +101,11 @@ Extracts `- [ ]` (open), `- [x]` (done), `- [i]` (info) items from body text. Fe
 - **line_number**: 1-indexed position within the body
 - **indent_level**: number of leading spaces (0 for top-level, 2+ for sub-items)
 
-Results stored in `ParsedZettel.checkboxes` and indexed in `_zdb_checkboxes`.
+Results stored in `ParsedDoogat.checkboxes` and indexed in `_ddb_checkboxes`.
 
 ## Serialization
 
-`serialize(zettel: &ParsedZettel) -> String`
+`serialize(doogat: &ParsedDoogat) -> String`
 
 Produces Markdown with canonical field ordering in frontmatter:
 
@@ -128,9 +128,9 @@ If `reference_section` is non-empty, appended after a `---` separator.
 
 ## ID Generation
 
-`generate_id() -> ZettelId`
+`generate_id() -> DoogatId`
 
-Returns a `ZettelId` from the current local timestamp: `chrono::Local::now().format("%Y%m%d%H%M%S")`.
+Returns a `DoogatId` from the current local timestamp: `chrono::Local::now().format("%Y%m%d%H%M%S")`.
 
 ## Test Coverage
 

@@ -1,0 +1,762 @@
+use rusqlite::params;
+
+use crate::error::Result;
+use crate::traits::DoogatSource;
+use crate::types::ParsedDoogat;
+
+use super::Index;
+
+/// DDL for creating a junction table for a REFERENCES column.
+pub fn junction_table_ddl(table_name: &str, col_name: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS \"{t}_{c}\" (\"{t}_id\" TEXT NOT NULL, \"{c}_id\" TEXT NOT NULL, PRIMARY KEY (\"{t}_id\", \"{c}_id\"))",
+        t = table_name,
+        c = col_name
+    )
+}
+
+impl Index {
+    /// Drop and recreate a materialized SQLite table from a schema.
+    fn drop_and_create_materialized_table(&self, schema: &crate::types::TableSchema) -> Result<()> {
+        // Drop junction tables first (before main table)
+        for col in &schema.columns {
+            if col.references.is_some() {
+                self.conn.execute(
+                    &format!(
+                        "DROP TABLE IF EXISTS \"{}_{}\"",
+                        schema.table_name, col.name
+                    ),
+                    [],
+                )?;
+            }
+        }
+
+        self.conn.execute(
+            &format!("DROP TABLE IF EXISTS \"{}\"", schema.table_name),
+            [],
+        )?;
+
+        let mut col_defs = vec!["id TEXT PRIMARY KEY".to_string()];
+        for col in &schema.columns {
+            let sql_type = match col.data_type.to_uppercase().as_str() {
+                "INTEGER" => "INTEGER",
+                "REAL" => "REAL",
+                "BOOLEAN" => "INTEGER",
+                _ => "TEXT",
+            };
+            let check = if let Some(ref vals) = col.allowed_values {
+                let quoted: Vec<String> = vals
+                    .iter()
+                    .map(|v| format!("'{}'", v.replace('\'', "''")))
+                    .collect();
+                format!(
+                    " CHECK(\"{}\" IS NULL OR \"{}\" IN ({}))",
+                    col.name,
+                    col.name,
+                    quoted.join(", ")
+                )
+            } else {
+                String::new()
+            };
+            col_defs.push(format!("\"{}\" {}{}", col.name, sql_type, check));
+        }
+        self.conn.execute(
+            &format!(
+                "CREATE TABLE \"{}\" ({})",
+                schema.table_name,
+                col_defs.join(", ")
+            ),
+            [],
+        )?;
+
+        // Create junction tables for REFERENCES columns
+        for col in &schema.columns {
+            if col.references.is_some() {
+                self.conn
+                    .execute(&junction_table_ddl(&schema.table_name, &col.name), [])?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Populate a materialized table with data doogats of the given type.
+    fn populate_materialized_table(
+        &self,
+        schema: &crate::types::TableSchema,
+        type_name: &str,
+        repo: &(impl DoogatSource + ?Sized),
+    ) -> Result<()> {
+        let mut data_stmt = self
+            .conn
+            .prepare("SELECT id, path FROM doogats WHERE type = ?1")?;
+        let data_doogats: Vec<(String, String)> = data_stmt
+            .query_map(params![type_name], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for (doogat_id, doogat_path) in &data_doogats {
+            let doogat_content = repo.read_file(doogat_path)?;
+            let doogat_parsed = crate::parser::parse(&doogat_content, doogat_path)?;
+            self.materialize_row(schema, doogat_id, &doogat_parsed)?;
+        }
+        Ok(())
+    }
+
+    /// Rematerialize a single type's SQLite table.
+    /// Loads typedef (if any), infers schema from data, merges, drops/creates table, populates rows.
+    pub fn rematerialize_type(
+        &self,
+        type_name: &str,
+        repo: &(impl DoogatSource + ?Sized),
+    ) -> Result<()> {
+        use crate::sql_engine::schema_from_parsed;
+
+        // Load typedef if exists
+        let typedef: Option<crate::types::TableSchema> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1")?;
+            let path: Option<String> = stmt.query_row(params![type_name], |row| row.get(0)).ok();
+            path.and_then(|p| {
+                let content = repo.read_file(&p).ok()?;
+                let parsed = crate::parser::parse(&content, &p).ok()?;
+                schema_from_parsed(&parsed).ok()
+            })
+        };
+
+        // Infer schema from data
+        let inferred = self.infer_schema(type_name, repo)?;
+        let schema = Self::merge_schemas(typedef, inferred);
+
+        if schema.columns.is_empty() {
+            return Ok(());
+        }
+
+        self.drop_and_create_materialized_table(&schema)?;
+        self.populate_materialized_table(&schema, type_name, repo)?;
+        Ok(())
+    }
+
+    /// Materialize SQLite tables for all typed doogats using merged schemas.
+    /// Returns (tables_materialized, types_inferred).
+    pub fn materialize_all_types(&self, repo: &impl DoogatSource) -> Result<(usize, Vec<String>)> {
+        let mut tables_materialized = 0;
+        let mut types_inferred = Vec::new();
+
+        // Load explicit _typedef schemas
+        let typedef_schemas = self.load_all_typedefs(repo);
+
+        // Find all distinct types (excluding _typedef and empty)
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT type FROM doogats WHERE type != '_typedef' AND type != '' AND type IS NOT NULL",
+        )?;
+        let type_names: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for type_name in &type_names {
+            let typedef = typedef_schemas.get(type_name.as_str()).cloned();
+
+            let inferred = self.infer_schema(type_name, repo)?;
+            let schema = Self::merge_schemas(typedef.clone(), inferred);
+
+            if schema.columns.is_empty() {
+                continue;
+            }
+
+            if typedef.is_none() {
+                // Type inference is tracked in types_inferred and returned to caller
+                types_inferred.push(type_name.clone());
+            }
+
+            self.drop_and_create_materialized_table(&schema)?;
+            self.populate_materialized_table(&schema, type_name, repo)?;
+            tables_materialized += 1;
+        }
+
+        // Also materialize typedef-only types with no data doogats
+        for (type_name, schema) in &typedef_schemas {
+            if !type_names.contains(type_name) && !schema.columns.is_empty() {
+                self.drop_and_create_materialized_table(schema)?;
+                tables_materialized += 1;
+            }
+        }
+
+        Ok((tables_materialized, types_inferred))
+    }
+
+    /// Infer a TableSchema from pre-parsed doogats (no git reads).
+    pub fn infer_schema_from(
+        type_name: &str,
+        doogats: &[ParsedDoogat],
+    ) -> crate::types::TableSchema {
+        use crate::types::{ColumnDef, TableSchema, Zone};
+        use std::collections::HashMap;
+
+        let mut columns: HashMap<String, (Zone, Vec<String>)> = HashMap::new();
+
+        for parsed in doogats
+            .iter()
+            .filter(|z| z.meta.doogat_type.as_deref() == Some(type_name))
+        {
+            for (key, value) in &parsed.meta.extra {
+                let inferred_type = infer_yaml_type(value);
+                columns
+                    .entry(key.to_lowercase())
+                    .or_insert_with(|| (Zone::Frontmatter, Vec::new()))
+                    .1
+                    .push(inferred_type);
+            }
+
+            for section in &parsed.sections {
+                if section.level > 0 {
+                    columns
+                        .entry(section.heading.to_lowercase())
+                        .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+                }
+            }
+
+            for field in &parsed.inline_fields {
+                if field.zone == Zone::Reference {
+                    let entry = columns
+                        .entry(field.key.to_lowercase())
+                        .or_insert_with(|| (Zone::Reference, Vec::new()));
+                    entry.1.push("TEXT".to_string());
+                }
+            }
+        }
+
+        let mut cols: Vec<ColumnDef> = columns
+            .into_iter()
+            .map(|(name, (zone, types))| {
+                let data_type = widen_types(&types);
+                ColumnDef {
+                    name,
+                    data_type,
+                    references: None,
+                    zone: Some(zone),
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                }
+            })
+            .collect();
+
+        cols.sort_by(|a, b| a.name.cmp(&b.name));
+
+        TableSchema {
+            table_name: type_name.to_string(),
+            columns: cols,
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+        }
+    }
+
+    /// Populate a materialized table from pre-parsed doogats (no git reads).
+    fn populate_materialized_table_from(
+        &self,
+        schema: &crate::types::TableSchema,
+        doogats: &[ParsedDoogat],
+    ) -> Result<()> {
+        let type_name = &schema.table_name;
+        for doogat in doogats
+            .iter()
+            .filter(|z| z.meta.doogat_type.as_deref() == Some(type_name.as_str()))
+        {
+            let id = doogat.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
+            self.materialize_row(schema, id, doogat)?;
+        }
+        Ok(())
+    }
+
+    /// Materialize all typed tables from pre-parsed doogats (no git reads).
+    pub fn materialize_all_types_from(
+        &self,
+        doogats: &[ParsedDoogat],
+    ) -> Result<(usize, Vec<String>)> {
+        let mut tables_materialized = 0;
+        let mut types_inferred = Vec::new();
+
+        let typedef_schemas = Self::load_all_typedefs_from(doogats);
+
+        // Find distinct types from the pre-parsed data
+        let type_names: Vec<String> = doogats
+            .iter()
+            .filter_map(|z| z.meta.doogat_type.as_deref())
+            .filter(|t| !t.is_empty() && *t != "_typedef")
+            .map(|t| t.to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        for type_name in &type_names {
+            let typedef = typedef_schemas.get(type_name.as_str()).cloned();
+
+            let inferred = Self::infer_schema_from(type_name, doogats);
+            let schema = Self::merge_schemas(typedef.clone(), inferred);
+
+            if schema.columns.is_empty() {
+                continue;
+            }
+
+            if typedef.is_none() {
+                // Type inference is tracked in types_inferred and returned to caller
+                types_inferred.push(type_name.clone());
+            }
+
+            self.drop_and_create_materialized_table(&schema)?;
+            self.populate_materialized_table_from(&schema, doogats)?;
+            tables_materialized += 1;
+        }
+
+        // Also materialize typedef-only types with no data doogats
+        for (type_name, schema) in &typedef_schemas {
+            if !type_names.contains(type_name) && !schema.columns.is_empty() {
+                self.drop_and_create_materialized_table(schema)?;
+                tables_materialized += 1;
+            }
+        }
+
+        Ok((tables_materialized, types_inferred))
+    }
+
+    /// Infer a TableSchema for a type by scanning all data doogats of that type.
+    pub fn infer_schema(
+        &self,
+        type_name: &str,
+        repo: &(impl DoogatSource + ?Sized),
+    ) -> Result<crate::types::TableSchema> {
+        use crate::types::{ColumnDef, TableSchema, Zone};
+        use std::collections::HashMap;
+
+        // Query all doogats of this type
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM doogats WHERE type = ?1")?;
+        let paths: Vec<String> = stmt
+            .query_map(params![type_name], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Track columns: name -> (zone, data_types_seen)
+        let mut columns: HashMap<String, (Zone, Vec<String>)> = HashMap::new();
+
+        for path in &paths {
+            let content = repo.read_file(path)?;
+            let parsed = crate::parser::parse(&content, path)?;
+
+            // Frontmatter extra keys → frontmatter columns
+            // Normalize to lowercase — SQLite column names are case-insensitive
+            for (key, value) in &parsed.meta.extra {
+                let inferred_type = infer_yaml_type(value);
+                columns
+                    .entry(key.to_lowercase())
+                    .or_insert_with(|| (Zone::Frontmatter, Vec::new()))
+                    .1
+                    .push(inferred_type);
+            }
+
+            // Body headings → body TEXT columns (from parsed sections)
+            for section in &parsed.sections {
+                if section.level > 0 {
+                    columns
+                        .entry(section.heading.to_lowercase())
+                        .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+                }
+            }
+
+            // Reference fields → reference columns
+            for field in &parsed.inline_fields {
+                if field.zone == Zone::Reference {
+                    let entry = columns
+                        .entry(field.key.to_lowercase())
+                        .or_insert_with(|| (Zone::Reference, Vec::new()));
+                    entry.1.push("TEXT".to_string());
+                }
+            }
+        }
+
+        // Build final columns with type widening
+        let mut cols: Vec<ColumnDef> = columns
+            .into_iter()
+            .map(|(name, (zone, types))| {
+                let data_type = widen_types(&types);
+                ColumnDef {
+                    name,
+                    data_type,
+                    references: None,
+                    zone: Some(zone),
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                }
+            })
+            .collect();
+
+        // Sort columns for deterministic output
+        cols.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Ok(TableSchema {
+            table_name: type_name.to_string(),
+            columns: cols,
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+        })
+    }
+
+    /// Merge an explicit typedef schema with an inferred schema.
+    /// Typedef columns take precedence; inferred columns fill gaps.
+    pub fn merge_schemas(
+        typedef: Option<crate::types::TableSchema>,
+        inferred: crate::types::TableSchema,
+    ) -> crate::types::TableSchema {
+        match typedef {
+            None => inferred,
+            Some(mut td) => {
+                let existing_names: std::collections::HashSet<String> =
+                    td.columns.iter().map(|c| c.name.clone()).collect();
+                for col in inferred.columns {
+                    if !existing_names.contains(&col.name) {
+                        td.columns.push(col);
+                    }
+                }
+                td
+            }
+        }
+    }
+
+    /// Collect structural consistency warnings during rebuild.
+    /// Warnings don't prevent indexing — they're advisory only.
+    pub fn collect_consistency_warnings(
+        &self,
+        repo: &impl DoogatSource,
+    ) -> Vec<crate::types::ConsistencyWarning> {
+        use crate::types::ConsistencyWarning;
+
+        let mut warnings = Vec::new();
+
+        let paths = match repo.list_doogats() {
+            Ok(p) => p,
+            Err(_) => return warnings,
+        };
+
+        let typedef_schemas = self.load_all_typedefs(repo);
+
+        for path in &paths {
+            let content = match repo.read_file(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            match crate::parser::parse(&content, path) {
+                Ok(parsed) => {
+                    // Check for cross-zone duplicate keys
+                    let mut seen_keys: std::collections::HashMap<String, &str> =
+                        std::collections::HashMap::new();
+
+                    for key in parsed.meta.extra.keys() {
+                        seen_keys.insert(key.clone(), "frontmatter");
+                    }
+
+                    for field in &parsed.inline_fields {
+                        if field.zone == crate::types::Zone::Reference {
+                            if let Some(&other_zone) = seen_keys.get(&field.key) {
+                                if other_zone != "reference" {
+                                    warnings.push(ConsistencyWarning::CrossZoneDuplicate {
+                                        path: path.clone(),
+                                        key: field.key.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Check missing required fields
+                    if let Some(type_name) = &parsed.meta.doogat_type {
+                        if let Some(schema) = typedef_schemas.get(type_name.as_str()) {
+                            for col in &schema.columns {
+                                if col.required {
+                                    let has_value = match col
+                                        .zone
+                                        .as_ref()
+                                        .unwrap_or(&crate::types::Zone::Frontmatter)
+                                    {
+                                        crate::types::Zone::Frontmatter => {
+                                            parsed.meta.extra.contains_key(&col.name)
+                                        }
+                                        crate::types::Zone::Reference => {
+                                            parsed.inline_fields.iter().any(|f| f.key == col.name)
+                                        }
+                                        crate::types::Zone::Body => {
+                                            parsed.body.contains(&format!("## {}", col.name))
+                                        }
+                                    };
+                                    if !has_value {
+                                        warnings.push(ConsistencyWarning::MissingRequired {
+                                            path: path.clone(),
+                                            type_name: type_name.clone(),
+                                            field: col.name.clone(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warnings.push(ConsistencyWarning::MalformedYaml {
+                        path: path.clone(),
+                        error: e.to_string(),
+                    });
+                }
+            }
+        }
+
+        warnings
+    }
+
+    /// Load all _typedef schemas from the index.
+    pub(crate) fn load_all_typedefs(
+        &self,
+        repo: &impl DoogatSource,
+    ) -> std::collections::HashMap<String, crate::types::TableSchema> {
+        use crate::sql_engine::schema_from_parsed;
+
+        let mut schemas = std::collections::HashMap::new();
+
+        let mut stmt = match self
+            .conn
+            .prepare("SELECT path FROM doogats WHERE type = '_typedef'")
+        {
+            Ok(s) => s,
+            Err(_) => return schemas,
+        };
+
+        let paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+
+        for path in &paths {
+            if let Ok(content) = repo.read_file(path) {
+                if let Ok(parsed) = crate::parser::parse(&content, path) {
+                    if let Ok(schema) = schema_from_parsed(&parsed) {
+                        schemas.insert(schema.table_name.clone(), schema);
+                    }
+                }
+            }
+        }
+
+        schemas
+    }
+
+    /// Load typedef schemas from pre-parsed doogats (no git reads).
+    fn load_all_typedefs_from(
+        doogats: &[ParsedDoogat],
+    ) -> std::collections::HashMap<String, crate::types::TableSchema> {
+        use crate::sql_engine::schema_from_parsed;
+
+        let mut schemas = std::collections::HashMap::new();
+        for z in doogats
+            .iter()
+            .filter(|z| z.meta.doogat_type.as_deref() == Some("_typedef"))
+        {
+            if let Ok(schema) = schema_from_parsed(z) {
+                schemas.insert(schema.table_name.clone(), schema);
+            }
+        }
+        schemas
+    }
+
+    /// Re-materialize a single doogat row (main table + junction tables).
+    /// Clears old junction rows before inserting fresh ones.
+    pub(crate) fn materialize_single(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        doogat: &crate::types::ParsedDoogat,
+    ) -> Result<()> {
+        // Clear old junction rows for this doogat
+        for col in &schema.columns {
+            if col.references.is_some() {
+                self.conn.execute(
+                    &format!(
+                        "DELETE FROM \"{t}_{c}\" WHERE \"{t}_id\" = ?1",
+                        t = schema.table_name,
+                        c = col.name
+                    ),
+                    params![id],
+                )?;
+            }
+        }
+        self.materialize_row(schema, id, doogat)
+    }
+
+    /// Insert a single data doogat's values into a materialized table.
+    fn materialize_row(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        doogat: &crate::types::ParsedDoogat,
+    ) -> Result<()> {
+        let mut col_names = vec!["id".to_string()];
+        let mut placeholders = vec!["?1".to_string()];
+        let mut vals: Vec<Option<String>> = vec![Some(id.to_string())];
+
+        for (i, col) in schema.columns.iter().enumerate() {
+            col_names.push(format!("\"{}\"", col.name));
+            placeholders.push(format!("?{}", i + 2));
+            let val = extract_column_value(doogat, col);
+            vals.push(if val.is_empty() { None } else { Some(val) });
+        }
+
+        let sql = format!(
+            "INSERT OR REPLACE INTO \"{}\" ({}) VALUES ({})",
+            schema.table_name,
+            col_names.join(", "),
+            placeholders.join(", ")
+        );
+
+        let params: Vec<&dyn rusqlite::types::ToSql> = vals
+            .iter()
+            .map(|v| v as &dyn rusqlite::types::ToSql)
+            .collect();
+        self.conn.execute(&sql, params.as_slice())?;
+
+        // Populate junction tables for REFERENCES columns
+        for col in &schema.columns {
+            if col.references.is_some() {
+                let ref_values = extract_multi_reference_values(doogat, &col.name);
+                for ref_id in &ref_values {
+                    self.conn.execute(
+                        &format!(
+                            "INSERT OR IGNORE INTO \"{t}_{c}\" (\"{t}_id\", \"{c}_id\") VALUES (?1, ?2)",
+                            t = schema.table_name,
+                            c = col.name
+                        ),
+                        params![id, ref_id],
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Extract a column value from a parsed doogat according to zone mapping.
+fn extract_column_value(
+    doogat: &crate::types::ParsedDoogat,
+    col: &crate::types::ColumnDef,
+) -> String {
+    use crate::types::Zone;
+
+    let zone = col.zone.clone().unwrap_or_else(|| {
+        if col.references.is_some() {
+            Zone::Reference
+        } else if matches!(
+            col.data_type.to_uppercase().as_str(),
+            "INTEGER" | "REAL" | "BOOLEAN"
+        ) {
+            Zone::Frontmatter
+        } else {
+            Zone::Body
+        }
+    });
+
+    match zone {
+        Zone::Reference => {
+            let values = extract_multi_reference_values(doogat, &col.name);
+            values.join(",")
+        }
+        Zone::Frontmatter => {
+            // Use path navigation for dot/bracket names, flat lookup otherwise
+            let val = if col.name.contains('.') || col.name.contains('[') {
+                crate::types::get_path_in_map(&doogat.meta.extra, &col.name).ok()
+            } else {
+                doogat.meta.extra.get(&col.name)
+            };
+            val.map(|v| match v {
+                crate::types::Value::Number(n) => n.to_string(),
+                crate::types::Value::Bool(b) => b.to_string(),
+                crate::types::Value::String(s) => s.clone(),
+                _ => format!("{v:?}"),
+            })
+            .unwrap_or_default()
+        }
+        Zone::Body => doogat
+            .sections
+            .iter()
+            .find(|s| s.level > 0 && s.heading.eq_ignore_ascii_case(&col.name))
+            .map(|s| s.content.trim().to_string())
+            .unwrap_or_default(),
+    }
+}
+
+/// Extract all reference values for a given column name from a parsed doogat.
+fn extract_multi_reference_values(
+    doogat: &crate::types::ParsedDoogat,
+    col_name: &str,
+) -> Vec<String> {
+    doogat
+        .inline_fields
+        .iter()
+        .filter(|f| f.key == col_name && f.zone == crate::types::Zone::Reference)
+        .map(|f| f.value.trim().to_string())
+        .collect()
+}
+
+/// Infer a SQL data type from a domain Value.
+fn infer_yaml_type(value: &crate::types::Value) -> String {
+    match value {
+        crate::types::Value::Bool(_) => "BOOLEAN".to_string(),
+        crate::types::Value::Number(n) => {
+            if n.fract() == 0.0 && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
+                "INTEGER".to_string()
+            } else {
+                "REAL".to_string()
+            }
+        }
+        crate::types::Value::String(s) => {
+            if s.parse::<i64>().is_ok() {
+                "INTEGER".to_string()
+            } else if s.parse::<f64>().is_ok() {
+                "REAL".to_string()
+            } else if s == "true" || s == "false" {
+                "BOOLEAN".to_string()
+            } else {
+                "TEXT".to_string()
+            }
+        }
+        _ => "TEXT".to_string(),
+    }
+}
+
+/// Widen types: if all values agree, use that type; otherwise widen to TEXT.
+fn widen_types(types: &[String]) -> String {
+    if types.is_empty() {
+        return "TEXT".to_string();
+    }
+    let first = &types[0];
+    if types.iter().all(|t| t == first) {
+        return first.clone();
+    }
+    // INTEGER + REAL → REAL
+    if types.iter().all(|t| t == "INTEGER" || t == "REAL") {
+        return "REAL".to_string();
+    }
+    "TEXT".to_string()
+}

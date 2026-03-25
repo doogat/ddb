@@ -8,12 +8,12 @@ use tempfile::TempDir;
 use tungstenite::http::Request;
 use tungstenite::{connect, Message};
 
-/// Locate the `zdb` binary in the workspace target directory.
-/// `CARGO_BIN_EXE_zdb` is only set for same-package binaries, and the
+/// Locate the `ddb` binary in the workspace target directory.
+/// `CARGO_BIN_EXE_ddb` is only set for same-package binaries, and the
 /// `assert_cmd::cargo::cargo_bin` function is deprecated, so we resolve
 /// the path ourselves.
-pub(crate) fn zdb_bin() -> PathBuf {
-    if let Ok(p) = std::env::var("CARGO_BIN_EXE_zdb") {
+pub(crate) fn ddb_bin() -> PathBuf {
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_ddb") {
         return PathBuf::from(p);
     }
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -28,12 +28,12 @@ pub(crate) fn zdb_bin() -> PathBuf {
     };
     target
         .join(profile)
-        .join(format!("zdb{}", std::env::consts::EXE_SUFFIX))
+        .join(format!("ddb{}", std::env::consts::EXE_SUFFIX))
 }
 
 static SERVER_PORT_COUNTER: AtomicU16 = AtomicU16::new(19100);
 
-/// RAII guard that starts a `zdb serve` process and kills it on drop.
+/// RAII guard that starts a `ddb serve` process and kills it on drop.
 pub struct ServerGuard {
     child: Child,
     pub port: u16,
@@ -42,12 +42,12 @@ pub struct ServerGuard {
 }
 
 impl ServerGuard {
-    pub fn start(repo: &ZdbTestRepo) -> Self {
+    pub fn start(repo: &DdbTestRepo) -> Self {
         let port = SERVER_PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
         let pg_port = SERVER_PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
         let log_dir = repo.path().join(".local/test-logs");
 
-        let mut child = std::process::Command::new(zdb_bin())
+        let mut child = std::process::Command::new(ddb_bin())
             .arg("--repo")
             .arg(repo.path())
             .arg("--log-dir")
@@ -339,15 +339,15 @@ pub fn read_next(
     }
 }
 
-pub struct ZdbTestRepo {
+pub struct DdbTestRepo {
     pub dir: TempDir,
 }
 
-impl ZdbTestRepo {
-    /// Init a new zettelkasten in a temp dir
+impl DdbTestRepo {
+    /// Init a new doogat db in a temp dir
     pub fn init() -> Self {
         let dir = TempDir::new().unwrap();
-        Self::zdb_at(dir.path())
+        Self::ddb_at(dir.path())
             .arg("init")
             .arg(dir.path())
             .assert()
@@ -356,15 +356,15 @@ impl ZdbTestRepo {
         Self { dir }
     }
 
-    pub fn zdb_at(path: &Path) -> Command {
-        let mut cmd = Command::new(zdb_bin());
+    pub fn ddb_at(path: &Path) -> Command {
+        let mut cmd = Command::new(ddb_bin());
         cmd.arg("--repo").arg(path);
         cmd
     }
 
-    /// Run zdb in this repo's dir
-    pub fn zdb(&self) -> Command {
-        Self::zdb_at(self.path())
+    /// Run ddb in this repo's dir
+    pub fn ddb(&self) -> Command {
+        Self::ddb_at(self.path())
     }
 
     pub fn path(&self) -> &Path {
@@ -384,7 +384,7 @@ impl ZdbTestRepo {
 /// Two-node setup: bare remote + two working repos
 pub struct TwoNodeSetup {
     pub remote_dir: TempDir,
-    pub node1: ZdbTestRepo,
+    pub node1: DdbTestRepo,
     pub node2_dir: TempDir,
 }
 
@@ -399,14 +399,14 @@ impl TwoNodeSetup {
             .unwrap();
 
         // Node 1
-        let node1 = ZdbTestRepo::init();
+        let node1 = DdbTestRepo::init();
         std::process::Command::new("git")
             .current_dir(node1.path())
             .args(["remote", "add", "origin"])
             .arg(remote_dir.path())
             .output()
             .unwrap();
-        ZdbTestRepo::zdb_at(node1.path())
+        DdbTestRepo::ddb_at(node1.path())
             .args(["register-node", "Laptop"])
             .assert()
             .success();
@@ -430,8 +430,8 @@ impl TwoNodeSetup {
             .arg(&node2_path)
             .output()
             .unwrap();
-        ZdbTestRepo::disable_git_signing(&node2_path);
-        ZdbTestRepo::zdb_at(&node2_path)
+        DdbTestRepo::disable_git_signing(&node2_path);
+        DdbTestRepo::ddb_at(&node2_path)
             .args(["register-node", "Desktop"])
             .assert()
             .success();
@@ -465,19 +465,19 @@ impl MultiNodeSetup {
         // Node 0: init + push
         let dir0 = TempDir::new().unwrap();
         let path0 = dir0.path().to_path_buf();
-        ZdbTestRepo::zdb_at(&path0)
+        DdbTestRepo::ddb_at(&path0)
             .arg("init")
             .arg(&path0)
             .assert()
             .success();
-        ZdbTestRepo::disable_git_signing(&path0);
+        DdbTestRepo::disable_git_signing(&path0);
         std::process::Command::new("git")
             .current_dir(&path0)
             .args(["remote", "add", "origin"])
             .arg(remote_dir.path())
             .output()
             .unwrap();
-        ZdbTestRepo::zdb_at(&path0)
+        DdbTestRepo::ddb_at(&path0)
             .args(["register-node", "Node-0"])
             .assert()
             .success();
@@ -495,8 +495,8 @@ impl MultiNodeSetup {
                 .arg(&path)
                 .output()
                 .unwrap();
-            ZdbTestRepo::disable_git_signing(&path);
-            ZdbTestRepo::zdb_at(&path)
+            DdbTestRepo::disable_git_signing(&path);
+            DdbTestRepo::ddb_at(&path)
                 .args(["register-node", &format!("Node-{i}")])
                 .assert()
                 .success();
@@ -518,12 +518,12 @@ impl MultiNodeSetup {
 
     /// Sync a node
     pub fn sync(node: &Path) {
-        ZdbTestRepo::zdb_at(node).arg("sync").assert().success();
+        DdbTestRepo::ddb_at(node).arg("sync").assert().success();
     }
 
-    /// Create a zettel on a node, return its ID
+    /// Create a doogat on a node, return its ID
     pub fn create(node: &Path, title: &str, body: &str) -> String {
-        let out = ZdbTestRepo::zdb_at(node)
+        let out = DdbTestRepo::ddb_at(node)
             .args(["create", "--title", title, "--body", body])
             .output()
             .unwrap();
@@ -535,9 +535,9 @@ impl MultiNodeSetup {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
-    /// Read a zettel, return stdout
+    /// Read a doogat, return stdout
     pub fn read(node: &Path, id: &str) -> String {
-        let out = ZdbTestRepo::zdb_at(node)
+        let out = DdbTestRepo::ddb_at(node)
             .args(["read", id])
             .output()
             .unwrap();
@@ -549,17 +549,17 @@ impl MultiNodeSetup {
         String::from_utf8_lossy(&out.stdout).to_string()
     }
 
-    /// Update a zettel
+    /// Update a doogat
     pub fn update(node: &Path, id: &str, title: &str, body: &str) {
-        ZdbTestRepo::zdb_at(node)
+        DdbTestRepo::ddb_at(node)
             .args(["update", id, "--title", title, "--body", body])
             .assert()
             .success();
     }
 
-    /// Delete a zettel
+    /// Delete a doogat
     pub fn delete(node: &Path, id: &str) {
-        ZdbTestRepo::zdb_at(node)
+        DdbTestRepo::ddb_at(node)
             .args(["delete", id])
             .assert()
             .success();

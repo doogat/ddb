@@ -1,4 +1,4 @@
-# ZettelDB Kotlin Verification Tests
+# Doogat DB Kotlin Verification Tests
 
 Minimal Gradle project to verify UniFFI bindings for Android/JVM.
 
@@ -18,14 +18,14 @@ Quick summary:
 1. Build native library (JVM host testing):
 
 ```bash
-cargo build -p zdb-core --release
+cargo build -p ddb-core --release
 ```
 
 2. Generate Kotlin bindings:
 
 ```bash
-cargo run -p zdb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-  --library target/release/libzdb_core.dylib \
+cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
+  --library target/release/libddb_core.dylib \
   --language kotlin --out-dir out/kotlin
 ```
 
@@ -50,4 +50,4 @@ dev/bin/build-android
 cd tests/kotlin && ./gradlew connectedAndroidTest
 ```
 
-Tests use `ZettelDriver.createRepo()` and `registerNode()` directly (no CLI binary needed), making them compatible with Android instrumented test targets.
+Tests use `DoogatDriver.createRepo()` and `registerNode()` directly (no CLI binary needed), making them compatible with Android instrumented test targets.

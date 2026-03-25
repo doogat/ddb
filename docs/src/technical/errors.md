@@ -1,13 +1,13 @@
 # Error Handling
 
-**Source**: `zdb-core/src/error.rs`
+**Source**: `ddb-core/src/error.rs`
 
-## ZettelError
+## DoogatError
 
 A unified error enum using `thiserror` for all fallible operations. All variants use `String` payloads — adapter-specific error types are converted at module boundaries via `From` impls in each adapter module:
 
 ```rust
-pub enum ZettelError {
+pub enum DoogatError {
     Git(String),           // Git operations (from git2::Error in git_ops.rs)
     Yaml(String),          // YAML parsing (from serde_yaml::Error in parser.rs)
     Sql(String),           // SQLite queries (from rusqlite::Error in indexer.rs)
@@ -24,28 +24,28 @@ pub enum ZettelError {
 ## Result Type
 
 ```rust
-pub type Result<T> = std::result::Result<T, ZettelError>;
+pub type Result<T> = std::result::Result<T, DoogatError>;
 ```
 
-All public functions in `zdb-core` return `Result<T>`.
+All public functions in `ddb-core` return `Result<T>`.
 
 ## Conversion
 
 External error types convert via `From` impls in their respective adapter modules (not in error.rs):
-- `git2::Error` → `ZettelError::Git` (in `git_ops.rs`)
-- `serde_yaml::Error` → `ZettelError::Yaml` (in `parser.rs`)
-- `rusqlite::Error` → `ZettelError::Sql` (in `indexer.rs`)
-- `automerge::AutomergeError` → `ZettelError::Automerge` (in `crdt_resolver.rs`)
-- `toml::de::Error` → `ZettelError::Toml` (in `sync_manager.rs`)
-- `std::io::Error` → `ZettelError::Io` (via `#[from]` in error.rs)
+- `git2::Error` → `DoogatError::Git` (in `git_ops.rs`)
+- `serde_yaml::Error` → `DoogatError::Yaml` (in `parser.rs`)
+- `rusqlite::Error` → `DoogatError::Sql` (in `indexer.rs`)
+- `automerge::AutomergeError` → `DoogatError::Automerge` (in `crdt_resolver.rs`)
+- `toml::de::Error` → `DoogatError::Toml` (in `sync_manager.rs`)
+- `std::io::Error` → `DoogatError::Io` (via `#[from]` in error.rs)
 
 This keeps `error.rs` free of adapter crate imports — it depends only on `thiserror` and `std::io`.
 
 Application-level errors use:
-- `ZettelError::Parse(msg)` for parsing failures
-- `ZettelError::NotFound(path)` for missing files or references
-- `ZettelError::Validation(msg)` for data integrity issues (e.g., cross-zone duplicate inline fields)
-- `ZettelError::SqlEngine(msg)` for SQL translation errors
+- `DoogatError::Parse(msg)` for parsing failures
+- `DoogatError::NotFound(path)` for missing files or references
+- `DoogatError::Validation(msg)` for data integrity issues (e.g., cross-zone duplicate inline fields)
+- `DoogatError::SqlEngine(msg)` for SQL translation errors
 
 ## CLI Error Handling
 
@@ -57,14 +57,14 @@ Uses `tracing` (library) + `tracing-subscriber` (CLI) for structured observabili
 
 ### Configuration
 
-- `--log-dir <path>` or `ZDB_LOG_DIR=<path>` — write NDJSON logs to `{dir}/zdb-{date}.ndjson`
-- Without `--log-dir` — stderr with `RUST_LOG` env filter (default: `info` for zdb crates, `warn` for dependencies)
-- `--log-level <level>` or `ZDB_LOG_LEVEL=<level>` — set log level for zdb crates (`RUST_LOG` takes precedence)
+- `--log-dir <path>` or `DDB_LOG_DIR=<path>` — write NDJSON logs to `{dir}/ddb-{date}.ndjson`
+- Without `--log-dir` — stderr with `RUST_LOG` env filter (default: `info` for ddb crates, `warn` for dependencies)
+- `--log-level <level>` or `DDB_LOG_LEVEL=<level>` — set log level for ddb crates (`RUST_LOG` takes precedence)
 
 ### NDJSON Format
 
 ```json
-{"timestamp":"...","level":"INFO","target":"zdb_core::sync_manager","fields":{"remote":"origin","branch":"master","message":"sync_start"}}
+{"timestamp":"...","level":"INFO","target":"ddb_core::sync_manager","fields":{"remote":"origin","branch":"master","message":"sync_start"}}
 ```
 
 ### Instrumented Events

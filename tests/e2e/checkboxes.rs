@@ -1,9 +1,9 @@
-use crate::common::{ServerGuard, ZdbTestRepo};
+use crate::common::{ServerGuard, DdbTestRepo};
 use predicates::prelude::*;
 
-fn create_with_checkboxes(repo: &ZdbTestRepo, title: &str, body: &str) {
+fn create_with_checkboxes(repo: &DdbTestRepo, title: &str, body: &str) {
     let body_arg = format!("--body={body}");
-    repo.zdb()
+    repo.ddb()
         .args(["create", "--title", title, &body_arg])
         .assert()
         .success();
@@ -11,17 +11,17 @@ fn create_with_checkboxes(repo: &ZdbTestRepo, title: &str, body: &str) {
 
 #[test]
 fn checkbox_items_indexed_via_sql() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     create_with_checkboxes(
         &repo,
         "tasks",
         "- [ ] buy groceries\n- [x] send email\n- [i] meeting notes",
     );
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
-            "SELECT state, content FROM _zdb_checkboxes ORDER BY line_number",
+            "SELECT state, content FROM _ddb_checkboxes ORDER BY line_number",
         ])
         .assert()
         .success()
@@ -35,17 +35,17 @@ fn checkbox_items_indexed_via_sql() {
 
 #[test]
 fn checkbox_filter_by_state() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     create_with_checkboxes(
         &repo,
         "mixed",
         "- [ ] task one\n- [x] task two\n- [ ] task three",
     );
 
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
-            "SELECT content FROM _zdb_checkboxes WHERE state = 'open' ORDER BY line_number",
+            "SELECT content FROM _ddb_checkboxes WHERE state = 'open' ORDER BY line_number",
         ])
         .assert()
         .success()
@@ -56,7 +56,7 @@ fn checkbox_filter_by_state() {
 
 #[test]
 fn checkbox_graphql_queries() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     create_with_checkboxes(
         &repo,
         "gql test",
@@ -66,7 +66,7 @@ fn checkbox_graphql_queries() {
     let server = ServerGuard::start(&repo);
 
     // checkboxItems — all states
-    let result = server.graphql("{ checkboxItems { state content zettelTitle } }");
+    let result = server.graphql("{ checkboxItems { state content doogatTitle } }");
     let items = &result["data"]["checkboxItems"];
     assert!(items.is_array());
     assert_eq!(items.as_array().unwrap().len(), 3);
@@ -89,7 +89,7 @@ fn checkbox_graphql_queries() {
 
 #[test]
 fn checkbox_indent_level() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     create_with_checkboxes(
         &repo,
         "nested",
@@ -97,10 +97,10 @@ fn checkbox_indent_level() {
     );
 
     // Verify indent_level stored correctly via SQL
-    repo.zdb()
+    repo.ddb()
         .args([
             "query",
-            "SELECT content, indent_level FROM _zdb_checkboxes ORDER BY line_number",
+            "SELECT content, indent_level FROM _ddb_checkboxes ORDER BY line_number",
         ])
         .assert()
         .success()
@@ -116,7 +116,7 @@ fn checkbox_indent_level() {
     let result = server.graphql("{ checkboxItems { content indentLevel } }");
     let items = result["data"]["checkboxItems"].as_array().unwrap();
     assert_eq!(items.len(), 3);
-    // Items ordered by zettel_id DESC, line_number ASC
+    // Items ordered by doogat_id DESC, line_number ASC
     assert_eq!(items[0]["indentLevel"], 0);
     assert_eq!(items[1]["indentLevel"], 2);
     assert_eq!(items[2]["indentLevel"], 4);

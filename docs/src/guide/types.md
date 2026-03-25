@@ -1,19 +1,19 @@
 # Type Definitions
 
-ZettelDB supports typed zettels. A zettel's `type` field determines which materialized SQLite table it belongs to. Type schemas can be explicit (`_typedef` zettels) or inferred from data.
+Doogat DB supports typed doogats. A doogat's `type` field determines which materialized SQLite table it belongs to. Type schemas can be explicit (`_typedef` doogats) or inferred from data.
 
 ## How It Works
 
-On `zdb reindex`, the indexer:
+On `ddb reindex`, the indexer:
 
-1. Indexes all zettels
+1. Indexes all doogats
 2. Finds all distinct `type` values
 3. For each type: loads the `_typedef` (if any), infers schema from data, merges them
 4. Creates a SQLite table with the merged columns and populates it
 
 ## Explicit Types (_typedef)
 
-A `_typedef` zettel defines a table schema explicitly:
+A `_typedef` doogat defines a table schema explicitly:
 
 ```yaml
 ---
@@ -49,7 +49,7 @@ Column properties:
 
 ## Implicit Types (Inferred)
 
-Types without a `_typedef` are inferred from data. The indexer scans all zettels of that type and infers columns from:
+Types without a `_typedef` are inferred from data. The indexer scans all doogats of that type and infers columns from:
 
 - **Frontmatter** extra keys → column type inferred (integer → float → boolean → text)
 - **Body** `## headings` → TEXT columns in body zone
@@ -65,7 +65,7 @@ When both a `_typedef` and data exist, schemas are merged:
 
 ## Bundled Types
 
-ZettelDB ships five built-in type definitions:
+Doogat DB ships five built-in type definitions:
 
 ### project
 
@@ -102,30 +102,30 @@ CRDT: `preset:last-writer-wins` | Sections: Description, Acceptance Criteria
 ### Install a bundled type
 
 ```bash
-zdb type install project
-zdb type install contact
-zdb type install literature-note
-zdb type install meeting-minutes
-zdb type install kanban
+ddb type install project
+ddb type install contact
+ddb type install literature-note
+ddb type install meeting-minutes
+ddb type install kanban
 ```
 
-Writes the `_typedef` zettel to `zettelkasten/_typedef/`, commits, and indexes.
+Writes the `_typedef` doogat to `ddb/_typedef/`, commits, and indexes.
 
 ### Suggest a typedef from data
 
 ```bash
-zdb type suggest mytype
+ddb type suggest mytype
 ```
 
-Infers a schema from existing zettels with `type: mytype` and prints a `_typedef` zettel to stdout. Redirect to a file and commit to make it permanent.
+Infers a schema from existing doogats with `type: mytype` and prints a `_typedef` doogat to stdout. Redirect to a file and commit to make it permanent.
 
 ## SQL Access
 
-Typed zettels are queryable via SQL:
+Typed doogats are queryable via SQL:
 
 ```bash
-zdb query "SELECT id, completed, deliverable FROM project WHERE completed = 0"
-zdb query "INSERT INTO project (deliverable, completed) VALUES ('Ship v1', 0)"
+ddb query "SELECT id, completed, deliverable FROM project WHERE completed = 0"
+ddb query "INSERT INTO project (deliverable, completed) VALUES ('Ship v1', 0)"
 ```
 
 See [Search & Queries](./search.md) for more SQL examples.

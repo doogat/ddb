@@ -1,63 +1,63 @@
-use crate::common::{read_next, ServerGuard, ZdbTestRepo};
+use crate::common::{read_next, ServerGuard, DdbTestRepo};
 use tungstenite::connect;
 use tungstenite::http::Request;
 use tungstenite::Message;
 
 #[test]
 fn subscribe_mutate_receive() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let mut ws = server
-        .ws_subscribe("subscription { zettelChanged { action zettelId zettel { id title } } }");
+        .ws_subscribe("subscription { doogatChanged { action doogatId doogat { id title } } }");
 
-    // Mutate: create a zettel
+    // Mutate: create a doogat
     let result = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id title } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title } }"#,
         serde_json::json!({ "input": { "title": "Sub Test", "content": "body" } }),
     );
     assert!(result.get("errors").is_none(), "create failed: {result}");
-    let created_id = result["data"]["createZettel"]["id"].as_str().unwrap();
+    let created_id = result["data"]["createDoogat"]["id"].as_str().unwrap();
 
     // Read the subscription event
     let event = read_next(&mut ws);
-    let data = &event["payload"]["data"]["zettelChanged"];
+    let data = &event["payload"]["data"]["doogatChanged"];
     assert_eq!(data["action"], "created");
-    assert_eq!(data["zettelId"], created_id);
-    assert_eq!(data["zettel"]["title"], "Sub Test");
+    assert_eq!(data["doogatId"], created_id);
+    assert_eq!(data["doogat"]["title"], "Sub Test");
 }
 
 #[test]
 fn subscribe_delete_receive() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Create first
     let result = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "To Delete" } }),
     );
-    let id = result["data"]["createZettel"]["id"]
+    let id = result["data"]["createDoogat"]["id"]
         .as_str()
         .unwrap()
         .to_string();
 
     // Subscribe to deletions
-    let mut ws = server.ws_subscribe("subscription { zettelDeleted }");
+    let mut ws = server.ws_subscribe("subscription { doogatDeleted }");
 
     // Delete
-    let result = server.graphql(&format!(r#"mutation {{ deleteZettel(id: "{id}") }}"#));
+    let result = server.graphql(&format!(r#"mutation {{ deleteDoogat(id: "{id}") }}"#));
     assert!(result.get("errors").is_none(), "delete failed: {result}");
 
     // Read event
     let event = read_next(&mut ws);
-    let deleted_id = &event["payload"]["data"]["zettelDeleted"];
+    let deleted_id = &event["payload"]["data"]["doogatDeleted"];
     assert_eq!(deleted_id.as_str().unwrap(), id);
 }
 
 #[test]
 fn ws_auth_invalid_header_returns_401() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let request = Request::builder()
@@ -82,31 +82,31 @@ fn ws_auth_invalid_header_returns_401() {
 
 #[test]
 fn ws_payload_auth_subscribe_receive() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let mut ws = server.ws_subscribe_with_payload_auth(
-        "subscription { zettelChanged { action zettelId zettel { id title } } }",
+        "subscription { doogatChanged { action doogatId doogat { id title } } }",
     );
 
     // Mutate via GraphQL
     let result = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id title } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title } }"#,
         serde_json::json!({ "input": { "title": "Payload Auth", "content": "body" } }),
     );
     assert!(result.get("errors").is_none(), "create failed: {result}");
-    let created_id = result["data"]["createZettel"]["id"].as_str().unwrap();
+    let created_id = result["data"]["createDoogat"]["id"].as_str().unwrap();
 
     let event = read_next(&mut ws);
-    let data = &event["payload"]["data"]["zettelChanged"];
+    let data = &event["payload"]["data"]["doogatChanged"];
     assert_eq!(data["action"], "created");
-    assert_eq!(data["zettelId"], created_id);
-    assert_eq!(data["zettel"]["title"], "Payload Auth");
+    assert_eq!(data["doogatId"], created_id);
+    assert_eq!(data["doogat"]["title"], "Payload Auth");
 }
 
 #[test]
 fn ws_payload_auth_invalid_token() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let mut ws = server.ws_connect_no_header();
@@ -140,7 +140,7 @@ fn ws_payload_auth_invalid_token() {
 
 #[test]
 fn ws_no_auth_no_payload_rejected() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let mut ws = server.ws_connect_no_header();
@@ -171,13 +171,13 @@ fn ws_no_auth_no_payload_rejected() {
 
 #[test]
 fn no_subscriber_mutations_work() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // No WS subscribers — just do mutations and verify they succeed
     for i in 0..3 {
         let result = server.graphql_with_vars(
-            r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
             serde_json::json!({ "input": { "title": format!("NoSub {i}") } }),
         );
         assert!(
@@ -187,14 +187,14 @@ fn no_subscriber_mutations_work() {
     }
 
     // Verify all created
-    let result = server.graphql(r#"{ zettels { id } }"#);
-    let list = result["data"]["zettels"].as_array().unwrap();
+    let result = server.graphql(r#"{ doogats { id } }"#);
+    let list = result["data"]["doogats"].as_array().unwrap();
     assert_eq!(list.len(), 3);
 }
 
 #[test]
 fn subscribe_type_filter() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Create two types
@@ -211,11 +211,11 @@ fn subscribe_type_filter() {
     }
 
     // Subscribe to contactChanged only
-    let mut ws = server.ws_subscribe("subscription { contactChanged { action zettelId } }");
+    let mut ws = server.ws_subscribe("subscription { contactChanged { action doogatId } }");
 
     // Create a bookmark — should NOT trigger contact subscription
     let result = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "My Bookmark", "type": "bookmark" } }),
     );
     assert!(
@@ -225,53 +225,53 @@ fn subscribe_type_filter() {
 
     // Create a contact — SHOULD trigger
     let result = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "Alice", "type": "contact" } }),
     );
     assert!(
         result.get("errors").is_none(),
         "create contact failed: {result}"
     );
-    let contact_id = result["data"]["createZettel"]["id"].as_str().unwrap();
+    let contact_id = result["data"]["createDoogat"]["id"].as_str().unwrap();
 
     // The first event we get should be the contact, not the bookmark
     let event = read_next(&mut ws);
     let data = &event["payload"]["data"]["contactChanged"];
     assert_eq!(data["action"], "created");
-    assert_eq!(data["zettelId"], contact_id);
+    assert_eq!(data["doogatId"], contact_id);
 }
 
 #[test]
 fn subscribe_disconnect_reconnect() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // First connection + subscription
     {
-        let mut ws = server.ws_subscribe("subscription { zettelChanged { action zettelId } }");
+        let mut ws = server.ws_subscribe("subscription { doogatChanged { action doogatId } }");
         let result = server.graphql_with_vars(
-            r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
             serde_json::json!({ "input": { "title": "First" } }),
         );
         assert!(result.get("errors").is_none());
         let event = read_next(&mut ws);
         assert_eq!(
-            event["payload"]["data"]["zettelChanged"]["action"],
+            event["payload"]["data"]["doogatChanged"]["action"],
             "created"
         );
         // ws drops here — disconnect
     }
 
     // Second connection — should work without issues
-    let mut ws = server.ws_subscribe("subscription { zettelChanged { action zettelId } }");
+    let mut ws = server.ws_subscribe("subscription { doogatChanged { action doogatId } }");
     let result = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "Second" } }),
     );
     assert!(result.get("errors").is_none());
     let event = read_next(&mut ws);
     assert_eq!(
-        event["payload"]["data"]["zettelChanged"]["action"],
+        event["payload"]["data"]["doogatChanged"]["action"],
         "created"
     );
 }

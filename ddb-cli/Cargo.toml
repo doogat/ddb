@@ -1,0 +1,29 @@
+[package]
+name = "ddb-cli"
+version = "0.2.0"
+edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/doogat/ddb"
+description = "CLI for Doogat DB — a hybrid Git-CRDT database"
+
+[[bin]]
+name = "ddb"
+path = "src/main.rs"
+
+[dependencies]
+chrono = "0.4"
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+toml = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+flate2 = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+self-replace = "1"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tar = "0.4"
+ddb-core = { path = "../ddb-core", features = ["nosql"] }
+ddb-server = { path = "../ddb-server" }

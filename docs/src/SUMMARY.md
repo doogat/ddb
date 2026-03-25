@@ -36,10 +36,10 @@
 # User Guide
 
 - [Getting Started](./guide/getting-started.md)
-- [Creating & Managing Zettels](./guide/zettels.md)
+- [Creating & Managing Doogats](./guide/doogats.md)
 - [Type Definitions](./guide/types.md)
 - [Search & Queries](./guide/search.md)
 - [Multi-Device Sync](./guide/sync.md)
 - [Building Apps](./guide/building-apps.md)
 - [Mobile Constraints](./guide/mobile-constraints.md)
-- [Zettel Format Reference](./guide/format-reference.md)
+- [Doogat Format Reference](./guide/format-reference.md)

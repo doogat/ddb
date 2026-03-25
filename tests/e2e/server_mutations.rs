@@ -1,9 +1,9 @@
-use crate::common::{ServerGuard, ZdbTestRepo};
+use crate::common::{ServerGuard, DdbTestRepo};
 use std::sync::Arc;
 
 #[test]
 fn compact_mutation_returns_result() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let result = server
@@ -17,7 +17,7 @@ fn compact_mutation_returns_result() {
 
 #[test]
 fn compact_force_mutation() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let result = server.graphql(
@@ -31,8 +31,8 @@ fn compact_force_mutation() {
 
 #[test]
 fn compact_with_node_produces_backup() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["register-node", "TestNode"])
         .assert()
         .success();
@@ -52,8 +52,8 @@ fn compact_with_node_produces_backup() {
 
 #[test]
 fn compact_no_backup_mutation() {
-    let repo = ZdbTestRepo::init();
-    repo.zdb()
+    let repo = DdbTestRepo::init();
+    repo.ddb()
         .args(["register-node", "TestNode"])
         .assert()
         .success();
@@ -74,7 +74,7 @@ fn compact_no_backup_mutation() {
 
 #[test]
 fn sync_mutation_no_remote_returns_error() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // No remote configured — should return an error, not panic
@@ -100,7 +100,7 @@ fn sync_mutation_with_remote() {
         .expect("failed to spawn git init");
     assert!(status.success(), "git init --bare failed");
 
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     // Add remote + register node
     let status = std::process::Command::new("git")
@@ -110,7 +110,7 @@ fn sync_mutation_with_remote() {
         .status()
         .expect("failed to spawn git remote add");
     assert!(status.success(), "git remote add failed");
-    repo.zdb()
+    repo.ddb()
         .args(["register-node", "TestNode"])
         .assert()
         .success();
@@ -152,7 +152,7 @@ fn sync_during_writes_serialized_through_actor() {
         .expect("failed to spawn git init");
     assert!(status.success(), "git init --bare failed");
 
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     // Add remote + register node
     let status = std::process::Command::new("git")
@@ -162,7 +162,7 @@ fn sync_during_writes_serialized_through_actor() {
         .status()
         .expect("failed to spawn git remote add");
     assert!(status.success(), "git remote add failed");
-    repo.zdb()
+    repo.ddb()
         .args(["register-node", "TestNode"])
         .assert()
         .success();
@@ -194,7 +194,7 @@ fn sync_during_writes_serialized_through_actor() {
         let srv = Arc::clone(&server);
         handles.push(std::thread::spawn(move || {
             let result = srv.graphql_with_vars(
-                r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+                r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
                 serde_json::json!({ "input": {
                     "title": format!("Concurrent Write {i}"),
                     "content": format!("body {i}"),
@@ -205,7 +205,7 @@ fn sync_during_writes_serialized_through_actor() {
                 "concurrent write {i} failed: {result}"
             );
             result
-                .pointer("/data/createZettel/id")
+                .pointer("/data/createDoogat/id")
                 .and_then(|v| v.as_str())
                 .map(String::from)
         }));
@@ -221,7 +221,7 @@ fn sync_during_writes_serialized_through_actor() {
             result.get("errors").is_none(),
             "concurrent sync failed: {result}"
         );
-        None // sync doesn't create a zettel
+        None // sync doesn't create a doogat
     }));
 
     // All must complete without panic or error
@@ -235,7 +235,7 @@ fn sync_during_writes_serialized_through_actor() {
         }
     }
 
-    // Verify serialization: all 5 zettels were created and are queryable
+    // Verify serialization: all 5 doogats were created and are queryable
     assert_eq!(
         created_ids.len(),
         5,
@@ -245,16 +245,16 @@ fn sync_during_writes_serialized_through_actor() {
     );
 
     for id in &created_ids {
-        let query = format!(r#"{{ zettel(id: "{id}") {{ id title }} }}"#);
+        let query = format!(r#"{{ doogat(id: "{id}") {{ id title }} }}"#);
         let result = server.graphql(&query);
         assert!(
             result.get("errors").is_none(),
-            "zettel {id} not found after concurrent writes: {result}"
+            "doogat {id} not found after concurrent writes: {result}"
         );
         assert_eq!(
-            result.pointer("/data/zettel/id").and_then(|v| v.as_str()),
+            result.pointer("/data/doogat/id").and_then(|v| v.as_str()),
             Some(id.as_str()),
-            "zettel {id} returned wrong data: {result}"
+            "doogat {id} returned wrong data: {result}"
         );
     }
 

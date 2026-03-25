@@ -1,4 +1,4 @@
-use crate::common::{TwoNodeSetup, ZdbTestRepo};
+use crate::common::{TwoNodeSetup, DdbTestRepo};
 use predicates::prelude::*;
 
 /// Helper: push node1's master to remote
@@ -17,7 +17,7 @@ fn two_node_fast_forward_sync() {
     // Create note on node1, push
     let out = setup
         .node1
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Note One", "--body", "hello"])
         .output()
         .unwrap();
@@ -26,13 +26,13 @@ fn two_node_fast_forward_sync() {
 
     // Clone node2, sync
     let node2_path = setup.clone_node2();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
 
     // Node2 can read the note
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["read", &id])
         .assert()
         .success()
@@ -47,7 +47,7 @@ fn non_overlapping_edits_merge_cleanly() {
     // Shared note
     let out = setup
         .node1
-        .zdb()
+        .ddb()
         .args([
             "create",
             "--title",
@@ -62,7 +62,7 @@ fn non_overlapping_edits_merge_cleanly() {
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     push_node1(&setup);
     let node2_path = setup.clone_node2();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
@@ -70,29 +70,29 @@ fn non_overlapping_edits_merge_cleanly() {
     // Node1: edit frontmatter (title + tags)
     setup
         .node1
-        .zdb()
+        .ddb()
         .args(["update", &id, "--title", "Updated Title", "--tags", "a,b"])
         .assert()
         .success();
 
     // Node2: edit body
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["update", &id, "--body", "modified body"])
         .assert()
         .success();
 
     // Node1 syncs first
-    setup.node1.zdb().arg("sync").assert().success();
+    setup.node1.ddb().arg("sync").assert().success();
 
     // Node2 syncs — should merge without conflict
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success()
         .stdout(predicate::str::contains("conflicts resolved: 0"));
 
     // Merged result has both changes
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["read", &id])
         .assert()
         .success()
@@ -107,7 +107,7 @@ fn overlapping_body_edits_resolved_by_crdt() {
 
     let out = setup
         .node1
-        .zdb()
+        .ddb()
         .args([
             "create",
             "--title",
@@ -120,7 +120,7 @@ fn overlapping_body_edits_resolved_by_crdt() {
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     push_node1(&setup);
     let node2_path = setup.clone_node2();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
@@ -128,7 +128,7 @@ fn overlapping_body_edits_resolved_by_crdt() {
     // Both edit the same line
     setup
         .node1
-        .zdb()
+        .ddb()
         .args([
             "update",
             &id,
@@ -137,7 +137,7 @@ fn overlapping_body_edits_resolved_by_crdt() {
         ])
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args([
             "update",
             &id,
@@ -148,15 +148,15 @@ fn overlapping_body_edits_resolved_by_crdt() {
         .success();
 
     // Node1 pushes, node2 syncs
-    setup.node1.zdb().arg("sync").assert().success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    setup.node1.ddb().arg("sync").assert().success();
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success()
         .stdout(predicate::str::contains("conflicts resolved: 1"));
 
     // Both fragments present in merged result
-    let result = ZdbTestRepo::zdb_at(&node2_path)
+    let result = DdbTestRepo::ddb_at(&node2_path)
         .args(["read", &id])
         .output()
         .unwrap();
@@ -178,14 +178,14 @@ fn frontmatter_field_conflict_resolved_by_crdt() {
 
     let out = setup
         .node1
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Shared", "--tags", "original"])
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     push_node1(&setup);
     let node2_path = setup.clone_node2();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
@@ -193,24 +193,24 @@ fn frontmatter_field_conflict_resolved_by_crdt() {
     // Both change tags
     setup
         .node1
-        .zdb()
+        .ddb()
         .args(["update", &id, "--tags", "laptop-tag"])
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["update", &id, "--tags", "desktop-tag"])
         .assert()
         .success();
 
-    setup.node1.zdb().arg("sync").assert().success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    setup.node1.ddb().arg("sync").assert().success();
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success()
         .stdout(predicate::str::contains("conflicts resolved: 1"));
 
     // Title and other fields preserved regardless of which tag wins
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["read", &id])
         .assert()
         .success()
@@ -223,14 +223,14 @@ fn nodes_converge_after_sync() {
 
     let out = setup
         .node1
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Converge Test", "--body", "original"])
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     push_node1(&setup);
     let node2_path = setup.clone_node2();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
@@ -238,26 +238,26 @@ fn nodes_converge_after_sync() {
     // Diverge
     setup
         .node1
-        .zdb()
+        .ddb()
         .args(["update", &id, "--title", "From Laptop"])
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["update", &id, "--body", "desktop body"])
         .assert()
         .success();
 
     // Sync both directions
-    setup.node1.zdb().arg("sync").assert().success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    setup.node1.ddb().arg("sync").assert().success();
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
-    setup.node1.zdb().arg("sync").assert().success();
+    setup.node1.ddb().arg("sync").assert().success();
 
     // Both should return identical content
-    let r1 = setup.node1.zdb().args(["read", &id]).output().unwrap();
-    let r2 = ZdbTestRepo::zdb_at(&node2_path)
+    let r1 = setup.node1.ddb().args(["read", &id]).output().unwrap();
+    let r2 = DdbTestRepo::ddb_at(&node2_path)
         .args(["read", &id])
         .output()
         .unwrap();
@@ -270,14 +270,14 @@ fn concurrent_tag_additions_both_survive() {
 
     let out = setup
         .node1
-        .zdb()
+        .ddb()
         .args(["create", "--title", "TagTest", "--tags", "shared"])
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     push_node1(&setup);
     let node2_path = setup.clone_node2();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
@@ -285,26 +285,26 @@ fn concurrent_tag_additions_both_survive() {
     // Node1 adds tag "laptop"
     setup
         .node1
-        .zdb()
+        .ddb()
         .args(["update", &id, "--tags", "shared,laptop"])
         .assert()
         .success();
 
     // Node2 adds tag "desktop"
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["update", &id, "--tags", "shared,desktop"])
         .assert()
         .success();
 
     // Sync
-    setup.node1.zdb().arg("sync").assert().success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    setup.node1.ddb().arg("sync").assert().success();
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
 
     // Both tags should be present after merge
-    let result = ZdbTestRepo::zdb_at(&node2_path)
+    let result = DdbTestRepo::ddb_at(&node2_path)
         .args(["read", &id])
         .output()
         .unwrap();
@@ -323,14 +323,14 @@ fn frontmatter_conflict_creates_fm_crdt_file() {
 
     let out = setup
         .node1
-        .zdb()
+        .ddb()
         .args(["create", "--title", "FmCrdt", "--tags", "base"])
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     push_node1(&setup);
     let node2_path = setup.clone_node2();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success();
@@ -338,18 +338,18 @@ fn frontmatter_conflict_creates_fm_crdt_file() {
     // Both change frontmatter (title) to create a conflict
     setup
         .node1
-        .zdb()
+        .ddb()
         .args(["update", &id, "--title", "Laptop Title"])
         .assert()
         .success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["update", &id, "--title", "Desktop Title"])
         .assert()
         .success();
 
     // Node1 pushes, node2 syncs → conflict resolution
-    setup.node1.zdb().arg("sync").assert().success();
-    ZdbTestRepo::zdb_at(&node2_path)
+    setup.node1.ddb().arg("sync").assert().success();
+    DdbTestRepo::ddb_at(&node2_path)
         .arg("sync")
         .assert()
         .success()
@@ -372,7 +372,7 @@ fn frontmatter_conflict_creates_fm_crdt_file() {
     assert!(!data.is_empty(), "_fm.crdt file should not be empty");
 
     // Run compaction — should handle _fm.crdt files
-    ZdbTestRepo::zdb_at(&node2_path)
+    DdbTestRepo::ddb_at(&node2_path)
         .args(["compact", "--force"])
         .assert()
         .success();

@@ -1,6 +1,6 @@
 # REST API
 
-ZettelDB exposes a REST API at `/rest/*` alongside the GraphQL endpoint. Both share the same auth middleware (Bearer token) and actor backend.
+Doogat DB exposes a REST API at `/rest/*` alongside the GraphQL endpoint. Both share the same auth middleware (Bearer token) and actor backend.
 
 ## Authentication
 
@@ -8,20 +8,20 @@ All endpoints require `Authorization: Bearer <token>` header. Missing or invalid
 
 ## Endpoints
 
-### List / Search Zettels
+### List / Search Doogats
 
 ```
-GET /rest/zettels
+GET /rest/doogats
 ```
 
 **Query parameters:**
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `type` | string | Filter by zettel type |
+| `type` | string | Filter by doogat type |
 | `tag` | string | Filter by tag |
-| `backlinks` | string | Filter by backlinks of zettel ID |
-| `q` | string | Full-text search (returns search hits instead of zettels) |
+| `backlinks` | string | Filter by backlinks of doogat ID |
+| `q` | string | Full-text search (returns search hits instead of doogats) |
 | `sort` | string | Sort field (reserved for future use) |
 | `field.{name}` | string | Filter by inline field value (repeatable for AND logic) |
 | `page` | int | Page number (default: 1) |
@@ -44,18 +44,18 @@ GET /rest/zettels
 }
 ```
 
-### Get Zettel
+### Get Doogat
 
 ```
-GET /rest/zettels/:id
+GET /rest/doogats/:id
 ```
 
 Returns `{ "data": { ... } }` or `404` if not found.
 
-### Create Zettel
+### Create Doogat
 
 ```
-POST /rest/zettels
+POST /rest/doogats
 Content-Type: application/json
 
 { "title": "...", "body": "...", "tags": ["..."], "type": "..." }
@@ -63,10 +63,10 @@ Content-Type: application/json
 
 Returns `201 Created` with `{ "data": { ... } }`.
 
-### Update Zettel
+### Update Doogat
 
 ```
-PUT /rest/zettels/:id
+PUT /rest/doogats/:id
 Content-Type: application/json
 
 { "title": "...", "body": "..." }
@@ -74,10 +74,10 @@ Content-Type: application/json
 
 All fields are optional (partial update). Returns `{ "data": { ... } }`.
 
-### Delete Zettel
+### Delete Doogat
 
 ```
-DELETE /rest/zettels/:id
+DELETE /rest/doogats/:id
 ```
 
 Returns `204 No Content`.
@@ -87,17 +87,17 @@ Returns `204 No Content`.
 ```json
 {
   "error": "NOT_FOUND",
-  "message": "zettel not found: 20240101120000"
+  "message": "doogat not found: 20240101120000"
 }
 ```
 
 | HTTP Status | Error Code | Trigger |
 |-------------|-----------|---------|
 | 400 | `VALIDATION_ERROR` | Invalid input |
-| 404 | `NOT_FOUND` | Zettel doesn't exist |
+| 404 | `NOT_FOUND` | Doogat doesn't exist |
 | 422 | `SQL_ERROR` | SQL engine error |
 | 500 | `INTERNAL_ERROR` | Unexpected failure |
 
 ## Implementation
 
-REST handlers in `zdb-server/src/rest.rs` translate HTTP requests to actor commands. The actor pattern (`ActorHandle`) provides thread-safe access to the Git repo and SQLite index. The same `ActorHandle` serves both GraphQL and REST routes.
+REST handlers in `ddb-server/src/rest.rs` translate HTTP requests to actor commands. The actor pattern (`ActorHandle`) provides thread-safe access to the Git repo and SQLite index. The same `ActorHandle` serves both GraphQL and REST routes.

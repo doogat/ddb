@@ -114,17 +114,17 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           TARGET="${{ matrix.target }}"
-          STAGING="zdb-${TAG}-${TARGET}"
+          STAGING="ddb-${TAG}-${TARGET}"
           mkdir "$STAGING"
 
           # Binary
-          cp "target/${TARGET}/release/zdb" "$STAGING/"
+          cp "target/${TARGET}/release/ddb" "$STAGING/"
 
           # cdylib
-          if [ -f "target/${TARGET}/release/libzdb_core.so" ]; then
-            cp "target/${TARGET}/release/libzdb_core.so" "$STAGING/"
-          elif [ -f "target/${TARGET}/release/libzdb_core.dylib" ]; then
-            cp "target/${TARGET}/release/libzdb_core.dylib" "$STAGING/"
+          if [ -f "target/${TARGET}/release/libddb_core.so" ]; then
+            cp "target/${TARGET}/release/libddb_core.so" "$STAGING/"
+          elif [ -f "target/${TARGET}/release/libddb_core.dylib" ]; then
+            cp "target/${TARGET}/release/libddb_core.dylib" "$STAGING/"
           fi
 
           tar czf "${STAGING}.tar.gz" "$STAGING"
@@ -136,12 +136,12 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
           $target = "${{ matrix.target }}"
-          $staging = "zdb-${tag}-${target}"
+          $staging = "ddb-${tag}-${target}"
           New-Item -ItemType Directory -Path $staging
 
-          Copy-Item "target\${target}\release\zdb.exe" $staging\
-          if (Test-Path "target\${target}\release\zdb_core.dll") {
-            Copy-Item "target\${target}\release\zdb_core.dll" $staging\
+          Copy-Item "target\${target}\release\ddb.exe" $staging\
+          if (Test-Path "target\${target}\release\ddb_core.dll") {
+            Copy-Item "target\${target}\release\ddb_core.dll" $staging\
           }
 
           Compress-Archive -Path "${staging}\*" -DestinationPath "${staging}.zip"
@@ -153,10 +153,10 @@ jobs:
         with:
           name: dist-${{ matrix.target }}
           path: |
-            zdb-*.tar.gz
-            zdb-*.tar.gz.sha256
-            zdb-*.zip
-            zdb-*.zip.sha256
+            ddb-*.tar.gz
+            ddb-*.tar.gz.sha256
+            ddb-*.zip
+            ddb-*.zip.sha256
 
   release:
     needs: build

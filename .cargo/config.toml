@@ -1,5 +1,5 @@
 [alias]
 # --lib --bins: skips integration tests (property_tests, sync_test, *_thresholds)
 # and doc-tests. Integration coverage lives in the CI integration job.
-"test-ci" = ["test", "--workspace", "--exclude", "zdb-e2e", "--exclude", "zdb-uniffi-bindgen", "--lib", "--bins"]
+"test-ci" = ["test", "--workspace", "--exclude", "ddb-e2e", "--exclude", "ddb-uniffi-bindgen", "--lib", "--bins"]
 "test-full" = ["test", "--workspace"]

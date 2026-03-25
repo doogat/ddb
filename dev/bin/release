@@ -10,8 +10,8 @@ run_preflight() {
   echo "running release preflight checks..."
   cargo check --workspace --quiet
   echo "running release performance thresholds..."
-  cargo test --release -p zdb-core --test query_thresholds nfr01_
-  cargo test --release -p zdb-core --test growth_thresholds nfr02_
+  cargo test --release -p ddb-core --test query_thresholds nfr01_
+  cargo test --release -p ddb-core --test growth_thresholds nfr02_
 }
 
 DRY_RUN=false
@@ -30,22 +30,22 @@ done
 [[ -z "$BUMP" ]] && usage
 
 CARGO_FILES=(
-  zdb-core/Cargo.toml
-  zdb-cli/Cargo.toml
-  zdb-server/Cargo.toml
-  zdb-uniffi-bindgen/Cargo.toml
+  ddb-core/Cargo.toml
+  ddb-cli/Cargo.toml
+  ddb-server/Cargo.toml
+  ddb-uniffi-bindgen/Cargo.toml
   tests/Cargo.toml
 )
 
 # --- local install mode ---
 if [[ "$BUMP" == "local" ]]; then
-  cargo install --path zdb-cli
-  echo "installed: $(zdb --version 2>/dev/null || echo 'zdb (version unknown)')"
+  cargo install --path ddb-cli
+  echo "installed: $(ddb --version 2>/dev/null || echo 'ddb (version unknown)')"
   exit 0
 fi
 
 # --- read current version ---
-CURRENT=$(sed -n 's/^version = "\(.*\)"/\1/p' zdb-core/Cargo.toml | head -1)
+CURRENT=$(sed -n 's/^version = "\(.*\)"/\1/p' ddb-core/Cargo.toml | head -1)
 IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT%%-*}"
 
 # --- compute new version ---
@@ -89,7 +89,7 @@ sed -i.bak '/^## \[Unreleased\]/a\
 ## ['"${NEW}"'] - '"${RELEASE_DATE}"'' CHANGELOG.md
 sed -i.bak 's|\[Unreleased\]: \(.*\)/v.*\.\.\.HEAD|[Unreleased]: \1/v'"${NEW}"'...HEAD|' CHANGELOG.md
 sed -i.bak '/^\[Unreleased\]/a\
-['"${NEW}"']: https://github.com/doogat/zdb/compare/v'"${CURRENT}"'...v'"${NEW}"'' CHANGELOG.md
+['"${NEW}"']: https://github.com/doogat/ddb/compare/v'"${CURRENT}"'...v'"${NEW}"'' CHANGELOG.md
 rm -f CHANGELOG.md.bak
 
 # --- bump versions ---
@@ -103,7 +103,7 @@ cargo check --workspace --quiet
 
 # --- commit, tag, push ---
 git add "${CARGO_FILES[@]}" Cargo.lock CHANGELOG.md
-git commit -m "build(zdb): bump to ${TAG}"
+git commit -m "build(ddb): bump to ${TAG}"
 git tag "$TAG"
 git push origin HEAD --tags
 

@@ -1,18 +1,18 @@
 # Storage Budget
 
-Measured growth of a single-node ZettelDB repository over a simulated year.
+Measured growth of a single-node Doogat DB repository over a simulated year.
 
 ## Workload assumptions
 
 | Parameter | Value |
 |-----------|-------|
-| Initial zettels | 5,000 |
+| Initial doogats | 5,000 |
 | Edits per day | 10 |
 | Total commits | 3,650 |
-| Average zettel size | ~200 bytes (frontmatter + body + references) |
+| Average doogat size | ~200 bytes (frontmatter + body + references) |
 | Devices | 1 (single-node, no CRDT temp files generated) |
 
-These are conservative: no attachments, no multi-device sync conflicts, small zettel bodies. Real-world repos with attachments or images will grow faster.
+These are conservative: no attachments, no multi-device sync conflicts, small doogat bodies. Real-world repos with attachments or images will grow faster.
 
 ## Results
 
@@ -52,7 +52,7 @@ These are conservative: no attachments, no multi-device sync conflicts, small ze
 
 NFR-02 targets: repo growth stays within yearly budget. At 10 edits/day with monthly compaction, growth is **1.2 MB/year** — well within any reasonable budget.
 
-Without compaction, growth is ~44 MB/year. For repos with higher edit rates or larger zettels, compaction is essential.
+Without compaction, growth is ~44 MB/year. For repos with higher edit rates or larger doogats, compaction is essential.
 
 ## Extrapolation to 100 edits/day
 
@@ -71,7 +71,7 @@ The linear extrapolation is conservative (slightly pessimistic) because git gc's
 
 - **Single-node only**: CRDT temp files (0 MB here) would add overhead in multi-device sync with conflicts
 - **No attachments**: Binary files resist delta compression and would dominate growth
-- **Synthetic content**: Real zettels vary in size; results scale roughly linearly with average zettel size
+- **Synthetic content**: Real doogats vary in size; results scale roughly linearly with average doogat size
 - **Linear extrapolation**: The 10→100 edits/day projection assumes linear scaling; actual growth may be slightly lower due to improved pack ratios
 
 ## Reproducing

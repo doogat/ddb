@@ -1,0 +1,14 @@
+[package]
+name = "ddb-uniffi-bindgen"
+version = "0.2.0"
+edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/doogat/ddb"
+description = "UniFFI binding generator for Doogat DB"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+uniffi = { version = "0.29", features = ["cli"] }

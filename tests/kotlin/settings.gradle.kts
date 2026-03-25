@@ -1,1 +1,1 @@
-rootProject.name = "zetteldb-tests"
+rootProject.name = "ddb-tests"

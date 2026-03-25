@@ -1,31 +1,31 @@
-# ZettelDB Code Walkthrough
+# Doogat DB Code Walkthrough
 
-ZettelDB is a hybrid Git-CRDT decentralized Zettelkasten database written in Rust. Git is the source of truth for all data; a SQLite index with FTS5 provides fast reads and full-text search. When concurrent edits on different devices produce Git merge conflicts, an Automerge CRDT layer resolves them at the zone level. The system ships as a CLI, a multi-protocol server (GraphQL, REST, PgWire, WebSocket), and a UniFFI facade for native Swift/Kotlin apps.
+Doogat DB is a hybrid Git-CRDT decentralized Doogat database written in Rust. Git is the source of truth for all data; a SQLite index with FTS5 provides fast reads and full-text search. When concurrent edits on different devices produce Git merge conflicts, an Automerge CRDT layer resolves them at the zone level. The system ships as a CLI, a multi-protocol server (GraphQL, REST, PgWire, WebSocket), and a UniFFI facade for native Swift/Kotlin apps.
 
 
 ## 1. Workspace Layout
 
 The Cargo workspace lives at the repository root. Five members are declared in the root `Cargo.toml`; three of them are default members so that a bare `cargo build` compiles the fast local loop.
 
-### zdb-core
+### ddb-core
 
-All domain logic lives here: parsing, Git storage, CRDT conflict resolution, SQLite indexing, SQL translation, sync orchestration, compaction, attachments, and the UniFFI FFI facade. Every other crate depends on it. The crate root at `lib.rs` re-exports every public module and calls `uniffi::setup_scaffolding!()` to wire up FFI scaffolding. An optional `nosql` feature gate enables an experimental redb-backed key-value index. The `service` module provides a unified `ZettelService` orchestration layer that composes GitRepo, Index, and optional NoSQL into a single entry point — CLI, FFI, and server all delegate to it instead of independently composing core modules.
+All domain logic lives here: parsing, Git storage, CRDT conflict resolution, SQLite indexing, SQL translation, sync orchestration, compaction, attachments, and the UniFFI FFI facade. Every other crate depends on it. The crate root at `lib.rs` re-exports every public module and calls `uniffi::setup_scaffolding!()` to wire up FFI scaffolding. An optional `nosql` feature gate enables an experimental redb-backed key-value index. The `service` module provides a unified `DoogatService` orchestration layer that composes GitRepo, Index, and optional NoSQL into a single entry point — CLI, FFI, and server all delegate to it instead of independently composing core modules.
 
-### zdb-cli
+### ddb-cli
 
-A thin clap-derived binary (`zdb`) in a single `main.rs`. It opens a `ZettelService` and delegates to it for all operations. Subcommands cover the full lifecycle: `init`, `create`, `read`, `update`, `delete`, `search`, `query`, `sync`, `reindex`, `compact`, `rename`, `serve`, `type`, `node`, `bundle`, `attach`, `detach`, `attachments`, `get`, `scan`, `backlinks`, `maintenance`, `discover`, `sequence`, and `update-bin`. An embedded `updater` module handles self-update from GitHub releases.
+A thin clap-derived binary (`ddb`) in a single `main.rs`. It opens a `DoogatService` and delegates to it for all operations. Subcommands cover the full lifecycle: `init`, `create`, `read`, `update`, `delete`, `search`, `query`, `sync`, `reindex`, `compact`, `rename`, `serve`, `type`, `node`, `bundle`, `attach`, `detach`, `attachments`, `get`, `scan`, `backlinks`, `maintenance`, `discover`, `sequence`, and `update-bin`. An embedded `updater` module handles self-update from GitHub releases.
 
-### zdb-server
+### ddb-server
 
-An axum-based multi-protocol server library. Protocols: GraphQL (dynamic schema from typedef zettels), REST (JSON CRUD), PgWire (Postgres wire protocol for SQL clients), and WebSocket (GraphQL subscriptions). The crate wires up bearer-token auth, a single-writer actor, a read-only connection pool, an event bus for real-time subscriptions, and hot schema reload when typedef zettels change.
+An axum-based multi-protocol server library. Protocols: GraphQL (dynamic schema from typedef doogats), REST (JSON CRUD), PgWire (Postgres wire protocol for SQL clients), and WebSocket (GraphQL subscriptions). The crate wires up bearer-token auth, a single-writer actor, a read-only connection pool, an event bus for real-time subscriptions, and hot schema reload when typedef doogats change.
 
-### zdb-uniffi-bindgen
+### ddb-uniffi-bindgen
 
-An isolated binary crate whose sole purpose is to host the UniFFI bindgen tool. Keeping it separate avoids polluting zdb-core with binary targets and simplifies cross-compilation for Swift and Kotlin binding generation.
+An isolated binary crate whose sole purpose is to host the UniFFI bindgen tool. Keeping it separate avoids polluting ddb-core with binary targets and simplifies cross-compilation for Swift and Kotlin binding generation.
 
-### tests (zdb-e2e)
+### tests (ddb-e2e)
 
-An end-to-end test harness using `assert_cmd` for CLI tests and `reqwest` for server tests. E2E tests require the `zdb` binary on the PATH, so `cargo build -p zdb-cli` must run first. The crate lives in `tests/` and is declared as the fifth workspace member.
+An end-to-end test harness using `assert_cmd` for CLI tests and `reqwest` for server tests. E2E tests require the `ddb` binary on the PATH, so `cargo build -p ddb-cli` must run first. The crate lives in `tests/` and is declared as the fifth workspace member.
 
 ### Build aliases and test tiers
 
@@ -35,32 +35,32 @@ The workspace defines custom Cargo aliases:
 - `cargo test-ci` runs the bounded CI matrix (unit and binary targets only).
 - `cargo test-full` runs the complete suite including workspace-wide and e2e tests.
 
-Additional test surfaces include `tests/smoke.sh` (bash) and `tests/smoke.ps1` (PowerShell) for CLI smoke tests, and Criterion benchmarks in `zdb-core/benches/` for CRUD and search performance.
+Additional test surfaces include `tests/smoke.sh` (bash) and `tests/smoke.ps1` (PowerShell) for CLI smoke tests, and Criterion benchmarks in `ddb-core/benches/` for CRUD and search performance.
 
 
 ## 2. Core Data Model
 
-All domain types are defined in `types.rs`. The data model is intentionally flat: every zettel is a Markdown file with structured frontmatter, and the system derives all relational structure from that content.
+All domain types are defined in `types.rs`. The data model is intentionally flat: every doogat is a Markdown file with structured frontmatter, and the system derives all relational structure from that content.
 
-### ZettelId
+### DoogatId
 
-A 14-digit timestamp string in the format `YYYYMMDDHHmmss`, for example `"20260226120000"`. It is a newtype wrapper around String (see `types.rs:ZettelId`). A custom `Deserialize` implementation accepts both YAML integer and string representations for backward compatibility with older zettels whose IDs were serialized as bare numbers.
+A 14-digit timestamp string in the format `YYYYMMDDHHmmss`, for example `"20260226120000"`. It is a newtype wrapper around String (see `types.rs:DoogatId`). A custom `Deserialize` implementation accepts both YAML integer and string representations for backward compatibility with older doogats whose IDs were serialized as bare numbers.
 
 ### Three-zone Markdown
 
-Every zettel file is divided into three zones separated by YAML front-matter fences (`---`):
+Every doogat file is divided into three zones separated by YAML front-matter fences (`---`):
 
 1. **Frontmatter** -- YAML key-value pairs: id, title, date, type, tags, and arbitrary extra fields captured in a `BTreeMap<String, Value>`.
 2. **Body** -- Free-form Markdown content below the closing `---` of the frontmatter.
 3. **References** -- An optional third zone below a second `---` fence, used for structured references, parent links, and other relational metadata.
 
-The parser splits these zones via `parser::split_zones()`, which returns a `Zettel` struct holding the three raw strings.
+The parser splits these zones via `parser::split_zones()`, which returns a `Doogat` struct holding the three raw strings.
 
-### ParsedZettel
+### ParsedDoogat
 
-The fully parsed representation after extracting metadata from all three zones (see `types.rs:ParsedZettel`). It holds:
+The fully parsed representation after extracting metadata from all three zones (see `types.rs:ParsedDoogat`). It holds:
 
-- `meta` -- a `ZettelMeta` with id, title, date, type, tags, and extra fields.
+- `meta` -- a `DoogatMeta` with id, title, date, type, tags, and extra fields.
 - `body` -- the raw body text.
 - `sections` -- parsed heading/content pairs from the body.
 - `reference_section` -- the raw reference zone text.
@@ -70,7 +70,7 @@ The fully parsed representation after extracting metadata from all three zones (
 - `checkboxes` -- task items with state (open/done/info), dates, and nesting level.
 - `path` -- the Git-relative file path.
 
-### ZettelMeta
+### DoogatMeta
 
 Core metadata deserialized from YAML frontmatter. All fields are optional. The `extra` map captures arbitrary YAML fields not in the core schema, preserving them through parse/serialize round-trips. The `attachments` key in `extra` is reserved for the attachment system.
 
@@ -87,21 +87,21 @@ Each extracted `Link` records its target, optional display text, optional sectio
 
 ### Storage paths
 
-Zettels are stored at `zettelkasten/{id}.md`. Type definitions live at `zettelkasten/_typedef/{id}.md`. When a typedef has `folder: true`, instances of that type are stored in a subdirectory: `zettelkasten/{type_name}/{id}.md`. Binary attachments live under `reference/{zettel_id}/`.
+Doogats are stored at `ddb/{id}.md`. Type definitions live at `ddb/_typedef/{id}.md`. When a typedef has `folder: true`, instances of that type are stored in a subdirectory: `ddb/{type_name}/{id}.md`. Binary attachments live under `reference/{doogat_id}/`.
 
 ### Repository layout
 
-After `zdb init`, the on-disk layout is:
+After `ddb init`, the on-disk layout is:
 
-- `.git/zdb-node` -- local node UUID (gitignored)
-- `zettelkasten/` -- zettel Markdown files
-- `zettelkasten/_typedef/` -- type definition zettels
+- `.git/ddb-node` -- local node UUID (gitignored)
+- `ddb/` -- doogat Markdown files
+- `ddb/_typedef/` -- type definition doogats
 - `reference/` -- binary attachment files
 - `.nodes/` -- node registry TOML files (git-tracked)
 - `.crdt/temp/` -- temporary CRDT files for conflict resolution
-- `.zdb/` -- local state (gitignored), contains `index.db` (SQLite)
-- `.zetteldb.toml` -- repository configuration (compaction, CRDT, maintenance settings)
-- `.zetteldb-version` -- format version number
+- `.ddb/` -- local state (gitignored), contains `index.db` (SQLite)
+- `.ddb.toml` -- repository configuration (compaction, CRDT, maintenance settings)
+- `.ddb-version` -- format version number
 
 ### Other domain types
 
@@ -109,7 +109,7 @@ After `zdb init`, the on-disk layout is:
 - `MergeResult` -- the outcome of a Git merge: `AlreadyUpToDate`, `FastForward`, `Clean`, or `Conflicts` (carrying a list of `ConflictFile` structs plus the theirs OID).
 - `ConflictFile` -- a file in conflict with ancestor/ours/theirs content and optional HLC timestamps.
 - `ResolvedFile` -- the result of CRDT resolution: path, merged content, and optional serialized CRDT bytes.
-- `TableSchema` and `ColumnDef` -- schema metadata for materialized SQLite tables derived from typedef zettels.
+- `TableSchema` and `ColumnDef` -- schema metadata for materialized SQLite tables derived from typedef doogats.
 - `Value` -- a domain-level value enum (String, Number, Bool, List, Map), decoupled from serde_yaml.
 - `NodeConfig` -- per-device registration with UUID, name, known heads, HLC, and lifecycle status.
 - `RepoConfig` -- repository settings for compaction, CRDT strategy, and maintenance auto-trigger.
@@ -121,33 +121,33 @@ Six primary paths move data through the system. Each path touches a specific sub
 
 ### Create
 
-1. The CLI or server generates a new `ZettelId` from the current timestamp (see `parser::new_id()`).
-2. The caller builds a `ZettelMeta` and body content.
+1. The CLI or server generates a new `DoogatId` from the current timestamp (see `parser::new_id()`).
+2. The caller builds a `DoogatMeta` and body content.
 3. `parser::serialize()` assembles the three-zone Markdown string.
 4. `git_ops::GitRepo::commit_file()` writes the file into the Git working tree, stages it, and creates a commit.
-5. `indexer::Index::index_zettel()` upserts the parsed zettel into SQLite (zettels, tags, fields, links, checkboxes, FTS5).
+5. `indexer::Index::index_doogat()` upserts the parsed doogat into SQLite (doogats, tags, fields, links, checkboxes, FTS5).
 6. If running under the server, the actor emits a `Created` event on the event bus for WebSocket subscribers.
 
 ### Read
 
-1. The caller provides a zettel ID.
+1. The caller provides a doogat ID.
 2. `indexer::Index::resolve_path()` maps the ID to a Git-relative path (handling both flat and folder-typed layouts).
 3. `git_ops::GitRepo::read_file()` reads the file content from the Git HEAD tree via libgit2, without touching the working directory.
-4. `parser::parse()` splits zones and extracts all metadata, returning a `ParsedZettel`.
+4. `parser::parse()` splits zones and extracts all metadata, returning a `ParsedDoogat`.
 
 ### Update
 
-1. Read the existing zettel (same as the Read path).
-2. Modify the `ParsedZettel` fields as requested.
+1. Read the existing doogat (same as the Read path).
+2. Modify the `ParsedDoogat` fields as requested.
 3. `parser::serialize()` reassembles the three-zone Markdown.
 4. `git_ops::GitRepo::commit_file()` writes and commits the updated content.
-5. `indexer::Index::index_zettel()` re-upserts the zettel, replacing all prior index entries for that ID.
+5. `indexer::Index::index_doogat()` re-upserts the doogat, replacing all prior index entries for that ID.
 6. The server actor emits an `Updated` event.
 
 ### Search
 
-1. `indexer::Index::ensure_fresh()` compares the stored HEAD OID in `_zdb_meta` against the actual Git HEAD. If they differ, a targeted incremental reindex runs for changed paths only (see `indexer/mod.rs:incremental_reindex()`).
-2. The FTS5 virtual table `_zdb_fts` is queried with `MATCH` using porter stemming and unicode61 tokenization.
+1. `indexer::Index::ensure_fresh()` compares the stored HEAD OID in `_ddb_meta` against the actual Git HEAD. If they differ, a targeted incremental reindex runs for changed paths only (see `indexer/mod.rs:incremental_reindex()`).
+2. The FTS5 virtual table `_ddb_fts` is queried with `MATCH` using porter stemming and unicode61 tokenization.
 3. Results are ranked by BM25 score and returned with highlighted snippets.
 4. `search_paginated()` adds limit/offset support and a total count.
 
@@ -168,22 +168,22 @@ Six primary paths move data through the system. Each path touches a specific sub
 ### SQL
 
 1. `sql_engine::SqlEngine::execute()` parses the SQL string using `sqlparser`.
-2. DDL statements (CREATE TABLE, ALTER TABLE, DROP TABLE) are translated into typedef zettel operations:
-   - CREATE TABLE creates a `_typedef` zettel with column definitions, then materializes a SQLite table.
-   - ALTER TABLE modifies the typedef zettel and re-materializes.
-   - DROP TABLE deletes the typedef zettel and drops the materialized table.
-3. DML statements are translated into zettel CRUD:
-   - INSERT creates a new zettel with the specified type and field values.
-   - UPDATE reads the existing zettel, modifies fields, and commits.
-   - DELETE removes the zettel file and index entry.
+2. DDL statements (CREATE TABLE, ALTER TABLE, DROP TABLE) are translated into typedef doogat operations:
+   - CREATE TABLE creates a `_typedef` doogat with column definitions, then materializes a SQLite table.
+   - ALTER TABLE modifies the typedef doogat and re-materializes.
+   - DROP TABLE deletes the typedef doogat and drops the materialized table.
+3. DML statements are translated into doogat CRUD:
+   - INSERT creates a new doogat with the specified type and field values.
+   - UPDATE reads the existing doogat, modifies fields, and commits.
+   - DELETE removes the doogat file and index entry.
 4. SELECT statements run directly against the SQLite index (both core tables and materialized type tables).
 5. Multi-statement transactions use a `TransactionBuffer` to batch writes and deletes into a single Git commit.
 
 ### Rename
 
-1. `git_ops::GitRepo::rename_zettel()` moves the file to a new path and commits.
-2. `parser::rewrite_links()` scans all other zettels for links pointing at the old path and rewrites them in a single batch commit.
-3. The indexer is updated for both the renamed zettel and all zettels whose links changed.
+1. `git_ops::GitRepo::rename_doogat()` moves the file to a new path and commits.
+2. `parser::rewrite_links()` scans all other doogats for links pointing at the old path and rewrites them in a single batch commit.
+3. The indexer is updated for both the renamed doogat and all doogats whose links changed.
 4. A `RenameReport` lists updated files and any unresolvable references.
 
 
@@ -191,7 +191,7 @@ Six primary paths move data through the system. Each path touches a specific sub
 
 ### parser to indexer
 
-The parser extracts structured data from raw Markdown; the indexer consumes it. When `indexer::Index::index_zettel()` receives a `ParsedZettel`, it upserts rows into `zettels`, `_zdb_tags`, `_zdb_fields`, `_zdb_links`, `_zdb_aliases`, `_zdb_checkboxes`, and `_zdb_attachments`. The FTS5 table `_zdb_fts` is kept in sync with the `zettels` table. The parser extracts four link kinds (wikilink, embed, markdown, bare URL), each stored with its zone and kind discriminant in `_zdb_links`.
+The parser extracts structured data from raw Markdown; the indexer consumes it. When `indexer::Index::index_doogat()` receives a `ParsedDoogat`, it upserts rows into `doogats`, `_ddb_tags`, `_ddb_fields`, `_ddb_links`, `_ddb_aliases`, `_ddb_checkboxes`, and `_ddb_attachments`. The FTS5 table `_ddb_fts` is kept in sync with the `doogats` table. The parser extracts four link kinds (wikilink, embed, markdown, bare URL), each stored with its zone and kind discriminant in `_ddb_links`.
 
 ### git_ops and crdt_resolver
 
@@ -207,54 +207,54 @@ Three CRDT strategy presets are supported (see `crdt_resolver.rs:resolve_conflic
 
 - `preset:default` -- zone-level merge as described above.
 - `preset:last-writer-wins` -- HLC comparison picks the newer version wholesale.
-- `preset:append-log` -- bodies are concatenated chronologically, useful for project log zettels.
+- `preset:append-log` -- bodies are concatenated chronologically, useful for project log doogats.
 
 ### sql_engine to git_ops
 
-The SQL engine translates relational operations into zettel file operations. DDL (CREATE TABLE, ALTER TABLE, DROP TABLE) creates, modifies, or deletes `_typedef` zettels in `zettelkasten/_typedef/`. DML (INSERT, UPDATE, DELETE) becomes `git_ops::GitRepo::commit_file()` or `commit_batch()` calls. SELECT goes directly to the SQLite index. The engine holds references to both `&Index` and `&dyn ZettelStore`, the latter satisfied by `GitRepo` which implements both `ZettelSource` and `ZettelStore`.
+The SQL engine translates relational operations into doogat file operations. DDL (CREATE TABLE, ALTER TABLE, DROP TABLE) creates, modifies, or deletes `_typedef` doogats in `ddb/_typedef/`. DML (INSERT, UPDATE, DELETE) becomes `git_ops::GitRepo::commit_file()` or `commit_batch()` calls. SELECT goes directly to the SQLite index. The engine holds references to both `&Index` and `&dyn DoogatStore`, the latter satisfied by `GitRepo` which implements both `DoogatSource` and `DoogatStore`.
 
 ### Server actor bridge
 
-The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `ZettelService` instance, delegating all operations to it. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
+The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `DoogatService` instance, delegating all operations to it. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
 
-For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent read-only access. Each read acquires a semaphore permit and runs on `spawn_blocking` with a fresh `ZettelService` instance, bypassing the single-writer actor entirely. The pool size is configurable via server config.
+For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent read-only access. Each read acquires a semaphore permit and runs on `spawn_blocking` with a fresh `DoogatService` instance, bypassing the single-writer actor entirely. The pool size is configurable via server config.
 
 ### Indexer rebuild pipeline
 
 Full rebuilds (see `indexer/mod.rs:rebuild()`) use a parallel pipeline powered by rayon:
 
-1. `ZettelSource::list_zettels()` collects all zettel paths.
-2. `ZettelSource::read_files_batch()` reads file contents (the default implementation is sequential; `GitRepo` can batch).
+1. `DoogatSource::list_doogats()` collects all doogat paths.
+2. `DoogatSource::read_files_batch()` reads file contents (the default implementation is sequential; `GitRepo` can batch).
 3. `parser::parse()` runs in parallel across files via rayon's `par_iter()`.
-4. Parsed zettels are upserted into SQLite within a transaction.
+4. Parsed doogats are upserted into SQLite within a transaction.
 5. Type definitions are collected and used to materialize typed tables.
 6. `RebuildReport` tallies indexed count, materialized tables, inferred types, and any consistency warnings.
 
-Incremental reindex (see `indexer/mod.rs:incremental_reindex()`) uses `ZettelSource::diff_paths()` to find changed files since the last known HEAD, then parses and upserts only those files.
+Incremental reindex (see `indexer/mod.rs:incremental_reindex()`) uses `DoogatSource::diff_paths()` to find changed files since the last known HEAD, then parses and upserts only those files.
 
 ### Event bus and subscriptions
 
-The server's `EventBus` (see `events.rs`) is a tokio broadcast channel. After each successful mutation, the actor publishes a `ZettelEvent` with the kind (created/updated/deleted), zettel ID, type, and timestamp. GraphQL subscriptions and WebSocket connections subscribe to this channel for real-time updates.
+The server's `EventBus` (see `events.rs`) is a tokio broadcast channel. After each successful mutation, the actor publishes a `DoogatEvent` with the kind (created/updated/deleted), doogat ID, type, and timestamp. GraphQL subscriptions and WebSocket connections subscribe to this channel for real-time updates.
 
 ### Hot schema reload
 
-When a typedef zettel is created, updated, or deleted, the actor triggers a schema reload via `SchemaReloader` (see `reload.rs`). The reloader fetches current type schemas from the actor, rebuilds the dynamic GraphQL schema, and atomically swaps it into the `ArcSwap<Schema>` shared with all request handlers. This allows the GraphQL API to reflect typedef changes without a server restart.
+When a typedef doogat is created, updated, or deleted, the actor triggers a schema reload via `SchemaReloader` (see `reload.rs`). The reloader fetches current type schemas from the actor, rebuilds the dynamic GraphQL schema, and atomically swaps it into the `ArcSwap<Schema>` shared with all request handlers. This allows the GraphQL API to reflect typedef changes without a server restart.
 
 
 ## 5. Key Types and Traits
 
 ### Foundation types
 
-- **ZettelId** -- 14-digit timestamp string newtype. See `types.rs:ZettelId`.
+- **DoogatId** -- 14-digit timestamp string newtype. See `types.rs:DoogatId`.
 - **CommitHash** -- Git commit OID string newtype. Access the inner string via `.0`. See `types.rs:CommitHash`.
 - **Value** -- Domain-level value enum (String, Number, Bool, List, Map), decoupled from serde_yaml. See `types.rs:Value`.
-- **Zone** -- Enum identifying which part of the zettel data came from: Frontmatter, Body, or Reference. See `types.rs:Zone`.
+- **Zone** -- Enum identifying which part of the doogat data came from: Frontmatter, Body, or Reference. See `types.rs:Zone`.
 
-### Zettel types
+### Doogat types
 
-- **Zettel** -- Raw three-zone split before metadata extraction: `raw_frontmatter`, `body`, `reference_section`. See `types.rs:Zettel`.
-- **ZettelMeta** -- Core metadata from YAML frontmatter with an `extra` BTreeMap for arbitrary fields. See `types.rs:ZettelMeta`.
-- **ParsedZettel** -- Full parsed representation with all extracted metadata, links, inline fields, sections, checkboxes, and body tags. See `types.rs:ParsedZettel`.
+- **Doogat** -- Raw three-zone split before metadata extraction: `raw_frontmatter`, `body`, `reference_section`. See `types.rs:Doogat`.
+- **DoogatMeta** -- Core metadata from YAML frontmatter with an `extra` BTreeMap for arbitrary fields. See `types.rs:DoogatMeta`.
+- **ParsedDoogat** -- Full parsed representation with all extracted metadata, links, inline fields, sections, checkboxes, and body tags. See `types.rs:ParsedDoogat`.
 - **InlineField** -- A Dataview-style `key:: value` pair with its source zone. See `types.rs:InlineField`.
 - **Link** -- An extracted reference with target, display text, section anchor, kind, and zone. See `types.rs:Link`.
 - **LinkKind** -- Discriminant for link syntax: WikiLink, MarkdownLink, Embed, BareUrl. See `types.rs:LinkKind`.
@@ -284,20 +284,20 @@ When a typedef zettel is created, updated, or deleted, the actor triggers a sche
 
 ### Error handling
 
-`ZettelError` is a single thiserror-derived enum covering all failure modes: Git, Yaml, Sql, Automerge, Io, Toml, Parse, NotFound, Validation, InvalidPath, SqlEngine, and VersionMismatch. An optional `Redb` variant exists behind the `nosql` feature gate. See `error.rs:ZettelError`.
+`DoogatError` is a single thiserror-derived enum covering all failure modes: Git, Yaml, Sql, Automerge, Io, Toml, Parse, NotFound, Validation, InvalidPath, SqlEngine, and VersionMismatch. An optional `Redb` variant exists behind the `nosql` feature gate. See `error.rs:DoogatError`.
 
-The crate defines a `Result<T>` alias as `std::result::Result<T, ZettelError>`. Every public function in the library returns this type. No panics in library code; all errors propagate via `?`.
+The crate defines a `Result<T>` alias as `std::result::Result<T, DoogatError>`. Every public function in the library returns this type. No panics in library code; all errors propagate via `?`.
 
 ### Core traits
 
 Four traits define the module boundaries (see `traits.rs`):
 
-- **ZettelSource** -- Read-only access to zettel storage: `list_zettels()`, `read_file()`, `head_oid()`, `diff_paths()`, and `read_files_batch()`. Implemented by `GitRepo`. The batch read has a default sequential implementation that concrete types can override.
-- **ZettelStore** -- Read-write access extending ZettelSource: `commit_file()`, `commit_files()`, `delete_file()`, `delete_files()`, and `commit_batch()`. Implemented by `GitRepo`.
-- **ZettelIndex** -- Query and mutation operations on the search index: `index_zettel()`, `remove_zettel()`, `search()`, `search_paginated()`, `resolve_path()`, `query_raw()`, `find_typedef_path()`, and `execute_sql()`. Implemented by `Index`.
+- **DoogatSource** -- Read-only access to doogat storage: `list_doogats()`, `read_file()`, `head_oid()`, `diff_paths()`, and `read_files_batch()`. Implemented by `GitRepo`. The batch read has a default sequential implementation that concrete types can override.
+- **DoogatStore** -- Read-write access extending DoogatSource: `commit_file()`, `commit_files()`, `delete_file()`, `delete_files()`, and `commit_batch()`. Implemented by `GitRepo`.
+- **DoogatIndex** -- Query and mutation operations on the search index: `index_doogat()`, `remove_doogat()`, `search()`, `search_paginated()`, `resolve_path()`, `query_raw()`, `find_typedef_path()`, and `execute_sql()`. Implemented by `Index`.
 - **ConflictResolver** -- CRDT-based conflict resolution: `resolve_conflicts()` takes a list of `ConflictFile` structs and an optional strategy string, returning `ResolvedFile` results. The free function `crdt_resolver::resolve_conflicts()` implements this logic.
 
-A `MockSource` in `traits::mock` provides an in-memory `ZettelSource` for unit tests.
+A `MockSource` in `traits::mock` provides an in-memory `DoogatSource` for unit tests.
 
 ### Hybrid Logical Clock
 
@@ -313,15 +313,15 @@ HLC values are totally ordered and used by the last-writer-wins CRDT strategy to
 
 ### UniFFI facade
 
-The FFI module (see `ffi.rs`) exposes a `ZettelDriver` struct that wraps `GitRepo`, `Index`, and `SqlEngine` behind a `Mutex`. It provides a UniFFI-friendly API with FFI-safe error types (`ZdbError`) and value types (`SearchResult`, etc.) that mirror the core types but use only UniFFI-compatible primitives. Swift and Kotlin bindings are generated from the proc-macro annotations via the isolated `zdb-uniffi-bindgen` crate.
+The FFI module (see `ffi.rs`) exposes a `DoogatDriver` struct that wraps `GitRepo`, `Index`, and `SqlEngine` behind a `Mutex`. It provides a UniFFI-friendly API with FFI-safe error types (`DdbError`) and value types (`SearchResult`, etc.) that mirror the core types but use only UniFFI-compatible primitives. Swift and Kotlin bindings are generated from the proc-macro annotations via the isolated `ddb-uniffi-bindgen` crate.
 
 ### Bundled types
 
-The `bundled_types` module (see `bundled_types.rs`) ships predefined typedef templates as embedded Markdown strings. Available templates include `project` (with columns for completed, deliverable, parent, ticket, and body template sections for Description/Log/Plan/Solution), `contact` (aliases, contact-type, email, with folder storage), and `literature-note`. These are installed via `zdb type install <name>`, which writes the typedef zettel into `zettelkasten/_typedef/`.
+The `bundled_types` module (see `bundled_types.rs`) ships predefined typedef templates as embedded Markdown strings. Available templates include `project` (with columns for completed, deliverable, parent, ticket, and body template sections for Description/Log/Plan/Solution), `contact` (aliases, contact-type, email, with folder storage), and `literature-note`. These are installed via `ddb type install <name>`, which writes the typedef doogat into `ddb/_typedef/`.
 
 ### Dynamic GraphQL schema
 
-The server reads all `_typedef` zettels at startup via the actor, then builds a dynamic async-graphql schema (see `schema/mod.rs:build_schema()`). Each typedef generates a GraphQL object type with fields matching the column definitions, plus standard zettel fields (id, title, body, tags, links, etc.). The schema includes queries for listing, filtering, searching, and counting typed zettels, plus mutations for CRUD and SQL execution. Subscriptions use the event bus for real-time push.
+The server reads all `_typedef` doogats at startup via the actor, then builds a dynamic async-graphql schema (see `schema/mod.rs:build_schema()`). Each typedef generates a GraphQL object type with fields matching the column definitions, plus standard doogat fields (id, title, body, tags, links, etc.). The schema includes queries for listing, filtering, searching, and counting typed doogats, plus mutations for CRUD and SQL execution. Subscriptions use the event bus for real-time push.
 
 When a typedef mutation occurs, the `SchemaReloader` rebuilds and atomically swaps in the new schema via `ArcSwap`, so clients see updated types without a server restart.
 
@@ -331,7 +331,7 @@ The server exposes a Postgres wire protocol endpoint (see `pgwire.rs`) that allo
 
 ### REST API
 
-A JSON REST API (see `rest.rs`) provides conventional CRUD endpoints alongside the GraphQL interface. Routes follow the pattern `/rest/zettels`, `/rest/zettels/:id`, with query parameters for filtering and pagination.
+A JSON REST API (see `rest.rs`) provides conventional CRUD endpoints alongside the GraphQL interface. Routes follow the pattern `/rest/doogats`, `/rest/doogats/:id`, with query parameters for filtering and pagination.
 
 ### WebSocket subscriptions
 
@@ -339,7 +339,7 @@ The WebSocket endpoint at `/ws` (see `ws.rs`) supports GraphQL subscriptions ove
 
 ### Attachments
 
-The attachment system (see `attachments.rs`) manages binary files associated with zettels. Files are stored in `reference/{zettel_id}/` and tracked in the zettel's frontmatter `attachments` array. Operations include `attach()` (validates the filename, detects MIME type, writes the blob, updates frontmatter, and commits), `detach()` (removes the blob and frontmatter entry), and `list()` (reads from frontmatter). The server provides a direct file-serving endpoint at `/attachments/{zettel_id}/{filename}` with path-traversal protection.
+The attachment system (see `attachments.rs`) manages binary files associated with doogats. Files are stored in `reference/{doogat_id}/` and tracked in the doogat's frontmatter `attachments` array. Operations include `attach()` (validates the filename, detects MIME type, writes the blob, updates frontmatter, and commits), `detach()` (removes the blob and frontmatter entry), and `list()` (reads from frontmatter). The server provides a direct file-serving endpoint at `/attachments/{doogat_id}/{filename}` with path-traversal protection.
 
 ### Bundles
 
@@ -347,7 +347,7 @@ The bundle system (see `bundle.rs`) supports air-gapped sync between devices tha
 
 ### Maintenance
 
-The maintenance module (see `maintenance.rs`) wraps `git maintenance run` for repository housekeeping (commit-graph, loose-objects, incremental-repack, pack-refs). If the system `git` binary lacks the `maintenance` subcommand, it falls back to `git gc --auto`. Auto-triggering can be configured in `.zetteldb.toml` with a write-count threshold. The server optionally runs maintenance on a periodic timer.
+The maintenance module (see `maintenance.rs`) wraps `git maintenance run` for repository housekeeping (commit-graph, loose-objects, incremental-repack, pack-refs). If the system `git` binary lacks the `maintenance` subcommand, it falls back to `git gc --auto`. Auto-triggering can be configured in `.ddb.toml` with a write-count threshold. The server optionally runs maintenance on a periodic timer.
 
 ### Compaction
 
@@ -356,23 +356,23 @@ The compaction module (see `compaction.rs`) cleans up CRDT temporary files in `.
 
 ## 7. Testing Strategy
 
-ZettelDB uses a layered testing approach with six distinct tiers, each covering different aspects of the system.
+Doogat DB uses a layered testing approach with six distinct tiers, each covering different aspects of the system.
 
 ### Unit tests
 
-In-module `#[cfg(test)] mod tests` blocks test individual functions in isolation. These run with `cargo test` (the fast local tier) and cover parsing edge cases, CRDT merge logic, SQL translation, type inference, HLC arithmetic, and error mapping. The `MockSource` in `traits::mock` provides an in-memory zettel store for tests that need a `ZettelSource` without touching Git.
+In-module `#[cfg(test)] mod tests` blocks test individual functions in isolation. These run with `cargo test` (the fast local tier) and cover parsing edge cases, CRDT merge logic, SQL translation, type inference, HLC arithmetic, and error mapping. The `MockSource` in `traits::mock` provides an in-memory doogat store for tests that need a `DoogatSource` without touching Git.
 
 ### Integration tests
 
-Tests in `zdb-core/tests/` exercise multi-module interactions: sync between two repos, property-based tests for parse/serialize round-trips, and CRDT resolution across different conflict scenarios. Run with `cargo test -p zdb-core`.
+Tests in `ddb-core/tests/` exercise multi-module interactions: sync between two repos, property-based tests for parse/serialize round-trips, and CRDT resolution across different conflict scenarios. Run with `cargo test -p ddb-core`.
 
 ### Property tests
 
-Proptest-based tests in `zdb-core/tests/property_tests.rs` generate random zettel content and verify invariants like parse/serialize round-trip fidelity and CRDT merge commutativity. The default case count is suitable for CI; a thorough run (`PROPTEST_CASES=5000`) takes around 20 minutes.
+Proptest-based tests in `ddb-core/tests/property_tests.rs` generate random doogat content and verify invariants like parse/serialize round-trip fidelity and CRDT merge commutativity. The default case count is suitable for CI; a thorough run (`PROPTEST_CASES=5000`) takes around 20 minutes.
 
 ### End-to-end tests
 
-The `tests/e2e/` directory contains assert_cmd-based tests that exercise the `zdb` binary as a black box. These tests create temporary repositories, run CLI commands, and assert on stdout/stderr output and exit codes. Server tests use reqwest to hit the HTTP endpoints. The binary must be built first: `cargo build -p zdb-cli && cargo test -p zdb-e2e`.
+The `tests/e2e/` directory contains assert_cmd-based tests that exercise the `ddb` binary as a black box. These tests create temporary repositories, run CLI commands, and assert on stdout/stderr output and exit codes. Server tests use reqwest to hit the HTTP endpoints. The binary must be built first: `cargo build -p ddb-cli && cargo test -p ddb-e2e`.
 
 ### Smoke tests
 
@@ -380,7 +380,7 @@ The `tests/e2e/` directory contains assert_cmd-based tests that exercise the `zd
 
 ### Benchmarks
 
-Criterion benchmarks in `zdb-core/benches/` measure CRUD operations and search performance at 1K zettels. `crud.rs` benchmarks create, read, update, and delete cycles. `search.rs` benchmarks FTS5 search, SQL SELECT, and full reindex. Run with `cargo bench`; compile-only with `cargo bench --no-run`.
+Criterion benchmarks in `ddb-core/benches/` measure CRUD operations and search performance at 1K doogats. `crud.rs` benchmarks create, read, update, and delete cycles. `search.rs` benchmarks FTS5 search, SQL SELECT, and full reindex. Run with `cargo bench`; compile-only with `cargo bench --no-run`.
 
 ### Full suite
 
@@ -388,11 +388,11 @@ Criterion benchmarks in `zdb-core/benches/` measure CRUD operations and search p
 
 ## 8. Consistency Auto-Fix
 
-The `consistency` module (`consistency.rs`) provides a detect-then-apply pipeline for normalizing zettels. The `zdb fix` command scans all zettels and corrects common data quality issues in a single atomic commit.
+The `consistency` module (`consistency.rs`) provides a detect-then-apply pipeline for normalizing doogats. The `ddb fix` command scans all doogats and corrects common data quality issues in a single atomic commit.
 
 ### Detection
 
-`detect_fixes(parsed, schema)` inspects a `ParsedZettel` and returns a `Vec<Fix>` with severity-ordered issues:
+`detect_fixes(parsed, schema)` inspects a `ParsedDoogat` and returns a `Vec<Fix>` with severity-ordered issues:
 
 - **Error**: cross-zone duplicate fields (same key in frontmatter and body inline fields)
 - **Warning**: missing type default, missing title (derived from H1 or filename), title doesn't match typedef `title_template`
@@ -400,37 +400,37 @@ The `consistency` module (`consistency.rs`) provides a detect-then-apply pipelin
 
 ### Application
 
-`apply_fixes(parsed, fixes)` modifies the `ParsedZettel` in-place and re-serializes via `parser::serialize()`. Tag fixes run in order: strip hash, dedup, sort. Key normalization uses `to_kebab_case()` which handles CamelCase, snake_case, and acronyms (e.g. `XMLParser` -> `xml-parser`).
+`apply_fixes(parsed, fixes)` modifies the `ParsedDoogat` in-place and re-serializes via `parser::serialize()`. Tag fixes run in order: strip hash, dedup, sort. Key normalization uses `to_kebab_case()` which handles CamelCase, snake_case, and acronyms (e.g. `XMLParser` -> `xml-parser`).
 
 ### Orchestration
 
-`fix_all(repo, index, dry_run)` iterates all zettels, detects fixes per typedef schema, applies them, and commits atomically. Dry-run mode collects the report without modifying files.
+`fix_all(repo, index, dry_run)` iterates all doogats, detects fixes per typedef schema, applies them, and commits atomically. Dry-run mode collects the report without modifying files.
 
 ### Migration
 
-`migrate_all(repo, dry_run)` runs versioned field-level migrations: `zkn-id` -> `id`, `tag` (singular) -> `tags`, type normalization (`loop` -> `project`, `zettel`/`wiki-article` -> `note`). Version tracked in `.zdb/migration-version`. Invoked via `zdb fix --migrate`.
+`migrate_all(repo, dry_run)` runs versioned field-level migrations: `zkn-id` -> `id`, `tag` (singular) -> `tags`, type normalization (`loop` -> `project`, `doogat`/`wiki-article` -> `note`). Version tracked in `.ddb/migration-version`. Invoked via `ddb fix --migrate`.
 
 ### Zone migration
 
-`zone_migrate_all(repo, index, dry_run)` compares each column's current zone (frontmatter, body, or reference) against the typedef's `effective_zone()` and rewrites the zettel to move data to the correct zone. For example, if a column was changed from body to frontmatter via `ALTER TABLE ... SET ZONE frontmatter FOR ...`, zone migration extracts the `## column_name` body section and places the value in frontmatter YAML. Also invoked via `zdb fix --migrate`.
+`zone_migrate_all(repo, index, dry_run)` compares each column's current zone (frontmatter, body, or reference) against the typedef's `effective_zone()` and rewrites the doogat to move data to the correct zone. For example, if a column was changed from body to frontmatter via `ALTER TABLE ... SET ZONE frontmatter FOR ...`, zone migration extracts the `## column_name` body section and places the value in frontmatter YAML. Also invoked via `ddb fix --migrate`.
 
 ### CLI
 
 ```
-zdb fix [--dry-run] [-v/--verbose] [--migrate]
+ddb fix [--dry-run] [-v/--verbose] [--migrate]
 ```
 
 ## 9. Discovery
 
-The discovery system surfaces latent connections, maintenance issues, and knowledge gaps across the zettel graph. Four queries are available via CLI and GraphQL.
+The discovery system surfaces latent connections, maintenance issues, and knowledge gaps across the doogat graph. Four queries are available via CLI and GraphQL.
 
 ### Unlinked mentions
 
-Finds zettels whose body text mentions another zettel's title without linking to it. Uses FTS5 phrase matching against the target's title, then excludes zettels that already link to the target (by path, ID, or alias). Self-references are also excluded.
+Finds doogats whose body text mentions another doogat's title without linking to it. Uses FTS5 phrase matching against the target's title, then excludes doogats that already link to the target (by path, ID, or alias). Self-references are also excluded.
 
 ```bash
-zdb discover mentions <id>
-zdb discover mentions --all
+ddb discover mentions <id>
+ddb discover mentions --all
 ```
 
 ```graphql
@@ -439,10 +439,10 @@ query { unlinkedMentions(id: "20260301120000") { sourceId sourceTitle snippet } 
 
 ### Link suggestions
 
-Suggests related zettels based on a hybrid scoring algorithm. Candidates with shared tags are scored by Jaccard similarity (weighted 0.6), then FTS5 BM25 content similarity against the source title is added (weighted 0.4). Already-linked zettels are excluded. When the source has no tags, the system falls back to content-only scoring.
+Suggests related doogats based on a hybrid scoring algorithm. Candidates with shared tags are scored by Jaccard similarity (weighted 0.6), then FTS5 BM25 content similarity against the source title is added (weighted 0.4). Already-linked doogats are excluded. When the source has no tags, the system falls back to content-only scoring.
 
 ```bash
-zdb discover similar <id> [--limit N]
+ddb discover similar <id> [--limit N]
 ```
 
 ```graphql
@@ -451,7 +451,7 @@ query { suggestions(id: "20260301120000", limit: 5) { id title score sharedTags 
 
 ### Staleness tracking
 
-Identifies zettels that haven't been updated within their type's configured threshold. Types opt in by setting `stale_after_days` in the typedef frontmatter:
+Identifies doogats that haven't been updated within their type's configured threshold. Types opt in by setting `stale_after_days` in the typedef frontmatter:
 
 ```yaml
 stale_after_days: 30
@@ -460,23 +460,23 @@ stale_after_days: 30
 The last-updated date uses a priority chain: git revision date > frontmatter `date` field > indexer `updated_at`. Results are sorted by staleness (most stale first).
 
 ```bash
-zdb discover stale [--type <type>]
+ddb discover stale [--type <type>]
 ```
 
 ```graphql
-query { staleZettels(type: "project") { id title zettelType lastUpdated dateSource daysStale thresholdDays } }
+query { staleDoogats(type: "project") { id title doogatType lastUpdated dateSource daysStale thresholdDays } }
 ```
 
 ### Orphan detection
 
-Finds zettels with zero incoming links (no other zettel links to them). Typedef zettels are excluded since they are structural, not content nodes. Results include the outgoing link count to help assess whether an orphan is isolated or simply unreferenced.
+Finds doogats with zero incoming links (no other doogat links to them). Typedef doogats are excluded since they are structural, not content nodes. Results include the outgoing link count to help assess whether an orphan is isolated or simply unreferenced.
 
 ```bash
-zdb discover orphans [--type <type>]
+ddb discover orphans [--type <type>]
 ```
 
 ```graphql
-query { orphanZettels(type: "note") { id title zettelType outgoingLinks } }
+query { orphanDoogats(type: "note") { id title doogatType outgoingLinks } }
 ```
 
 
@@ -514,7 +514,7 @@ Errors are structured as `PathError` with variants `KeyNotFound`, `IndexOutOfBou
 
 ### Indexer integration
 
-Nested `Map` and `List` values in frontmatter `extra` fields are flattened into the `_zdb_fields` table with dot/bracket notation keys:
+Nested `Map` and `List` values in frontmatter `extra` fields are flattened into the `_ddb_fields` table with dot/bracket notation keys:
 
 ```yaml
 author:
@@ -525,7 +525,7 @@ scores:
   - 20
 ```
 
-Produces `_zdb_fields` rows with keys: `author.name`, `author.email`, `scores[0]`, `scores[1]`.
+Produces `_ddb_fields` rows with keys: `author.name`, `author.email`, `scores[0]`, `scores[1]`.
 
 ### SQL and GraphQL
 
@@ -535,7 +535,7 @@ Column names containing `.` or `[` trigger path navigation in both:
 
 ## 12. Sequence Navigation
 
-Zettels can form ordered chains using the `sequence` frontmatter field. A zettel points to its parent:
+Doogats can form ordered chains using the `sequence` frontmatter field. A doogat points to its parent:
 
 ```yaml
 ---
@@ -545,7 +545,7 @@ sequence: 20260315120000
 ---
 ```
 
-Children are discovered by reverse lookup: all zettels where `sequence == this.id`. No schema change is needed — the existing `_zdb_fields` table stores the `sequence` key.
+Children are discovered by reverse lookup: all doogats where `sequence == this.id`. No schema change is needed — the existing `_ddb_fields` table stores the `sequence` key.
 
 ### Core queries (indexer/)
 
@@ -558,22 +558,22 @@ Cycle detection: breadcrumb walk tracks visited IDs and breaks after 100 iterati
 
 ### MOC (Map of Content) recognition
 
-Zettels with `role: moc` (or `role: index`, `role: hub`, `role: structure`) in frontmatter are recognized as structural organizers — natural sequence roots. No special code is needed: the `role` field is stored in `_zdb_fields` like any other frontmatter extra, so these zettels are discoverable via SQL queries:
+Doogats with `role: moc` (or `role: index`, `role: hub`, `role: structure`) in frontmatter are recognized as structural organizers — natural sequence roots. No special code is needed: the `role` field is stored in `_ddb_fields` like any other frontmatter extra, so these doogats are discoverable via SQL queries:
 
 ```sql
-SELECT z.id, z.title FROM _zdb_fields f
-JOIN zettels z ON z.id = f.zettel_id
+SELECT z.id, z.title FROM _ddb_fields f
+JOIN doogats z ON z.id = f.doogat_id
 WHERE f.key = 'role' AND f.value = 'moc'
 ```
 
-A MOC zettel typically has no `sequence` field (it's the root) and its children point to it via their `sequence` field.
+A MOC doogat typically has no `sequence` field (it's the root) and its children point to it via their `sequence` field.
 
 ### CLI
 
 ```bash
-zdb sequence tree <id>         # breadcrumb line + children list
-zdb sequence breadcrumb <id>   # root → ... → self
-zdb sequence broken            # broken sequence references
+ddb sequence tree <id>         # breadcrumb line + children list
+ddb sequence breadcrumb <id>   # root → ... → self
+ddb sequence broken            # broken sequence references
 ```
 
 ### GraphQL
@@ -626,7 +626,7 @@ The SQL engine supports custom DDL extensions that `sqlparser` cannot parse: `AL
 3. If a regex matches, capture groups are extracted and dispatched to `handle_set_zone()` or `handle_title_template()`.
 4. If no regex matches, `try_custom_ddl()` returns `None` and normal `sqlparser` flow continues.
 
-This approach keeps the parser dependency clean while supporting ZettelDB-specific DDL.
+This approach keeps the parser dependency clean while supporting Doogat DB-specific DDL.
 
 
 ## 15. Junction Tables
@@ -649,17 +649,17 @@ This junction table is created in SQLite alongside the main materialized table.
 
 ### Write-through (materialize.rs)
 
-During zettel indexing, `materialize_row()` handles junction population:
+During doogat indexing, `materialize_row()` handles junction population:
 
 1. Insert the main row into the type table.
 2. For each column where `col.references.is_some()`, call `extract_multi_reference_values()`.
-3. This function filters the zettel's `inline_fields` for entries where `f.key == col_name` and `f.zone == Zone::Reference`.
+3. This function filters the doogat's `inline_fields` for entries where `f.key == col_name` and `f.zone == Zone::Reference`.
 4. For each reference value, execute `INSERT OR IGNORE` into the junction table.
 5. Before rematerialization, old junction rows are deleted with `DELETE FROM "{t}_{c}" WHERE "{t}_id" = ?`.
 
 ### DROP CASCADE
 
-`DROP TABLE <name> CASCADE` drops both the main table and all its junction tables. The engine iterates columns with references and drops each `{table}_{col}` table before dropping the main table and deleting the typedef zettel.
+`DROP TABLE <name> CASCADE` drops both the main table and all its junction tables. The engine iterates columns with references and drops each `{table}_{col}` table before dropping the main table and deleting the typedef doogat.
 
 ### GraphQL list field resolution (schema/base_types.rs)
 
@@ -679,7 +679,7 @@ For each column with a `REFERENCES` target, the dynamic GraphQL schema adds a pl
 
 ## 16. Help Guides
 
-The CLI includes an embedded guide system via `zdb help <topic>`. When called without a topic, it lists available guides. Each guide is a prose walkthrough of a workflow (e.g., data modeling, zone configuration, API access).
+The CLI includes an embedded guide system via `ddb help <topic>`. When called without a topic, it lists available guides. Each guide is a prose walkthrough of a workflow (e.g., data modeling, zone configuration, API access).
 
 The implementation lives in the `Command::Help` arm of `main.rs`. Guide text is returned inline (not loaded from files). Several subcommands include `after_help` or `after_long_help` hints that point users to relevant guides.
 
@@ -693,5 +693,5 @@ For deeper detail on any module, see the corresponding document in `docs/src/tec
 - `technical/sync.md` -- multi-device sync protocol
 - `technical/server.md` -- server architecture and API
 - `technical/ffi.md` -- UniFFI bindings
-- `technical/data-model.md` -- zettel format and frontmatter schema
+- `technical/data-model.md` -- doogat format and frontmatter schema
 - `technical/errors.md` -- error handling patterns

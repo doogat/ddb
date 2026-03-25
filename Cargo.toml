@@ -1,4 +1,4 @@
 [workspace]
-members = ["zdb-core", "zdb-cli", "zdb-server", "zdb-uniffi-bindgen", "tests"]
-default-members = ["zdb-core", "zdb-cli", "zdb-server"]
+members = ["ddb-core", "ddb-cli", "ddb-server", "ddb-uniffi-bindgen", "tests"]
+default-members = ["ddb-core", "ddb-cli", "ddb-server"]
 resolver = "2"

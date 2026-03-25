@@ -1,12 +1,12 @@
-# Building Apps with ZettelDB
+# Building Apps with Doogat DB
 
-ZettelDB works as a backend for personal productivity apps. Your data lives in Git-backed Markdown files with full version history, CRDT sync across devices, and SQL/GraphQL access for frontends.
+Doogat DB works as a backend for personal productivity apps. Your data lives in Git-backed Markdown files with full version history, CRDT sync across devices, and SQL/GraphQL access for frontends.
 
 This guide covers data modeling, API access, and two worked examples.
 
-## When to use ZettelDB
+## When to use Doogat DB
 
-ZettelDB fits apps where:
+Doogat DB fits apps where:
 
 - **You are the sole user** — single-writer, personal data
 - **Data portability matters** — your data is Markdown in Git, readable by any tool
@@ -20,40 +20,40 @@ Examples: link managers, personal CRMs, reading logs, project trackers, habit tr
 ```
 Frontend (React, Swift, Kotlin, etc.)
     │
-    ├─ GraphQL ─── zdb serve (HTTP, port 2891)        ← Mode 1: Server
+    ├─ GraphQL ─── ddb serve (HTTP, port 2891)        ← Mode 1: Server
     │                  │
     │                  └── Actor thread
     │                       ├── GitRepo (storage)
     │                       ├── Index (SQLite FTS5)
     │                       └── SqlEngine (DDL/DML)
     │
-    ├─ FFI ─────── ZettelDriver (UniFFI, embedded)     ← Mode 2: Embedded native
+    ├─ FFI ─────── DoogatDriver (UniFFI, embedded)     ← Mode 2: Embedded native
     │                  ├── GitRepo (storage)
     │                  ├── Index (SQLite FTS5)
     │                  └── SqlEngine (DDL/DML)
     │
     └─ Host Shell ─ One app, multiple feature modules  ← Mode 3: Mobile host-shell
-                       └── shared ZettelDriver
+                       └── shared DoogatDriver
                             ├── GitRepo (one repo)
                             ├── Index (one index)
                             └── SqlEngine
 ```
 
-**Web/desktop apps**: talk to `zdb serve` over GraphQL.
-**Single native apps**: embed `ZettelDriver` via UniFFI (Swift/Kotlin bindings) — same SQL engine, typed CRUD, transactions, and schema discovery as the server, no server process needed.
-**Mobile mini-apps**: one host app embedding ZettelDriver with multiple feature modules — see [Mobile mini-apps](#mobile-mini-apps) below.
-**CLI scripts**: use `zdb query` and `zdb create` directly.
+**Web/desktop apps**: talk to `ddb serve` over GraphQL.
+**Single native apps**: embed `DoogatDriver` via UniFFI (Swift/Kotlin bindings) — same SQL engine, typed CRUD, transactions, and schema discovery as the server, no server process needed.
+**Mobile mini-apps**: one host app embedding DoogatDriver with multiple feature modules — see [Mobile mini-apps](#mobile-mini-apps) below.
+**CLI scripts**: use `ddb query` and `ddb create` directly.
 
 ## Data modeling
 
-> **Always use `CREATE TABLE` via `zdb query` to define types.** Do not create `_typedef` zettels manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
+> **Always use `CREATE TABLE` via `ddb query` to define types.** Do not create `_typedef` doogats manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
 
 ### Entities become tables
 
-Each entity in your app maps to a SQL table, which maps to a `_typedef` zettel, which auto-generates a GraphQL type.
+Each entity in your app maps to a SQL table, which maps to a `_typedef` doogat, which auto-generates a GraphQL type.
 
 ```
-SQL table ←→ _typedef zettel ←→ GraphQL type ←→ Markdown files
+SQL table ←→ _typedef doogat ←→ GraphQL type ←→ Markdown files
 ```
 
 Define schemas with SQL:
@@ -67,13 +67,13 @@ CREATE TABLE bookmark (
 ```
 
 This single statement:
-1. Creates a `_typedef` zettel at `zettelkasten/_typedef/{id}.md`
+1. Creates a `_typedef` doogat at `ddb/_typedef/{id}.md`
 2. Creates a materialized SQLite table for queries
 3. Generates a `Bookmark` GraphQL type with a `bookmarks()` query
 
 ### Zone mapping
 
-Each column maps to a zone in the zettel Markdown file:
+Each column maps to a zone in the doogat Markdown file:
 
 | Zone | Stored as | Best for |
 |------|-----------|----------|
@@ -96,7 +96,7 @@ Each column maps to a zone in the zettel Markdown file:
 | `VARCHAR(n>255)`, `TEXT`, `MEDIUMTEXT`, `LONGTEXT` | body |
 | Everything else | body |
 
-Rule of thumb: if it points somewhere else, it's a reference. If it describes the zettel, it's frontmatter. If it IS the zettel, it's body.
+Rule of thumb: if it points somewhere else, it's a reference. If it describes the doogat, it's frontmatter. If it IS the doogat, it's body.
 
 ### Relationships
 
@@ -163,7 +163,7 @@ template_sections:
   - Notes
 ```
 
-A zettel of this type will have:
+A doogat of this type will have:
 
 ```markdown
 ---
@@ -189,7 +189,7 @@ Body sections are stored as `TEXT` columns in the body zone, queryable via SQL a
 
 ### Title resolution
 
-By default, a zettel's title comes from the `title` frontmatter field. For typed zettels, you can set a **title template** that auto-generates titles from column values:
+By default, a doogat's title comes from the `title` frontmatter field. For typed doogats, you can set a **title template** that auto-generates titles from column values:
 
 ```sql
 ALTER TABLE contact SET TITLE TEMPLATE '{name} ({relationship})';
@@ -203,7 +203,7 @@ Remove a template:
 ALTER TABLE contact DROP TITLE TEMPLATE;
 ```
 
-`zdb fix` detects zettels whose titles don't match their type's template and offers to correct them.
+`ddb fix` detects doogats whose titles don't match their type's template and offers to correct them.
 
 ### Zone overrides
 
@@ -215,10 +215,10 @@ ALTER TABLE note SET ZONE body FOR summary;
 
 This moves `summary` from its inferred default zone into the body zone. Available zones: `frontmatter`, `body`, `reference`.
 
-After changing a zone, existing zettels need migration to move data to the new zone:
+After changing a zone, existing doogats need migration to move data to the new zone:
 
 ```bash
-zdb fix --migrate
+ddb fix --migrate
 ```
 
 ### Multi-valued references
@@ -272,14 +272,14 @@ Dropping a table cascades to its junction tables.
 Start the server:
 
 ```bash
-zdb serve                    # localhost:2891
-zdb serve --playground       # enables GraphQL Playground at GET /graphql
+ddb serve                    # localhost:2891
+ddb serve --playground       # enables GraphQL Playground at GET /graphql
 ```
 
-Authenticate with the bearer token (auto-generated at `~/.config/zetteldb/token`):
+Authenticate with the bearer token (auto-generated at `~/.config/ddb/token`):
 
 ```bash
-curl -H "Authorization: Bearer $(cat ~/.config/zetteldb/token)" \
+curl -H "Authorization: Bearer $(cat ~/.config/ddb/token)" \
      -H "Content-Type: application/json" \
      -d '{"query": "{ bookmarks { id, title, url } }"}' \
      http://localhost:2891/graphql
@@ -313,8 +313,8 @@ Use the generic mutations or SQL passthrough:
 
 ```graphql
 mutation {
-  # Generic zettel creation
-  createZettel(input: { title: "My Link", type: "bookmark", tags: ["dev"] }) {
+  # Generic doogat creation
+  createDoogat(input: { title: "My Link", type: "bookmark", tags: ["dev"] }) {
     id
   }
 
@@ -341,29 +341,29 @@ query {
 
 ```bash
 # Define schema
-zdb query "CREATE TABLE bookmark (title TEXT NOT NULL, url TEXT NOT NULL)"
+ddb query "CREATE TABLE bookmark (title TEXT NOT NULL, url TEXT NOT NULL)"
 
 # Insert data
-zdb query "INSERT INTO bookmark (title, url) VALUES ('Rust Book', 'https://doc.rust-lang.org/book/')"
+ddb query "INSERT INTO bookmark (title, url) VALUES ('Rust Book', 'https://doc.rust-lang.org/book/')"
 
 # Query
-zdb query "SELECT id, title, url FROM bookmark"
+ddb query "SELECT id, title, url FROM bookmark"
 
-# Full-text search across all zettels
-zdb search "rust programming"
+# Full-text search across all doogats
+ddb search "rust programming"
 ```
 
 ### UniFFI (mobile)
 
-Embed ZettelDB directly in Swift or Kotlin. The embedded API delegates to the same `SqlEngine` as `zdb serve` — DDL creates typedef zettels via Git, DML reads/writes Git-backed zettels, and SELECT returns typed rows.
+Embed Doogat DB directly in Swift or Kotlin. The embedded API delegates to the same `SqlEngine` as `ddb serve` — DDL creates typedef doogats via Git, DML reads/writes Git-backed doogats, and SELECT returns typed rows.
 
 ```swift
-let driver = try ZettelDriver.createRepo(repoPath: "/path/to/zettelkasten")
+let driver = try DoogatDriver.createRepo(repoPath: "/path/to/ddb")
 
 // Schema — same DDL as server
 try driver.executeSql("CREATE TABLE contact (name TEXT, email TEXT)")
 
-// Insert — returns created zettel IDs
+// Insert — returns created doogat IDs
 let ins = try driver.executeSql(
     "INSERT INTO contact (name, email) VALUES ('Alice', 'alice@example.com')"
 )
@@ -398,13 +398,13 @@ Mobile platforms do not support multiple independently installed apps sharing on
 - **iOS**: apps are sandboxed; no shared filesystem, no `localhost` IPC between apps, background processes are killed aggressively
 - **Android**: apps have private storage; `localhost` servers are killed by Doze mode and app standby; cross-app IPC requires explicit permissions and trust
 
-Running `zdb serve` on a phone and connecting multiple installed apps to it is not portable and not supported.
+Running `ddb serve` on a phone and connecting multiple installed apps to it is not portable and not supported.
 
 ### The host-shell model
 
 The recommended mobile architecture is one installed app containing:
 
-- One embedded ZettelDB core (`ZettelDriver` via UniFFI)
+- One embedded Doogat DB core (`DoogatDriver` via UniFFI)
 - One shared repository and index
 - Multiple feature modules that feel like mini-apps
 - Optional widgets and extensions bound to the same shared data
@@ -432,7 +432,7 @@ Users get the UX of several mini-apps. The OS sees one well-behaved app.
 Each feature module contributes:
 
 - **Schema**: table definitions via `CREATE TABLE` (applied at app startup)
-- **Queries/mutations**: SQL or typed CRUD calls through the shared `ZettelDriver`
+- **Queries/mutations**: SQL or typed CRUD calls through the shared `DoogatDriver`
 - **UI**: screens, navigation destinations, local view state
 - **Optional surfaces**: dashboard widgets, share extensions, shortcuts
 
@@ -444,11 +444,11 @@ Each module does **not** own:
 
 ### Shared schema bootstrap
 
-On app launch, the host shell initializes `ZettelDriver` once, then each module registers its tables:
+On app launch, the host shell initializes `DoogatDriver` once, then each module registers its tables:
 
 ```swift
 // iOS example
-let driver = try ZettelDriver.createRepo(repoPath: appGroupRepoPath)
+let driver = try DoogatDriver.createRepo(repoPath: appGroupRepoPath)
 
 // Each module bootstraps its schema (idempotent)
 try driver.executeSql(sql: "CREATE TABLE IF NOT EXISTS category (name TEXT NOT NULL)")
@@ -458,7 +458,7 @@ try driver.executeSql(sql: "CREATE TABLE IF NOT EXISTS contact (name TEXT NOT NU
 
 ```kotlin
 // Android example
-val driver = ZettelDriver.createRepo(repoPath = appPrivateRepoPath)
+val driver = DoogatDriver.createRepo(repoPath = appPrivateRepoPath)
 
 // Each module bootstraps its schema (idempotent)
 driver.executeSql("CREATE TABLE IF NOT EXISTS category (name TEXT NOT NULL)")
@@ -470,7 +470,7 @@ driver.executeSql("CREATE TABLE IF NOT EXISTS contact (name TEXT NOT NULL, email
 
 ### Relationship to embedded parity
 
-The host-shell model depends on full embedded API parity between `ZettelDriver` and `zdb serve`.
+The host-shell model depends on full embedded API parity between `DoogatDriver` and `ddb serve`.
 
 ## Worked example: link dashboard
 

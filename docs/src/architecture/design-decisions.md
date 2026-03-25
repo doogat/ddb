@@ -10,7 +10,7 @@
 
 ## Three-Zone Markdown
 
-**Decision**: Split each zettel into frontmatter (YAML), body (Markdown prose), and reference section (structured fields).
+**Decision**: Split each doogat into frontmatter (YAML), body (Markdown prose), and reference section (structured fields).
 
 **Why**: Each zone has different merge semantics. Frontmatter fields are independent key-value pairs — field-level CRDT merge is natural. Body text is prose — character-level text CRDT handles concurrent edits. Reference fields are structured data — set-union semantics with ours-wins conflict resolution.
 
@@ -18,9 +18,9 @@
 
 ## ID-Only Filenames
 
-**Decision**: Zettel files are named `{id}.md` where ID is a 14-digit timestamp (`YYYYMMDDHHmmss`).
+**Decision**: Doogat files are named `{id}.md` where ID is a 14-digit timestamp (`YYYYMMDDHHmmss`).
 
-**Why**: Filenames never change when titles change, so wikilinks (`[[20260226120000]]`) remain stable. Avoids title-to-slug mapping complexity. Follows Zettelkasten philosophy where IDs are the stable identifier.
+**Why**: Filenames never change when titles change, so wikilinks (`[[20260226120000]]`) remain stable. Avoids title-to-slug mapping complexity. Follows Doogat philosophy where IDs are the stable identifier.
 
 **Tradeoff**: Filesystem browsing is opaque without the CLI or index. The `search` and `query` commands compensate.
 
@@ -30,7 +30,7 @@
 
 **Why**: No consistency hazard between Git and the index — Git always wins. Staleness detection is cheap (compare HEAD OID). The index can be safely deleted and rebuilt. Avoids dual-write coordination.
 
-**Tradeoff**: Full rebuild reads and parses every zettel. Acceptable at MVP scale (<5K zettels) but will need incremental indexing for larger collections.
+**Tradeoff**: Full rebuild reads and parses every doogat. Acceptable at MVP scale (<5K doogats) but will need incremental indexing for larger collections.
 
 ## Git Commits as Sync Checkpoints
 
@@ -60,7 +60,7 @@
 
 **Decision**: Drop Git sparse index from the scalability roadmap.
 
-**Why**: ZDB indexes all zettels and requires full-clone semantics on every device. Sparse index is coupled to sparse checkout, which conflicts with ZDB's "all zettels locally available" contract. The original Phase 2 spec item was formally evaluated during Phase 2 exit and ruled out.
+**Why**: DDB indexes all doogats and requires full-clone semantics on every device. Sparse index is coupled to sparse checkout, which conflicts with DDB's "all doogats locally available" contract. The original Phase 2 spec item was formally evaluated during Phase 2 exit and ruled out.
 
 **Alternatives considered**: (1) Git sparse checkout for specific operating modes — rejected because it breaks the full-clone guarantee. (2) Application-level partial index — unnecessary since SQLite FTS5 already serves as the read cache and scales independently of Git's index format.
 
@@ -82,6 +82,6 @@
 | Compaction | Removes all temp files, not history-aware | Implement history-based CRDT compaction |
 | Air-gapped sync | Not implemented | Bundle-based sync protocol |
 | Binary assets | No conflict resolution strategy | Define binary merge policy |
-| Performance | Untested beyond small collections | Benchmark at 5K+ zettels |
+| Performance | Untested beyond small collections | Benchmark at 5K+ doogats |
 | Plugin system | Not implemented | Type-specific behaviors via plugins |
 | ID type | `i64` in CLI read/update, `String` in types | Align to `String` everywhere |

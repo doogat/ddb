@@ -1,15 +1,15 @@
 # SQL Engine
 
-**Source**: `zdb-core/src/sql_engine.rs` (~3,400 lines)
+**Source**: `ddb-core/src/sql_engine.rs` (~3,400 lines)
 
-Translates SQL DDL/DML statements into zettel CRUD operations. Tables map to zettel types — `CREATE TABLE` produces a `_typedef` zettel, `INSERT` produces a typed data zettel, etc.
+Translates SQL DDL/DML statements into doogat CRUD operations. Tables map to doogat types — `CREATE TABLE` produces a `_typedef` doogat, `INSERT` produces a typed data doogat, etc.
 
 ## SqlEngine
 
 ```rust
 pub struct SqlEngine<'a> {
     index: &'a Index,
-    repo: &'a dyn ZettelStore,
+    repo: &'a dyn DoogatStore,
     txn: Option<TransactionBuffer>,
 }
 ```
@@ -22,15 +22,15 @@ All methods take `&mut self`. The CLI creates `SqlEngine` per invocation; the se
 
 | Statement | Effect |
 |-----------|--------|
-| `CREATE TABLE foo (name TEXT, count INTEGER)` | Creates a `_typedef` zettel for type `foo` |
+| `CREATE TABLE foo (name TEXT, count INTEGER)` | Creates a `_typedef` doogat for type `foo` |
 | `ALTER TABLE foo ADD COLUMN bar TEXT` | Adds column to typedef schema; existing rows get NULL |
 | `ALTER TABLE foo DROP COLUMN bar` | Removes column from typedef schema; orphaned data keys ignored |
-| `ALTER TABLE foo RENAME COLUMN old TO new` | Renames column in typedef + rewrites all data zettels |
+| `ALTER TABLE foo RENAME COLUMN old TO new` | Renames column in typedef + rewrites all data doogats |
 | `ALTER TABLE foo SET ZONE frontmatter FOR col` | Override column zone (custom DDL, pre-parse intercepted) |
 | `ALTER TABLE foo SET TITLE TEMPLATE 'tpl'` | Set title template on typedef |
 | `ALTER TABLE foo DROP TITLE TEMPLATE` | Remove title template from typedef |
-| `DROP TABLE foo` | Strips `type:` from data zettels, deletes typedef |
-| `DROP TABLE foo CASCADE` | Deletes typedef + all data zettels |
+| `DROP TABLE foo` | Strips `type:` from data doogats, deletes typedef |
+| `DROP TABLE foo CASCADE` | Deletes typedef + all data doogats |
 | `DROP TABLE IF EXISTS foo` | No-op if table doesn't exist |
 
 Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTEXT`, `INTEGER`, `REAL`, `BOOLEAN`, `BLOB` variants, `BINARY`, `VARBINARY`, `ENUM('a','b')`, `SET('x','y')`. Foreign keys via `REFERENCES other_type(id)`.
@@ -41,30 +41,30 @@ Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTE
 
 | Statement | Effect |
 |-----------|--------|
-| `INSERT INTO foo (name, count) VALUES ('Widget', 42)` | Creates a data zettel with `type: foo` |
-| `INSERT INTO foo (name) VALUES ('A'), ('B'), ('C')` | Creates N zettels in a single git commit; returns comma-separated IDs |
+| `INSERT INTO foo (name, count) VALUES ('Widget', 42)` | Creates a data doogat with `type: foo` |
+| `INSERT INTO foo (name) VALUES ('A'), ('B'), ('C')` | Creates N doogats in a single git commit; returns comma-separated IDs |
 | `SELECT name, count FROM foo` | Queries the materialized table |
-| `SELECT ... WHERE id = '...'` | Filters by zettel ID |
-| `UPDATE foo SET count = 43 WHERE id = '...'` | Modifies the zettel and materialized row |
+| `SELECT ... WHERE id = '...'` | Filters by doogat ID |
+| `UPDATE foo SET count = 43 WHERE id = '...'` | Modifies the doogat and materialized row |
 | `UPDATE foo SET status = 'done' WHERE priority > 5` | Bulk update — resolves matching IDs via SQLite |
 | `UPDATE foo SET status = 'done'` | Updates all rows |
-| `DELETE FROM foo WHERE id = '...'` | Removes the zettel and materialized row |
+| `DELETE FROM foo WHERE id = '...'` | Removes the doogat and materialized row |
 | `DELETE FROM foo WHERE status = 'done'` | Bulk delete — resolves matching IDs via SQLite |
 | `DELETE FROM foo` | Deletes all rows |
 
 ## Multi-Row INSERT
 
-`INSERT INTO t (cols) VALUES (...), (...), (...)` creates N zettels in a single git commit.
+`INSERT INTO t (cols) VALUES (...), (...), (...)` creates N doogats in a single git commit.
 
 - **ID generation**: `unique_ids(count)` generates a base timestamp via `generate_unique_id`, then increments by 1 second per subsequent row — no sleeping between rows
 - **Single commit**: all N files staged and committed together via `commit_files`
-- **Return value**: comma-separated list of ZettelIds (e.g. `20260310120000,20260310120001,20260310120002`)
+- **Return value**: comma-separated list of DoogatIds (e.g. `20260310120000,20260310120001,20260310120002`)
 - **Transaction-aware**: within a `BEGIN`/`COMMIT` block, writes are buffered as usual
-- **Folder-aware paths**: if the typedef has `folder: true`, created files go to `zettelkasten/{type}/{id}.md`; otherwise they stay flat at `zettelkasten/{id}.md`
+- **Folder-aware paths**: if the typedef has `folder: true`, created files go to `ddb/{type}/{id}.md`; otherwise they stay flat at `ddb/{id}.md`
 
 ## Zone Mapping
 
-Each column maps to a zettel zone based on explicit `zone` field or inference:
+Each column maps to a doogat zone based on explicit `zone` field or inference:
 
 | Zone | Storage | Examples |
 |------|---------|----------|
@@ -74,9 +74,9 @@ Each column maps to a zettel zone based on explicit `zone` field or inference:
 
 Zone inference uses `is_short_string_type()` (AST-based) at CREATE TABLE time and `is_short_string_type_str()` (string-based) at runtime in `effective_zone()`. The 255-char boundary follows MySQL convention. `effective_zone()` resolves: explicit zone from `_typedef` wins, then references, then numeric/short-string → frontmatter, else body. Columns with `allowed_values` always infer frontmatter.
 
-## _typedef Zettel Format
+## _typedef Doogat Format
 
-A `_typedef` zettel defines a table schema:
+A `_typedef` doogat defines a table schema:
 
 ```yaml
 ---
@@ -102,8 +102,8 @@ origin: prd-00030
 
 ### Key Functions
 
-- `build_typedef_zettel(id, schema)` — serialize a `TableSchema` to a `ParsedZettel`
-- `schema_from_parsed(zettel)` — deserialize a `_typedef` zettel back to `TableSchema`
+- `build_typedef_doogat(id, schema)` — serialize a `TableSchema` to a `ParsedDoogat`
+- `schema_from_parsed(doogat)` — deserialize a `_typedef` doogat back to `TableSchema`
 - `data_type_to_string(dt)` — convert AST `DataType` to stored string (preserves VARCHAR size)
 - `is_short_string_type(dt)` — AST-based check for frontmatter-eligible string types
 - `extract_allowed_values(dt)` — extract ENUM/SET variant names from AST
@@ -114,16 +114,16 @@ UPDATE and DELETE support arbitrary WHERE clauses beyond `WHERE id = '...'`. The
 
 1. Try `extract_where_id` — fast path for single-row by ID
 2. Fall back to `resolve_matching_ids` — delegates WHERE evaluation to SQLite, returns `Vec<(id, path)>` of matching rows
-3. Apply changes to each zettel and commit in batch
+3. Apply changes to each doogat and commit in batch
 
 Bare UPDATE/DELETE (no WHERE) operates on all rows of the table.
 
 ## ALTER TABLE
 
-- **ADD COLUMN**: Appends to typedef schema, rematerializes. Existing data zettels untouched (NULL for new column).
-- **DROP COLUMN**: Removes from typedef schema, rematerializes. Orphaned data keys in zettels are ignored.
-- **RENAME COLUMN**: Rewrites typedef + all data zettels in a single commit. Uses `rename_key_in_zettel` for zone-aware renaming (frontmatter extra keys, body `## heading`, reference `- key::` lines).
-- **SET ZONE**: Custom DDL (pre-parse intercepted). Updates column zone in typedef, rematerializes. Existing data zettels are NOT migrated — they stay in the old zone until next update.
+- **ADD COLUMN**: Appends to typedef schema, rematerializes. Existing data doogats untouched (NULL for new column).
+- **DROP COLUMN**: Removes from typedef schema, rematerializes. Orphaned data keys in doogats are ignored.
+- **RENAME COLUMN**: Rewrites typedef + all data doogats in a single commit. Uses `rename_key_in_doogat` for zone-aware renaming (frontmatter extra keys, body `## heading`, reference `- key::` lines).
+- **SET ZONE**: Custom DDL (pre-parse intercepted). Updates column zone in typedef, rematerializes. Existing data doogats are NOT migrated — they stay in the old zone until next update.
 - **SET/DROP TITLE TEMPLATE**: Custom DDL. Sets or removes `title_template` on the typedef. No rematerialization needed.
 
 ## Pre-Parse Interception
@@ -132,8 +132,8 @@ Three custom DDL statements are intercepted via regex before sqlparser parsing: 
 
 ## DROP TABLE
 
-- Without CASCADE: strips `type:` from data zettels (they become untyped), deletes typedef via `commit_batch`
-- With CASCADE: deletes typedef + all data zettels via `delete_files`
+- Without CASCADE: strips `type:` from data doogats (they become untyped), deletes typedef via `commit_batch`
+- With CASCADE: deletes typedef + all data doogats via `delete_files`
 - IF EXISTS: no-op when table doesn't exist
 
 ## Transactions
@@ -147,16 +147,16 @@ Three custom DDL statements are intercepted via regex before sqlparser parsing: 
 
 ### How It Works
 
-1. **BEGIN**: Creates a SQLite `SAVEPOINT zdb_txn` and initializes a `TransactionBuffer`
+1. **BEGIN**: Creates a SQLite `SAVEPOINT ddb_txn` and initializes a `TransactionBuffer`
 2. **DML within txn**: SQLite changes applied immediately (read-your-writes). Git writes buffered as `PendingWrite`/`PendingDelete` entries
-3. **COMMIT**: Flushes buffered writes/deletes to git via `commit_batch` in a single commit (message: `"transaction"`), then `RELEASE zdb_txn`
-4. **ROLLBACK**: Executes `ROLLBACK TO zdb_txn; RELEASE zdb_txn` to undo SQLite changes. Buffer discarded, git untouched
+3. **COMMIT**: Flushes buffered writes/deletes to git via `commit_batch` in a single commit (message: `"transaction"`), then `RELEASE ddb_txn`
+4. **ROLLBACK**: Executes `ROLLBACK TO ddb_txn; RELEASE ddb_txn` to undo SQLite changes. Buffer discarded, git untouched
 
 ### Buffer Types
 
 ```rust
 struct PendingWrite { path: String, content: String }
-struct PendingDelete { path: String, zettel_id: String }
+struct PendingDelete { path: String, doogat_id: String }
 struct TransactionBuffer { writes: Vec<PendingWrite>, deletes: Vec<PendingDelete> }
 ```
 
@@ -188,7 +188,7 @@ COMMIT;
 
 ## Junction Tables (Multi-Value References)
 
-Columns declared with `REFERENCES` produce junction tables that enable many-to-many relationships between zettel types. A single zettel can reference multiple targets for the same column, stored as multiple `- col:: [[target]]` lines in the reference section.
+Columns declared with `REFERENCES` produce junction tables that enable many-to-many relationships between doogat types. A single doogat can reference multiple targets for the same column, stored as multiple `- col:: [[target]]` lines in the reference section.
 
 ### Naming Convention
 
@@ -206,10 +206,10 @@ Junction tables are created automatically during `materialize_tables()` for ever
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `{type}_id` | TEXT | Foreign key to the owning zettel |
-| `{column}_id` | TEXT | Foreign key to the referenced zettel |
+| `{type}_id` | TEXT | Foreign key to the owning doogat |
+| `{column}_id` | TEXT | Foreign key to the referenced doogat |
 
-Both columns together form the effective composite key. The junction table is populated during materialization by scanning each data zettel's reference section for matching `- col:: [[id]]` lines.
+Both columns together form the effective composite key. The junction table is populated during materialization by scanning each data doogat's reference section for matching `- col:: [[id]]` lines.
 
 ### INSERT Write-Through
 
@@ -217,7 +217,7 @@ Both columns together form the effective composite key. The junction table is po
 INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('20260310120000', '20260310120001')
 ```
 
-Appends a `- category:: [[20260310120001]]` line to the bookmark zettel's reference section and inserts a row into the materialized junction table. Multiple inserts add multiple reference lines.
+Appends a `- category:: [[20260310120001]]` line to the bookmark doogat's reference section and inserts a row into the materialized junction table. Multiple inserts add multiple reference lines.
 
 ### DELETE Write-Through
 
@@ -225,21 +225,21 @@ Appends a `- category:: [[20260310120001]]` line to the bookmark zettel's refere
 DELETE FROM bookmark_category WHERE bookmark_id = '20260310120000' AND category_id = '20260310120001'
 ```
 
-Removes the matching `- category:: [[id]]` line from the bookmark zettel's reference section and deletes the row from the materialized junction table.
+Removes the matching `- category:: [[id]]` line from the bookmark doogat's reference section and deletes the row from the materialized junction table.
 
 ### DROP CASCADE
 
-`DROP TABLE bookmark CASCADE` deletes all bookmark data zettels, the bookmark typedef, the materialized `bookmark` table, **and** all associated junction tables (`bookmark_category`, etc.).
+`DROP TABLE bookmark CASCADE` deletes all bookmark data doogats, the bookmark typedef, the materialized `bookmark` table, **and** all associated junction tables (`bookmark_category`, etc.).
 
 ## Not Supported
 
-These SQL features are explicitly rejected with descriptive error messages. They either operate only on the materialized cache (lost on reindex) or bypass git storage (causing zettel-cache divergence).
+These SQL features are explicitly rejected with descriptive error messages. They either operate only on the materialized cache (lost on reindex) or bypass git storage (causing doogat-cache divergence).
 
 | Statement | Reason |
 |-----------|--------|
-| `CREATE INDEX` | Cache optimization only; indexes are rebuilt from zettel data on reindex |
-| `CREATE VIEW` | Views store queries, not data; no zettel representation; lost on reindex |
-| `CREATE VIRTUAL TABLE` | No zettel representation for virtual tables |
+| `CREATE INDEX` | Cache optimization only; indexes are rebuilt from doogat data on reindex |
+| `CREATE VIEW` | Views store queries, not data; no doogat representation; lost on reindex |
+| `CREATE VIRTUAL TABLE` | No doogat representation for virtual tables |
 | `CREATE TRIGGER` | Triggers fire on cache mutations, not git commits |
 | `ALTER INDEX` | Indexes are managed automatically |
 | `DROP INDEX` / `DROP VIEW` | Cannot be created, so cannot be dropped |

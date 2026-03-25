@@ -1,17 +1,17 @@
-use crate::common::ZdbTestRepo;
+use crate::common::DdbTestRepo;
 
 #[test]
 fn insert_folder_typedef_creates_subdirectory_path() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     // Create typedef via SQL
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE widget (color TEXT)"])
         .assert()
         .success();
 
-    // Manually add folder: true to the typedef zettel
-    let typedef_dir = repo.path().join("zettelkasten/_typedef");
+    // Manually add folder: true to the typedef doogat
+    let typedef_dir = repo.path().join("ddb/_typedef");
     let typedef_file = std::fs::read_dir(&typedef_dir)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -38,11 +38,11 @@ fn insert_folder_typedef_creates_subdirectory_path() {
         .unwrap();
 
     // Reindex to pick up folder setting
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // INSERT a widget via SQL
     let out = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO widget (color) VALUES ('red')"])
         .output()
         .unwrap();
@@ -53,8 +53,8 @@ fn insert_folder_typedef_creates_subdirectory_path() {
     );
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    // Verify the file is at zettelkasten/widget/{id}.md
-    let expected_path = repo.path().join(format!("zettelkasten/widget/{id}.md"));
+    // Verify the file is at ddb/widget/{id}.md
+    let expected_path = repo.path().join(format!("ddb/widget/{id}.md"));
     assert!(
         expected_path.exists(),
         "expected file at {}",
@@ -64,17 +64,17 @@ fn insert_folder_typedef_creates_subdirectory_path() {
 
 #[test]
 fn insert_no_folder_typedef_stays_flat() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     // Create typedef WITHOUT folder
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE gadget (size TEXT)"])
         .assert()
         .success();
 
     // INSERT — should stay flat
     let out = repo
-        .zdb()
+        .ddb()
         .args(["query", "INSERT INTO gadget (size) VALUES ('large')"])
         .output()
         .unwrap();
@@ -85,9 +85,9 @@ fn insert_no_folder_typedef_stays_flat() {
     );
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    // Verify the file is at zettelkasten/{id}.md (flat)
-    let flat_path = repo.path().join(format!("zettelkasten/{id}.md"));
-    let folder_path = repo.path().join(format!("zettelkasten/gadget/{id}.md"));
+    // Verify the file is at ddb/{id}.md (flat)
+    let flat_path = repo.path().join(format!("ddb/{id}.md"));
+    let folder_path = repo.path().join(format!("ddb/gadget/{id}.md"));
     assert!(
         flat_path.exists(),
         "expected flat file at {}",
@@ -101,15 +101,15 @@ fn insert_no_folder_typedef_stays_flat() {
 
 #[test]
 fn cli_create_respects_folder_typedef() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
     // Create typedef with folder: true via SQL + manual edit
-    repo.zdb()
+    repo.ddb()
         .args(["query", "CREATE TABLE pet (species TEXT)"])
         .assert()
         .success();
 
-    let typedef_dir = repo.path().join("zettelkasten/_typedef");
+    let typedef_dir = repo.path().join("ddb/_typedef");
     let typedef_file = std::fs::read_dir(&typedef_dir)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -133,22 +133,22 @@ fn cli_create_respects_folder_typedef() {
         .args(["commit", "-m", "add folder to pet"])
         .output()
         .unwrap();
-    repo.zdb().arg("reindex").assert().success();
+    repo.ddb().arg("reindex").assert().success();
 
     // CLI create with --type pet
     let out = repo
-        .zdb()
+        .ddb()
         .args(["create", "--title", "Buddy", "--type", "pet"])
         .output()
         .unwrap();
     assert!(out.status.success());
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    // Should be in zettelkasten/pet/{id}.md
-    let folder_path = repo.path().join(format!("zettelkasten/pet/{id}.md"));
+    // Should be in ddb/pet/{id}.md
+    let folder_path = repo.path().join(format!("ddb/pet/{id}.md"));
     assert!(
         folder_path.exists(),
-        "CLI create should put typed zettel in pet/ subdirectory: {}",
+        "CLI create should put typed doogat in pet/ subdirectory: {}",
         folder_path.display()
     );
 }

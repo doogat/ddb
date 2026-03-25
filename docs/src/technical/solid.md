@@ -6,7 +6,7 @@ SOLID originated in OOP, but the principles translate well to Rust — often enf
 
 Each module owns one concern. The natural unit in Rust is the module and its public API, not a class.
 
-ZettelDB modules follow this: `parser.rs` parses, `git_ops.rs` handles git, `indexer.rs` handles SQLite. Each module exposes a focused public API and hides implementation details.
+Doogat DB modules follow this: `parser.rs` parses, `git_ops.rs` handles git, `indexer.rs` handles SQLite. Each module exposes a focused public API and hides implementation details.
 
 ## Open/Closed (O)
 
@@ -16,9 +16,9 @@ Instead of subclassing, define a trait and let callers provide implementations. 
 
 ```rust
 // Good: open for extension
-trait ZettelSource {
-    fn get(&self, id: &ZettelId) -> Result<ParsedZettel>;
-    fn list(&self) -> Result<Vec<ZettelId>>;
+trait DoogatSource {
+    fn get(&self, id: &DoogatId) -> Result<ParsedDoogat>;
+    fn list(&self) -> Result<Vec<DoogatId>>;
 }
 
 // Bad: hardcoded to one implementation
@@ -33,10 +33,10 @@ fn rebuild_index(repo_path: &Path) -> Result<()> {
 Any type implementing a trait must honor that trait's contract. Rust enforces the structural part at compile time — type signatures, lifetimes, Send/Sync bounds. The semantic part (behavior contracts) is still on you: document trait invariants.
 
 ```rust
-/// Implementors MUST return zettels sorted by id.
+/// Implementors MUST return doogats sorted by id.
 /// Returning unsorted results violates the contract.
-trait ZettelSource {
-    fn list_sorted(&self) -> Result<Vec<ZettelId>>;
+trait DoogatSource {
+    fn list_sorted(&self) -> Result<Vec<DoogatId>>;
 }
 ```
 
@@ -47,18 +47,18 @@ Don't force implementors to provide methods they don't need. Prefer **small, foc
 ```rust
 // Good: separated concerns
 trait ReadStore {
-    fn get(&self, id: &ZettelId) -> Result<ParsedZettel>;
+    fn get(&self, id: &DoogatId) -> Result<ParsedDoogat>;
 }
 
 trait WriteStore {
-    fn put(&self, zettel: &ParsedZettel) -> Result<()>;
+    fn put(&self, doogat: &ParsedDoogat) -> Result<()>;
 }
 
 // Bad: forces read-only consumers to stub out writes
 trait Store {
-    fn get(&self, id: &ZettelId) -> Result<ParsedZettel>;
-    fn put(&self, zettel: &ParsedZettel) -> Result<()>;
-    fn delete(&self, id: &ZettelId) -> Result<()>;
+    fn get(&self, id: &DoogatId) -> Result<ParsedDoogat>;
+    fn put(&self, doogat: &ParsedDoogat) -> Result<()>;
+    fn delete(&self, id: &DoogatId) -> Result<()>;
 }
 ```
 
@@ -68,22 +68,22 @@ High-level modules depend on abstractions (traits), not concretions. Accept `imp
 
 ```rust
 // Good: indexer depends on an abstraction
-fn rebuild_index(source: &impl ZettelSource, db: &Connection) -> Result<()> {
+fn rebuild_index(source: &impl DoogatSource, db: &Connection) -> Result<()> {
     for id in source.list()? {
-        let zettel = source.get(&id)?;
-        insert_into_index(db, &zettel)?;
+        let doogat = source.get(&id)?;
+        insert_into_index(db, &doogat)?;
     }
     Ok(())
 }
 
 // Bad: indexer directly calls git_ops
 fn rebuild_index(repo_path: &Path, db: &Connection) -> Result<()> {
-    let zettels = git_ops::list_all(repo_path)?;
+    let doogats = git_ops::list_all(repo_path)?;
     // ...
 }
 ```
 
-This enables testing the indexer without a real git repo — pass a mock `ZettelSource` instead.
+This enables testing the indexer without a real git repo — pass a mock `DoogatSource` instead.
 
 ## What the Rust compiler already enforces
 

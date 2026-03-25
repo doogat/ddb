@@ -1,6 +1,6 @@
 # Search Index
 
-**Source**: `zdb-core/src/indexer.rs` (~1,366 lines)
+**Source**: `ddb-core/src/indexer.rs` (~1,366 lines)
 
 SQLite-based search index with FTS5 full-text search, type inference, schema merging, and table materialization. The index is a derived cache — always rebuildable from the Git repository. No schema migration framework is needed: on full rebuild, all tables are dropped and recreated from the current schema definitions.
 
@@ -17,16 +17,16 @@ pub struct Index {
 Created on `Index::open()` (idempotent):
 
 ```sql
-zettels(id TEXT PK, title, date, type, path UNIQUE, body, updated_at)
-_zdb_tags(zettel_id FK, tag, source DEFAULT 'frontmatter')  -- index on tag; source: 'frontmatter' or 'body'
-_zdb_fields(zettel_id FK, key, value, zone)  -- index on key
-_zdb_links(source_id FK, target_path, display, zone)  -- index on target_path
-_zdb_aliases(zettel_id FK, alias COLLATE NOCASE)  -- index on alias
-_zdb_attachments(zettel_id FK, name, mime, size INTEGER, path)
-_zdb_checkboxes(zettel_id FK, state, content, date, due_date, line_number INTEGER, indent_level INTEGER)
-                                         -- indexes on state, zettel_id
-_zdb_fts(title, body, tags)              -- FTS5 virtual table
-_zdb_meta(key PK, value)                 -- staleness tracking
+doogats(id TEXT PK, title, date, type, path UNIQUE, body, updated_at)
+_ddb_tags(doogat_id FK, tag, source DEFAULT 'frontmatter')  -- index on tag; source: 'frontmatter' or 'body'
+_ddb_fields(doogat_id FK, key, value, zone)  -- index on key
+_ddb_links(source_id FK, target_path, display, zone)  -- index on target_path
+_ddb_aliases(doogat_id FK, alias COLLATE NOCASE)  -- index on alias
+_ddb_attachments(doogat_id FK, name, mime, size INTEGER, path)
+_ddb_checkboxes(doogat_id FK, state, content, date, due_date, line_number INTEGER, indent_level INTEGER)
+                                         -- indexes on state, doogat_id
+_ddb_fts(title, body, tags)              -- FTS5 virtual table
+_ddb_meta(key PK, value)                 -- staleness tracking
 ```
 
 FTS5 uses `porter unicode61` tokenizer — porter stemming with Unicode support.
@@ -35,27 +35,27 @@ WAL journal mode is enabled for better concurrent read performance.
 
 ## Key Operations
 
-### index_zettel
+### index_doogat
 
-`index_zettel(zettel: &ParsedZettel) -> Result<()>`
+`index_doogat(doogat: &ParsedDoogat) -> Result<()>`
 
-Upserts a single zettel into all tables within a transaction:
+Upserts a single doogat into all tables within a transaction:
 
-1. Check if the zettel already exists (for FTS cleanup)
+1. Check if the doogat already exists (for FTS cleanup)
 2. Delete old FTS entry if exists
-3. `INSERT OR REPLACE` into `zettels`
+3. `INSERT OR REPLACE` into `doogats`
 4. Delete and re-insert `tags`, `fields`, `links`, `aliases`, `checkboxes`
-5. Insert scalar frontmatter extras into `_zdb_fields` with `zone = 'Frontmatter'` (String, Number, Bool — skips List/Map)
+5. Insert scalar frontmatter extras into `_ddb_fields` with `zone = 'Frontmatter'` (String, Number, Bool — skips List/Map)
 6. Insert aliases from frontmatter `aliases` list (if present)
 7. Delete and re-insert `attachments` from frontmatter `attachments` list (if present)
-8. Insert checkbox items from `parsed.checkboxes` into `_zdb_checkboxes`
+8. Insert checkbox items from `parsed.checkboxes` into `_ddb_checkboxes`
 9. Insert new FTS entry
 
 Uses a named `SAVEPOINT`/`RELEASE` pair (via `with_savepoint`) for atomic writes that nest correctly within SQL engine transactions.
 
 ### rebuild
 
-`rebuild(repo: &impl ZettelSource) -> Result<RebuildReport>`
+`rebuild(repo: &impl DoogatSource) -> Result<RebuildReport>`
 
 Full index rebuild using a parallel pipeline. Drops all tables (internal and materialized) and recreates the schema from scratch. The index is a disposable cache — no migration framework needed.
 
@@ -63,13 +63,13 @@ Phases:
 
 1. **Drop & recreate** — drop every table (FK checks disabled for drop order), recreate internal schema from `SCHEMA_DDL`
 2. **Parallel parse** — `parallel_parse()` reads all files from git sequentially via `read_files_batch()` (optimal for pack I/O), then parses in parallel using rayon `par_iter()`. Parse errors become warnings, not failures.
-3. **Batch index** — `batch_index()` writes all parsed zettels to SQLite in a single `BEGIN IMMEDIATE`/`COMMIT` transaction. Per-zettel errors are logged and skipped.
+3. **Batch index** — `batch_index()` writes all parsed doogats to SQLite in a single `BEGIN IMMEDIATE`/`COMMIT` transaction. Per-doogat errors are logged and skipped.
 4. **Consistency warnings** — detect malformed YAML, cross-zone duplicates, missing required fields
-5. **Cached materialization** — `materialize_all_types_from()` creates typed SQLite tables using the already-parsed data (no redundant git reads). Schema inference and row population both filter the in-memory `Vec<ParsedZettel>` by type.
-6. Store current HEAD OID in `_zdb_meta` table
+5. **Cached materialization** — `materialize_all_types_from()` creates typed SQLite tables using the already-parsed data (no redundant git reads). Schema inference and row population both filter the in-memory `Vec<ParsedDoogat>` by type.
+6. Store current HEAD OID in `_ddb_meta` table
 
 Full rebuild is only triggered by:
-- Explicit `zdb reindex`
+- Explicit `ddb reindex`
 - Index corruption (detected by `check_integrity`)
 - Unreachable HEAD OID (e.g. after `git gc`)
 
@@ -88,11 +88,11 @@ pub struct RebuildReport {
 
 ### incremental_reindex
 
-`incremental_reindex(repo: &impl ZettelSource, old_head: &str) -> Result<RebuildReport>`
+`incremental_reindex(repo: &impl DoogatSource, old_head: &str) -> Result<RebuildReport>`
 
-Diffs `old_head` against the current HEAD and processes only changed files. Added or modified zettels are re-indexed; deleted zettels are removed. Falls back to full `rebuild` if the diff fails (e.g. old HEAD unreachable after gc).
+Diffs `old_head` against the current HEAD and processes only changed files. Added or modified doogats are re-indexed; deleted doogats are removed. Falls back to full `rebuild` if the diff fails (e.g. old HEAD unreachable after gc).
 
-When multiple files are changed (2+), uses `batch_index()` (single transaction) instead of per-zettel `index_zettel()` for better throughput.
+When multiple files are changed (2+), uses `batch_index()` (single transaction) instead of per-doogat `index_doogat()` for better throughput.
 
 This is the common path for keeping the index current after `git pull` or direct file edits — fast and non-destructive (no table drops).
 
@@ -100,13 +100,13 @@ This is the common path for keeping the index current after `git pull` or direct
 
 `check_integrity() -> Result<bool>`
 
-Runs `PRAGMA integrity_check` and verifies core tables exist (`zettels`, `_zdb_fts`, `_zdb_tags`, `_zdb_fields`, `_zdb_links`, `_zdb_aliases`, `_zdb_checkboxes`, `_zdb_meta`). Returns `false` if corrupt.
+Runs `PRAGMA integrity_check` and verifies core tables exist (`doogats`, `_ddb_fts`, `_ddb_tags`, `_ddb_fields`, `_ddb_links`, `_ddb_aliases`, `_ddb_checkboxes`, `_ddb_meta`). Returns `false` if corrupt.
 
 ### Staleness Detection
 
 `is_stale(repo) -> Result<bool>`
 
-Compares the HEAD OID stored in `_zdb_meta` table against the current Git HEAD. If they differ, the index is stale and needs rebuilding.
+Compares the HEAD OID stored in `_ddb_meta` table against the current Git HEAD. If they differ, the index is stale and needs rebuilding.
 
 `rebuild_if_stale(repo) -> Result<Option<RebuildReport>>`
 
@@ -118,13 +118,13 @@ Checks integrity first (force rebuild if corrupt), then staleness. Returns `None
 
 `infer_schema(type_name: &str, repo: &GitRepo) -> Result<TableSchema>`
 
-Scans all zettels of a given type and infers a `TableSchema`:
+Scans all doogats of a given type and infers a `TableSchema`:
 
 - **Frontmatter** extra keys → frontmatter columns (inferred as INTEGER, REAL, BOOLEAN, or TEXT)
 - **Body** `## headings` → body TEXT columns
 - **Reference** `key:: value` fields → reference columns
 
-Type widening: if any zettel of the type has a non-matching value for a field, the type widens (INTEGER+REAL → REAL, any mismatch → TEXT).
+Type widening: if any doogat of the type has a non-matching value for a field, the type widens (INTEGER+REAL → REAL, any mismatch → TEXT).
 
 ### merge_schemas
 
@@ -140,18 +140,18 @@ Merges an explicit `_typedef` with inferred columns:
 
 For each distinct type in the index:
 1. Load `_typedef` if it exists
-2. Infer schema from data zettels
+2. Infer schema from data doogats
 3. Merge schemas (typedef wins)
 4. Create SQLite table and populate with data
 5. Log advisory for inferred-only types
 
-Also creates empty tables for typedef-only types with no data zettels.
+Also creates empty tables for typedef-only types with no data doogats.
 
 ## Consistency Warnings
 
 `collect_consistency_warnings(repo: &GitRepo) -> Vec<ConsistencyWarning>`
 
-Scans all zettels and produces advisory warnings:
+Scans all doogats and produces advisory warnings:
 
 ```rust
 pub enum ConsistencyWarning {
@@ -161,7 +161,7 @@ pub enum ConsistencyWarning {
 }
 ```
 
-Warnings don't prevent indexing — zettels are always indexed best-effort.
+Warnings don't prevent indexing — doogats are always indexed best-effort.
 
 ## Alias Resolution
 
@@ -169,9 +169,9 @@ Warnings don't prevent indexing — zettels are always indexed best-effort.
 
 `resolve_alias(name: &str) -> Result<Option<String>>`
 
-Case-insensitive lookup in `_zdb_aliases`. Returns the zettel ID if found.
+Case-insensitive lookup in `_ddb_aliases`. Returns the doogat ID if found.
 
-Aliases are populated from the frontmatter `aliases` list during `index_zettel()` and cleaned up on `remove_zettel()`.
+Aliases are populated from the frontmatter `aliases` list during `index_doogat()` and cleaned up on `remove_doogat()`.
 
 ### resolve_wikilink
 
@@ -179,8 +179,8 @@ Aliases are populated from the frontmatter `aliases` list during `index_zettel()
 
 Three-step resolution chain:
 
-1. **Path lookup** — check if `target` matches a `zettels.path` directly
-2. **ID lookup** — try `resolve_path(target)` (exact zettel ID match)
+1. **Path lookup** — check if `target` matches a `doogats.path` directly
+2. **ID lookup** — try `resolve_path(target)` (exact doogat ID match)
 3. **Alias lookup** — try `resolve_alias(target)`, then `resolve_path()` on the result
 
 Returns `None` if no match found at any step.
@@ -228,7 +228,7 @@ Hierarchical tag prefix query using `LIKE`. For example, `"client/"` matches `"c
 
 `backlinks(target_path: &str) -> Result<Vec<String>>`
 
-Find all zettel IDs that link to the given target path.
+Find all doogat IDs that link to the given target path.
 
 ### query_raw
 
@@ -238,14 +238,14 @@ Execute arbitrary SQL. Returns rows as string vectors. Handles all SQLite value 
 
 ### Sequence Navigation
 
-Zettels form ordered chains via the `sequence` frontmatter field (stored in `_zdb_fields`). No schema migration needed.
+Doogats form ordered chains via the `sequence` frontmatter field (stored in `_ddb_fields`). No schema migration needed.
 
-- `sequence_children(id)` — children sorted by ID (chronological). Queries `_zdb_fields` WHERE key='sequence' AND value=?id, JOINs zettels for title.
-- `sequence_breadcrumb(id)` — walks parent chain to root via repeated `_zdb_fields` lookups. Returns root-to-self path. Cycle detection breaks after 100 iterations using a HashSet of visited IDs.
+- `sequence_children(id)` — children sorted by ID (chronological). Queries `_ddb_fields` WHERE key='sequence' AND value=?id, JOINs doogats for title.
+- `sequence_breadcrumb(id)` — walks parent chain to root via repeated `_ddb_fields` lookups. Returns root-to-self path. Cycle detection breaks after 100 iterations using a HashSet of visited IDs.
 - `sequence_info(id)` — combines parent lookup, `sequence_children`, and `sequence_breadcrumb` into `SequenceInfo { parent, children, breadcrumb }`.
-- `broken_sequences()` — LEFT JOIN `_zdb_fields` (key='sequence') against `zettels` to find references to non-existent parents.
+- `broken_sequences()` — LEFT JOIN `_ddb_fields` (key='sequence') against `doogats` to find references to non-existent parents.
 
-MOC (Map of Content) zettels use `role: moc` in frontmatter and serve as natural sequence roots. The `role` field is indexed in `_zdb_fields` automatically — no special handling required.
+MOC (Map of Content) doogats use `role: moc` in frontmatter and serve as natural sequence roots. The `role` field is indexed in `_ddb_fields` automatically — no special handling required.
 
 ## Test Coverage
 
@@ -258,10 +258,10 @@ MOC (Map of Content) zettels use `role: moc` in frontmatter and serve as natural
 - Raw SQL join queries
 - Upsert replaces old data
 - Rebuild with staleness detection and `RebuildReport`
-- Materialization of typed tables from `_typedef` zettels
+- Materialization of typed tables from `_typedef` doogats
 - Type inference (frontmatter types, body headings, reference fields, empty type, type widening)
 - Schema merging (typedef-only, inferred-only, overlap, no overlap)
-- Consistency warnings (valid zettel, missing required)
+- Consistency warnings (valid doogat, missing required)
 - Integration: full cycle with inferred type
 - Integration: typedef + inferred merge
 - Integration: external edit reconciliation

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed project from ZettelDB to Doogat DB; binary is now `ddb`, storage dir is `ddb/`, data dir is `.ddb/`
+
 ## [0.2.0] - 2026-03-25
 
 ### Added
@@ -112,6 +116,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error responses never leak internal paths, stack traces, or SQL details
 - quinn-proto upgraded to 0.11.14 (RUSTSEC-2026-0037)
 
-[Unreleased]: https://github.com/doogat/zdb/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/doogat/zdb/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/doogat/zdb/releases/tag/v0.1.0
+[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/doogat/ddb/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/doogat/ddb/releases/tag/v0.1.0

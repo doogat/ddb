@@ -1,4 +1,4 @@
-# Contributing to ZettelDB
+# Contributing to Doogat DB
 
 Contributions are welcome — bug fixes, documentation improvements, and test coverage especially.
 
@@ -10,8 +10,8 @@ For large features or architectural changes, open an issue to discuss before sta
 2. Clone the repo and configure git hooks:
 
 ```bash
-git clone https://github.com/doogat/zdb.git
-cd zdb
+git clone https://github.com/doogat/ddb.git
+cd ddb
 git config core.hooksPath dev/hooks
 ```
 

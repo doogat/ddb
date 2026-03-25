@@ -1,6 +1,6 @@
 # CRDT Conflict Resolution
 
-**Source**: `zdb-core/src/crdt_resolver.rs` (487 lines)
+**Source**: `ddb-core/src/crdt_resolver.rs` (487 lines)
 
 When Git detects a merge conflict, this module resolves it using Automerge CRDT with per-zone strategies.
 
@@ -113,7 +113,7 @@ Used as strategy `preset:last-writer-wins` in typedef `crdt_strategy`, and as th
 
 `resolve_append_log(conflicts) -> Result<Vec<ResolvedFile>>`
 
-Section-aware body merge for log-style zettels (e.g. project type):
+Section-aware body merge for log-style doogats (e.g. project type):
 
 1. **Frontmatter**: same as default (Automerge Map)
 2. **Reference**: same as default (set merge)
@@ -124,25 +124,25 @@ Section-aware body merge for log-style zettels (e.g. project type):
 ## Compaction Strategy
 
 CRDT temp files in `.crdt/temp/` use two naming conventions:
-- Body: `{commit_oid}_{zettel_id}.crdt`
-- Frontmatter: `{commit_oid}_{zettel_id}_fm.crdt`
+- Body: `{commit_oid}_{doogat_id}.crdt`
+- Frontmatter: `{commit_oid}_{doogat_id}_fm.crdt`
 
-Legacy files using bare OIDs are also supported. `parse_crdt_temp_name()` returns `(oid, zettel_id, is_frontmatter)`.
+Legacy files using bare OIDs are also supported. `parse_crdt_temp_name()` returns `(oid, doogat_id, is_frontmatter)`.
 
 Compaction modes:
 
 - **Cleanup**: removes temp files whose commit is an ancestor of the shared head (all nodes have synced past it). Handles both `.crdt` and `_fm.crdt` files.
-- **Doc compaction**: groups remaining temp files by `(zettel_id, is_frontmatter)`, loads all Automerge changes, calls `AutoCommit::save()` to produce separate compacted blobs for body and frontmatter per zettel
-- **Per-zettel**: `compact_zettel(repo, zettel_id)` targets a single zettel's CRDT history
+- **Doc compaction**: groups remaining temp files by `(doogat_id, is_frontmatter)`, loads all Automerge changes, calls `AutoCommit::save()` to produce separate compacted blobs for body and frontmatter per doogat
+- **Per-doogat**: `compact_doogat(repo, doogat_id)` targets a single doogat's CRDT history
 - **Threshold check**: compaction skips when `.crdt/temp/` size is below `CompactionConfig.threshold_mb` (default 1MB) unless `--force` is passed
 
-CLI flags: `zdb compact --force` (ignore threshold), `zdb compact --dry-run` (report what would happen).
+CLI flags: `ddb compact --force` (ignore threshold), `ddb compact --dry-run` (report what would happen).
 
 When CRDT temp files are missing (compacted away), the resolver still works — it builds fresh Automerge docs from the three-way Git diff. See [Conflict Resolution Cascade](sync.md#conflict-resolution-cascade) for the full fallback decision tree.
 
 ## Round-Trip Validation
 
-After merging all zones, the result is serialized via `parser::serialize()` and the module verifies the output parses correctly as a `ParsedZettel`. If parsing fails, a validation error is returned — this prevents corrupted merges from being committed.
+After merging all zones, the result is serialized via `parser::serialize()` and the module verifies the output parses correctly as a `ParsedDoogat`. If parsing fails, a validation error is returned — this prevents corrupted merges from being committed.
 
 ## Test Coverage
 

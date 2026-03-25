@@ -9,20 +9,20 @@ error (foundation — no adapter crate imports)
 types (depends: error — no adapter crate imports)
   │
   v
-traits (depends: error, types — defines ZettelSource, ZettelStore,
-  │                               ZettelIndex, ConflictResolver)
+traits (depends: error, types — defines DoogatSource, DoogatStore,
+  │                               DoogatIndex, ConflictResolver)
   │
   ├──> parser (depends: error, types)
   │      │
   │      └──> crdt_resolver (depends: error, types, parser, traits)
   │
-  ├──> git_ops (depends: error, types, traits — implements ZettelSource/Store)
+  ├──> git_ops (depends: error, types, traits — implements DoogatSource/Store)
   │      │
   │      ├──> indexer (depends: error, types, traits, parser, sql_engine
-  │      │             — accepts &impl ZettelSource, implements ZettelIndex)
+  │      │             — accepts &impl DoogatSource, implements DoogatIndex)
   │      │
   │      ├──> sql_engine (depends: error, types, parser, indexer
-  │      │                — accepts &dyn ZettelStore)
+  │      │                — accepts &dyn DoogatStore)
   │      │
   │      ├──> sync_manager (depends: error, types, git_ops,
   │      │                           crdt_resolver, indexer)
@@ -52,24 +52,24 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
   │              consistency, attachments, bundle, nosql
   │              — unified orchestration layer for CLI/FFI/server)
   │
-  ├──> ffi (depends: service — UniFFI ZettelDriver facade,
-  │         delegates to ZettelService)
+  ├──> ffi (depends: service — UniFFI DoogatDriver facade,
+  │         delegates to DoogatService)
   │
-  └──> CLI (depends: service — delegates to ZettelService)
+  └──> CLI (depends: service — delegates to DoogatService)
 ```
 
 ## Module Summary
 
 | Module | Purpose | Key Dependencies |
 |--------|---------|-----------------|
-| `error` | `ZettelError` enum + `Result<T>` alias | thiserror only |
-| `types` | Domain types (CommitHash, Value, ParsedZettel, TableSchema) | no adapter crates |
-| `traits` | Core trait abstractions (ZettelSource, ZettelStore, ZettelIndex, ConflictResolver) | error, types |
+| `error` | `DoogatError` enum + `Result<T>` alias | thiserror only |
+| `types` | Domain types (CommitHash, Value, ParsedDoogat, TableSchema) | no adapter crates |
+| `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, ConflictResolver) | error, types |
 | `parser` | Parse/serialize three-zone Markdown | regex, chrono, serde_yaml |
-| `git_ops` | Git repository CRUD + merge; implements ZettelSource/Store | git2 |
+| `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store | git2 |
 | `crdt_resolver` | Automerge conflict resolution; implements ConflictResolver | automerge, similar |
-| `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/search, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements ZettelIndex | rusqlite |
-| `sql_engine` | SQL DDL/DML → zettel CRUD, _typedef management | sqlparser, rusqlite |
+| `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/search, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements DoogatIndex | rusqlite |
+| `sql_engine` | SQL DDL/DML → doogat CRUD, _typedef management | sqlparser, rusqlite |
 | `bundled_types` | Built-in _typedef templates (project, contact) | — |
 | `sync_manager` | Multi-device sync orchestration | uuid, toml, chrono |
 | `compaction` | CRDT cleanup + git gc | — |
@@ -79,14 +79,14 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 | `hlc` | Hybrid Logical Clock for causal ordering | — (std only) |
 | `bundle` | Air-gapped sync via tar archive export/import | tar, sha2, flate2 |
 | `nosql` | redb-based key-value index for fast lookups (feature-gated) | redb |
-| `service` | Unified orchestration layer (ZettelService) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write | all core modules |
-| `ffi` | UniFFI facade (ZettelDriver) wrapping `Mutex<ZettelService>` for Swift/Kotlin | service, uniffi |
-| **CLI** | Command-line interface delegating to ZettelService | service, clap |
+| `service` | Unified orchestration layer (DoogatService) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write | all core modules |
+| `ffi` | UniFFI facade (DoogatDriver) wrapping `Mutex<DoogatService>` for Swift/Kotlin | service, uniffi |
+| **CLI** | Command-line interface delegating to DoogatService | service, clap |
 | **updater** (CLI) | Self-update from GitHub releases | reqwest, semver, self_replace, sha2, flate2, tar |
 
 ## External Dependencies
 
-### Core (`zdb-core`)
+### Core (`ddb-core`)
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
@@ -104,11 +104,11 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 | `uniffi` | 0.29 | Cross-platform FFI bindings (Swift/Kotlin) |
 | `uuid` | 1 | Node UUID generation (v4) |
 
-### CLI (`zdb-cli`)
+### CLI (`ddb-cli`)
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `chrono` | 0.4 | Date formatting for new zettels |
+| `chrono` | 0.4 | Date formatting for new doogats |
 | `clap` | 4 | Argument parsing with derive |
 | `flate2` | 1 | Gzip decompression for update archives |
 | `reqwest` | 0.12 | HTTP client for GitHub releases API |
@@ -118,7 +118,7 @@ traits (depends: error, types — defines ZettelSource, ZettelStore,
 | `serde_json` | 1 | JSON state file format |
 | `sha2` | 0.10 | SHA-256 checksum verification |
 | `tar` | 0.4 | Archive extraction for update binaries |
-| `zdb-core` | path | Local workspace dependency |
+| `ddb-core` | path | Local workspace dependency |
 
 ### Dev
 

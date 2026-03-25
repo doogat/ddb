@@ -8,22 +8,22 @@ The server serializes reads and writes through a single actor thread. Before bro
 
 ## Benchmark Results
 
-All measurements on macOS, release build. Full benchmark suite: `cargo bench -p zdb-server` (requires `cargo build -p zdb-cli --release` first — benchmarks launch the `zdb` binary).
+All measurements on macOS, release build. Full benchmark suite: `cargo bench -p ddb-server` (requires `cargo build -p ddb-cli --release` first — benchmarks launch the `ddb` binary).
 
 ### Single-request latency (no contention)
 
-| Protocol | Operation | 200 zettels | 5K zettels |
+| Protocol | Operation | 200 doogats | 5K doogats |
 |----------|-----------|-------------|------------|
-| GraphQL | get zettel | 276 µs | 1.04 ms |
+| GraphQL | get doogat | 276 µs | 1.04 ms |
 | GraphQL | list 20 | 2.9 ms | 18.3 ms |
 | GraphQL | FTS search | 65 µs | 65 µs |
-| REST | get zettel | 211 µs | 1.05 ms |
-| NoSQL | get zettel | 60 µs | 64 µs |
+| REST | get doogat | 211 µs | 1.05 ms |
+| NoSQL | get doogat | 60 µs | 64 µs |
 | pgwire | SELECT by id | 62 µs | 69 µs |
 
-Get and search stay well under 10 ms at 5K. List (20 zettels) exceeds 10 ms at 5K (18.3 ms) due to index scan overhead on the larger dataset — this is the actor round-trip plus SQLite query time, not a protocol bottleneck.
+Get and search stay well under 10 ms at 5K. List (20 doogats) exceeds 10 ms at 5K (18.3 ms) due to index scan overhead on the larger dataset — this is the actor round-trip plus SQLite query time, not a protocol bottleneck.
 
-### Concurrent reads (list 20 zettels, GraphQL)
+### Concurrent reads (list 20 doogats, GraphQL)
 
 | Readers | Batch time | Throughput |
 |---------|-----------|------------|
@@ -50,7 +50,7 @@ This is the critical finding: **writes degrade read latency for expensive querie
 
 ### Protocol overhead (get-by-id)
 
-| Protocol | 200 zettels | 5K zettels | Overhead vs NoSQL (5K) |
+| Protocol | 200 doogats | 5K doogats | Overhead vs NoSQL (5K) |
 |----------|------------|------------|----------------------|
 | NoSQL | 60 µs | 64 µs | baseline |
 | pgwire | 62 µs | 69 µs | +5 µs |
@@ -96,7 +96,7 @@ Non-mutating queries bypass the actor and read SQLite directly via a shared read
 
 ## Decision
 
-**Keep single actor.** The current model meets NFR-01 latency targets for get and search at 5K zettels. List queries exceed 10 ms at 5K (18.3 ms) but remain acceptable for the expected access pattern. The 45x degradation under mixed load is real but only manifests when writes are sustained — in practice, Zettelkasten writes are infrequent (human-speed note-taking), so reads rarely contend.
+**Keep single actor.** The current model meets NFR-01 latency targets for get and search at 5K doogats. List queries exceed 10 ms at 5K (18.3 ms) but remain acceptable for the expected access pattern. The 45x degradation under mixed load is real but only manifests when writes are sustained — in practice, Doogat writes are infrequent (human-speed note-taking), so reads rarely contend.
 
 ### What scales
 
@@ -124,7 +124,7 @@ These are the supported performance boundaries for the single-actor design.
 | Parameter | Limit | Notes |
 |-----------|-------|-------|
 | Concurrent readers (no writes) | Up to 16 | Latency grows linearly; p99 stays under 50 ms for list queries |
-| Single-request latency | < 1.1 ms (get), < 70 µs (search), ~18 ms (list) | Measured at 5K zettels |
+| Single-request latency | < 1.1 ms (get), < 70 µs (search), ~18 ms (list) | Measured at 5K doogats |
 | Throughput (read-only) | ~360 req/s (list), ~15K req/s (search) | Actor-serialized ceiling |
 | Write frequency | Human-speed (< 1 write/sec) | Reads remain responsive at this rate |
 
@@ -146,6 +146,6 @@ Introduce a read fast path if any of these become true:
 
 ## References
 
-- NFR-01 / AC-06: Query latency < 10 ms at 5K zettels
+- NFR-01 / AC-06: Query latency < 10 ms at 5K doogats
 - NFR-03 / AC-02: Sync should not degrade reads beyond accepted bounds
 - Spec §5: Single-writer semantics preserved (actor enforces this)

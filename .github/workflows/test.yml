@@ -25,8 +25,8 @@ jobs:
 
       - name: Configure git identity
         run: |
-          git config --global user.email "ci@zetteldb.dev"
-          git config --global user.name "ZettelDB CI"
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
 
       - name: Dependency policy
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -37,7 +37,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build CLI binary
-        run: cargo build -p zdb-cli --bin zdb
+        run: cargo build -p ddb-cli --bin ddb
 
       - name: Fast cargo test tier
         run: cargo test-ci
@@ -45,33 +45,33 @@ jobs:
       - name: Quick smoke test
         env:
           SMOKE_PROFILE: quick
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
         run: ./tests/smoke.sh
 
       - name: Sync integration tests
-        run: cargo test -p zdb-core --test sync_test
+        run: cargo test -p ddb-core --test sync_test
 
       - name: E2E - GraphQL CRUD
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
-        run: cargo test -p zdb-e2e --test e2e serve::crud_lifecycle -- --exact
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
+        run: cargo test -p ddb-e2e --test e2e serve::crud_lifecycle -- --exact
 
       - name: E2E - PgWire
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
-        run: cargo test -p zdb-e2e --test e2e pgwire::pgwire_insert_update_delete -- --exact
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
+        run: cargo test -p ddb-e2e --test e2e pgwire::pgwire_insert_update_delete -- --exact
 
       - name: E2E - WebSocket subscriptions
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
-        run: cargo test -p zdb-e2e --test e2e subscriptions::subscribe_mutate_receive -- --exact
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
+        run: cargo test -p ddb-e2e --test e2e subscriptions::subscribe_mutate_receive -- --exact
 
       - name: E2E - Sync/CRDT
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
-        run: cargo test -p zdb-e2e --test e2e sync_crdt::overlapping_body_edits_resolved_by_crdt -- --exact
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
+        run: cargo test -p ddb-e2e --test e2e sync_crdt::overlapping_body_edits_resolved_by_crdt -- --exact
 
       - name: E2E - Multi-device
         env:
-          ZDB_BIN: ${{ github.workspace }}/target/debug/zdb
-        run: cargo test -p zdb-e2e --test e2e multi_device::stale_node_returns -- --exact
+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
+        run: cargo test -p ddb-e2e --test e2e multi_device::stale_node_returns -- --exact

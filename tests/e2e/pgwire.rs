@@ -1,18 +1,18 @@
-use crate::common::{ServerGuard, ZdbTestRepo};
+use crate::common::{ServerGuard, DdbTestRepo};
 use tokio_postgres::SimpleQueryMessage;
 
 #[test]
 fn pgwire_connect_auth_ok() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let (client, connection) = tokio_postgres::Config::new()
             .host("127.0.0.1")
             .port(server.pg_port)
-            .user("zdb")
+            .user("ddb")
             .password(&server.token)
-            .dbname("zdb")
+            .dbname("ddb")
             .connect(tokio_postgres::NoTls)
             .await
             .unwrap();
@@ -34,16 +34,16 @@ fn pgwire_connect_auth_ok() {
 
 #[test]
 fn pgwire_auth_rejected() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let connect = tokio_postgres::Config::new()
             .host("127.0.0.1")
             .port(server.pg_port)
-            .user("zdb")
+            .user("ddb")
             .password("wrong-token")
-            .dbname("zdb")
+            .dbname("ddb")
             .connect(tokio_postgres::NoTls)
             .await;
         assert!(connect.is_err(), "expected auth to fail");
@@ -52,11 +52,11 @@ fn pgwire_auth_rejected() {
 
 #[test]
 fn pgwire_select_with_columns() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let create = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id title } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title } }"#,
         serde_json::json!({
             "input": {
                 "title": "PGWire Note",
@@ -65,7 +65,7 @@ fn pgwire_select_with_columns() {
         }),
     );
     assert!(create.get("errors").is_none(), "create failed: {create}");
-    let created = &create["data"]["createZettel"];
+    let created = &create["data"]["createDoogat"];
     let id = created["id"].as_str().unwrap().to_string();
     let title = created["title"].as_str().unwrap().to_string();
 
@@ -73,9 +73,9 @@ fn pgwire_select_with_columns() {
         let (client, connection) = tokio_postgres::Config::new()
             .host("127.0.0.1")
             .port(server.pg_port)
-            .user("zdb")
+            .user("ddb")
             .password(&server.token)
-            .dbname("zdb")
+            .dbname("ddb")
             .connect(tokio_postgres::NoTls)
             .await
             .unwrap();
@@ -84,7 +84,7 @@ fn pgwire_select_with_columns() {
         });
 
         let messages = client
-            .simple_query("SELECT id, title FROM zettels")
+            .simple_query("SELECT id, title FROM doogats")
             .await
             .unwrap();
         let row = messages
@@ -103,16 +103,16 @@ fn pgwire_select_with_columns() {
 
 #[test]
 fn pgwire_ddl_create_table() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let (client, connection) = tokio_postgres::Config::new()
             .host("127.0.0.1")
             .port(server.pg_port)
-            .user("zdb")
+            .user("ddb")
             .password(&server.token)
-            .dbname("zdb")
+            .dbname("ddb")
             .connect(tokio_postgres::NoTls)
             .await
             .unwrap();
@@ -140,16 +140,16 @@ fn pgwire_ddl_create_table() {
 
 #[test]
 fn pgwire_insert_update_delete() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let (client, connection) = tokio_postgres::Config::new()
             .host("127.0.0.1")
             .port(server.pg_port)
-            .user("zdb")
+            .user("ddb")
             .password(&server.token)
-            .dbname("zdb")
+            .dbname("ddb")
             .connect(tokio_postgres::NoTls)
             .await
             .unwrap();

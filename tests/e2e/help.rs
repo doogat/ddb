@@ -1,13 +1,13 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 
-fn zdb() -> Command {
-    Command::new(crate::common::zdb_bin())
+fn ddb() -> Command {
+    Command::new(crate::common::ddb_bin())
 }
 
 #[test]
 fn help_create_app_prints_guide() {
-    zdb()
+    ddb()
         .args(["help", "create-app"])
         .assert()
         .success()
@@ -17,7 +17,7 @@ fn help_create_app_prints_guide() {
 
 #[test]
 fn help_unknown_topic_fails() {
-    zdb()
+    ddb()
         .args(["help", "nonexistent"])
         .assert()
         .failure()
@@ -26,7 +26,7 @@ fn help_unknown_topic_fails() {
 
 #[test]
 fn help_no_topic_lists_guides() {
-    zdb()
+    ddb()
         .args(["help"])
         .assert()
         .success()
@@ -35,9 +35,9 @@ fn help_no_topic_lists_guides() {
 
 #[test]
 fn query_long_help_mentions_guide() {
-    zdb()
+    ddb()
         .args(["query", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("zdb help create-app"));
+        .stdout(predicate::str::contains("ddb help create-app"));
 }

@@ -1,9 +1,9 @@
-use crate::common::{ServerGuard, ZdbTestRepo};
+use crate::common::{ServerGuard, DdbTestRepo};
 use std::time::Duration;
 
 #[test]
 fn auth_missing_token_returns_401() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let resp = reqwest::blocking::Client::new()
@@ -18,7 +18,7 @@ fn auth_missing_token_returns_401() {
 
 #[test]
 fn auth_wrong_token_returns_401() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let resp = reqwest::blocking::Client::new()
@@ -34,12 +34,12 @@ fn auth_wrong_token_returns_401() {
 
 #[test]
 fn crud_lifecycle() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Create
     let result = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id title tags body } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title tags body } }"#,
         serde_json::json!({
             "input": {
                 "title": "Test Note",
@@ -49,7 +49,7 @@ fn crud_lifecycle() {
         }),
     );
     assert!(result.get("errors").is_none(), "create failed: {result}");
-    let created = &result["data"]["createZettel"];
+    let created = &result["data"]["createDoogat"];
     let id = created["id"].as_str().expect("missing id");
     assert!(!id.is_empty());
     assert_eq!(created["title"].as_str().unwrap(), "Test Note");
@@ -57,15 +57,15 @@ fn crud_lifecycle() {
 
     // Read
     let result = server.graphql(&format!(
-        r#"{{ zettel(id: "{id}") {{ id title body tags }} }}"#
+        r#"{{ doogat(id: "{id}") {{ id title body tags }} }}"#
     ));
     assert!(result.get("errors").is_none(), "read failed: {result}");
-    let fetched = &result["data"]["zettel"];
+    let fetched = &result["data"]["doogat"];
     assert_eq!(fetched["title"].as_str().unwrap(), "Test Note");
 
     // Update
     let result = server.graphql_with_vars(
-        r#"mutation($input: UpdateZettelInput!) { updateZettel(input: $input) { id title body } }"#,
+        r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id title body } }"#,
         serde_json::json!({
             "input": {
                 "id": id,
@@ -75,51 +75,51 @@ fn crud_lifecycle() {
         }),
     );
     assert!(result.get("errors").is_none(), "update failed: {result}");
-    let updated = &result["data"]["updateZettel"];
+    let updated = &result["data"]["updateDoogat"];
     assert_eq!(updated["title"].as_str().unwrap(), "Updated Note");
     assert_eq!(updated["body"].as_str().unwrap(), "Updated body");
 
     // Delete
-    let result = server.graphql(&format!(r#"mutation {{ deleteZettel(id: "{id}") }}"#));
+    let result = server.graphql(&format!(r#"mutation {{ deleteDoogat(id: "{id}") }}"#));
     assert!(result.get("errors").is_none(), "delete failed: {result}");
-    assert_eq!(result["data"]["deleteZettel"], true);
+    assert_eq!(result["data"]["deleteDoogat"], true);
 
     // Verify deleted
-    let result = server.graphql(&format!(r#"{{ zettel(id: "{id}") {{ id }} }}"#));
+    let result = server.graphql(&format!(r#"{{ doogat(id: "{id}") {{ id }} }}"#));
     assert!(result["errors"].is_array());
 }
 
 #[test]
 fn search_and_list() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    // Create a few zettels
+    // Create a few doogats
     let r1 = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "Alpha Note", "content": "searchable content", "tags": ["alpha"] } }),
     );
     assert!(r1.get("errors").is_none(), "create alpha failed: {r1}");
 
     let r2 = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "Beta Note", "content": "different content", "tags": ["beta"] } }),
     );
     assert!(r2.get("errors").is_none(), "create beta failed: {r2}");
 
     // List all
-    let result = server.graphql(r#"{ zettels { id title } }"#);
+    let result = server.graphql(r#"{ doogats { id title } }"#);
     assert!(result.get("errors").is_none(), "list all failed: {result}");
-    let list = result["data"]["zettels"].as_array().unwrap();
+    let list = result["data"]["doogats"].as_array().unwrap();
     assert!(list.len() >= 2);
 
     // List by tag
-    let result = server.graphql(r#"{ zettels(tag: "alpha") { id title } }"#);
+    let result = server.graphql(r#"{ doogats(tag: "alpha") { id title } }"#);
     assert!(
         result.get("errors").is_none(),
         "list by tag failed: {result}"
     );
-    let list = result["data"]["zettels"].as_array().unwrap();
+    let list = result["data"]["doogats"].as_array().unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["title"].as_str().unwrap(), "Alpha Note");
 
@@ -139,19 +139,19 @@ fn search_and_list() {
 
 #[test]
 fn sql_query() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    // Create a zettel
+    // Create a doogat
     let r = server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "SQL Test", "content": "body" } }),
     );
     assert!(r.get("errors").is_none(), "create failed: {r}");
 
     // SQL query
     let result =
-        server.graphql(r#"{ sql(query: "SELECT id, title FROM zettels") { rows message } }"#);
+        server.graphql(r#"{ sql(query: "SELECT id, title FROM doogats") { rows message } }"#);
     assert!(result.get("errors").is_none(), "sql query failed: {result}");
     let sql = &result["data"]["sql"];
     let rows = sql["rows"].as_array().unwrap();
@@ -162,12 +162,12 @@ fn sql_query() {
 
 #[test]
 fn rest_crud_lifecycle() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Create
     let resp = server.rest_post(
-        "/zettels",
+        "/doogats",
         serde_json::json!({
             "title": "REST Note",
             "body": "Hello REST",
@@ -182,14 +182,14 @@ fn rest_crud_lifecycle() {
     assert_eq!(created["data"]["body"].as_str().unwrap(), "Hello REST");
 
     // Read
-    let resp = server.rest_get(&format!("/zettels/{id}"));
+    let resp = server.rest_get(&format!("/doogats/{id}"));
     assert_eq!(resp.status(), 200);
     let fetched: serde_json::Value = resp.json().unwrap();
     assert_eq!(fetched["data"]["title"].as_str().unwrap(), "REST Note");
 
     // Update
     let resp = server.rest_put(
-        &format!("/zettels/{id}"),
+        &format!("/doogats/{id}"),
         serde_json::json!({
             "title": "Updated REST Note",
             "body": "Updated body"
@@ -204,30 +204,30 @@ fn rest_crud_lifecycle() {
     assert_eq!(updated["data"]["body"].as_str().unwrap(), "Updated body");
 
     // Delete
-    let resp = server.rest_delete(&format!("/zettels/{id}"));
+    let resp = server.rest_delete(&format!("/doogats/{id}"));
     assert_eq!(resp.status(), 204);
 
     // Verify deleted
-    let resp = server.rest_get(&format!("/zettels/{id}"));
+    let resp = server.rest_get(&format!("/doogats/{id}"));
     assert_eq!(resp.status(), 404);
 }
 
 #[test]
 fn rest_pagination() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    // Create 3 zettels
+    // Create 3 doogats
     for i in 0..3 {
         let resp = server.rest_post(
-            "/zettels",
+            "/doogats",
             serde_json::json!({ "title": format!("Page Note {i}") }),
         );
         assert_eq!(resp.status(), 201);
     }
 
     // Page 1 with per_page=2
-    let resp = server.rest_get("/zettels?per_page=2&page=1");
+    let resp = server.rest_get("/doogats?per_page=2&page=1");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     assert_eq!(body["data"].as_array().unwrap().len(), 2);
@@ -237,7 +237,7 @@ fn rest_pagination() {
     assert_eq!(body["pagination"]["total_pages"].as_i64().unwrap(), 2);
 
     // Page 2
-    let resp = server.rest_get("/zettels?per_page=2&page=2");
+    let resp = server.rest_get("/doogats?per_page=2&page=2");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     assert_eq!(body["data"].as_array().unwrap().len(), 1);
@@ -245,16 +245,16 @@ fn rest_pagination() {
 
 #[test]
 fn rest_filter_by_tag() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     server.rest_post(
-        "/zettels",
+        "/doogats",
         serde_json::json!({ "title": "Tagged", "tags": ["alpha"] }),
     );
-    server.rest_post("/zettels", serde_json::json!({ "title": "Untagged" }));
+    server.rest_post("/doogats", serde_json::json!({ "title": "Untagged" }));
 
-    let resp = server.rest_get("/zettels?tag=alpha");
+    let resp = server.rest_get("/doogats?tag=alpha");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
@@ -264,16 +264,16 @@ fn rest_filter_by_tag() {
 
 #[test]
 fn rest_search() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let r = server.rest_post(
-        "/zettels",
+        "/doogats",
         serde_json::json!({ "title": "Findable", "body": "searchable content here" }),
     );
     assert_eq!(r.status(), 201, "create failed");
 
-    let resp = server.rest_get("/zettels?q=searchable");
+    let resp = server.rest_get("/doogats?q=searchable");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
@@ -283,10 +283,10 @@ fn rest_search() {
 
 #[test]
 fn rest_filter_by_field() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    // Create a typed table with a frontmatter field (INTEGER → frontmatter → _zdb_fields)
+    // Create a typed table with a frontmatter field (INTEGER → frontmatter → _ddb_fields)
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "CREATE TABLE item (name TEXT NOT NULL, priority INTEGER)" }),
@@ -304,21 +304,21 @@ fn rest_filter_by_field() {
     }
 
     // Filter by field.priority=1 → should return Alpha and Gamma
-    let resp = server.rest_get("/zettels?field.priority=1");
+    let resp = server.rest_get("/doogats?field.priority=1");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
     assert_eq!(data.len(), 2, "expected 2 matches, got: {data:?}");
 
     // Filter by field.priority=2 → Beta only
-    let resp = server.rest_get("/zettels?field.priority=2");
+    let resp = server.rest_get("/doogats?field.priority=2");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
     assert_eq!(data.len(), 1, "expected 1 match, got: {data:?}");
 
     // Nonexistent value → empty
-    let resp = server.rest_get("/zettels?field.priority=99");
+    let resp = server.rest_get("/doogats?field.priority=99");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
@@ -337,7 +337,7 @@ fn rest_filter_by_field() {
     assert!(r.get("errors").is_none(), "INSERT failed: {r}");
 
     // Delta has priority=1 AND status=10; Alpha and Gamma have priority=1 but no status
-    let resp = server.rest_get("/zettels?field.priority=1&field.status=10");
+    let resp = server.rest_get("/doogats?field.priority=1&field.status=10");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
@@ -348,23 +348,23 @@ fn rest_filter_by_field() {
     );
 
     // SQL injection via field key — should return empty, not error
-    let resp = server.rest_get("/zettels?field.';DROP%20TABLE%20zettels--=x");
+    let resp = server.rest_get("/doogats?field.';DROP%20TABLE%20doogats--=x");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
     assert!(data.is_empty(), "SQL injection attempt should return empty");
 
-    // Verify zettels table still exists
-    let resp = server.rest_get("/zettels");
+    // Verify doogats table still exists
+    let resp = server.rest_get("/doogats");
     assert_eq!(resp.status(), 200);
 }
 
 #[test]
 fn rest_filter_field_and_tag() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    // Create tagged zettel with extra field via SQL type
+    // Create tagged doogat with extra field via SQL type
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "CREATE TABLE widget (label TEXT NOT NULL, priority INTEGER)" }),
@@ -376,14 +376,14 @@ fn rest_filter_field_and_tag() {
     );
     assert!(r.get("errors").is_none());
 
-    // Create untyped zettel (no priority field)
+    // Create untyped doogat (no priority field)
     server.rest_post(
-        "/zettels",
+        "/doogats",
         serde_json::json!({ "title": "Plain", "tags": ["widget"] }),
     );
 
     // Filter by type + field → only the SQL-created widget
-    let resp = server.rest_get("/zettels?type=widget&field.priority=5");
+    let resp = server.rest_get("/doogats?type=widget&field.priority=5");
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
@@ -396,13 +396,13 @@ fn rest_filter_field_and_tag() {
 
 #[test]
 fn rest_auth_required() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // No auth header
     let resp = server
         .rest_client()
-        .get(server.rest_url("/zettels"))
+        .get(server.rest_url("/doogats"))
         .timeout(Duration::from_secs(5))
         .send()
         .unwrap();
@@ -411,7 +411,7 @@ fn rest_auth_required() {
     // Wrong token
     let resp = server
         .rest_client()
-        .get(server.rest_url("/zettels"))
+        .get(server.rest_url("/doogats"))
         .header("Authorization", "Bearer wrong-token")
         .timeout(Duration::from_secs(5))
         .send()
@@ -423,7 +423,7 @@ fn rest_auth_required() {
 
 #[test]
 fn hot_schema_reload_create_and_query() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Verify schemaVersion works (reloader is in schema data)
@@ -470,7 +470,7 @@ fn hot_schema_reload_create_and_query() {
 
 #[test]
 fn hot_schema_reload_schema_version_increments() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Initial version
@@ -503,7 +503,7 @@ fn hot_schema_reload_schema_version_increments() {
 
 #[test]
 fn hot_schema_reload_multiple_creates() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     for table in ["book", "movie", "song"] {
@@ -534,7 +534,7 @@ fn hot_schema_reload_multiple_creates() {
 
 #[test]
 fn drop_table_removes_type_from_schema() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Create a type
@@ -547,7 +547,7 @@ fn drop_table_removes_type_from_schema() {
         "CREATE TABLE failed: {result}"
     );
 
-    // DROP TABLE removes typedef zettel and triggers schema reload
+    // DROP TABLE removes typedef doogat and triggers schema reload
     let result = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "DROP TABLE book" }),
@@ -588,7 +588,7 @@ fn setup_task_type(server: &ServerGuard) {
 
 #[test]
 fn filter_eq() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -606,7 +606,7 @@ fn filter_eq() {
 
 #[test]
 fn filter_gte() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -627,7 +627,7 @@ fn filter_gte() {
 
 #[test]
 fn filter_contains() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -647,7 +647,7 @@ fn filter_contains() {
 
 #[test]
 fn filter_compound_and_or() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -674,7 +674,7 @@ fn filter_compound_and_or() {
 
 #[test]
 fn order_by() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -696,7 +696,7 @@ fn order_by() {
 
 #[test]
 fn aggregate_query() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -710,7 +710,7 @@ fn aggregate_query() {
 
 #[test]
 fn aggregate_with_filter() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -728,7 +728,7 @@ fn aggregate_with_filter() {
 
 #[test]
 fn filter_sql_injection_attempt() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -753,7 +753,7 @@ fn filter_sql_injection_attempt() {
 
 #[test]
 fn filter_tag_with_where() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
     setup_task_type(&server);
 
@@ -772,7 +772,7 @@ fn filter_tag_with_where() {
     for item in &items[..2] {
         let id = item["id"].as_str().unwrap();
         let r = server.graphql_with_vars(
-            r#"mutation($input: UpdateZettelInput!) { updateZettel(input: $input) { id tags } }"#,
+            r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id tags } }"#,
             serde_json::json!({ "input": { "id": id, "tags": ["urgent"] } }),
         );
         assert!(r.get("errors").is_none(), "tag update failed: {r}");
@@ -813,7 +813,7 @@ fn filter_tag_with_where() {
 
 #[test]
 fn alter_table_column_visible_in_graphql() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Create a type with one column
@@ -862,7 +862,7 @@ fn alter_table_column_visible_in_graphql() {
 
 #[test]
 fn malformed_typedef_preserves_schema() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // Create a valid type first
@@ -880,7 +880,7 @@ fn malformed_typedef_preserves_schema() {
     let typedef_content =
         "---\ntype: _typedef\ntable_name: broken\ncolumns:\n  - bad yaml {{{\n---\n";
     server.graphql_with_vars(
-        r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "body": typedef_content, "tags": ["_typedef"] } }),
     );
 
@@ -903,7 +903,7 @@ fn malformed_typedef_preserves_schema() {
 
 #[test]
 fn health_returns_ok() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let resp = reqwest::blocking::Client::new()
@@ -922,7 +922,7 @@ fn health_returns_ok() {
 
 #[test]
 fn health_no_auth_required() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     // No Authorization header — should still get 200, not 401
@@ -937,7 +937,7 @@ fn health_no_auth_required() {
 
 #[test]
 fn health_live_always_ok() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
     let resp = reqwest::blocking::Client::new()

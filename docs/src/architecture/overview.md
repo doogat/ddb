@@ -1,21 +1,21 @@
 # Architecture Overview
 
-ZettelDB is a modular monolith with 12 core library modules, a GraphQL server crate, a CLI binary, and UniFFI bindings for Swift/Kotlin. Each module has a single responsibility and clear dependency boundaries.
+Doogat DB is a modular monolith with 12 core library modules, a GraphQL server crate, a CLI binary, and UniFFI bindings for Swift/Kotlin. Each module has a single responsibility and clear dependency boundaries.
 
 ## System Layers
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│                     CLI (zdb-cli)                        │
+│                     CLI (ddb-cli)                        │
 │                 clap-based command interface             │
 ├─────────────────────────────────────────────────────────┤
-│               GraphQL Server (zdb-server)                │
+│               GraphQL Server (ddb-server)                │
 │     axum + async-graphql · actor bridge · Bearer auth    │
 ├─────────────────────────────────────────────────────────┤
-│            FFI Bindings (ZettelDriver facade)            │
+│            FFI Bindings (DoogatDriver facade)            │
 │         uniffi proc-macro · Swift · Kotlin              │
 ├─────────────────────────────────────────────────────────┤
-│                Core Library (zdb-core)                   │
+│                Core Library (ddb-core)                   │
 │  ┌────────────────────────────────────────────────────┐ │
 │  │  Orchestration: sync_manager, compaction           │ │
 │  ├────────────────────────────────────────────────────┤ │
@@ -44,14 +44,14 @@ Features are classified as **stable** or **experimental**:
 
 | Tier | Scope |
 |------|-------|
-| Stable | CLI CRUD, search, query, sync, type management; Git storage format; FTS5; SQL DDL/DML; `zdb-core` public API |
+| Stable | CLI CRUD, search, query, sync, type management; Git storage format; FTS5; SQL DDL/DML; `ddb-core` public API |
 | Experimental | GraphQL server, REST, PgWire, WebSocket, NoSQL API, UniFFI bindings, bundles, attachments, auto-update |
 
 Stable APIs follow semver. Experimental APIs may change in any release.
 
 ## Hybrid Git-CRDT Strategy
 
-Git handles >99% of merges (non-overlapping edits). When Git detects a conflict, ZettelDB falls back to Automerge CRDT with per-zone merge strategies:
+Git handles >99% of merges (non-overlapping edits). When Git detects a conflict, Doogat DB falls back to Automerge CRDT with per-zone merge strategies:
 
 | Zone | Merge Strategy |
 |------|---------------|
@@ -64,11 +64,11 @@ Git handles >99% of merges (non-overlapping edits). When Git detects a conflict,
 - **Source of truth**: Git repository (Markdown files)
 - **Read cache**: SQLite database with FTS5 (derived, always rebuildable from Git)
 - **Node registry**: TOML files in `.nodes/` (tracked by Git)
-- **Local state**: `.git/zdb-node` (node UUID, not tracked)
+- **Local state**: `.git/ddb-node` (node UUID, not tracked)
 
 ## Deployment Modes
 
-ZettelDB supports three deployment modes. The backend contract (storage, types, sync, queries) is identical across all three — only the process topology and transport differ.
+Doogat DB supports three deployment modes. The backend contract (storage, types, sync, queries) is identical across all three — only the process topology and transport differ.
 
 ### Mode 1: Server
 
@@ -76,7 +76,7 @@ ZettelDB supports three deployment modes. The backend contract (storage, types, 
 Web / Desktop app
       │
       ▼
-zdb serve (HTTP :2891)
+ddb serve (HTTP :2891)
       │
       ├── GitRepo (storage)
       ├── Index (SQLite FTS5)
@@ -91,7 +91,7 @@ Target: web apps, remote desktop apps, shared local desktops, admin tools. Trans
 Native app (Swift / Kotlin)
       │
       ▼
-ZettelDriver (UniFFI, in-process)
+DoogatDriver (UniFFI, in-process)
       │
       ├── GitRepo (storage)
       ├── Index (SQLite FTS5)
@@ -104,7 +104,7 @@ Target: native apps that own the repo locally. Transport: UniFFI function calls.
 
 ```text
 Host App
-├── ZettelDriver (one instance)
+├── DoogatDriver (one instance)
 │   ├── GitRepo (shared repo)
 │   ├── Index (shared index)
 │   └── SqlEngine
@@ -115,16 +115,16 @@ Host App
 └── Widget / Extension (read-only access)
 ```
 
-Target: multiple mini-app experiences on one mobile device. All modules share one embedded ZettelDriver, one repository, and one index.
+Target: multiple mini-app experiences on one mobile device. All modules share one embedded DoogatDriver, one repository, and one index.
 
-ZettelDB does not support multiple separately installed mobile apps sharing one phone-local backend server. Mobile OS sandboxing, background execution limits, and IPC restrictions make this topology non-portable.
+Doogat DB does not support multiple separately installed mobile apps sharing one phone-local backend server. Mobile OS sandboxing, background execution limits, and IPC restrictions make this topology non-portable.
 
 ## Project Structure
 
 ```text
-zetteldb/
+ddb/
 ├── Cargo.toml                  # Workspace root
-├── zdb-core/                   # Core library
+├── ddb-core/                   # Core library
 │   ├── src/
 │   │   ├── lib.rs              # Public re-exports + UniFFI scaffolding
 │   │   ├── error.rs            # Error types
@@ -139,15 +139,15 @@ zetteldb/
 │   │   ├── bundled_types.rs    # Built-in type definitions
 │   │   ├── sync_manager.rs     # Multi-device sync
 │   │   ├── compaction.rs       # CRDT cleanup + git gc
-│   │   ├── ffi.rs              # UniFFI ZettelDriver facade
-│   │   └── zdb.udl             # UniFFI interface definition (docs)
+│   │   ├── ffi.rs              # UniFFI DoogatDriver facade
+│   │   └── ddb.udl             # UniFFI interface definition (docs)
 │   └── benches/
-│       ├── crud.rs             # CRUD benchmarks (1K zettels)
+│       ├── crud.rs             # CRUD benchmarks (1K doogats)
 │       └── search.rs           # Search/reindex benchmarks
-├── zdb-cli/                    # CLI binary
+├── ddb-cli/                    # CLI binary
 │   └── src/
 │       └── main.rs             # clap command handlers
-├── zdb-server/                 # GraphQL server library
+├── ddb-server/                 # GraphQL server library
 │   └── src/
 │       ├── lib.rs              # Server entrypoint (axum)
 │       ├── actor.rs            # Thread-safe core bridge
@@ -160,22 +160,22 @@ zetteldb/
 
 ## Runtime Directory Layout
 
-Created by `zdb init`:
+Created by `ddb init`:
 
 ```text
-my-zettelkasten/
+my-ddb/
 ├── .git/
-│   └── zdb-node                # Local node UUID (gitignored)
-├── zettelkasten/               # Zettel Markdown files
+│   └── ddb-node                # Local node UUID (gitignored)
+├── ddb/               # Doogat Markdown files
 │   ├── 20260226120000.md
-│   ├── _typedef/               # Type definition zettels
+│   ├── _typedef/               # Type definition doogats
 │   │   └── 20260226143000.md
 │   └── ...
 ├── reference/                  # Binary/asset files
 ├── .nodes/                     # Node registry (git-tracked)
 │   └── {uuid}.toml
 ├── .crdt/temp/                 # Temporary CRDT files
-├── .zdb/                       # Local-only (gitignored)
+├── .ddb/                       # Local-only (gitignored)
 │   └── index.db                # SQLite search index
-└── .gitignore                  # Ignores .zdb/
+└── .gitignore                  # Ignores .ddb/
 ```

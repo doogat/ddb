@@ -1,6 +1,6 @@
 # Bundle Protocol
 
-**Source**: `zdb-core/src/bundle.rs`
+**Source**: `ddb-core/src/bundle.rs`
 
 Air-gapped sync via tar bundles for environments without network connectivity.
 
@@ -31,7 +31,7 @@ format_version = 1
 Exports only commits the target hasn't seen, based on `known_heads`:
 
 ```bash
-zdb bundle export --target <uuid> --output path.tar
+ddb bundle export --target <uuid> --output path.tar
 ```
 
 ### Full bundle
@@ -39,13 +39,13 @@ zdb bundle export --target <uuid> --output path.tar
 Exports all refs for bootstrapping a new node:
 
 ```bash
-zdb bundle export --full --output path.tar
+ddb bundle export --full --output path.tar
 ```
 
 ## Import
 
 ```bash
-zdb bundle import path.tar
+ddb bundle import path.tar
 ```
 
 Steps:
@@ -60,15 +60,15 @@ Steps:
 
 ## Pre-compaction Backup
 
-Compaction automatically exports a full bundle before mutating data, providing a recovery path if compaction corrupts the repository. Backups are stored at `.zdb/backups/pre-compact-{ISO8601}.bundle.tar` by default.
+Compaction automatically exports a full bundle before mutating data, providing a recovery path if compaction corrupts the repository. Backups are stored at `.ddb/backups/pre-compact-{ISO8601}.bundle.tar` by default.
 
 ```bash
-zdb compact                          # backup + compact
-zdb compact --no-backup              # skip backup
-zdb compact --backup-path /tmp/b.tar # custom path
+ddb compact                          # backup + compact
+ddb compact --no-backup              # skip backup
+ddb compact --backup-path /tmp/b.tar # custom path
 ```
 
-The GraphQL `compact` mutation accepts `noBackup: Boolean` and returns `backupPath: String` (null when skipped). To recover from a backup: `zdb bundle import <backup.bundle.tar>` on a fresh `zdb init`.
+The GraphQL `compact` mutation accepts `noBackup: Boolean` and returns `backupPath: String` (null when skipped). To recover from a backup: `ddb bundle import <backup.bundle.tar>` on a fresh `ddb init`.
 
 ## Verification
 
@@ -79,7 +79,7 @@ let manifest = bundle::verify_bundle(&path)?;
 
 ## FFI Access
 
-Both export modes and import are available through `ZettelDriver` (UniFFI bindings):
+Both export modes and import are available through `DoogatDriver` (UniFFI bindings):
 
 - `exportFullBundle(outputPath)` — full export
 - `exportDeltaBundle(targetNodeUuid, outputPath)` — delta export targeting a specific node

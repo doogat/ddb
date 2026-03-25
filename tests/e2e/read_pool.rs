@@ -1,4 +1,4 @@
-use crate::common::{ServerGuard, ZdbTestRepo};
+use crate::common::{ServerGuard, DdbTestRepo};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_postgres::SimpleQueryMessage;
@@ -6,10 +6,10 @@ use tokio_postgres::SimpleQueryMessage;
 /// Concurrent reads succeed while a write is in flight.
 #[test]
 fn concurrent_reads_during_write() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    // Create a zettel so reads have something to query
-    repo.zdb()
+    // Create a doogat so reads have something to query
+    repo.ddb()
         .args(["create", "--title", "Seed", "--body", "seed body"])
         .assert()
         .success();
@@ -23,19 +23,19 @@ fn concurrent_reads_during_write() {
     for i in 0..3 {
         let srv = Arc::clone(&server);
         handles.push(std::thread::spawn(move || {
-            let result = srv.graphql(r#"{ zettels { id title } }"#);
+            let result = srv.graphql(r#"{ doogats { id title } }"#);
             assert!(
                 result.get("errors").is_none(),
                 "concurrent graphql read {i} failed: {result}"
             );
-            let zettels = result.pointer("/data/zettels").unwrap();
-            assert!(zettels.is_array(), "expected array, got {zettels}");
+            let doogats = result.pointer("/data/doogats").unwrap();
+            assert!(doogats.is_array(), "expected array, got {doogats}");
         }));
     }
     for i in 0..3 {
         let srv = Arc::clone(&server);
         handles.push(std::thread::spawn(move || {
-            let resp = srv.rest_get("/zettels");
+            let resp = srv.rest_get("/doogats");
             assert!(
                 resp.status().is_success(),
                 "concurrent rest read {i} failed: {}",
@@ -48,7 +48,7 @@ fn concurrent_reads_during_write() {
     let srv = Arc::clone(&server);
     handles.push(std::thread::spawn(move || {
         let result = srv.graphql_with_vars(
-            r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
             serde_json::json!({ "input": {
                 "title": "Written during reads",
                 "content": "body",
@@ -64,7 +64,7 @@ fn concurrent_reads_during_write() {
         h.join().expect("thread panicked");
     }
 
-    // Verify both seed and new zettel exist
+    // Verify both seed and new doogat exist
     let result = server.graphql(r#"{ search(query: "Written during reads") { hits { id } } }"#);
     assert!(
         result.get("errors").is_none(),
@@ -77,9 +77,9 @@ fn concurrent_reads_during_write() {
 /// pgwire SELECT uses ReadPool (verified by running a query while a mutation is in flight)
 #[test]
 fn pgwire_select_during_graphql_write() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    repo.zdb()
+    repo.ddb()
         .args(["create", "--title", "PgSeed", "--body", "pg seed"])
         .assert()
         .success();
@@ -93,9 +93,9 @@ fn pgwire_select_during_graphql_write() {
             let (client, connection) = tokio_postgres::Config::new()
                 .host("127.0.0.1")
                 .port(srv1.pg_port)
-                .user("zdb")
+                .user("ddb")
                 .password(&srv1.token)
-                .dbname("zdb")
+                .dbname("ddb")
                 .connect(tokio_postgres::NoTls)
                 .await
                 .expect("pg connect failed");
@@ -121,7 +121,7 @@ fn pgwire_select_during_graphql_write() {
     let srv2 = Arc::clone(&server);
     let write_handle = std::thread::spawn(move || {
         let result = srv2.graphql_with_vars(
-            r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
             serde_json::json!({ "input": {
                 "title": "Written during pg read",
                 "content": "body",
@@ -143,9 +143,9 @@ fn pgwire_select_during_graphql_write() {
 /// still catching regressions where reads queue behind writes.
 #[test]
 fn read_latency_bounded_under_writes() {
-    let repo = ZdbTestRepo::init();
+    let repo = DdbTestRepo::init();
 
-    repo.zdb()
+    repo.ddb()
         .args(["create", "--title", "LatSeed", "--body", "seed"])
         .assert()
         .success();
@@ -156,7 +156,7 @@ fn read_latency_bounded_under_writes() {
     let mut baseline_times = Vec::new();
     for _ in 0..5 {
         let start = Instant::now();
-        let result = server.graphql(r#"{ zettels { id title } }"#);
+        let result = server.graphql(r#"{ doogats { id title } }"#);
         baseline_times.push(start.elapsed());
         assert!(result.get("errors").is_none());
     }
@@ -170,7 +170,7 @@ fn read_latency_bounded_under_writes() {
     let write_thread = std::thread::spawn(move || {
         for i in 0..5 {
             let _ = write_server.graphql_with_vars(
-                r#"mutation($input: CreateZettelInput!) { createZettel(input: $input) { id } }"#,
+                r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
                 serde_json::json!({ "input": {
                     "title": format!("LatWrite{i}"),
                     "content": "body",
@@ -183,7 +183,7 @@ fn read_latency_bounded_under_writes() {
     let mut mixed_times = Vec::new();
     while !write_done.load(std::sync::atomic::Ordering::Acquire) || mixed_times.len() < 5 {
         let start = Instant::now();
-        let result = server.graphql(r#"{ zettels { id title } }"#);
+        let result = server.graphql(r#"{ doogats { id title } }"#);
         mixed_times.push(start.elapsed());
         assert!(result.get("errors").is_none());
         if mixed_times.len() >= 50 {

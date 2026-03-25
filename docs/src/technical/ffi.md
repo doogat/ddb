@@ -2,9 +2,9 @@
 
 > **Experimental**: UniFFI bindings are experimental and may change in future releases. Do not depend on API stability.
 
-**Source**: `zdb-core/src/ffi.rs`
+**Source**: `ddb-core/src/ffi.rs`
 
-UniFFI-based foreign function interface exposing ZettelDB to Swift and Kotlin via a high-level `ZettelDriver` facade.
+UniFFI-based foreign function interface exposing Doogat DB to Swift and Kotlin via a high-level `DoogatDriver` facade.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ UniFFI-based foreign function interface exposing ZettelDB to Swift and Kotlin vi
 Swift/Kotlin app
       │
       ▼
-ZettelDriver (ffi.rs)       ← UniFFI proc-macro boundary
+DoogatDriver (ffi.rs)       ← UniFFI proc-macro boundary
       │
       ├── GitRepo            ← git_ops (storage)
       ├── Index              ← indexer (search/query)
@@ -20,33 +20,33 @@ ZettelDriver (ffi.rs)       ← UniFFI proc-macro boundary
       └── parser             ← parse/serialize
 ```
 
-`ZettelDriver` wraps `GitRepo` and `Index` behind `Mutex` for thread safety. All methods take `&self` (shared reference via `Arc` on the foreign side).
+`DoogatDriver` wraps `GitRepo` and `Index` behind `Mutex` for thread safety. All methods take `&self` (shared reference via `Arc` on the foreign side).
 
 ## Mobile Integration Model
 
-`ZettelDriver` is the embedded runtime boundary for native apps — not a mobile IPC mechanism. On mobile, the recommended model is one host app embedding a single `ZettelDriver` instance, not multiple separately installed apps communicating over `localhost`. Mobile OS sandboxing and background execution limits make inter-app backends non-portable.
+`DoogatDriver` is the embedded runtime boundary for native apps — not a mobile IPC mechanism. On mobile, the recommended model is one host app embedding a single `DoogatDriver` instance, not multiple separately installed apps communicating over `localhost`. Mobile OS sandboxing and background execution limits make inter-app backends non-portable.
 
-Widgets and extensions (iOS WidgetKit, Android AppWidgetProvider) access the same shared repository via App Group storage (iOS) or app-private storage (Android). Whether extensions get their own read-only `ZettelDriver` instance or consume snapshots exported by the host app depends on the coordination strategy — see the [Building Apps guide](../guide/building-apps.md#mobile-mini-apps) for architecture details.
+Widgets and extensions (iOS WidgetKit, Android AppWidgetProvider) access the same shared repository via App Group storage (iOS) or app-private storage (Android). Whether extensions get their own read-only `DoogatDriver` instance or consume snapshots exported by the host app depends on the coordination strategy — see the [Building Apps guide](../guide/building-apps.md#mobile-mini-apps) for architecture details.
 
 ## Interface
 
 ### Constructors
 
 ```rust
-ZettelDriver::new(repo_path: String) -> Result<Self, ZdbError>
-ZettelDriver::create_repo(repo_path: String) -> Result<Self, ZdbError>
+DoogatDriver::new(repo_path: String) -> Result<Self, DdbError>
+DoogatDriver::create_repo(repo_path: String) -> Result<Self, DdbError>
 ```
 
-`new` opens an existing ZettelDB repo. `create_repo` creates a new repo (directories, `.gitignore`, initial commit) then opens it. Both set up the SQLite index at `.zdb/index.db`.
+`new` opens an existing Doogat DB repo. `create_repo` creates a new repo (directories, `.gitignore`, initial commit) then opens it. Both set up the SQLite index at `.ddb/index.db`.
 
 ### CRUD
 
 | Method | Delegates to |
 |--------|-------------|
-| `create_zettel(content, message)` | `parser::parse` → `repo.commit_file` → `index.index_zettel` |
-| `read_zettel(id)` | `index.resolve_path` → `repo.read_file` |
-| `update_zettel(id, content, message)` | `index.resolve_path` → `repo.commit_file` → `index.index_zettel` |
-| `delete_zettel(id, message)` | `index.resolve_path` → `repo.delete_file` → `index.remove_zettel` |
+| `create_doogat(content, message)` | `parser::parse` → `repo.commit_file` → `index.index_doogat` |
+| `read_doogat(id)` | `index.resolve_path` → `repo.read_file` |
+| `update_doogat(id, content, message)` | `index.resolve_path` → `repo.commit_file` → `index.index_doogat` |
+| `delete_doogat(id, message)` | `index.resolve_path` → `repo.delete_file` → `index.remove_doogat` |
 
 ### Query
 
@@ -54,16 +54,16 @@ ZettelDriver::create_repo(repo_path: String) -> Result<Self, ZdbError>
 |--------|-------------|
 | `search(query)` | `search_paginated(query, MAX, 0)`, returns hits only |
 | `search_paginated(query, limit, offset)` | `index.search_paginated` (FTS5 with LIMIT/OFFSET) |
-| `list_zettels()` | `repo.list_zettels` |
+| `list_doogats()` | `repo.list_doogats` |
 | `execute_sql(sql)` | See [SQL (SqlEngine-backed)](#sql-sqlengine-backed) |
 
 ### Attachments
 
 | Method | Delegates to |
 |--------|-------------|
-| `attach_file(zettel_id, file_path)` | `fs::read` → `attachments::attach_file` |
-| `detach_file(zettel_id, filename)` | `attachments::detach_file` |
-| `list_attachments(zettel_id)` | `attachments::list_attachments` |
+| `attach_file(doogat_id, file_path)` | `fs::read` → `attachments::attach_file` |
+| `detach_file(doogat_id, filename)` | `attachments::detach_file` |
+| `list_attachments(doogat_id)` | `attachments::list_attachments` |
 
 `attach_file` reads the file from disk, detects MIME type from the filename extension, stores the blob under `reference/{id}/`, updates frontmatter, and returns `AttachmentInfo`. Both repo and index locks are held for the duration.
 
@@ -71,7 +71,7 @@ ZettelDriver::create_repo(repo_path: String) -> Result<Self, ZdbError>
 
 | Method | Behavior |
 |--------|----------|
-| `execute_sql(sql)` | Delegates to `SqlEngine::execute` — same path as `zdb serve`. DDL creates typedef zettels via Git; DML reads/writes Git-backed zettels; SELECT returns rows. |
+| `execute_sql(sql)` | Delegates to `SqlEngine::execute` — same path as `ddb serve`. DDL creates typedef doogats via Git; DML reads/writes Git-backed doogats; SELECT returns rows. |
 | `begin_transaction()` | Opens a SAVEPOINT; subsequent `execute_sql` calls buffer writes |
 | `commit_transaction()` | Flushes buffered writes/deletes as a single Git commit, releases SAVEPOINT |
 | `rollback_transaction()` | Discards buffered writes, rolls back SAVEPOINT |
@@ -80,13 +80,13 @@ Returns `SqlResultRecord`:
 - **Queries** (SELECT): `columns` and `rows` populated, `affected_rows` = row count
 - **Mutations** (UPDATE/DELETE): `affected_rows` populated
 - **DDL** (CREATE/DROP TABLE): `message` populated (e.g. "table foo created")
-- **INSERT**: `message` contains comma-separated created zettel IDs
+- **INSERT**: `message` contains comma-separated created doogat IDs
 
 ### Type Discovery
 
 | Method | Returns |
 |--------|---------|
-| `list_type_schemas()` | `Vec<TypeSchemaRecord>` — all typedef zettels with columns, CRDT strategy, template sections |
+| `list_type_schemas()` | `Vec<TypeSchemaRecord>` — all typedef doogats with columns, CRDT strategy, template sections |
 
 `TypeSchemaRecord` contains:
 - `table_name` — the type name
@@ -107,9 +107,9 @@ Returns `SqlResultRecord`:
 
 ## Error Mapping
 
-`ZdbError` is a UniFFI-exported enum mirroring `ZettelError` variants. Each variant carries a `msg: String`. The `From<ZettelError>` impl maps internal errors to FFI-safe variants:
+`DdbError` is a UniFFI-exported enum mirroring `DoogatError` variants. Each variant carries a `msg: String`. The `From<DoogatError>` impl maps internal errors to FFI-safe variants:
 
-| ZettelError | ZdbError |
+| DoogatError | DdbError |
 |------------|---------|
 | `Git(msg)` | `Git { msg }` |
 | `Yaml(msg)` | `Yaml { msg }` |
@@ -130,37 +130,37 @@ Returns `SqlResultRecord`:
 
 ## Binding Generation
 
-Uses UniFFI proc-macro approach (`uniffi::setup_scaffolding!()` in `lib.rs`). No UDL-based code generation; `src/zdb.udl` is kept as interface documentation.
+Uses UniFFI proc-macro approach (`uniffi::setup_scaffolding!()` in `lib.rs`). No UDL-based code generation; `src/ddb.udl` is kept as interface documentation.
 
 Generate bindings via the bundled `uniffi-bindgen` binary:
 
 ```bash
 # Build the cdylib first
-cargo build -p zdb-core
+cargo build -p ddb-core
 
 # Generate Swift
-cargo run -p zdb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-  --library target/debug/libzdb_core.dylib \
+cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
+  --library target/debug/libddb_core.dylib \
   --language swift --out-dir out/swift
 
 # Generate Kotlin
-cargo run -p zdb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-  --library target/debug/libzdb_core.dylib \
+cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
+  --library target/debug/libddb_core.dylib \
   --language kotlin --out-dir out/kotlin
 ```
 
 Output files:
-- Swift: `zdb_core.swift`, `zdb_coreFFI.h`, `zdb_coreFFI.modulemap`
-- Kotlin: `uniffi/zdb_core/zdb_core.kt`
+- Swift: `ddb_core.swift`, `ddb_coreFFI.h`, `ddb_coreFFI.modulemap`
+- Kotlin: `uniffi/ddb_core/ddb_core.kt`
 
 ## Thread Safety
 
-`ZettelDriver` fields are wrapped in `Mutex`:
+`DoogatDriver` fields are wrapped in `Mutex`:
 - `repo: Mutex<GitRepo>` — serializes all git operations
 - `index: Mutex<Index>` — serializes all SQLite operations
 - `txn: Mutex<Option<TransactionBuffer>>` — holds buffered writes/deletes during an active transaction
 
-When multiple locks are needed, the canonical acquisition order is **index → repo → txn**. Methods that only need one lock at a time (e.g. `read_zettel`) may drop and reacquire in any order.
+When multiple locks are needed, the canonical acquisition order is **index → repo → txn**. Methods that only need one lock at a time (e.g. `read_doogat`) may drop and reacquire in any order.
 
 During a transaction, `execute_sql` injects the stored `TransactionBuffer` into a fresh `SqlEngine`, executes, then extracts the buffer back. The SAVEPOINT lives on `Index.conn` and persists across calls. This avoids self-referential lifetime issues while maintaining SqlEngine's transaction semantics.
 
@@ -241,26 +241,26 @@ Both scripts use the `vendored` feature to compile OpenSSL and libgit2 from sour
 - **Platform**: macOS 26.2, Apple Silicon (arm64), Xcode 26.3, Swift 6.2
 - **XCFramework slices**: ios-arm64, ios-arm64_x86_64-simulator, macos-arm64
 - **Tests**: 9/9 passed
-  - `testCreateAndReadZettel` — create zettel via FFI, reindex, read back, verify content
-  - `testSearch` — create zettel, reindex, FTS5 search by title
-  - `testListZettels` — create zettel, verify it appears in listing
-  - `testPerformanceMetrics` — cold start, create, search, reindex latency at 100 zettels
+  - `testCreateAndReadDoogat` — create doogat via FFI, reindex, read back, verify content
+  - `testSearch` — create doogat, reindex, FTS5 search by title
+  - `testListDoogats` — create doogat, verify it appears in listing
+  - `testPerformanceMetrics` — cold start, create, search, reindex latency at 100 doogats
   - `testExecuteSqlReturnsStructuredResult` — execute SQL via SqlEngine, verify structured row/column result
   - `testTransactionCommitAndRollback` — begin/commit/rollback lifecycle, verify atomicity
   - `testListTypeSchemas` — create typedef, list schemas, verify columns and metadata
   - `testMultiTableTypedScenario` — 4-table PRD scenario: workspace/section/link/section-link, joined read, transactional update, type metadata bootstrap
   - `testBundleExportImport` — export full bundle, import into fresh repo, verify round-trip
-- **Note**: Tests use `ZettelDriver.createRepo()` and `registerNode()` directly (no CLI binary needed), making them compatible with iOS simulator targets. Verified on macOS slice of the XCFramework.
+- **Note**: Tests use `DoogatDriver.createRepo()` and `registerNode()` directly (no CLI binary needed), making them compatible with iOS simulator targets. Verified on macOS slice of the XCFramework.
 
 #### Kotlin on JVM (2026-03-09)
 
 - **Platform**: macOS, JDK 25, Kotlin 2.3.10, JNA 5.16.0
-- **Native lib**: `libzdb_core.dylib` (release build, host platform)
+- **Native lib**: `libddb_core.dylib` (release build, host platform)
 - **Tests**: 9/9 passed
-  - `testCreateAndReadZettel` — create zettel via FFI, reindex, read back, verify content
-  - `testSearch` — create zettel, reindex, FTS5 search by title
-  - `testListZettels` — create zettel, verify it appears in listing
-  - `testPerformanceMetrics` — cold start, create, search, reindex latency at 100 zettels
+  - `testCreateAndReadDoogat` — create doogat via FFI, reindex, read back, verify content
+  - `testSearch` — create doogat, reindex, FTS5 search by title
+  - `testListDoogats` — create doogat, verify it appears in listing
+  - `testPerformanceMetrics` — cold start, create, search, reindex latency at 100 doogats
   - `testExecuteSqlReturnsStructuredResult` — execute SQL via SqlEngine, verify structured row/column result
   - `testTransactionCommitAndRollback` — begin/commit/rollback lifecycle, verify atomicity
   - `testListTypeSchemas` — create typedef, list schemas, verify columns and metadata

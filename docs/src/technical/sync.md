@@ -2,7 +2,7 @@
 
 ## Sync Manager
 
-**Source**: `zdb-core/src/sync_manager.rs` (198 lines)
+**Source**: `ddb-core/src/sync_manager.rs` (198 lines)
 
 Orchestrates multi-device synchronization.
 
@@ -22,16 +22,16 @@ pub struct SyncManager<'a> {
 1. Generate UUIDv4
 2. Create `NodeConfig` with name, uuid, empty `known_heads`
 3. Write `.nodes/{uuid}.toml` (Git-tracked)
-4. Write UUID to `.git/zdb-node` (local-only, not tracked)
+4. Write UUID to `.git/ddb-node` (local-only, not tracked)
 5. Commit the `.nodes/` file
 
-The local `.git/zdb-node` file identifies which node this device is. It must exist for `SyncManager::open()` to work.
+The local `.git/ddb-node` file identifies which node this device is. It must exist for `SyncManager::open()` to work.
 
 ### Opening
 
 `SyncManager::open(repo) -> Result<Self>`
 
-Reads the UUID from `.git/zdb-node`, then loads the corresponding `.nodes/{uuid}.toml` from the Git tree.
+Reads the UUID from `.git/ddb-node`, then loads the corresponding `.nodes/{uuid}.toml` from the Git tree.
 
 ### Full Sync Cycle
 
@@ -63,9 +63,9 @@ Each bucket is resolved independently. The resolved files from all three are col
 
 ### Add-Add Collision Detection
 
-When two devices independently create a zettel with the same ID (same-second creation), Git sees a content conflict at that path with no common ancestor. Previously, the CRDT/LWW cascade would pick one version and silently lose the other. Now both zettels survive.
+When two devices independently create a doogat with the same ID (same-second creation), Git sees a content conflict at that path with no common ancestor. Previously, the CRDT/LWW cascade would pick one version and silently lose the other. Now both doogats survive.
 
-**Winner selection**: Compare HLC timestamps from the conflicting commits. Later HLC wins. On tie or missing HLC, "theirs" (remote) wins. Rationale: the remote zettel may already be linked from other synced devices; reassigning the local zettel minimizes cross-device link breakage.
+**Winner selection**: Compare HLC timestamps from the conflicting commits. Later HLC wins. On tie or missing HLC, "theirs" (remote) wins. Rationale: the remote doogat may already be linked from other synced devices; reassigning the local doogat minimizes cross-device link breakage.
 
 **Merge commit**: The winner's content goes into the resolved vec alongside other conflict resolutions, keeping the original path.
 
@@ -73,12 +73,12 @@ When two devices independently create a zettel with the same ID (same-second cre
 
 1. Generate a new unique ID via `generate_unique_id()`, checking both filesystem and the winner's ID for collisions.
 2. Update the loser's frontmatter `id` field to the new ID.
-3. Compute the new path via `zettel_path(new_id, type_name, folder)`, respecting folder-typed storage (e.g., `zettelkasten/contact/{new_id}.md`).
+3. Compute the new path via `doogat_path(new_id, type_name, folder)`, respecting folder-typed storage (e.g., `ddb/contact/{new_id}.md`).
 4. Walk the HEAD tree scanning all `.md` files for references to the old ID. For each file containing the old ID, call `rewrite_links()` twice: once for the bare ID form, once for the path form (minus `.md`).
-5. Commit the loser at its new path plus all rewritten files atomically: `fix: reassign collided zettel ID {old} -> {new}`.
+5. Commit the loser at its new path plus all rewritten files atomically: `fix: reassign collided doogat ID {old} -> {new}`.
 6. Emit `tracing::warn!` with old/new IDs and paths.
 
-**Reporting**: `SyncReport.collisions_reassigned` counts reassigned zettels. The CLI displays this when > 0.
+**Reporting**: `SyncReport.collisions_reassigned` counts reassigned doogats. The CLI displays this when > 0.
 
 ### Three-Step Merge Cascade
 
@@ -106,7 +106,7 @@ Walks `.nodes/*.toml` files in the HEAD tree, deserializes each into `NodeConfig
 
 ## Hybrid Logical Clocks
 
-**Source**: `zdb-core/src/hlc.rs`
+**Source**: `ddb-core/src/hlc.rs`
 
 HLC combines wall clock time, a logical counter, and node ID for causally-ordered timestamps across devices.
 
@@ -133,9 +133,9 @@ pub struct Hlc {
 
 ## Compaction
 
-**Source**: `zdb-core/src/compaction.rs`
+**Source**: `ddb-core/src/compaction.rs`
 
-Cleans up temporary CRDT files, merges per-zettel CRDT docs, and runs Git garbage collection. Reports before/after storage measurements.
+Cleans up temporary CRDT files, merges per-doogat CRDT docs, and runs Git garbage collection. Reports before/after storage measurements.
 
 ### Shared Head Calculation
 
@@ -159,7 +159,7 @@ Removes files in `.crdt/temp/` whose commit OID is an ancestor of the shared hea
 
 `compact_crdt_docs(repo) -> Result<usize>`
 
-Groups remaining CRDT temp files by `(zettel_id, is_frontmatter)` and merges multiple Automerge documents per group into a single compacted doc. Body and frontmatter are compacted independently.
+Groups remaining CRDT temp files by `(doogat_id, is_frontmatter)` and merges multiple Automerge documents per group into a single compacted doc. Body and frontmatter are compacted independently.
 
 ### Git GC
 
@@ -176,7 +176,7 @@ Runs `git gc` (not `--aggressive`) for pack consolidation and object deduplicati
 3. Measure `.git/` directory size (before)
 4. Compute shared head from active nodes
 5. Clean up CRDT temp files older than shared head
-6. Compact CRDT docs per zettel
+6. Compact CRDT docs per doogat
 7. Measure `.crdt/temp/` size and file count (after)
 8. Run `git gc`
 9. Measure `.git/` directory size (after)
@@ -186,7 +186,7 @@ Runs `git gc` (not `--aggressive`) for pack consolidation and object deduplicati
 ```rust
 pub struct CompactionReport {
     pub files_removed: usize,        // temp files deleted in step 5
-    pub crdt_docs_compacted: usize,  // zettels merged in step 6
+    pub crdt_docs_compacted: usize,  // doogats merged in step 6
     pub gc_success: bool,            // git gc exit status
     pub crdt_temp_bytes_before: u64, // .crdt/temp/ bytes before cleanup
     pub crdt_temp_bytes_after: u64,  // .crdt/temp/ bytes after compaction
@@ -247,13 +247,13 @@ If the reconstructed merge produces invalid markdown (rare edge case), the casca
 | Non-overlapping edits | Both edits preserved |
 | Same field edited on both sides | CRDT picks one deterministically (not random) |
 | One side deletes, other edits | Edit wins; `resurrected: true` added to frontmatter |
-| Both devices create same ID | Both zettels survive; loser gets new ID, links rewritten |
+| Both devices create same ID | Both doogats survive; loser gets new ID, links rewritten |
 | Stale node returns after compaction | Step 2 runs from Git content; usually succeeds |
 | CRDT error + no HLC | Falls back to local version (ours-wins) |
 
 **E2E tests proving these paths:**
 - `stale_node_resync_after_compaction` — LWW fallback after CRDT state removed
-- `stale_node_edits_deleted_zettel_after_compaction` — edit-vs-delete after compaction
+- `stale_node_edits_deleted_doogat_after_compaction` — edit-vs-delete after compaction
 - `multiple_stale_nodes_return_sequentially` — cascade through multiple compaction cycles
 - `bundle_recovery_after_compaction` — bootstrap from post-compaction bundle
 
@@ -294,11 +294,11 @@ If the reconstructed merge produces invalid markdown (rare edge case), the casca
 
 ## Performance
 
-### NFR-03: Two-node sync under 2s at 5K zettels
+### NFR-03: Two-node sync under 2s at 5K doogats
 
 Measured on macOS (Apple Silicon), release build, localhost bare remote.
 
-Scenario: 5000 zettels seeded, fast-forward sync of 10 new zettels.
+Scenario: 5000 doogats seeded, fast-forward sync of 10 new doogats.
 
 | Phase | Before (ms) | After (ms) |
 |-------|------------|-----------|

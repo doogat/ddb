@@ -1,4 +1,4 @@
-# ZettelDB Swift Verification Tests
+# Doogat DB Swift Verification Tests
 
 Minimal Swift package to verify UniFFI bindings on Apple platforms.
 
@@ -21,7 +21,7 @@ dev/bin/build-xcframework
 2. Copy generated bindings into the source target:
 
 ```bash
-cp out/swift/zdb_core.swift tests/swift/Sources/ZettelDB/
+cp out/swift/ddb_core.swift tests/swift/Sources/DoogatDB/
 ```
 
 ## Run
@@ -30,4 +30,4 @@ cp out/swift/zdb_core.swift tests/swift/Sources/ZettelDB/
 cd tests/swift && swift test
 ```
 
-Tests use `ZettelDriver.createRepo()` and `registerNode()` directly (no CLI binary needed), making them compatible with iOS simulator targets.
+Tests use `DoogatDriver.createRepo()` and `registerNode()` directly (no CLI binary needed), making them compatible with iOS simulator targets.

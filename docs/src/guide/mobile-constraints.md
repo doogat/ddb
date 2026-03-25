@@ -4,11 +4,11 @@ This page covers platform-specific constraints for mobile host-shell apps. Read 
 
 ## Cross-Process Safety
 
-When the host app and widgets/extensions run in separate processes, they share the same SQLite index file. ZettelDB uses WAL mode and a 5-second busy timeout to coordinate access safely.
+When the host app and widgets/extensions run in separate processes, they share the same SQLite index file. Doogat DB uses WAL mode and a 5-second busy timeout to coordinate access safely.
 
 ### Rules
 
-1. **Host app is the sole writer.** Only the host app process should create, update, or delete zettels. Widgets and extensions read from the index only.
+1. **Host app is the sole writer.** Only the host app process should create, update, or delete doogats. Widgets and extensions read from the index only.
 2. **Widgets open read-only connections.** Use `SQLITE_OPEN_READONLY` (iOS) or `SQLiteDatabase.OPEN_READONLY` (Android) when opening `index.db` from a widget.
 3. **WAL provides snapshot isolation.** A widget reading during a host app write sees a consistent pre-write snapshot — no torn reads, no locks.
 4. **busy_timeout prevents SQLITE_BUSY.** If the host app is mid-checkpoint while a widget opens a connection, the widget retries for up to 5 seconds instead of failing immediately.
@@ -16,12 +16,12 @@ When the host app and widgets/extensions run in separate processes, they share t
 
 ### Exception: iOS Share Extension
 
-A Share Extension may create a single zettel via an ephemeral `ZettelDriver`. This is safe because:
+A Share Extension may create a single doogat via an ephemeral `DoogatDriver`. This is safe because:
 - Git commits are atomic (single file write + index update)
 - The host app reindexes on next launch
 - The extension closes the driver immediately after the operation
 
-Do not hold `ZettelDriver` open in an extension beyond the single operation.
+Do not hold `DoogatDriver` open in an extension beyond the single operation.
 
 ### What can go wrong
 
@@ -30,7 +30,7 @@ Do not hold `ZettelDriver` open in an extension beyond the single operation.
 | Widget reads during host app write | Safe — WAL snapshot isolation |
 | Widget reads during host app reindex | Safe — sees pre-reindex snapshot |
 | Host app killed mid-write | Safe — SQLite WAL recovery on next open |
-| Extension creates zettel while host app is running | Git lockfile serializes; one waits for the other |
+| Extension creates doogat while host app is running | Git lockfile serializes; one waits for the other |
 | Two extensions write simultaneously | Git lockfile serializes; unlikely in practice |
 
 ## Background Execution
@@ -46,7 +46,7 @@ iOS aggressively limits background execution:
 | BGProcessingTask | Minutes | Only when plugged in, rare |
 | Push notification trigger | ~30 seconds | Requires server-side push |
 
-**Practical impact**: sync (`ZettelDriver` remote fetch/push) should run in the foreground or in a short background task. Do not rely on background execution for regular sync — it may not fire for hours or days.
+**Practical impact**: sync (`DoogatDriver` remote fetch/push) should run in the foreground or in a short background task. Do not rely on background execution for regular sync — it may not fire for hours or days.
 
 **What not to attempt in background**:
 - Full reindex (can take seconds at scale)
@@ -74,7 +74,7 @@ Android background restrictions vary by OS version and manufacturer:
 
 ## Widget Data Freshness
 
-Widgets show data from the SQLite index. They cannot trigger sync or run the full ZettelDB core.
+Widgets show data from the SQLite index. They cannot trigger sync or run the full Doogat DB core.
 
 ### iOS WidgetKit
 
@@ -92,7 +92,7 @@ WidgetCenter.shared.reloadAllTimelines()
 ```swift
 // In widget TimelineProvider
 func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
-    let dbPath = appGroupURL.appendingPathComponent(".zdb/index.db").path
+    let dbPath = appGroupURL.appendingPathComponent(".ddb/index.db").path
     // Open read-only SQLite connection, query materialized tables
     let entries = queryRecentBookmarks(dbPath: dbPath)
     let timeline = Timeline(entries: entries, policy: .after(Date().addingTimeInterval(3600)))
@@ -122,14 +122,14 @@ Share extensions let users send content to your app from other apps (Safari, Pho
 
 - Runs in a **separate process** from the host app
 - Has access to App Group storage
-- Can create a short-lived `ZettelDriver` to insert one zettel
+- Can create a short-lived `DoogatDriver` to insert one doogat
 - Must complete within the system time limit (~seconds)
-- Host app reindexes on next launch to pick up the new zettel
+- Host app reindexes on next launch to pick up the new doogat
 
 ```swift
 // In ShareViewController
 func didSelectPost() {
-    let driver = try ZettelDriver(repoPath: appGroupRepoPath)
+    let driver = try DoogatDriver(repoPath: appGroupRepoPath)
     let t = title.replacingOccurrences(of: "'", with: "''")
     let u = url.replacingOccurrences(of: "'", with: "''")
     try driver.executeSql("""
@@ -140,11 +140,11 @@ func didSelectPost() {
 }
 ```
 
-**Warning**: do not hold the `ZettelDriver` open beyond the single operation. Extensions are killed without notice.
+**Warning**: do not hold the `DoogatDriver` open beyond the single operation. Extensions are killed without notice.
 
 ### iOS Action Extension
 
-Action extensions (e.g., "Open in ZettelDB") are read-only — they display data but should not write. Open a read-only SQLite connection to the index.
+Action extensions (e.g., "Open in Doogat DB") are read-only — they display data but should not write. Open a read-only SQLite connection to the index.
 
 ### Android Share Target
 
@@ -152,7 +152,7 @@ Action extensions (e.g., "Open in ZettelDB") are read-only — they display data
 // In ShareActivity
 override fun onCreate(savedInstanceState: Bundle?) {
     val url = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return finish()
-    val driver = ZettelDriver(repoPath = appGroupRepoPath)
+    val driver = DoogatDriver(repoPath = appGroupRepoPath)
     val safeUrl = url.replace("'", "''")
     driver.executeSql("INSERT INTO bookmark (title, url) VALUES ('Shared', '$safeUrl')")
     finish()
@@ -187,22 +187,22 @@ Conflicts are resolved automatically by the CRDT resolver — no user interventi
 
 ### Cold start budget
 
-ZettelDriver initialization includes:
+DoogatDriver initialization includes:
 - Opening the git repo (~1-5ms)
 - Opening/creating the SQLite index (~1-5ms)
 - Schema bootstrap per module (~10-50ms per `listTypeSchemas()` + `CREATE TABLE` check)
 
 Reference numbers from FFI performance tests (macOS, Apple Silicon):
 
-| Repo size | Cold start | Create zettel | Search | Reindex |
+| Repo size | Cold start | Create doogat | Search | Reindex |
 |-----------|-----------|---------------|--------|---------|
 | Empty | <50ms | ~20ms | <5ms | <10ms |
-| 100 zettels | <100ms | ~25ms | <10ms | ~200ms |
-| 1K zettels | <200ms | ~30ms | <15ms | ~2s |
+| 100 doogats | <100ms | ~25ms | <10ms | ~200ms |
+| 1K doogats | <200ms | ~30ms | <15ms | ~2s |
 
-Mobile devices are slower — expect 2-3x these numbers on older phones. A 1K-zettel repo should still initialize in under 500ms on modern devices.
+Mobile devices are slower — expect 2-3x these numbers on older phones. A 1K-doogat repo should still initialize in under 500ms on modern devices.
 
-**Recommendation**: initialize `ZettelDriver` on a background thread and show a loading indicator. Don't block the main/UI thread.
+**Recommendation**: initialize `DoogatDriver` on a background thread and show a loading indicator. Don't block the main/UI thread.
 
 ### Index reuse
 
@@ -232,13 +232,13 @@ if headBefore != headAfter {
 
 | Strategy | When to use |
 |----------|-------------|
-| **Eager** (reindex at launch) | Small repos (<500 zettels), sync always runs at launch |
+| **Eager** (reindex at launch) | Small repos (<500 doogats), sync always runs at launch |
 | **Lazy** (reindex after sync only) | Larger repos, sync is user-triggered or background |
 
 For most mobile apps, lazy reindex is better — users open the app far more often than they sync.
 
 ### Memory pressure
 
-On iOS, respond to `didReceiveMemoryWarning` by dropping any cached data. The `ZettelDriver` itself holds minimal memory (just Mutex-wrapped handles). SQLite's page cache is the main consumer — it releases memory automatically under pressure.
+On iOS, respond to `didReceiveMemoryWarning` by dropping any cached data. The `DoogatDriver` itself holds minimal memory (just Mutex-wrapped handles). SQLite's page cache is the main consumer — it releases memory automatically under pressure.
 
-On Android, consider closing the `ZettelDriver` in `onTrimMemory(TRIM_MEMORY_BACKGROUND)` and reopening on next use.
+On Android, consider closing the `DoogatDriver` in `onTrimMemory(TRIM_MEMORY_BACKGROUND)` and reopening on next use.
