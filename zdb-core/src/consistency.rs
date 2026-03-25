@@ -895,7 +895,9 @@ fn extract_from_zone(parsed: &ParsedZettel, col_name: &str, zone: &Zone) -> Opti
             crate::types::Value::String(s) => Some(s.clone()),
             crate::types::Value::Number(n) => Some(n.to_string()),
             crate::types::Value::Bool(b) => Some(b.to_string()),
-            _ => None,
+            crate::types::Value::Map(_) | crate::types::Value::List(_) => {
+                serde_yaml::to_string(v).ok().map(|s| s.trim_end().to_string())
+            }
         }),
         Zone::Body => {
             // Check ## heading sections first, then body inline fields
@@ -2160,5 +2162,40 @@ mod tests {
         );
         assert!(body.contains("## A\ncontent a\n"));
         assert!(body.contains("## C\ncontent c\n"));
+    }
+
+    #[test]
+    fn extract_from_zone_map_value() {
+        let mut p = empty_parsed();
+        let mut inner = BTreeMap::new();
+        inner.insert("k1".to_string(), crate::types::Value::String("v1".to_string()));
+        inner.insert("k2".to_string(), crate::types::Value::Number(42.0));
+        p.meta
+            .extra
+            .insert("nested".to_string(), crate::types::Value::Map(inner));
+        let result = extract_from_zone(&p, "nested", &Zone::Frontmatter);
+        assert!(result.is_some(), "Map value should be extracted");
+        let yaml = result.unwrap();
+        assert!(yaml.contains("k1:"), "YAML should contain key k1: {yaml:?}");
+        assert!(yaml.contains("k2:"), "YAML should contain key k2: {yaml:?}");
+    }
+
+    #[test]
+    fn extract_from_zone_list_value() {
+        let mut p = empty_parsed();
+        let items = vec![
+            crate::types::Value::String("a".to_string()),
+            crate::types::Value::String("b".to_string()),
+            crate::types::Value::Number(3.0),
+        ];
+        p.meta
+            .extra
+            .insert("items".to_string(), crate::types::Value::List(items));
+        let result = extract_from_zone(&p, "items", &Zone::Frontmatter);
+        assert!(result.is_some(), "List value should be extracted");
+        let yaml = result.unwrap();
+        assert!(yaml.contains("a"), "YAML should contain 'a': {yaml:?}");
+        assert!(yaml.contains("b"), "YAML should contain 'b': {yaml:?}");
+        assert!(yaml.contains("3.0"), "YAML should contain '3.0': {yaml:?}");
     }
 }
