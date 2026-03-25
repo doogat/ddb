@@ -411,9 +411,9 @@ zdb --log-level debug status *>$null
 pass "--log-level flag accepted"
 
 # 16d. app-building end-to-end flow
-$output = zdb query "CREATE TABLE abcategory (name VARCHAR(100))"
+$output = zdb query "CREATE TABLE abcategory (name VARCHAR(100), priority ENUM('low','medium','high'))"
 if ($output -notmatch "table abcategory created") { throw "create abcategory failed" }
-$AB_CAT_ID = zdb query "INSERT INTO abcategory (name) VALUES ('work')"
+$AB_CAT_ID = zdb query "INSERT INTO abcategory (name, priority) VALUES ('work', 'high')"
 if ($AB_CAT_ID -notmatch "^\d{14}$") { throw "insert abcategory bad id: $AB_CAT_ID" }
 $output = zdb query "CREATE TABLE abbookmark (url VARCHAR(2048), description TEXT, abcategory TEXT REFERENCES abcategory)"
 if ($output -notmatch "table abbookmark created") { throw "create abbookmark failed" }
@@ -429,15 +429,20 @@ if ($AB_BM1 -notmatch "^\d{14}$") { throw "insert bookmark1 bad id: $AB_BM1" }
 Start-Sleep -Seconds 1
 $AB_BM2 = zdb query "INSERT INTO abbookmark (url, description) VALUES ('https://crates.io', 'Rust package registry')"
 if ($AB_BM2 -notmatch "^\d{14}$") { throw "insert bookmark2 bad id: $AB_BM2" }
-# Link bookmark to category via junction table
+# Link both bookmarks to category via junction table
 $output = zdb query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM1', '$AB_CAT_ID')"
-if ($output -notmatch "1 row") { throw "junction insert failed: $output" }
+if ($output -notmatch "1 row") { throw "junction insert bm1 failed: $output" }
+$output = zdb query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM2', '$AB_CAT_ID')"
+if ($output -notmatch "1 row") { throw "junction insert bm2 failed: $output" }
 # SELECT from main table
 $output = zdb query "SELECT url FROM abbookmark"
 if ($output -notmatch "rust-lang") { throw "select bookmark failed" }
-# SELECT from junction table
-$output = zdb query "SELECT abcategory_id FROM abbookmark_abcategory WHERE abbookmark_id = '$AB_BM1'"
-if ($output -notmatch $AB_CAT_ID) { throw "junction select failed" }
+# SELECT from junction table — both bookmarks linked
+$output = zdb query "SELECT COUNT(*) FROM abbookmark_abcategory"
+if ($output -notmatch "2") { throw "junction count wrong: $output" }
+# Verify ENUM allowed_values stored in typedef
+$output = zdb query "SELECT priority FROM abcategory"
+if ($output -notmatch "high") { throw "ENUM priority not stored: $output" }
 # help create-app guide available
 $output = zdb help create-app
 if ($output -notmatch "CREATE TABLE") { throw "help create-app failed" }

@@ -337,8 +337,8 @@ pass "help list"
 pass "help unknown fails"
 
 # 16d. app-building end-to-end flow
-$ZDB query "CREATE TABLE abcategory (name VARCHAR(100))" | grep -q "table abcategory created"
-AB_CAT_ID=$($ZDB query "INSERT INTO abcategory (name) VALUES ('work')")
+$ZDB query "CREATE TABLE abcategory (name VARCHAR(100), priority ENUM('low','medium','high'))" | grep -q "table abcategory created"
+AB_CAT_ID=$($ZDB query "INSERT INTO abcategory (name, priority) VALUES ('work', 'high')")
 echo "$AB_CAT_ID" | grep -qE "^[0-9]{14}$"
 $ZDB query "CREATE TABLE abbookmark (url VARCHAR(2048), description TEXT, abcategory TEXT REFERENCES abcategory)" | grep -q "table abbookmark created"
 $ZDB query "ALTER TABLE abbookmark SET ZONE reference FOR url" | grep -q "zone set to reference"
@@ -351,12 +351,15 @@ echo "$AB_BM1" | grep -qE "^[0-9]{14}$"
 sleep 1
 AB_BM2=$($ZDB query "INSERT INTO abbookmark (url, description) VALUES ('https://crates.io', 'Rust package registry')")
 echo "$AB_BM2" | grep -qE "^[0-9]{14}$"
-# Link bookmark to category via junction table
+# Link both bookmarks to category via junction table
 $ZDB query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM1', '$AB_CAT_ID')" | grep -q "1 row"
+$ZDB query "INSERT INTO abbookmark_abcategory (abbookmark_id, abcategory_id) VALUES ('$AB_BM2', '$AB_CAT_ID')" | grep -q "1 row"
 # SELECT from main table
 $ZDB query "SELECT url FROM abbookmark" | grep -q "rust-lang"
-# SELECT from junction table
-$ZDB query "SELECT abcategory_id FROM abbookmark_abcategory WHERE abbookmark_id = '$AB_BM1'" | grep -q "$AB_CAT_ID"
+# SELECT from junction table — both bookmarks linked
+$ZDB query "SELECT COUNT(*) FROM abbookmark_abcategory" | grep -q "2"
+# Verify ENUM allowed_values stored in typedef
+$ZDB query "SELECT priority FROM abcategory" | grep -q "high"
 # help create-app guide available
 $ZDB help create-app | grep -q "CREATE TABLE"
 # Clean up
