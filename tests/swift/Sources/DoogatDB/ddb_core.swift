@@ -7,8 +7,8 @@ import Foundation
 // Depending on the consumer's build setup, the low-level FFI code
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
-#if canImport(zdb_coreFFI)
-import zdb_coreFFI
+#if canImport(ddb_coreFFI)
+import ddb_coreFFI
 #endif
 
 fileprivate extension RustBuffer {
@@ -25,13 +25,13 @@ fileprivate extension RustBuffer {
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
-        try! rustCall { ffi_zdb_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
+        try! rustCall { ffi_ddb_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
     // Frees the buffer in place.
     // The buffer must not be used after this is called.
     func deallocate() {
-        try! rustCall { ffi_zdb_core_rustbuffer_free(self, $0) }
+        try! rustCall { ffi_ddb_core_rustbuffer_free(self, $0) }
     }
 }
 
@@ -281,7 +281,7 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureZdbCoreInitialized()
+    uniffiEnsureDdbCoreInitialized()
     var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
@@ -530,45 +530,41 @@ fileprivate struct FfiConverterString: FfiConverter {
 
 
 /**
- * High-level facade composing GitRepo + Index for mobile/desktop FFI consumers.
+ * High-level facade for mobile/desktop FFI consumers.
  *
- * Lock ordering (must be consistent across all methods): index → repo → txn.
+ * Wraps a single `Mutex<DoogatService>` for thread safety.
  */
-public protocol ZettelDriverProtocol: AnyObject, Sendable {
+public protocol DoogatDriverProtocol: AnyObject, Sendable {
     
-    func attachFile(zettelId: String, filePath: String) throws  -> AttachmentInfo
+    func attachFile(doogatId: String, filePath: String) throws  -> AttachmentInfo
     
-    /**
-     * Lock order: index → repo → txn (must match all other methods).
-     */
     func beginTransaction() throws 
     
     func commitTransaction() throws 
     
     func compact() throws 
     
-    func createZettel(content: String, message: String) throws  -> String
+    func createDoogat(content: String, message: String) throws  -> String
     
-    func deleteZettel(id: String, message: String) throws 
+    func deleteDoogat(id: String, message: String) throws 
     
-    func detachFile(zettelId: String, filename: String) throws 
+    func detachFile(doogatId: String, filename: String) throws 
     
     func executeSql(sql: String) throws  -> SqlResultRecord
+    
+    func exportDeltaBundle(targetNodeUuid: String, outputPath: String) throws  -> String
     
     func exportFullBundle(outputPath: String) throws  -> String
     
     func importBundle(bundlePath: String) throws 
     
-    func listAttachments(zettelId: String) throws  -> [AttachmentInfo]
+    func listAttachments(doogatId: String) throws  -> [AttachmentInfo]
     
-    /**
-     * List all defined types (typedef zettels) with their schemas.
-     */
+    func listDoogats() throws  -> [String]
+    
     func listTypeSchemas() throws  -> [TypeSchemaRecord]
     
-    func listZettels() throws  -> [String]
-    
-    func readZettel(id: String) throws  -> String
+    func readDoogat(id: String) throws  -> String
     
     func registerNode(name: String) throws  -> String
     
@@ -576,19 +572,21 @@ public protocol ZettelDriverProtocol: AnyObject, Sendable {
     
     func rollbackTransaction() throws 
     
+    func runMaintenance() throws  -> Bool
+    
     func search(query: String) throws  -> [SearchResult]
     
     func searchPaginated(query: String, limit: UInt32, offset: UInt32) throws  -> PaginatedSearchResult
     
-    func updateZettel(id: String, content: String, message: String) throws 
+    func updateDoogat(id: String, content: String, message: String) throws 
     
 }
 /**
- * High-level facade composing GitRepo + Index for mobile/desktop FFI consumers.
+ * High-level facade for mobile/desktop FFI consumers.
  *
- * Lock ordering (must be consistent across all methods): index → repo → txn.
+ * Wraps a single `Mutex<DoogatService>` for thread safety.
  */
-open class ZettelDriver: ZettelDriverProtocol, @unchecked Sendable {
+open class DoogatDriver: DoogatDriverProtocol, @unchecked Sendable {
     fileprivate let pointer: UnsafeMutableRawPointer!
 
     /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
@@ -625,15 +623,15 @@ open class ZettelDriver: ZettelDriverProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_zdb_core_fn_clone_zetteldriver(self.pointer, $0) }
+        return try! rustCall { uniffi_ddb_core_fn_clone_doogatdriver(self.pointer, $0) }
     }
     /**
-     * Open an existing ZettelDB repository.
+     * Open an existing Doogat DB repository.
      */
 public convenience init(repoPath: String)throws  {
     let pointer =
-        try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_constructor_zetteldriver_new(
+        try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_constructor_doogatdriver_new(
         FfiConverterString.lower(repoPath),$0
     )
 }
@@ -645,16 +643,16 @@ public convenience init(repoPath: String)throws  {
             return
         }
 
-        try! rustCall { uniffi_zdb_core_fn_free_zetteldriver(pointer, $0) }
+        try! rustCall { uniffi_ddb_core_fn_free_doogatdriver(pointer, $0) }
     }
 
     
     /**
-     * Initialize a new ZettelDB repository at `repo_path` and open it.
+     * Initialize a new Doogat DB repository at `repo_path` and open it.
      */
-public static func createRepo(repoPath: String)throws  -> ZettelDriver  {
-    return try  FfiConverterTypeZettelDriver_lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_constructor_zetteldriver_create_repo(
+public static func createRepo(repoPath: String)throws  -> DoogatDriver  {
+    return try  FfiConverterTypeDoogatDriver_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_constructor_doogatdriver_create_repo(
         FfiConverterString.lower(repoPath),$0
     )
 })
@@ -662,149 +660,159 @@ public static func createRepo(repoPath: String)throws  -> ZettelDriver  {
     
 
     
-open func attachFile(zettelId: String, filePath: String)throws  -> AttachmentInfo  {
-    return try  FfiConverterTypeAttachmentInfo_lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_attach_file(self.uniffiClonePointer(),
-        FfiConverterString.lower(zettelId),
+open func attachFile(doogatId: String, filePath: String)throws  -> AttachmentInfo  {
+    return try  FfiConverterTypeAttachmentInfo_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_attach_file(self.uniffiClonePointer(),
+        FfiConverterString.lower(doogatId),
         FfiConverterString.lower(filePath),$0
     )
 })
 }
     
-    /**
-     * Lock order: index → repo → txn (must match all other methods).
-     */
-open func beginTransaction()throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_begin_transaction(self.uniffiClonePointer(),$0
+open func beginTransaction()throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_begin_transaction(self.uniffiClonePointer(),$0
     )
 }
 }
     
-open func commitTransaction()throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_commit_transaction(self.uniffiClonePointer(),$0
+open func commitTransaction()throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_commit_transaction(self.uniffiClonePointer(),$0
     )
 }
 }
     
-open func compact()throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_compact(self.uniffiClonePointer(),$0
+open func compact()throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_compact(self.uniffiClonePointer(),$0
     )
 }
 }
     
-open func createZettel(content: String, message: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_create_zettel(self.uniffiClonePointer(),
+open func createDoogat(content: String, message: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_create_doogat(self.uniffiClonePointer(),
         FfiConverterString.lower(content),
         FfiConverterString.lower(message),$0
     )
 })
 }
     
-open func deleteZettel(id: String, message: String)throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_delete_zettel(self.uniffiClonePointer(),
+open func deleteDoogat(id: String, message: String)throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_delete_doogat(self.uniffiClonePointer(),
         FfiConverterString.lower(id),
         FfiConverterString.lower(message),$0
     )
 }
 }
     
-open func detachFile(zettelId: String, filename: String)throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_detach_file(self.uniffiClonePointer(),
-        FfiConverterString.lower(zettelId),
+open func detachFile(doogatId: String, filename: String)throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_detach_file(self.uniffiClonePointer(),
+        FfiConverterString.lower(doogatId),
         FfiConverterString.lower(filename),$0
     )
 }
 }
     
 open func executeSql(sql: String)throws  -> SqlResultRecord  {
-    return try  FfiConverterTypeSqlResultRecord_lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_execute_sql(self.uniffiClonePointer(),
+    return try  FfiConverterTypeSqlResultRecord_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_execute_sql(self.uniffiClonePointer(),
         FfiConverterString.lower(sql),$0
     )
 })
 }
     
-open func exportFullBundle(outputPath: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_export_full_bundle(self.uniffiClonePointer(),
+open func exportDeltaBundle(targetNodeUuid: String, outputPath: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_export_delta_bundle(self.uniffiClonePointer(),
+        FfiConverterString.lower(targetNodeUuid),
         FfiConverterString.lower(outputPath),$0
     )
 })
 }
     
-open func importBundle(bundlePath: String)throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_import_bundle(self.uniffiClonePointer(),
+open func exportFullBundle(outputPath: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_export_full_bundle(self.uniffiClonePointer(),
+        FfiConverterString.lower(outputPath),$0
+    )
+})
+}
+    
+open func importBundle(bundlePath: String)throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_import_bundle(self.uniffiClonePointer(),
         FfiConverterString.lower(bundlePath),$0
     )
 }
 }
     
-open func listAttachments(zettelId: String)throws  -> [AttachmentInfo]  {
-    return try  FfiConverterSequenceTypeAttachmentInfo.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_list_attachments(self.uniffiClonePointer(),
-        FfiConverterString.lower(zettelId),$0
+open func listAttachments(doogatId: String)throws  -> [AttachmentInfo]  {
+    return try  FfiConverterSequenceTypeAttachmentInfo.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_list_attachments(self.uniffiClonePointer(),
+        FfiConverterString.lower(doogatId),$0
     )
 })
 }
     
-    /**
-     * List all defined types (typedef zettels) with their schemas.
-     */
+open func listDoogats()throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_list_doogats(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
 open func listTypeSchemas()throws  -> [TypeSchemaRecord]  {
-    return try  FfiConverterSequenceTypeTypeSchemaRecord.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_list_type_schemas(self.uniffiClonePointer(),$0
+    return try  FfiConverterSequenceTypeTypeSchemaRecord.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_list_type_schemas(self.uniffiClonePointer(),$0
     )
 })
 }
     
-open func listZettels()throws  -> [String]  {
-    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_list_zettels(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-open func readZettel(id: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_read_zettel(self.uniffiClonePointer(),
+open func readDoogat(id: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_read_doogat(self.uniffiClonePointer(),
         FfiConverterString.lower(id),$0
     )
 })
 }
     
 open func registerNode(name: String)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_register_node(self.uniffiClonePointer(),
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_register_node(self.uniffiClonePointer(),
         FfiConverterString.lower(name),$0
     )
 })
 }
     
 open func reindex()throws  -> RebuildReport  {
-    return try  FfiConverterTypeRebuildReport_lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_reindex(self.uniffiClonePointer(),$0
+    return try  FfiConverterTypeRebuildReport_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_reindex(self.uniffiClonePointer(),$0
     )
 })
 }
     
-open func rollbackTransaction()throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_rollback_transaction(self.uniffiClonePointer(),$0
+open func rollbackTransaction()throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_rollback_transaction(self.uniffiClonePointer(),$0
     )
 }
 }
     
+open func runMaintenance()throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_run_maintenance(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
 open func search(query: String)throws  -> [SearchResult]  {
-    return try  FfiConverterSequenceTypeSearchResult.lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_search(self.uniffiClonePointer(),
+    return try  FfiConverterSequenceTypeSearchResult.lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_search(self.uniffiClonePointer(),
         FfiConverterString.lower(query),$0
     )
 })
 }
     
 open func searchPaginated(query: String, limit: UInt32, offset: UInt32)throws  -> PaginatedSearchResult  {
-    return try  FfiConverterTypePaginatedSearchResult_lift(try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_search_paginated(self.uniffiClonePointer(),
+    return try  FfiConverterTypePaginatedSearchResult_lift(try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_search_paginated(self.uniffiClonePointer(),
         FfiConverterString.lower(query),
         FfiConverterUInt32.lower(limit),
         FfiConverterUInt32.lower(offset),$0
@@ -812,8 +820,8 @@ open func searchPaginated(query: String, limit: UInt32, offset: UInt32)throws  -
 })
 }
     
-open func updateZettel(id: String, content: String, message: String)throws   {try rustCallWithError(FfiConverterTypeZdbError_lift) {
-    uniffi_zdb_core_fn_method_zetteldriver_update_zettel(self.uniffiClonePointer(),
+open func updateDoogat(id: String, content: String, message: String)throws   {try rustCallWithError(FfiConverterTypeDdbError_lift) {
+    uniffi_ddb_core_fn_method_doogatdriver_update_doogat(self.uniffiClonePointer(),
         FfiConverterString.lower(id),
         FfiConverterString.lower(content),
         FfiConverterString.lower(message),$0
@@ -828,20 +836,20 @@ open func updateZettel(id: String, content: String, message: String)throws   {tr
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeZettelDriver: FfiConverter {
+public struct FfiConverterTypeDoogatDriver: FfiConverter {
 
     typealias FfiType = UnsafeMutableRawPointer
-    typealias SwiftType = ZettelDriver
+    typealias SwiftType = DoogatDriver
 
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> ZettelDriver {
-        return ZettelDriver(unsafeFromRawPointer: pointer)
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> DoogatDriver {
+        return DoogatDriver(unsafeFromRawPointer: pointer)
     }
 
-    public static func lower(_ value: ZettelDriver) -> UnsafeMutableRawPointer {
+    public static func lower(_ value: DoogatDriver) -> UnsafeMutableRawPointer {
         return value.uniffiClonePointer()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ZettelDriver {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DoogatDriver {
         let v: UInt64 = try readInt(&buf)
         // The Rust code won't compile if a pointer won't fit in a UInt64.
         // We have to go via `UInt` because that's the thing that's the size of a pointer.
@@ -852,7 +860,7 @@ public struct FfiConverterTypeZettelDriver: FfiConverter {
         return try lift(ptr!)
     }
 
-    public static func write(_ value: ZettelDriver, into buf: inout [UInt8]) {
+    public static func write(_ value: DoogatDriver, into buf: inout [UInt8]) {
         // This fiddling is because `Int` is the thing that's the same size as a pointer.
         // The Rust code won't compile if a pointer won't fit in a `UInt64`.
         writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
@@ -863,15 +871,15 @@ public struct FfiConverterTypeZettelDriver: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeZettelDriver_lift(_ pointer: UnsafeMutableRawPointer) throws -> ZettelDriver {
-    return try FfiConverterTypeZettelDriver.lift(pointer)
+public func FfiConverterTypeDoogatDriver_lift(_ pointer: UnsafeMutableRawPointer) throws -> DoogatDriver {
+    return try FfiConverterTypeDoogatDriver.lift(pointer)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeZettelDriver_lower(_ value: ZettelDriver) -> UnsafeMutableRawPointer {
-    return FfiConverterTypeZettelDriver.lower(value)
+public func FfiConverterTypeDoogatDriver_lower(_ value: DoogatDriver) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeDoogatDriver.lower(value)
 }
 
 
@@ -1490,7 +1498,7 @@ public func FfiConverterTypeTypeSchemaRecord_lower(_ value: TypeSchemaRecord) ->
 /**
  * FFI error enum exposed to Swift/Kotlin via UniFFI.
  */
-public enum ZdbError: Swift.Error {
+public enum DdbError: Swift.Error {
 
     
     
@@ -1522,10 +1530,10 @@ public enum ZdbError: Swift.Error {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeZdbError: FfiConverterRustBuffer {
-    typealias SwiftType = ZdbError
+public struct FfiConverterTypeDdbError: FfiConverterRustBuffer {
+    typealias SwiftType = DdbError
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ZdbError {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DdbError {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
@@ -1570,7 +1578,7 @@ public struct FfiConverterTypeZdbError: FfiConverterRustBuffer {
         }
     }
 
-    public static func write(_ value: ZdbError, into buf: inout [UInt8]) {
+    public static func write(_ value: DdbError, into buf: inout [UInt8]) {
         switch value {
 
         
@@ -1639,24 +1647,24 @@ public struct FfiConverterTypeZdbError: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeZdbError_lift(_ buf: RustBuffer) throws -> ZdbError {
-    return try FfiConverterTypeZdbError.lift(buf)
+public func FfiConverterTypeDdbError_lift(_ buf: RustBuffer) throws -> DdbError {
+    return try FfiConverterTypeDdbError.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeZdbError_lower(_ value: ZdbError) -> RustBuffer {
-    return FfiConverterTypeZdbError.lower(value)
+public func FfiConverterTypeDdbError_lower(_ value: DdbError) -> RustBuffer {
+    return FfiConverterTypeDdbError.lower(value)
 }
 
 
-extension ZdbError: Equatable, Hashable {}
+extension DdbError: Equatable, Hashable {}
 
 
 
 
-extension ZdbError: Foundation.LocalizedError {
+extension DdbError: Foundation.LocalizedError {
     public var errorDescription: String? {
         String(reflecting: self)
     }
@@ -1850,74 +1858,80 @@ private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
     let bindings_contract_version = 29
     // Get the scaffolding contract version by calling the into the dylib
-    let scaffolding_contract_version = ffi_zdb_core_uniffi_contract_version()
+    let scaffolding_contract_version = ffi_ddb_core_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_attach_file() != 1297) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_attach_file() != 44248) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_begin_transaction() != 54687) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_begin_transaction() != 2386) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_commit_transaction() != 62898) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_commit_transaction() != 53950) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_compact() != 17122) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_compact() != 62532) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_create_zettel() != 29578) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_create_doogat() != 17793) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_delete_zettel() != 11467) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_delete_doogat() != 32617) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_detach_file() != 55487) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_detach_file() != 36880) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_execute_sql() != 42927) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_execute_sql() != 53297) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_export_full_bundle() != 37132) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_export_delta_bundle() != 8901) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_import_bundle() != 52952) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_export_full_bundle() != 20475) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_list_attachments() != 50289) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_import_bundle() != 27104) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_list_type_schemas() != 34503) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_list_attachments() != 31614) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_list_zettels() != 8000) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_list_doogats() != 42306) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_read_zettel() != 64177) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_list_type_schemas() != 61858) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_register_node() != 16520) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_read_doogat() != 49206) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_reindex() != 9955) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_register_node() != 59657) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_rollback_transaction() != 13251) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_reindex() != 56254) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_search() != 27489) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_rollback_transaction() != 1197) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_search_paginated() != 30262) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_run_maintenance() != 36036) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_method_zetteldriver_update_zettel() != 62395) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_search() != 43993) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_constructor_zetteldriver_create_repo() != 4847) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_search_paginated() != 42656) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zdb_core_checksum_constructor_zetteldriver_new() != 52882) {
+    if (uniffi_ddb_core_checksum_method_doogatdriver_update_doogat() != 39210) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ddb_core_checksum_constructor_doogatdriver_create_repo() != 44522) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ddb_core_checksum_constructor_doogatdriver_new() != 10962) {
         return InitializationResult.apiChecksumMismatch
     }
 
@@ -1926,7 +1940,7 @@ private let initializationResult: InitializationResult = {
 
 // Make the ensure init function public so that other modules which have external type references to
 // our types can call it.
-public func uniffiEnsureZdbCoreInitialized() {
+public func uniffiEnsureDdbCoreInitialized() {
     switch initializationResult {
     case .ok:
         break
