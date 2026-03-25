@@ -118,30 +118,38 @@ The SQL engine validates FK targets on INSERT. Backlinks are automatically index
 
 ### Constraints
 
+Use SQL `ENUM` and `SET` types for value constraints:
+
 ```sql
 CREATE TABLE task (
   title TEXT NOT NULL,
-  status TEXT DEFAULT 'todo',
-  priority TEXT
+  status ENUM('todo', 'doing', 'done') DEFAULT 'todo',
+  priority ENUM('low', 'medium', 'high')
 );
 ```
 
-Use `_typedef` YAML for richer constraints:
+The engine translates `ENUM`/`SET` into `allowed_values` in the typedef YAML:
 
 ```yaml
 columns:
   - name: status
-    data_type: TEXT
+    data_type: ENUM
     zone: frontmatter
     allowed_values: [todo, doing, done]
     default_value: todo
   - name: priority
-    data_type: TEXT
+    data_type: ENUM
     zone: frontmatter
     allowed_values: [low, medium, high]
 ```
 
-`allowed_values` enforces enum constraints; `default_value` fills missing columns on INSERT.
+`allowed_values` is enforced on INSERT - invalid values are rejected. `DEFAULT` fills missing columns.
+
+You can also add constraints to existing tables:
+
+```sql
+ALTER TABLE task ADD COLUMN tags SET('urgent', 'blocked', 'review');
+```
 
 ### Body sections for rich content
 
