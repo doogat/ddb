@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `zdb help` subcommand with in-depth guides (start with `zdb help create-app` for data modeling, zones, title resolution, and API access)
 - Contextual hints on `zdb query --help`, `zdb type --help`, `zdb create --help` pointing to the create-app guide
 - GUIDES section in `zdb --help` output
+- Type-aware zone inference: SQL column types determine default zone placement (VARCHAR/CHAR to frontmatter, TEXT to body, REFERENCES to reference)
+- ENUM/SET column types map to `allowed_values` constraints in typedef YAML
+- `ALTER TABLE ... SET ZONE` for column zone overrides after type creation
+- `ALTER TABLE ... SET/DROP TITLE TEMPLATE` for title derivation from column values
+- Title resolution cascade: explicit title > template > body H1 > frontmatter > fallback
+- `origin` field on typedefs (`ddl` for SQL-created, `manual` for hand-created) with info-level warning on manual creation
+
+### Changed
+
+- Parser preserves multiple same-key reference fields instead of deduplicating
+- `DROP TABLE` cascades to junction tables
 
 ### Fixed
 
@@ -27,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `update_frontmatter_id` returns an error on parse failure instead of silently preserving the old ID
 - Collision loser ID generation checks both flat and folder-typed paths
 - Scalar GraphQL field for REFERENCES columns returns first value instead of all comma-joined
+- SQL INSERT respects explicit `title` column instead of always generating from template
 
 ## [0.1.0] - 2026-03-19
 
