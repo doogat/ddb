@@ -89,7 +89,7 @@ Each column maps to a zone in the zettel Markdown file:
 | SQL Type | Default Zone |
 |----------|-------------|
 | `REFERENCES` column | reference |
-| `CHAR(n)`, `VARCHAR(n≤255)`, `VARCHAR` (no size), `TINYTEXT` | frontmatter |
+| `CHAR`, `CHAR(n)`, `VARCHAR(n≤255)`, `VARCHAR` (no size), `TINYTEXT` | frontmatter |
 | `INTEGER`, `REAL`, `BOOLEAN` | frontmatter |
 | `ENUM(...)`, `SET(...)` | frontmatter |
 | Column with `allowed_values` | frontmatter |
@@ -210,10 +210,10 @@ ALTER TABLE contact DROP TITLE TEMPLATE;
 Override the default zone for any column:
 
 ```sql
-ALTER TABLE bookmark SET ZONE reference FOR url;
+ALTER TABLE note SET ZONE body FOR summary;
 ```
 
-This moves `url` from its default zone (body, since `TEXT` defaults to body) into the reference zone. Available zones: `frontmatter`, `body`, `reference`.
+This moves `summary` from its inferred default zone into the body zone. Available zones: `frontmatter`, `body`, `reference`.
 
 After changing a zone, existing zettels need migration to move data to the new zone:
 
@@ -564,7 +564,7 @@ A comprehensive guide to the Rust programming language.
 - category:: [[20260301120100]]
 ```
 
-Three zones visible: frontmatter (url, status), body (description text), references (category wikilink). Editable in any text editor or Obsidian.
+Three zones visible: frontmatter (url, status), body (description - editable in any text editor after creation), references (category wikilink). Editable in any Markdown editor or Obsidian.
 
 ## Worked example: personal CRM
 
