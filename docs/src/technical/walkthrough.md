@@ -585,6 +585,98 @@ sequenceBreadcrumb(id: ID!): [SequenceNode!]!
 brokenSequences: [BrokenSequence!]!
 ```
 
+## 13. Zone Inference
+
+When `CREATE TABLE` defines columns, each column's SQL data type determines its default zone placement. This inference runs in `sql_engine.rs:extract_columns()` during typedef creation.
+
+### Inference rules (applied in order)
+
+1. If column has a `REFERENCES` clause, zone is **Reference**.
+2. If data type is numeric (`INTEGER`, `REAL`, `BOOLEAN`), zone is **Frontmatter**.
+3. If data type is a short string, zone is **Frontmatter**:
+   - `CHAR`, `CHARACTER`, `TINYTEXT`
+   - `VARCHAR`/`CHAR VARYING` with length <= 255 (or no length)
+   - `ENUM`, `SET`
+4. Otherwise (`TEXT`, `MEDIUMTEXT`, `LONGTEXT`), zone is **Body**.
+
+```rust
+let zone = if references.is_some() {
+    Some(Zone::Reference)
+} else if is_numeric_type(&data_type) || is_short_string_type(&col.data_type) {
+    Some(Zone::Frontmatter)
+} else {
+    Some(Zone::Body)
+};
+```
+
+Zone overrides via `ALTER TABLE ... SET ZONE` change the typedef's column zone after creation.
+
+
+## 14. Pre-Parse Interception
+
+The SQL engine supports custom DDL extensions that `sqlparser` cannot parse: `ALTER TABLE SET ZONE`, `SET TITLE TEMPLATE`, and `DROP TITLE TEMPLATE`. These are intercepted before the SQL reaches the parser.
+
+### Flow
+
+1. `execute(sql)` calls `try_custom_ddl(sql)` first.
+2. Three `OnceLock<Regex>` patterns match the custom syntax:
+   - `ALTER TABLE <t> SET ZONE <zone> FOR <col>`
+   - `ALTER TABLE <t> SET TITLE TEMPLATE '<template>'`
+   - `ALTER TABLE <t> DROP TITLE TEMPLATE`
+3. If a regex matches, capture groups are extracted and dispatched to `handle_set_zone()` or `handle_title_template()`.
+4. If no regex matches, `try_custom_ddl()` returns `None` and normal `sqlparser` flow continues.
+
+This approach keeps the parser dependency clean while supporting ZettelDB-specific DDL.
+
+
+## 15. Junction Tables
+
+Multi-valued `REFERENCES` columns use auto-created junction tables for many-to-many relationships.
+
+### Auto-creation (sql_engine.rs)
+
+When `CREATE TABLE` includes a column with `REFERENCES`, `handle_create_table()` calls `junction_table_ddl(table_name, col_name)` to generate:
+
+```sql
+CREATE TABLE IF NOT EXISTS "{table}_{col}" (
+  "{table}_id" TEXT NOT NULL,
+  "{col}_id" TEXT NOT NULL,
+  PRIMARY KEY ("{table}_id", "{col}_id")
+)
+```
+
+This junction table is created in SQLite alongside the main materialized table.
+
+### Write-through (materialize.rs)
+
+During zettel indexing, `materialize_row()` handles junction population:
+
+1. Insert the main row into the type table.
+2. For each column where `col.references.is_some()`, call `extract_multi_reference_values()`.
+3. This function filters the zettel's `inline_fields` for entries where `f.key == col_name` and `f.zone == Zone::Reference`.
+4. For each reference value, execute `INSERT OR IGNORE` into the junction table.
+5. Before rematerialization, old junction rows are deleted with `DELETE FROM "{t}_{c}" WHERE "{t}_id" = ?`.
+
+### DROP CASCADE
+
+`DROP TABLE <name> CASCADE` drops both the main table and all its junction tables. The engine iterates columns with references and drops each `{table}_{col}` table before dropping the main table and deleting the typedef zettel.
+
+### GraphQL list field resolution (schema/base_types.rs)
+
+For each column with a `REFERENCES` target, the dynamic GraphQL schema adds a pluralized list field:
+
+1. `build_typed_object_type()` calls `pluralize(&col.name)` to derive the field name (e.g., `category` -> `categories`).
+2. The field is typed as `[String!]!` (non-null list of non-null strings).
+3. At query time, `build_typed_object()` extracts all `inline_fields` matching the column name in `Zone::Reference` and returns them as a list.
+4. Both singular (first value) and plural (all values) fields are available.
+
+### Pluralization rules
+
+- Ends with 's' -> add 'es' (e.g., `class` -> `classes`)
+- Ends with 'y' -> replace 'y' with 'ies' (e.g., `category` -> `categories`)
+- Otherwise -> add 's' (e.g., `assignee` -> `assignees`)
+
+
 For deeper detail on any module, see the corresponding document in `docs/src/technical/`:
 
 - `technical/parser.md` -- three-zone Markdown parsing
