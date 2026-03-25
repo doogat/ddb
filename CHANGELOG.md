@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-25
+
 ### Added
 
 - Junction tables for multi-value references: `REFERENCES` columns auto-create `{type}_{col}` junction tables with INSERT/DELETE write-through and DROP CASCADE support
@@ -110,5 +112,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error responses never leak internal paths, stack traces, or SQL details
 - quinn-proto upgraded to 0.11.14 (RUSTSEC-2026-0037)
 
-[Unreleased]: https://github.com/doogat/zdb/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/doogat/zdb/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/doogat/zdb/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/doogat/zdb/releases/tag/v0.1.0
