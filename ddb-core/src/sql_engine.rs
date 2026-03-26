@@ -2140,6 +2140,12 @@ fn apply_updates_to_doogat(
     updates: &BTreeMap<String, String>,
 ) {
     for (col_name, new_val) in updates {
+        // Handle implicit `title` column (not in schema.columns).
+        if col_name == "title" {
+            doogat.meta.title = Some(new_val.clone());
+            continue;
+        }
+
         let col_def = schema.columns.iter().find(|c| c.name == *col_name);
         let col_def = match col_def {
             Some(c) => c,
