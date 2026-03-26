@@ -73,6 +73,7 @@ git config core.hooksPath dev/hooks
 - Data dir: `.ddb/`, node file: `.git/ddb-node`, git signature: `ddb`
 - Plan documents go in `.local/plans/` (gitignored), NOT in `docs/`
 - Git worktrees go in `.local/worktrees/` (gitignored), nowhere else
+- Releases: use `dev/bin/release` only. Never `gh release create` manually - CI creates the GitHub release with binary artifacts on tag push
 
 ## Definition of Done
 
