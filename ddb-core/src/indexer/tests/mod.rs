@@ -1064,3 +1064,49 @@ processed: true
         assert_eq!(timeout, 5000);
     }
 
+    #[test]
+    fn list_tags_counts_and_ordering() {
+        let idx = in_memory_index();
+
+        // Doogat 1: frontmatter tags "rust" and "cli", body tag "tools"
+        let mut z1 = make_doogat(1);
+        z1.meta.tags = vec!["rust".into(), "cli".into()];
+        z1.body_tags = vec!["tools".into()];
+        idx.index_doogat(&z1).unwrap();
+
+        // Doogat 2: frontmatter tag "rust", body tag "tools"
+        let mut z2 = make_doogat(2);
+        z2.meta.tags = vec!["rust".into()];
+        z2.body_tags = vec!["tools".into()];
+        idx.index_doogat(&z2).unwrap();
+
+        // Doogat 3: frontmatter tag "cli"
+        let mut z3 = make_doogat(3);
+        z3.meta.tags = vec!["cli".into()];
+        z3.body_tags = vec![];
+        idx.index_doogat(&z3).unwrap();
+
+        let tags = idx.list_tags().unwrap();
+
+        // Expected counts: cli=2, rust=2, tools=2
+        // All tied at count=2, so ordered alphabetically: cli, rust, tools
+        assert_eq!(tags.len(), 3);
+        assert_eq!(tags[0], ("cli".into(), 2));
+        assert_eq!(tags[1], ("rust".into(), 2));
+        assert_eq!(tags[2], ("tools".into(), 2));
+
+        // Add a 4th doogat with "rust" to break the tie
+        let mut z4 = make_doogat(4);
+        z4.meta.tags = vec!["rust".into()];
+        z4.body_tags = vec![];
+        idx.index_doogat(&z4).unwrap();
+
+        let tags = idx.list_tags().unwrap();
+
+        // rust=3 now leads, then cli=2, tools=2 (alphabetical tiebreak)
+        assert_eq!(tags.len(), 3);
+        assert_eq!(tags[0], ("rust".into(), 3));
+        assert_eq!(tags[1], ("cli".into(), 2));
+        assert_eq!(tags[2], ("tools".into(), 2));
+    }
+

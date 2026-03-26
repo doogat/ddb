@@ -113,7 +113,7 @@ type Doogat {
   title: String
   date: String
   type: String
-  tags: [String!]!
+  tags: [String!]!       # merged frontmatter + body hashtags, deduplicated
   body: String!
   path: String!
   fields: [InlineField!]!
@@ -130,6 +130,7 @@ type SearchConnection { hits: [SearchHit!]!, totalCount: Int! }
 type TypeDef { name: String!, columns: [ColumnInfo!]!, crdtStrategy: String, templateSections: [String!]! }
 type ColumnInfo { name: String!, dataType: String!, zone: String, required: Boolean!, references: String }
 type SqlResult { rows: [String!], affected: Int, message: String }
+type TagInfo { name: String!, count: Int! }
 type CheckboxItem {
   doogatId: ID!
   doogatTitle: String
@@ -156,6 +157,7 @@ type Query {
   schemaVersion: Int!
   checkboxItems(state: String, doogatId: ID, limit: Int, offset: Int): [CheckboxItem!]!
   openActions(limit: Int): [CheckboxItem!]!
+  tags: [TagInfo!]!
 }
 ```
 

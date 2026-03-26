@@ -448,6 +448,23 @@ RESULT=$(gql '{"query":"{ openActions { state content } }"}')
 echo "$RESULT" | grep -q '"openActions"'
 pass "serve: graphql openActions"
 
+# 18c. GraphQL tag queries
+TAG_RESULT=$(gql '{"query":"mutation { createDoogat(input: { title: \"Tag Test\", tags: [\"alpha\", \"beta\"] }) { id title tags } }"}')
+echo "$TAG_RESULT" | grep -q '"alpha"'
+TAG_ID=$(echo "$TAG_RESULT" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+pass "serve: graphql create with tags"
+
+TAGS_RESULT=$(gql '{"query":"{ tags { name count } }"}')
+echo "$TAGS_RESULT" | grep -q '"alpha"'
+echo "$TAGS_RESULT" | grep -q '"beta"'
+pass "serve: graphql tags query"
+
+FILTERED=$(gql '{"query":"{ doogats(tag: \"alpha\") { id title tags } }"}')
+echo "$FILTERED" | grep -q "$TAG_ID"
+pass "serve: graphql doogats tag filter"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TAG_ID\\\") }\"}" >/dev/null
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \

@@ -558,6 +558,23 @@ $result = gql '{"query":"{ openActions { state content } }"}'
 if ($result -notmatch '"openActions"') { throw "graphql openActions failed" }
 pass "serve: graphql openActions"
 
+# 18c. GraphQL tag queries
+$result = gql '{"query":"mutation { createDoogat(input: { title: \"Tag Test\", tags: [\"alpha\", \"beta\"] }) { id title tags } }"}'
+if ($result -notmatch '"alpha"') { throw "graphql create with tags failed" }
+$TAG_ID = if ($result -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no tag id in response" }
+pass "serve: graphql create with tags"
+
+$result = gql '{"query":"{ tags { name count } }"}'
+if ($result -notmatch '"alpha"') { throw "tags query missing alpha" }
+if ($result -notmatch '"beta"') { throw "tags query missing beta" }
+pass "serve: graphql tags query"
+
+$result = gql '{"query":"{ doogats(tag: \"alpha\") { id title tags } }"}'
+if ($result -notmatch $TAG_ID) { throw "tag filter missing expected doogat" }
+pass "serve: graphql doogats tag filter"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TAG_ID\`") }`"}" | Out-Null
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `

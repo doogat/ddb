@@ -21,3 +21,4 @@ mod server_mutations;
 mod sql_lifecycle;
 mod subscriptions;
 mod sync_crdt;
+mod tags;

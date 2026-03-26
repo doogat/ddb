@@ -684,6 +684,21 @@ impl Index {
         })
     }
 
+    /// Return all tags with their usage counts, ordered by count descending then name ascending.
+    pub fn list_tags(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT tag, COUNT(*) as count FROM _ddb_tags GROUP BY tag ORDER BY count DESC, tag ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Find doogats by hierarchical tag prefix.
     pub fn by_tag(&self, prefix: &str) -> Result<Vec<String>> {
         let pattern = format!("{prefix}%");

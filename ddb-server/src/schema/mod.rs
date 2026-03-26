@@ -267,6 +267,10 @@ pub fn build_schema(
             },
         ));
 
+    let tag_info_type = Object::new("TagInfo")
+        .field(simple_field("name", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("count", TypeRef::named_nn(TypeRef::INT)));
+
     // -- Discovery output types --
     let unlinked_mention_type = Object::new("UnlinkedMention")
         .field(simple_field("sourceId", TypeRef::named_nn(TypeRef::ID)))
@@ -1096,6 +1100,24 @@ pub fn build_schema(
         }
     }
 
+    // tags
+    {
+        query = query.field(Field::new(
+            "tags",
+            TypeRef::named_nn_list_nn("TagInfo"),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let pool = ctx.data::<ReadPool>()?;
+                    let tags = pool.list_tags().await.map_err(to_server_error)?;
+                    Ok(Some(FieldValue::list(
+                        tags.iter()
+                            .map(|(name, count)| FieldValue::owned_any(tag_info_to_value(name, *count))),
+                    )))
+                })
+            },
+        ));
+    }
+
     // -- Mutation fields --
     let mut mutation = Object::new("Mutation");
 
@@ -1768,6 +1790,7 @@ pub fn build_schema(
     .register(suggestion_type)
     .register(stale_doogat_type)
     .register(orphan_doogat_type)
+    .register(tag_info_type)
     .register(sequence_node_type)
     .register(sequence_info_type)
     .register(broken_sequence_type)

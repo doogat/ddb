@@ -14,10 +14,13 @@ pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
     let title = z.meta.title.as_deref().unwrap_or("");
     let date = z.meta.date.as_deref().unwrap_or("");
     let ztype = z.meta.doogat_type.as_deref().unwrap_or("");
+    let mut seen = std::collections::HashSet::new();
     let tags: Vec<GqlValue> = z
         .meta
         .tags
         .iter()
+        .chain(z.body_tags.iter())
+        .filter(|t| seen.insert(t.as_str()))
         .map(|t| GqlValue::from(t.as_str()))
         .collect();
 
@@ -161,6 +164,13 @@ pub(crate) fn search_hit_to_value(r: &SearchResult) -> GqlValue {
     obj.insert(Name::new("path"), GqlValue::from(r.path.as_str()));
     obj.insert(Name::new("snippet"), GqlValue::from(r.snippet.as_str()));
     obj.insert(Name::new("rank"), GqlValue::from(r.rank));
+    GqlValue::Object(obj)
+}
+
+pub(crate) fn tag_info_to_value(name: &str, count: i64) -> GqlValue {
+    let mut obj = IndexMap::new();
+    obj.insert(Name::new("name"), GqlValue::from(name));
+    obj.insert(Name::new("count"), GqlValue::from(count));
     GqlValue::Object(obj)
 }
 
@@ -626,6 +636,51 @@ mod tests {
                 assert_eq!(items[1], GqlValue::from("20260301120101".to_string()));
             }
             _ => panic!("expected list, got {list:?}"),
+        }
+    }
+
+    #[test]
+    fn doogat_to_value_merges_body_tags_deduplicated() {
+        use ddb_core::types::{DoogatMeta, ParsedDoogat};
+
+        let z = ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(ddb_core::types::DoogatId("20260301140200".into())),
+                title: Some("TagTest".into()),
+                date: None,
+                tags: vec!["shared".into(), "fm-only".into()],
+                doogat_type: None,
+                extra: std::collections::BTreeMap::new(),
+            },
+            body: String::new(),
+            sections: vec![],
+            links: vec![],
+            body_tags: vec!["shared".into(), "body-only".into()],
+            checkboxes: vec![],
+            inline_fields: vec![],
+            reference_section: String::new(),
+            path: "ddb/20260301140200.md".into(),
+        };
+
+        let val = doogat_to_value(&z);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+
+        let tags = obj.get("tags").unwrap();
+        match tags {
+            GqlValue::List(items) => {
+                let strs: Vec<&str> = items
+                    .iter()
+                    .map(|v| match v {
+                        GqlValue::String(s) => s.as_str(),
+                        _ => panic!("expected string in tags"),
+                    })
+                    .collect();
+                assert_eq!(strs, vec!["shared", "fm-only", "body-only"]);
+            }
+            _ => panic!("expected list, got {tags:?}"),
         }
     }
 }

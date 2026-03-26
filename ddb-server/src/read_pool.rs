@@ -222,6 +222,10 @@ impl ReadPool {
         self.with_service(move |svc| svc.broken_sequences()).await
     }
 
+    pub async fn list_tags(&self) -> Result<Vec<(String, i64)>> {
+        self.with_service(move |svc| svc.list_tags()).await
+    }
+
     // --- Dispatch helpers ---
 
     async fn acquire(&self) -> Result<OwnedSemaphorePermit> {

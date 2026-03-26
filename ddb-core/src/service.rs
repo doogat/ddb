@@ -402,6 +402,12 @@ impl DoogatService {
         Ok(count)
     }
 
+    /// List all tags with usage counts, ordered by count descending.
+    pub fn list_tags(&self) -> Result<Vec<(String, i64)>> {
+        self.ensure_fresh()?;
+        self.index.list_tags()
+    }
+
     /// Execute a raw SQL query with params, returning the first result row.
     pub fn aggregate_query(
         &self,
@@ -1249,6 +1255,24 @@ mod tests {
         assert!(svc.auto_maintenance_enabled().unwrap());
         svc.set_auto_maintenance(false).unwrap();
         assert!(!svc.auto_maintenance_enabled().unwrap());
+    }
+
+    #[test]
+    fn list_tags_returns_counts() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("A", &["rust".into(), "cli".into()], None, "")
+            .unwrap();
+        svc.create_doogat("B", &["rust".into()], None, "")
+            .unwrap();
+        svc.reindex().unwrap();
+
+        let tags = svc.list_tags().unwrap();
+        // rust should appear first (count 2), cli second (count 1)
+        assert!(tags.len() >= 2);
+        assert_eq!(tags[0].0, "rust");
+        assert_eq!(tags[0].1, 2);
+        assert_eq!(tags[1].0, "cli");
+        assert_eq!(tags[1].1, 1);
     }
 
     #[test]
