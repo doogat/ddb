@@ -2,6 +2,58 @@
 
 Doogat DB is a database engine that pairs decentralized Git-backed storage with conflict-free sync and flexible multi-protocol data access.
 
+## Installation
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/doogat/ddb/releases/latest).
+
+### macOS / Linux
+
+```bash
+# set your target: aarch64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+TARGET=aarch64-apple-darwin
+TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/doogat/ddb/releases/latest | xargs basename)
+curl -fsSL "https://github.com/doogat/ddb/releases/download/${TAG}/ddb-${TAG}-${TARGET}.tar.gz" | tar xz
+sudo mv "ddb-${TAG}-${TARGET}/ddb" /usr/local/bin/
+```
+
+### Windows
+
+Download the `ddb-*-x86_64-pc-windows-msvc.zip` asset from [Releases](https://github.com/doogat/ddb/releases/latest), extract, and add the folder to your `PATH`.
+
+### From source
+
+```bash
+cargo install --path ddb-cli
+```
+
+Or use the release helper:
+
+```bash
+dev/bin/release local
+```
+
+### Verify
+
+```bash
+ddb --version
+```
+
+## Updates
+
+`ddb` checks for new releases in the background. When a new version is available, you'll see a notice on the next run.
+
+To update immediately:
+
+```bash
+ddb update-bin
+```
+
+To roll back to the previous version:
+
+```bash
+ddb update-bin --rollback
+```
+
 ## Stability
 
 ### Stable (v0.1.0 API contract)
