@@ -429,6 +429,11 @@ impl DoogatService {
         self.index.query_raw_with_params(sql, params)
     }
 
+    pub fn query_raw_with_columns(&self, sql: &str) -> Result<(Vec<String>, Vec<Vec<String>>)> {
+        self.ensure_fresh()?;
+        self.index.query_raw_with_columns(sql)
+    }
+
     /// Query a materialized type table with WHERE/ORDER/LIMIT, returning parsed doogats.
     pub fn typed_filtered_list(&self, query: &TypedListQuery) -> Result<Vec<ParsedDoogat>> {
         self.ensure_fresh()?;
