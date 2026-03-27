@@ -177,7 +177,7 @@ fn is_broken_pipe(err: &ddb_core::error::DoogatError) -> bool {
 #[derive(Parser)]
 #[command(
     name = "ddb",
-    version,
+    version = env!("DDB_VERSION"),
     about = "Decentralized Doogat DB",
     disable_help_subcommand = true,
     after_help = "GUIDES:\n  help <topic>    In-depth guides (try: ddb help create-app)"

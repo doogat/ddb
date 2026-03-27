@@ -39,6 +39,8 @@ CARGO_FILES=(
 
 # --- local install mode ---
 if [[ "$BUMP" == "local" ]]; then
+  SHORT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  export DDB_BUILD_META="+dev.g${SHORT_SHA}"
   cargo install --path ddb-cli
   echo "installed: $(ddb --version 2>/dev/null || echo 'ddb (version unknown)')"
   exit 0
