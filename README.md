@@ -110,9 +110,14 @@ cargo bench                # run criterion benchmarks (CRUD + search)
 
 ### Install locally
 
+If you installed `ddb` from a GitHub release binary (to `/usr/local/bin/`), use `release local` to test your working tree changes. It installs to `~/.cargo/bin/ddb` which takes PATH priority over `/usr/local/bin/`.
+
 ```bash
 dev/bin/release local      # cargo install from source
+ddb --version              # 0.1.0+dev.g<sha> confirms the local build
 ```
+
+The `+dev.g<sha>` suffix only appears in local builds. CI and tagged releases produce a clean version (`0.1.0`).
 
 ### Release
 
