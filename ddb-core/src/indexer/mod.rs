@@ -643,20 +643,17 @@ impl Index {
         offset: usize,
         filters: &SearchFilters,
     ) -> Result<PaginatedSearchResult> {
-        let hits = self.search_hits(query, Some((limit, offset)), filters)?;
-
         let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
-        let count_sql = if filter_clauses.is_empty() {
-            "SELECT COUNT(*) FROM _ddb_fts \
-             JOIN doogats z ON z.rowid = _ddb_fts.rowid \
-             WHERE _ddb_fts MATCH ?1"
-                .to_string()
+        let hits = self.search_hits_inner(query, Some((limit, offset)), &filter_clauses, filter_params.clone())?;
+
+        let filter_sql = filter_clauses.join(" ");
+        let count_sql = if filter_sql.is_empty() {
+            "SELECT COUNT(*) FROM _ddb_fts WHERE _ddb_fts MATCH ?1".to_string()
         } else {
             format!(
                 "SELECT COUNT(*) FROM _ddb_fts \
                  JOIN doogats z ON z.rowid = _ddb_fts.rowid \
-                 WHERE _ddb_fts MATCH ?1 {}",
-                filter_clauses.join(" ")
+                 WHERE _ddb_fts MATCH ?1 {filter_sql}"
             )
         };
 
@@ -678,7 +675,16 @@ impl Index {
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
         let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
+        self.search_hits_inner(query, pagination, &filter_clauses, filter_params)
+    }
 
+    fn search_hits_inner(
+        &self,
+        query: &str,
+        pagination: Option<(usize, usize)>,
+        filter_clauses: &[String],
+        filter_params: Vec<String>,
+    ) -> Result<Vec<SearchResult>> {
         let filter_sql = filter_clauses.join(" ");
         let base = format!(
             "SELECT z.id, z.title, z.path, \
@@ -689,7 +695,6 @@ impl Index {
              ORDER BY rank"
         );
 
-        // Build params: ?1 = query, then filter params, then pagination params
         let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> =
             vec![Box::new(query.to_string())];
         for p in filter_params {
@@ -700,8 +705,7 @@ impl Index {
             Some(_) => {
                 let limit_idx = all_params.len() + 1;
                 let offset_idx = all_params.len() + 2;
-                let s = format!("{base} LIMIT ?{limit_idx} OFFSET ?{offset_idx}");
-                s
+                format!("{base} LIMIT ?{limit_idx} OFFSET ?{offset_idx}")
             }
             None => base,
         };
