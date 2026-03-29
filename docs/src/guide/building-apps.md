@@ -344,7 +344,7 @@ Materialized type tables include `title`, `date`, and `updated_at` columns autom
 
 #### Boolean columns
 
-Boolean columns are stored as `1`/`0` integers. Use `WHERE pinned = 1` (not `WHERE pinned = 'true'`).
+Boolean columns are stored as `1`/`0` integers. Use `WHERE pinned = 1` (not `WHERE pinned = 'true'`). If upgrading from a previous version, run `ddb reindex` to convert existing `"true"`/`"false"` strings.
 
 ### CLI
 
