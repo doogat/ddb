@@ -513,6 +513,36 @@ gql "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM sfitem WHERE id = '
 gql "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM sfitem WHERE id = '$SF_W2_ID'\\\") { message } }\"}" >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE sfitem CASCADE\") { message } }"}' >/dev/null
 
+# 18f. REFERENCES relation resolution
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokecat (label TEXT)\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)\") { message } }"}' >/dev/null
+SCAT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokecat (title, label) VALUES ('Tech', 'tech')\\\") { message } }\"}")
+SCAT_ID=$(echo "$SCAT" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+sleep 1
+SBM=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm (title, url) VALUES ('Example', 'https://example.com')\\\") { message } }\"}")
+SBM_ID=$(echo "$SBM" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm_smokecat (smokebm_id, smokecat_id) VALUES ('$SBM_ID', '$SCAT_ID')\\\") { message } }\"}" >/dev/null
+
+# Singular: resolves as object
+RESULT=$(gql '{"query":"{ smokebms { items { smokecat { id label } } } }"}')
+echo "$RESULT" | grep -q "\"label\":\"tech\""
+pass "serve: relation singular resolves object"
+
+# Plural: resolves as list of objects
+RESULT=$(gql '{"query":"{ smokebms { items { smokecats { id label } } } }"}')
+echo "$RESULT" | grep -q "\"label\":\"tech\""
+pass "serve: relation plural resolves object list"
+
+# Null reference: bookmark without link
+sleep 1
+gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm (title, url) VALUES ('No Cat', 'https://nocat.com')\\\") { message } }\"}" >/dev/null
+RESULT=$(gql '{"query":"{ smokebms { items { id smokecat { id } smokecats { id } } } }"}')
+echo "$RESULT" | grep -q '"smokecat":null'
+pass "serve: relation null returns null"
+
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' >/dev/null
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \

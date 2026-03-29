@@ -618,6 +618,36 @@ gql "{`"query`":`"mutation { executeSql(sql: \`"DELETE FROM sfitem WHERE id = '$
 gql "{`"query`":`"mutation { executeSql(sql: \`"DELETE FROM sfitem WHERE id = '$SF_W2_ID'\`") { message } }`"}" | Out-Null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE sfitem CASCADE\") { message } }"}' | Out-Null
 
+# 18f. REFERENCES relation resolution
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokecat (label TEXT)\") { message } }"}' | Out-Null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)\") { message } }"}' | Out-Null
+$scat = gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokecat (title, label) VALUES ('Tech', 'tech')\`") { message } }`"}"
+$SCAT_ID = if ($scat -match '"message":"([^"]+)"') { $Matches[1] }
+Start-Sleep -Seconds 1
+$sbm = gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokebm (title, url) VALUES ('Example', 'https://example.com')\`") { message } }`"}"
+$SBM_ID = if ($sbm -match '"message":"([^"]+)"') { $Matches[1] }
+gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokebm_smokecat (smokebm_id, smokecat_id) VALUES ('$SBM_ID', '$SCAT_ID')\`") { message } }`"}" | Out-Null
+
+# Singular: resolves as object
+$result = gql '{"query":"{ smokebms { items { smokecat { id label } } } }"}'
+if ($result -notmatch '"label":"tech"') { throw "singular relation resolution failed: $result" }
+pass "serve: relation singular resolves object"
+
+# Plural: resolves as list of objects
+$result = gql '{"query":"{ smokebms { items { smokecats { id label } } } }"}'
+if ($result -notmatch '"label":"tech"') { throw "plural relation resolution failed: $result" }
+pass "serve: relation plural resolves object list"
+
+# Null reference: bookmark without link
+Start-Sleep -Seconds 1
+gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokebm (title, url) VALUES ('No Cat', 'https://nocat.com')\`") { message } }`"}" | Out-Null
+$result = gql '{"query":"{ smokebms { items { id smokecat { id } smokecats { id } } } }"}'
+if ($result -notmatch '"smokecat":null') { throw "null relation failed: $result" }
+pass "serve: relation null returns null"
+
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' | Out-Null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' | Out-Null
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `
