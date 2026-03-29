@@ -730,7 +730,7 @@ mod tests {
             _ => panic!("expected object"),
         };
 
-        // Scalar field should have comma-separated (first found)
+        // Singular field stores raw ID (resolver fetches the object at query time)
         let scalar = obj.get("category").unwrap();
         assert_eq!(scalar, &GqlValue::from("20260301120100".to_string()));
 
