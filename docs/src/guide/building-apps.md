@@ -330,12 +330,21 @@ mutation {
 ```graphql
 query {
   sql(query: "SELECT c.name, COUNT(b.id) as count FROM category c LEFT JOIN bookmark b ON b.category = c.id GROUP BY c.id ORDER BY count DESC") {
+    columns
     rows
   }
 }
 ```
 
-`rows` returns each row as a JSON string.
+`columns` returns the column names as a string array (e.g. `["name", "count"]`). `rows` returns each row as a JSON string.
+
+#### Core fields in type tables
+
+Materialized type tables include `title`, `date`, and `updated_at` columns automatically, so queries like `SELECT title, url FROM bookmark` work without joining the `doogats` table.
+
+#### Boolean columns
+
+Boolean columns are stored as `1`/`0` integers. Use `WHERE pinned = 1` (not `WHERE pinned = 'true'`).
 
 ### CLI
 

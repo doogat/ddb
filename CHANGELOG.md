@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GraphQL `tags` query returning all tags with usage counts (`TagInfo` type)
 - Body hashtags now included in GraphQL doogat `tags` field (merged with frontmatter, deduplicated)
+- `columns` field in GraphQL `SqlResult` type returns column names alongside row data
+- Core doogat fields (`title`, `date`, `updated_at`) in materialized type tables, removing need for `JOIN doogats`
+
+### Changed
+
+- Boolean values in materialized tables stored as `1`/`0` integers instead of `"true"`/`"false"` strings (requires `ddb reindex` after upgrade)
 
 ## [0.1.0] - 2026-03-26
 
