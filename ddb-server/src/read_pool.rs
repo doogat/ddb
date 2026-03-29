@@ -317,7 +317,7 @@ mod tests {
     async fn search_empty_repo() {
         let (_dir, path) = setup_repo();
         let pool = ReadPool::new(path, 2).unwrap();
-        let result = pool.search("anything".to_string(), 10, 0).await.unwrap();
+        let result = pool.search("anything".to_string(), 10, 0, SearchFilters::default()).await.unwrap();
         assert!(result.hits.is_empty());
         assert_eq!(result.total_count, 0);
     }
