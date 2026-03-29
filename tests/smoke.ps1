@@ -815,7 +815,7 @@ $mvCat1 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name
 $mvCat2 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (''Math'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
 $mvBm = (gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO mvbookmark (mvcategory) VALUES ('$mvCat1')\`"){message}}`"}") -replace '.*"message":"(\d+)".*','$1'
 gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO mvbookmark_mvcategory (mvbookmark_id, mvcategory_id) VALUES ('$mvBm', '$mvCat2')\`"){message}}`"}" | Out-Null
-$mvResult = gql '{"query":"{ mvbookmarks { items { id mvcategories } } }"}'
+$mvResult = gql '{"query":"{ mvbookmarks { items { id mvcategories { id } } } }"}'
 if ($mvResult -notmatch $mvCat1) { throw "multi-value ref: cat1 not in graphql list field" }
 if ($mvResult -notmatch $mvCat2) { throw "multi-value ref: cat2 not in graphql list field" }
 pass "serve: graphql multi-value ref list field"
