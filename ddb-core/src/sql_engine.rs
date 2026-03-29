@@ -1505,7 +1505,14 @@ impl<'a> SqlEngine<'a> {
             col_names.push(format!("\"{}\"", col.name));
             placeholders.push(format!("?{}", i + 2));
             let val = col_values.get(&col.name).cloned().unwrap_or_default();
-            vals.push(if val.is_empty() { None } else { Some(val) });
+            let val = if val.is_empty() {
+                None
+            } else if col.data_type.eq_ignore_ascii_case("BOOLEAN") {
+                Some(normalize_bool_str(&val))
+            } else {
+                Some(val)
+            };
+            vals.push(val);
         }
 
         let sql = format!(
@@ -1535,7 +1542,16 @@ impl<'a> SqlEngine<'a> {
 
         for (col, val) in updates {
             if valid_cols.contains(&col) {
-                vals.push(val.clone());
+                let is_bool = schema
+                    .columns
+                    .iter()
+                    .any(|c| &c.name == col && c.data_type.eq_ignore_ascii_case("BOOLEAN"));
+                let normalized = if is_bool {
+                    normalize_bool_str(val)
+                } else {
+                    val.clone()
+                };
+                vals.push(normalized);
                 set_clauses.push(format!("\"{}\" = ?{}", col, vals.len()));
             }
         }
@@ -1982,6 +1998,14 @@ fn is_short_string_type(dt: &DataType) -> bool {
     }
 }
 
+
+fn normalize_bool_str(val: &str) -> String {
+    match val.to_lowercase().as_str() {
+        "true" | "1" | "yes" => "1".to_string(),
+        "false" | "0" | "no" => "0".to_string(),
+        _ => val.to_string(),
+    }
+}
 
 fn to_yaml_value(val: &str, data_type: &str) -> Value {
     match data_type.to_uppercase().as_str() {
@@ -4428,5 +4452,44 @@ mod tests {
             .query_raw("SELECT name FROM sqlite_master WHERE type='table' AND name='bookmark'")
             .unwrap();
         assert_eq!(tables.len(), 0, "main table should be dropped");
+    }
+
+    #[test]
+    fn boolean_materialized_as_integer() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE flagged (pinned BOOLEAN)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO flagged (pinned) VALUES (true)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO flagged (pinned) VALUES (false)")
+            .unwrap();
+
+        // Materialized table should store 1/0
+        let result = engine
+            .execute("SELECT pinned FROM flagged WHERE pinned = 1")
+            .unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "1");
+            }
+            _ => panic!("expected Rows"),
+        }
+
+        let result = engine
+            .execute("SELECT pinned FROM flagged WHERE pinned = 0")
+            .unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "0");
+            }
+            _ => panic!("expected Rows"),
+        }
     }
 }

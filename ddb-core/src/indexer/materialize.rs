@@ -689,10 +689,23 @@ fn extract_column_value(
             } else {
                 doogat.meta.extra.get(&col.name)
             };
+            let is_bool_col = col.data_type.eq_ignore_ascii_case("BOOLEAN");
             val.map(|v| match v {
                 crate::types::Value::Number(n) => n.to_string(),
-                crate::types::Value::Bool(b) => b.to_string(),
-                crate::types::Value::String(s) => s.clone(),
+                crate::types::Value::Bool(b) => {
+                    if *b { "1" } else { "0" }.to_string()
+                }
+                crate::types::Value::String(s) => {
+                    if is_bool_col {
+                        match s.to_lowercase().as_str() {
+                            "true" | "yes" => "1".to_string(),
+                            "false" | "no" => "0".to_string(),
+                            _ => s.clone(),
+                        }
+                    } else {
+                        s.clone()
+                    }
+                }
                 _ => format!("{v:?}"),
             })
             .unwrap_or_default()
