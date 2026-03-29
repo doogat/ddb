@@ -8,7 +8,7 @@ use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use futures_util::StreamExt;
 use indexmap::IndexMap;
-use ddb_core::types::TableSchema;
+use ddb_core::types::{SearchFilters, TableSchema};
 
 use std::sync::Arc;
 
@@ -469,7 +469,7 @@ pub fn build_schema(
                         .and_then(|v| v.i64().ok())
                         .unwrap_or(0) as usize;
                     let result = pool
-                        .search(q, limit, offset)
+                        .search(q, limit, offset, SearchFilters::default())
                         .await
                         .map_err(to_server_error)?;
                     let mut obj = IndexMap::new();

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
 use ddb_core::error::DoogatError;
-use ddb_core::types::{ParsedDoogat, Value as DdbValue};
+use ddb_core::types::{ParsedDoogat, SearchFilters, Value as DdbValue};
 
 // ── Query / body types ───────────────────────────────────────────
 
@@ -206,7 +206,7 @@ async fn list_doogats(
         let page_usize = page as usize;
         let offset = (page_usize - 1) * limit;
         let result = read_pool
-            .search(q, limit, offset)
+            .search(q, limit, offset, SearchFilters::default())
             .await
             .map_err(rest_error)?;
         let hits: Vec<SearchHit> = result

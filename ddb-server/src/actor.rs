@@ -7,8 +7,8 @@ use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
     BrokenSequence, CompactOptions, CompactionReport, ListFilter, MaintenanceReport, OrphanDoogat,
-    PaginatedSearchResult, ParsedDoogat, SequenceInfo, SequenceNode, StaleDoogat, Suggestion,
-    SyncReport, TableSchema, UnlinkedMention,
+    PaginatedSearchResult, ParsedDoogat, SearchFilters, SequenceInfo, SequenceNode, StaleDoogat,
+    Suggestion, SyncReport, TableSchema, UnlinkedMention,
 };
 
 use crate::events::{EventBus, EventKind, DoogatEvent};
@@ -33,6 +33,7 @@ pub enum ActorCommand {
         query: String,
         limit: usize,
         offset: usize,
+        filters: SearchFilters,
     },
     CreateDoogat {
         title: String,
@@ -251,12 +252,14 @@ impl ActorHandle {
         query: String,
         limit: usize,
         offset: usize,
+        filters: SearchFilters,
     ) -> ActorResult<PaginatedSearchResult> {
         match self
             .send(ActorCommand::Search {
                 query,
                 limit,
                 offset,
+                filters,
             })
             .await
         {
@@ -655,7 +658,8 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
             query,
             limit,
             offset,
-        } => ActorReply::SearchResults(svc.search_paginated(&query, limit, offset)),
+            filters,
+        } => ActorReply::SearchResults(svc.search_paginated_filtered(&query, limit, offset, &filters)),
         ActorCommand::CreateDoogat {
             title,
             body,

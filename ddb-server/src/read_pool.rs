@@ -11,8 +11,9 @@ use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
-    BrokenSequence, ListFilter, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SequenceInfo,
-    SequenceNode, StaleDoogat, Suggestion, TableSchema, TypedListQuery, UnlinkedMention,
+    BrokenSequence, ListFilter, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SearchFilters,
+    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, TableSchema, TypedListQuery,
+    UnlinkedMention,
 };
 
 type Result<T> = std::result::Result<T, DoogatError>;
@@ -99,9 +100,12 @@ impl ReadPool {
         query: String,
         limit: usize,
         offset: usize,
+        filters: SearchFilters,
     ) -> Result<PaginatedSearchResult> {
-        self.with_service(move |svc| svc.search_paginated(&query, limit, offset))
-            .await
+        self.with_service(move |svc| {
+            svc.search_paginated_filtered(&query, limit, offset, &filters)
+        })
+        .await
     }
 
     pub async fn count_doogats(
@@ -297,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn read_fails_on_invalid_path() {
         let pool = ReadPool::new(PathBuf::from("/nonexistent/repo"), 2).unwrap();
-        let result = pool.search("anything".to_string(), 10, 0).await;
+        let result = pool.search("anything".to_string(), 10, 0, SearchFilters::default()).await;
         assert!(result.is_err());
     }
 
@@ -336,7 +340,7 @@ mod tests {
         for i in 0..8 {
             let p = pool.clone();
             handles.push(tokio::spawn(async move {
-                p.search(format!("query{i}"), 10, 0).await
+                p.search(format!("query{i}"), 10, 0, SearchFilters::default()).await
             }));
         }
         for h in handles {
@@ -414,7 +418,7 @@ mod tests {
 
         // This read should queue (not error) and complete once the slot frees
         let p2 = pool.clone();
-        let queued = tokio::spawn(async move { p2.search("queued".into(), 10, 0).await });
+        let queued = tokio::spawn(async move { p2.search("queued".into(), 10, 0, SearchFilters::default()).await });
 
         // Release the slow task
         tx.send(()).unwrap();
