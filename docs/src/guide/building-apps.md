@@ -543,7 +543,24 @@ query {
 # Search across all bookmarks
 query {
   search(query: "rust async") {
-    id, title, snippet, rank
+    totalCount
+    hits { id, title, snippet, rank }
+  }
+}
+
+# Search with filters: only bookmarks tagged "rust"
+query {
+  search(query: "async", types: ["bookmark"], tag: "rust") {
+    totalCount
+    hits { id, title, snippet }
+  }
+}
+
+# Search with field filter: only active bookmarks
+query {
+  search(query: "async", where: [{ field: "status", eq: "active" }]) {
+    totalCount
+    hits { id, title }
   }
 }
 

@@ -151,13 +151,19 @@ Note: `SqlResult.rows` encodes each row as a JSON string to avoid nested list li
 type Query {
   doogat(id: ID!): Doogat
   doogats(type: String, tag: String, backlinksOf: ID, limit: Int, offset: Int): [Doogat!]!
-  search(query: String!, limit: Int, offset: Int): SearchConnection!
+  search(query: String!, types: [String!], tag: String, where: [SearchFieldFilter!], limit: Int, offset: Int): SearchConnection!
   typeDefs: [TypeDef!]!
   sql(query: String!): SqlResult!
   schemaVersion: Int!
   checkboxItems(state: String, doogatId: ID, limit: Int, offset: Int): [CheckboxItem!]!
   openActions(limit: Int): [CheckboxItem!]!
   tags: [TagInfo!]!
+}
+
+input SearchFieldFilter {
+  field: String!
+  eq: String
+  contains: String
 }
 ```
 

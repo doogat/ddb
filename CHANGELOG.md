@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Search query filters: `types`, `tag`, and `where` (field predicates) on GraphQL `search` query
 - GraphQL `tags` query returning all tags with usage counts (`TagInfo` type)
 - Body hashtags now included in GraphQL doogat `tags` field (merged with frontmatter, deduplicated)
 - `columns` field in GraphQL `SqlResult` type returns column names alongside row data
