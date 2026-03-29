@@ -751,6 +751,24 @@ if ($mvRest -notmatch '"references"') { throw "multi-value ref: no references in
 if ($mvRest -notmatch '"mvcategory"') { throw "multi-value ref: no category key in references" }
 pass "serve: rest multi-value ref structured json"
 
+# 38c. sql-materialization (columns, boolean normalization, core fields)
+$result = gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}'
+if ($result -notmatch '"columns"') { throw "sql columns: missing columns field" }
+if ($result -notmatch '"id"') { throw "sql columns: missing id column" }
+if ($result -notmatch '"title"') { throw "sql columns: missing title column" }
+pass "serve: sql columns in response"
+
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' | Out-Null
+$smokepinId = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokepin (pinned) VALUES (true)\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
+if (-not $smokepinId) { throw "smokepin insert failed" }
+$result = gql "{`"query`":`"{ sql(query: \`"SELECT pinned FROM smokepin WHERE pinned = 1\`") { rows } }`"}"
+if ($result -notmatch '[\\"]1[\\"]') { throw "boolean not normalized to 1" }
+pass "serve: boolean normalized to 1/0"
+
+$result = gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }"}'
+if ($result -notmatch $smokepinId) { throw "core fields: title missing from type table" }
+pass "serve: core fields in type table"
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

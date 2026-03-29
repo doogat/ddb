@@ -639,6 +639,26 @@ echo "$RESULT" | grep -q '"references"'
 echo "$RESULT" | grep -q '"mvcategory"'
 pass "serve: rest multi-value ref structured json"
 
+# 38c. sql-materialization (columns, boolean normalization, core fields)
+RESULT=$(gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}')
+echo "$RESULT" | grep -q '"columns"'
+echo "$RESULT" | grep -q '"id"'
+echo "$RESULT" | grep -q '"title"'
+pass "serve: sql columns in response"
+
+sleep 1
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' >/dev/null
+sleep 1
+SMOKEPIN_ID=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokepin (pinned) VALUES (true)\"){message}}"}' | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+[ -n "$SMOKEPIN_ID" ]
+RESULT=$(gql "{\"query\":\"{ sql(query: \\\"SELECT pinned FROM smokepin WHERE pinned = 1\\\") { rows } }\"}")
+echo "$RESULT" | grep -q '\\"1\\"'
+pass "serve: boolean normalized to 1/0"
+
+RESULT=$(gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }"}')
+echo "$RESULT" | grep -q "$SMOKEPIN_ID"
+pass "serve: core fields in type table"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
