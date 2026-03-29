@@ -649,14 +649,14 @@ pass "serve: sql columns in response"
 sleep 1
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' >/dev/null
 sleep 1
-SMOKEPIN_ID=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokepin (pinned) VALUES (true)\"){message}}"}' | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+SMOKEPIN_ID=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)\\\"){message}}\"}" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
 [ -n "$SMOKEPIN_ID" ]
 RESULT=$(gql "{\"query\":\"{ sql(query: \\\"SELECT pinned FROM smokepin WHERE pinned = 1\\\") { rows } }\"}")
 echo "$RESULT" | grep -q '\\"1\\"'
 pass "serve: boolean normalized to 1/0"
 
 RESULT=$(gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }"}')
-echo "$RESULT" | grep -q "$SMOKEPIN_ID"
+echo "$RESULT" | grep -q 'PinTest'
 pass "serve: core fields in type table"
 
 kill "$SERVER_PID" 2>/dev/null || true
