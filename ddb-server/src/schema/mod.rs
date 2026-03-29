@@ -8,7 +8,7 @@ use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use futures_util::StreamExt;
 use indexmap::IndexMap;
-use ddb_core::types::{SearchFilters, TableSchema};
+use ddb_core::types::{SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
 use std::sync::Arc;
 
@@ -391,6 +391,14 @@ pub fn build_schema(
         ))
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)));
 
+    let search_field_filter_input = InputObject::new("SearchFieldFilter")
+        .field(InputValue::new(
+            "field",
+            TypeRef::named_nn(TypeRef::STRING),
+        ))
+        .field(InputValue::new("eq", TypeRef::named(TypeRef::STRING)))
+        .field(InputValue::new("contains", TypeRef::named(TypeRef::STRING)));
+
     // -- Query fields --
     let mut query = Object::new("Query");
 
@@ -451,7 +459,7 @@ pub fn build_schema(
         );
     }
 
-    // search(query, limit?, offset?)
+    // search(query, limit?, offset?, types?, tag?, where?)
     {
         query = query.field(
             Field::new("search", TypeRef::named_nn("SearchConnection"), |ctx| {
@@ -468,8 +476,59 @@ pub fn build_schema(
                         .get("offset")
                         .and_then(|v| v.i64().ok())
                         .unwrap_or(0) as usize;
+
+                    let types = ctx
+                        .args
+                        .get("types")
+                        .and_then(|v| v.list().ok())
+                        .map(|list| {
+                            list.iter()
+                                .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                .collect::<Vec<_>>()
+                        });
+
+                    let tag = ctx
+                        .args
+                        .get("tag")
+                        .and_then(|v| v.string().ok().map(|s| s.to_string()));
+
+                    let where_filters = ctx
+                        .args
+                        .get("where")
+                        .and_then(|v| v.list().ok())
+                        .map(|list| {
+                            list.iter()
+                                .filter_map(|v| {
+                                    let obj = v.object().ok()?;
+                                    let field =
+                                        obj.get("field")?.string().ok()?.to_string();
+                                    if let Some(eq) = obj.get("eq") {
+                                        let val = eq.string().ok()?.to_string();
+                                        Some(SearchFieldFilter {
+                                            field,
+                                            op: SearchFieldOp::Eq(val),
+                                        })
+                                    } else if let Some(contains) = obj.get("contains") {
+                                        let val = contains.string().ok()?.to_string();
+                                        Some(SearchFieldFilter {
+                                            field,
+                                            op: SearchFieldOp::Contains(val),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                        });
+
+                    let filters = SearchFilters {
+                        types,
+                        tag,
+                        where_filters,
+                    };
+
                     let result = pool
-                        .search(q, limit, offset, SearchFilters::default())
+                        .search(q, limit, offset, filters)
                         .await
                         .map_err(to_server_error)?;
                     let mut obj = IndexMap::new();
@@ -485,6 +544,15 @@ pub fn build_schema(
                 })
             })
             .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
+            .argument(InputValue::new(
+                "types",
+                TypeRef::named_list(TypeRef::STRING),
+            ))
+            .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
+            .argument(InputValue::new(
+                "where",
+                TypeRef::named_list("SearchFieldFilter"),
+            ))
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
             .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),
         );
@@ -1794,6 +1862,7 @@ pub fn build_schema(
     .register(sql_result_type)
     .register(create_input)
     .register(update_input)
+    .register(search_field_filter_input)
     .register(attachment_type)
     .register(checkbox_item_type)
     .register(unlinked_mention_type)
