@@ -6,6 +6,11 @@ use crate::types::ParsedDoogat;
 
 use super::Index;
 
+/// Column names reserved for core doogat fields in materialized tables.
+pub(crate) fn is_core_column(name: &str) -> bool {
+    matches!(name, "id" | "title" | "date" | "updated_at")
+}
+
 /// DDL for creating a junction table for a REFERENCES column.
 pub fn junction_table_ddl(table_name: &str, col_name: &str) -> String {
     format!(
@@ -43,6 +48,9 @@ impl Index {
             "updated_at TEXT".to_string(),
         ];
         for col in &schema.columns {
+            if is_core_column(&col.name) {
+                continue;
+            }
             let sql_type = match col.data_type.to_uppercase().as_str() {
                 "INTEGER" => "INTEGER",
                 "REAL" => "REAL",
@@ -642,9 +650,14 @@ impl Index {
             updated_at,
         ];
 
-        for (i, col) in schema.columns.iter().enumerate() {
+        let mut param_idx = 5;
+        for col in &schema.columns {
+            if is_core_column(&col.name) {
+                continue;
+            }
             col_names.push(format!("\"{}\"", col.name));
-            placeholders.push(format!("?{}", i + 5));
+            placeholders.push(format!("?{}", param_idx));
+            param_idx += 1;
             let val = extract_column_value(doogat, col);
             vals.push(if val.is_empty() { None } else { Some(val) });
         }

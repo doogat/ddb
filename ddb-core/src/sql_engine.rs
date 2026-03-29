@@ -480,6 +480,7 @@ impl<'a> SqlEngine<'a> {
     }
 
     fn create_materialized_table(&mut self, schema: &TableSchema) -> Result<()> {
+        use crate::indexer::materialize::is_core_column;
         let mut col_defs = vec![
             "id TEXT PRIMARY KEY".to_string(),
             "title TEXT".to_string(),
@@ -487,6 +488,9 @@ impl<'a> SqlEngine<'a> {
             "updated_at TEXT".to_string(),
         ];
         for col in &schema.columns {
+            if is_core_column(&col.name) {
+                continue;
+            }
             let sql_type = match col.data_type.to_uppercase().as_str() {
                 "INTEGER" => "INTEGER",
                 "REAL" => "REAL",
@@ -1522,9 +1526,14 @@ impl<'a> SqlEngine<'a> {
         let mut placeholders = vec!["?1".to_string(), "?2".to_string(), "?3".to_string(), "?4".to_string()];
         let mut vals: Vec<Option<String>> = vec![Some(id.to_string()), title, date, updated_at];
 
-        for (i, col) in schema.columns.iter().enumerate() {
+        let mut param_idx = 5;
+        for col in &schema.columns {
+            if crate::indexer::materialize::is_core_column(&col.name) {
+                continue;
+            }
             col_names.push(format!("\"{}\"", col.name));
-            placeholders.push(format!("?{}", i + 5));
+            placeholders.push(format!("?{}", param_idx));
+            param_idx += 1;
             let val = col_values.get(&col.name).cloned().unwrap_or_default();
             let val = if val.is_empty() {
                 None
@@ -1557,7 +1566,12 @@ impl<'a> SqlEngine<'a> {
         id: &str,
         updates: &BTreeMap<String, String>,
     ) -> Result<()> {
-        let valid_cols: Vec<&String> = schema.columns.iter().map(|c| &c.name).collect();
+        let valid_cols: Vec<&String> = schema
+            .columns
+            .iter()
+            .filter(|c| !crate::indexer::materialize::is_core_column(&c.name))
+            .map(|c| &c.name)
+            .collect();
         let mut set_clauses = Vec::new();
         let mut vals: Vec<String> = Vec::new();
 
