@@ -575,6 +575,30 @@ pass "serve: graphql doogats tag filter"
 
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TAG_ID\`") }`"}" | Out-Null
 
+# 18d. GraphQL search filters
+$sf1 = gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Alpha\", type: \"link\", tags: [\"sf-tag\"] }) { id } }"}'
+$SF1_ID = if ($sf1 -match '"id":"([^"]+)"') { $Matches[1] }
+$sf2 = gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Beta\", type: \"note\", tags: [\"sf-tag\"] }) { id } }"}'
+$SF2_ID = if ($sf2 -match '"id":"([^"]+)"') { $Matches[1] }
+$sf3 = gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Gamma\", type: \"link\" }) { id } }"}'
+$SF3_ID = if ($sf3 -match '"id":"([^"]+)"') { $Matches[1] }
+
+$result = gql '{"query":"{ search(query: \"SearchFilter\", types: [\"link\"]) { totalCount hits { id } } }"}'
+if ($result -notmatch '"totalCount":2') { throw "search type filter: expected 2, got $result" }
+pass "serve: search filter by type"
+
+$result = gql '{"query":"{ search(query: \"SearchFilter\", tag: \"sf-tag\") { totalCount hits { id } } }"}'
+if ($result -notmatch '"totalCount":2') { throw "search tag filter: expected 2, got $result" }
+pass "serve: search filter by tag"
+
+$result = gql '{"query":"{ search(query: \"SearchFilter\", types: [\"link\"], tag: \"sf-tag\") { totalCount hits { id } } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search combined filter: expected 1, got $result" }
+pass "serve: search filter combined type+tag"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF1_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF2_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF3_ID\`") }`"}" | Out-Null
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `

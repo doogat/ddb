@@ -465,6 +465,33 @@ pass "serve: graphql doogats tag filter"
 
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TAG_ID\\\") }\"}" >/dev/null
 
+# 18d. GraphQL search filters
+SF1=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Alpha\", type: \"link\", tags: [\"sf-tag\"] }) { id } }"}')
+SF1_ID=$(echo "$SF1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+SF2=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Beta\", type: \"note\", tags: [\"sf-tag\"] }) { id } }"}')
+SF2_ID=$(echo "$SF2" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+SF3=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Gamma\", type: \"link\" }) { id } }"}')
+SF3_ID=$(echo "$SF3" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+RESULT=$(gql '{"query":"{ search(query: \"SearchFilter\", types: [\"link\"]) { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "2" ]
+pass "serve: search filter by type"
+
+RESULT=$(gql '{"query":"{ search(query: \"SearchFilter\", tag: \"sf-tag\") { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "2" ]
+pass "serve: search filter by tag"
+
+RESULT=$(gql '{"query":"{ search(query: \"SearchFilter\", types: [\"link\"], tag: \"sf-tag\") { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search filter combined type+tag"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF1_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF2_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF3_ID\\\") }\"}" >/dev/null
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
