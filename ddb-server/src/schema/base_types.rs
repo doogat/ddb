@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_graphql::dynamic::*;
@@ -462,8 +462,23 @@ pub(crate) fn doogat_object(name: &str) -> Object {
         ))
 }
 
+/// Determine the GQL type name for a REFERENCES column's target.
+/// Falls back to "Doogat" if the target type isn't in the known set.
+fn ref_target_gql_type(col: &ColumnDef, known_types: &HashSet<String>) -> String {
+    let target = col.references.as_deref().unwrap_or("");
+    if known_types.contains(target) {
+        capitalize(target)
+    } else {
+        "Doogat".to_string()
+    }
+}
+
 /// Build a dynamic GraphQL object type for a _typedef schema.
-pub(crate) fn build_typed_object(type_name: &str, schema: &TableSchema) -> Object {
+pub(crate) fn build_typed_object(
+    type_name: &str,
+    schema: &TableSchema,
+    known_types: &HashSet<String>,
+) -> Object {
     let mut obj = doogat_object(type_name);
 
     for col in &schema.columns {
@@ -474,33 +489,111 @@ pub(crate) fn build_typed_object(type_name: &str, schema: &TableSchema) -> Objec
             );
             continue;
         }
-        let gql_type = column_to_gql_type(col);
-        let col_name = col.name.clone();
-        obj = obj.field(Field::new(&col.name, gql_type, move |ctx| {
-            let col_name = col_name.clone();
-            FieldFuture::new(async move {
-                let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-                Ok(obj_field(obj, &col_name))
-            })
-        }));
 
-        // Add pluralized list field for REFERENCES columns
         if col.references.is_some() {
+            // Singular: resolves as the referenced typed object (nullable)
+            let target_type = ref_target_gql_type(col, known_types);
+            let target_ref_name = col.references.clone().unwrap_or_default();
+            let col_name = col.name.clone();
+            obj = obj.field(Field::new(
+                &col.name,
+                TypeRef::named(&target_type),
+                move |ctx| {
+                    let col_name = col_name.clone();
+                    let target_ref_name = target_ref_name.clone();
+                    FieldFuture::new(async move {
+                        let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                        let id = match parent {
+                            GqlValue::Object(map) => match map.get(col_name.as_str()) {
+                                Some(GqlValue::String(s)) if !s.is_empty() => s.to_string(),
+                                _ => return Ok(None),
+                            },
+                            _ => return Ok(None),
+                        };
+                        let pool = ctx.data::<crate::read_pool::ReadPool>()?;
+                        let schemas = ctx.data::<TypeSchemaMap>()?;
+                        let doogat = match pool.get_doogat(id).await {
+                            Ok(z) => z,
+                            Err(_) => return Ok(None),
+                        };
+                        let val = match schemas.0.get(&target_ref_name) {
+                            Some(ts) => typed_doogat_to_value(&doogat, ts),
+                            None => doogat_to_value(&doogat),
+                        };
+                        Ok(Some(FieldValue::owned_any(val)))
+                    })
+                },
+            ));
+
+            // Plural: resolves as list of referenced typed objects
             let list_name = pluralize(&col.name);
             if is_valid_graphql_name(&list_name) {
+                let target_type = ref_target_gql_type(col, known_types);
+                let target_ref_name = col.references.clone().unwrap_or_default();
                 let list_col_name = list_name.clone();
                 obj = obj.field(Field::new(
                     &list_name,
-                    TypeRef::named_nn_list_nn(TypeRef::STRING),
+                    TypeRef::named_nn_list_nn(&target_type),
                     move |ctx| {
                         let list_col_name = list_col_name.clone();
+                        let target_ref_name = target_ref_name.clone();
                         FieldFuture::new(async move {
-                            let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-                            Ok(obj_field(obj, &list_col_name))
+                            let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                            let ids: Vec<String> = match parent {
+                                GqlValue::Object(map) => match map.get(list_col_name.as_str()) {
+                                    Some(GqlValue::List(items)) => items
+                                        .iter()
+                                        .filter_map(|v| match v {
+                                            GqlValue::String(s) if !s.is_empty() => {
+                                                Some(s.to_string())
+                                            }
+                                            _ => None,
+                                        })
+                                        .collect(),
+                                    _ => return Ok(Some(FieldValue::list(
+                                        std::iter::empty::<FieldValue>(),
+                                    ))),
+                                },
+                                _ => {
+                                    return Ok(Some(FieldValue::list(
+                                        std::iter::empty::<FieldValue>(),
+                                    )))
+                                }
+                            };
+                            if ids.is_empty() {
+                                return Ok(Some(FieldValue::list(
+                                    std::iter::empty::<FieldValue>(),
+                                )));
+                            }
+                            let pool = ctx.data::<crate::read_pool::ReadPool>()?;
+                            let schemas = ctx.data::<TypeSchemaMap>()?;
+                            let target_schema = schemas.0.get(&target_ref_name);
+                            let mut resolved = Vec::with_capacity(ids.len());
+                            for id in ids {
+                                if let Ok(z) = pool.get_doogat(id).await {
+                                    let val = match target_schema {
+                                        Some(ts) => typed_doogat_to_value(&z, ts),
+                                        None => doogat_to_value(&z),
+                                    };
+                                    resolved.push(FieldValue::owned_any(val));
+                                }
+                            }
+                            Ok(Some(FieldValue::list(resolved)))
                         })
                     },
                 ));
             }
+        } else {
+            // Non-REFERENCES scalar field
+            let gql_type = column_to_gql_type(col);
+            let col_name = col.name.clone();
+            obj = obj.field(Field::new(&col.name, gql_type, move |ctx| {
+                let col_name = col_name.clone();
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, &col_name))
+                })
+            }));
         }
     }
 

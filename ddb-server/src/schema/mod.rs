@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use indexmap::IndexMap;
 use ddb_core::types::{SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::actor::ActorHandle;
@@ -1004,6 +1004,11 @@ pub fn build_schema(
     }
 
     // -- Dynamic per-type queries --
+    let known_types: HashSet<String> = type_schemas
+        .iter()
+        .filter(|s| is_valid_graphql_name(&s.table_name))
+        .map(|s| s.table_name.clone())
+        .collect();
     let mut dynamic_types: Vec<Object> = Vec::new();
     let mut dynamic_inputs: Vec<InputObject> = Vec::new();
     for schema in &type_schemas {
@@ -1018,7 +1023,7 @@ pub fn build_schema(
         let plural = pluralize(&schema.table_name);
 
         // Create typed object
-        let typed_obj = build_typed_object(&type_name, schema);
+        let typed_obj = build_typed_object(&type_name, schema, &known_types);
         dynamic_types.push(typed_obj);
 
         // Create per-type Where, OrderBy inputs, Connection and Aggregate types
