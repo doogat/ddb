@@ -177,7 +177,10 @@ pub(crate) fn tag_info_to_value(name: &str, count: i64) -> GqlValue {
 pub(crate) fn sql_result_to_value(r: &SqlResult) -> GqlValue {
     let mut obj = IndexMap::new();
     match r {
-        SqlResult::Rows { rows, .. } => {
+        SqlResult::Rows { columns, rows } => {
+            let gql_cols: Vec<GqlValue> =
+                columns.iter().map(|c| GqlValue::from(c.as_str())).collect();
+            obj.insert(Name::new("columns"), GqlValue::List(gql_cols));
             // Encode each row as a JSON string to avoid nested list limitation
             let gql_rows: Vec<GqlValue> = rows
                 .iter()
@@ -191,11 +194,13 @@ pub(crate) fn sql_result_to_value(r: &SqlResult) -> GqlValue {
             obj.insert(Name::new("message"), GqlValue::Null);
         }
         SqlResult::Affected(n) => {
+            obj.insert(Name::new("columns"), GqlValue::Null);
             obj.insert(Name::new("rows"), GqlValue::Null);
             obj.insert(Name::new("affected"), GqlValue::from(*n as i64));
             obj.insert(Name::new("message"), GqlValue::Null);
         }
         SqlResult::Ok(msg) => {
+            obj.insert(Name::new("columns"), GqlValue::Null);
             obj.insert(Name::new("rows"), GqlValue::Null);
             obj.insert(Name::new("affected"), GqlValue::Null);
             obj.insert(Name::new("message"), GqlValue::from(msg.as_str()));
@@ -637,6 +642,59 @@ mod tests {
             }
             _ => panic!("expected list, got {list:?}"),
         }
+    }
+
+    #[test]
+    fn sql_result_rows_includes_columns() {
+        let result = SqlResult::Rows {
+            columns: vec!["id".into(), "title".into()],
+            rows: vec![vec!["123".into(), "hello".into()]],
+        };
+        let val = sql_result_to_value(&result);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+        let cols = obj.get("columns").unwrap();
+        match cols {
+            GqlValue::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0], GqlValue::from("id"));
+                assert_eq!(items[1], GqlValue::from("title"));
+            }
+            _ => panic!("expected list, got {cols:?}"),
+        }
+        assert!(obj.get("rows").is_some());
+        assert_eq!(obj.get("affected").unwrap(), &GqlValue::Null);
+    }
+
+    #[test]
+    fn sql_result_affected_has_null_columns() {
+        let result = SqlResult::Affected(3);
+        let val = sql_result_to_value(&result);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+        assert_eq!(obj.get("columns").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("rows").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("affected").unwrap(), &GqlValue::from(3i64));
+    }
+
+    #[test]
+    fn sql_result_ok_has_null_columns() {
+        let result = SqlResult::Ok("done".into());
+        let val = sql_result_to_value(&result);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+        assert_eq!(obj.get("columns").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("rows").unwrap(), &GqlValue::Null);
+        assert_eq!(
+            obj.get("message").unwrap(),
+            &GqlValue::from("done")
+        );
     }
 
     #[test]

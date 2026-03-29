@@ -207,6 +207,16 @@ pub fn build_schema(
 
     let sql_result_type = Object::new("SqlResult")
         .field(Field::new(
+            "columns",
+            TypeRef::named_nn_list(TypeRef::STRING),
+            |ctx| {
+                FieldFuture::new(async move {
+                    let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    Ok(obj_field(obj, "columns"))
+                })
+            },
+        ))
+        .field(Field::new(
             "rows",
             TypeRef::named_nn_list(TypeRef::STRING),
             |ctx| {
