@@ -643,7 +643,8 @@ Start-Sleep -Seconds 1
 gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokebm (title, url) VALUES ('No Cat', 'https://nocat.com')\`") { message } }`"}" | Out-Null
 $result = gql '{"query":"{ smokebms { items { id smokecat { id } smokecats { id } } } }"}'
 if ($result -notmatch '"smokecat":null') { throw "null relation failed: $result" }
-pass "serve: relation null returns null"
+if ($result -notmatch '"smokecats":\[\]') { throw "empty plural relation failed: $result" }
+pass "serve: relation null returns null and empty list"
 
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' | Out-Null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' | Out-Null

@@ -538,7 +538,8 @@ sleep 1
 gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm (title, url) VALUES ('No Cat', 'https://nocat.com')\\\") { message } }\"}" >/dev/null
 RESULT=$(gql '{"query":"{ smokebms { items { id smokecat { id } smokecats { id } } } }"}')
 echo "$RESULT" | grep -q '"smokecat":null'
-pass "serve: relation null returns null"
+echo "$RESULT" | grep -q '"smokecats":\[\]'
+pass "serve: relation null returns null and empty list"
 
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' >/dev/null
