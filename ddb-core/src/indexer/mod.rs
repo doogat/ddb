@@ -18,6 +18,7 @@ impl From<rusqlite::Error> for DoogatError {
 }
 
 pub use crate::types::{PaginatedSearchResult, SearchResult};
+use crate::types::{SearchFieldOp, SearchFilters};
 
 pub struct Index {
     pub(crate) conn: Connection,
@@ -619,7 +620,7 @@ impl Index {
     /// Full-text search with snippets and ranking.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
-        self.search_hits(query, None)
+        self.search_hits(query, None, &SearchFilters::default())
     }
 
     /// Paginated full-text search with snippets, ranking, and total count.
@@ -630,13 +631,42 @@ impl Index {
         limit: usize,
         offset: usize,
     ) -> Result<PaginatedSearchResult> {
-        let hits = self.search_hits(query, Some((limit, offset)))?;
+        self.search_paginated_filtered(query, limit, offset, &SearchFilters::default())
+    }
 
-        let total_count: usize = self.conn.query_row(
-            "SELECT COUNT(*) FROM _ddb_fts WHERE _ddb_fts MATCH ?1",
-            params![query],
-            |row| row.get(0),
-        )?;
+    /// Paginated full-text search with optional type/tag/field filters.
+    #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
+    pub fn search_paginated_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        filters: &SearchFilters,
+    ) -> Result<PaginatedSearchResult> {
+        let hits = self.search_hits(query, Some((limit, offset)), filters)?;
+
+        let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
+        let count_sql = if filter_clauses.is_empty() {
+            "SELECT COUNT(*) FROM _ddb_fts \
+             JOIN doogats z ON z.rowid = _ddb_fts.rowid \
+             WHERE _ddb_fts MATCH ?1"
+                .to_string()
+        } else {
+            format!(
+                "SELECT COUNT(*) FROM _ddb_fts \
+                 JOIN doogats z ON z.rowid = _ddb_fts.rowid \
+                 WHERE _ddb_fts MATCH ?1 {}",
+                filter_clauses.join(" ")
+            )
+        };
+
+        let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(query.to_string())];
+        for p in filter_params {
+            all_params.push(Box::new(p));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
+        let total_count: usize = self.conn.query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))?;
 
         Ok(PaginatedSearchResult { hits, total_count })
     }
@@ -645,33 +675,101 @@ impl Index {
         &self,
         query: &str,
         pagination: Option<(usize, usize)>,
+        filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
-        let base = "SELECT z.id, z.title, z.path, \
-                    snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank \
-                    FROM _ddb_fts \
-                    JOIN doogats z ON z.rowid = _ddb_fts.rowid \
-                    WHERE _ddb_fts MATCH ?1 \
-                    ORDER BY rank";
+        let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
+
+        let filter_sql = filter_clauses.join(" ");
+        let base = format!(
+            "SELECT z.id, z.title, z.path, \
+             snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank \
+             FROM _ddb_fts \
+             JOIN doogats z ON z.rowid = _ddb_fts.rowid \
+             WHERE _ddb_fts MATCH ?1 {filter_sql}\
+             ORDER BY rank"
+        );
+
+        // Build params: ?1 = query, then filter params, then pagination params
+        let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(query.to_string())];
+        for p in filter_params {
+            all_params.push(Box::new(p));
+        }
+
         let sql = match pagination {
-            Some(_) => format!("{base} LIMIT ?2 OFFSET ?3"),
-            None => base.to_string(),
+            Some(_) => {
+                let limit_idx = all_params.len() + 1;
+                let offset_idx = all_params.len() + 2;
+                let s = format!("{base} LIMIT ?{limit_idx} OFFSET ?{offset_idx}");
+                s
+            }
+            None => base,
         };
 
+        if let Some((limit, offset)) = pagination {
+            all_params.push(Box::new(limit as i64));
+            all_params.push(Box::new(offset as i64));
+        }
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
         let mut stmt = self.conn.prepare(&sql)?;
-
-        let rows = match pagination {
-            Some((limit, offset)) => stmt.query_map(
-                params![query, limit as i64, offset as i64],
-                Self::map_search_row,
-            )?,
-            None => stmt.query_map(params![query], Self::map_search_row)?,
-        };
+        let rows = stmt.query_map(param_refs.as_slice(), Self::map_search_row)?;
 
         let mut hits = Vec::new();
         for r in rows {
             hits.push(r?);
         }
         Ok(hits)
+    }
+
+    fn build_filter_clauses(filters: &SearchFilters) -> (Vec<String>, Vec<String>) {
+        let mut clauses = Vec::new();
+        let mut params = Vec::new();
+        let mut idx = 2; // ?1 is always the FTS query
+
+        if let Some(ref types) = filters.types {
+            if !types.is_empty() {
+                let placeholders: Vec<String> =
+                    types.iter().map(|_| { let p = format!("?{idx}"); idx += 1; p }).collect();
+                clauses.push(format!("AND z.type IN ({})", placeholders.join(", ")));
+                params.extend(types.clone());
+            }
+        }
+
+        if let Some(ref tag) = filters.tag {
+            clauses.push(format!(
+                "AND z.id IN (SELECT doogat_id FROM _ddb_tags WHERE tag = ?{idx})"
+            ));
+            params.push(tag.clone());
+            idx += 1;
+        }
+
+        if let Some(ref where_filters) = filters.where_filters {
+            for wf in where_filters {
+                match &wf.op {
+                    SearchFieldOp::Eq(val) => {
+                        clauses.push(format!(
+                            "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value = ?{})",
+                            idx, idx + 1
+                        ));
+                        params.push(wf.field.clone());
+                        params.push(val.clone());
+                        idx += 2;
+                    }
+                    SearchFieldOp::Contains(val) => {
+                        clauses.push(format!(
+                            "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value LIKE '%' || ?{} || '%')",
+                            idx, idx + 1
+                        ));
+                        params.push(wf.field.clone());
+                        params.push(val.clone());
+                        idx += 2;
+                    }
+                }
+            }
+        }
+
+        (clauses, params)
     }
 
     fn map_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {

@@ -1186,6 +1186,25 @@ pub struct PaginatedSearchResult {
     pub total_count: usize,
 }
 
+#[derive(Debug, Clone)]
+pub enum SearchFieldOp {
+    Eq(String),
+    Contains(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchFieldFilter {
+    pub field: String,
+    pub op: SearchFieldOp,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SearchFilters {
+    pub types: Option<Vec<String>>,
+    pub tag: Option<String>,
+    pub where_filters: Option<Vec<SearchFieldFilter>>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RenameReport {
     pub updated: Vec<String>,
