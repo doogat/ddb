@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
 use indexmap::IndexMap;
@@ -6,6 +9,12 @@ use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{ColumnDef, ParsedDoogat, SearchResult, TableSchema, Zone};
 
 use crate::events;
+
+// -- Shared schema data --
+
+/// Map of type name → TableSchema, accessible to resolvers via `ctx.data()`.
+#[derive(Clone)]
+pub(crate) struct TypeSchemaMap(pub Arc<HashMap<String, TableSchema>>);
 
 // -- Value converters --
 

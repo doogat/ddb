@@ -10,6 +10,7 @@ use futures_util::StreamExt;
 use indexmap::IndexMap;
 use ddb_core::types::{SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::actor::ActorHandle;
@@ -1888,7 +1889,13 @@ pub fn build_schema(
     .register(mutation)
     .register(subscription)
     .data(actor)
-    .data(read_pool);
+    .data(read_pool)
+    .data(TypeSchemaMap(Arc::new(
+        type_schemas
+            .iter()
+            .map(|s| (s.table_name.clone(), s.clone()))
+            .collect::<HashMap<_, _>>(),
+    )));
 
     for typed_obj in dynamic_types {
         builder = builder.register(typed_obj);
