@@ -36,7 +36,12 @@ impl Index {
             [],
         )?;
 
-        let mut col_defs = vec!["id TEXT PRIMARY KEY".to_string()];
+        let mut col_defs = vec![
+            "id TEXT PRIMARY KEY".to_string(),
+            "title TEXT".to_string(),
+            "date TEXT".to_string(),
+            "updated_at TEXT".to_string(),
+        ];
         for col in &schema.columns {
             let sql_type = match col.data_type.to_uppercase().as_str() {
                 "INTEGER" => "INTEGER",
@@ -612,13 +617,34 @@ impl Index {
         id: &str,
         doogat: &crate::types::ParsedDoogat,
     ) -> Result<()> {
-        let mut col_names = vec!["id".to_string()];
-        let mut placeholders = vec!["?1".to_string()];
-        let mut vals: Vec<Option<String>> = vec![Some(id.to_string())];
+        let mut col_names = vec![
+            "id".to_string(),
+            "title".to_string(),
+            "date".to_string(),
+            "updated_at".to_string(),
+        ];
+        let mut placeholders = vec!["?1".to_string(), "?2".to_string(), "?3".to_string(), "?4".to_string()];
+
+        // Fetch updated_at from the doogats table
+        let updated_at: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT updated_at FROM doogats WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let mut vals: Vec<Option<String>> = vec![
+            Some(id.to_string()),
+            doogat.meta.title.clone(),
+            doogat.meta.date.clone(),
+            updated_at,
+        ];
 
         for (i, col) in schema.columns.iter().enumerate() {
             col_names.push(format!("\"{}\"", col.name));
-            placeholders.push(format!("?{}", i + 2));
+            placeholders.push(format!("?{}", i + 5));
             let val = extract_column_value(doogat, col);
             vals.push(if val.is_empty() { None } else { Some(val) });
         }

@@ -480,7 +480,12 @@ impl<'a> SqlEngine<'a> {
     }
 
     fn create_materialized_table(&mut self, schema: &TableSchema) -> Result<()> {
-        let mut col_defs = vec!["id TEXT PRIMARY KEY".to_string()];
+        let mut col_defs = vec![
+            "id TEXT PRIMARY KEY".to_string(),
+            "title TEXT".to_string(),
+            "date TEXT".to_string(),
+            "updated_at TEXT".to_string(),
+        ];
         for col in &schema.columns {
             let sql_type = match col.data_type.to_uppercase().as_str() {
                 "INTEGER" => "INTEGER",
@@ -1497,13 +1502,29 @@ impl<'a> SqlEngine<'a> {
         id: &str,
         col_values: &BTreeMap<String, String>,
     ) -> Result<()> {
-        let mut col_names = vec!["id".to_string()];
-        let mut placeholders = vec!["?1".to_string()];
-        let mut vals: Vec<Option<String>> = vec![Some(id.to_string())];
+        // Fetch core fields from the doogats table (populated by index_doogat)
+        let (title, date, updated_at): (Option<String>, Option<String>, Option<String>) = self
+            .index
+            .conn
+            .query_row(
+                "SELECT title, date, updated_at FROM doogats WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap_or((None, None, None));
+
+        let mut col_names = vec![
+            "id".to_string(),
+            "title".to_string(),
+            "date".to_string(),
+            "updated_at".to_string(),
+        ];
+        let mut placeholders = vec!["?1".to_string(), "?2".to_string(), "?3".to_string(), "?4".to_string()];
+        let mut vals: Vec<Option<String>> = vec![Some(id.to_string()), title, date, updated_at];
 
         for (i, col) in schema.columns.iter().enumerate() {
             col_names.push(format!("\"{}\"", col.name));
-            placeholders.push(format!("?{}", i + 2));
+            placeholders.push(format!("?{}", i + 5));
             let val = col_values.get(&col.name).cloned().unwrap_or_default();
             let val = if val.is_empty() {
                 None
@@ -1539,6 +1560,32 @@ impl<'a> SqlEngine<'a> {
         let valid_cols: Vec<&String> = schema.columns.iter().map(|c| &c.name).collect();
         let mut set_clauses = Vec::new();
         let mut vals: Vec<String> = Vec::new();
+
+        // Refresh core columns from the doogats table
+        if let Ok((title, date, updated_at)) = self.index.conn.query_row(
+            "SELECT title, date, updated_at FROM doogats WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        ) {
+            if let Some(t) = title {
+                vals.push(t);
+                set_clauses.push(format!("title = ?{}", vals.len()));
+            }
+            if let Some(d) = date {
+                vals.push(d);
+                set_clauses.push(format!("date = ?{}", vals.len()));
+            }
+            if let Some(u) = updated_at {
+                vals.push(u);
+                set_clauses.push(format!("updated_at = ?{}", vals.len()));
+            }
+        }
 
         for (col, val) in updates {
             if valid_cols.contains(&col) {
@@ -4488,6 +4535,52 @@ mod tests {
             SqlResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0][0], "0");
+            }
+            _ => panic!("expected Rows"),
+        }
+    }
+
+    #[test]
+    fn core_fields_in_materialized_table() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE widget (name VARCHAR(100))")
+            .unwrap();
+        let id = match engine
+            .execute("INSERT INTO widget (title, name) VALUES ('My Widget', 'sprocket')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        // Query title from type table without JOIN
+        let result = engine
+            .execute("SELECT title, name FROM widget")
+            .unwrap();
+        match result {
+            SqlResult::Rows { columns, rows } => {
+                assert_eq!(columns[0], "title");
+                assert_eq!(columns[1], "name");
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "My Widget");
+                assert_eq!(rows[0][1], "sprocket");
+            }
+            _ => panic!("expected Rows"),
+        }
+
+        // date and updated_at should be present
+        let result = engine
+            .execute(&format!("SELECT date, updated_at FROM widget WHERE id = '{id}'"))
+            .unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                // date comes from frontmatter, may be empty
+                // updated_at should be populated by indexer
+                assert!(!rows[0][1].is_empty(), "updated_at should be populated");
             }
             _ => panic!("expected Rows"),
         }
