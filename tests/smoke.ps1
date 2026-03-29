@@ -599,6 +599,25 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF3_ID\`") }`"}" | Out-Null
 
+# 18e. search where-filter (field predicates)
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE sfitem (status VARCHAR(20))\") { message } }"}' | Out-Null
+$sfw1 = gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO sfitem (title, status) VALUES ('WhereTest Active', 'active')\`") { message } }`"}"
+$SF_W1_ID = if ($sfw1 -match '"message":"([^"]+)"') { $Matches[1] }
+$sfw2 = gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO sfitem (title, status) VALUES ('WhereTest Archived', 'archived')\`") { message } }`"}"
+$SF_W2_ID = if ($sfw2 -match '"message":"([^"]+)"') { $Matches[1] }
+
+$result = gql '{"query":"{ search(query: \"WhereTest\", where: [{ field: \"status\", eq: \"active\" }]) { totalCount hits { id } } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search where eq: expected 1, got $result" }
+pass "serve: search where-filter eq"
+
+$result = gql '{"query":"{ search(query: \"WhereTest\", where: [{ field: \"status\", contains: \"arch\" }]) { totalCount hits { id } } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search where contains: expected 1, got $result" }
+pass "serve: search where-filter contains"
+
+gql "{`"query`":`"mutation { executeSql(sql: \`"DELETE FROM sfitem WHERE id = '$SF_W1_ID'\`") { message } }`"}" | Out-Null
+gql "{`"query`":`"mutation { executeSql(sql: \`"DELETE FROM sfitem WHERE id = '$SF_W2_ID'\`") { message } }`"}" | Out-Null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE sfitem CASCADE\") { message } }"}' | Out-Null
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `

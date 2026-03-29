@@ -546,12 +546,12 @@ pub fn build_schema(
             .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
             .argument(InputValue::new(
                 "types",
-                TypeRef::named_list_nn(TypeRef::STRING),
+                TypeRef::named_list(TypeRef::STRING),
             ))
             .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
             .argument(InputValue::new(
                 "where",
-                TypeRef::named_list_nn("SearchFieldFilter"),
+                TypeRef::named_list("SearchFieldFilter"),
             ))
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
             .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),

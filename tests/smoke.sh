@@ -492,6 +492,27 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF2_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF3_ID\\\") }\"}" >/dev/null
 
+# 18e. search where-filter (field predicates)
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE sfitem (status VARCHAR(20))\") { message } }"}' >/dev/null
+SF_W1=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO sfitem (title, status) VALUES ('WhereTest Active', 'active')\\\") { message } }\"}")
+SF_W1_ID=$(echo "$SF_W1" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+SF_W2=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO sfitem (title, status) VALUES ('WhereTest Archived', 'archived')\\\") { message } }\"}")
+SF_W2_ID=$(echo "$SF_W2" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+
+RESULT=$(gql '{"query":"{ search(query: \"WhereTest\", where: [{ field: \"status\", eq: \"active\" }]) { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search where-filter eq"
+
+RESULT=$(gql '{"query":"{ search(query: \"WhereTest\", where: [{ field: \"status\", contains: \"arch\" }]) { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search where-filter contains"
+
+gql "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM sfitem WHERE id = '$SF_W1_ID'\\\") { message } }\"}" >/dev/null
+gql "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM sfitem WHERE id = '$SF_W2_ID'\\\") { message } }\"}" >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE sfitem CASCADE\") { message } }"}' >/dev/null
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
