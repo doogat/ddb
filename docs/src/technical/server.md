@@ -289,9 +289,14 @@ Column type mapping:
 | TEXT | body | `String` (section content) |
 | TEXT | reference | `String` (wikilink target) |
 
-#### Multi-Value Reference Fields
+#### Relation Resolution
 
-Columns with `REFERENCES` produce a pluralized `[String!]!` list field on the GraphQL type instead of a scalar `String`. For example, a `category TEXT REFERENCES category` column generates a `categories: [String!]!` field that returns all referenced IDs from the junction table. The pluralization follows English rules (category → categories, tag → tags).
+Columns with `REFERENCES` resolve as nested typed objects instead of raw ID strings. For a `category TEXT REFERENCES category` column:
+
+- **Singular field** (`category`): Returns the referenced typed object (e.g., `Category`) with all its fields, or `null` if no reference exists or the target doogat is missing.
+- **Plural field** (`categories`): Returns `[Category!]!` - a list of all referenced typed objects from the junction table. Returns an empty list if no references exist.
+
+Resolution is single-level only (no recursive nesting). Each reference is fetched individually via the read pool. If the target type schema is unknown, the resolver falls back to the base `Doogat` type. The pluralization follows English rules (category -> categories, tag -> tags).
 
 The REST API exposes multi-value references via a `references` JSON object on each doogat. Each key maps to an array of referenced IDs:
 

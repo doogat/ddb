@@ -303,7 +303,8 @@ type Bookmark {
   # ... typed fields from columns
   bookmarkTitle: String    # frontmatter TEXT
   url: String              # frontmatter TEXT
-  category: String         # reference FK
+  category: Category       # singular: resolved referenced object (nullable)
+  categories: [Category!]! # plural: all referenced objects
 }
 ```
 
@@ -527,16 +528,15 @@ INSERT INTO bookmark (title, url, category) VALUES ('Tokio Tutorial', 'https://t
 ### Frontend queries
 
 ```graphql
-# Load all panels with their categories and bookmarks
+# Load all bookmarks with resolved category objects
 query {
-  panels {
-    id, name, sortOrder
-  }
-  categories {
-    id, name, panel
-  }
   bookmarks {
-    id, title, url, category
+    items {
+      id, title, url
+      category { id, name }       # singular: resolved object
+      categories { id, name }     # plural: list of resolved objects
+    }
+    totalCount
   }
 }
 
