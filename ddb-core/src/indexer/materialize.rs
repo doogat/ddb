@@ -11,6 +11,15 @@ pub(crate) fn is_core_column(name: &str) -> bool {
     matches!(name, "id" | "title" | "date" | "updated_at")
 }
 
+/// Normalize a boolean string to "1" or "0" for SQLite storage.
+pub(crate) fn normalize_bool_str(val: &str) -> String {
+    match val.to_lowercase().as_str() {
+        "true" | "1" | "yes" => "1".to_string(),
+        "false" | "0" | "no" => "0".to_string(),
+        _ => val.to_string(),
+    }
+}
+
 /// DDL for creating a junction table for a REFERENCES column.
 pub fn junction_table_ddl(table_name: &str, col_name: &str) -> String {
     format!(
@@ -736,11 +745,7 @@ fn extract_column_value(
                 }
                 crate::types::Value::String(s) => {
                     if is_bool_col {
-                        match s.to_lowercase().as_str() {
-                            "true" | "yes" => "1".to_string(),
-                            "false" | "no" => "0".to_string(),
-                            _ => s.clone(),
-                        }
+                        normalize_bool_str(s)
                     } else {
                         s.clone()
                     }

@@ -480,7 +480,6 @@ impl<'a> SqlEngine<'a> {
     }
 
     fn create_materialized_table(&mut self, schema: &TableSchema) -> Result<()> {
-        use crate::indexer::materialize::is_core_column;
         let mut col_defs = vec![
             "id TEXT PRIMARY KEY".to_string(),
             "title TEXT".to_string(),
@@ -1528,7 +1527,7 @@ impl<'a> SqlEngine<'a> {
 
         let mut param_idx = 5;
         for col in &schema.columns {
-            if crate::indexer::materialize::is_core_column(&col.name) {
+            if is_core_column(&col.name) {
                 continue;
             }
             col_names.push(format!("\"{}\"", col.name));
@@ -1569,7 +1568,7 @@ impl<'a> SqlEngine<'a> {
         let valid_cols: Vec<&String> = schema
             .columns
             .iter()
-            .filter(|c| !crate::indexer::materialize::is_core_column(&c.name))
+            .filter(|c| !is_core_column(&c.name))
             .map(|c| &c.name)
             .collect();
         let mut set_clauses = Vec::new();
@@ -2060,13 +2059,7 @@ fn is_short_string_type(dt: &DataType) -> bool {
 }
 
 
-fn normalize_bool_str(val: &str) -> String {
-    match val.to_lowercase().as_str() {
-        "true" | "1" | "yes" => "1".to_string(),
-        "false" | "0" | "no" => "0".to_string(),
-        _ => val.to_string(),
-    }
-}
+use crate::indexer::materialize::{is_core_column, normalize_bool_str};
 
 fn to_yaml_value(val: &str, data_type: &str) -> Value {
     match data_type.to_uppercase().as_str() {
