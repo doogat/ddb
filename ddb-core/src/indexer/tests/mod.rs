@@ -1,6 +1,6 @@
     use super::*;
     use crate::git_ops::GitRepo;
-    use crate::types::{InlineField, Link, Value, DoogatId, DoogatMeta, Zone};
+    use crate::types::{InlineField, Link, SearchFieldFilter, SearchFieldOp, SearchFilters, Value, DoogatId, DoogatMeta, Zone};
 
 mod graph_tests;
 mod materialize_tests;
@@ -1108,5 +1108,162 @@ processed: true
         assert_eq!(tags[0], ("rust".into(), 3));
         assert_eq!(tags[1], ("cli".into(), 2));
         assert_eq!(tags[2], ("tools".into(), 2));
+    }
+
+    // ── Search filter tests ────────────────────────────────────────
+
+    fn make_typed_doogat(n: usize, dtype: &str, tags: Vec<&str>) -> ParsedDoogat {
+        let id = format!("2026030112{n:04}");
+        ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(DoogatId(id.clone())),
+                title: Some(format!("Typed {dtype} {n}")),
+                date: Some("2026-03-01".into()),
+                doogat_type: Some(dtype.into()),
+                tags: tags.into_iter().map(|s| s.to_string()).collect(),
+                extra: Default::default(),
+            },
+            body: format!("Searchable content for {dtype} number {n}"),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: format!("ddb/{id}.md"),
+        }
+    }
+
+    #[test]
+    fn search_filter_by_type() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "link", vec![])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "link", vec![])).unwrap();
+        idx.index_doogat(&make_typed_doogat(2, "note", vec![])).unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2);
+        assert_eq!(result.total_count, 2);
+        for hit in &result.hits {
+            assert!(hit.id.starts_with("2026030112000") || hit.id == "20260301120001");
+        }
+    }
+
+    #[test]
+    fn search_filter_by_tag() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec!["rust"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "note", vec!["python"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(2, "note", vec!["rust", "cli"])).unwrap();
+
+        let filters = SearchFilters {
+            tag: Some("rust".into()),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2);
+        assert_eq!(result.total_count, 2);
+    }
+
+    #[test]
+    fn search_filter_by_field_eq() {
+        let idx = in_memory_index();
+        let mut z0 = make_typed_doogat(0, "note", vec![]);
+        z0.meta.extra.insert("status".into(), Value::String("active".into()));
+        let mut z1 = make_typed_doogat(1, "note", vec![]);
+        z1.meta.extra.insert("status".into(), Value::String("archived".into()));
+        let mut z2 = make_typed_doogat(2, "note", vec![]);
+        z2.meta.extra.insert("status".into(), Value::String("active".into()));
+
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "status".into(),
+                op: SearchFieldOp::Eq("active".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2);
+        assert_eq!(result.total_count, 2);
+    }
+
+    #[test]
+    fn search_filter_by_field_contains() {
+        let idx = in_memory_index();
+        let mut z0 = make_typed_doogat(0, "note", vec![]);
+        z0.meta.extra.insert("source".into(), Value::String("Wikipedia article".into()));
+        let mut z1 = make_typed_doogat(1, "note", vec![]);
+        z1.meta.extra.insert("source".into(), Value::String("Blog post".into()));
+
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "source".into(),
+                op: SearchFieldOp::Contains("Wiki".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_combined() {
+        let idx = in_memory_index();
+        let mut z0 = make_typed_doogat(0, "link", vec!["rust"]);
+        z0.meta.extra.insert("status".into(), Value::String("active".into()));
+        let mut z1 = make_typed_doogat(1, "link", vec!["python"]);
+        z1.meta.extra.insert("status".into(), Value::String("active".into()));
+        let mut z2 = make_typed_doogat(2, "note", vec!["rust"]);
+        z2.meta.extra.insert("status".into(), Value::String("active".into()));
+        let mut z3 = make_typed_doogat(3, "link", vec!["rust"]);
+        z3.meta.extra.insert("status".into(), Value::String("archived".into()));
+
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+        idx.index_doogat(&z3).unwrap();
+
+        // type=link AND tag=rust AND status=active → only z0
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            tag: Some("rust".into()),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "status".into(),
+                op: SearchFieldOp::Eq("active".into()),
+            }]),
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_no_filters_unchanged() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec!["rust"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "link", vec!["python"])).unwrap();
+
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &SearchFilters::default()).unwrap();
+        assert_eq!(result.hits.len(), 2);
+        assert_eq!(result.total_count, 2);
+
+        // Should match unfiltered paginated search
+        let unfiltered = idx.search_paginated("Searchable", 100, 0).unwrap();
+        assert_eq!(result.hits.len(), unfiltered.hits.len());
+        assert_eq!(result.total_count, unfiltered.total_count);
     }
 
