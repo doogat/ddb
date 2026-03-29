@@ -9,8 +9,8 @@ use crate::sync_manager::SyncManager;
 use crate::types::{
     AttachmentInfo, BrokenSequence, CommitHash, CompactDryRunInfo, CompactOptions,
     CompactionReport, FixReport, ListFilter, MaintenanceReport, NodeConfig, OrphanDoogat,
-    PaginatedSearchResult, ParsedDoogat, RebuildReport, RenameReport, SearchResult, SequenceInfo,
-    SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, TypedListQuery,
+    PaginatedSearchResult, ParsedDoogat, RebuildReport, RenameReport, SearchFilters, SearchResult,
+    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, TypedListQuery,
     UnlinkedMention, DoogatId, DoogatMeta,
 };
 
@@ -272,6 +272,18 @@ impl DoogatService {
     ) -> Result<PaginatedSearchResult> {
         self.ensure_fresh()?;
         self.index.search_paginated(query, limit, offset)
+    }
+
+    pub fn search_paginated_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        filters: &SearchFilters,
+    ) -> Result<PaginatedSearchResult> {
+        self.ensure_fresh()?;
+        self.index
+            .search_paginated_filtered(query, limit, offset, filters)
     }
 
     pub fn reindex(&self) -> Result<RebuildReport> {
