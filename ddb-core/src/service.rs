@@ -500,7 +500,11 @@ impl DoogatService {
     pub fn sync(&self, remote: &str, branch: &str) -> Result<SyncReport> {
         let mut mgr = match SyncManager::open(&self.repo) {
             Ok(m) => m,
-            Err(DoogatError::NotFound(_)) => {
+            Err(DoogatError::NotFound(msg)) => {
+                let node_file = self.repo.path.join(".git/ddb-node");
+                if node_file.exists() {
+                    return Err(DoogatError::NotFound(msg));
+                }
                 let name = hostname::get()
                     .map(|h| h.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| "unknown".to_string());
@@ -1335,5 +1339,20 @@ mod tests {
         let _ = svc.sync("origin", "master");
         let uuid_after = std::fs::read_to_string(&node_path).unwrap();
         assert_eq!(uuid_before, uuid_after, "existing registration should be reused");
+    }
+
+    #[test]
+    fn sync_does_not_auto_register_when_node_file_exists_but_toml_missing() {
+        let (tmp, svc) = fresh_svc();
+        // Write a ddb-node file pointing to a non-existent node TOML
+        let node_path = tmp.path().join(".git/ddb-node");
+        std::fs::write(&node_path, "bogus-uuid-that-has-no-toml").unwrap();
+
+        let result = svc.sync("origin", "master");
+        assert!(result.is_err());
+        // Should NOT have overwritten the node file with a new UUID
+        let uuid_after = std::fs::read_to_string(&node_path).unwrap();
+        assert_eq!(uuid_after, "bogus-uuid-that-has-no-toml",
+            "corrupt state should propagate error, not silently re-register");
     }
 }
