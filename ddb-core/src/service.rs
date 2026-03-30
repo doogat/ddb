@@ -377,6 +377,8 @@ impl DoogatService {
             &filter.field_filters,
             filter.limit,
             filter.offset,
+            filter.sort_field.as_deref(),
+            filter.sort_desc,
         );
         let rows = self.index.query_raw(&sql)?;
         let mut doogats = Vec::new();
@@ -401,6 +403,8 @@ impl DoogatService {
             filter.tag.as_deref(),
             filter.backlinks_of.as_deref(),
             &filter.field_filters,
+            None,
+            None,
             None,
             None,
         );
@@ -945,6 +949,9 @@ impl DoogatService {
     }
 }
 
+/// Sortable columns on the doogats table.
+pub const SORTABLE_COLUMNS: &[&str] = &["id", "title", "date", "type"];
+
 /// Build SQL query with filters for doogat listing.
 fn build_filtered_sql(
     doogat_type: Option<&str>,
@@ -953,6 +960,8 @@ fn build_filtered_sql(
     field_filters: &[(String, String)],
     limit: Option<i64>,
     offset: Option<i64>,
+    sort_field: Option<&str>,
+    sort_desc: Option<bool>,
 ) -> String {
     let mut conditions = Vec::new();
 
@@ -992,7 +1001,15 @@ fn build_filtered_sql(
         (None, None) => String::new(),
     };
 
-    format!("SELECT z.id, z.path FROM doogats z{where_clause} ORDER BY z.id DESC{limit_clause}")
+    let order_clause = match sort_field.filter(|f| SORTABLE_COLUMNS.contains(f)) {
+        Some(field) => {
+            let dir = if sort_desc.unwrap_or(false) { "DESC" } else { "ASC" };
+            format!(" ORDER BY z.{field} {dir}")
+        }
+        None => " ORDER BY z.id DESC".to_string(),
+    };
+
+    format!("SELECT z.id, z.path FROM doogats z{where_clause}{order_clause}{limit_clause}")
 }
 
 #[cfg(test)]
