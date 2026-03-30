@@ -392,6 +392,8 @@ pub fn aggregate_row_to_value(row: &[String], names: &[String]) -> GqlValue {
             GqlValue::Null
         } else if name == "count" {
             GqlValue::from(val.parse::<i64>().unwrap_or(0))
+        } else if name == "key" {
+            GqlValue::from(val)
         } else {
             GqlValue::from(val.parse::<f64>().unwrap_or(0.0))
         };
