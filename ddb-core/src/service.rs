@@ -1311,4 +1311,29 @@ mod tests {
         let children = svc.sequence_children(&id).unwrap();
         assert!(children.is_empty());
     }
+
+    #[test]
+    fn sync_auto_registers_node_when_none_exists() {
+        let (tmp, svc) = fresh_svc();
+        let node_path = tmp.path().join(".git/ddb-node");
+        assert!(!node_path.exists(), "node should not exist before sync");
+
+        // sync will fail (no remote) but auto-register should still happen
+        let result = svc.sync("origin", "master");
+        assert!(result.is_err(), "sync should fail without a remote");
+        assert!(node_path.exists(), "node should be auto-registered after sync attempt");
+    }
+
+    #[test]
+    fn sync_reuses_existing_registration() {
+        let (tmp, svc) = fresh_svc();
+        svc.register_node("MyLaptop").unwrap();
+        let node_path = tmp.path().join(".git/ddb-node");
+        let uuid_before = std::fs::read_to_string(&node_path).unwrap();
+
+        // sync fails (no remote) but should not re-register
+        let _ = svc.sync("origin", "master");
+        let uuid_after = std::fs::read_to_string(&node_path).unwrap();
+        assert_eq!(uuid_before, uuid_after, "existing registration should be reused");
+    }
 }
