@@ -377,3 +377,38 @@ fn frontmatter_conflict_creates_fm_crdt_file() {
         .assert()
         .success();
 }
+
+#[test]
+fn sync_auto_registers_node_when_none_exists() {
+    let remote_dir = tempfile::TempDir::new().unwrap();
+    std::process::Command::new("git")
+        .args(["init", "--bare"])
+        .arg(remote_dir.path())
+        .output()
+        .unwrap();
+
+    let node = DdbTestRepo::init();
+    std::process::Command::new("git")
+        .current_dir(node.path())
+        .args(["remote", "add", "origin"])
+        .arg(remote_dir.path())
+        .output()
+        .unwrap();
+
+    // Push initial commit so remote has a master branch
+    std::process::Command::new("git")
+        .current_dir(node.path())
+        .args(["push", "-u", "origin", "master"])
+        .output()
+        .unwrap();
+
+    // No register-node — sync should auto-register
+    let node_file = node.path().join(".git/ddb-node");
+    assert!(!node_file.exists());
+
+    node.ddb().arg("sync").assert().success();
+    assert!(node_file.exists(), "auto-register should create .git/ddb-node");
+
+    // Subsequent sync should reuse registration
+    node.ddb().arg("sync").assert().success();
+}
