@@ -836,4 +836,28 @@ pass "binary asset LWW (loser preserved in history)"
 
 rm -rf "$BIN_REMOTE" "$BIN_NODE1" "$BIN_NODE2"
 
+# 41. auto-register node on first sync
+AR_REMOTE="$(mktemp -d)"
+AR_NODE="$(mktemp -d)"
+git init --bare "$AR_REMOTE" >/dev/null
+$DDB init "$AR_NODE" >/dev/null
+cd "$AR_NODE"
+git remote add origin "$AR_REMOTE"
+git push -u origin master >/dev/null 2>&1
+
+# No register-node — sync should auto-register
+[ ! -f .git/ddb-node ]
+$DDB sync origin master >/dev/null
+[ -f .git/ddb-node ]
+pass "auto-register node on first sync"
+
+# Subsequent sync reuses registration
+UUID_BEFORE=$(cat .git/ddb-node)
+$DDB sync origin master >/dev/null
+UUID_AFTER=$(cat .git/ddb-node)
+[ "$UUID_BEFORE" = "$UUID_AFTER" ]
+pass "auto-register reuses existing registration"
+
+rm -rf "$AR_REMOTE" "$AR_NODE"
+
 echo "=== all integration tests passed ==="

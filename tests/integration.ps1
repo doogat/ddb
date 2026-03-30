@@ -938,6 +938,31 @@ Pop-Location
 
 Remove-Item -Recurse -Force $BIN_REMOTE, $BIN_NODE1, $BIN_NODE2
 
+# 41. auto-register node on first sync
+$AR_REMOTE = New-TempDir
+$AR_NODE = New-TempDir
+git init --bare $AR_REMOTE 2>$null | Out-Null
+ddb init $AR_NODE | Out-Null
+Push-Location $AR_NODE
+git remote add origin $AR_REMOTE
+git push -u origin master 2>$null | Out-Null
+
+# No register-node — sync should auto-register
+if (Test-Path ".git/ddb-node") { throw "node file should not exist before sync" }
+ddb sync origin master | Out-Null
+if (-not (Test-Path ".git/ddb-node")) { throw "auto-register should create .git/ddb-node" }
+pass "auto-register node on first sync"
+
+# Subsequent sync reuses registration
+$uuidBefore = Get-Content ".git/ddb-node"
+ddb sync origin master | Out-Null
+$uuidAfter = Get-Content ".git/ddb-node"
+if ($uuidBefore -ne $uuidAfter) { throw "existing registration should be reused" }
+pass "auto-register reuses existing registration"
+
+Pop-Location
+Remove-Item -Recurse -Force $AR_REMOTE, $AR_NODE
+
 # Return to original directory
 Set-Location $TMPDIR
 
