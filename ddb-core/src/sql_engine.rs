@@ -1347,9 +1347,8 @@ impl<'a> SqlEngine<'a> {
             // Rematerialize if typed
             if let Some(ref stype) = re_parsed.meta.doogat_type {
                 if let Ok(schema) = self.load_schema(stype) {
-                    let _ = self
-                        .index
-                        .materialize_single(&schema, source_id, &re_parsed);
+                    self.index
+                        .materialize_single(&schema, source_id, &re_parsed)?;
                 }
             }
 
