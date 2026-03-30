@@ -1262,4 +1262,244 @@ mod tests {
         sorted_b.sort();
         assert_eq!(sorted_a, sorted_b, "nodes should converge");
     }
+
+    /// Helper: set up two repos (A, B) with a shared bare remote, both registered
+    /// as sync nodes. Returns (dir_a, repo_a, dir_b, repo_b, bare_dir).
+    fn setup_binary_sync_pair() -> (
+        tempfile::TempDir,
+        GitRepo,
+        tempfile::TempDir,
+        GitRepo,
+        tempfile::TempDir,
+    ) {
+        let bare_dir = tempfile::TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        let (dir_a, repo_a) = temp_repo();
+        repo_a
+            .add_remote("origin", bare_dir.path().to_str().unwrap())
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+        register_node(&repo_a, "A").unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        let dir_b = tempfile::TempDir::new().unwrap();
+        git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
+        let repo_b = GitRepo::open(dir_b.path()).unwrap();
+        register_node(&repo_b, "B").unwrap();
+        repo_b.push("origin", "master").unwrap();
+
+        // Sync A to pick up B's node registration
+        repo_a.fetch("origin", "master").unwrap();
+        repo_a.merge_remote("origin", "master").unwrap();
+
+        (dir_a, repo_a, dir_b, repo_b, bare_dir)
+    }
+
+    #[test]
+    fn binary_lww_ours_wins_higher_hlc() {
+        let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+        let bin_path = "reference/test/photo.bin";
+        let ours_bytes = b"OURS_BINARY_CONTENT_AAA";
+        let theirs_bytes = b"THEIRS_BINARY_CONTENT_BBB";
+
+        // A commits with a LOWER HLC (earlier timestamp)
+        let hlc_a = crate::hlc::Hlc {
+            wall_ms: 1000,
+            counter: 0,
+            node: "aaaaaaaa".into(),
+        };
+        let msg_a = crate::hlc::append_hlc_trailer("A adds binary", &hlc_a);
+        repo_a
+            .commit_binary_file(bin_path, theirs_bytes, &msg_a)
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        // B commits with a HIGHER HLC (later timestamp) — this is "ours" from B's perspective
+        let hlc_b = crate::hlc::Hlc {
+            wall_ms: 9000,
+            counter: 0,
+            node: "bbbbbbbb".into(),
+        };
+        let msg_b = crate::hlc::append_hlc_trailer("B adds binary", &hlc_b);
+        repo_b
+            .commit_binary_file(bin_path, ours_bytes, &msg_b)
+            .unwrap();
+
+        // B syncs — ours (B, wall_ms=9000) > theirs (A, wall_ms=1000), ours wins
+        let db_b = dir_b.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        assert!(report.conflicts_resolved > 0, "should have resolved a conflict");
+        let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
+        assert_eq!(resolved, ours_bytes, "ours (higher HLC) should win");
+    }
+
+    #[test]
+    fn binary_lww_theirs_wins_higher_hlc() {
+        let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+        let bin_path = "reference/test/photo.bin";
+        let ours_bytes = b"OURS_BINARY_CONTENT_AAA";
+        let theirs_bytes = b"THEIRS_BINARY_CONTENT_BBB";
+
+        // A commits with a HIGHER HLC — this will be "theirs" from B's perspective
+        let hlc_a = crate::hlc::Hlc {
+            wall_ms: 9000,
+            counter: 0,
+            node: "aaaaaaaa".into(),
+        };
+        let msg_a = crate::hlc::append_hlc_trailer("A adds binary", &hlc_a);
+        repo_a
+            .commit_binary_file(bin_path, theirs_bytes, &msg_a)
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        // B commits with a LOWER HLC
+        let hlc_b = crate::hlc::Hlc {
+            wall_ms: 1000,
+            counter: 0,
+            node: "bbbbbbbb".into(),
+        };
+        let msg_b = crate::hlc::append_hlc_trailer("B adds binary", &hlc_b);
+        repo_b
+            .commit_binary_file(bin_path, ours_bytes, &msg_b)
+            .unwrap();
+
+        // B syncs — theirs (A, wall_ms=9000) > ours (B, wall_ms=1000), theirs wins
+        let db_b = dir_b.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        assert!(report.conflicts_resolved > 0, "should have resolved a conflict");
+        let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
+        assert_eq!(resolved, theirs_bytes, "theirs (higher HLC) should win");
+    }
+
+    #[test]
+    fn binary_lww_theirs_wins_on_tie() {
+        let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+        let bin_path = "reference/test/photo.bin";
+        let ours_bytes = b"OURS_TIE_CONTENT";
+        let theirs_bytes = b"THEIRS_TIE_CONTENT";
+
+        // Both use identical HLC timestamps
+        let hlc = crate::hlc::Hlc {
+            wall_ms: 5000,
+            counter: 0,
+            node: "aaaaaaaa".into(),
+        };
+
+        let msg_a = crate::hlc::append_hlc_trailer("A adds binary", &hlc);
+        repo_a
+            .commit_binary_file(bin_path, theirs_bytes, &msg_a)
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        let msg_b = crate::hlc::append_hlc_trailer("B adds binary", &hlc);
+        repo_b
+            .commit_binary_file(bin_path, ours_bytes, &msg_b)
+            .unwrap();
+
+        // B syncs — tied HLC, theirs wins by convention
+        let db_b = dir_b.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        assert!(report.conflicts_resolved > 0, "should have resolved a conflict");
+        let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
+        assert_eq!(resolved, theirs_bytes, "theirs should win on HLC tie");
+    }
+
+    #[test]
+    fn binary_lww_theirs_wins_missing_hlc() {
+        let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+        let bin_path = "reference/test/photo.bin";
+        let ours_bytes = b"OURS_NO_HLC";
+        let theirs_bytes = b"THEIRS_NO_HLC";
+
+        // Neither commit includes an HLC trailer
+        repo_a
+            .commit_binary_file(bin_path, theirs_bytes, "A adds binary (no HLC)")
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        repo_b
+            .commit_binary_file(bin_path, ours_bytes, "B adds binary (no HLC)")
+            .unwrap();
+
+        // B syncs — no HLC on either side, theirs wins by convention
+        let db_b = dir_b.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        assert!(report.conflicts_resolved > 0, "should have resolved a conflict");
+        let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
+        assert_eq!(resolved, theirs_bytes, "theirs should win when both HLCs missing");
+    }
+
+    #[test]
+    fn binary_lww_preserves_exact_bytes() {
+        // Use bytes that would be corrupted by String::from_utf8_lossy
+        // (0xFF, 0xFE are invalid UTF-8 lead bytes; 0x00 is a null byte)
+        let non_utf8: Vec<u8> = vec![
+            0xFF, 0xFE, 0x00, 0x01, 0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xC1, 0xFD, 0xFE, 0xFF,
+        ];
+
+        let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+        let bin_path = "reference/test/corrupt-if-lossy.bin";
+
+        // A commits the non-UTF8 content with a HIGHER HLC (theirs wins)
+        let hlc_a = crate::hlc::Hlc {
+            wall_ms: 9000,
+            counter: 0,
+            node: "aaaaaaaa".into(),
+        };
+        let msg_a = crate::hlc::append_hlc_trailer("A adds non-utf8 binary", &hlc_a);
+        repo_a
+            .commit_binary_file(bin_path, &non_utf8, &msg_a)
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        // B commits different content with lower HLC
+        let hlc_b = crate::hlc::Hlc {
+            wall_ms: 1000,
+            counter: 0,
+            node: "bbbbbbbb".into(),
+        };
+        let msg_b = crate::hlc::append_hlc_trailer("B adds placeholder", &hlc_b);
+        repo_b
+            .commit_binary_file(bin_path, b"placeholder", &msg_b)
+            .unwrap();
+
+        // B syncs — theirs (A) wins, content must be byte-exact
+        let db_b = dir_b.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        assert!(report.conflicts_resolved > 0, "should have resolved a conflict");
+        let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
+        assert_eq!(
+            resolved, non_utf8,
+            "binary content must survive without UTF-8 lossy corruption"
+        );
+        // Double-check: if lossy conversion had occurred, replacement char (0xEF 0xBF 0xBD)
+        // would appear and lengths would differ
+        assert_eq!(resolved.len(), non_utf8.len(), "byte length must match exactly");
+    }
 }
