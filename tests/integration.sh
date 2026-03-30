@@ -406,6 +406,16 @@ pass "serve: relation null returns null and empty list"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' >/dev/null
 
+# 38b3. typed connection includes tags
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tagarticle (topic TEXT)\") { message } }"}' >/dev/null
+TA_ID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tagarticle (topic) VALUES (\\\"rust\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$TA_ID\\\", tags: [\\\"coding\\\", \\\"systems\\\"] }) { id } }\"}" >/dev/null
+RESULT=$(gql '{"query":"{ tagarticles { items { id tags topic } } }"}')
+echo "$RESULT" | grep -q '"coding"'
+echo "$RESULT" | grep -q '"systems"'
+pass "serve: typed connection includes tags"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tagarticle CASCADE\") { message } }"}' >/dev/null
+
 # 38c. sql-materialization (columns, boolean normalization, core fields)
 RESULT=$(gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}')
 echo "$RESULT" | grep -q '"columns"'

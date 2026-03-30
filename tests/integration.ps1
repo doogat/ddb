@@ -465,6 +465,16 @@ pass "serve: relation null returns null and empty list"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' | Out-Null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' | Out-Null
 
+# 38b3. typed connection includes tags
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tagarticle (topic TEXT)\") { message } }"}' | Out-Null
+$taId = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tagarticle (topic) VALUES (\\\"rust\\\")\") { message } }"}') -replace '.*"message":"(\d+)".*','$1'
+gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$taId\`", tags: [\`"coding\`", \`"systems\`"] }) { id } }`"}" | Out-Null
+$result = gql '{"query":"{ tagarticles { items { id tags topic } } }"}'
+if ($result -notmatch '"coding"') { throw "typed connection tags: missing coding tag: $result" }
+if ($result -notmatch '"systems"') { throw "typed connection tags: missing systems tag: $result" }
+pass "serve: typed connection includes tags"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tagarticle CASCADE\") { message } }"}' | Out-Null
+
 # 38c. sql-materialization (columns, boolean normalization, core fields)
 $result = gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}'
 if ($result -notmatch '"columns"') { throw "sql columns: missing columns field" }
