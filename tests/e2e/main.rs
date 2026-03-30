@@ -1,4 +1,5 @@
 mod attachments;
+mod cascade_delete;
 mod checkboxes;
 mod collision;
 mod common;
