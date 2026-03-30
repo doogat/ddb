@@ -436,5 +436,28 @@ $output = ddb query "DROP TABLE abcategory CASCADE"
 if ($output -notmatch "dropped") { throw "drop abcategory failed" }
 pass "app-building end-to-end flow"
 
+# 17. cascade delete
+ddb query "CREATE TABLE cdcategory (label VARCHAR(100))" | Out-Null
+ddb query "CREATE TABLE cdbookmark (url TEXT, cdcategory TEXT REFERENCES cdcategory)" | Out-Null
+$CAT_ID = ddb query "INSERT INTO cdcategory (label) VALUES ('work')"
+Start-Sleep -Seconds 1
+$BM_ID = ddb query "INSERT INTO cdbookmark (url) VALUES ('https://example.com')"
+ddb query "INSERT INTO cdbookmark_cdcategory (cdbookmark_id, cdcategory_id) VALUES ('$BM_ID', '$CAT_ID')" | Out-Null
+# Verify junction row exists
+$output = ddb query "SELECT COUNT(*) FROM cdbookmark_cdcategory WHERE cdcategory_id = '$CAT_ID'"
+if ($output -notmatch "1") { throw "junction row not created" }
+# Delete the category — should cascade
+ddb query "DELETE FROM cdcategory WHERE id = '$CAT_ID'" | Out-Null
+# Junction row should be gone
+$output = ddb query "SELECT COUNT(*) FROM cdbookmark_cdcategory WHERE cdcategory_id = '$CAT_ID'"
+if ($output -notmatch "0") { throw "junction row not cascaded: $output" }
+# Wikilink to deleted category should be removed from bookmark
+$output = ddb read $BM_ID
+if ($output -match "\[\[$CAT_ID\]\]") { throw "wikilink to deleted category still present in bookmark" }
+# Clean up
+ddb query "DROP TABLE cdbookmark CASCADE" | Out-Null
+ddb query "DROP TABLE cdcategory CASCADE" | Out-Null
+pass "cascade delete"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

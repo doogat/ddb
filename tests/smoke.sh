@@ -351,4 +351,27 @@ $DDB query "DROP TABLE abbookmark CASCADE" | grep -q "dropped"
 $DDB query "DROP TABLE abcategory CASCADE" | grep -q "dropped"
 pass "app-building end-to-end flow"
 
+# 17. cascade delete
+$DDB query "CREATE TABLE cdcategory (label VARCHAR(100))" >/dev/null
+$DDB query "CREATE TABLE cdbookmark (url TEXT, cdcategory TEXT REFERENCES cdcategory)" >/dev/null
+CAT_ID=$($DDB query "INSERT INTO cdcategory (label) VALUES ('work')")
+sleep 1
+BM_ID=$($DDB query "INSERT INTO cdbookmark (url) VALUES ('https://example.com')")
+$DDB query "INSERT INTO cdbookmark_cdcategory (cdbookmark_id, cdcategory_id) VALUES ('$BM_ID', '$CAT_ID')" >/dev/null
+# Verify junction row exists
+$DDB query "SELECT COUNT(*) FROM cdbookmark_cdcategory WHERE cdcategory_id = '$CAT_ID'" | grep -q "1"
+# Delete the category — should cascade
+$DDB query "DELETE FROM cdcategory WHERE id = '$CAT_ID'" >/dev/null
+# Junction row should be gone
+$DDB query "SELECT COUNT(*) FROM cdbookmark_cdcategory WHERE cdcategory_id = '$CAT_ID'" | grep -q "0"
+# Wikilink to deleted category should be removed from bookmark
+BM_CONTENT=$($DDB read "$BM_ID")
+if echo "$BM_CONTENT" | grep -q "\[\[${CAT_ID}\]\]"; then
+  echo "FAIL: wikilink to deleted category still present in bookmark" >&2; exit 1
+fi
+# Clean up
+$DDB query "DROP TABLE cdbookmark CASCADE" >/dev/null
+$DDB query "DROP TABLE cdcategory CASCADE" >/dev/null
+pass "cascade delete"
+
 echo "=== all smoke tests passed ==="
