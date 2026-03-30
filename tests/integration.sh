@@ -426,6 +426,55 @@ RESULT=$(gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }"
 echo "$RESULT" | grep -q 'PinTest'
 pass "serve: core fields in type table"
 
+# 38d. DISTINCT on typed connection queries
+# foo table already has one row with bar='val', baz=1. Add more.
+gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO foo (title, bar, baz) VALUES ('dup1', 'val', 2)\\\"){message}}\"}" >/dev/null
+gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO foo (title, bar, baz) VALUES ('uniq', 'other', 3)\\\"){message}}\"}" >/dev/null
+sleep 1
+RESULT=$(gql '{"query":"{ foos(distinct: \"bar\") { items { bar } totalCount } }"}')
+echo "$RESULT" | grep -q '"totalCount":2'
+pass "serve: distinct deduplicates and totalCount reflects unique count"
+
+RESULT=$(gql '{"query":"{ foos(distinct: \"bar\", where: { baz: { gte: 2 } }) { totalCount } }"}')
+echo "$RESULT" | grep -q '"totalCount":2'
+pass "serve: distinct with where filter"
+
+# 38e. GROUP BY on typed aggregate queries
+RESULT=$(gql '{"query":"{ foosAggregate(groupBy: \"bar\") { groups { key count } } }"}')
+echo "$RESULT" | grep -q '"key":"val"'
+echo "$RESULT" | grep -q '"key":"other"'
+pass "serve: groupBy returns per-group counts"
+
+RESULT=$(gql '{"query":"{ foosAggregate(groupBy: \"bar\") { groups { key count minBaz maxBaz } } }"}')
+echo "$RESULT" | grep -q '"minBaz"'
+echo "$RESULT" | grep -q '"maxBaz"'
+pass "serve: groupBy with numeric aggregates"
+
+RESULT=$(gql '{"query":"{ foosAggregate(groupBy: \"bar\", where: { baz: { gte: 2 } }) { groups { key count } } }"}')
+echo "$RESULT" | grep -q '"key"'
+pass "serve: groupBy with where filter"
+
+# Non-grouped still works
+RESULT=$(gql '{"query":"{ foosAggregate { count } }"}')
+echo "$RESULT" | grep -q '"count":3'
+pass "serve: aggregate without groupBy still works"
+
+# 38f. executeBatch mutation
+RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"INSERT INTO foo (title, bar, baz) VALUES ('"'"'batch1'"'"', '"'"'b1'"'"', 10)\", \"INSERT INTO foo (title, bar, baz) VALUES ('"'"'batch2'"'"', '"'"'b2'"'"', 20)\"]) { message affected } }"}')
+echo "$RESULT" | grep -qv '"errors"'
+pass "serve: executeBatch multiple INSERTs"
+
+# executeBatch with DDL triggers schema reload
+RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE batchtest (col1 TEXT)\"]) { message } }"}')
+echo "$RESULT" | grep -q '"message"'
+sleep 1
+RESULT=$(gql '{"query":"{ batchtests { totalCount } }"}')
+echo "$RESULT" | grep -q '"totalCount":0'
+pass "serve: executeBatch DDL triggers schema reload"
+
+# cleanup
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE batchtest CASCADE\") { message } }"}' >/dev/null
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

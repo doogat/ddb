@@ -483,6 +483,51 @@ $result = gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }
 if ($result -notmatch 'PinTest') { throw "core fields: title missing from type table" }
 pass "serve: core fields in type table"
 
+# 38d. DISTINCT on typed connection queries
+gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO foo (title, bar, baz) VALUES ('dup1', 'val', 2)\`"){message}}`"}" | Out-Null
+gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO foo (title, bar, baz) VALUES ('uniq', 'other', 3)\`"){message}}`"}" | Out-Null
+Start-Sleep -Seconds 1
+$result = gql '{"query":"{ foos(distinct: \"bar\") { items { bar } totalCount } }"}'
+if ($result -notmatch '"totalCount":2') { throw "distinct totalCount: $result" }
+pass "serve: distinct deduplicates and totalCount reflects unique count"
+
+$result = gql '{"query":"{ foos(distinct: \"bar\", where: { baz: { gte: 2 } }) { totalCount } }"}'
+if ($result -notmatch '"totalCount":2') { throw "distinct with where: $result" }
+pass "serve: distinct with where filter"
+
+# 38e. GROUP BY on typed aggregate queries
+$result = gql '{"query":"{ foosAggregate(groupBy: \"bar\") { groups { key count } } }"}'
+if ($result -notmatch '"key":"val"') { throw "groupBy missing val: $result" }
+if ($result -notmatch '"key":"other"') { throw "groupBy missing other: $result" }
+pass "serve: groupBy returns per-group counts"
+
+$result = gql '{"query":"{ foosAggregate(groupBy: \"bar\") { groups { key count minBaz maxBaz } } }"}'
+if ($result -notmatch '"minBaz"') { throw "groupBy missing minBaz: $result" }
+if ($result -notmatch '"maxBaz"') { throw "groupBy missing maxBaz: $result" }
+pass "serve: groupBy with numeric aggregates"
+
+$result = gql '{"query":"{ foosAggregate(groupBy: \"bar\", where: { baz: { gte: 2 } }) { groups { key count } } }"}'
+if ($result -notmatch '"key"') { throw "groupBy with where: $result" }
+pass "serve: groupBy with where filter"
+
+$result = gql '{"query":"{ foosAggregate { count } }"}'
+if ($result -notmatch '"count":3') { throw "aggregate without groupBy: $result" }
+pass "serve: aggregate without groupBy still works"
+
+# 38f. executeBatch mutation
+$result = gql '{"query":"mutation { executeBatch(statements: [\"INSERT INTO foo (title, bar, baz) VALUES (''batch1'', ''b1'', 10)\", \"INSERT INTO foo (title, bar, baz) VALUES (''batch2'', ''b2'', 20)\"]) { message affected } }"}'
+if ($result -match '"errors"') { throw "executeBatch errors: $result" }
+pass "serve: executeBatch multiple INSERTs"
+
+$result = gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE batchtest (col1 TEXT)\"]) { message } }"}'
+if ($result -notmatch '"message"') { throw "executeBatch DDL: $result" }
+Start-Sleep -Seconds 1
+$result = gql '{"query":"{ batchtests { totalCount } }"}'
+if ($result -notmatch '"totalCount":0') { throw "executeBatch schema reload: $result" }
+pass "serve: executeBatch DDL triggers schema reload"
+
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE batchtest CASCADE\") { message } }"}' | Out-Null
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
