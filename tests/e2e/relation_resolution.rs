@@ -277,3 +277,128 @@ fn cross_type_resolution_includes_typed_fields() {
     assert_eq!(proj["name"].as_str().unwrap(), "Alpha");
     assert_eq!(proj["priority"].as_i64().unwrap(), 1);
 }
+
+#[test]
+fn typed_connection_includes_tags() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a type and insert doogats with tags
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE article (topic TEXT)" }),
+    );
+    assert!(r.get("errors").is_none());
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO article (topic) VALUES ('rust')" }),
+    );
+    assert!(r.get("errors").is_none());
+    let id1 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+
+    // Tag the doogat
+    let r = server.graphql_with_vars(
+        r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id tags } }"#,
+        serde_json::json!({ "input": { "id": id1, "tags": ["coding", "systems"] } }),
+    );
+    assert!(r.get("errors").is_none(), "tag update failed: {r}");
+
+    // Query via typed connection - tags should be present
+    let r = server.graphql(r#"{ articles { items { id topic tags } } }"#);
+    assert!(r.get("errors").is_none(), "tags on typed connection failed: {r}");
+    let items = r["data"]["articles"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let tags: Vec<&str> = items[0]["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(tags.contains(&"coding"), "missing 'coding' tag: {r}");
+    assert!(tags.contains(&"systems"), "missing 'systems' tag: {r}");
+}
+
+#[test]
+fn batch_plural_references_multiple_items() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create category type
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE category (label TEXT)" }),
+    );
+    assert!(r.get("errors").is_none());
+
+    // Create bookmark type with REFERENCES
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)" }),
+    );
+    assert!(r.get("errors").is_none());
+
+    // Insert 2 categories
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO category (label) VALUES ('tech')" }),
+    );
+    let cat1 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO category (label) VALUES ('science')" }),
+    );
+    let cat2 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Insert 2 bookmarks
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO bookmark (url) VALUES ('https://a.com')" }),
+    );
+    let bm1 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO bookmark (url) VALUES ('https://b.com')" }),
+    );
+    let bm2 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+
+    // Link bm1 to both categories, bm2 to none
+    for cat in [&cat1, &cat2] {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({
+                "sql": format!(
+                    "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm1}', '{cat}')"
+                )
+            }),
+        );
+        assert!(r.get("errors").is_none(), "junction insert failed: {r}");
+    }
+
+    // Query all bookmarks with categories
+    let r = server.graphql(r#"{ bookmarks { items { id url categories { id label } } } }"#);
+    assert!(r.get("errors").is_none(), "batch plural query failed: {r}");
+    let items = r["data"]["bookmarks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "expected 2 bookmarks: {r}");
+
+    // Find each bookmark's categories
+    let bm1_item = items.iter().find(|i| i["id"].as_str().unwrap() == bm1).unwrap();
+    let bm2_item = items.iter().find(|i| i["id"].as_str().unwrap() == bm2).unwrap();
+
+    let bm1_cats = bm1_item["categories"].as_array().unwrap();
+    assert_eq!(bm1_cats.len(), 2, "bm1 should have 2 categories: {r}");
+    let labels: Vec<&str> = bm1_cats.iter().map(|c| c["label"].as_str().unwrap()).collect();
+    assert!(labels.contains(&"tech"));
+    assert!(labels.contains(&"science"));
+
+    let bm2_cats = bm2_item["categories"].as_array().unwrap();
+    assert!(bm2_cats.is_empty(), "bm2 should have no categories: {r}");
+}
