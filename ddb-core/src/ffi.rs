@@ -46,6 +46,10 @@ impl From<DoogatError> for DdbError {
             DoogatError::Validation(msg) => DdbError::Validation { msg },
             DoogatError::InvalidPath(msg) => DdbError::Validation { msg },
             DoogatError::SqlEngine(msg) => DdbError::SqlEngine { msg },
+            DoogatError::Conflict(msg) => DdbError::Git { msg },
+            DoogatError::Sync(msg) => DdbError::Git { msg },
+            DoogatError::Index(msg) => DdbError::Sql { msg },
+            DoogatError::BadRequest(msg) => DdbError::Validation { msg },
             DoogatError::VersionMismatch { repo, driver } => DdbError::VersionMismatch {
                 msg: format!("repo format v{repo}, driver supports up to v{driver}"),
             },
