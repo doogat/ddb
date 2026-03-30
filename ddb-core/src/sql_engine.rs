@@ -4885,4 +4885,190 @@ mod tests {
             "junction row should not be affected when deleting a doogat of a type that is not referenced"
         );
     }
+
+    #[test]
+    fn test_cascade_ref_single_removal() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Link bookmark -> category via junction (writes wikilink to reference section)
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+            ))
+            .unwrap();
+
+        // Verify wikilink exists in bookmark file before delete
+        let bm_path = index.resolve_path(&bm_id).unwrap();
+        let content_before = repo.read_file(&bm_path).unwrap();
+        assert!(
+            content_before.contains(&format!("[[{cat_id}]]")),
+            "bookmark should reference category before delete"
+        );
+
+        // Delete the category
+        engine
+            .execute(&format!("DELETE FROM category WHERE id = '{cat_id}'"))
+            .unwrap();
+
+        // Bookmark file should no longer contain the wikilink to deleted category
+        let content_after = repo.read_file(&bm_path).unwrap();
+        assert!(
+            !content_after.contains(&format!("[[{cat_id}]]")),
+            "wikilink to deleted category should be removed from bookmark file"
+        );
+    }
+
+    #[test]
+    fn test_cascade_ref_multi_reference_preservation() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_a = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let cat_b = match engine
+            .execute("INSERT INTO category (label) VALUES ('science')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Bookmark references both categories
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_a}')"
+            ))
+            .unwrap();
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_b}')"
+            ))
+            .unwrap();
+
+        // Delete only category A
+        engine
+            .execute(&format!("DELETE FROM category WHERE id = '{cat_a}'"))
+            .unwrap();
+
+        // Bookmark file should still contain wikilink to category B
+        let bm_path = index.resolve_path(&bm_id).unwrap();
+        let content = repo.read_file(&bm_path).unwrap();
+        assert!(
+            !content.contains(&format!("[[{cat_a}]]")),
+            "wikilink to deleted category A should be removed"
+        );
+        assert!(
+            content.contains(&format!("[[{cat_b}]]")),
+            "wikilink to surviving category B should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_cascade_ref_multiple_referencing_doogats() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm1_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://one.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm2_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://two.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Both bookmarks reference the same category
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm1_id}', '{cat_id}')"
+            ))
+            .unwrap();
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm2_id}', '{cat_id}')"
+            ))
+            .unwrap();
+
+        // Delete the category
+        engine
+            .execute(&format!("DELETE FROM category WHERE id = '{cat_id}'"))
+            .unwrap();
+
+        // Both bookmark files should have the wikilink removed
+        let bm1_path = index.resolve_path(&bm1_id).unwrap();
+        let bm1_content = repo.read_file(&bm1_path).unwrap();
+        assert!(
+            !bm1_content.contains(&format!("[[{cat_id}]]")),
+            "wikilink to deleted category should be removed from bookmark 1"
+        );
+
+        let bm2_path = index.resolve_path(&bm2_id).unwrap();
+        let bm2_content = repo.read_file(&bm2_path).unwrap();
+        assert!(
+            !bm2_content.contains(&format!("[[{cat_id}]]")),
+            "wikilink to deleted category should be removed from bookmark 2"
+        );
+    }
 }
