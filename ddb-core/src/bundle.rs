@@ -95,7 +95,7 @@ pub fn import_bundle(
             .current_dir(&repo.path)
             .output()?;
         if !output.status.success() {
-            return Err(DoogatError::Git(format!(
+            return Err(DoogatError::Sync(format!(
                 "git bundle unbundle failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -111,7 +111,7 @@ pub fn import_bundle(
             .current_dir(&repo.path)
             .output()?;
         if !output.status.success() {
-            return Err(DoogatError::Git(format!(
+            return Err(DoogatError::Sync(format!(
                 "git fetch from bundle failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -137,7 +137,7 @@ pub fn import_bundle(
             // Use sync_mgr's conflict resolution
             sync_mgr.resolve_post_merge_conflicts(index)?
         } else {
-            return Err(DoogatError::Git(format!("git merge failed: {stderr}")));
+            return Err(DoogatError::Sync(format!("git merge failed: {stderr}")));
         }
     } else {
         0
@@ -247,7 +247,7 @@ fn build_tar_bundle(
         .current_dir(&repo.path)
         .output()?;
     if !output_cmd.status.success() {
-        return Err(DoogatError::Git(format!(
+        return Err(DoogatError::Sync(format!(
             "git bundle create failed: {}",
             String::from_utf8_lossy(&output_cmd.stderr)
         )));
