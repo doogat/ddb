@@ -253,10 +253,10 @@ impl<'a> SyncManager<'a> {
                 let mut add_add = Vec::new();
                 let mut normal = Vec::new();
                 for c in conflicts {
-                    if c.path.starts_with("reference/") {
-                        binary_ref.push(c);
-                    } else if c.ours.is_empty() || c.theirs.is_empty() {
+                    if c.ours.is_empty() || c.theirs.is_empty() {
                         delete_edit.push(c);
+                    } else if c.path.starts_with("reference/") {
+                        binary_ref.push(c);
                     } else if c.ancestor.is_none() {
                         add_add.push(c);
                     } else {
@@ -1530,5 +1530,53 @@ mod tests {
         // Double-check: if lossy conversion had occurred, replacement char (0xEF 0xBF 0xBD)
         // would appear and lengths would differ
         assert_eq!(resolved.len(), non_utf8.len(), "byte length must match exactly");
+    }
+
+    #[test]
+    fn binary_ref_delete_vs_edit_uses_resurrection() {
+        // Delete-vs-edit on a reference/ path should go through the delete_edit
+        // bucket (resurrection), NOT the binary_ref bucket (LWW).
+        let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+        let bin_path = "reference/test/photo.bin";
+        let content = b"SOME_BINARY_CONTENT";
+
+        // Both nodes start with the same file
+        repo_a
+            .commit_binary_file(bin_path, content, "add binary")
+            .unwrap();
+        repo_a.push("origin", "master").unwrap();
+        repo_b.fetch("origin", "master").unwrap();
+        repo_b.merge_remote("origin", "master").unwrap();
+
+        // Node A: delete the binary file
+        repo_a.delete_file(bin_path, "delete binary").unwrap();
+        repo_a.push("origin", "master").unwrap();
+
+        // Node B: modify the binary file (edit wins in delete-vs-edit)
+        let new_content = b"MODIFIED_BINARY";
+        repo_b
+            .commit_binary_file(bin_path, new_content, "modify binary")
+            .unwrap();
+
+        let db_b = dir_b.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+        assert!(
+            report.conflicts_resolved > 0,
+            "should have resolved a conflict"
+        );
+        // In delete-vs-edit, edit wins. The file should still exist.
+        assert!(
+            dir_b.path().join(bin_path).exists(),
+            "reference/ file should survive delete-vs-edit (edit wins)"
+        );
+        assert_eq!(
+            report.resurrected, 1,
+            "should count as resurrected (delete-vs-edit), not binary LWW"
+        );
     }
 }
