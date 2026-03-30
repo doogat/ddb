@@ -888,6 +888,56 @@ if (-not $helpFail) {
 }
 pass "help unknown fails"
 
+# 40. binary asset LWW conflict resolution
+Write-Host "=== binary asset LWW ==="
+$BIN_REMOTE = New-TempDir
+$BIN_NODE1 = New-TempDir
+$BIN_NODE2 = New-TempDir
+git init --bare $BIN_REMOTE 2>$null | Out-Null
+
+Push-Location $BIN_NODE1
+ddb init . | Out-Null
+git remote add origin $BIN_REMOTE
+ddb register-node "BinNode1" | Out-Null
+$binId = ddb create --title "Binary test"
+New-Item -ItemType Directory -Force -Path "reference/test" | Out-Null
+[System.IO.File]::WriteAllBytes("$BIN_NODE1/reference/test/photo.bin", [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A))
+git add reference/test/photo.bin
+git commit -m "add binary asset" 2>$null | Out-Null
+git push -u origin master 2>$null | Out-Null
+
+git clone $BIN_REMOTE $BIN_NODE2 2>$null | Out-Null
+Push-Location $BIN_NODE2
+ddb reindex | Out-Null
+ddb register-node "BinNode2" | Out-Null
+Pop-Location
+
+# Node1: modify binary with higher HLC
+[System.IO.File]::WriteAllText("$BIN_NODE1/reference/test/photo.bin", "NODE1_WINS_CONTENT")
+git add reference/test/photo.bin
+git commit -m "node1 update binary`n`nddb-hlc: 9999999999999.0.BinNode1" 2>$null | Out-Null
+git push origin master 2>$null | Out-Null
+
+# Node2: modify same binary with lower HLC
+Push-Location $BIN_NODE2
+[System.IO.File]::WriteAllText("$BIN_NODE2/reference/test/photo.bin", "NODE2_LOSES_CONTENT")
+git add reference/test/photo.bin
+git commit -m "node2 update binary`n`nddb-hlc: 1000000000000.0.BinNode2" 2>$null | Out-Null
+
+$syncOut = ddb sync origin master
+if ($syncOut -notmatch "conflicts resolved: 1") { throw "expected 1 conflict resolved: $syncOut" }
+$resolved = [System.IO.File]::ReadAllText("$BIN_NODE2/reference/test/photo.bin")
+if ($resolved -ne "NODE1_WINS_CONTENT") { throw "LWW winner wrong: $resolved" }
+pass "binary asset LWW (higher HLC wins)"
+
+$mergeLog = git log --merges --oneline -1
+if ($mergeLog -notmatch "resolve merge") { throw "no merge commit found: $mergeLog" }
+pass "binary asset LWW (loser preserved in history)"
+Pop-Location
+Pop-Location
+
+Remove-Item -Recurse -Force $BIN_REMOTE, $BIN_NODE1, $BIN_NODE2
+
 # Return to original directory
 Set-Location $TMPDIR
 

@@ -780,4 +780,60 @@ FIX_OUT=$($DDB fix --migrate --verbose)
 echo "$FIX_OUT" | grep -q "zone-migrated"
 pass "zone migration"
 
+# 40. binary asset LWW conflict resolution
+echo "=== binary asset LWW ==="
+BIN_REMOTE="$(mktemp -d)"
+BIN_NODE1="$(mktemp -d)"
+BIN_NODE2="$(mktemp -d)"
+git init --bare "$BIN_REMOTE" >/dev/null 2>&1
+
+cd "$BIN_NODE1"
+$DDB init . >/dev/null
+git remote add origin "$BIN_REMOTE"
+$DDB register-node "BinNode1" >/dev/null
+# Create a doogat so the repo has content
+BIN_DDB_ID=$($DDB create --title "Binary test")
+# Create initial binary asset
+mkdir -p reference/test
+printf '\x89PNG\r\n' > reference/test/photo.bin
+git add reference/test/photo.bin
+git commit -m "add binary asset" >/dev/null
+git push -u origin master >/dev/null 2>&1
+
+# Clone to node2
+git clone "$BIN_REMOTE" "$BIN_NODE2" >/dev/null 2>&1
+cd "$BIN_NODE2"
+$DDB reindex >/dev/null
+$DDB register-node "BinNode2" >/dev/null
+
+# Node1: modify binary with higher HLC (later wall_ms)
+cd "$BIN_NODE1"
+printf 'NODE1_WINS_CONTENT' > reference/test/photo.bin
+git add reference/test/photo.bin
+git commit -m "node1 update binary
+
+ddb-hlc: 9999999999999.0.BinNode1" >/dev/null
+git push origin master >/dev/null 2>&1
+
+# Node2: modify same binary with lower HLC
+cd "$BIN_NODE2"
+printf 'NODE2_LOSES_CONTENT' > reference/test/photo.bin
+git add reference/test/photo.bin
+git commit -m "node2 update binary
+
+ddb-hlc: 1000000000000.0.BinNode2" >/dev/null
+
+# Sync node2 — should resolve conflict via LWW, node1 (higher HLC) wins
+SYNC_OUT=$($DDB sync origin master)
+echo "$SYNC_OUT" | grep -q "conflicts resolved: 1"
+RESOLVED=$(cat reference/test/photo.bin)
+[ "$RESOLVED" = "NODE1_WINS_CONTENT" ]
+pass "binary asset LWW (higher HLC wins)"
+
+# Verify a merge commit exists in recent history (loser preserved)
+git log --merges --oneline -1 | grep -q "resolve merge"
+pass "binary asset LWW (loser preserved in history)"
+
+rm -rf "$BIN_REMOTE" "$BIN_NODE1" "$BIN_NODE2"
+
 echo "=== all integration tests passed ==="
