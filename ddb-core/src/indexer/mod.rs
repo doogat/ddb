@@ -13,7 +13,7 @@ use crate::types::ParsedDoogat;
 
 impl From<rusqlite::Error> for DoogatError {
     fn from(e: rusqlite::Error) -> Self {
-        Self::Sql(e.to_string())
+        Self::Index(e.to_string())
     }
 }
 

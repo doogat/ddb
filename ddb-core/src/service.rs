@@ -661,7 +661,7 @@ impl DoogatService {
     pub fn install_bundled_type(&self, name: &str) -> Result<String> {
         let content =
             crate::bundled_types::get_bundled_type(name).ok_or_else(|| {
-                DoogatError::SqlEngine(format!(
+                DoogatError::BadRequest(format!(
                     "unknown bundled type \"{name}\". available: {:?}",
                     crate::bundled_types::list_bundled_types()
                 ))

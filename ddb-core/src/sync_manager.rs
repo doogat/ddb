@@ -323,7 +323,7 @@ impl<'a> SyncManager<'a> {
                     };
 
                     let oid = winner_oid.as_deref().ok_or_else(|| {
-                        crate::error::DoogatError::Git(format!(
+                        crate::error::DoogatError::Conflict(format!(
                             "binary conflict at {} missing blob OID for winner ({})",
                             conflict.path, winner
                         ))
