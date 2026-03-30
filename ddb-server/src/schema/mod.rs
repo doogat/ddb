@@ -1038,10 +1038,12 @@ pub fn build_schema(
         let order_by_input = crate::filter::build_order_by_input(&type_name, schema);
         let connection_type = crate::filter::build_connection_type(&type_name);
         let aggregate_type = crate::filter::build_aggregate_type(&type_name, schema);
+        let aggregate_group_type = crate::filter::build_aggregate_group_type(&type_name, schema);
         dynamic_inputs.push(where_input);
         dynamic_inputs.push(order_by_input);
         dynamic_types.push(connection_type);
         dynamic_types.push(aggregate_type);
+        dynamic_types.push(aggregate_group_type);
 
         // Add per-type query field
         let schema_clone = schema.clone();
@@ -1194,18 +1196,57 @@ pub fn build_schema(
                                 .map(|v| crate::filter::build_where_sql(&v, &schema_clone))
                                 .unwrap_or_else(crate::filter::WhereClause::empty);
 
-                            let (sql, names) =
-                                crate::filter::build_aggregate_sql(&table_name, &schema_clone, &wc);
-                            let row = pool
-                                .aggregate_query(sql, wc.params)
-                                .await
-                                .map_err(to_server_error)?;
-                            let val = crate::filter::aggregate_row_to_value(&row, &names);
-                            Ok(Some(FieldValue::owned_any(val)))
+                            let group_by = ctx
+                                .args
+                                .get("groupBy")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string())
+                                .filter(|col| {
+                                    schema_clone.columns.iter().any(|c| c.name == *col)
+                                });
+
+                            let (sql, names) = crate::filter::build_aggregate_sql_grouped(
+                                &table_name,
+                                &schema_clone,
+                                &wc,
+                                group_by.as_deref(),
+                            );
+
+                            if group_by.is_some() {
+                                let rows = pool
+                                    .aggregate_query_rows(sql, wc.params)
+                                    .await
+                                    .map_err(to_server_error)?;
+                                let groups: Vec<GqlValue> = rows
+                                    .iter()
+                                    .map(|row| {
+                                        crate::filter::aggregate_row_to_value(row, &names)
+                                    })
+                                    .collect();
+                                let mut val = IndexMap::new();
+                                val.insert(
+                                    Name::new("count"),
+                                    GqlValue::from(0i64),
+                                );
+                                val.insert(
+                                    Name::new("groups"),
+                                    GqlValue::List(groups),
+                                );
+                                Ok(Some(FieldValue::owned_any(GqlValue::Object(val))))
+                            } else {
+                                let row = pool
+                                    .aggregate_query(sql, wc.params)
+                                    .await
+                                    .map_err(to_server_error)?;
+                                let val =
+                                    crate::filter::aggregate_row_to_value(&row, &names);
+                                Ok(Some(FieldValue::owned_any(val)))
+                            }
                         })
                     },
                 )
-                .argument(InputValue::new("where", TypeRef::named(&where_type_name))),
+                .argument(InputValue::new("where", TypeRef::named(&where_type_name)))
+                .argument(InputValue::new("groupBy", TypeRef::named(TypeRef::STRING))),
             );
         }
     }

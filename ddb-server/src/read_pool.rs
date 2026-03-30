@@ -170,6 +170,15 @@ impl ReadPool {
             .await
     }
 
+    pub async fn aggregate_query_rows(
+        &self,
+        sql: String,
+        params: Vec<rusqlite::types::Value>,
+    ) -> Result<Vec<Vec<String>>> {
+        self.with_service(move |svc| svc.query_raw_with_params(&sql, &params))
+            .await
+    }
+
     // --- Discovery reads ---
 
     pub async fn unlinked_mentions(&self, id: String) -> Result<Vec<UnlinkedMention>> {

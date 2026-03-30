@@ -215,11 +215,9 @@ fn is_numeric(data_type: &str) -> bool {
 ///
 /// Always has `count: Int!`. For each numeric column, adds
 /// `min{Col}`, `max{Col}`, `sum{Col}`, `avg{Col}` as nullable Float fields.
-pub fn build_aggregate_type(type_name: &str, schema: &TableSchema) -> Object {
-    let mut obj = Object::new(format!("{type_name}Aggregate"));
-
+fn add_aggregate_fields(obj: Object, schema: &TableSchema) -> Object {
     // count: Int!
-    obj = obj.field(Field::new(
+    let mut obj = obj.field(Field::new(
         "count",
         TypeRef::named_nn(TypeRef::INT),
         |ctx| {
@@ -266,6 +264,55 @@ pub fn build_aggregate_type(type_name: &str, schema: &TableSchema) -> Object {
     obj
 }
 
+pub fn build_aggregate_group_type(type_name: &str, schema: &TableSchema) -> Object {
+    let group_name = format!("{type_name}AggregateGroup");
+    let mut obj = Object::new(&group_name);
+
+    // key: String!
+    obj = obj.field(Field::new(
+        "key",
+        TypeRef::named_nn(TypeRef::STRING),
+        |ctx| {
+            FieldFuture::new(async move {
+                let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                if let GqlValue::Object(map) = parent {
+                    if let Some(v) = map.get("key") {
+                        return Ok(Some(FieldValue::value(v.clone())));
+                    }
+                }
+                Ok(Some(FieldValue::value(GqlValue::from(""))))
+            })
+        },
+    ));
+
+    add_aggregate_fields(obj, schema)
+}
+
+pub fn build_aggregate_type(type_name: &str, schema: &TableSchema) -> Object {
+    let group_type_name = format!("{type_name}AggregateGroup");
+    let obj = Object::new(format!("{type_name}Aggregate"));
+    let obj = add_aggregate_fields(obj, schema);
+
+    // groups: [{Type}AggregateGroup!]
+    obj.field(Field::new(
+        "groups",
+        TypeRef::named_list_nn(&group_type_name),
+        |ctx| {
+            FieldFuture::new(async move {
+                let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                if let GqlValue::Object(map) = parent {
+                    if let Some(GqlValue::List(items)) = map.get("groups") {
+                        return Ok(Some(FieldValue::list(
+                            items.iter().map(|item| FieldValue::owned_any(item.clone())),
+                        )));
+                    }
+                }
+                Ok(None)
+            })
+        },
+    ))
+}
+
 /// Build the SQL for an aggregate query on a materialized table.
 ///
 /// Returns (sql, column_names) where column_names maps positionally
@@ -275,8 +322,26 @@ pub fn build_aggregate_sql(
     schema: &TableSchema,
     where_clause: &WhereClause,
 ) -> (String, Vec<String>) {
-    let mut selects = vec!["COUNT(*) AS count".to_string()];
-    let mut names = vec!["count".to_string()];
+    build_aggregate_sql_grouped(table_name, schema, where_clause, None)
+}
+
+pub fn build_aggregate_sql_grouped(
+    table_name: &str,
+    schema: &TableSchema,
+    where_clause: &WhereClause,
+    group_by: Option<&str>,
+) -> (String, Vec<String>) {
+    let mut selects = Vec::new();
+    let mut names = Vec::new();
+
+    if let Some(col) = group_by {
+        let escaped = col.replace('"', "\"\"");
+        selects.push(format!("\"{escaped}\" AS \"key\""));
+        names.push("key".to_string());
+    }
+
+    selects.push("COUNT(*) AS count".to_string());
+    names.push("count".to_string());
 
     for col in &schema.columns {
         if !is_numeric(&col.data_type) {
@@ -302,8 +367,16 @@ pub fn build_aggregate_sql(
         format!(" WHERE {}", where_clause.sql)
     };
 
+    let group_part = match group_by {
+        Some(col) => {
+            let escaped = col.replace('"', "\"\"");
+            format!(" GROUP BY \"{escaped}\"")
+        }
+        None => String::new(),
+    };
+
     let sql = format!(
-        "SELECT {} FROM \"{table_name}\"{where_part}",
+        "SELECT {} FROM \"{table_name}\"{where_part}{group_part}",
         selects.join(", ")
     );
 
