@@ -498,7 +498,18 @@ impl DoogatService {
     // ── Sync / Compact / Maintenance ────────────────────────────────────
 
     pub fn sync(&self, remote: &str, branch: &str) -> Result<SyncReport> {
-        let mut mgr = SyncManager::open(&self.repo)?;
+        let mut mgr = match SyncManager::open(&self.repo) {
+            Ok(m) => m,
+            Err(DoogatError::NotFound(_)) => {
+                let name = hostname::get()
+                    .map(|h| h.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| "unknown".to_string());
+                tracing::info!(node_name = %name, "auto-registering node for first sync");
+                self.register_node(&name)?;
+                SyncManager::open(&self.repo)?
+            }
+            Err(e) => return Err(e),
+        };
         mgr.sync(remote, branch, &self.index)
     }
 
