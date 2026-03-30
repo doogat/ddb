@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 50K query threshold tests (NFR-01/AC-19) validated and enabled in release builds and nightly CI
+- 50K repo growth threshold test (NFR-02, < 200MB/yr) added to nightly CI
 
 - **Breaking:** REFERENCES columns in typed GraphQL queries now resolve as nested objects instead of ID strings. Singular fields return the referenced typed object (or null), plural fields return `[TargetType!]!` (or empty list). Clients requesting REFERENCES fields as scalars must update to sub-selections (e.g., `category { id title }`)
 - Boolean values in materialized tables stored as `1`/`0` integers instead of `"true"`/`"false"` strings (requires `ddb reindex` after upgrade)

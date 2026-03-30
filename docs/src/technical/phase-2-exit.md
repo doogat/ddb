@@ -63,7 +63,7 @@ Phase 2 is complete for practical purposes. Core functionality (bundles, REST, N
 | Req | Metric | 5K target | 50K target | Status | Evidence |
 |-----|--------|-----------|------------|--------|----------|
 | NFR-01 | Query latency (indexed) | < 10 ms | < 50 ms | done (5K), not measured (50K) | 5K: FTS ~3.0ms, SQL ~6.1µs. Benches: `search.rs` (5K), `large_scale.rs` (50K). Thresholds: `query_thresholds.rs` (50K ignored). Docs: `performance.md`, `benchmarks.md` |
-| NFR-02 | Repository growth | < 50 MB/year | < 200 MB/year | done (5K), no test (50K) | 5K: 43.7 MB/yr without compaction, 1.2 MB/yr with. Bench: `growth.rs`. Threshold: `growth_thresholds.rs`. Docs: `storage-budget.md` |
+| NFR-02 | Repository growth | < 50 MB/year | < 200 MB/year | done (5K + 50K) | 5K: 43.7 MB/yr without compaction, 1.2 MB/yr with. 50K: threshold test in `growth_thresholds.rs`. Bench: `growth.rs`. Docs: `storage-budget.md` |
 | NFR-03 | Sync time (batch) | < 2 s | < 10 s | **fail** (5K: ~12.6s vs 2s target) | Bench: `sync.rs`. Threshold: `sync_thresholds.rs` (ignored). Docs: `performance.md` |
 
 ### Additional Phase 2 Roadmap Items
@@ -84,11 +84,11 @@ _Items that diverge from the initial spec. Each entry: what changed, why, replac
 
 | Req/Item | Deviation | Rationale | Replacement |
 |----------|-----------|-----------|-------------|
-| FR-33 | Delta export implemented; FFI exposes full export only | Delta path works with unit + smoke coverage. Mobile use case only needs full export for now | FFI delta export deferred until mobile clients need node-targeted sync |
+| ~~FR-33~~ | ~~Delta export implemented; FFI exposes full export only~~ Resolved | FFI `exportDeltaBundle` added with Swift and Kotlin tests | No action needed |
 | ~~FR-64a~~ | ~~Pre-compaction bundle backup not wired into compact pipeline~~ Resolved | Implemented: `backup_before_compact()` wired into `compact()` pipeline; CLI flags `--no-backup`, `--backup-path` | No action needed |
 | NFR-03 | Sync time 12.6s at 5K vs 2s target (6x over) | Git fetch+merge dominates. Optimization not yet attempted | Profile `SyncManager::sync` hot path. Likely needs shallow fetch or incremental approach. Formally deferred to Phase 3. Evidence: `sync_thresholds.rs` (ignored, annotated with current measurement) |
 | NFR-01 (50K) | Benchmarks exist but results not measured/recorded | 50K threshold tests are `#[ignore]`. Need dedicated run on representative hardware | Run `large_scale.rs` benchmarks, record in `performance.md` |
-| NFR-02 (50K) | No 50K growth benchmark | Only 5K measured. Linear extrapolation suggests ~8.7 MB/yr with compaction | Add `growth_50k` benchmark or document extrapolation as sufficient |
+| ~~NFR-02 (50K)~~ | ~~No 50K growth benchmark~~ Resolved | 50K growth threshold test added to `growth_thresholds.rs`, runs in nightly CI | No action needed |
 | Sparse index | Dropped entirely | DDB indexes all doogats — sparse checkout adds no value when full index is required | No replacement needed; architecture eliminates the use case |
 | fsmonitor | Deferred to Phase 3+ | Not supported in libgit2 or gitoxide; requires external watchman daemon | Phase 3 candidate when gitoxide adds support or DDB migrates git backend |
 | ~~Background maintenance~~ | ~~Deferred to Phase 3+~~ Resolved | Implemented: `maintenance.rs` with auto/manual modes, write-threshold triggers, 9 unit tests | No action needed |

@@ -7,7 +7,7 @@ Measured values for NFR/AC performance targets. All measurements taken on Darwin
 | Req | Target | Measured | Status |
 |-----|--------|----------|--------|
 | NFR-01 / AC-06 | Query < 10ms (5K) | FTS ~3ms, SQL ~6µs | PASS |
-| NFR-02 / AC-08 | Growth < 50MB/yr (5K) | < 50MB | PASS |
+| NFR-02 / AC-08 | Growth < 50MB/yr (5K), < 200MB/yr (50K) | PASS | PASS |
 | NFR-03 / AC-02 | Sync < 2s (5K, LAN) | ~12.6s | FAIL |
 | NFR-04 / AC-07 | Binary size profiled | 23.5MB | — |
 | AC-19 | Query < 50ms (50K) | not yet measured | — |
@@ -45,6 +45,7 @@ The local release script (`dev/bin/release`) runs the 5K release-profile thresho
 | Scale | Target | Status |
 |-------|--------|--------|
 | 5K doogats, 365 days × 10 edits/day | < 50MB | PASS |
+| 50K doogats, 365 days × 10 edits/day | < 200MB | PASS |
 
 Benchmark: `cargo bench -p ddb-core --bench growth -- --test`
 
