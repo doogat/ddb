@@ -846,22 +846,30 @@ impl<'a> SqlEngine<'a> {
         // Fast path: single-row WHERE id = '...'
         if let Ok(doogat_id) = extract_where_id(&del.selection) {
             let path = self.index.resolve_path(&doogat_id)?;
-            if let Some(ref mut buf) = self.txn {
-                buf.deletes.push(PendingDelete {
-                    path: path.clone(),
-                    doogat_id: doogat_id.clone(),
-                });
-            } else {
-                self.repo
-                    .delete_file(&path, &format!("delete from {table_name} {doogat_id}"))?;
-            }
             self.index.remove_doogat(&doogat_id)?;
             self.index.conn.execute(
                 &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
                 params![doogat_id],
             )?;
             self.cascade_junction_cleanup(&table_name, &doogat_id)?;
-            self.cascade_remove_dangling_references(&doogat_id, &path)?;
+            let ref_edits = self.cascade_remove_dangling_references(&doogat_id, &path)?;
+            if let Some(ref mut buf) = self.txn {
+                buf.deletes.push(PendingDelete {
+                    path: path.clone(),
+                    doogat_id: doogat_id.clone(),
+                });
+                buf.writes.extend(ref_edits);
+            } else {
+                let writes: Vec<(&str, &str)> = ref_edits
+                    .iter()
+                    .map(|w| (w.path.as_str(), w.content.as_str()))
+                    .collect();
+                self.repo.commit_batch(
+                    &writes,
+                    &[&path],
+                    &format!("delete from {table_name} {doogat_id}"),
+                )?;
+            }
             return Ok(SqlResult::Affected(1));
         }
 
@@ -871,19 +879,7 @@ impl<'a> SqlEngine<'a> {
             return Ok(SqlResult::Affected(0));
         }
 
-        if let Some(ref mut buf) = self.txn {
-            for (id, path) in &matches {
-                buf.deletes.push(PendingDelete {
-                    path: path.clone(),
-                    doogat_id: id.clone(),
-                });
-            }
-        } else {
-            let paths: Vec<&str> = matches.iter().map(|(_, p)| p.as_str()).collect();
-            self.repo
-                .delete_files(&paths, &format!("bulk delete from {table_name}"))?;
-        }
-
+        let mut all_ref_edits: Vec<PendingWrite> = Vec::new();
         for (id, path) in &matches {
             self.index.remove_doogat(id)?;
             self.index.conn.execute(
@@ -891,7 +887,28 @@ impl<'a> SqlEngine<'a> {
                 params![id],
             )?;
             self.cascade_junction_cleanup(&table_name, id)?;
-            self.cascade_remove_dangling_references(id, path)?;
+            all_ref_edits.extend(self.cascade_remove_dangling_references(id, path)?);
+        }
+
+        if let Some(ref mut buf) = self.txn {
+            for (id, path) in &matches {
+                buf.deletes.push(PendingDelete {
+                    path: path.clone(),
+                    doogat_id: id.clone(),
+                });
+            }
+            buf.writes.extend(all_ref_edits);
+        } else {
+            let delete_paths: Vec<&str> = matches.iter().map(|(_, p)| p.as_str()).collect();
+            let writes: Vec<(&str, &str)> = all_ref_edits
+                .iter()
+                .map(|w| (w.path.as_str(), w.content.as_str()))
+                .collect();
+            self.repo.commit_batch(
+                &writes,
+                &delete_paths,
+                &format!("bulk delete from {table_name}"),
+            )?;
         }
 
         Ok(SqlResult::Affected(matches.len()))
@@ -1289,12 +1306,13 @@ impl<'a> SqlEngine<'a> {
     }
 
     /// Remove wikilinks to `deleted_id` from the reference sections of all
-    /// doogats that link to it, re-index, and commit (or buffer in txn).
+    /// doogats that link to it.  Returns the edited files; caller is
+    /// responsible for committing or buffering them.
     fn cascade_remove_dangling_references(
         &mut self,
         deleted_id: &str,
         deleted_path: &str,
-    ) -> Result<()> {
+    ) -> Result<Vec<PendingWrite>> {
         // Find all sources linking to the deleted doogat by bare ID or path
         let mut sources: Vec<(String, String)> = Vec::new();
         for target in &[deleted_id, deleted_path] {
@@ -1314,6 +1332,7 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
+        let mut edits = Vec::new();
         for (source_id, source_path) in &sources {
             let content = self.read_content(source_path)?;
             let mut parsed = parser::parse(&content, source_path)?;
@@ -1342,7 +1361,7 @@ impl<'a> SqlEngine<'a> {
             let re_parsed = parser::parse(&new_content, source_path)?;
             self.index.index_doogat(&re_parsed)?;
 
-            // Load schema for rematerialization if typed
+            // Rematerialize if typed
             if let Some(ref stype) = re_parsed.meta.doogat_type {
                 if let Ok(schema) = self.load_schema(stype) {
                     let _ = self
@@ -1351,20 +1370,12 @@ impl<'a> SqlEngine<'a> {
                 }
             }
 
-            if let Some(ref mut buf) = self.txn {
-                buf.writes.push(PendingWrite {
-                    path: source_path.clone(),
-                    content: new_content,
-                });
-            } else {
-                self.repo.commit_file(
-                    source_path,
-                    &new_content,
-                    &format!("cascade remove refs to {deleted_id}"),
-                )?;
-            }
+            edits.push(PendingWrite {
+                path: source_path.clone(),
+                content: new_content,
+            });
         }
-        Ok(())
+        Ok(edits)
     }
 
     /// Check if `table_name` is a junction table (`{type}_{col}` where type is
@@ -5150,6 +5161,64 @@ mod tests {
         assert!(
             !bm2_content.contains(&format!("[[{cat_id}]]")),
             "wikilink to deleted category should be removed from bookmark 2"
+        );
+    }
+
+    #[test]
+    fn test_cascade_atomic_single_commit() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+            ))
+            .unwrap();
+
+        // Record head before delete
+        let head_before = repo.head_oid().unwrap();
+
+        // Delete the category (should cascade both junction + ref removal)
+        engine
+            .execute(&format!("DELETE FROM category WHERE id = '{cat_id}'"))
+            .unwrap();
+
+        let head_after = repo.head_oid().unwrap();
+
+        // Exactly one new commit should have been created (atomic batch)
+        assert_ne!(head_before, head_after, "delete should create a commit");
+
+        // Walk back one commit - should reach head_before
+        let commit = repo
+            .repo
+            .find_commit(git2::Oid::from_str(&head_after.0).unwrap())
+            .unwrap();
+        let parent_oid = commit.parent(0).unwrap().id().to_string();
+        assert_eq!(
+            parent_oid, head_before.0,
+            "cascade delete + ref removal should be one atomic commit"
         );
     }
 }

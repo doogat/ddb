@@ -249,6 +249,9 @@ impl DoogatService {
     }
 
     /// Delete a doogat by ID. Returns broken backlinks `(source_id, source_path)`.
+    ///
+    /// Cascade behavior: junction table rows and dangling wikilinks in
+    /// referencing files are cleaned up atomically in a single git commit.
     pub fn delete_doogat(&self, id: &str, message: &str) -> Result<Vec<(String, String)>> {
         self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
@@ -263,7 +266,9 @@ impl DoogatService {
                 |row| row.get(0),
             )
             .ok();
-        self.repo.delete_file(&path, message)?;
+        // Collect reference edits before deleting
+        let ref_edits = self.collect_ref_edits(id, &path, &broken)?;
+        // Update index
         self.index.remove_doogat(id)?;
         self.nosql_remove_doogat(id);
         // Cascade: remove junction table rows referencing deleted doogat
@@ -272,20 +277,24 @@ impl DoogatService {
                 self.index.cascade_junction_cleanup(&self.repo, dtype, id)?;
             }
         }
-        // Cascade: remove dangling wikilinks from referencing files
-        self.cascade_remove_dangling_references(id, &path, &broken)?;
+        // Atomic commit: delete + reference edits in one operation
+        let writes: Vec<(&str, &str)> = ref_edits
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        self.repo.commit_batch(&writes, &[&path], message)?;
         Ok(broken)
     }
 
-    /// Remove wikilinks to `deleted_id` from the reference sections of
-    /// backlinking doogats, re-index, and commit atomically.
-    fn cascade_remove_dangling_references(
+    /// Collect reference section edits needed when deleting a doogat.
+    /// Returns `(path, new_content)` pairs; does NOT commit.
+    fn collect_ref_edits(
         &self,
         deleted_id: &str,
         deleted_path: &str,
         backlinks: &[(String, String)],
-    ) -> Result<()> {
-        let mut edits: Vec<(String, String)> = Vec::new();
+    ) -> Result<Vec<(String, String)>> {
+        let mut edits = Vec::new();
         for (_source_id, source_path) in backlinks {
             let content = self.repo.read_file(source_path)?;
             let mut parsed = parser::parse(&content, source_path)?;
@@ -316,15 +325,7 @@ impl DoogatService {
 
             edits.push((source_path.clone(), new_content));
         }
-        if !edits.is_empty() {
-            let files: Vec<(&str, &str)> = edits
-                .iter()
-                .map(|(p, c)| (p.as_str(), c.as_str()))
-                .collect();
-            self.repo
-                .commit_files(&files, &format!("cascade remove refs to {deleted_id}"))?;
-        }
-        Ok(())
+        Ok(edits)
     }
 
     // ── Search ──────────────────────────────────────────────────────────
