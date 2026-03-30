@@ -25,7 +25,11 @@ pub struct SyncManager<'a> {
 4. Write UUID to `.git/ddb-node` (local-only, not tracked)
 5. Commit the `.nodes/` file
 
-The local `.git/ddb-node` file identifies which node this device is. It must exist for `SyncManager::open()` to work.
+The local `.git/ddb-node` file identifies which node this device is.
+
+### Auto-Registration
+
+When `DoogatService::sync()` is called and no node is registered (`.git/ddb-node` missing), the node is automatically registered using the system hostname. This removes the need to run `ddb register-node` before the first sync. Users can still call `ddb register-node <name>` explicitly to choose a custom name.
 
 ### Opening
 
