@@ -17,12 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Body hashtags now included in GraphQL doogat `tags` field (merged with frontmatter, deduplicated)
 - `columns` field in GraphQL `SqlResult` type returns column names alongside row data
 - Core doogat fields (`title`, `date`, `updated_at`) in materialized type tables, removing need for `JOIN doogats`
+- `DoogatError` now includes `Conflict`, `Sync`, `Index`, `BadRequest` variants for precise error discrimination; server returns 409 for conflicts, 400 for bad requests
 
 ### Changed
 
 - **Breaking:** REFERENCES columns in typed GraphQL queries now resolve as nested objects instead of ID strings. Singular fields return the referenced typed object (or null), plural fields return `[TargetType!]!` (or empty list). Clients requesting REFERENCES fields as scalars must update to sub-selections (e.g., `category { id title }`)
 - Boolean values in materialized tables stored as `1`/`0` integers instead of `"true"`/`"false"` strings (requires `ddb reindex` after upgrade)
-- `DoogatError` now includes `Conflict`, `Sync`, `Index`, `BadRequest` variants for precise error discrimination; server returns 409 for conflicts, 400 for bad requests
 
 ## [0.1.0] - 2026-03-26
 
