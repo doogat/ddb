@@ -4619,4 +4619,263 @@ mod tests {
             _ => panic!("expected Rows"),
         }
     }
+
+    #[test]
+    fn test_cascade_junction_single_delete() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Link bookmark -> category via junction
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+            ))
+            .unwrap();
+
+        // Verify junction row exists
+        let rows = index
+            .query_raw(&format!(
+                "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_id}'"
+            ))
+            .unwrap();
+        assert_eq!(rows[0][0], "1", "junction row should exist before delete");
+
+        // Delete the category
+        engine
+            .execute(&format!("DELETE FROM category WHERE id = '{cat_id}'"))
+            .unwrap();
+
+        // Junction row should be cascade-deleted
+        let rows = index
+            .query_raw(&format!(
+                "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_id}'"
+            ))
+            .unwrap();
+        assert_eq!(
+            rows[0][0], "0",
+            "junction row should be removed after deleting referenced category"
+        );
+    }
+
+    #[test]
+    fn test_cascade_junction_multi_parent() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm1_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://one.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm2_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://two.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Both bookmarks reference the same category
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm1_id}', '{cat_id}')"
+            ))
+            .unwrap();
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm2_id}', '{cat_id}')"
+            ))
+            .unwrap();
+
+        // Verify both junction rows exist
+        let rows = index
+            .query_raw(&format!(
+                "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_id}'"
+            ))
+            .unwrap();
+        assert_eq!(rows[0][0], "2", "both junction rows should exist before delete");
+
+        // Delete the category
+        engine
+            .execute(&format!("DELETE FROM category WHERE id = '{cat_id}'"))
+            .unwrap();
+
+        // Both junction rows should be removed
+        let rows = index
+            .query_raw(&format!(
+                "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_id}'"
+            ))
+            .unwrap();
+        assert_eq!(
+            rows[0][0], "0",
+            "all junction rows referencing deleted category should be removed"
+        );
+    }
+
+    #[test]
+    fn test_cascade_junction_selective() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_a = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let cat_b = match engine
+            .execute("INSERT INTO category (label) VALUES ('science')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Bookmark references both categories
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_a}')"
+            ))
+            .unwrap();
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_b}')"
+            ))
+            .unwrap();
+
+        // Delete only category A
+        engine
+            .execute(&format!("DELETE FROM category WHERE id = '{cat_a}'"))
+            .unwrap();
+
+        // Category A's junction row should be gone
+        let rows = index
+            .query_raw(&format!(
+                "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_a}'"
+            ))
+            .unwrap();
+        assert_eq!(
+            rows[0][0], "0",
+            "junction row for deleted category A should be removed"
+        );
+
+        // Category B's junction row should still exist
+        let rows = index
+            .query_raw(&format!(
+                "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_b}'"
+            ))
+            .unwrap();
+        assert_eq!(
+            rows[0][0], "1",
+            "junction row for category B should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_cascade_junction_no_false_positives() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE category (label VARCHAR(100))")
+            .unwrap();
+        engine
+            .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+            .unwrap();
+
+        let cat_id = match engine
+            .execute("INSERT INTO category (label) VALUES ('tech')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        let bm_id = match engine
+            .execute("INSERT INTO bookmark (url) VALUES ('https://example.com')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Link bookmark -> category
+        engine
+            .execute(&format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+            ))
+            .unwrap();
+
+        // Delete the bookmark (no REFERENCES point TO bookmark, only FROM it)
+        engine
+            .execute(&format!("DELETE FROM bookmark WHERE id = '{bm_id}'"))
+            .unwrap();
+
+        // Junction row should NOT be cascade-deleted by the bookmark delete,
+        // because the cascade targets the referenced type (category), not the
+        // referencing type (bookmark). The junction row cleanup for the
+        // "owner" side is a separate concern (write-through).
+        // However, the category_id junction entry should remain intact.
+        let rows = index
+            .query_raw(&format!(
+                "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_id}'"
+            ))
+            .unwrap();
+        assert_eq!(
+            rows[0][0], "1",
+            "junction row should not be affected when deleting a doogat of a type that is not referenced"
+        );
+    }
 }
