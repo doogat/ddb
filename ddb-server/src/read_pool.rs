@@ -58,6 +58,11 @@ impl ReadPool {
             .await
     }
 
+    pub async fn get_doogats_batch(&self, ids: Vec<String>) -> Result<Vec<ParsedDoogat>> {
+        self.with_service(move |svc| svc.get_doogats_batch(&ids))
+            .await
+    }
+
     pub async fn list_doogats(&self, filter: ListFilter) -> Result<Vec<ParsedDoogat>> {
         self.with_service(move |svc| svc.list_doogats_filtered(&filter))
             .await

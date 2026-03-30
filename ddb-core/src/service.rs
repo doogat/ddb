@@ -188,6 +188,22 @@ impl DoogatService {
         parser::parse(&content, &path)
     }
 
+    /// Batch-fetch multiple doogats by ID, skipping any that fail to resolve or parse.
+    pub fn get_doogats_batch(&self, ids: &[String]) -> Result<Vec<ParsedDoogat>> {
+        self.ensure_fresh()?;
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Ok(path) = self.index.resolve_path(id) {
+                if let Ok(content) = self.repo.read_file(&path) {
+                    if let Ok(parsed) = parser::parse(&content, &path) {
+                        results.push(parsed);
+                    }
+                }
+            }
+        }
+        Ok(results)
+    }
+
     /// Update a doogat, merging provided fields into the existing content.
     pub fn update_doogat(
         &self,
