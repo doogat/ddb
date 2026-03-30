@@ -140,7 +140,10 @@ pub fn doogat_to_json(z: &ParsedDoogat) -> DoogatJson {
 fn rest_error(e: DoogatError) -> (StatusCode, Json<ErrorBody>) {
     let status = match &e {
         DoogatError::NotFound(_) => StatusCode::NOT_FOUND,
-        DoogatError::Validation(_) | DoogatError::InvalidPath(_) => StatusCode::BAD_REQUEST,
+        DoogatError::Validation(_) | DoogatError::InvalidPath(_) | DoogatError::BadRequest(_) => {
+            StatusCode::BAD_REQUEST
+        }
+        DoogatError::Conflict(_) => StatusCode::CONFLICT,
         DoogatError::SqlEngine(_) => StatusCode::UNPROCESSABLE_ENTITY,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };

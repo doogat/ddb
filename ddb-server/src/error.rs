@@ -11,6 +11,8 @@ pub fn classify(e: &DoogatError) -> (&'static str, String) {
         DoogatError::NotFound(m) => ("NOT_FOUND", m.clone()),
         DoogatError::Validation(m) => ("VALIDATION_ERROR", m.clone()),
         DoogatError::InvalidPath(m) => ("INVALID_PATH", m.clone()),
+        DoogatError::Conflict(m) => ("CONFLICT", m.clone()),
+        DoogatError::BadRequest(m) => ("BAD_REQUEST", m.clone()),
         // SQL errors — redact raw details
         DoogatError::SqlEngine(_) => {
             tracing::error!(%e, "internal error");
@@ -25,6 +27,8 @@ pub fn classify(e: &DoogatError) -> (&'static str, String) {
         | DoogatError::Io(_)
         | DoogatError::Toml(_)
         | DoogatError::Parse(_)
+        | DoogatError::Sync(_)
+        | DoogatError::Index(_)
         | DoogatError::VersionMismatch { .. }
         | DoogatError::Redb(_) => {
             tracing::error!(%e, "internal error");
@@ -110,6 +114,34 @@ mod tests {
     #[test]
     fn redb_error_redacted() {
         let (code, msg) = classify(&DoogatError::Redb("corrupt table".into()));
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
+    fn conflict_passes_through() {
+        let (code, msg) = classify(&DoogatError::Conflict("merge conflict in ddb/123.md".into()));
+        assert_eq!(code, "CONFLICT");
+        assert_eq!(msg, "merge conflict in ddb/123.md");
+    }
+
+    #[test]
+    fn bad_request_passes_through() {
+        let (code, msg) = classify(&DoogatError::BadRequest("missing title".into()));
+        assert_eq!(code, "BAD_REQUEST");
+        assert_eq!(msg, "missing title");
+    }
+
+    #[test]
+    fn sync_error_redacted() {
+        let (code, msg) = classify(&DoogatError::Sync("remote fetch failed".into()));
+        assert_eq!(code, "INTERNAL_ERROR");
+        assert_eq!(msg, "internal error");
+    }
+
+    #[test]
+    fn index_error_redacted() {
+        let (code, msg) = classify(&DoogatError::Index("FTS5 corrupt".into()));
         assert_eq!(code, "INTERNAL_ERROR");
         assert_eq!(msg, "internal error");
     }
