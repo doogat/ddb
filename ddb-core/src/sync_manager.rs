@@ -309,6 +309,30 @@ impl<'a> SyncManager<'a> {
                     resolved.extend(self.cascade_resolve(normal, strategy.as_deref()));
                 }
 
+                // Binary reference conflicts: LWW via HLC (raw bytes, no string conversion)
+                for conflict in &binary_ref {
+                    let theirs_wins = match (&conflict.ours_hlc, &conflict.theirs_hlc) {
+                        (Some(ours_hlc), Some(theirs_hlc)) => theirs_hlc >= ours_hlc,
+                        _ => true,
+                    };
+                    let winner = if theirs_wins { "theirs" } else { "ours" };
+                    let winner_oid = if theirs_wins {
+                        &conflict.theirs_blob_oid
+                    } else {
+                        &conflict.ours_blob_oid
+                    };
+
+                    if let Some(oid) = winner_oid {
+                        let bytes = self.repo.read_blob(oid)?;
+                        let full_path = self.repo.path.join(&conflict.path);
+                        if let Some(parent) = full_path.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::write(&full_path, &bytes)?;
+                        tracing::info!(path = %conflict.path, winner, "binary_lww_resolved");
+                    }
+                }
+
                 // Tick HLC for merge commit
                 let hlc = self.tick_hlc();
                 let merge_msg =
@@ -319,7 +343,10 @@ impl<'a> SyncManager<'a> {
                     .iter()
                     .map(|r| (r.path.as_str(), r.content.as_str()))
                     .collect();
-                self.repo.commit_merge(&files, &merge_msg, &theirs_oid)?;
+                let binary_paths: Vec<&str> =
+                    binary_ref.iter().map(|c| c.path.as_str()).collect();
+                self.repo
+                    .commit_merge(&files, &binary_paths, &merge_msg, &theirs_oid)?;
 
                 // Persist frontmatter CRDT state for compaction
                 let commit_oid = self.repo.head_oid()?;
@@ -942,6 +969,7 @@ mod tests {
         let merge_hash = repo
             .commit_merge(
                 &[(path, merged_invalid)],
+                &[],
                 "synthetic clean merge",
                 &theirs_hash,
             )
@@ -1009,6 +1037,7 @@ mod tests {
         let merge_hash = repo
             .commit_merge(
                 &[(path, merged_invalid)],
+                &[],
                 "synthetic merge with invalid content",
                 &theirs_hash,
             )

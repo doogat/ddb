@@ -306,10 +306,14 @@ impl GitRepo {
     pub fn commit_merge(
         &self,
         files: &[(&str, &str)],
+        binary_paths: &[&str],
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash> {
         for (rel_path, _) in files {
+            validate_path(&self.path, rel_path)?;
+        }
+        for rel_path in binary_paths {
             validate_path(&self.path, rel_path)?;
         }
 
@@ -336,8 +340,11 @@ impl GitRepo {
         let diff =
             self.repo
                 .diff_tree_to_tree(Some(&ours_tree), Some(&theirs_tree), None)?;
-        let resolved_set: std::collections::HashSet<&str> =
-            files.iter().map(|(p, _)| *p).collect();
+        let resolved_set: std::collections::HashSet<&str> = files
+            .iter()
+            .map(|(p, _)| *p)
+            .chain(binary_paths.iter().copied())
+            .collect();
         let mut theirs_only = Vec::new();
         for delta in diff.deltas() {
             let dominated = matches!(
@@ -363,6 +370,9 @@ impl GitRepo {
         let mut index = self.repo.index()?;
         for (rel_path, _) in files {
             index.add_path(Path::new(rel_path))?;
+        }
+        for path in binary_paths {
+            index.add_path(Path::new(path))?;
         }
         for path in &theirs_only {
             index.add_path(Path::new(path))?;
