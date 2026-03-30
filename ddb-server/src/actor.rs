@@ -653,6 +653,7 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
             field_filters,
             limit,
             offset,
+            ..Default::default()
         })),
         ActorCommand::Search {
             query,
@@ -711,6 +712,7 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
             field_filters,
             limit: None,
             offset: None,
+            ..Default::default()
         })),
         ActorCommand::FilteredList(q) => ActorReply::DoogatList(svc.typed_filtered_list(&q)),
         ActorCommand::AggregateQuery { sql, params } => {

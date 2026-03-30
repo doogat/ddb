@@ -66,6 +66,8 @@ impl ReadPool {
         field_filters: Vec<(String, String)>,
         limit: Option<i64>,
         offset: Option<i64>,
+        sort_field: Option<String>,
+        sort_desc: Option<bool>,
     ) -> Result<Vec<ParsedDoogat>> {
         self.with_service(move |svc| {
             svc.list_doogats_filtered(&ListFilter {
@@ -75,6 +77,8 @@ impl ReadPool {
                 field_filters,
                 limit,
                 offset,
+                sort_field,
+                sort_desc,
             })
         })
         .await
@@ -123,6 +127,7 @@ impl ReadPool {
                 field_filters,
                 limit: None,
                 offset: None,
+                ..Default::default()
             })
         })
         .await

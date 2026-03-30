@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
 use ddb_core::error::DoogatError;
+use ddb_core::service::SORTABLE_COLUMNS;
 use ddb_core::types::{ParsedDoogat, SearchFilters, Value as DdbValue};
 
 // ── Query / body types ───────────────────────────────────────────
@@ -177,8 +178,23 @@ async fn list_doogats(
     let tag = raw_params.get("tag").cloned();
     let q = raw_params.get("q").cloned();
     let backlinks = raw_params.get("backlinks").cloned();
-    let sort = raw_params.get("sort").cloned();
-    let _ = sort; // reserved for future use
+    let (sort_field, sort_desc) = match raw_params.get("sort").map(|s| s.as_str()) {
+        Some(raw) => {
+            let (desc, field) = if let Some(f) = raw.strip_prefix('-') {
+                (true, f)
+            } else {
+                (false, raw)
+            };
+            if !SORTABLE_COLUMNS.contains(&field) {
+                return Err(rest_error(DoogatError::Validation(format!(
+                    "invalid sort field '{field}'; allowed: {}",
+                    SORTABLE_COLUMNS.join(", ")
+                ))));
+            }
+            (Some(field.to_string()), Some(desc))
+        }
+        None => (None, None),
+    };
     let page: i64 = raw_params
         .get("page")
         .and_then(|v| v.parse().ok())
@@ -254,6 +270,8 @@ async fn list_doogats(
             field_filters,
             Some(per_page),
             Some(offset),
+            sort_field,
+            sort_desc,
         )
         .await
         .map_err(rest_error)?;

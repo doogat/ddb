@@ -442,7 +442,7 @@ pub fn build_schema(
                     let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
                     let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
                     let doogats = pool
-                        .list_doogats(doogat_type, tag, backlinks_of, vec![], limit, offset)
+                        .list_doogats(doogat_type, tag, backlinks_of, vec![], limit, offset, None, None)
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::list(
