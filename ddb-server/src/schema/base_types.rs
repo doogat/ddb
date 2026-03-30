@@ -568,16 +568,18 @@ pub(crate) fn build_typed_object(
                             let pool = ctx.data::<crate::read_pool::ReadPool>()?;
                             let schemas = ctx.data::<TypeSchemaMap>()?;
                             let target_schema = schemas.0.get(&target_ref_name);
-                            let mut resolved = Vec::with_capacity(ids.len());
-                            for id in ids {
-                                if let Ok(z) = pool.get_doogat(id).await {
+                            let doogats = pool.get_doogats_batch(ids).await
+                                .map_err(crate::error::to_server_error)?;
+                            let resolved: Vec<FieldValue> = doogats
+                                .iter()
+                                .map(|z| {
                                     let val = match target_schema {
-                                        Some(ts) => typed_doogat_to_value(&z, ts),
-                                        None => doogat_to_value(&z),
+                                        Some(ts) => typed_doogat_to_value(z, ts),
+                                        None => doogat_to_value(z),
                                     };
-                                    resolved.push(FieldValue::owned_any(val));
-                                }
-                            }
+                                    FieldValue::owned_any(val)
+                                })
+                                .collect();
                             Ok(Some(FieldValue::list(resolved)))
                         })
                     },
