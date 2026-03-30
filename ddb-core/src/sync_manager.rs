@@ -247,12 +247,15 @@ impl<'a> SyncManager<'a> {
                 let count = conflicts.len();
                 tracing::info!(count, "merge_result: conflicts");
 
-                // Three-bucket partition
+                // Four-bucket partition
+                let mut binary_ref = Vec::new();
                 let mut delete_edit = Vec::new();
                 let mut add_add = Vec::new();
                 let mut normal = Vec::new();
                 for c in conflicts {
-                    if c.ours.is_empty() || c.theirs.is_empty() {
+                    if c.path.starts_with("reference/") {
+                        binary_ref.push(c);
+                    } else if c.ours.is_empty() || c.theirs.is_empty() {
                         delete_edit.push(c);
                     } else if c.ancestor.is_none() {
                         add_add.push(c);
