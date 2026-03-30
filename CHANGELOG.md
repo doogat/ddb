@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cascade delete: deleting a doogat automatically removes junction table rows referencing it and cleans up dangling wikilinks in other doogats' reference sections, all in a single atomic git commit
 - `distinct` argument on typed connection queries for deduplicating results by a column (e.g. `categories(distinct: "space")`)
 - `groupBy` argument on typed aggregate queries returning per-group counts and numeric aggregates (e.g. `linksAggregate(groupBy: "status") { groups { key count } }`)
 - `executeBatch` GraphQL mutation for atomic multi-statement SQL execution with per-statement results

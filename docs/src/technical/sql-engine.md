@@ -48,9 +48,9 @@ Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTE
 | `UPDATE foo SET count = 43 WHERE id = '...'` | Modifies the doogat and materialized row |
 | `UPDATE foo SET status = 'done' WHERE priority > 5` | Bulk update — resolves matching IDs via SQLite |
 | `UPDATE foo SET status = 'done'` | Updates all rows |
-| `DELETE FROM foo WHERE id = '...'` | Removes the doogat and materialized row |
-| `DELETE FROM foo WHERE status = 'done'` | Bulk delete — resolves matching IDs via SQLite |
-| `DELETE FROM foo` | Deletes all rows |
+| `DELETE FROM foo WHERE id = '...'` | Removes the doogat, cascades junction + reference cleanup |
+| `DELETE FROM foo WHERE status = 'done'` | Bulk delete with cascade — resolves matching IDs via SQLite |
+| `DELETE FROM foo` | Deletes all rows with cascade |
 
 ## Multi-Row INSERT
 
@@ -230,6 +230,16 @@ Removes the matching `- category:: [[id]]` line from the bookmark doogat's refer
 ### DROP CASCADE
 
 `DROP TABLE bookmark CASCADE` deletes all bookmark data doogats, the bookmark typedef, the materialized `bookmark` table, **and** all associated junction tables (`bookmark_category`, etc.).
+
+### Cascade on Data Delete
+
+When a doogat is deleted via `DELETE FROM`, two cascade operations happen automatically:
+
+1. **Junction cleanup**: all junction table rows where the deleted ID appears as a referenced target are removed. For example, deleting a category removes all `bookmark_category` rows where `category_id` matches.
+
+2. **Dangling reference removal**: all doogats that link to the deleted doogat via wikilinks in their reference section have those lines removed and are re-committed.
+
+Both operations, plus the original delete, land in a single atomic git commit. Inside a transaction, they are buffered and committed together with other transaction operations.
 
 ## Not Supported
 
