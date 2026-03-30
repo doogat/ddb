@@ -412,7 +412,7 @@ mutation {
 }
 ```
 
-If any statement fails, all are rolled back. DDL statements in the batch trigger a schema reload.
+Multi-statement batches run in an implicit transaction: if any DML fails, all are rolled back. DDL (CREATE/DROP/ALTER TABLE) commits immediately and is not rolled back on subsequent failures. DDL triggers a schema reload.
 
 ### CLI
 

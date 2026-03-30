@@ -399,7 +399,7 @@ mutation {
 }
 ```
 
-Returns one `SqlResult` per statement. If any statement fails, all are rolled back. DDL statements trigger schema reload.
+Returns one `SqlResult` per statement. Multi-statement batches run in an implicit transaction: if any DML statement fails, all are rolled back. DDL statements (CREATE/DROP/ALTER TABLE) commit to git immediately and are not covered by the implicit transaction. DDL statements trigger schema reload.
 
 ### Connection Wrapper
 
