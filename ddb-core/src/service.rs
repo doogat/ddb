@@ -1226,6 +1226,78 @@ mod tests {
     }
 
     #[test]
+    fn list_doogats_filtered_sort_by_title_asc() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("Charlie", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("Alpha", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("Bravo", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter {
+            sort_field: Some("title".into()),
+            sort_desc: Some(false),
+            ..Default::default()
+        };
+        let results = svc.list_doogats_filtered(&filter).unwrap();
+        let titles: Vec<_> = results.iter().map(|d| d.meta.title.as_deref().unwrap()).collect();
+        assert_eq!(titles, vec!["Alpha", "Bravo", "Charlie"]);
+    }
+
+    #[test]
+    fn list_doogats_filtered_sort_by_title_desc() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("Alpha", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("Charlie", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("Bravo", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter {
+            sort_field: Some("title".into()),
+            sort_desc: Some(true),
+            ..Default::default()
+        };
+        let results = svc.list_doogats_filtered(&filter).unwrap();
+        let titles: Vec<_> = results.iter().map(|d| d.meta.title.as_deref().unwrap()).collect();
+        assert_eq!(titles, vec!["Charlie", "Bravo", "Alpha"]);
+    }
+
+    #[test]
+    fn list_doogats_filtered_sort_default_is_id_desc() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("First", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("Second", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter::default();
+        let results = svc.list_doogats_filtered(&filter).unwrap();
+        // Default is id DESC, so newest (Second) comes first
+        assert_eq!(results[0].meta.title.as_deref(), Some("Second"));
+        assert_eq!(results[1].meta.title.as_deref(), Some("First"));
+    }
+
+    #[test]
+    fn list_doogats_filtered_sort_invalid_field_falls_back_to_default() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("A", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("B", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter {
+            sort_field: Some("nonexistent".into()),
+            ..Default::default()
+        };
+        let results = svc.list_doogats_filtered(&filter).unwrap();
+        // Falls back to id DESC
+        assert_eq!(results[0].meta.title.as_deref(), Some("B"));
+    }
+
+    #[test]
     fn aggregate_query_select_one() {
         let (_tmp, svc) = fresh_svc();
         let row = svc.aggregate_query("SELECT 1 AS n", &[]).unwrap();
