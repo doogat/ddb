@@ -37,6 +37,18 @@ pub enum DoogatError {
     #[error("sql engine: {0}")]
     SqlEngine(String),
 
+    #[error("conflict: {0}")]
+    Conflict(String),
+
+    #[error("sync: {0}")]
+    Sync(String),
+
+    #[error("index: {0}")]
+    Index(String),
+
+    #[error("bad request: {0}")]
+    BadRequest(String),
+
     #[error("version mismatch: repo format v{repo}, driver supports up to v{driver}")]
     VersionMismatch { repo: u32, driver: u32 },
 
