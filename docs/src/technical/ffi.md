@@ -240,7 +240,7 @@ Both scripts use the `vendored` feature to compile OpenSSL and libgit2 from sour
 
 - **Platform**: macOS 26.2, Apple Silicon (arm64), Xcode 26.3, Swift 6.2
 - **XCFramework slices**: ios-arm64, ios-arm64_x86_64-simulator, macos-arm64
-- **Tests**: 9/9 passed
+- **Tests**: 10/10 passed
   - `testCreateAndReadDoogat` — create doogat via FFI, reindex, read back, verify content
   - `testSearch` — create doogat, reindex, FTS5 search by title
   - `testListDoogats` — create doogat, verify it appears in listing
@@ -249,6 +249,7 @@ Both scripts use the `vendored` feature to compile OpenSSL and libgit2 from sour
   - `testTransactionCommitAndRollback` — begin/commit/rollback lifecycle, verify atomicity
   - `testListTypeSchemas` — create typedef, list schemas, verify columns and metadata
   - `testMultiTableTypedScenario` — 4-table PRD scenario: workspace/section/link/section-link, joined read, transactional update, type metadata bootstrap
+  - `testDeltaBundleExportImport` — register remote node with known_heads, export delta bundle, import into fresh repo, verify only post-sync content
   - `testBundleExportImport` — export full bundle, import into fresh repo, verify round-trip
 - **Note**: Tests use `DoogatDriver.createRepo()` and `registerNode()` directly (no CLI binary needed), making them compatible with iOS simulator targets. Verified on macOS slice of the XCFramework.
 
@@ -256,7 +257,7 @@ Both scripts use the `vendored` feature to compile OpenSSL and libgit2 from sour
 
 - **Platform**: macOS, JDK 25, Kotlin 2.3.10, JNA 5.16.0
 - **Native lib**: `libddb_core.dylib` (release build, host platform)
-- **Tests**: 9/9 passed
+- **Tests**: 10/10 passed
   - `testCreateAndReadDoogat` — create doogat via FFI, reindex, read back, verify content
   - `testSearch` — create doogat, reindex, FTS5 search by title
   - `testListDoogats` — create doogat, verify it appears in listing
@@ -265,5 +266,6 @@ Both scripts use the `vendored` feature to compile OpenSSL and libgit2 from sour
   - `testTransactionCommitAndRollback` — begin/commit/rollback lifecycle, verify atomicity
   - `testListTypeSchemas` — create typedef, list schemas, verify columns and metadata
   - `testMultiTableTypedScenario` — 4-table PRD scenario: workspace/section/link/section-link, joined read, transactional update, type metadata bootstrap
+  - `testDeltaBundleExportImport` — register remote node with known_heads, export delta bundle, import into fresh repo, verify only post-sync content
   - `testBundleExportImport` — export full bundle, import into fresh repo, verify round-trip
 - **Note**: Tests run on JVM host (not Android emulator). The native library and FFI bindings are verified via JNA on the host platform.
