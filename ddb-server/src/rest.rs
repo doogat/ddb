@@ -11,7 +11,7 @@ use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
 use ddb_core::error::DoogatError;
 use ddb_core::service::SORTABLE_COLUMNS;
-use ddb_core::types::{ParsedDoogat, SearchFilters, Value as DdbValue};
+use ddb_core::types::{ListFilter, ParsedDoogat, SearchFilters, Value as DdbValue};
 
 // ── Query / body types ───────────────────────────────────────────
 
@@ -263,16 +263,16 @@ async fn list_doogats(
     };
 
     let doogats = read_pool
-        .list_doogats(
+        .list_doogats(ListFilter {
             doogat_type,
             tag,
-            backlinks,
+            backlinks_of: backlinks,
             field_filters,
-            Some(per_page),
-            Some(offset),
+            limit: Some(per_page),
+            offset: Some(offset),
             sort_field,
             sort_desc,
-        )
+        })
         .await
         .map_err(rest_error)?;
 

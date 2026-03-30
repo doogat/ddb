@@ -370,16 +370,7 @@ impl DoogatService {
     /// Query doogats matching filter criteria, returning parsed doogats.
     pub fn list_doogats_filtered(&self, filter: &ListFilter) -> Result<Vec<ParsedDoogat>> {
         self.ensure_fresh()?;
-        let sql = build_filtered_sql(
-            filter.doogat_type.as_deref(),
-            filter.tag.as_deref(),
-            filter.backlinks_of.as_deref(),
-            &filter.field_filters,
-            filter.limit,
-            filter.offset,
-            filter.sort_field.as_deref(),
-            filter.sort_desc,
-        );
+        let sql = build_filtered_sql(filter);
         let rows = self.index.query_raw(&sql)?;
         let mut doogats = Vec::new();
         for row in rows {
@@ -398,16 +389,14 @@ impl DoogatService {
     /// Count doogats matching filter criteria.
     pub fn count_doogats_filtered(&self, filter: &ListFilter) -> Result<i64> {
         self.ensure_fresh()?;
-        let select_sql = build_filtered_sql(
-            filter.doogat_type.as_deref(),
-            filter.tag.as_deref(),
-            filter.backlinks_of.as_deref(),
-            &filter.field_filters,
-            None,
-            None,
-            None,
-            None,
-        );
+        let count_filter = ListFilter {
+            limit: None,
+            offset: None,
+            sort_field: None,
+            sort_desc: None,
+            ..filter.clone()
+        };
+        let select_sql = build_filtered_sql(&count_filter);
         let count_sql = format!("SELECT COUNT(*) FROM ({select_sql})");
         let rows = self.index.query_raw(&count_sql)?;
         let count = rows
@@ -953,34 +942,25 @@ impl DoogatService {
 pub const SORTABLE_COLUMNS: &[&str] = &["id", "title", "date", "type"];
 
 /// Build SQL query with filters for doogat listing.
-fn build_filtered_sql(
-    doogat_type: Option<&str>,
-    tag: Option<&str>,
-    backlinks_of: Option<&str>,
-    field_filters: &[(String, String)],
-    limit: Option<i64>,
-    offset: Option<i64>,
-    sort_field: Option<&str>,
-    sort_desc: Option<bool>,
-) -> String {
+fn build_filtered_sql(filter: &ListFilter) -> String {
     let mut conditions = Vec::new();
 
-    if let Some(t) = doogat_type {
+    if let Some(t) = filter.doogat_type.as_deref() {
         conditions.push(format!("z.type = '{}'", t.replace('\'', "''")));
     }
-    if let Some(t) = tag {
+    if let Some(t) = filter.tag.as_deref() {
         conditions.push(format!(
             "z.id IN (SELECT doogat_id FROM _ddb_tags WHERE tag = '{}')",
             t.replace('\'', "''")
         ));
     }
-    if let Some(bl) = backlinks_of {
+    if let Some(bl) = filter.backlinks_of.as_deref() {
         conditions.push(format!(
             "z.id IN (SELECT source_id FROM _ddb_links WHERE target_path = '{}')",
             bl.replace('\'', "''")
         ));
     }
-    for (key, value) in field_filters {
+    for (key, value) in &filter.field_filters {
         conditions.push(format!(
             "z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = '{}' AND value = '{}')",
             key.replace('\'', "''"),
@@ -994,16 +974,16 @@ fn build_filtered_sql(
         format!(" WHERE {}", conditions.join(" AND "))
     };
 
-    let limit_clause = match (limit, offset) {
+    let limit_clause = match (filter.limit, filter.offset) {
         (Some(l), Some(o)) => format!(" LIMIT {l} OFFSET {o}"),
         (Some(l), None) => format!(" LIMIT {l}"),
         (None, Some(o)) => format!(" LIMIT -1 OFFSET {o}"),
         (None, None) => String::new(),
     };
 
-    let order_clause = match sort_field.filter(|f| SORTABLE_COLUMNS.contains(f)) {
+    let order_clause = match filter.sort_field.as_deref().filter(|f| SORTABLE_COLUMNS.contains(f)) {
         Some(field) => {
-            let dir = if sort_desc.unwrap_or(false) { "DESC" } else { "ASC" };
+            let dir = if filter.sort_desc.unwrap_or(false) { "DESC" } else { "ASC" };
             format!(" ORDER BY z.{field} {dir}")
         }
         None => " ORDER BY z.id DESC".to_string(),

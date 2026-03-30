@@ -205,6 +205,48 @@ RESULT=$(rest "/doogats?field.priority=999")
 echo "$RESULT" | grep -q '"data":\[\]'
 pass "rest: field filter no match"
 
+# REST sort: create doogats with distinct titles for sorting
+SORT_A=$(curl -sf "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Charlie Sort","tags":["sorttest"]}' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+sleep 0.1
+SORT_B=$(curl -sf "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Alpha Sort","tags":["sorttest"]}' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+sleep 0.1
+SORT_C=$(curl -sf "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Bravo Sort","tags":["sorttest"]}' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+RESULT=$(rest "/doogats?tag=sorttest&sort=title")
+FIRST_TITLE=$(echo "$RESULT" | sed -n 's/.*"data":\[{[^}]*"title":"\([^"]*\)".*/\1/p')
+[ "$FIRST_TITLE" = "Alpha Sort" ]
+pass "rest: sort by title ascending"
+
+RESULT=$(rest "/doogats?tag=sorttest&sort=-title")
+FIRST_TITLE=$(echo "$RESULT" | sed -n 's/.*"data":\[{[^}]*"title":"\([^"]*\)".*/\1/p')
+[ "$FIRST_TITLE" = "Charlie Sort" ]
+pass "rest: sort by title descending"
+
+# sort=date returns results
+RESULT=$(rest "/doogats?sort=date")
+echo "$RESULT" | grep -q '"data":\['
+pass "rest: sort by date"
+
+# invalid sort field returns 400
+HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats?sort=invalid" \
+  -H "Authorization: Bearer $TOKEN")
+[ "$HTTP_CODE" = "400" ]
+pass "rest: sort invalid field returns 400"
+
+# Clean up sort test doogats
+curl -sf "$REST_URL/doogats/$SORT_A" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+curl -sf "$REST_URL/doogats/$SORT_B" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+curl -sf "$REST_URL/doogats/$SORT_C" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats/$REST_ID" \
   -H "Authorization: Bearer $TOKEN" -X DELETE)
 [ "$HTTP_CODE" = "204" ]

@@ -261,6 +261,46 @@ $resp = rest "/doogats?field.priority=999"
 if ((content $resp) -notmatch '"data":\[\]') { throw "field filter no-match failed" }
 pass "rest: field filter no match"
 
+# REST sort: create doogats with distinct titles
+$resp = rest "/doogats" "POST" '{"title":"Charlie Sort","tags":["sorttest"]}'
+$SORT_A = if ((content $resp) -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no id" }
+Start-Sleep -Milliseconds 100
+$resp = rest "/doogats" "POST" '{"title":"Alpha Sort","tags":["sorttest"]}'
+$SORT_B = if ((content $resp) -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no id" }
+Start-Sleep -Milliseconds 100
+$resp = rest "/doogats" "POST" '{"title":"Bravo Sort","tags":["sorttest"]}'
+$SORT_C = if ((content $resp) -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no id" }
+
+$resp = rest "/doogats?tag=sorttest&sort=title"
+$c = content $resp
+if ($c -notmatch '"data":\[\{[^}]*"title":"([^"]*)"') { throw "sort title parse" }
+if ($Matches[1] -ne "Alpha Sort") { throw "sort title asc: got $($Matches[1])" }
+pass "rest: sort by title ascending"
+
+$resp = rest "/doogats?tag=sorttest&sort=-title"
+$c = content $resp
+if ($c -notmatch '"data":\[\{[^}]*"title":"([^"]*)"') { throw "sort -title parse" }
+if ($Matches[1] -ne "Charlie Sort") { throw "sort title desc: got $($Matches[1])" }
+pass "rest: sort by title descending"
+
+$resp = rest "/doogats?sort=date"
+if ((content $resp) -notmatch '"data":\[') { throw "sort date failed" }
+pass "rest: sort by date"
+
+try {
+    Invoke-WebRequest -Uri "$REST_URL/doogats?sort=invalid" -Method GET `
+        -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction Stop
+    throw "should have been 400"
+} catch {
+    if ($_.Exception.Response.StatusCode.value__ -ne 400) { throw "expected 400, got $($_.Exception.Response.StatusCode.value__)" }
+}
+pass "rest: sort invalid field returns 400"
+
+# Clean up sort test doogats
+Invoke-WebRequest -Uri "$REST_URL/doogats/$SORT_A" -Method DELETE -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction SilentlyContinue | Out-Null
+Invoke-WebRequest -Uri "$REST_URL/doogats/$SORT_B" -Method DELETE -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction SilentlyContinue | Out-Null
+Invoke-WebRequest -Uri "$REST_URL/doogats/$SORT_C" -Method DELETE -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction SilentlyContinue | Out-Null
+
 $resp = Invoke-WebRequest -Uri "$REST_URL/doogats/$REST_ID" -Method DELETE `
     -Headers @{ Authorization = "Bearer $TOKEN" } -ErrorAction Stop
 if ($resp.StatusCode -ne 204) { throw "rest delete expected 204" }

@@ -58,30 +58,9 @@ impl ReadPool {
             .await
     }
 
-    pub async fn list_doogats(
-        &self,
-        doogat_type: Option<String>,
-        tag: Option<String>,
-        backlinks_of: Option<String>,
-        field_filters: Vec<(String, String)>,
-        limit: Option<i64>,
-        offset: Option<i64>,
-        sort_field: Option<String>,
-        sort_desc: Option<bool>,
-    ) -> Result<Vec<ParsedDoogat>> {
-        self.with_service(move |svc| {
-            svc.list_doogats_filtered(&ListFilter {
-                doogat_type,
-                tag,
-                backlinks_of,
-                field_filters,
-                limit,
-                offset,
-                sort_field,
-                sort_desc,
-            })
-        })
-        .await
+    pub async fn list_doogats(&self, filter: ListFilter) -> Result<Vec<ParsedDoogat>> {
+        self.with_service(move |svc| svc.list_doogats_filtered(&filter))
+            .await
     }
 
     pub async fn filtered_list(&self, q: TypedListQuery) -> Result<Vec<ParsedDoogat>> {

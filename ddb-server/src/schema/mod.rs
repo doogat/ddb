@@ -8,7 +8,7 @@ use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use futures_util::StreamExt;
 use indexmap::IndexMap;
-use ddb_core::types::{SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
+use ddb_core::types::{ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -442,7 +442,14 @@ pub fn build_schema(
                     let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
                     let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
                     let doogats = pool
-                        .list_doogats(doogat_type, tag, backlinks_of, vec![], limit, offset, None, None)
+                        .list_doogats(ListFilter {
+                            doogat_type,
+                            tag,
+                            backlinks_of,
+                            limit,
+                            offset,
+                            ..Default::default()
+                        })
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::list(
