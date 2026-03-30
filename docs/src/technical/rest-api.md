@@ -22,7 +22,7 @@ GET /rest/doogats
 | `tag` | string | Filter by tag |
 | `backlinks` | string | Filter by backlinks of doogat ID |
 | `q` | string | Full-text search (returns search hits instead of doogats) |
-| `sort` | string | Sort field (reserved for future use) |
+| `sort` | string | Sort field: `id`, `title`, `date`, `type`. Prefix with `-` for descending (e.g. `sort=-date`). Default: `date` descending. Invalid fields return 400. |
 | `field.{name}` | string | Filter by inline field value (repeatable for AND logic) |
 | `page` | int | Page number (default: 1) |
 | `per_page` | int | Results per page (default: 50, max: 200) |

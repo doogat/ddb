@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- REST list endpoint `sort` query parameter: `sort=field` (ascending), `sort=-field` (descending); supports id, title, date, type; defaults to date descending (FR-50)
 - Auto-register node on first sync using system hostname (FR-41)
 - Binary asset conflict resolution via LWW for `reference/` files during sync
 - Search query filters: `types`, `tag`, and `where` (field predicates) on GraphQL `search` query
