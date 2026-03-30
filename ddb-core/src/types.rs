@@ -1306,6 +1306,8 @@ pub struct ListFilter {
     pub field_filters: Vec<(String, String)>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    pub sort_field: Option<String>,
+    pub sort_desc: Option<bool>,
 }
 
 /// Query parameters for typed (materialized) table queries.
