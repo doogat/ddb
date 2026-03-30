@@ -267,7 +267,7 @@ impl DoogatService {
             )
             .ok();
         // Collect reference edits before deleting
-        let ref_edits = self.collect_ref_edits(id, &path, &broken)?;
+        let ref_edits = self.collect_ref_edits(id, &path)?;
         // Update index
         self.index.remove_doogat(id)?;
         self.nosql_remove_doogat(id);
@@ -292,10 +292,10 @@ impl DoogatService {
         &self,
         deleted_id: &str,
         deleted_path: &str,
-        backlinks: &[(String, String)],
     ) -> Result<Vec<(String, String)>> {
+        let sources = self.index.backlinks_by_target(deleted_id, deleted_path)?;
         let mut edits = Vec::new();
-        for (_source_id, source_path) in backlinks {
+        for (source_id, source_path) in &sources {
             let content = self.repo.read_file(source_path)?;
             let mut parsed = parser::parse(&content, source_path)?;
 
@@ -319,11 +319,18 @@ impl DoogatService {
             parsed.reference_section = new_section;
             let new_content = parser::serialize(&parsed);
 
-            // Re-index
+            // Re-index and rematerialize
             let re_parsed = parser::parse(&new_content, source_path)?;
             self.index.index_doogat(&re_parsed)?;
+            if let Some(ref stype) = re_parsed.meta.doogat_type {
+                let schemas = self.index.load_all_typedefs(&self.repo);
+                if let Some(schema) = schemas.get(stype.as_str()) {
+                    self.index
+                        .materialize_single(schema, source_id, &re_parsed)?;
+                }
+            }
 
-            edits.push((source_path.clone(), new_content));
+            edits.push((source_path.to_string(), new_content));
         }
         Ok(edits)
     }

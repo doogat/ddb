@@ -38,6 +38,33 @@ impl Index {
         Ok(out)
     }
 
+    /// Find all doogats linking to a target by both bare ID and file path.
+    /// Returns deduplicated `(source_id, source_path)` pairs.
+    pub fn backlinks_by_target(
+        &self,
+        target_id: &str,
+        target_path: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let mut out = Vec::new();
+        for target in &[target_id, target_path] {
+            let mut stmt = self.conn.prepare(
+                "SELECT DISTINCT l.source_id, z.path \
+                 FROM _ddb_links l JOIN doogats z ON l.source_id = z.id \
+                 WHERE l.target_path = ?1",
+            )?;
+            let rows = stmt.query_map(params![target], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (id, path) = row?;
+                if !out.iter().any(|(sid, _): &(String, String)| sid == &id) {
+                    out.push((id, path));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Return (id, title) pairs of doogats with `resurrected: true` frontmatter.
     pub fn resurrected_doogats(&self) -> Result<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare(

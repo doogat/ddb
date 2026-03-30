@@ -1313,24 +1313,7 @@ impl<'a> SqlEngine<'a> {
         deleted_id: &str,
         deleted_path: &str,
     ) -> Result<Vec<PendingWrite>> {
-        // Find all sources linking to the deleted doogat by bare ID or path
-        let mut sources: Vec<(String, String)> = Vec::new();
-        for target in &[deleted_id, deleted_path] {
-            let mut stmt = self.index.conn.prepare(
-                "SELECT DISTINCT l.source_id, z.path \
-                 FROM _ddb_links l JOIN doogats z ON l.source_id = z.id \
-                 WHERE l.target_path = ?1",
-            )?;
-            let rows = stmt.query_map(params![target], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            for row in rows {
-                let (id, path) = row?;
-                if !sources.iter().any(|(sid, _)| sid == &id) {
-                    sources.push((id, path));
-                }
-            }
-        }
+        let sources = self.index.backlinks_by_target(deleted_id, deleted_path)?;
 
         let mut edits = Vec::new();
         for (source_id, source_path) in &sources {
