@@ -55,8 +55,8 @@ jobs:
         run: |
           git config --global user.email "ci@ddb.dev"
           git config --global user.name "Doogat DB CI"
-      - name: Query thresholds
-        run: cargo test --release -p ddb-core --test query_thresholds nfr01_
+      - name: Query thresholds (5K + 50K)
+        run: cargo test --release -p ddb-core --test query_thresholds
       - name: Growth thresholds
         run: cargo test --release -p ddb-core --test growth_thresholds nfr02_
       - name: Sync thresholds
