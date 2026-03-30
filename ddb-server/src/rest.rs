@@ -181,9 +181,9 @@ async fn list_doogats(
     let (sort_field, sort_desc) = match raw_params.get("sort").map(|s| s.as_str()) {
         Some(raw) => {
             let (desc, field) = if let Some(f) = raw.strip_prefix('-') {
-                (true, f)
+                (Some(true), f)
             } else {
-                (false, raw)
+                (None, raw)
             };
             if !SORTABLE_COLUMNS.contains(&field) {
                 return Err(rest_error(DoogatError::Validation(format!(
@@ -191,7 +191,7 @@ async fn list_doogats(
                     SORTABLE_COLUMNS.join(", ")
                 ))));
             }
-            (Some(field.to_string()), Some(desc))
+            (Some(field.to_string()), desc)
         }
         None => (None, None),
     };
