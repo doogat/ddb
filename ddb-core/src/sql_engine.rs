@@ -861,6 +861,7 @@ impl<'a> SqlEngine<'a> {
                 params![doogat_id],
             )?;
             self.cascade_junction_cleanup(&table_name, &doogat_id)?;
+            self.cascade_remove_dangling_references(&doogat_id, &path)?;
             return Ok(SqlResult::Affected(1));
         }
 
@@ -883,13 +884,14 @@ impl<'a> SqlEngine<'a> {
                 .delete_files(&paths, &format!("bulk delete from {table_name}"))?;
         }
 
-        for (id, _) in &matches {
+        for (id, path) in &matches {
             self.index.remove_doogat(id)?;
             self.index.conn.execute(
                 &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
                 params![id],
             )?;
             self.cascade_junction_cleanup(&table_name, id)?;
+            self.cascade_remove_dangling_references(id, path)?;
         }
 
         Ok(SqlResult::Affected(matches.len()))
@@ -1284,6 +1286,85 @@ impl<'a> SqlEngine<'a> {
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
         self.index
             .cascade_junction_cleanup(self.repo, target_type, deleted_id)
+    }
+
+    /// Remove wikilinks to `deleted_id` from the reference sections of all
+    /// doogats that link to it, re-index, and commit (or buffer in txn).
+    fn cascade_remove_dangling_references(
+        &mut self,
+        deleted_id: &str,
+        deleted_path: &str,
+    ) -> Result<()> {
+        // Find all sources linking to the deleted doogat by bare ID or path
+        let mut sources: Vec<(String, String)> = Vec::new();
+        for target in &[deleted_id, deleted_path] {
+            let mut stmt = self.index.conn.prepare(
+                "SELECT DISTINCT l.source_id, z.path \
+                 FROM _ddb_links l JOIN doogats z ON l.source_id = z.id \
+                 WHERE l.target_path = ?1",
+            )?;
+            let rows = stmt.query_map(params![target], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (id, path) = row?;
+                if !sources.iter().any(|(sid, _)| sid == &id) {
+                    sources.push((id, path));
+                }
+            }
+        }
+
+        for (source_id, source_path) in &sources {
+            let content = self.read_content(source_path)?;
+            let mut parsed = parser::parse(&content, source_path)?;
+
+            let old_section = parsed.reference_section.clone();
+            let new_lines: Vec<&str> = old_section
+                .lines()
+                .filter(|line| {
+                    !line.contains(&format!("[[{deleted_id}]]"))
+                        && !line.contains(&format!("[[{deleted_path}]]"))
+                })
+                .collect();
+            let new_section = if new_lines.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", new_lines.join("\n"))
+            };
+
+            if new_section == old_section {
+                continue;
+            }
+            parsed.reference_section = new_section;
+            let new_content = parser::serialize(&parsed);
+
+            // Re-index
+            let re_parsed = parser::parse(&new_content, source_path)?;
+            self.index.index_doogat(&re_parsed)?;
+
+            // Load schema for rematerialization if typed
+            if let Some(ref stype) = re_parsed.meta.doogat_type {
+                if let Ok(schema) = self.load_schema(stype) {
+                    let _ = self
+                        .index
+                        .materialize_single(&schema, source_id, &re_parsed);
+                }
+            }
+
+            if let Some(ref mut buf) = self.txn {
+                buf.writes.push(PendingWrite {
+                    path: source_path.clone(),
+                    content: new_content,
+                });
+            } else {
+                self.repo.commit_file(
+                    source_path,
+                    &new_content,
+                    &format!("cascade remove refs to {deleted_id}"),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Check if `table_name` is a junction table (`{type}_{col}` where type is

@@ -272,7 +272,59 @@ impl DoogatService {
                 self.index.cascade_junction_cleanup(&self.repo, dtype, id)?;
             }
         }
+        // Cascade: remove dangling wikilinks from referencing files
+        self.cascade_remove_dangling_references(id, &path, &broken)?;
         Ok(broken)
+    }
+
+    /// Remove wikilinks to `deleted_id` from the reference sections of
+    /// backlinking doogats, re-index, and commit atomically.
+    fn cascade_remove_dangling_references(
+        &self,
+        deleted_id: &str,
+        deleted_path: &str,
+        backlinks: &[(String, String)],
+    ) -> Result<()> {
+        let mut edits: Vec<(String, String)> = Vec::new();
+        for (_source_id, source_path) in backlinks {
+            let content = self.repo.read_file(source_path)?;
+            let mut parsed = parser::parse(&content, source_path)?;
+
+            let old_section = parsed.reference_section.clone();
+            let new_lines: Vec<&str> = old_section
+                .lines()
+                .filter(|line| {
+                    !line.contains(&format!("[[{deleted_id}]]"))
+                        && !line.contains(&format!("[[{deleted_path}]]"))
+                })
+                .collect();
+            let new_section = if new_lines.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", new_lines.join("\n"))
+            };
+
+            if new_section == old_section {
+                continue;
+            }
+            parsed.reference_section = new_section;
+            let new_content = parser::serialize(&parsed);
+
+            // Re-index
+            let re_parsed = parser::parse(&new_content, source_path)?;
+            self.index.index_doogat(&re_parsed)?;
+
+            edits.push((source_path.clone(), new_content));
+        }
+        if !edits.is_empty() {
+            let files: Vec<(&str, &str)> = edits
+                .iter()
+                .map(|(p, c)| (p.as_str(), c.as_str()))
+                .collect();
+            self.repo
+                .commit_files(&files, &format!("cascade remove refs to {deleted_id}"))?;
+        }
+        Ok(())
     }
 
     // ── Search ──────────────────────────────────────────────────────────
