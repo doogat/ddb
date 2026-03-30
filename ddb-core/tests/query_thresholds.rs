@@ -106,9 +106,11 @@ fn nfr01_sql_query_under_10ms_at_5k() {
 }
 
 /// AC-19: query < 50ms at 50K doogats. Long setup (~minutes).
-/// Run with: cargo test --release --test query_thresholds -- --ignored
 #[test]
-#[ignore = "50K setup takes minutes — run explicitly"]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "50K thresholds require --release; setup takes minutes"
+)]
 fn ac19_fts_query_under_50ms_at_50k() {
     let (_dir, index) = setup(DOOGAT_COUNT_50K);
     let ms = median_ms(|| {
@@ -121,7 +123,10 @@ fn ac19_fts_query_under_50ms_at_50k() {
 }
 
 #[test]
-#[ignore = "50K setup takes minutes — run explicitly"]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "50K thresholds require --release; setup takes minutes"
+)]
 fn ac19_sql_query_under_50ms_at_50k() {
     let (_dir, index) = setup(DOOGAT_COUNT_50K);
     let ms = median_ms(|| {
