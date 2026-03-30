@@ -1223,10 +1223,19 @@ pub fn build_schema(
                                         crate::filter::aggregate_row_to_value(row, &names)
                                     })
                                     .collect();
+                                // Sum group counts for top-level count
+                                let total_count: i64 = groups.iter().map(|g| {
+                                    if let GqlValue::Object(map) = g {
+                                        if let Some(GqlValue::Number(n)) = map.get("count") {
+                                            return n.as_i64().unwrap_or(0);
+                                        }
+                                    }
+                                    0
+                                }).sum();
                                 let mut val = IndexMap::new();
                                 val.insert(
                                     Name::new("count"),
-                                    GqlValue::from(0i64),
+                                    GqlValue::from(total_count),
                                 );
                                 val.insert(
                                     Name::new("groups"),
