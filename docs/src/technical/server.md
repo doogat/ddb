@@ -37,7 +37,7 @@ The `sql` query field uses `sqlparser` to classify queries: pure `SELECT` statem
 
 Both the server and embedded (`DoogatDriver`) paths delegate typed SQL execution to the same `SqlEngine` in `ddb-core`. The server actor constructs `SqlEngine::new(index, repo)` per command; `DoogatDriver` does the same per `execute_sql` call. This ensures identical semantics for single statements: DDL creates typedef doogats via Git, DML reads/writes Git-backed doogats.
 
-**Transaction difference**: The embedded path (`DoogatDriver`) supports multi-statement transactions via `begin_transaction`/`commit_transaction`/`rollback_transaction`, which suspend and resume a `TransactionBuffer` across calls. The server path creates a fresh `SqlEngine` per `executeSql` command, so BEGIN/COMMIT/ROLLBACK cannot span multiple GraphQL or pgwire calls — each statement executes atomically in isolation. Multi-statement transactions are an embedded-only capability.
+**Transaction difference**: The embedded path (`DoogatDriver`) supports multi-statement transactions via `begin_transaction`/`commit_transaction`/`rollback_transaction`, which suspend and resume a `TransactionBuffer` across calls. The server path creates a fresh `SqlEngine` per `executeSql` command, so BEGIN/COMMIT/ROLLBACK cannot span multiple GraphQL calls. For atomic multi-statement execution over GraphQL, use `executeBatch(statements: [...])` which joins statements and executes them through the service's batch path.
 
 See [FFI Bindings](./ffi.md) for the embedded side of this contract.
 
@@ -175,6 +175,7 @@ type Mutation {
   updateDoogat(input: UpdateDoogatInput!): Doogat!
   deleteDoogat(id: ID!): Boolean!
   executeSql(sql: String!): SqlResult!
+  executeBatch(statements: [String!]!): [SqlResult!]!
   attachFile(input: AttachFileInput!): Attachment!
   detachFile(doogatId: ID!, filename: String!): Boolean!
   sync(remote: String, branch: String): SyncResult!
@@ -275,8 +276,9 @@ For each `_typedef` doogat (e.g. "project"), the server generates:
 - A `{Type}Where` input for field-level filtering
 - A `{Type}OrderBy` input for sorting
 - A `{Type}Aggregate` type for aggregate queries
-- A per-type query: `projects(where: ProjectWhere, orderBy: ProjectOrderBy, tag: String, limit: Int, offset: Int): ProjectConnection!`
-- A per-type aggregate query: `projectsAggregate(where: ProjectWhere): ProjectAggregate!`
+- A `{Type}AggregateGroup` type for grouped aggregate results
+- A per-type query: `projects(where: ProjectWhere, orderBy: ProjectOrderBy, tag: String, limit: Int, offset: Int, distinct: String): ProjectConnection!`
+- A per-type aggregate query: `projectsAggregate(where: ProjectWhere, groupBy: String): ProjectAggregate!`
 
 Column type mapping:
 
@@ -350,9 +352,54 @@ Per-type aggregate queries return `count` plus per-numeric-column `min`/`max`/`a
 ```graphql
 { projectsAggregate(where: { status: { eq: "active" } }) {
     count
-    priority { min max avg sum }
+    minPriority maxPriority avgPriority sumPriority
   } }
 ```
+
+Use `groupBy` for per-group aggregates:
+
+```graphql
+{ projectsAggregate(groupBy: "status") {
+    groups {
+      key       # the distinct group value
+      count
+      minPriority maxPriority
+    }
+  } }
+```
+
+Without `groupBy`, the top-level `count` and numeric fields return a single aggregate row. With `groupBy`, use the `groups` field. The column name must exist in the type schema.
+
+### Distinct
+
+Deduplicate typed query results by a column. Useful for dropdown population:
+
+```graphql
+{ projects(distinct: "status") {
+    items { status }
+    totalCount          # reflects deduplicated count
+  } }
+```
+
+When `distinct` is set, results are grouped by the specified column and one representative row per unique value is returned. `totalCount` uses `COUNT(DISTINCT col)`. The column name must exist in the type schema (unknown columns are silently ignored).
+
+### Batch Mutations
+
+Execute multiple SQL statements atomically:
+
+```graphql
+mutation {
+  executeBatch(statements: [
+    "INSERT INTO project (title) VALUES ('P1')",
+    "INSERT INTO project (title) VALUES ('P2')"
+  ]) {
+    message
+    affected
+  }
+}
+```
+
+Returns one `SqlResult` per statement. If any statement fails, all are rolled back. DDL statements trigger schema reload.
 
 ### Connection Wrapper
 
@@ -365,7 +412,7 @@ type ProjectConnection {
 }
 ```
 
-`totalCount` reflects the total matching rows (respecting `where` filters but ignoring `limit`/`offset`), enabling pagination UI.
+`totalCount` reflects the total matching rows (respecting `where` and `distinct` filters but ignoring `limit`/`offset`), enabling pagination UI.
 
 ### Hot Schema Reload
 

@@ -347,6 +347,73 @@ Materialized type tables include `title`, `date`, and `updated_at` columns autom
 
 Boolean columns are stored as `1`/`0` integers. Use `WHERE pinned = 1` (not `WHERE pinned = 'true'`). If upgrading from a previous version, run `ddb reindex` to convert existing `"true"`/`"false"` strings.
 
+#### Distinct values
+
+Deduplicate typed query results by a column. Useful for populating dropdowns:
+
+```graphql
+query {
+  categories(distinct: "space") {
+    items { space }
+    totalCount          # reflects deduplicated count
+  }
+}
+```
+
+Combine with `where` to filter before deduplication:
+
+```graphql
+query {
+  bookmarks(distinct: "category", where: { pinned: { eq: 1 } }) {
+    items { category { name } }
+    totalCount
+  }
+}
+```
+
+#### Grouped aggregates
+
+Get per-group counts and numeric aggregates with `groupBy`:
+
+```graphql
+query {
+  bookmarksAggregate(groupBy: "status") {
+    groups {
+      key         # the group value (e.g. "active", "archived")
+      count
+      minPriority
+      maxPriority
+    }
+  }
+}
+```
+
+Without `groupBy`, the aggregate query returns a single row as before:
+
+```graphql
+query {
+  bookmarksAggregate { count }   # total count, no grouping
+}
+```
+
+#### Batch mutations
+
+Execute multiple SQL statements atomically in one call:
+
+```graphql
+mutation {
+  executeBatch(statements: [
+    "INSERT INTO bookmark (title, url) VALUES ('Link 1', 'https://one.com')",
+    "INSERT INTO bookmark (title, url) VALUES ('Link 2', 'https://two.com')"
+  ]) {
+    message
+    affected
+  }
+}
+```
+
+If any statement fails, all are rolled back. DDL statements in the batch trigger a schema reload.
+
 ### CLI
 
 ```bash

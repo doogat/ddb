@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `distinct` argument on typed connection queries for deduplicating results by a column (e.g. `categories(distinct: "space")`)
+- `groupBy` argument on typed aggregate queries returning per-group counts and numeric aggregates (e.g. `linksAggregate(groupBy: "status") { groups { key count } }`)
+- `executeBatch` GraphQL mutation for atomic multi-statement SQL execution with per-statement results
 - REST list endpoint `sort` query parameter: `sort=-field` for descending; supports id, title, date, type; date/id default descending, title/type default ascending; omitting sort defaults to date descending (FR-50)
 - Auto-register node on first sync using system hostname (FR-41)
 - Binary asset conflict resolution via LWW for `reference/` files during sync
