@@ -459,5 +459,24 @@ ddb query "DROP TABLE cdbookmark CASCADE" | Out-Null
 ddb query "DROP TABLE cdcategory CASCADE" | Out-Null
 pass "cascade delete"
 
+# 18. cascade delete via ddb delete (service path)
+ddb query "CREATE TABLE cdcat2 (label VARCHAR(100))" | Out-Null
+ddb query "CREATE TABLE cdbm2 (url TEXT, cdcat2 TEXT REFERENCES cdcat2)" | Out-Null
+$CAT2_ID = ddb query "INSERT INTO cdcat2 (label) VALUES ('svc')"
+Start-Sleep -Seconds 1
+$BM2_ID = ddb query "INSERT INTO cdbm2 (url) VALUES ('https://svc.example.com')"
+ddb query "INSERT INTO cdbm2_cdcat2 (cdbm2_id, cdcat2_id) VALUES ('$BM2_ID', '$CAT2_ID')" | Out-Null
+# Delete via ddb delete (service path)
+ddb delete $CAT2_ID 2>$null
+# Junction row should be gone
+$output = ddb query "SELECT COUNT(*) FROM cdbm2_cdcat2 WHERE cdcat2_id = '$CAT2_ID'"
+if ($output -notmatch "0") { throw "junction row not cascaded (service path): $output" }
+# Wikilink removed from bookmark
+$output = ddb read $BM2_ID
+if ($output -match "\[\[$CAT2_ID\]\]") { throw "wikilink to deleted category still present (service path)" }
+ddb query "DROP TABLE cdbm2 CASCADE" | Out-Null
+ddb query "DROP TABLE cdcat2 CASCADE" | Out-Null
+pass "cascade delete (service path)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
