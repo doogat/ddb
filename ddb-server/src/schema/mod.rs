@@ -1072,6 +1072,17 @@ pub fn build_schema(
                                 .map(|s| s.to_string());
                             let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
                             let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
+                            let distinct = ctx
+                                .args
+                                .get("distinct")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string())
+                                .filter(|col| {
+                                    schema_clone
+                                        .columns
+                                        .iter()
+                                        .any(|c| c.name == *col)
+                                });
 
                             // Parse optional orderBy
                             let order_sql = ctx
@@ -1090,7 +1101,7 @@ pub fn build_schema(
                                 _ => crate::filter::WhereClause::empty(),
                             };
 
-                            // Fetch items (always use filtered_list — supports where + tag + orderBy)
+                            // Fetch items (always use filtered_list — supports where + tag + orderBy + distinct)
                             let doogats = pool
                                 .filtered_list(ddb_core::types::TypedListQuery {
                                     table_name: table_name.clone(),
@@ -1100,6 +1111,7 @@ pub fn build_schema(
                                     tag: tag.clone(),
                                     limit,
                                     offset,
+                                    distinct: distinct.clone(),
                                 })
                                 .await
                                 .map_err(to_server_error)?;
@@ -1120,8 +1132,14 @@ pub fn build_schema(
                             } else {
                                 format!(" WHERE {}", count_conditions.join(" AND "))
                             };
-                            let count_sql =
-                                format!("SELECT COUNT(*) FROM \"{table_name}\"{count_where}");
+                            let count_sql = if let Some(ref col) = distinct {
+                                let escaped = col.replace('"', "\"\"");
+                                format!(
+                                    "SELECT COUNT(DISTINCT \"{escaped}\") FROM \"{table_name}\"{count_where}"
+                                )
+                            } else {
+                                format!("SELECT COUNT(*) FROM \"{table_name}\"{count_where}")
+                            };
                             let count_row = pool
                                 .aggregate_query(count_sql, wc.params)
                                 .await
@@ -1150,7 +1168,8 @@ pub fn build_schema(
                 ))
                 .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
                 .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-                .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),
+                .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
+                .argument(InputValue::new("distinct", TypeRef::named(TypeRef::STRING))),
             );
         }
 

@@ -1320,6 +1320,8 @@ pub struct TypedListQuery {
     pub tag: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// When set, deduplicate results by this column (GROUP BY).
+    pub distinct: Option<String>,
 }
 
 /// Metadata for a file attached to a doogat, stored in `reference/{doogat_id}/`.

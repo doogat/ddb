@@ -467,8 +467,13 @@ impl DoogatService {
             (None, None) => String::new(),
         };
 
+        let group_by = match &query.distinct {
+            Some(col) => format!(" GROUP BY \"{}\"", col.replace('"', "\"\"")),
+            None => String::new(),
+        };
+
         let sql = format!(
-            "SELECT id FROM \"{}\"{where_clause} ORDER BY {order}{limit_clause}",
+            "SELECT id FROM \"{}\"{where_clause}{group_by} ORDER BY {order}{limit_clause}",
             query.table_name
         );
 
