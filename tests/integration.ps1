@@ -283,9 +283,11 @@ if ($c -notmatch '"data":\[\{[^}]*"title":"([^"]*)"') { throw "sort -title parse
 if ($Matches[1] -ne "Charlie Sort") { throw "sort title desc: got $($Matches[1])" }
 pass "rest: sort by title descending"
 
-$resp = rest "/doogats?sort=date"
-if ((content $resp) -notmatch '"data":\[') { throw "sort date failed" }
-pass "rest: sort by date"
+$resp = rest "/doogats?tag=sorttest&sort=date"
+$c = content $resp
+if ($c -notmatch '"data":\[\{[^}]*"id":"([^"]*)"') { throw "sort date parse" }
+if ($Matches[1] -ne $SORT_C) { throw "sort date desc: expected $SORT_C, got $($Matches[1])" }
+pass "rest: sort by date descending (default)"
 
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats?sort=invalid" -Method GET `

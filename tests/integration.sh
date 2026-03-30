@@ -231,10 +231,11 @@ FIRST_TITLE=$(echo "$RESULT" | sed -n 's/.*"data":\[{[^}]*"title":"\([^"]*\)".*/
 [ "$FIRST_TITLE" = "Charlie Sort" ]
 pass "rest: sort by title descending"
 
-# sort=date returns results
-RESULT=$(rest "/doogats?sort=date")
-echo "$RESULT" | grep -q '"data":\['
-pass "rest: sort by date"
+# sort=date defaults to descending (newest first)
+RESULT=$(rest "/doogats?tag=sorttest&sort=date")
+FIRST_ID=$(echo "$RESULT" | sed -n 's/.*"data":\[{[^}]*"id":"\([^"]*\)".*/\1/p')
+[ "$FIRST_ID" = "$SORT_C" ]
+pass "rest: sort by date descending (default)"
 
 # invalid sort field returns 400
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats?sort=invalid" \
