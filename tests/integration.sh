@@ -472,6 +472,15 @@ RESULT=$(gql '{"query":"{ batchtests { totalCount } }"}')
 echo "$RESULT" | grep -q '"totalCount":0'
 pass "serve: executeBatch DDL triggers schema reload"
 
+# executeBatch failure rolls back: second INSERT targets non-existent table, first should not persist
+PRE_COUNT=$(gql '{"query":"{ foosAggregate { count } }"}' | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"INSERT INTO foo (title, bar, baz) VALUES ('"'"'rollback_test'"'"', '"'"'rb'"'"', 99)\", \"INSERT INTO no_such_table (title) VALUES ('"'"'bad'"'"')\"]) { message } }"}' || true)
+echo "$RESULT" | grep -q '"errors"'
+sleep 1
+POST_COUNT=$(gql '{"query":"{ foosAggregate { count } }"}' | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+[ "$PRE_COUNT" = "$POST_COUNT" ]
+pass "serve: executeBatch failure rolls back all statements"
+
 # cleanup
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE batchtest CASCADE\") { message } }"}' >/dev/null
 

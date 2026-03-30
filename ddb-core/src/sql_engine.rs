@@ -224,10 +224,37 @@ impl<'a> SqlEngine<'a> {
             return Err(DoogatError::SqlEngine("no SQL statements".into()));
         }
 
+        // Check if batch contains an explicit BEGIN — if so, let user manage txn
+        let has_explicit_txn = statements.iter().any(|s| {
+            matches!(
+                s,
+                Statement::StartTransaction { .. } | Statement::Commit { .. }
+            )
+        });
+
+        // Wrap in implicit transaction when no explicit txn and no txn already active
+        let implicit_txn = !has_explicit_txn && self.txn.is_none() && statements.len() > 1;
+        if implicit_txn {
+            self.handle_begin()?;
+        }
+
         let mut results = Vec::with_capacity(statements.len());
         for stmt in &statements {
-            results.push(self.execute_statement(stmt)?);
+            match self.execute_statement(stmt) {
+                Ok(r) => results.push(r),
+                Err(e) => {
+                    if implicit_txn {
+                        let _ = self.handle_rollback();
+                    }
+                    return Err(e);
+                }
+            }
         }
+
+        if implicit_txn {
+            self.handle_commit()?;
+        }
+
         Ok(results)
     }
 

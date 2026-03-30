@@ -526,6 +526,14 @@ $result = gql '{"query":"{ batchtests { totalCount } }"}'
 if ($result -notmatch '"totalCount":0') { throw "executeBatch schema reload: $result" }
 pass "serve: executeBatch DDL triggers schema reload"
 
+# executeBatch failure rolls back
+$preCount = (gql '{"query":"{ foosAggregate { count } }"}') -replace '.*"count":(\d+).*','$1'
+try { gql '{"query":"mutation { executeBatch(statements: [\"INSERT INTO foo (title, bar, baz) VALUES (''rollback_test'', ''rb'', 99)\", \"INSERT INTO no_such_table (title) VALUES (''bad'')\"]) { message } }"}' } catch {}
+Start-Sleep -Seconds 1
+$postCount = (gql '{"query":"{ foosAggregate { count } }"}') -replace '.*"count":(\d+).*','$1'
+if ($preCount -ne $postCount) { throw "executeBatch rollback failed: pre=$preCount post=$postCount" }
+pass "serve: executeBatch failure rolls back all statements"
+
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE batchtest CASCADE\") { message } }"}' | Out-Null
 
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
