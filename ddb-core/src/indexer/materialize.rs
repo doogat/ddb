@@ -552,7 +552,7 @@ impl Index {
     /// Load all _typedef schemas from the index.
     pub(crate) fn load_all_typedefs(
         &self,
-        repo: &impl DoogatSource,
+        repo: &dyn DoogatSource,
     ) -> std::collections::HashMap<String, crate::types::TableSchema> {
         use crate::sql_engine::schema_from_parsed;
 

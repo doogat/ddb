@@ -860,6 +860,7 @@ impl<'a> SqlEngine<'a> {
                 &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
                 params![doogat_id],
             )?;
+            self.cascade_junction_cleanup(&table_name, &doogat_id)?;
             return Ok(SqlResult::Affected(1));
         }
 
@@ -888,6 +889,7 @@ impl<'a> SqlEngine<'a> {
                 &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
                 params![id],
             )?;
+            self.cascade_junction_cleanup(&table_name, id)?;
         }
 
         Ok(SqlResult::Affected(matches.len()))
@@ -1277,6 +1279,11 @@ impl<'a> SqlEngine<'a> {
         let content = self.repo.read_file(&path)?;
         let parsed = parser::parse(&content, &path)?;
         schema_from_parsed(&parsed)
+    }
+
+    fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
+        self.index
+            .cascade_junction_cleanup(self.repo, target_type, deleted_id)
     }
 
     /// Check if `table_name` is a junction table (`{type}_{col}` where type is

@@ -348,6 +348,31 @@ impl Index {
         })
     }
 
+    /// Remove junction table rows where `deleted_id` appears as a referenced
+    /// target.  Scans all typedef schemas for REFERENCES columns pointing to
+    /// `target_type` and deletes matching rows from their junction tables.
+    pub fn cascade_junction_cleanup(
+        &self,
+        repo: &dyn DoogatSource,
+        target_type: &str,
+        deleted_id: &str,
+    ) -> Result<()> {
+        let schemas = self.load_all_typedefs(repo);
+        for (table_name, schema) in &schemas {
+            for col in &schema.columns {
+                if col.references.as_deref() == Some(target_type) {
+                    let jt = format!("{table_name}_{}", col.name);
+                    let col_id = format!("{}_id", col.name);
+                    self.conn.execute(
+                        &format!("DELETE FROM \"{jt}\" WHERE \"{col_id}\" = ?1"),
+                        params![deleted_id],
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Check database integrity: runs PRAGMA integrity_check and verifies core tables exist.
     pub fn check_integrity(&self) -> Result<bool> {
         // PRAGMA integrity_check returns "ok" if clean

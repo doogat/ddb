@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use rusqlite::params;
+
 use crate::error::{Result, DoogatError};
 use crate::git_ops::{self, GitRepo};
 use crate::indexer::Index;
@@ -251,9 +253,25 @@ impl DoogatService {
         self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
         let broken = self.index.backlinking_doogat_paths(id)?;
+        // Look up type before removing from index (needed for cascade)
+        let doogat_type: Option<String> = self
+            .index
+            .conn
+            .query_row(
+                "SELECT type FROM doogats WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok();
         self.repo.delete_file(&path, message)?;
         self.index.remove_doogat(id)?;
         self.nosql_remove_doogat(id);
+        // Cascade: remove junction table rows referencing deleted doogat
+        if let Some(ref dtype) = doogat_type {
+            if !dtype.is_empty() && dtype != "_typedef" {
+                self.index.cascade_junction_cleanup(&self.repo, dtype, id)?;
+            }
+        }
         Ok(broken)
     }
 
