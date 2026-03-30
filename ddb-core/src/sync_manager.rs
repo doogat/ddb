@@ -322,15 +322,19 @@ impl<'a> SyncManager<'a> {
                         &conflict.ours_blob_oid
                     };
 
-                    if let Some(oid) = winner_oid {
-                        let bytes = self.repo.read_blob(oid)?;
-                        let full_path = self.repo.path.join(&conflict.path);
-                        if let Some(parent) = full_path.parent() {
-                            std::fs::create_dir_all(parent)?;
-                        }
-                        std::fs::write(&full_path, &bytes)?;
-                        tracing::info!(path = %conflict.path, winner, "binary_lww_resolved");
+                    let oid = winner_oid.as_deref().ok_or_else(|| {
+                        crate::error::DoogatError::Git(format!(
+                            "binary conflict at {} missing blob OID for winner ({})",
+                            conflict.path, winner
+                        ))
+                    })?;
+                    let bytes = self.repo.read_blob(oid)?;
+                    let full_path = self.repo.path.join(&conflict.path);
+                    if let Some(parent) = full_path.parent() {
+                        std::fs::create_dir_all(parent)?;
                     }
+                    std::fs::write(&full_path, &bytes)?;
+                    tracing::info!(path = %conflict.path, winner, "binary_lww_resolved");
                 }
 
                 // Tick HLC for merge commit
