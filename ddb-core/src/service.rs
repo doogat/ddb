@@ -983,10 +983,15 @@ fn build_filtered_sql(filter: &ListFilter) -> String {
 
     let order_clause = match filter.sort_field.as_deref().filter(|f| SORTABLE_COLUMNS.contains(f)) {
         Some(field) => {
-            let dir = if filter.sort_desc.unwrap_or(false) { "DESC" } else { "ASC" };
-            format!(" ORDER BY z.{field} {dir}")
+            let default_desc = matches!(field, "date" | "id");
+            let dir = if filter.sort_desc.unwrap_or(default_desc) { "DESC" } else { "ASC" };
+            if field == "id" {
+                format!(" ORDER BY z.id {dir}")
+            } else {
+                format!(" ORDER BY z.{field} {dir}, z.id DESC")
+            }
         }
-        None => " ORDER BY z.id DESC".to_string(),
+        None => " ORDER BY z.date DESC, z.id DESC".to_string(),
     };
 
     format!("SELECT z.id, z.path FROM doogats z{where_clause}{order_clause}{limit_clause}")
@@ -1246,7 +1251,7 @@ mod tests {
     }
 
     #[test]
-    fn list_doogats_filtered_sort_default_is_id_desc() {
+    fn list_doogats_filtered_sort_default_is_date_desc() {
         let (_tmp, svc) = fresh_svc();
         svc.create_doogat("First", &[], None, "").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1255,9 +1260,45 @@ mod tests {
 
         let filter = crate::types::ListFilter::default();
         let results = svc.list_doogats_filtered(&filter).unwrap();
-        // Default is id DESC, so newest (Second) comes first
+        // Default is date DESC, id DESC - newest comes first
         assert_eq!(results[0].meta.title.as_deref(), Some("Second"));
         assert_eq!(results[1].meta.title.as_deref(), Some("First"));
+    }
+
+    #[test]
+    fn list_doogats_filtered_sort_date_defaults_to_desc() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("First", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("Second", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter {
+            sort_field: Some("date".into()),
+            ..Default::default()
+        };
+        let results = svc.list_doogats_filtered(&filter).unwrap();
+        // sort=date without explicit direction defaults to DESC
+        assert_eq!(results[0].meta.title.as_deref(), Some("Second"));
+        assert_eq!(results[1].meta.title.as_deref(), Some("First"));
+    }
+
+    #[test]
+    fn list_doogats_filtered_sort_title_defaults_to_asc() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("Bravo", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        svc.create_doogat("Alpha", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter {
+            sort_field: Some("title".into()),
+            ..Default::default()
+        };
+        let results = svc.list_doogats_filtered(&filter).unwrap();
+        // sort=title without explicit direction defaults to ASC
+        assert_eq!(results[0].meta.title.as_deref(), Some("Alpha"));
+        assert_eq!(results[1].meta.title.as_deref(), Some("Bravo"));
     }
 
     #[test]
