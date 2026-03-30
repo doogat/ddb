@@ -339,6 +339,30 @@ echo "$RESULT" | grep -q '"references"'
 echo "$RESULT" | grep -q '"mvcategory"'
 pass "serve: rest multi-value ref structured json"
 
+# 38b2. REFERENCES relation resolution
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokecat (label TEXT)\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)\") { message } }"}' >/dev/null
+SCAT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokecat (title, label) VALUES ('Tech', 'tech')\\\") { message } }\"}")
+SCAT_ID=$(echo "$SCAT" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+sleep 1
+SBM=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm (title, url) VALUES ('Example', 'https://example.com')\\\") { message } }\"}")
+SBM_ID=$(echo "$SBM" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm_smokecat (smokebm_id, smokecat_id) VALUES ('$SBM_ID', '$SCAT_ID')\\\") { message } }\"}" >/dev/null
+RESULT=$(gql '{"query":"{ smokebms { items { smokecat { id label } } } }"}')
+echo "$RESULT" | grep -q "\"label\":\"tech\""
+pass "serve: relation singular resolves object"
+RESULT=$(gql '{"query":"{ smokebms { items { smokecats { id label } } } }"}')
+echo "$RESULT" | grep -q "\"label\":\"tech\""
+pass "serve: relation plural resolves object list"
+sleep 1
+gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm (title, url) VALUES ('No Cat', 'https://nocat.com')\\\") { message } }\"}" >/dev/null
+RESULT=$(gql '{"query":"{ smokebms { items { id smokecat { id } smokecats { id } } } }"}')
+echo "$RESULT" | grep -q '"smokecat":null'
+echo "$RESULT" | grep -q '"smokecats":\[\]'
+pass "serve: relation null returns null and empty list"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' >/dev/null
+
 # 38c. sql-materialization (columns, boolean normalization, core fields)
 RESULT=$(gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}')
 echo "$RESULT" | grep -q '"columns"'
