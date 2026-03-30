@@ -42,9 +42,8 @@ jobs:
       - name: Fast cargo test tier
         run: cargo test-ci
 
-      - name: Quick smoke test
+      - name: Smoke test
         env:
-          SMOKE_PROFILE: quick
           DDB_BIN: ${{ github.workspace }}/target/debug/ddb
         run: ./tests/smoke.sh
 

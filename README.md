@@ -81,7 +81,7 @@ ddb update-bin --rollback
 
 - [Rust](https://rustup.rs/) (stable toolchain)
 - C compiler + pkg-config (for `git2`, `openssl` native deps)
-- Optional: `psql` for PgWire smoke tests
+- Optional: `psql` for PgWire integration tests
 
 ### Build
 
@@ -98,8 +98,8 @@ cargo test                 # fast local tier
 cargo test-ci              # bounded CI matrix tier (unit/bin targets only)
 cargo test-full            # full cargo suite (includes ddb-e2e)
 cargo clippy --workspace   # lint
-SMOKE_PROFILE=quick ./tests/smoke.sh   # quick CLI smoke
-./tests/smoke.sh           # full CLI + server + sync smoke
+./tests/smoke.sh             # CLI smoke test
+./tests/integration.sh       # full integration (runs smoke first)
 ```
 
 ### Benchmarks

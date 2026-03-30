@@ -35,7 +35,7 @@ The workspace defines custom Cargo aliases:
 - `cargo test-ci` runs the bounded CI matrix (unit and binary targets only).
 - `cargo test-full` runs the complete suite including workspace-wide and e2e tests.
 
-Additional test surfaces include `tests/smoke.sh` (bash) and `tests/smoke.ps1` (PowerShell) for CLI smoke tests, and Criterion benchmarks in `ddb-core/benches/` for CRUD and search performance.
+Additional test surfaces include `tests/smoke.sh` and `tests/smoke.ps1` for CLI smoke tests, `tests/integration.sh` and `tests/integration.ps1` for full integration tests (server, sync, CRDT), and Criterion benchmarks in `ddb-core/benches/` for CRUD and search performance.
 
 
 ## 2. Core Data Model
@@ -376,7 +376,7 @@ The `tests/e2e/` directory contains assert_cmd-based tests that exercise the `dd
 
 ### Smoke tests
 
-`tests/smoke.sh` (bash, Linux/macOS) and `tests/smoke.ps1` (PowerShell, Windows) provide quick end-to-end validation of the CLI and server. Each file follows a numbered-section pattern with a `pass` helper for status reporting. A `SMOKE_PROFILE=quick` environment variable runs a minimal subset.
+`tests/smoke.sh` (bash) and `tests/smoke.ps1` (PowerShell) provide quick CLI validation (init, CRUD, search, SQL, types, compact). `tests/integration.sh` and `tests/integration.ps1` run the smoke tests first, then continue with server, sync, CRDT conflict resolution, bundles, and advanced SQL tests. All files follow a numbered-section pattern with a `pass` helper for status reporting.
 
 ### Benchmarks
 

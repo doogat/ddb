@@ -43,7 +43,10 @@ ddb-server/src/     GraphQL server crate
   config.rs         Server config (~/.config/ddb/)
   error.rs          DoogatError → GraphQL error mapping
 tests/e2e/          E2E tests (assert_cmd, exercises ddb binary)
-tests/smoke.sh      CLI smoke test (init, CRUD, search, SQL, sync, compact)
+tests/smoke.sh      CLI smoke test (init, CRUD, search, SQL, types, compact)
+tests/integration.sh  Full integration tests (server, sync, CRDT, bundles)
+tests/smoke.ps1     PowerShell port of tests/smoke.sh
+tests/integration.ps1 PowerShell port of tests/integration.sh
 tests/fixtures/     Test fixtures
 dev/bin/             Developer scripts
   release              Version bump, tag, push
@@ -80,7 +83,7 @@ git config core.hooksPath dev/hooks
 A task is NOT complete unless ALL of these pass:
 
 1. **Tests** — unit tests in the module AND integration/e2e tests in `tests/` (not just unit tests; use `cargo test --workspace` for the full cargo suite)
-2. **Smoke test** — if the change adds a CLI command, server endpoint, or user-facing behavior, add a corresponding scenario to BOTH `tests/smoke.sh` (bash, runs on Linux/macOS) and `tests/smoke.ps1` (PowerShell, runs on Windows) following each file's existing numbered-section + `pass` helper pattern
+2. **Smoke/integration test** — if the change adds a CLI command or user-facing behavior, add a scenario to `tests/smoke.sh` and `tests/smoke.ps1`. If it adds a server endpoint, sync behavior, or CRDT logic, add it to `tests/integration.sh` and `tests/integration.ps1`. All four files follow the numbered-section + `pass` helper pattern
 3. **Docs** — update relevant files in `docs/src/` to reflect any behavioral or API changes
 4. **Build** — `cargo clippy --workspace`, fast-tier `cargo test`, and full-suite `cargo test --workspace` all pass
 5. **Walkthrough** — if the task adds a CLI command, server endpoint, or user-facing behavior, create an executable showboat walkthrough in `.local/walkthroughs/` (see Showboat Walkthroughs below)
@@ -163,8 +166,8 @@ cargo test -p ddb-e2e                 Run e2e tests only
 cargo bench                           Run criterion benchmarks (CRUD + search)
 cargo bench --no-run                  Compile benchmarks without running
 cargo build -p ddb-core --features profiling   Build with tracing instrumentation
-SMOKE_PROFILE=quick ./tests/smoke.sh  Quick CLI smoke test
-./tests/smoke.sh                      Full CLI + server + sync smoke test
+./tests/smoke.sh                      CLI smoke test
+./tests/integration.sh                Full integration tests (runs smoke first)
 cargo test -p ddb-core --test property_tests   Property-based integration tests
 cargo test -p ddb-core --test sync_test        Core sync integration tests
 cargo clippy --workspace              Lint

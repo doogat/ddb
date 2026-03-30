@@ -39,7 +39,8 @@ Every change needs tests:
 
 - **Unit tests** in the module
 - **Integration/e2e tests** in `tests/` for behavior changes
-- **Smoke test** scenarios in `tests/smoke.sh` and `tests/smoke.ps1` for CLI or server changes
+- **Smoke test** scenarios in `tests/smoke.sh` and `tests/smoke.ps1` for CLI changes
+- **Integration test** scenarios in `tests/integration.sh` and `tests/integration.ps1` for server or sync changes
 
 Run the full suite before submitting:
 

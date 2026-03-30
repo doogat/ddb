@@ -76,10 +76,10 @@ jobs:
           git config --global user.name "Doogat DB CI"
       - name: Build CLI binary
         run: cargo build -p ddb-cli --bin ddb
-      - name: Full smoke test
+      - name: Integration test
         env:
           DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: ./tests/smoke.sh
+        run: ./tests/integration.sh
 
   linux-e2e:
     runs-on: ubuntu-latest
@@ -116,10 +116,10 @@ jobs:
         env:
           PROPTEST_CASES: 50
         run: cargo test-full
-      - name: Full smoke test
+      - name: Integration test
         env:
           DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: ./tests/smoke.sh
+        run: ./tests/integration.sh
 
   windows-full:
     runs-on: windows-latest
@@ -137,11 +137,11 @@ jobs:
         env:
           PROPTEST_CASES: 50
         run: cargo test-full
-      - name: Full smoke test
+      - name: Integration test
         timeout-minutes: 15
         env:
           DDB_BIN: ${{ github.workspace }}\target\debug\ddb.exe
-        run: pwsh -File tests/smoke.ps1
+        run: pwsh -File tests/integration.ps1
 
   mark-validated:
     needs:
