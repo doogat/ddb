@@ -1476,6 +1476,50 @@ pub fn build_schema(
         );
     }
 
+    // executeBatch
+    {
+        mutation = mutation.field(
+            Field::new(
+                "executeBatch",
+                TypeRef::named_nn_list_nn("SqlResult"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let a = ctx.data::<ActorHandle>()?;
+                        let stmts_val = ctx.args.try_get("statements")?.list()?;
+                        let statements: Vec<String> = stmts_val
+                            .iter()
+                            .map(|v| v.string().unwrap_or_default().to_string())
+                            .collect();
+
+                        let has_ddl = statements.iter().any(|s| {
+                            let upper = s.to_uppercase();
+                            upper.contains("CREATE TABLE")
+                                || upper.contains("DROP TABLE")
+                                || upper.contains("ALTER TABLE")
+                        });
+
+                        let results =
+                            a.execute_batch(statements).await.map_err(to_server_error)?;
+
+                        if has_ddl {
+                            if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>() {
+                                reloader.trigger_reload_and_wait().await;
+                            }
+                        }
+
+                        Ok(Some(FieldValue::list(
+                            results.iter().map(|r| FieldValue::owned_any(sql_result_to_value(r))),
+                        )))
+                    })
+                },
+            )
+            .argument(InputValue::new(
+                "statements",
+                TypeRef::named_nn_list_nn(TypeRef::STRING),
+            )),
+        );
+    }
+
     // -- SyncResult output type --
     let sync_result_type = Object::new("SyncResult")
         .field(simple_field(

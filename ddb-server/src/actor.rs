@@ -54,6 +54,9 @@ pub enum ActorCommand {
     ExecuteSql {
         sql: String,
     },
+    ExecuteBatch {
+        statements: Vec<String>,
+    },
     GetTypeSchemas,
     GetBacklinks {
         id: String,
@@ -138,6 +141,7 @@ pub enum ActorReply {
     DoogatList(ActorResult<Vec<ParsedDoogat>>),
     SearchResults(ActorResult<PaginatedSearchResult>),
     SqlResult(ActorResult<SqlResult>),
+    SqlResults(ActorResult<Vec<SqlResult>>),
     TypeSchemas(ActorResult<Vec<TableSchema>>),
     Backlinks(ActorResult<Vec<String>>),
     Deleted(ActorResult<()>),
@@ -322,6 +326,16 @@ impl ActorHandle {
     pub async fn execute_sql(&self, sql: String) -> ActorResult<SqlResult> {
         match self.send(ActorCommand::ExecuteSql { sql }).await {
             ActorReply::SqlResult(r) => r,
+            _ => Err(DoogatError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn execute_batch(&self, statements: Vec<String>) -> ActorResult<Vec<SqlResult>> {
+        match self
+            .send(ActorCommand::ExecuteBatch { statements })
+            .await
+        {
+            ActorReply::SqlResults(r) => r,
             _ => Err(DoogatError::Validation("unexpected reply".into())),
         }
     }
@@ -698,6 +712,10 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
             )
         }
         ActorCommand::ExecuteSql { sql } => ActorReply::SqlResult(svc.execute_sql(&sql)),
+        ActorCommand::ExecuteBatch { statements } => {
+            let combined = statements.join(";\n");
+            ActorReply::SqlResults(svc.execute_batch(&combined))
+        }
         ActorCommand::GetTypeSchemas => ActorReply::TypeSchemas(svc.list_type_schemas()),
         ActorCommand::GetBacklinks { id } => ActorReply::Backlinks(svc.backlink_ids(&id)),
         ActorCommand::CountDoogats {
