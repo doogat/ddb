@@ -1548,4 +1548,66 @@ mod tests {
         assert_eq!(uuid_after, "bogus-uuid-that-has-no-toml",
             "corrupt state should propagate error, not silently re-register");
     }
+
+    #[test]
+    fn get_doogats_batch_multiple_valid() {
+        let (_tmp, svc) = fresh_svc();
+        let id1 = svc.create_doogat("First", &[], None, "body one").unwrap();
+        let id2 = svc.create_doogat("Second", &[], None, "body two").unwrap();
+        let id3 = svc.create_doogat("Third", &[], None, "body three").unwrap();
+
+        let ids = vec![id1.clone(), id2.clone(), id3.clone()];
+        let results = svc.get_doogats_batch(&ids).unwrap();
+        assert_eq!(results.len(), 3);
+
+        let titles: Vec<_> = results
+            .iter()
+            .map(|d| d.meta.title.as_deref().unwrap())
+            .collect();
+        assert!(titles.contains(&"First"));
+        assert!(titles.contains(&"Second"));
+        assert!(titles.contains(&"Third"));
+    }
+
+    #[test]
+    fn get_doogats_batch_skips_invalid_ids() {
+        let (_tmp, svc) = fresh_svc();
+        let id1 = svc.create_doogat("Valid One", &[], None, "").unwrap();
+        let id2 = svc.create_doogat("Valid Two", &[], None, "").unwrap();
+
+        let ids = vec![
+            id1.clone(),
+            "99990101000000".to_string(), // nonexistent
+            id2.clone(),
+            "not-a-real-id".to_string(),  // invalid
+        ];
+        let results = svc.get_doogats_batch(&ids).unwrap();
+        assert_eq!(results.len(), 2);
+
+        let titles: Vec<_> = results
+            .iter()
+            .map(|d| d.meta.title.as_deref().unwrap())
+            .collect();
+        assert!(titles.contains(&"Valid One"));
+        assert!(titles.contains(&"Valid Two"));
+    }
+
+    #[test]
+    fn get_doogats_batch_empty_returns_empty() {
+        let (_tmp, svc) = fresh_svc();
+        let results = svc.get_doogats_batch(&[]).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn get_doogats_batch_single_id_matches_get_parsed() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.create_doogat("Solo", &["tag1".into()], None, "solo body").unwrap();
+
+        let single = svc.get_doogat_parsed(&id).unwrap();
+        let batch = svc.get_doogats_batch(&[id]).unwrap();
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].meta.title, single.meta.title);
+        assert_eq!(batch[0].body, single.body);
+    }
 }
