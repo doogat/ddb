@@ -1179,6 +1179,8 @@ fn arb_conflict_divergent_fm() -> impl Strategy<Value = ConflictFile> {
                 theirs,
                 ours_hlc: None,
                 theirs_hlc: None,
+                ours_blob_oid: None,
+                theirs_blob_oid: None,
             }
         },
     )
@@ -1210,6 +1212,8 @@ fn arb_conflict_body_edits() -> impl Strategy<Value = ConflictFile> {
                 theirs,
                 ours_hlc: None,
                 theirs_hlc: None,
+                ours_blob_oid: None,
+                theirs_blob_oid: None,
             }
         })
 }
@@ -1240,6 +1244,8 @@ fn arb_conflict_ref_additions() -> impl Strategy<Value = ConflictFile> {
                 theirs,
                 ours_hlc: None,
                 theirs_hlc: None,
+                ours_blob_oid: None,
+                theirs_blob_oid: None,
             }
         })
 }
@@ -1261,6 +1267,8 @@ proptest! {
             theirs: conflict.ours.clone(),
             ours_hlc: conflict.theirs_hlc.clone(),
             theirs_hlc: conflict.ours_hlc.clone(),
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
 
         let result_ab = crdt_resolver::resolve_conflicts(vec![conflict], None).unwrap();
@@ -1281,6 +1289,8 @@ proptest! {
             theirs: conflict.ours.clone(),
             ours_hlc: conflict.theirs_hlc.clone(),
             theirs_hlc: conflict.ours_hlc.clone(),
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
 
         let result_ab = crdt_resolver::resolve_conflicts(vec![conflict], None).unwrap();
@@ -1301,6 +1311,8 @@ proptest! {
             theirs: conflict.ours.clone(),
             ours_hlc: conflict.theirs_hlc.clone(),
             theirs_hlc: conflict.ours_hlc.clone(),
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
 
         let result_ab = crdt_resolver::resolve_conflicts(vec![conflict], None).unwrap();
@@ -1332,6 +1344,8 @@ proptest! {
             theirs: md.clone(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
 
         let result = crdt_resolver::resolve_conflicts(vec![conflict], None).unwrap();

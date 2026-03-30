@@ -900,6 +900,10 @@ pub struct ConflictFile {
     pub ours_hlc: Option<crate::hlc::Hlc>,
     /// HLC from the commit that produced "theirs" content.
     pub theirs_hlc: Option<crate::hlc::Hlc>,
+    /// Raw blob OID for "ours" side (for binary conflict resolution).
+    pub ours_blob_oid: Option<String>,
+    /// Raw blob OID for "theirs" side (for binary conflict resolution).
+    pub theirs_blob_oid: Option<String>,
 }
 
 /// Domain-level commit identifier, decoupled from git2::Oid.

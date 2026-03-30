@@ -1016,6 +1016,8 @@ mod tests {
             theirs: theirs.into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_conflicts(conflicts, None).unwrap();
@@ -1038,6 +1040,8 @@ mod tests {
             theirs: theirs.into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_conflicts(conflicts, None).unwrap();
@@ -1076,6 +1080,8 @@ mod tests {
             theirs: "---\ntitle: Theirs\n---\nTheirs body.".into(),
             ours_hlc: Some(ours_hlc),
             theirs_hlc: Some(theirs_hlc),
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_lww(conflicts).unwrap();
@@ -1101,6 +1107,8 @@ mod tests {
             theirs: "theirs content".into(),
             ours_hlc: Some(ours_hlc),
             theirs_hlc: Some(theirs_hlc),
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_lww(conflicts).unwrap();
@@ -1117,6 +1125,8 @@ mod tests {
             theirs: "theirs content".into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_lww(conflicts).unwrap();
@@ -1137,6 +1147,8 @@ mod tests {
             theirs: theirs.into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_append_log(conflicts).unwrap();
@@ -1165,6 +1177,8 @@ mod tests {
             theirs: theirs.into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_append_log(conflicts).unwrap();
@@ -1186,6 +1200,8 @@ mod tests {
             theirs: theirs.into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_append_log(conflicts).unwrap();
@@ -1207,6 +1223,8 @@ mod tests {
             theirs: theirs.into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let resolved = resolve_append_log(conflicts).unwrap();
@@ -1226,6 +1244,8 @@ mod tests {
             theirs: theirs.into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         // Should succeed (using default strategy) and log a warning
@@ -1246,6 +1266,8 @@ mod tests {
             theirs: "still no frontmatter".into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         }];
 
         let result = resolve_conflicts(conflicts, None);

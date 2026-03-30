@@ -476,6 +476,8 @@ impl<'a> SyncManager<'a> {
                     .unwrap_or_default(),
                 ours_hlc: self.repo.find_hlc_for_path(&ours_commit, path),
                 theirs_hlc: self.repo.find_hlc_for_path(&theirs_commit, path),
+                ours_blob_oid: None,
+                theirs_blob_oid: None,
             })
             .collect();
 
@@ -1082,6 +1084,8 @@ mod tests {
             theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nBody theirs\n".into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
         assert!(conflict.ancestor.is_none());
         assert!(!conflict.ours.is_empty());
@@ -1112,6 +1116,8 @@ mod tests {
             theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
             ours_hlc: Some(earlier),
             theirs_hlc: Some(later),
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
         let (winner, loser) = resolve_add_add_collision(&conflict);
         // Theirs has later HLC, so theirs wins
@@ -1129,6 +1135,8 @@ mod tests {
             theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
             ours_hlc: None,
             theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
         let (winner, _loser) = resolve_add_add_collision(&conflict);
         assert!(winner.content.contains("Theirs body"));
@@ -1146,6 +1154,8 @@ mod tests {
             theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs\n".into(),
             ours_hlc: Some(hlc.clone()),
             theirs_hlc: Some(hlc),
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
         };
         let (winner2, _) = resolve_add_add_collision(&conflict2);
         assert!(winner2.content.contains("Theirs"));

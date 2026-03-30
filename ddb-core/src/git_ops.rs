@@ -527,6 +527,9 @@ impl GitRepo {
                 None => String::new(),
             };
 
+            let ours_blob_oid = conflict.our.as_ref().map(|e| e.id.to_string());
+            let theirs_blob_oid = conflict.their.as_ref().map(|e| e.id.to_string());
+
             let ours_hlc = self.find_hlc_for_path(ours_commit, &path);
             let theirs_hlc = self.find_hlc_for_path(theirs_commit, &path);
 
@@ -537,6 +540,8 @@ impl GitRepo {
                 theirs,
                 ours_hlc,
                 theirs_hlc,
+                ours_blob_oid,
+                theirs_blob_oid,
             });
         }
         Ok(conflicts)
@@ -797,6 +802,13 @@ impl GitRepo {
         let content =
             std::str::from_utf8(blob.content()).map_err(|e| DoogatError::Parse(e.to_string()))?;
         Ok(content.to_string())
+    }
+
+    /// Read raw blob bytes by OID.
+    pub fn read_blob(&self, oid_str: &str) -> Result<Vec<u8>> {
+        let oid = Oid::from_str(oid_str)?;
+        let blob = self.repo.find_blob(oid)?;
+        Ok(blob.content().to_vec())
     }
 
     /// Read multiple files from the HEAD tree in a single sequential pass.
