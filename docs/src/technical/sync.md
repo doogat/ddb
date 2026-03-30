@@ -49,17 +49,24 @@ Reads the UUID from `.git/ddb-node`, then loads the corresponding `.nodes/{uuid}
 6. **Commit-graph**: write once (deferred from per-commit writes during sync)
 7. **Reindex**: `index.rebuild_if_stale(repo)` — incremental reindex via `diff_paths` processes only changed files
 
-### Three-Bucket Conflict Partition
+### Four-Bucket Conflict Partition
 
-When `merge_remote()` returns `Conflicts`, the conflict list is partitioned into three buckets before resolution:
+When `merge_remote()` returns `Conflicts`, the conflict list is partitioned into four buckets before resolution:
 
 | Bucket | Condition | Handling |
 |--------|-----------|----------|
+| **binary-ref** | `path.starts_with("reference/")` | LWW via HLC on raw blob bytes |
 | **delete-vs-edit** | `ours` or `theirs` is empty | Edit wins; `resurrected: true` marker added |
 | **add-add** | `ancestor.is_none()` and both sides non-empty | Winner keeps ID; loser reassigned (see below) |
 | **normal** | Everything else | Three-step merge cascade |
 
-Each bucket is resolved independently. The resolved files from all three are collected into a single merge commit.
+Each bucket is resolved independently. The resolved files from all four are collected into a single merge commit.
+
+### Binary Asset LWW Resolution
+
+Binary files under `reference/` (attachments, images, etc.) are resolved via LWW using HLC timestamps from the conflicting commits. The branch with the higher HLC wins. On tie or missing HLC, "theirs" (remote) wins.
+
+Resolution uses raw blob bytes via `ConflictFile.ours_blob_oid` / `theirs_blob_oid` to avoid corruption from UTF-8 lossy conversion. The winning blob is written directly to disk and staged alongside text conflict resolutions in the merge commit. The losing version remains accessible in Git history as a parent of the merge commit.
 
 ### Add-Add Collision Detection
 
