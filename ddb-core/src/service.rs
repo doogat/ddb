@@ -1734,4 +1734,28 @@ mod tests {
         assert_eq!(doogats[0].meta.title.as_deref(), Some("First"));
         assert_eq!(doogats[1].meta.title.as_deref(), Some("Second"));
     }
+
+    #[test]
+    fn typed_filtered_list_has_updated_at() {
+        let (_tmp, mut svc) = fresh_svc();
+        svc.execute_sql("CREATE TABLE project (name TEXT)").unwrap();
+        svc.execute_sql("INSERT INTO project (name) VALUES ('Alpha')").unwrap();
+
+        let query = crate::types::TypedListQuery {
+            table_name: "project".to_string(),
+            where_sql: String::new(),
+            params: vec![],
+            order_sql: None,
+            tag: None,
+            limit: None,
+            offset: None,
+            distinct: None,
+        };
+        let doogats = svc.typed_filtered_list(&query).unwrap();
+        assert_eq!(doogats.len(), 1);
+        assert!(
+            doogats[0].updated_at.is_some(),
+            "typed_filtered_list should populate updated_at"
+        );
+    }
 }
