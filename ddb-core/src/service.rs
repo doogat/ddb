@@ -861,15 +861,8 @@ impl DoogatService {
 
     // ── Utility ─────────────────────────────────────────────────────────
 
-    pub fn list_doogats(&self) -> Result<Vec<ParsedDoogat>> {
-        let paths = self.repo.list_doogats()?;
-        let mut out = Vec::with_capacity(paths.len());
-        for path in &paths {
-            let content = self.repo.read_file(path)?;
-            let parsed = parser::parse(&content, path)?;
-            out.push(parsed);
-        }
-        Ok(out)
+    pub fn list_doogats(&self) -> Result<Vec<String>> {
+        self.repo.list_doogats()
     }
 
     pub fn resolve_path(&self, id: &str) -> Result<String> {
@@ -1957,11 +1950,12 @@ mod tests {
 
         let before = count_commits(tmp.path());
 
+        let filter = crate::types::ListFilter::default();
         let ids: Vec<String> = svc
-            .list_doogats()
+            .list_doogats_filtered(&filter)
             .unwrap()
             .into_iter()
-            .map(|d| d.meta.id.unwrap().0)
+            .filter_map(|d| d.meta.id.map(|id| id.0))
             .collect();
         assert_eq!(ids.len(), 5);
 

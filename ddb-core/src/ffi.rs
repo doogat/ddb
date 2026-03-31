@@ -317,8 +317,7 @@ impl DoogatDriver {
 
     pub fn list_doogats(&self) -> Result<Vec<String>, DdbError> {
         let svc = self.svc.lock().unwrap();
-        let parsed = svc.list_doogats().map_err(DdbError::from)?;
-        Ok(parsed.into_iter().map(|d| d.path).collect())
+        svc.list_doogats().map_err(DdbError::from)
     }
 
     pub fn execute_sql(&self, sql: String) -> Result<SqlResultRecord, DdbError> {
