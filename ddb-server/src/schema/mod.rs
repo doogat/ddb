@@ -2212,5 +2212,67 @@ mod tests {
             "expected exactly 1 'type MyType {{' but found {count} (collision not detected)"
         );
     }
+
+    #[tokio::test]
+    async fn build_schema_hyphenated_query_and_aggregate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let schemas = vec![
+            make_table_schema(
+                "test-widget",
+                vec![
+                    simple_column("status"),
+                    ColumnDef {
+                        name: "priority".into(),
+                        data_type: "INTEGER".into(),
+                        references: None,
+                        zone: Some(Zone::Frontmatter),
+                        required: false,
+                        search_boost: None,
+                        allowed_values: None,
+                        default_value: None,
+                    },
+                ],
+            ),
+            make_table_schema("bookmark", vec![simple_column("url")]),
+        ];
+
+        let schema = build_schema(actor, pool, schemas, None)
+            .expect("schema should build with mixed hyphenated and plain types");
+        let sdl = schema.sdl();
+
+        // Query fields: camelCase + pluralized
+        assert!(
+            sdl.contains("testWidgets"),
+            "SDL should contain query field 'testWidgets', got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("bookmarks"),
+            "SDL should contain query field 'bookmarks', got:\n{sdl}"
+        );
+
+        // Aggregate query field
+        assert!(
+            sdl.contains("testWidgetsAggregate"),
+            "SDL should contain 'testWidgetsAggregate', got:\n{sdl}"
+        );
+
+        // Input types
+        assert!(
+            sdl.contains("TestWidgetWhere"),
+            "SDL should contain input 'TestWidgetWhere', got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("TestWidgetOrderBy"),
+            "SDL should contain input 'TestWidgetOrderBy', got:\n{sdl}"
+        );
+
+        // Subscription field
+        assert!(
+            sdl.contains("testWidgetChanged"),
+            "SDL should contain subscription 'testWidgetChanged', got:\n{sdl}"
+        );
+    }
 }
 
