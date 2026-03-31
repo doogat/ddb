@@ -39,6 +39,25 @@ Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTE
 
 `BOOLEAN` columns are stored as `INTEGER` (1/0) in SQLite. SQL `SELECT` queries against materialized type tables automatically coerce these values to `"true"`/`"false"` in the response. This coercion applies only to tables with typedefs; queries against raw internal tables (`_ddb_*`, `doogats`) return uncoerced values.
 
+### DEFAULT NEXT (auto-increment)
+
+A ddb SQL extension for auto-incrementing INTEGER columns. Not standard SQL.
+
+```sql
+CREATE TABLE items (name TEXT, pos INTEGER DEFAULT NEXT)
+CREATE TABLE memberships (cat TEXT, sort_order INTEGER DEFAULT NEXT(cat))
+```
+
+**Simple NEXT**: On INSERT, columns with `DEFAULT NEXT` resolve to `MAX(col) + 1` across the entire table (or 1 if empty). Explicit values are respected; the next auto value will be `MAX + 1` after any manual insert.
+
+**Partitioned NEXT(col)**: `DEFAULT NEXT(partition_col)` scopes the MAX query with `WHERE partition_col = ?`, giving independent sequences per partition value. Useful for per-category sort ordering.
+
+**Behavior**:
+- MAX-based, not gap-filling. Deleting row 2 and inserting again yields 4, not 2.
+- Multi-row INSERT computes MAX once and increments in-memory across rows.
+- Only valid on INTEGER columns. `VARCHAR DEFAULT NEXT` is rejected at CREATE TABLE time.
+- Stored as `"NEXT"` or `"NEXT(col)"` in the typedef's `default_value` field.
+
 ### DML
 
 | Statement | Effect |
