@@ -54,7 +54,8 @@ CREATE TABLE memberships (cat TEXT, sort_order INTEGER DEFAULT NEXT(cat))
 
 **Behavior**:
 - MAX-based, not gap-filling. Deleting row 2 and inserting again yields 4, not 2.
-- Multi-row INSERT computes MAX once and increments in-memory across rows.
+- Simple NEXT: multi-row INSERT computes MAX once and increments in-memory across rows.
+- Partitioned NEXT(col): queries MAX per row (previous rows visible via SQLite within same connection).
 - Only valid on INTEGER columns. `VARCHAR DEFAULT NEXT` is rejected at CREATE TABLE time.
 - Stored as `"NEXT"` or `"NEXT(col)"` in the typedef's `default_value` field.
 
