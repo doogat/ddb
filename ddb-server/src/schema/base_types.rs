@@ -814,6 +814,32 @@ mod tests {
     }
 
     #[test]
+    fn sql_result_rows_objects_format() {
+        let result = SqlResult::Rows {
+            columns: vec!["id".into(), "title".into()],
+            rows: vec![vec!["123".into(), "hello".into()]],
+        };
+        let val = sql_result_to_value(&result, "objects");
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+        let rows = match obj.get("rows").unwrap() {
+            GqlValue::List(items) => items,
+            other => panic!("expected list, got {other:?}"),
+        };
+        assert_eq!(rows.len(), 1);
+        let row_json = match &rows[0] {
+            GqlValue::String(s) => s.clone(),
+            other => panic!("expected string, got {other:?}"),
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&row_json).unwrap();
+        assert!(parsed.is_object(), "row should be JSON object");
+        assert_eq!(parsed["id"].as_str().unwrap(), "123");
+        assert_eq!(parsed["title"].as_str().unwrap(), "hello");
+    }
+
+    #[test]
     fn doogat_to_value_merges_body_tags_deduplicated() {
         use ddb_core::types::{DoogatMeta, ParsedDoogat};
 

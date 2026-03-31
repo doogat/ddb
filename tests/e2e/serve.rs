@@ -1056,7 +1056,7 @@ fn execute_sql_format_objects() {
             .expect("row should be valid JSON");
     assert!(row.is_object(), "row should be a JSON object, got: {row}");
     assert_eq!(row["name"].as_str().unwrap(), "Widget");
-    assert_eq!(row["price"].as_str().unwrap_or("42"), "42");
+    assert_eq!(row["price"].as_str().unwrap(), "42");
 }
 
 #[test]
@@ -1083,4 +1083,83 @@ fn non_select_with_format_objects_ignored() {
     let sql = &result["data"]["executeSql"];
     // Non-SELECT returns message with the created ID
     assert!(sql["message"].is_string());
+}
+
+#[test]
+fn sql_columns_aliased() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a doogat so there's data to query
+    server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({ "input": { "title": "Alias Test" } }),
+    );
+
+    // Aliased column name should appear in columns
+    let result = server.graphql(
+        r#"{ sql(query: "SELECT id AS doogat_id, title AS name FROM doogats") { columns } }"#,
+    );
+    assert!(result.get("errors").is_none(), "aliased query failed: {result}");
+    let cols = result["data"]["sql"]["columns"].as_array().unwrap();
+    assert_eq!(cols[0].as_str().unwrap(), "doogat_id");
+    assert_eq!(cols[1].as_str().unwrap(), "name");
+}
+
+#[test]
+fn sql_columns_star_select() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a typed table and insert a row
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE gadget (label TEXT NOT NULL, weight INTEGER)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO gadget (label, weight) VALUES ('G1', 10)" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+
+    // SELECT * should return all columns
+    let result = server.graphql(
+        r#"{ sql(query: "SELECT * FROM gadget") { columns rows } }"#,
+    );
+    assert!(result.get("errors").is_none(), "star select failed: {result}");
+    let cols = result["data"]["sql"]["columns"].as_array().unwrap();
+    let col_names: Vec<&str> = cols.iter().map(|c| c.as_str().unwrap()).collect();
+    assert!(col_names.contains(&"label"), "missing label column: {col_names:?}");
+    assert!(col_names.contains(&"weight"), "missing weight column: {col_names:?}");
+}
+
+#[test]
+fn execute_batch_format_objects() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create type and insert data
+    server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE planet (name TEXT NOT NULL)" }),
+    );
+    server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO planet (name) VALUES ('Mars')" }),
+    );
+
+    // executeBatch with format:"objects"
+    let result = server.graphql_with_vars(
+        r#"mutation($stmts: [String!]!, $fmt: String) { executeBatch(statements: $stmts, format: $fmt) { columns rows } }"#,
+        serde_json::json!({ "stmts": ["SELECT name FROM planet"], "fmt": "objects" }),
+    );
+    assert!(result.get("errors").is_none(), "executeBatch format:objects failed: {result}");
+    let batch = result["data"]["executeBatch"].as_array().unwrap();
+    assert!(!batch.is_empty());
+    let rows = batch[0]["rows"].as_array().unwrap();
+    assert!(!rows.is_empty());
+    let row: serde_json::Value = serde_json::from_str(rows[0].as_str().unwrap()).unwrap();
+    assert!(row.is_object(), "batch row should be object: {row}");
+    assert_eq!(row["name"].as_str().unwrap(), "Mars");
 }
