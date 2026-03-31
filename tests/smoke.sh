@@ -447,4 +447,11 @@ echo "$NEXT_MAX" | grep -q "100"
 $DDB query "DROP TABLE nexttbl CASCADE" >/dev/null
 pass "DEFAULT NEXT auto-increment"
 
+# 22. FTS5 search boost (search_boost on typedef columns)
+$DDB type install contact >/dev/null 2>&1 || true
+BOOST_ID=$($DDB create --type contact --title "Boost Test Contact" --set email=uniquexyz@example.com)
+$DDB reindex >/dev/null
+$DDB search "uniquexyz" | grep -q "$BOOST_ID"
+pass "fts5 search boost (boosted field match)"
+
 echo "=== all smoke tests passed ==="

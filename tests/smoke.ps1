@@ -531,5 +531,13 @@ if ($output -notmatch "100") { throw "NEXT default: expected MAX 100: $output" }
 ddb query "DROP TABLE nexttbl CASCADE" | Out-Null
 pass "DEFAULT NEXT auto-increment"
 
+# 22. FTS5 search boost (search_boost on typedef columns)
+ddb type install contact 2>$null | Out-Null
+$BOOST_ID = ddb create --type contact --title "Boost Test Contact" --set email=uniquexyz@example.com
+ddb reindex | Out-Null
+$output = ddb search "uniquexyz"
+if ($output -notmatch $BOOST_ID) { throw "fts5 search boost: boosted field not found in results" }
+pass "fts5 search boost (boosted field match)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
