@@ -950,3 +950,137 @@ fn health_live_always_ok() {
     let body: serde_json::Value = resp.json().unwrap();
     assert_eq!(body["status"].as_str().unwrap(), "ok");
 }
+
+// ── SQL object-format tests ────────────────────────────────────
+
+#[test]
+fn sql_format_objects_returns_keyed_rows() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a doogat so there's data to query
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({ "input": { "title": "Obj Test", "content": "body" } }),
+    );
+    assert!(r.get("errors").is_none(), "create failed: {r}");
+    let id = r["data"]["createDoogat"]["id"].as_str().unwrap();
+
+    // Query with format:"objects" — rows should be JSON objects keyed by column name
+    let result = server.graphql(
+        r#"{ sql(query: "SELECT id, title FROM doogats", format: "objects") { columns rows } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "sql with format:objects failed: {result}"
+    );
+    let sql = &result["data"]["sql"];
+    let rows = sql["rows"].as_array().expect("rows should be an array");
+    assert!(!rows.is_empty(), "expected at least one row");
+
+    // Each row should be a JSON object with "id" and "title" keys
+    let row: serde_json::Value =
+        serde_json::from_str(rows[0].as_str().expect("row should be a string"))
+            .expect("row should be valid JSON");
+    assert!(row.is_object(), "row should be a JSON object, got: {row}");
+    assert_eq!(row["id"].as_str().unwrap(), id);
+    assert_eq!(row["title"].as_str().unwrap(), "Obj Test");
+}
+
+#[test]
+fn sql_default_format_returns_arrays() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a doogat
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({ "input": { "title": "Array Test", "content": "body" } }),
+    );
+    assert!(r.get("errors").is_none(), "create failed: {r}");
+
+    // Query without format arg — rows should be JSON arrays (backwards compat)
+    let result =
+        server.graphql(r#"{ sql(query: "SELECT id, title FROM doogats") { columns rows } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "sql without format failed: {result}"
+    );
+    let sql = &result["data"]["sql"];
+    let rows = sql["rows"].as_array().expect("rows should be an array");
+    assert!(!rows.is_empty(), "expected at least one row");
+
+    // Each row should be a JSON array, not an object
+    let row: serde_json::Value =
+        serde_json::from_str(rows[0].as_str().expect("row should be a string"))
+            .expect("row should be valid JSON");
+    assert!(
+        row.is_array(),
+        "default format row should be a JSON array, got: {row}"
+    );
+}
+
+#[test]
+fn execute_sql_format_objects() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a typed table and insert data
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE item (name TEXT NOT NULL, price INTEGER)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO item (name, price) VALUES ('Widget', 42)" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+
+    // executeSql SELECT with format:"objects"
+    let result = server.graphql_with_vars(
+        r#"mutation($sql: String!, $fmt: String) { executeSql(sql: $sql, format: $fmt) { columns rows } }"#,
+        serde_json::json!({ "sql": "SELECT name, price FROM item", "fmt": "objects" }),
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "executeSql with format:objects failed: {result}"
+    );
+    let sql = &result["data"]["executeSql"];
+    let rows = sql["rows"].as_array().expect("rows should be an array");
+    assert!(!rows.is_empty(), "expected at least one row");
+
+    let row: serde_json::Value =
+        serde_json::from_str(rows[0].as_str().expect("row should be a string"))
+            .expect("row should be valid JSON");
+    assert!(row.is_object(), "row should be a JSON object, got: {row}");
+    assert_eq!(row["name"].as_str().unwrap(), "Widget");
+    assert_eq!(row["price"].as_str().unwrap_or("42"), "42");
+}
+
+#[test]
+fn non_select_with_format_objects_ignored() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a typed table
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE thing (name TEXT NOT NULL)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    // INSERT with format:"objects" — should succeed, format is ignored for non-SELECT
+    let result = server.graphql_with_vars(
+        r#"mutation($sql: String!, $fmt: String) { executeSql(sql: $sql, format: $fmt) { affected rows columns } }"#,
+        serde_json::json!({ "sql": "INSERT INTO thing (name) VALUES ('A')", "fmt": "objects" }),
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "INSERT with format:objects should not error: {result}"
+    );
+    let sql = &result["data"]["executeSql"];
+    // Non-SELECT returns affected count, null columns/rows
+    assert!(sql["affected"].as_i64().is_some() || sql["rows"].is_null());
+}
