@@ -37,6 +37,8 @@ Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTE
 
 `ENUM` and `SET` columns extract `allowed_values` into the typedef schema and store as `TEXT` in SQLite.
 
+`BOOLEAN` columns are stored as `INTEGER` (1/0) in SQLite. SQL `SELECT` queries against materialized type tables automatically coerce these values to `"true"`/`"false"` in the response. This coercion applies only to tables with typedefs; queries against raw internal tables (`_ddb_*`, `doogats`) return uncoerced values.
+
 ### DML
 
 | Statement | Effect |

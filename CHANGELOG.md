@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SQL `SELECT` responses now return `"true"`/`"false"` for BOOLEAN columns instead of `"1"`/`"0"` (applies to materialized type tables with typedefs)
+- PgWire responses use proper BOOL type for BOOLEAN columns (psql shows `t`/`f`)
 - Malformed FTS5 search queries (e.g., `AND AND`) now return `BAD_REQUEST` instead of `INTERNAL_ERROR`
 
 ## [0.1.0] - 2026-03-26

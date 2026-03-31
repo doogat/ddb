@@ -488,9 +488,20 @@ Uses PostgreSQL MD5 password authentication. The password is the same bearer tok
 
 `CREATE TABLE` and `DROP TABLE` statements sent over pgwire trigger the same hot schema reload as the GraphQL `executeSql` mutation. New types become immediately available via GraphQL after creation.
 
+### Type encoding
+
+When a SELECT targets a materialized type table (one with a typedef), the pgwire response uses proper PostgreSQL types:
+
+- `BOOLEAN` columns use `BOOL` type (psql displays `t`/`f`)
+- `INTEGER` columns use `INT8` type
+- `REAL` columns use `FLOAT8` type
+- Other columns use `VARCHAR`
+
+Queries against untyped tables (no typedef) return all columns as `VARCHAR`.
+
 ### Limitations
 
-- **TEXT-only**: all column values are returned as PostgreSQL `VARCHAR` (text). No native int/bool encoding.
+- **Text encoding for untyped tables**: columns from tables without typedefs are returned as `VARCHAR`.
 - **Simple query protocol only**: no prepared statements or extended query protocol. Most clients default to simple mode for ad-hoc queries.
 - **No TLS**: bind to localhost or use an SSH tunnel for remote access.
 - **No catalog queries**: psql meta-commands (`\dt`, `\d`, `\l`) query PostgreSQL system catalogs which don't exist — they fail gracefully.
