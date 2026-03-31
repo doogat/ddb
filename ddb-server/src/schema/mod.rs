@@ -1088,12 +1088,10 @@ pub fn build_schema(
                                 .args
                                 .get("distinct")
                                 .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string())
-                                .filter(|col| {
-                                    schema_clone
-                                        .columns
-                                        .iter()
-                                        .any(|c| c.name == *col)
+                                .and_then(|col| {
+                                    schema_clone.columns.iter().find(|c| {
+                                        c.name == col || sanitize_field_name(&c.name) == col
+                                    }).map(|c| c.name.clone())
                                 });
 
                             // Parse optional orderBy
@@ -1210,9 +1208,10 @@ pub fn build_schema(
                                 .args
                                 .get("groupBy")
                                 .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string())
-                                .filter(|col| {
-                                    schema_clone.columns.iter().any(|c| c.name == *col)
+                                .and_then(|col| {
+                                    schema_clone.columns.iter().find(|c| {
+                                        c.name == col || sanitize_field_name(&c.name) == col
+                                    }).map(|c| c.name.clone())
                                 });
 
                             let (sql, names) = crate::filter::build_aggregate_sql_grouped(
