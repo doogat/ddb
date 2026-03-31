@@ -126,6 +126,16 @@ pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
     };
     obj.insert(Name::new("attachments"), GqlValue::List(attachments));
 
+    // Timestamps
+    obj.insert(
+        Name::new("updated_at"),
+        z.updated_at
+            .as_deref()
+            .map(GqlValue::from)
+            .unwrap_or(GqlValue::Null),
+    );
+    obj.insert(Name::new("created_at"), GqlValue::from(date));
+
     GqlValue::Object(obj)
 }
 
@@ -173,6 +183,14 @@ pub(crate) fn search_hit_to_value(r: &SearchResult) -> GqlValue {
     obj.insert(Name::new("path"), GqlValue::from(r.path.as_str()));
     obj.insert(Name::new("snippet"), GqlValue::from(r.snippet.as_str()));
     obj.insert(Name::new("rank"), GqlValue::from(r.rank));
+    obj.insert(
+        Name::new("updated_at"),
+        if r.updated_at.is_empty() {
+            GqlValue::Null
+        } else {
+            GqlValue::from(r.updated_at.as_str())
+        },
+    );
     GqlValue::Object(obj)
 }
 
@@ -472,6 +490,8 @@ pub(crate) fn doogat_object(name: &str) -> Object {
                 })
             },
         ))
+        .field(simple_field("updated_at", TypeRef::named(TypeRef::STRING)))
+        .field(simple_field("created_at", TypeRef::named(TypeRef::STRING)))
 }
 
 /// Determine the GQL type name for a REFERENCES column's target.

@@ -125,7 +125,8 @@ pub fn build_schema(
                     Ok(obj_field(obj, "rank"))
                 })
             },
-        ));
+        ))
+        .field(simple_field("updated_at", TypeRef::named(TypeRef::STRING)));
 
     let search_connection_type = Object::new("SearchConnection")
         .field(Field::new(
