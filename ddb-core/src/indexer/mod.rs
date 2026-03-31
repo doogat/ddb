@@ -95,8 +95,13 @@ impl Index {
         CREATE INDEX IF NOT EXISTS idx_ddb_checkboxes_doogat ON _ddb_checkboxes(doogat_id);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
-            title, body, tags,
+            title, body, tags, fields,
             tokenize = 'porter unicode61'
+        );
+
+        CREATE TABLE IF NOT EXISTS _ddb_boost (
+            type_name TEXT PRIMARY KEY,
+            max_boost REAL NOT NULL DEFAULT 1.0
         );
     ";
 
@@ -118,9 +123,58 @@ impl Index {
     fn configure_connection(conn: Connection) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
-        conn.execute_batch(Self::SCHEMA_DDL)?;
 
+        // Detect old 3-column FTS5 schema and upgrade if needed.
+        // FTS5 virtual tables cannot be ALTERed, so we drop all tables
+        // and recreate from the current SCHEMA_DDL.
+        if Self::needs_schema_upgrade(&conn) {
+            tracing::info!("index schema outdated, dropping tables for upgrade");
+            conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+            let mut stmt = conn.prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'",
+            )?;
+            let tables: Vec<String> = stmt
+                .query_map([], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(stmt);
+            for table in &tables {
+                conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{table}\""))?;
+            }
+            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        }
+
+        conn.execute_batch(Self::SCHEMA_DDL)?;
         Ok(Self { conn })
+    }
+
+    /// Check whether the existing schema needs upgrading (e.g. old 3-column
+    /// FTS5 table missing `fields`, or missing `_ddb_boost` table).
+    fn needs_schema_upgrade(conn: &Connection) -> bool {
+        let fts_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master \
+                 WHERE type='table' AND name='_ddb_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !fts_exists {
+            return false; // fresh DB, SCHEMA_DDL will create everything
+        }
+        // Probe for the `fields` column by attempting an insert
+        let has_fields = conn
+            .execute(
+                "INSERT INTO _ddb_fts (title, body, tags, fields) VALUES ('', '', '', '')",
+                [],
+            )
+            .is_ok();
+        if has_fields {
+            // Clean up the probe row
+            let _ = conn.execute("DELETE FROM _ddb_fts WHERE title = '' AND body = ''", []);
+        }
+        !has_fields
     }
 
     /// Drop every table (internal + materialized) so the schema can be
@@ -314,10 +368,10 @@ impl Index {
 
         // Insert FTS entry
         self.conn.execute(
-            "INSERT INTO _ddb_fts (rowid, title, body, tags) VALUES (
-                (SELECT rowid FROM doogats WHERE id = ?1), ?2, ?3, ?4
+            "INSERT INTO _ddb_fts (rowid, title, body, tags, fields) VALUES (
+                (SELECT rowid FROM doogats WHERE id = ?1), ?2, ?3, ?4, ?5
             )",
-            params![id, title, doogat.body, tags_str],
+            params![id, title, doogat.body, tags_str, ""],
         )?;
 
         Ok(())
