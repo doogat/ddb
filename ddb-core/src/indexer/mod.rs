@@ -824,6 +824,7 @@ impl Index {
             path: row.get(2)?,
             snippet: row.get(3)?,
             rank: row.get(4)?,
+            updated_at: String::new(),
         })
     }
 

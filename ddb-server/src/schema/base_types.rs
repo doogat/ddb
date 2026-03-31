@@ -716,6 +716,7 @@ mod tests {
             ],
             reference_section: String::new(),
             path: "ddb/20260301140100.md".into(),
+            updated_at: None,
         };
 
         let schema = TableSchema {
@@ -862,6 +863,7 @@ mod tests {
             inline_fields: vec![],
             reference_section: String::new(),
             path: "ddb/20260301140200.md".into(),
+            updated_at: None,
         };
 
         let val = doogat_to_value(&z);

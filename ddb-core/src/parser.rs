@@ -915,6 +915,7 @@ pub fn parse(content: &str, path: &str) -> Result<crate::types::ParsedDoogat> {
         body_tags,
         checkboxes,
         path: path.to_string(),
+        updated_at: None,
     })
 }
 
@@ -1705,6 +1706,7 @@ Some more body.
             body_tags: vec![],
             checkboxes: vec![],
             path: "20260226120000.md".into(),
+            updated_at: None,
         };
 
         let serialized = serialize(&parsed);
@@ -1735,6 +1737,7 @@ Some more body.
             body_tags: vec![],
             checkboxes: vec![],
             path: "test.md".into(),
+            updated_at: None,
         };
 
         let serialized = serialize(&parsed);
@@ -1769,6 +1772,7 @@ Some more body.
             body_tags: vec![],
             checkboxes: vec![],
             path: "test.md".into(),
+            updated_at: None,
         };
 
         let serialized = serialize(&parsed);

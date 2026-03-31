@@ -34,6 +34,7 @@ mod resolve_tests;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260226120000.md".into(),
+            updated_at: None,
         }
     }
 
@@ -62,6 +63,7 @@ mod resolve_tests;
                     body_tags: vec![],
                     checkboxes: vec![],
                     path: format!("ddb/{id}.md"),
+                    updated_at: None,
                 }
             })
             .collect()
@@ -90,6 +92,7 @@ mod resolve_tests;
             body_tags: vec![],
             checkboxes: vec![],
             path: format!("ddb/2026022612{n:04}.md"),
+            updated_at: None,
         }
     }
 
@@ -115,6 +118,7 @@ mod resolve_tests;
             body_tags: vec![],
             checkboxes: vec![],
             path: format!("ddb/{id}.md"),
+            updated_at: None,
         }
     }
 
@@ -602,6 +606,7 @@ processed: true
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260226120000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&z).unwrap();
 
@@ -865,6 +870,7 @@ processed: true
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301130000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&doogat).unwrap();
 
@@ -1015,6 +1021,7 @@ processed: true
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260226120001.md".into(),
+            updated_at: None,
         };
         writer.index_doogat(&doogat2).unwrap();
 
@@ -1131,6 +1138,7 @@ processed: true
             body_tags: vec![],
             checkboxes: vec![],
             path: format!("ddb/{id}.md"),
+            updated_at: None,
         }
     }
 
@@ -1272,6 +1280,7 @@ processed: true
             body_tags: vec![],
             checkboxes: vec![],
             path: format!("ddb/{id}.md"),
+            updated_at: None,
         }
     }
 

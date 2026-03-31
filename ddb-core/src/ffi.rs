@@ -67,6 +67,7 @@ pub struct SearchResult {
     pub path: String,
     pub snippet: String,
     pub rank: f64,
+    pub updated_at: String,
 }
 
 impl From<crate::types::SearchResult> for SearchResult {
@@ -77,6 +78,7 @@ impl From<crate::types::SearchResult> for SearchResult {
             path: r.path,
             snippet: r.snippet,
             rank: r.rank,
+            updated_at: r.updated_at,
         }
     }
 }

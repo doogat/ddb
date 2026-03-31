@@ -1772,6 +1772,7 @@ proptest! {
             body_tags: vec![],
             checkboxes: vec![],
                 path: format!("ddb/{id}.md"),
+                updated_at: None,
             };
             idx.index_doogat(&doogat).unwrap();
 
@@ -1844,6 +1845,7 @@ proptest! {
             body_tags: vec![],
             checkboxes: vec![],
                     path: format!("ddb/{id}.md"),
+                    updated_at: None,
                 };
                 let _ = idx.index_doogat(&doogat);
             }

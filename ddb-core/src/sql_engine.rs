@@ -2095,6 +2095,7 @@ pub fn build_typedef_doogat(id: &DoogatId, schema: &TableSchema) -> ParsedDoogat
         body_tags: vec![],
         checkboxes: vec![],
         path: format!("ddb/_typedef/{}.md", id.0),
+        updated_at: None,
     }
 }
 
@@ -2221,6 +2222,7 @@ fn build_data_doogat(
         body_tags: vec![],
         checkboxes: vec![],
         path: format!("ddb/{}.md", id.0),
+        updated_at: None,
     }
 }
 

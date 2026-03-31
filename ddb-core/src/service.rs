@@ -128,6 +128,7 @@ impl DoogatService {
             body_tags: vec![],
             checkboxes: vec![],
             path: path.clone(),
+            updated_at: None,
         };
 
         let content = parser::serialize(&parsed);

@@ -68,6 +68,7 @@ pub fn resolve_conflicts(
             body_tags: vec![],
             checkboxes: vec![],
             path: conflict.path.clone(),
+            updated_at: None,
         };
 
         let content = parser::serialize(&parsed);
@@ -639,6 +640,7 @@ pub fn resolve_append_log(conflicts: Vec<ConflictFile>) -> Result<Vec<ResolvedFi
             body_tags: vec![],
             checkboxes: vec![],
             path: conflict.path.clone(),
+            updated_at: None,
         };
 
         resolved.push(ResolvedFile {

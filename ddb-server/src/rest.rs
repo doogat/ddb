@@ -383,6 +383,7 @@ mod tests {
             ],
             reference_section: String::new(),
             path: "ddb/20260301140100.md".into(),
+            updated_at: None,
         };
 
         let json = doogat_to_json(&z);

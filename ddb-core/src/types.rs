@@ -834,6 +834,8 @@ pub struct ParsedDoogat {
     #[serde(default)]
     pub checkboxes: Vec<CheckboxItem>,
     pub path: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1182,6 +1184,7 @@ pub struct SearchResult {
     pub path: String,
     pub snippet: String,
     pub rank: f64,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone)]

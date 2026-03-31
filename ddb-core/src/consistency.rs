@@ -1078,6 +1078,7 @@ mod tests {
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260315120000.md".to_string(),
+            updated_at: None,
         }
     }
 

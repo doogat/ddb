@@ -22,6 +22,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301120000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&target).unwrap();
 
@@ -65,6 +66,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301100000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&source).unwrap();
 
@@ -147,6 +149,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260302120000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&z2).unwrap();
 
@@ -194,6 +197,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301100000.md".to_string(),
+            updated_at: None,
         };
 
         // Doogat B is the target (no outgoing links)
@@ -214,6 +218,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301120000.md".to_string(),
+            updated_at: None,
         };
 
         index.index_doogat(&doogat_a).unwrap();
@@ -251,6 +256,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301100000.md".into(),
+            updated_at: None,
         };
 
         // Create doogat B that links to A
@@ -277,6 +283,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301100001.md".into(),
+            updated_at: None,
         };
 
         index.index_doogat(&a).unwrap();
@@ -318,6 +325,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301000000.md".into(),
+            updated_at: None,
         };
 
         // Doogat B: body mentions "Project Alpha" but does NOT link to A
@@ -338,6 +346,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260301000001.md".into(),
+            updated_at: None,
         };
 
         idx.index_doogat(&a).unwrap();
@@ -370,6 +379,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260302000000.md".into(),
+            updated_at: None,
         };
 
         // Doogat B: mentions "Project Beta" AND links to A via wikilink
@@ -396,6 +406,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260302000001.md".into(),
+            updated_at: None,
         };
 
         idx.index_doogat(&a).unwrap();
@@ -430,6 +441,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260303000000.md".into(),
+            updated_at: None,
         };
 
         idx.index_doogat(&a).unwrap();
@@ -463,6 +475,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260304000000.md".into(),
+            updated_at: None,
         };
 
         // Candidate1: tags [a, b] — 2 shared tags
@@ -483,6 +496,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260304000001.md".into(),
+            updated_at: None,
         };
 
         // Candidate2: tags [a] — 1 shared tag
@@ -503,6 +517,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260304000002.md".into(),
+            updated_at: None,
         };
 
         idx.index_doogat(&source).unwrap();
@@ -552,6 +567,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260305000000.md".into(),
+            updated_at: None,
         };
 
         // Candidate: same tag as source
@@ -572,6 +588,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260305000001.md".into(),
+            updated_at: None,
         };
 
         idx.index_doogat(&source).unwrap();
@@ -606,6 +623,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260306000000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&source).unwrap();
 
@@ -629,6 +647,7 @@ use super::*;
                 body_tags: vec![],
                 checkboxes: vec![],
                 path: format!("ddb/{id}.md"),
+                updated_at: None,
             };
             idx.index_doogat(&c).unwrap();
         }
@@ -663,6 +682,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260314000000.md".into(),
+            updated_at: None,
         };
 
         // Doogat B: no shared tags, body contains "machine learning"
@@ -683,6 +703,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260314000001.md".into(),
+            updated_at: None,
         };
 
         idx.index_doogat(&a).unwrap();
@@ -854,6 +875,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260309000000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&orphan).unwrap();
 
@@ -884,6 +906,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260310000001.md".into(),
+            updated_at: None,
         };
 
         // Doogat A: links to B
@@ -910,6 +933,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260310000000.md".into(),
+            updated_at: None,
         };
 
         idx.index_doogat(&b).unwrap();
@@ -944,6 +968,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/_typedef/20260311000000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&typedef).unwrap();
 
@@ -991,6 +1016,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20260312000000.md".into(),
+            updated_at: None,
         };
         idx.index_doogat(&orphan).unwrap();
 

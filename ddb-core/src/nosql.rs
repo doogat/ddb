@@ -250,6 +250,7 @@ mod tests {
             body_tags: vec![],
             checkboxes: vec![],
             path: format!("ddb/{id}.md"),
+            updated_at: None,
         }
     }
 

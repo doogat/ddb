@@ -32,6 +32,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20240101120000.md".to_string(),
+            updated_at: None,
         };
 
         index.index_doogat(&doogat).unwrap();
@@ -83,6 +84,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20240101120000.md".to_string(),
+            updated_at: None,
         };
 
         index.index_doogat(&doogat).unwrap();
@@ -121,6 +123,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20240101120000.md".to_string(),
+            updated_at: None,
         };
 
         index.index_doogat(&doogat).unwrap();
@@ -162,6 +165,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/contact/20240101120000.md".to_string(),
+            updated_at: None,
         };
 
         // Doogat B: its *ID* equals A's full path — contrived but tests precedence
@@ -184,6 +188,7 @@ use super::*;
             body_tags: vec![],
             checkboxes: vec![],
             path: "ddb/20240202120000.md".to_string(),
+            updated_at: None,
         };
 
         index.index_doogat(&doogat_a).unwrap();
