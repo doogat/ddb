@@ -5820,4 +5820,29 @@ mod tests {
         assert_eq!(rows[1][0], "2");
         assert_eq!(rows[2][0], "3");
     }
+
+    #[test]
+    fn insert_next_partitioned_multi_row_same_partition() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute(
+                "CREATE TABLE items (cat TEXT, pos INTEGER DEFAULT NEXT(cat))",
+            )
+            .unwrap();
+
+        // Multi-row INSERT with same partition value
+        engine
+            .execute("INSERT INTO items (cat) VALUES ('a'), ('a'), ('a')")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT pos FROM items ORDER BY pos")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], "1");
+        assert_eq!(rows[1][0], "2");
+        assert_eq!(rows[2][0], "3");
+    }
 }
