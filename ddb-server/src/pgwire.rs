@@ -28,16 +28,16 @@ use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
 use crate::reload::SchemaReloader;
 
-/// True when `sql` references pg_catalog (e.g. psql's \dt, tab-completion).
+/// True when `sql` references pg_catalog as a schema qualifier (e.g. psql's \dt, tab-completion).
+/// Matches `pg_catalog.` with the dot to avoid false positives on user data containing "pg_catalog".
 fn is_pg_catalog_query(sql: &str) -> bool {
-    let upper = sql.to_uppercase();
-    upper.contains("PG_CATALOG")
+    sql.to_uppercase().contains("PG_CATALOG.")
 }
 
 /// True when a pg_catalog query is requesting a table listing (pg_class).
 fn is_table_listing_query(sql: &str) -> bool {
     let upper = sql.to_uppercase();
-    upper.contains("PG_CLASS") || upper.contains("PG_TABLES")
+    upper.contains("PG_CATALOG.PG_CLASS") || upper.contains("PG_CATALOG.PG_TABLES")
 }
 
 /// True when the table name is internal and should be hidden from introspection.
@@ -442,6 +442,10 @@ mod tests {
         ));
         assert!(!is_pg_catalog_query("SELECT * FROM books"));
         assert!(!is_pg_catalog_query("SELECT 1"));
+        // Must not match bare "pg_catalog" without dot qualifier
+        assert!(!is_pg_catalog_query(
+            "SELECT * FROM my_table WHERE note = 'see pg_catalog docs'"
+        ));
     }
 
     #[test]
@@ -454,6 +458,10 @@ mod tests {
         ));
         assert!(!is_table_listing_query(
             "SELECT typname FROM pg_catalog.pg_type"
+        ));
+        // Must not match user table names containing "pg_class"
+        assert!(!is_table_listing_query(
+            "SELECT * FROM pg_class_archive"
         ));
     }
 
