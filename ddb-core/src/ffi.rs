@@ -180,7 +180,7 @@ pub struct SqlResultRecord {
 impl From<SqlResult> for SqlResultRecord {
     fn from(r: SqlResult) -> Self {
         match r {
-            SqlResult::Rows { columns, rows } => {
+            SqlResult::Rows { columns, rows, .. } => {
                 let affected_rows = rows.len() as i64;
                 Self {
                     columns,

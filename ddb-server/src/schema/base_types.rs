@@ -186,7 +186,7 @@ pub(crate) fn tag_info_to_value(name: &str, count: i64) -> GqlValue {
 pub(crate) fn sql_result_to_value(r: &SqlResult, format: &str) -> GqlValue {
     let mut obj = IndexMap::new();
     match r {
-        SqlResult::Rows { columns, rows } => {
+        SqlResult::Rows { columns, rows, .. } => {
             let gql_cols: Vec<GqlValue> =
                 columns.iter().map(|c| GqlValue::from(c.as_str())).collect();
             obj.insert(Name::new("columns"), GqlValue::List(gql_cols));
@@ -765,6 +765,7 @@ mod tests {
         let result = SqlResult::Rows {
             columns: vec!["id".into(), "title".into()],
             rows: vec![vec!["123".into(), "hello".into()]],
+            column_types: None,
         };
         let val = sql_result_to_value(&result, "array");
         let obj = match &val {
@@ -818,6 +819,7 @@ mod tests {
         let result = SqlResult::Rows {
             columns: vec!["id".into(), "title".into()],
             rows: vec![vec!["123".into(), "hello".into()]],
+            column_types: None,
         };
         let val = sql_result_to_value(&result, "objects");
         let obj = match &val {

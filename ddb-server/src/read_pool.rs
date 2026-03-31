@@ -356,7 +356,7 @@ mod tests {
             .await
             .unwrap();
         match result {
-            SqlResult::Rows { rows, columns } => {
+            SqlResult::Rows { rows, columns, .. } => {
                 assert_eq!(columns, vec!["n"]);
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0][0], "1");

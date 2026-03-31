@@ -103,16 +103,24 @@ impl SimpleQueryHandler for DdbBackend {
         };
 
         let response = match result {
-            SqlResult::Rows { columns, rows } => {
+            SqlResult::Rows { columns, rows, column_types } => {
+                let col_types = column_types.as_deref();
                 let schema = Arc::new(
                     columns
                         .iter()
-                        .map(|name| {
+                        .enumerate()
+                        .map(|(i, name)| {
+                            let pg_type = match col_types.and_then(|ct| ct.get(i)).map(|s| s.as_str()) {
+                                Some(t) if t.eq_ignore_ascii_case("BOOLEAN") => Type::BOOL,
+                                Some(t) if t.eq_ignore_ascii_case("INTEGER") => Type::INT8,
+                                Some(t) if t.eq_ignore_ascii_case("REAL") => Type::FLOAT8,
+                                _ => Type::VARCHAR,
+                            };
                             FieldInfo::new(
                                 name.clone(),
                                 None,
                                 None,
-                                Type::VARCHAR,
+                                pg_type,
                                 FieldFormat::Text,
                             )
                         })
@@ -123,11 +131,26 @@ impl SimpleQueryHandler for DdbBackend {
                     .iter()
                     .map(|row| {
                         let mut encoder = DataRowEncoder::new(schema.clone());
-                        for val in row {
-                            let v: &str = val;
-                            encoder
-                                .encode_field(&Some(v))
-                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                        for (i, val) in row.iter().enumerate() {
+                            let is_bool = col_types
+                                .and_then(|ct| ct.get(i))
+                                .is_some_and(|t| t.eq_ignore_ascii_case("BOOLEAN"));
+                            if is_bool {
+                                let b = match val.as_str() {
+                                    "true" => Some(true),
+                                    "false" => Some(false),
+                                    "NULL" => None,
+                                    _ => Some(val == "1"),
+                                };
+                                encoder
+                                    .encode_field(&b)
+                                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                            } else {
+                                let v: &str = val;
+                                encoder
+                                    .encode_field(&Some(v))
+                                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                            }
                         }
                         encoder.finish()
                     })

@@ -78,6 +78,9 @@ pub enum SqlResult {
     Rows {
         columns: Vec<String>,
         rows: Vec<Vec<String>>,
+        /// Optional data types for each column (e.g. "BOOLEAN", "INTEGER", "TEXT").
+        /// Present when the query targets a materialized type table with a typedef.
+        column_types: Option<Vec<String>>,
     },
     Affected(usize),
     Ok(String),
@@ -342,8 +345,8 @@ impl<'a> SqlEngine<'a> {
                 // Pass through (SELECT and anything else) to raw query
                 let sql_str = stmt.to_string();
                 let (columns, rows) = self.index.query_raw_with_columns(&sql_str)?;
-                let rows = self.coerce_boolean_columns(stmt, &columns, rows);
-                Ok(SqlResult::Rows { columns, rows })
+                let (rows, column_types) = self.coerce_boolean_columns(stmt, &columns, rows);
+                Ok(SqlResult::Rows { columns, rows, column_types })
             }
         }
     }
@@ -1325,6 +1328,7 @@ impl<'a> SqlEngine<'a> {
     }
 
     /// Coerce BOOLEAN columns in SELECT results from "1"/"0" to "true"/"false".
+    /// Also returns column type metadata when a schema is available.
     /// Extracts table name from the statement's FROM clause, loads its schema,
     /// and applies coercion to matching columns. Falls back to uncoerced rows
     /// when the table can't be determined or has no typedef.
@@ -1333,30 +1337,28 @@ impl<'a> SqlEngine<'a> {
         stmt: &Statement,
         columns: &[String],
         mut rows: Vec<Vec<String>>,
-    ) -> Vec<Vec<String>> {
+    ) -> (Vec<Vec<String>>, Option<Vec<String>>) {
         let table_name = match extract_from_table(stmt) {
             Some(t) => t,
-            None => return rows,
+            None => return (rows, None),
         };
         let schema = match self.load_schema(&table_name) {
             Ok(s) => s,
-            Err(_) => return rows,
+            Err(_) => return (rows, None),
         };
-        // Build a set of column indices that are BOOLEAN
-        let bool_indices: Vec<usize> = columns
-            .iter()
-            .enumerate()
-            .filter_map(|(i, col_name)| {
-                let is_bool = schema.columns.iter().any(|c| {
-                    c.name.eq_ignore_ascii_case(col_name)
-                        && c.data_type.eq_ignore_ascii_case("BOOLEAN")
-                });
-                if is_bool { Some(i) } else { None }
-            })
-            .collect();
-        if bool_indices.is_empty() {
-            return rows;
+
+        // Build column type list and boolean indices
+        let mut col_types = Vec::with_capacity(columns.len());
+        let mut bool_indices = Vec::new();
+        for (i, col_name) in columns.iter().enumerate() {
+            let schema_col = schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name));
+            let dtype = schema_col.map(|c| c.data_type.clone()).unwrap_or_else(|| "TEXT".to_string());
+            if dtype.eq_ignore_ascii_case("BOOLEAN") {
+                bool_indices.push(i);
+            }
+            col_types.push(dtype);
         }
+
         for row in &mut rows {
             for &idx in &bool_indices {
                 if idx < row.len() {
@@ -1368,7 +1370,7 @@ impl<'a> SqlEngine<'a> {
                 }
             }
         }
-        rows
+        (rows, Some(col_types))
     }
 
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
@@ -3987,7 +3989,7 @@ mod tests {
         let mut engine = SqlEngine::new(&index, &repo);
         let result = engine.execute("SELECT 1 AS val").unwrap();
         match result {
-            SqlResult::Rows { columns, rows } => {
+            SqlResult::Rows { columns, rows, .. } => {
                 assert_eq!(columns, vec!["val"]);
                 assert_eq!(rows.len(), 1);
             }
@@ -4747,7 +4749,7 @@ mod tests {
             .execute("SELECT title, name FROM widget")
             .unwrap();
         match result {
-            SqlResult::Rows { columns, rows } => {
+            SqlResult::Rows { columns, rows, .. } => {
                 assert_eq!(columns[0], "title");
                 assert_eq!(columns[1], "name");
                 assert_eq!(rows.len(), 1);
@@ -5384,7 +5386,7 @@ mod tests {
 
         let result = engine.execute("SELECT * FROM flags").unwrap();
         match result {
-            SqlResult::Rows { columns, rows } => {
+            SqlResult::Rows { columns, rows, .. } => {
                 assert_eq!(rows.len(), 1);
                 let active_idx = columns.iter().position(|c| c == "active").unwrap();
                 assert_eq!(rows[0][active_idx], "true");
