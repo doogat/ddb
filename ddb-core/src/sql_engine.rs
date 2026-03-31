@@ -5427,4 +5427,91 @@ mod tests {
             _ => panic!("expected Rows"),
         }
     }
+
+    #[test]
+    fn create_table_next_default_stores_marker() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        let schema = engine.load_schema("foo").unwrap();
+        let col = schema.columns.iter().find(|c| c.name == "pos").unwrap();
+        assert_eq!(col.default_value, Some("NEXT".to_string()));
+        assert_eq!(col.data_type, "INTEGER");
+    }
+
+    #[test]
+    fn create_table_next_scoped_default_stores_expression() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (pos INTEGER DEFAULT NEXT(category_id))")
+            .unwrap();
+
+        let schema = engine.load_schema("foo").unwrap();
+        let col = schema.columns.iter().find(|c| c.name == "pos").unwrap();
+        assert_eq!(col.default_value, Some("NEXT(category_id)".to_string()));
+    }
+
+    #[test]
+    fn create_table_next_default_rejected_on_non_integer() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        let err = engine
+            .execute("CREATE TABLE foo (pos VARCHAR(255) DEFAULT NEXT)")
+            .unwrap_err();
+        assert!(
+            format!("{err}").to_lowercase().contains("integer"),
+            "expected error about INTEGER requirement, got: {err}"
+        );
+    }
+
+    #[test]
+    fn create_table_next_default_roundtrip() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE roundtrip (pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        // Load schema from stored typedef and verify default survives
+        let schema = engine.load_schema("roundtrip").unwrap();
+        let col = schema.columns.iter().find(|c| c.name == "pos").unwrap();
+        assert_eq!(col.default_value, Some("NEXT".to_string()));
+
+        // Also verify via a fresh engine to ensure persistence
+        let mut engine2 = SqlEngine::new(&index, &repo);
+        let schema2 = engine2.load_schema("roundtrip").unwrap();
+        let col2 = schema2.columns.iter().find(|c| c.name == "pos").unwrap();
+        assert_eq!(col2.default_value, Some("NEXT".to_string()));
+    }
+
+    #[test]
+    fn create_table_mixed_static_and_next_defaults() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute(
+                "CREATE TABLE mixed (name TEXT DEFAULT 'untitled', pos INTEGER DEFAULT NEXT, priority INTEGER DEFAULT 0)",
+            )
+            .unwrap();
+
+        let schema = engine.load_schema("mixed").unwrap();
+
+        let name_col = schema.columns.iter().find(|c| c.name == "name").unwrap();
+        assert_eq!(name_col.default_value, Some("untitled".to_string()));
+
+        let pos_col = schema.columns.iter().find(|c| c.name == "pos").unwrap();
+        assert_eq!(pos_col.default_value, Some("NEXT".to_string()));
+
+        let prio_col = schema.columns.iter().find(|c| c.name == "priority").unwrap();
+        assert_eq!(prio_col.default_value, Some("0".to_string()));
+    }
 }
