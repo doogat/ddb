@@ -5601,6 +5601,36 @@ mod tests {
     }
 
     #[test]
+    fn insert_next_default_persists_in_git() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (name TEXT, pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        let id = match engine
+            .execute("INSERT INTO foo (name) VALUES ('a')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        // Verify the value is in the materialized table
+        let rows = index.query_raw("SELECT pos FROM foo").unwrap();
+        assert_eq!(rows[0][0], "1");
+
+        // Verify the value is persisted in the git doogat
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(
+            content.contains("pos: 1"),
+            "pos not found in doogat content:\n{content}"
+        );
+    }
+
+    #[test]
     fn insert_next_default_auto_increments() {
         let (_dir, repo, index) = setup();
         let mut engine = SqlEngine::new(&index, &repo);
