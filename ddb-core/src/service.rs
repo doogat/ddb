@@ -118,7 +118,7 @@ impl DoogatService {
             extra,
         };
 
-        let parsed = ParsedDoogat {
+        let mut parsed = ParsedDoogat {
             meta,
             body: body.to_owned(),
             sections: vec![],
@@ -136,6 +136,7 @@ impl DoogatService {
             .commit_file(&path, &content, &format!("create doogat {id_str}"))?;
         self.index.index_doogat(&parsed)?;
         self.nosql_index_doogat(&parsed);
+        parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
 
         Ok(parsed)
     }
@@ -254,9 +255,10 @@ impl DoogatService {
         self.repo
             .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
         // Re-parse to capture updated inline fields/wikilinks
-        let parsed = parser::parse(&new_content, &path)?;
+        let mut parsed = parser::parse(&new_content, &path)?;
         self.index.index_doogat(&parsed)?;
         self.nosql_index_doogat(&parsed);
+        parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
         Ok(parsed)
     }
 
@@ -1756,6 +1758,27 @@ mod tests {
         assert!(
             doogats[0].updated_at.is_some(),
             "typed_filtered_list should populate updated_at"
+        );
+    }
+
+    #[test]
+    fn create_returns_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        let parsed = svc.create_doogat_parsed("Direct", &[], None, "body").unwrap();
+        assert!(
+            parsed.updated_at.is_some(),
+            "create_doogat_parsed should return updated_at in the response"
+        );
+    }
+
+    #[test]
+    fn update_returns_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.create_doogat("Before", &[], None, "body").unwrap();
+        let parsed = svc.update_doogat_parsed(&id, Some("After"), None, None, None).unwrap();
+        assert!(
+            parsed.updated_at.is_some(),
+            "update_doogat_parsed should return updated_at in the response"
         );
     }
 }
