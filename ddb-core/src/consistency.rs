@@ -168,7 +168,10 @@ pub fn detect_fixes(parsed: &ParsedDoogat, schema: Option<&TableSchema>) -> Vec<
 
     detect_tag_issues(&parsed.meta.tags, &mut fixes);
     detect_default_issues(parsed, &mut fixes);
-    detect_title_issues(parsed, &mut fixes);
+    // Skip title fixes for typedefs — their titles are SQL table names
+    if parsed.meta.doogat_type.as_deref() != Some("_typedef") {
+        detect_title_issues(parsed, &mut fixes);
+    }
     detect_key_issues(parsed, &mut fixes);
     detect_cross_zone_issues(parsed, &mut fixes);
     if let Some(s) = schema {
@@ -1359,6 +1362,21 @@ mod tests {
         assert!(
             fixes.iter().any(|f| matches!(f, Fix::TitleCapitalized)),
             "should detect uncapitalized title: {fixes:?}"
+        );
+    }
+
+    #[test]
+    fn typedef_skips_title_fixes() {
+        let mut parsed = empty_parsed();
+        parsed.meta.doogat_type = Some("_typedef".to_string());
+        parsed.meta.title = Some("lowercase".to_string());
+        let fixes = detect_fixes(&parsed, None);
+        assert!(
+            !fixes.iter().any(|f| matches!(
+                f,
+                Fix::TitleCapitalized | Fix::TitleTrimmed | Fix::TitleDerived { .. } | Fix::H1Aligned { .. }
+            )),
+            "typedef titles should not be modified: {fixes:?}"
         );
     }
 
