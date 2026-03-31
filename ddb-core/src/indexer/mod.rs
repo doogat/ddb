@@ -809,7 +809,7 @@ impl Index {
     /// user-actionable error code instead of an opaque internal error.
     fn classify_search_error(e: rusqlite::Error, query: &str) -> DoogatError {
         let msg = e.to_string();
-        if msg.contains("fts5") || msg.contains("syntax error") || msg.contains("parse error") {
+        if msg.contains("fts5: syntax error") || msg.contains("fts5: parse error") {
             DoogatError::BadRequest(format!("invalid search query: {query}"))
         } else {
             DoogatError::Sql(msg)
