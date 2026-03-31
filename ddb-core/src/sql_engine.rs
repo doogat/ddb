@@ -1045,6 +1045,26 @@ impl<'a> SqlEngine<'a> {
                     }
                     let dt = data_type_to_string(&column_def.data_type);
                     let refs = extract_references(&column_def.options);
+                    let default_value = extract_default(&column_def.options)?;
+                    // Validate NEXT defaults on ALTER TABLE ADD COLUMN
+                    if let Some(ref dv) = default_value {
+                        if (dv == "NEXT" || dv.starts_with("NEXT("))
+                            && !dt.eq_ignore_ascii_case("integer")
+                        {
+                            return Err(DoogatError::SqlEngine(format!(
+                                "DEFAULT NEXT is only valid on INTEGER columns, not {dt}"
+                            )));
+                        }
+                        if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                            let partition_col = &dv[5..dv.len() - 1];
+                            let all_cols: Vec<&str> = schema.columns.iter().map(|c| c.name.as_str()).collect();
+                            if !all_cols.contains(&partition_col) && partition_col != col_name {
+                                return Err(DoogatError::SqlEngine(format!(
+                                    "DEFAULT NEXT({partition_col}): column '{partition_col}' not found in table"
+                                )));
+                            }
+                        }
+                    }
                     let zone = if refs.is_some() {
                         Some(Zone::Reference)
                     } else if is_numeric_type(&dt)
@@ -1062,7 +1082,7 @@ impl<'a> SqlEngine<'a> {
                         search_boost: None,
                         references: refs,
                         allowed_values: extract_allowed_values(&column_def.data_type),
-                        default_value: extract_default(&column_def.options)?,
+                        default_value,
                     });
                 }
                 AlterTableOperation::DropColumn {
