@@ -8,6 +8,7 @@ mod discover;
 mod fix;
 mod folder_namespace;
 mod help;
+mod hyphenated_types;
 mod junction_tables;
 mod link_kinds;
 mod multi_device;
