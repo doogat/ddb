@@ -425,4 +425,26 @@ echo "$SC_OUT" | grep -q "Self-Contained Test"
 pass "type table self-contained (core columns without JOIN)"
 $DDB query "DROP TABLE foo CASCADE" >/dev/null
 
+# 21. DEFAULT NEXT auto-increment
+$DDB query "CREATE TABLE nexttbl (name TEXT, pos INTEGER DEFAULT NEXT)" | grep -q "table nexttbl created"
+$DDB query "INSERT INTO nexttbl (name) VALUES ('a')" >/dev/null
+sleep 1
+$DDB query "INSERT INTO nexttbl (name) VALUES ('b')" >/dev/null
+sleep 1
+$DDB query "INSERT INTO nexttbl (name) VALUES ('c')" >/dev/null
+# Verify auto-assigned values 1, 2, 3
+NEXT_OUT=$($DDB query "SELECT pos FROM nexttbl ORDER BY pos")
+echo "$NEXT_OUT" | grep -q "1"
+echo "$NEXT_OUT" | grep -q "2"
+echo "$NEXT_OUT" | grep -q "3"
+# Explicit override
+sleep 1
+$DDB query "INSERT INTO nexttbl (name, pos) VALUES ('d', 99)" >/dev/null
+sleep 1
+$DDB query "INSERT INTO nexttbl (name) VALUES ('e')" >/dev/null
+NEXT_MAX=$($DDB query "SELECT MAX(pos) FROM nexttbl")
+echo "$NEXT_MAX" | grep -q "100"
+$DDB query "DROP TABLE nexttbl CASCADE" >/dev/null
+pass "DEFAULT NEXT auto-increment"
+
 echo "=== all smoke tests passed ==="

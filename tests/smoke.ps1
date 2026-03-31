@@ -509,5 +509,27 @@ if ($output -notmatch "Self-Contained Test") { throw "self-contained: title miss
 pass "type table self-contained (core columns without JOIN)"
 ddb query "DROP TABLE foo CASCADE" | Out-Null
 
+# 21. DEFAULT NEXT auto-increment
+ddb query "CREATE TABLE nexttbl (name TEXT, pos INTEGER DEFAULT NEXT)" | Out-Null
+ddb query "INSERT INTO nexttbl (name) VALUES ('a')" | Out-Null
+Start-Sleep -Seconds 1
+ddb query "INSERT INTO nexttbl (name) VALUES ('b')" | Out-Null
+Start-Sleep -Seconds 1
+ddb query "INSERT INTO nexttbl (name) VALUES ('c')" | Out-Null
+# Verify auto-assigned values 1, 2, 3
+$output = ddb query "SELECT pos FROM nexttbl ORDER BY pos"
+if ($output -notmatch "1") { throw "NEXT default: expected 1: $output" }
+if ($output -notmatch "2") { throw "NEXT default: expected 2: $output" }
+if ($output -notmatch "3") { throw "NEXT default: expected 3: $output" }
+# Explicit override
+Start-Sleep -Seconds 1
+ddb query "INSERT INTO nexttbl (name, pos) VALUES ('d', 99)" | Out-Null
+Start-Sleep -Seconds 1
+ddb query "INSERT INTO nexttbl (name) VALUES ('e')" | Out-Null
+$output = ddb query "SELECT MAX(pos) FROM nexttbl"
+if ($output -notmatch "100") { throw "NEXT default: expected MAX 100: $output" }
+ddb query "DROP TABLE nexttbl CASCADE" | Out-Null
+pass "DEFAULT NEXT auto-increment"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

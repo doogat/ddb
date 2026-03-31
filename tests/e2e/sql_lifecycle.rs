@@ -800,3 +800,81 @@ fn multi_row_insert() {
     // Just verify the insert was a single commit by checking total is reasonable
     assert!(count >= 3, "expected at least 3 commits, got {count}");
 }
+
+#[test]
+fn default_next_auto_increments() {
+    let repo = DdbTestRepo::init();
+    repo.ddb()
+        .args(["query", "CREATE TABLE nexttest (name TEXT, pos INTEGER DEFAULT NEXT)"])
+        .assert()
+        .success();
+
+    // Multi-row insert should assign sequential values
+    repo.ddb()
+        .args(["query", "INSERT INTO nexttest (name) VALUES ('a'), ('b'), ('c')"])
+        .assert()
+        .success();
+
+    repo.ddb()
+        .args(["query", "SELECT pos FROM nexttest ORDER BY pos"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"))
+        .stdout(predicate::str::contains("2"))
+        .stdout(predicate::str::contains("3"));
+
+    // Explicit override then auto
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    repo.ddb()
+        .args(["query", "INSERT INTO nexttest (name, pos) VALUES ('d', 99)"])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    repo.ddb()
+        .args(["query", "INSERT INTO nexttest (name) VALUES ('e')"])
+        .assert()
+        .success();
+
+    repo.ddb()
+        .args(["query", "SELECT MAX(pos) FROM nexttest"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("100"));
+}
+
+#[test]
+fn default_next_partitioned() {
+    let repo = DdbTestRepo::init();
+    repo.ddb()
+        .args(["query", "CREATE TABLE parttest (cat TEXT, pos INTEGER DEFAULT NEXT(cat))"])
+        .assert()
+        .success();
+
+    repo.ddb()
+        .args(["query", "INSERT INTO parttest (cat) VALUES ('a')"])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    repo.ddb()
+        .args(["query", "INSERT INTO parttest (cat) VALUES ('b')"])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    repo.ddb()
+        .args(["query", "INSERT INTO parttest (cat) VALUES ('a')"])
+        .assert()
+        .success();
+
+    // cat 'a' should have pos 1 and 2, cat 'b' should have pos 1
+    repo.ddb()
+        .args(["query", "SELECT cat, pos FROM parttest WHERE cat = 'a' ORDER BY pos"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"))
+        .stdout(predicate::str::contains("2"));
+    repo.ddb()
+        .args(["query", "SELECT pos FROM parttest WHERE cat = 'b'"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"));
+}
