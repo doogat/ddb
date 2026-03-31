@@ -313,8 +313,8 @@ if command -v psql >/dev/null 2>&1; then
 
   # pgwire \dt hides internal tables
   DT_OUT=$(PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -t -A -c "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r'")
-  echo "$DT_OUT" | grep -qv "_ddb_"
-  echo "$DT_OUT" | grep -qv "^doogats$"
+  ! echo "$DT_OUT" | grep -q "_ddb_"
+  ! echo "$DT_OUT" | grep -q "^doogats$"
   pass "pgwire: \\dt hides internal tables"
 else
   pass "pgwire: skipped (no psql)"
@@ -359,7 +359,7 @@ pass "serve: not-found returns 404"
 
 # GraphQL introspection hides internal tables
 INTRO=$(gql '{"query":"{ __schema { queryType { fields { name } } } }"}')
-echo "$INTRO" | grep -qv "_ddb_"
+! echo "$INTRO" | grep -q "_ddb_"
 pass "serve: introspection hides internal tables"
 
 # compact mutation
