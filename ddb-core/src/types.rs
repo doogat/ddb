@@ -1313,6 +1313,16 @@ pub struct ListFilter {
     pub sort_desc: Option<bool>,
 }
 
+/// Input for a single item in a batch update operation.
+#[derive(Debug, Clone)]
+pub struct BatchUpdateInput {
+    pub id: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub doogat_type: Option<String>,
+}
+
 /// Query parameters for typed (materialized) table queries.
 #[derive(Debug, Clone)]
 pub struct TypedListQuery {

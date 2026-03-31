@@ -9,7 +9,7 @@ use crate::parser;
 use crate::sql_engine::{SqlEngine, SqlResult, TransactionBuffer};
 use crate::sync_manager::SyncManager;
 use crate::types::{
-    AttachmentInfo, BrokenSequence, CommitHash, CompactDryRunInfo, CompactOptions,
+    AttachmentInfo, BatchUpdateInput, BrokenSequence, CommitHash, CompactDryRunInfo, CompactOptions,
     CompactionReport, FixReport, ListFilter, MaintenanceReport, NodeConfig, OrphanDoogat,
     PaginatedSearchResult, ParsedDoogat, RebuildReport, RenameReport, SearchFilters, SearchResult,
     SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, TypedListQuery,
@@ -260,6 +260,66 @@ impl DoogatService {
         self.nosql_index_doogat(&parsed);
         parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
         Ok(parsed)
+    }
+
+    /// Batch-update multiple doogats in a single atomic commit.
+    ///
+    /// All mutations are prepared first; if any ID fails to resolve the
+    /// entire batch is aborted. On success a single git commit is created
+    /// and each doogat is re-indexed.
+    pub fn batch_update(&self, updates: &[BatchUpdateInput]) -> Result<Vec<ParsedDoogat>> {
+        if updates.is_empty() {
+            return Ok(vec![]);
+        }
+        self.ensure_fresh()?;
+
+        // Phase 1: prepare all writes (fail-fast, no side effects)
+        let mut writes: Vec<(String, String)> = Vec::with_capacity(updates.len());
+        for update in updates {
+            let path = self.index.resolve_path(&update.id)?;
+            let content = self.repo.read_file(&path)?;
+            let mut parsed = parser::parse(&content, &path)?;
+
+            if let Some(ref t) = update.title {
+                parsed.meta.title = Some(t.clone());
+            }
+            if let Some(ref t) = update.tags {
+                parsed.meta.tags = t.clone();
+            }
+            if let Some(ref t) = update.doogat_type {
+                parsed.meta.doogat_type = Some(t.clone());
+            }
+            if let Some(ref b) = update.body {
+                parsed.body = b.clone();
+            }
+
+            let new_content = parser::serialize(&parsed);
+            writes.push((path, new_content));
+        }
+
+        // Phase 2: atomic commit
+        let write_refs: Vec<(&str, &str)> = writes
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        self.repo.commit_batch(
+            &write_refs,
+            &[],
+            &format!("batch update {} doogats", updates.len()),
+        )?;
+
+        // Phase 3: re-parse, index, return
+        let mut results = Vec::with_capacity(updates.len());
+        for (i, (path, new_content)) in writes.iter().enumerate() {
+            let mut parsed = parser::parse(new_content, path)?;
+            self.index.index_doogat(&parsed)?;
+            self.nosql_index_doogat(&parsed);
+            let id = &updates[i].id;
+            parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
+            results.push(parsed);
+        }
+
+        Ok(results)
     }
 
     /// Update a doogat from raw content (for FFI consumers).
@@ -801,8 +861,15 @@ impl DoogatService {
 
     // ── Utility ─────────────────────────────────────────────────────────
 
-    pub fn list_doogats(&self) -> Result<Vec<String>> {
-        self.repo.list_doogats()
+    pub fn list_doogats(&self) -> Result<Vec<ParsedDoogat>> {
+        let paths = self.repo.list_doogats()?;
+        let mut out = Vec::with_capacity(paths.len());
+        for path in &paths {
+            let content = self.repo.read_file(path)?;
+            let parsed = parser::parse(&content, path)?;
+            out.push(parsed);
+        }
+        Ok(out)
     }
 
     pub fn resolve_path(&self, id: &str) -> Result<String> {
@@ -1794,7 +1861,7 @@ mod tests {
 
     #[test]
     fn batch_update_basic() {
-        let (tmp, svc) = fresh_svc();
+        let (_tmp, svc) = fresh_svc();
         let id1 = svc.create_doogat("One", &[], None, "").unwrap();
         let id2 = svc.create_doogat("Two", &[], None, "").unwrap();
         let id3 = svc.create_doogat("Three", &[], None, "").unwrap();
@@ -1840,7 +1907,7 @@ mod tests {
 
     #[test]
     fn batch_update_atomicity() {
-        let (tmp, svc) = fresh_svc();
+        let (_tmp, svc) = fresh_svc();
         let id1 = svc.create_doogat("Alpha", &[], None, "body1").unwrap();
         let id2 = svc.create_doogat("Beta", &[], None, "body2").unwrap();
         let id3 = svc.create_doogat("Gamma", &[], None, "body3").unwrap();
@@ -1934,7 +2001,7 @@ mod tests {
 
     #[test]
     fn batch_update_mixed_fields() {
-        let (tmp, svc) = fresh_svc();
+        let (_tmp, svc) = fresh_svc();
         let id1 = svc.create_doogat("Title1", &["tag1".to_string()], None, "body1").unwrap();
         let id2 = svc.create_doogat("Title2", &["tag2".to_string()], None, "body2").unwrap();
         let id3 = svc.create_doogat("Title3", &["tag3".to_string()], None, "body3").unwrap();
