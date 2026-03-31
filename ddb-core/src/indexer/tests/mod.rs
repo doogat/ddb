@@ -1251,6 +1251,88 @@ processed: true
         assert_eq!(result.hits[0].id, "20260301120000");
     }
 
+    // ── Boolean / phrase search tests ─────────────────────────────
+
+    fn make_search_doogat(n: usize, title: &str, body: &str) -> ParsedDoogat {
+        let id = format!("2026040112{n:04}");
+        ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(DoogatId(id.clone())),
+                title: Some(title.into()),
+                date: Some("2026-04-01".into()),
+                doogat_type: None,
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: body.into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: format!("ddb/{id}.md"),
+        }
+    }
+
+    #[test]
+    fn search_boolean_and() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_search_doogat(0, "Rust CRDT Guide", "rust and crdt patterns")).unwrap();
+        idx.index_doogat(&make_search_doogat(1, "Rust Only", "rust programming basics")).unwrap();
+        idx.index_doogat(&make_search_doogat(2, "CRDT Only", "crdt conflict resolution")).unwrap();
+
+        let results = idx.search("rust AND crdt").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260401120000");
+    }
+
+    #[test]
+    fn search_boolean_or() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_search_doogat(0, "Rust Guide", "rust programming")).unwrap();
+        idx.index_doogat(&make_search_doogat(1, "Golang Guide", "golang programming")).unwrap();
+        idx.index_doogat(&make_search_doogat(2, "Python Guide", "python programming")).unwrap();
+
+        let results = idx.search("rust OR golang").unwrap();
+        assert_eq!(results.len(), 2);
+        let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"20260401120000"));
+        assert!(ids.contains(&"20260401120001"));
+    }
+
+    #[test]
+    fn search_boolean_not() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_search_doogat(0, "Rust CRDT", "rust crdt patterns")).unwrap();
+        idx.index_doogat(&make_search_doogat(1, "Rust Basics", "rust programming basics")).unwrap();
+
+        let results = idx.search("rust NOT crdt").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260401120001");
+    }
+
+    #[test]
+    fn search_quoted_phrase() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_search_doogat(0, "Conflict Resolution", "conflict resolution strategies")).unwrap();
+        idx.index_doogat(&make_search_doogat(1, "Resolution Conflict", "resolution of a conflict")).unwrap();
+
+        // Exact phrase should match only the first
+        let results = idx.search("\"conflict resolution\"").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260401120000");
+    }
+
+    #[test]
+    fn search_malformed_fts5_query_returns_error() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_search_doogat(0, "Test", "content")).unwrap();
+
+        let result = idx.search("AND AND");
+        assert!(result.is_err());
+    }
+
     #[test]
     fn search_no_filters_unchanged() {
         let idx = in_memory_index();
