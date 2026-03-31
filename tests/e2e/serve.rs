@@ -1163,3 +1163,70 @@ fn execute_batch_format_objects() {
     assert!(row.is_object(), "batch row should be object: {row}");
     assert_eq!(row["name"].as_str().unwrap(), "Mars");
 }
+
+#[test]
+fn search_boolean_and_phrase_queries() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create doogats with distinct content
+    for (title, body) in [
+        ("Rust CRDT Guide", "rust crdt patterns"),
+        ("Rust Only", "rust programming basics"),
+        ("Golang Guide", "golang programming"),
+    ] {
+        let r = server.graphql_with_vars(
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+            serde_json::json!({ "input": { "title": title, "content": body } }),
+        );
+        assert!(r.get("errors").is_none(), "create {title} failed: {r}");
+    }
+
+    // AND: only the doogat with both terms
+    let result = server.graphql(
+        r#"{ search(query: "rust AND crdt") { totalCount hits { title } } }"#,
+    );
+    assert!(result.get("errors").is_none(), "AND query failed: {result}");
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
+
+    // OR: doogats with either term
+    let result = server.graphql(
+        r#"{ search(query: "rust OR golang") { totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "OR query failed: {result}");
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 3);
+
+    // NOT: rust without crdt
+    let result = server.graphql(
+        r#"{ search(query: "rust NOT crdt") { totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "NOT query failed: {result}");
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
+
+    // Quoted phrase
+    let result = server.graphql(
+        r#"{ search(query: "\"rust crdt\"") { totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "phrase query failed: {result}");
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
+}
+
+#[test]
+fn search_malformed_query_returns_bad_request() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create at least one doogat so the index isn't empty
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({ "input": { "title": "Dummy", "content": "content" } }),
+    );
+    assert!(r.get("errors").is_none(), "create failed: {r}");
+
+    let result = server.graphql(
+        r#"{ search(query: "AND AND") { totalCount } }"#,
+    );
+    assert!(result["errors"].is_array(), "expected errors for malformed query: {result}");
+    let err_msg = result["errors"][0]["message"].as_str().unwrap();
+    assert!(err_msg.contains("invalid search query"), "expected user-facing error, got: {err_msg}");
+}

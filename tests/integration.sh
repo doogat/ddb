@@ -165,6 +165,42 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF2_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF3_ID\\\") }\"}" >/dev/null
 
+# 18e. Boolean and phrase search queries
+BQ1=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", body: \"rust crdt patterns\" }) { id } }"}')
+BQ1_ID=$(echo "$BQ1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+BQ2=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust Only\", body: \"rust programming\" }) { id } }"}')
+BQ2_ID=$(echo "$BQ2" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+BQ3=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Golang\", body: \"golang programming\" }) { id } }"}')
+BQ3_ID=$(echo "$BQ3" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+RESULT=$(gql '{"query":"{ search(query: \"rust AND crdt\") { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search boolean AND"
+
+RESULT=$(gql '{"query":"{ search(query: \"rust OR golang\") { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "3" ]
+pass "serve: search boolean OR"
+
+RESULT=$(gql '{"query":"{ search(query: \"rust NOT crdt\") { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search boolean NOT"
+
+RESULT=$(gql '{"query":"{ search(query: \"\\\"rust crdt\\\"\") { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search quoted phrase"
+
+RESULT=$(gql '{"query":"{ search(query: \"AND AND\") { totalCount } }"}' 2>&1 || true)
+echo "$RESULT" | grep -q "BAD_REQUEST"
+pass "serve: search malformed query returns BAD_REQUEST"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ1_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ2_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ3_ID\\\") }\"}" >/dev/null
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \

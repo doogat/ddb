@@ -223,6 +223,38 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF3_ID\`") }`"}" | Out-Null
 
+# 18e. Boolean and phrase search queries
+$bq1 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", body: \"rust crdt patterns\" }) { id } }"}'
+$BQ1_ID = if ($bq1 -match '"id":"([^"]+)"') { $Matches[1] }
+$bq2 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust Only\", body: \"rust programming\" }) { id } }"}'
+$BQ2_ID = if ($bq2 -match '"id":"([^"]+)"') { $Matches[1] }
+$bq3 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Golang\", body: \"golang programming\" }) { id } }"}'
+$BQ3_ID = if ($bq3 -match '"id":"([^"]+)"') { $Matches[1] }
+
+$result = gql '{"query":"{ search(query: \"rust AND crdt\") { totalCount } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search AND: expected 1, got $result" }
+pass "serve: search boolean AND"
+
+$result = gql '{"query":"{ search(query: \"rust OR golang\") { totalCount } }"}'
+if ($result -notmatch '"totalCount":3') { throw "search OR: expected 3, got $result" }
+pass "serve: search boolean OR"
+
+$result = gql '{"query":"{ search(query: \"rust NOT crdt\") { totalCount } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search NOT: expected 1, got $result" }
+pass "serve: search boolean NOT"
+
+$result = gql '{"query":"{ search(query: \"\\\""rust crdt\\\""\" ) { totalCount } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search phrase: expected 1, got $result" }
+pass "serve: search quoted phrase"
+
+$result = try { gql '{"query":"{ search(query: \"AND AND\") { totalCount } }"}' } catch { $_.Exception.Message }
+if ($result -notmatch 'BAD_REQUEST') { throw "search malformed: expected BAD_REQUEST, got $result" }
+pass "serve: search malformed query returns BAD_REQUEST"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ1_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ2_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ3_ID\`") }`"}" | Out-Null
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `
