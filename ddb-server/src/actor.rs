@@ -6,9 +6,9 @@ use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
-    BrokenSequence, CompactOptions, CompactionReport, ListFilter, MaintenanceReport, OrphanDoogat,
-    PaginatedSearchResult, ParsedDoogat, SearchFilters, SequenceInfo, SequenceNode, StaleDoogat,
-    Suggestion, SyncReport, TableSchema, UnlinkedMention,
+    BatchUpdateInput, BrokenSequence, CompactOptions, CompactionReport, ListFilter,
+    MaintenanceReport, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SearchFilters,
+    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, UnlinkedMention,
 };
 
 use crate::events::{EventBus, EventKind, DoogatEvent};
@@ -53,6 +53,9 @@ pub enum ActorCommand {
     },
     ExecuteSql {
         sql: String,
+    },
+    BatchUpdate {
+        updates: Vec<BatchUpdateInput>,
     },
     ExecuteBatch {
         statements: Vec<String>,
@@ -312,6 +315,16 @@ impl ActorHandle {
             .await
         {
             ActorReply::Doogat(r) => *r,
+            _ => Err(DoogatError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn batch_update(
+        &self,
+        updates: Vec<BatchUpdateInput>,
+    ) -> ActorResult<Vec<ParsedDoogat>> {
+        match self.send(ActorCommand::BatchUpdate { updates }).await {
+            ActorReply::DoogatList(r) => r,
             _ => Err(DoogatError::Validation("unexpected reply".into())),
         }
     }
@@ -593,6 +606,7 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
             ),
             _ => (None, None),
         };
+        let is_batch_update = matches!(&msg.cmd, ActorCommand::BatchUpdate { .. });
         let mutation_kind = match &msg.cmd {
             ActorCommand::CreateDoogat { .. } => Some(EventKind::Created),
             ActorCommand::UpdateDoogat { .. } => Some(EventKind::Updated),
@@ -629,6 +643,26 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
                     });
                 }
                 _ => {} // mutation failed, no event
+            }
+        }
+
+        // Emit events for batch update (one per updated doogat)
+        if is_batch_update {
+            if let ActorReply::DoogatList(Ok(ref doogats)) = reply {
+                let now = Utc::now();
+                for z in doogats {
+                    event_bus.send(DoogatEvent {
+                        kind: EventKind::Updated,
+                        doogat_id: z
+                            .meta
+                            .id
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_default(),
+                        doogat_type: z.meta.doogat_type.clone(),
+                        timestamp: now,
+                    });
+                }
             }
         }
 
@@ -704,6 +738,9 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
                 body.as_deref(),
             );
             ActorReply::Doogat(Box::new(result))
+        }
+        ActorCommand::BatchUpdate { updates } => {
+            ActorReply::DoogatList(svc.batch_update(&updates))
         }
         ActorCommand::DeleteDoogat { id } => {
             ActorReply::Deleted(
