@@ -5203,4 +5203,122 @@ mod tests {
             "cascade delete + ref removal should be one atomic commit"
         );
     }
+
+    #[test]
+    fn select_coerces_boolean_columns_to_true_false() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE flags (name TEXT, active BOOLEAN)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO flags (name, active) VALUES ('alpha', true)")
+            .unwrap();
+
+        let result = engine.execute("SELECT name, active FROM flags").unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "alpha");
+                assert_eq!(rows[0][1], "true");
+            }
+            _ => panic!("expected Rows"),
+        }
+    }
+
+    #[test]
+    fn select_coerces_boolean_false_to_false_string() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE flags (name TEXT, active BOOLEAN)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO flags (name, active) VALUES ('beta', false)")
+            .unwrap();
+
+        let result = engine.execute("SELECT name, active FROM flags").unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "beta");
+                assert_eq!(rows[0][1], "false");
+            }
+            _ => panic!("expected Rows"),
+        }
+    }
+
+    #[test]
+    fn select_boolean_null_stays_null() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE flags (name TEXT, active BOOLEAN)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO flags (name) VALUES ('gamma')")
+            .unwrap();
+
+        let result = engine.execute("SELECT name, active FROM flags").unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "gamma");
+                assert_eq!(rows[0][1], "NULL");
+            }
+            _ => panic!("expected Rows"),
+        }
+    }
+
+    #[test]
+    fn select_boolean_coercion_preserves_non_boolean_columns() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE mixed (name TEXT, active BOOLEAN, count INTEGER)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO mixed (name, active, count) VALUES ('delta', true, 7)")
+            .unwrap();
+
+        let result = engine
+            .execute("SELECT name, active, count FROM mixed")
+            .unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "delta");
+                assert_eq!(rows[0][1], "true");
+                assert_eq!(rows[0][2], "7");
+            }
+            _ => panic!("expected Rows"),
+        }
+    }
+
+    #[test]
+    fn select_star_coerces_boolean_columns() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE flags (name TEXT, active BOOLEAN)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO flags (name, active) VALUES ('epsilon', true)")
+            .unwrap();
+
+        let result = engine.execute("SELECT * FROM flags").unwrap();
+        match result {
+            SqlResult::Rows { columns, rows } => {
+                assert_eq!(rows.len(), 1);
+                let active_idx = columns.iter().position(|c| c == "active").unwrap();
+                assert_eq!(rows[0][active_idx], "true");
+            }
+            _ => panic!("expected Rows"),
+        }
+    }
 }
