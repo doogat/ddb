@@ -1335,6 +1335,8 @@ impl<'a> SqlEngine<'a> {
     /// Extracts table name from the statement's FROM clause, loads its schema,
     /// and applies coercion to matching columns. Falls back to uncoerced rows
     /// when the table can't be determined or has no typedef.
+    /// Note: aliased columns (SELECT active AS is_done) won't match the schema
+    /// and will skip coercion.
     fn coerce_boolean_columns(
         &mut self,
         stmt: &Statement,
