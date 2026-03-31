@@ -136,7 +136,7 @@ fn cascade_delete_removes_wikilink_from_referencing_file() {
         .args(["get", &bm_id])
         .assert()
         .success()
-        .stdout(predicate::str::contains(&format!("[[{cat_id}]]")));
+        .stdout(predicate::str::contains(format!("[[{cat_id}]]")));
 
     // Delete the category
     repo.ddb()
@@ -152,7 +152,7 @@ fn cascade_delete_removes_wikilink_from_referencing_file() {
         .args(["get", &bm_id])
         .assert()
         .success()
-        .stdout(predicate::str::contains(&format!("[[{cat_id}]]")).not());
+        .stdout(predicate::str::contains(format!("[[{cat_id}]]")).not());
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn cascade_delete_via_ddb_delete_cleans_junction_and_refs() {
         .args(["get", &bm_id])
         .assert()
         .success()
-        .stdout(predicate::str::contains(&format!("[[{cat_id}]]")));
+        .stdout(predicate::str::contains(format!("[[{cat_id}]]")));
 
     // Delete via `ddb delete` (service path, not SQL engine)
     repo.ddb()
@@ -233,5 +233,5 @@ fn cascade_delete_via_ddb_delete_cleans_junction_and_refs() {
         .args(["get", &bm_id])
         .assert()
         .success()
-        .stdout(predicate::str::contains(&format!("[[{cat_id}]]")).not());
+        .stdout(predicate::str::contains(format!("[[{cat_id}]]")).not());
 }
