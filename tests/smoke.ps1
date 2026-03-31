@@ -501,5 +501,13 @@ if ($output -notmatch "true") { throw "boolean column not coerced in mix: $outpu
 ddb query "DROP TABLE booltest CASCADE" | Out-Null
 pass "boolean consistency (SQL responses)"
 
+# 20. type tables are self-contained (no JOIN needed for core columns)
+$scId = ddb query "INSERT INTO foo (title, bar, baz) VALUES ('Self-Contained Test', 'val', 1)"
+$output = ddb query "SELECT id, title, date, updated_at, bar FROM foo WHERE id = '$scId'"
+if ($output -notmatch $scId) { throw "self-contained: id missing: $output" }
+if ($output -notmatch "Self-Contained Test") { throw "self-contained: title missing: $output" }
+pass "type table self-contained (core columns without JOIN)"
+ddb query "DROP TABLE foo CASCADE" | Out-Null
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

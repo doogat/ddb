@@ -417,4 +417,12 @@ echo "$BOOL_MIX" | grep -q "true"
 $DDB query "DROP TABLE booltest CASCADE" >/dev/null
 pass "boolean consistency (SQL responses)"
 
+# 20. type tables are self-contained (no JOIN needed for core columns)
+SC_ID=$($DDB query "INSERT INTO foo (title, bar, baz) VALUES ('Self-Contained Test', 'val', 1)")
+SC_OUT=$($DDB query "SELECT id, title, date, updated_at, bar FROM foo WHERE id = '$SC_ID'")
+echo "$SC_OUT" | grep -q "$SC_ID"
+echo "$SC_OUT" | grep -q "Self-Contained Test"
+pass "type table self-contained (core columns without JOIN)"
+$DDB query "DROP TABLE foo CASCADE" >/dev/null
+
 echo "=== all smoke tests passed ==="

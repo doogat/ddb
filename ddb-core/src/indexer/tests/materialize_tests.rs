@@ -1087,3 +1087,50 @@ https://example.com
         );
     }
 
+    #[test]
+    fn type_table_includes_core_doogat_columns() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        let typedef = "\
+---
+id: 20260331100000
+title: task
+type: _typedef
+columns:
+  - name: priority
+    data_type: TEXT
+    zone: frontmatter
+---\n";
+        repo.commit_file("ddb/_typedef/20260331100000.md", typedef, "add typedef")
+            .unwrap();
+
+        let data = "\
+---
+id: 20260331100100
+title: Buy milk
+type: task
+priority: high
+---
+Task body.
+";
+        repo.commit_file("ddb/20260331100100.md", data, "add task")
+            .unwrap();
+
+        let db_path = dir.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        // SELECT all core doogat columns + type column directly from type table - no JOIN
+        let rows = idx
+            .query_raw("SELECT id, title, date, updated_at, priority FROM task")
+            .unwrap();
+        assert_eq!(rows.len(), 1, "expected exactly one row in task table");
+        assert_eq!(rows[0][0], "20260331100100", "id mismatch");
+        assert_eq!(rows[0][1], "Buy milk", "title mismatch");
+        assert!(!rows[0][2].is_empty(), "date should be populated");
+        assert!(!rows[0][3].is_empty(), "updated_at should be populated");
+        assert_eq!(rows[0][4], "high", "priority mismatch");
+    }
+
