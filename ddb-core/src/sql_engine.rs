@@ -64,6 +64,9 @@ fn extract_from_table(stmt: &Statement) -> Option<String> {
     if select.from.len() != 1 {
         return None;
     }
+    if !select.from[0].joins.is_empty() {
+        return None;
+    }
     let relation = &select.from[0].relation;
     match relation {
         sqlparser::ast::TableFactor::Table { name, .. } => {
@@ -5390,6 +5393,32 @@ mod tests {
                 assert_eq!(rows.len(), 1);
                 let active_idx = columns.iter().position(|c| c == "active").unwrap();
                 assert_eq!(rows[0][active_idx], "true");
+            }
+            _ => panic!("expected Rows"),
+        }
+    }
+
+    #[test]
+    fn select_join_bypasses_boolean_coercion() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE jtbl (active BOOLEAN)")
+            .unwrap();
+        engine
+            .execute("INSERT INTO jtbl (active) VALUES (true)")
+            .unwrap();
+
+        // JOIN query should not apply coercion (returns raw "1")
+        let result = engine
+            .execute("SELECT j.active FROM jtbl j JOIN doogats d ON d.id = j.id")
+            .unwrap();
+        match result {
+            SqlResult::Rows { rows, column_types, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0][0], "1");
+                assert!(column_types.is_none());
             }
             _ => panic!("expected Rows"),
         }
