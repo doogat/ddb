@@ -271,6 +271,18 @@ impl DoogatService {
         if updates.is_empty() {
             return Ok(vec![]);
         }
+
+        // Reject duplicate IDs (later entries would silently overwrite earlier ones)
+        let mut seen = std::collections::HashSet::with_capacity(updates.len());
+        for u in updates {
+            if !seen.insert(&u.id) {
+                return Err(DoogatError::Validation(format!(
+                    "duplicate id in batch: {}",
+                    u.id
+                )));
+            }
+        }
+
         self.ensure_fresh()?;
 
         // Phase 1: prepare all writes (fail-fast, no side effects)
@@ -2065,5 +2077,35 @@ mod tests {
             results[0].updated_at.is_some(),
             "batch_update should populate updated_at on returned doogats"
         );
+    }
+
+    #[test]
+    fn batch_update_rejects_duplicate_ids() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.create_doogat("Dup", &[], None, "").unwrap();
+
+        let updates = vec![
+            crate::types::BatchUpdateInput {
+                id: id.clone(),
+                title: Some("First".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+            crate::types::BatchUpdateInput {
+                id: id.clone(),
+                title: Some("Second".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+        ];
+
+        let result = svc.batch_update(&updates);
+        assert!(result.is_err(), "batch_update should reject duplicate IDs");
+
+        // Original unchanged
+        let p = svc.get_doogat_parsed(&id).unwrap();
+        assert_eq!(p.meta.title.as_deref(), Some("Dup"));
     }
 }
