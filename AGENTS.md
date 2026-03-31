@@ -198,7 +198,7 @@ Read from `docs/src/` before working on related modules:
 
 - `architecture/overview.md` - System design and data flow
 - `architecture/modules.md` - Module responsibilities and boundaries
-- `architecture/design-decisions.md` - Key architectural choices
+- `architecture/design-decisions.md` - Key architectural choices and non-goals. **Check before proposing new features or PRDs** - if a proposal conflicts with a decision or non-goal, the decision must be revisited first
 - `technical/data-model.md` - Doogat format, frontmatter schema
 - `technical/parser.md` - Three-zone Markdown parsing details
 - `technical/git-ops.md` - Git storage layer
