@@ -1325,12 +1325,17 @@ processed: true
     }
 
     #[test]
-    fn search_malformed_fts5_query_returns_error() {
+    fn search_malformed_fts5_query_returns_bad_request() {
         let idx = in_memory_index();
         idx.index_doogat(&make_search_doogat(0, "Test", "content")).unwrap();
 
-        let result = idx.search("AND AND");
-        assert!(result.is_err());
+        let err = idx.search("AND AND").unwrap_err();
+        match err {
+            crate::error::DoogatError::BadRequest(msg) => {
+                assert!(msg.contains("invalid search query"), "expected user-facing message, got: {msg}");
+            }
+            other => panic!("expected BadRequest, got: {other:?}"),
+        }
     }
 
     #[test]

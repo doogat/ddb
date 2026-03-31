@@ -688,7 +688,9 @@ impl Index {
             all_params.push(Box::new(p));
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
-        let total_count: usize = self.conn.query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))?;
+        let total_count: usize = self.conn
+            .query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))
+            .map_err(|e| Self::classify_search_error(e, query))?;
 
         Ok(PaginatedSearchResult { hits, total_count })
     }
@@ -742,11 +744,13 @@ impl Index {
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(param_refs.as_slice(), Self::map_search_row)?;
+        let rows = stmt
+            .query_map(param_refs.as_slice(), Self::map_search_row)
+            .map_err(|e| Self::classify_search_error(e, query))?;
 
         let mut hits = Vec::new();
         for r in rows {
-            hits.push(r?);
+            hits.push(r.map_err(|e| Self::classify_search_error(e, query))?);
         }
         Ok(hits)
     }
@@ -799,6 +803,17 @@ impl Index {
         }
 
         (clauses, params)
+    }
+
+    /// Reclassify FTS5 syntax errors as `BadRequest` so the server returns a
+    /// user-actionable error code instead of an opaque internal error.
+    fn classify_search_error(e: rusqlite::Error, query: &str) -> DoogatError {
+        let msg = e.to_string();
+        if msg.contains("fts5") || msg.contains("syntax error") || msg.contains("parse error") {
+            DoogatError::BadRequest(format!("invalid search query: {query}"))
+        } else {
+            DoogatError::Sql(msg)
+        }
     }
 
     fn map_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {
