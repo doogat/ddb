@@ -316,6 +316,10 @@ if command -v psql >/dev/null 2>&1; then
   ! echo "$DT_OUT" | grep -q "_ddb_"
   ! echo "$DT_OUT" | grep -q "^doogats$"
   pass "pgwire: \\dt hides internal tables"
+
+  # pgwire: direct access to internal tables still works (hidden, not blocked)
+  PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -t -A -c "SELECT COUNT(*) FROM _ddb_tags" | grep -qE "^[0-9]+$"
+  pass "pgwire: direct access to internal tables works"
 else
   pass "pgwire: skipped (no psql)"
 fi
