@@ -212,6 +212,20 @@ type CompactResult {
 `sync` defaults to `remote: "origin"`, `branch: "master"` (override via arguments for repos using a different default branch). Returns an error if no remote is configured.
 `compact` defaults to `force: false`. When no node is registered, returns a no-op report (zeros).
 
+### Search query syntax
+
+The `search` query passes the `query` string directly to SQLite FTS5 MATCH. This means FTS5's full query syntax is available:
+
+- **AND**: `"rust AND crdt"` - both terms must appear
+- **OR**: `"rust OR golang"` - either term matches
+- **NOT**: `"rust NOT draft"` - exclude doogats containing a term
+- **Quoted phrases**: `"\"conflict resolution\""` - exact phrase match
+- **Implicit AND**: `"rust crdt"` (space-separated terms default to AND)
+
+Combine with the `types`, `tag`, and `where` parameters for structured filtering on top of full-text search.
+
+Malformed FTS5 queries (e.g., `"AND AND"`) return a `BAD_REQUEST` error with the message `"invalid search query: ..."`.
+
 ### Subscriptions
 
 Real-time push notifications over WebSocket using the `graphql-transport-ws` protocol.
