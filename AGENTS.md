@@ -74,8 +74,8 @@ git config core.hooksPath dev/hooks
 - DoogatId: 14-digit timestamp string (YYYYMMDDHHmmss)
 - Doogats stored at `ddb/{id}.md`, typedefs at `ddb/_typedef/{id}.md`
 - Data dir: `.ddb/`, node file: `.git/ddb-node`, git signature: `ddb`
-- Plan documents go in `.local/plans/` (gitignored), NOT in `docs/`
-- Git worktrees go in `.local/worktrees/` (gitignored), nowhere else
+- Plan documents go in `dev/local/plans/` (gitignored), NOT in `docs/`
+- Git worktrees go in `dev/local/worktrees/` (gitignored), nowhere else
 - Releases: use `dev/bin/release` only. Never `gh release create` manually - CI creates the GitHub release with binary artifacts on tag push
 
 ## Definition of Done
@@ -86,7 +86,7 @@ A task is NOT complete unless ALL of these pass:
 2. **Smoke/integration test** — if the change adds a CLI command or user-facing behavior, add a scenario to `tests/smoke.sh` and `tests/smoke.ps1`. If it adds a server endpoint, sync behavior, or CRDT logic, add it to `tests/integration.sh` and `tests/integration.ps1`. All four files follow the numbered-section + `pass` helper pattern
 3. **Docs** — update relevant files in `docs/src/` to reflect any behavioral or API changes
 4. **Build** — `cargo clippy --workspace`, fast-tier `cargo test`, and full-suite `cargo test --workspace` all pass
-5. **Walkthrough** — if the task adds a CLI command, server endpoint, or user-facing behavior, create an executable showboat walkthrough in `.local/walkthroughs/` (see Showboat Walkthroughs below)
+5. **Walkthrough** — if the task adds a CLI command, server endpoint, or user-facing behavior, create an executable showboat walkthrough in `dev/local/walkthroughs/` (see Showboat Walkthroughs below)
 6. **Architecture doc** — if the task changes module boundaries, data flow, or key types, update `docs/src/technical/walkthrough.md`
 
 ## Showboat Walkthroughs
@@ -95,7 +95,7 @@ Executable feature demos built with [showboat](https://github.com/simonw/showboa
 
 ### Location and naming
 
-`.local/walkthroughs/{5-digit}-{slug}.md` — e.g. `00001-crud-basics.md`
+`dev/local/walkthroughs/{5-digit}-{slug}.md` — e.g. `00001-crud-basics.md`
 
 ### Installation
 
@@ -132,11 +132,11 @@ Each `showboat exec` runs in its own shell. Variables, background jobs, and work
 **CLI walkthrough** — use `--workdir` with a fixed temp path (not `mktemp`, since the path must be reused across exec calls):
 
     WD=/tmp/ddb-demo-feature
-    showboat init .local/walkthroughs/00001-feature.md "Feature Name"
-    showboat note .local/walkthroughs/00001-feature.md "Initialize a repo."
-    showboat exec --workdir $WD .local/walkthroughs/00001-feature.md bash "mkdir -p $WD && ddb init"
-    showboat exec --workdir $WD .local/walkthroughs/00001-feature.md bash "ddb create --title 'Test'"
-    showboat exec .local/walkthroughs/00001-feature.md bash "rm -rf $WD"
+    showboat init dev/local/walkthroughs/00001-feature.md "Feature Name"
+    showboat note dev/local/walkthroughs/00001-feature.md "Initialize a repo."
+    showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "mkdir -p $WD && ddb init"
+    showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "ddb create --title 'Test'"
+    showboat exec dev/local/walkthroughs/00001-feature.md bash "rm -rf $WD"
 
 **Server walkthrough** — use PID file pattern since background jobs don't persist across exec calls:
 
@@ -146,7 +146,7 @@ Each `showboat exec` runs in its own shell. Variables, background jobs, and work
 
 ### Maintenance
 
-Walkthroughs are local working documents (`.local/` is gitignored). They can be regenerated anytime. When CLI output changes cause `showboat verify` to fail, regenerate using `showboat extract` to get the original commands, then re-execute.
+Walkthroughs are local working documents (`dev/local/` is gitignored). They can be regenerated anytime. When CLI output changes cause `showboat verify` to fail, regenerate using `showboat extract` to get the original commands, then re-execute.
 
 ## Gotchas
 

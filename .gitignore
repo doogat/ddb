@@ -23,9 +23,6 @@ Thumbs.db
 # Logs
 *.log
 
-# Local development
-.local/
-
 # Build output
 out/
 .build/

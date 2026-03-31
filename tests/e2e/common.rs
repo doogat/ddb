@@ -45,7 +45,7 @@ impl ServerGuard {
     pub fn start(repo: &DdbTestRepo) -> Self {
         let port = SERVER_PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
         let pg_port = SERVER_PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let log_dir = repo.path().join(".local/test-logs");
+        let log_dir = repo.path().join("dev/local/test-logs");
 
         let mut child = std::process::Command::new(ddb_bin())
             .arg("--repo")
