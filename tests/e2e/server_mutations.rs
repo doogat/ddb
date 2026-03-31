@@ -274,3 +274,183 @@ fn sync_during_writes_serialized_through_actor() {
         "expected at least 5 new commits (one per create), got {new_commits}"
     );
 }
+
+fn commit_count(path: &std::path::Path) -> usize {
+    let out = std::process::Command::new("git")
+        .current_dir(path)
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .expect("git rev-list failed");
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn batch_update_via_graphql() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create 3 doogats
+    let mut ids = Vec::new();
+    for i in 1..=3 {
+        let result = server.graphql_with_vars(
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+            serde_json::json!({ "input": { "title": format!("Original {i}") } }),
+        );
+        assert!(result.get("errors").is_none(), "create {i} failed: {result}");
+        ids.push(
+            result["data"]["createDoogat"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+
+    // Batch update all 3 titles
+    let query = format!(
+        r#"mutation {{ batchUpdate(updates: [
+            {{id: "{}", title: "Updated 1"}},
+            {{id: "{}", title: "Updated 2"}},
+            {{id: "{}", title: "Updated 3"}}
+        ]) {{ id title }} }}"#,
+        ids[0], ids[1], ids[2]
+    );
+    let result = server.graphql(&query);
+    assert!(
+        result.get("errors").is_none(),
+        "batchUpdate failed: {result}"
+    );
+    let updated = result["data"]["batchUpdate"].as_array().unwrap();
+    assert_eq!(updated.len(), 3, "expected 3 results: {result}");
+    for (i, item) in updated.iter().enumerate() {
+        assert_eq!(item["id"].as_str().unwrap(), ids[i]);
+        assert_eq!(
+            item["title"].as_str().unwrap(),
+            format!("Updated {}", i + 1)
+        );
+    }
+
+    // Re-query each to confirm persistence
+    for (i, id) in ids.iter().enumerate() {
+        let result = server.graphql(&format!(
+            r#"{{ doogat(id: "{id}") {{ id title }} }}"#
+        ));
+        assert!(result.get("errors").is_none(), "re-query {id} failed: {result}");
+        assert_eq!(
+            result["data"]["doogat"]["title"].as_str().unwrap(),
+            format!("Updated {}", i + 1)
+        );
+    }
+}
+
+#[test]
+fn batch_update_atomicity_via_graphql() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create 2 doogats
+    let mut ids = Vec::new();
+    for i in 1..=2 {
+        let result = server.graphql_with_vars(
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+            serde_json::json!({ "input": { "title": format!("Keep {i}") } }),
+        );
+        assert!(result.get("errors").is_none(), "create {i} failed: {result}");
+        ids.push(
+            result["data"]["createDoogat"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+
+    // Batch update with one bad ID
+    let query = format!(
+        r#"mutation {{ batchUpdate(updates: [
+            {{id: "{}", title: "Changed"}},
+            {{id: "99999999999999", title: "Ghost"}}
+        ]) {{ id title }} }}"#,
+        ids[0]
+    );
+    let result = server.graphql(&query);
+    assert!(
+        result.get("errors").is_some(),
+        "batchUpdate with bad ID should error: {result}"
+    );
+
+    // Verify originals unchanged
+    for (i, id) in ids.iter().enumerate() {
+        let result = server.graphql(&format!(
+            r#"{{ doogat(id: "{id}") {{ id title }} }}"#
+        ));
+        assert!(result.get("errors").is_none(), "re-query {id} failed: {result}");
+        assert_eq!(
+            result["data"]["doogat"]["title"].as_str().unwrap(),
+            format!("Keep {}", i + 1),
+            "doogat {id} should be unchanged after failed batch"
+        );
+    }
+}
+
+#[test]
+fn batch_update_empty() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let result = server.graphql(r#"mutation { batchUpdate(updates: []) { id title } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "batchUpdate([]) should succeed: {result}"
+    );
+    let updated = result["data"]["batchUpdate"].as_array().unwrap();
+    assert!(updated.is_empty(), "expected empty array: {result}");
+}
+
+#[test]
+fn batch_update_single_commit_via_graphql() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create 3 doogats
+    let mut ids = Vec::new();
+    for i in 1..=3 {
+        let result = server.graphql_with_vars(
+            r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+            serde_json::json!({ "input": { "title": format!("Item {i}") } }),
+        );
+        assert!(result.get("errors").is_none(), "create {i} failed: {result}");
+        ids.push(
+            result["data"]["createDoogat"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+
+    let commits_before = commit_count(repo.path());
+
+    // Batch update all 3
+    let query = format!(
+        r#"mutation {{ batchUpdate(updates: [
+            {{id: "{}", title: "New 1"}},
+            {{id: "{}", title: "New 2"}},
+            {{id: "{}", title: "New 3"}}
+        ]) {{ id }} }}"#,
+        ids[0], ids[1], ids[2]
+    );
+    let result = server.graphql(&query);
+    assert!(
+        result.get("errors").is_none(),
+        "batchUpdate failed: {result}"
+    );
+
+    let commits_after = commit_count(repo.path());
+    assert_eq!(
+        commits_after - commits_before,
+        1,
+        "batchUpdate should produce exactly 1 commit, got {}",
+        commits_after - commits_before
+    );
+}
