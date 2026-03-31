@@ -521,7 +521,7 @@ impl<'a> SqlEngine<'a> {
                 Some(Zone::Body)
             };
             let allowed_values = extract_allowed_values(&col.data_type);
-            let default_value = extract_default(&col.options);
+            let default_value = extract_default(&col.options)?;
             if let Some(ref dv) = default_value {
                 if (dv == "NEXT" || dv.starts_with("NEXT("))
                     && !data_type.eq_ignore_ascii_case("integer")
@@ -542,6 +542,22 @@ impl<'a> SqlEngine<'a> {
                 default_value,
             });
         }
+
+        // Validate NEXT(col) partition columns exist in the table
+        let col_names: Vec<&str> = out.iter().map(|c| c.name.as_str()).collect();
+        for col in &out {
+            if let Some(ref dv) = col.default_value {
+                if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                    let partition_col = &dv[5..dv.len() - 1];
+                    if !col_names.contains(&partition_col) {
+                        return Err(DoogatError::SqlEngine(format!(
+                            "DEFAULT NEXT({partition_col}): column '{partition_col}' not found in table"
+                        )));
+                    }
+                }
+            }
+        }
+
         Ok(out)
     }
 
@@ -1046,7 +1062,7 @@ impl<'a> SqlEngine<'a> {
                         search_boost: None,
                         references: refs,
                         allowed_values: extract_allowed_values(&column_def.data_type),
-                        default_value: extract_default(&column_def.options),
+                        default_value: extract_default(&column_def.options)?,
                     });
                 }
                 AlterTableOperation::DropColumn {
@@ -1963,13 +1979,13 @@ fn extract_allowed_values(dt: &DataType) -> Option<Vec<String>> {
     }
 }
 
-fn extract_default(options: &[sqlparser::ast::ColumnOptionDef]) -> Option<String> {
+fn extract_default(options: &[sqlparser::ast::ColumnOptionDef]) -> Result<Option<String>> {
     for opt in options {
         if let ColumnOption::Default(expr) = &opt.option {
             // Bare DEFAULT NEXT
             if let Expr::Identifier(ident) = expr {
                 if ident.value.eq_ignore_ascii_case("next") {
-                    return Some("NEXT".to_string());
+                    return Ok(Some("NEXT".to_string()));
                 }
             }
             // DEFAULT NEXT(partition_col)
@@ -1977,19 +1993,32 @@ fn extract_default(options: &[sqlparser::ast::ColumnOptionDef]) -> Option<String
                 let func_name = func.name.to_string();
                 if func_name.eq_ignore_ascii_case("next") {
                     if let sqlparser::ast::FunctionArguments::List(arg_list) = &func.args {
+                        if arg_list.args.is_empty() {
+                            return Err(DoogatError::SqlEngine(
+                                "DEFAULT NEXT() requires exactly one partition column argument".into(),
+                            ));
+                        }
+                        if arg_list.args.len() > 1 {
+                            return Err(DoogatError::SqlEngine(
+                                "DEFAULT NEXT() accepts only one partition column argument".into(),
+                            ));
+                        }
                         if let Some(sqlparser::ast::FunctionArg::Unnamed(
                             sqlparser::ast::FunctionArgExpr::Expr(Expr::Identifier(ident)),
                         )) = arg_list.args.first()
                         {
-                            return Some(format!("NEXT({})", ident.value));
+                            return Ok(Some(format!("NEXT({})", ident.value)));
                         }
+                        return Err(DoogatError::SqlEngine(
+                            "DEFAULT NEXT() argument must be a column name".into(),
+                        ));
                     }
                 }
             }
-            return expr_to_string(expr).ok();
+            return Ok(expr_to_string(expr).ok());
         }
     }
-    None
+    Ok(None)
 }
 
 fn extract_values(exprs: &[Expr]) -> Result<Vec<String>> {
@@ -5534,12 +5563,54 @@ mod tests {
         let mut engine = SqlEngine::new(&index, &repo);
 
         engine
-            .execute("CREATE TABLE foo (pos INTEGER DEFAULT NEXT(category_id))")
+            .execute("CREATE TABLE foo (category_id TEXT, pos INTEGER DEFAULT NEXT(category_id))")
             .unwrap();
 
         let schema = engine.load_schema("foo").unwrap();
         let col = schema.columns.iter().find(|c| c.name == "pos").unwrap();
         assert_eq!(col.default_value, Some("NEXT(category_id)".to_string()));
+    }
+
+    #[test]
+    fn create_table_next_scoped_rejects_nonexistent_column() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        let err = engine
+            .execute("CREATE TABLE foo (pos INTEGER DEFAULT NEXT(nonexistent))")
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("not found"),
+            "expected 'not found' error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn create_table_next_rejects_empty_args() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        let err = engine
+            .execute("CREATE TABLE foo (pos INTEGER DEFAULT NEXT())")
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("exactly one"),
+            "expected 'exactly one' error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn create_table_next_rejects_multiple_args() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        let err = engine
+            .execute("CREATE TABLE foo (a TEXT, b TEXT, pos INTEGER DEFAULT NEXT(a, b))")
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("only one"),
+            "expected 'only one' error, got: {err}"
+        );
     }
 
     #[test]
