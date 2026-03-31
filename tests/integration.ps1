@@ -482,6 +482,12 @@ if ($result -notmatch '"id"') { throw "sql columns: missing id column" }
 if ($result -notmatch '"title"') { throw "sql columns: missing title column" }
 pass "serve: sql columns in response"
 
+# 38c2. sql format:objects returns keyed rows
+$result = gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\", format: \"objects\") { columns rows } }"}'
+if ($result -notmatch '"id":') { throw "sql format objects: missing id key in row object" }
+if ($result -notmatch '"title":') { throw "sql format objects: missing title key in row object" }
+pass "serve: sql format objects returns keyed rows"
+
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' | Out-Null
 $smokepinId = (gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)\`"){message}}`"}") -replace '.*"message":"(\d+)".*','$1'
 if (-not $smokepinId) { throw "smokepin insert failed" }

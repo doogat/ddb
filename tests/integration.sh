@@ -423,6 +423,12 @@ echo "$RESULT" | grep -q '"id"'
 echo "$RESULT" | grep -q '"title"'
 pass "serve: sql columns in response"
 
+# 38c2. sql format:objects returns keyed rows
+RESULT=$(gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\", format: \"objects\") { columns rows } }"}')
+echo "$RESULT" | grep -q '"id":'
+echo "$RESULT" | grep -q '"title":'
+pass "serve: sql format objects returns keyed rows"
+
 sleep 1
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' >/dev/null
 sleep 1
