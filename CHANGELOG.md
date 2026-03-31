@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Plural REFERENCES fields on typed GraphQL queries use batch loading (single fetch per relation type per page, eliminates N+1)
+- Plural REFERENCES fields on typed GraphQL queries use batch loading per parent item (reduces per-reference overhead)
 - 50K query threshold tests (NFR-01/AC-19) validated and enabled in release builds and nightly CI
 - 50K repo growth threshold test (NFR-02, < 200MB/yr) added to nightly CI
 

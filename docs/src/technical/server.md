@@ -298,7 +298,7 @@ Columns with `REFERENCES` resolve as nested typed objects instead of raw ID stri
 - **Singular field** (`category`): Returns the referenced typed object (e.g., `Category`) with all its fields, or `null` if no reference exists or the target doogat is missing.
 - **Plural field** (`categories`): Returns `[Category!]!` - a list of all referenced typed objects from the junction table. Returns an empty list if no references exist.
 
-Resolution is single-level only (no recursive nesting). Plural fields use batch loading: all referenced IDs are collected and fetched in a single call, avoiding N+1 queries. Singular fields resolve individually. If the target type schema is unknown, the resolver falls back to the base `Doogat` type. The pluralization follows English rules (category -> categories, tag -> tags).
+Resolution is single-level only (no recursive nesting). Plural fields batch-fetch all referenced IDs for each parent item in a single call (reducing per-reference overhead within each item). Singular fields resolve individually. If the target type schema is unknown, the resolver falls back to the base `Doogat` type. The pluralization follows English rules (category -> categories, tag -> tags).
 
 Tags are always available on typed connection queries via the `tags` field, populated from the parsed doogat's frontmatter and body hashtags.
 
