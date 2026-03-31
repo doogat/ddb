@@ -610,6 +610,16 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU2_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU3_ID\\\") }\"}" >/dev/null
 
+# Hyphenated type names in GraphQL
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"test-widget\\\" (status TEXT, priority INTEGER)\") { message } }"}' >/dev/null
+sleep 1
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO \\\"test-widget\\\" (status, priority) VALUES ('"'"'active'"'"', 1)\") { message } }"}' >/dev/null
+RESULT=$(gql '{"query":"{ testWidgets { items { id status priority } totalCount } }"}')
+echo "$RESULT" | jq -e '.data.testWidgets.totalCount == 1' >/dev/null
+echo "$RESULT" | jq -e '.data.testWidgets.items[0].status == "active"' >/dev/null
+echo "$RESULT" | jq -e '.data.testWidgets.items[0].priority == 1' >/dev/null
+pass "serve: hyphenated type typed query"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

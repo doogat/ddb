@@ -641,6 +641,17 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU3_ID\`") }`"}" | Out-Null
 
+# Hyphenated type names in GraphQL
+gql "{`"query`":`"mutation { executeSql(sql: \`"CREATE TABLE \\\`"test-widget\\\`" (status TEXT, priority INTEGER)\`") { message } }`"}" | Out-Null
+Start-Sleep -Seconds 1
+gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO \\\`"test-widget\\\`" (status, priority) VALUES ('active', 1)\`") { message } }`"}" | Out-Null
+$result = gql "{`"query`":`"{ testWidgets { items { id status priority } totalCount } }`"}"
+$parsed = $result | ConvertFrom-Json
+if ($parsed.data.testWidgets.totalCount -ne 1) { throw "testWidgets expected 1 item, got $($parsed.data.testWidgets.totalCount)" }
+if ($parsed.data.testWidgets.items[0].status -ne "active") { throw "status expected active, got $($parsed.data.testWidgets.items[0].status)" }
+if ($parsed.data.testWidgets.items[0].priority -ne 1) { throw "priority expected 1, got $($parsed.data.testWidgets.items[0].priority)" }
+pass "serve: hyphenated type typed query"
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
