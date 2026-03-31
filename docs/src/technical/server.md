@@ -129,7 +129,7 @@ type SearchHit { id: ID!, title: String!, path: String!, snippet: String!, rank:
 type SearchConnection { hits: [SearchHit!]!, totalCount: Int! }
 type TypeDef { name: String!, columns: [ColumnInfo!]!, crdtStrategy: String, templateSections: [String!]! }
 type ColumnInfo { name: String!, dataType: String!, zone: String, required: Boolean!, references: String }
-type SqlResult { rows: [String!], affected: Int, message: String }
+type SqlResult { columns: [String!], rows: [String!], affected: Int, message: String }
 type TagInfo { name: String!, count: Int! }
 type CheckboxItem {
   doogatId: ID!
@@ -143,7 +143,16 @@ type CheckboxItem {
 }
 ```
 
-Note: `SqlResult.rows` encodes each row as a JSON string to avoid nested list limitations.
+Note: `SqlResult.rows` encodes each row as a JSON string to avoid nested list limitations. `SqlResult.columns` returns column names matching the SELECT clause order.
+
+#### Row format option
+
+The `sql`, `executeSql`, and `executeBatch` fields accept an optional `format` argument:
+
+- `format: "array"` (default) - rows are JSON arrays: `["val1", "val2"]`
+- `format: "objects"` - rows are JSON objects keyed by column name: `{"id": "val1", "title": "val2"}`
+
+Object format eliminates positional coupling between client code and SELECT column order.
 
 ### Queries
 
@@ -153,7 +162,7 @@ type Query {
   doogats(type: String, tag: String, backlinksOf: ID, limit: Int, offset: Int): [Doogat!]!
   search(query: String!, types: [String], tag: String, where: [SearchFieldFilter], limit: Int, offset: Int): SearchConnection!
   typeDefs: [TypeDef!]!
-  sql(query: String!): SqlResult!
+  sql(query: String!, format: String): SqlResult!
   schemaVersion: Int!
   checkboxItems(state: String, doogatId: ID, limit: Int, offset: Int): [CheckboxItem!]!
   openActions(limit: Int): [CheckboxItem!]!
@@ -174,8 +183,8 @@ type Mutation {
   createDoogat(input: CreateDoogatInput!): Doogat!
   updateDoogat(input: UpdateDoogatInput!): Doogat!
   deleteDoogat(id: ID!): Boolean!
-  executeSql(sql: String!): SqlResult!
-  executeBatch(statements: [String!]!): [SqlResult!]!
+  executeSql(sql: String!, format: String): SqlResult!
+  executeBatch(statements: [String!]!, format: String): [SqlResult!]!
   attachFile(input: AttachFileInput!): Attachment!
   detachFile(doogatId: ID!, filename: String!): Boolean!
   sync(remote: String, branch: String): SyncResult!
