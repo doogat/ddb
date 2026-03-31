@@ -1073,7 +1073,7 @@ fn non_select_with_format_objects_ignored() {
 
     // INSERT with format:"objects" — should succeed, format is ignored for non-SELECT
     let result = server.graphql_with_vars(
-        r#"mutation($sql: String!, $fmt: String) { executeSql(sql: $sql, format: $fmt) { affected rows columns } }"#,
+        r#"mutation($sql: String!, $fmt: String) { executeSql(sql: $sql, format: $fmt) { affected message } }"#,
         serde_json::json!({ "sql": "INSERT INTO thing (name) VALUES ('A')", "fmt": "objects" }),
     );
     assert!(
@@ -1081,6 +1081,6 @@ fn non_select_with_format_objects_ignored() {
         "INSERT with format:objects should not error: {result}"
     );
     let sql = &result["data"]["executeSql"];
-    // Non-SELECT returns affected count, null columns/rows
-    assert!(sql["affected"].as_i64().is_some() || sql["rows"].is_null());
+    // Non-SELECT returns message with the created ID
+    assert!(sql["message"].is_string());
 }

@@ -585,12 +585,13 @@ pub fn build_schema(
         ));
     }
 
-    // sql(query) — SELECT via ReadPool, non-SELECT via actor
+    // sql(query, format?) — SELECT via ReadPool, non-SELECT via actor
     {
         query = query.field(
             Field::new("sql", TypeRef::named_nn("SqlResult"), |ctx| {
                 FieldFuture::new(async move {
                     let q = ctx.args.try_get("query")?.string()?.to_string();
+                    let fmt = ctx.args.get("format").and_then(|v| v.string().ok()).unwrap_or("array");
                     let result = if crate::pgwire::is_select_only(&q) {
                         let pool = ctx.data::<ReadPool>()?;
                         pool.execute_select(q).await.map_err(to_server_error)?
@@ -598,10 +599,11 @@ pub fn build_schema(
                         let a = ctx.data::<ActorHandle>()?;
                         a.execute_sql(q).await.map_err(to_server_error)?
                     };
-                    Ok(Some(FieldValue::owned_any(sql_result_to_value(&result))))
+                    Ok(Some(FieldValue::owned_any(sql_result_to_value(&result, fmt))))
                 })
             })
-            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING))),
+            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
+            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING))),
         );
     }
 
@@ -1465,6 +1467,7 @@ pub fn build_schema(
                 FieldFuture::new(async move {
                     let a = ctx.data::<ActorHandle>()?;
                     let sql = ctx.args.try_get("sql")?.string()?.to_string();
+                    let fmt = ctx.args.get("format").and_then(|v| v.string().ok()).unwrap_or("array");
                     let result = a.execute_sql(sql.clone()).await.map_err(to_server_error)?;
 
                     // Await schema reload if this was a typedef-mutating statement
@@ -1478,10 +1481,11 @@ pub fn build_schema(
                         }
                     }
 
-                    Ok(Some(FieldValue::owned_any(sql_result_to_value(&result))))
+                    Ok(Some(FieldValue::owned_any(sql_result_to_value(&result, fmt))))
                 })
             })
-            .argument(InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING))),
+            .argument(InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING)))
+            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING))),
         );
     }
 
@@ -1495,6 +1499,7 @@ pub fn build_schema(
                     FieldFuture::new(async move {
                         let a = ctx.data::<ActorHandle>()?;
                         let stmts_val = ctx.args.try_get("statements")?.list()?;
+                        let fmt = ctx.args.get("format").and_then(|v| v.string().ok()).unwrap_or("array");
                         let statements: Vec<String> = stmts_val
                             .iter()
                             .map(|v| v.string().unwrap_or_default().to_string())
@@ -1517,7 +1522,7 @@ pub fn build_schema(
                         }
 
                         Ok(Some(FieldValue::list(
-                            results.iter().map(|r| FieldValue::owned_any(sql_result_to_value(r))),
+                            results.iter().map(|r| FieldValue::owned_any(sql_result_to_value(r, fmt))),
                         )))
                     })
                 },
@@ -1525,7 +1530,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "statements",
                 TypeRef::named_nn_list_nn(TypeRef::STRING),
-            )),
+            ))
+            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING))),
         );
     }
 

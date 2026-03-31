@@ -183,21 +183,33 @@ pub(crate) fn tag_info_to_value(name: &str, count: i64) -> GqlValue {
     GqlValue::Object(obj)
 }
 
-pub(crate) fn sql_result_to_value(r: &SqlResult) -> GqlValue {
+pub(crate) fn sql_result_to_value(r: &SqlResult, format: &str) -> GqlValue {
     let mut obj = IndexMap::new();
     match r {
         SqlResult::Rows { columns, rows } => {
             let gql_cols: Vec<GqlValue> =
                 columns.iter().map(|c| GqlValue::from(c.as_str())).collect();
             obj.insert(Name::new("columns"), GqlValue::List(gql_cols));
-            // Encode each row as a JSON string to avoid nested list limitation
-            let gql_rows: Vec<GqlValue> = rows
-                .iter()
-                .map(|row| {
-                    let json = serde_json::to_string(row).unwrap_or_default();
-                    GqlValue::from(json)
-                })
-                .collect();
+            let gql_rows: Vec<GqlValue> = if format == "objects" {
+                rows.iter()
+                    .map(|row| {
+                        let obj: serde_json::Map<String, serde_json::Value> = columns
+                            .iter()
+                            .zip(row.iter())
+                            .map(|(col, val)| (col.clone(), serde_json::Value::String(val.clone())))
+                            .collect();
+                        let json = serde_json::to_string(&obj).unwrap_or_default();
+                        GqlValue::from(json)
+                    })
+                    .collect()
+            } else {
+                rows.iter()
+                    .map(|row| {
+                        let json = serde_json::to_string(row).unwrap_or_default();
+                        GqlValue::from(json)
+                    })
+                    .collect()
+            };
             obj.insert(Name::new("rows"), GqlValue::List(gql_rows));
             obj.insert(Name::new("affected"), GqlValue::Null);
             obj.insert(Name::new("message"), GqlValue::Null);
@@ -754,7 +766,7 @@ mod tests {
             columns: vec!["id".into(), "title".into()],
             rows: vec![vec!["123".into(), "hello".into()]],
         };
-        let val = sql_result_to_value(&result);
+        let val = sql_result_to_value(&result, "array");
         let obj = match &val {
             GqlValue::Object(o) => o,
             _ => panic!("expected object"),
@@ -775,7 +787,7 @@ mod tests {
     #[test]
     fn sql_result_affected_has_null_columns() {
         let result = SqlResult::Affected(3);
-        let val = sql_result_to_value(&result);
+        let val = sql_result_to_value(&result, "array");
         let obj = match &val {
             GqlValue::Object(o) => o,
             _ => panic!("expected object"),
@@ -788,7 +800,7 @@ mod tests {
     #[test]
     fn sql_result_ok_has_null_columns() {
         let result = SqlResult::Ok("done".into());
-        let val = sql_result_to_value(&result);
+        let val = sql_result_to_value(&result, "array");
         let obj = match &val {
             GqlValue::Object(o) => o,
             _ => panic!("expected object"),
