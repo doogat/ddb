@@ -184,6 +184,7 @@ input SearchFieldFilter {
 type Mutation {
   createDoogat(input: CreateDoogatInput!): Doogat!
   updateDoogat(input: UpdateDoogatInput!): Doogat!
+  batchUpdate(updates: [UpdateDoogatInput!]!): [Doogat!]!
   deleteDoogat(id: ID!): Boolean!
   executeSql(sql: String!, format: String): SqlResult!
   executeBatch(statements: [String!]!, format: String): [SqlResult!]!
@@ -210,6 +211,8 @@ type CompactResult {
   gcSuccess: Boolean!
 }
 ```
+
+`batchUpdate` applies multiple updates atomically in a single git commit. All updates must succeed or none are applied. If any ID is not found, the entire batch fails with no changes committed. An empty updates array returns an empty array with no git commit. Reuses `UpdateDoogatInput` so any fields accepted by `updateDoogat` work in a batch.
 
 `sync` defaults to `remote: "origin"`, `branch: "master"` (override via arguments for repos using a different default branch). Returns an error if no remote is configured.
 `compact` defaults to `force: false`. When no node is registered, returns a no-op report (zeros).

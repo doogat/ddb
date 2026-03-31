@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `batchUpdate` GraphQL mutation for atomic multi-doogat updates in a single git commit; accepts `[UpdateDoogatInput!]!`, returns `[Doogat!]!`
 - `updated_at` and `created_at` fields in all GraphQL doogat responses (generic, typed, and search hits); `updated_at` also available as a sort field
 - Cascade delete: deleting a doogat automatically removes junction table rows referencing it and cleans up dangling wikilinks in other doogats' reference sections, all in a single atomic git commit
 - `distinct` argument on typed connection queries for deduplicating results by a column (e.g. `categories(distinct: "space")`)
