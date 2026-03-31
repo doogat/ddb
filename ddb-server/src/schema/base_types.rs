@@ -674,9 +674,14 @@ pub(crate) fn pluralize(s: &str) -> String {
 /// Pluralize without lowercasing - preserves camelCase.
 pub(crate) fn pluralize_preserving_case(s: &str) -> String {
     let lower = s.to_ascii_lowercase();
-    if lower.ends_with('s') {
+    if lower.ends_with('s')
+        || lower.ends_with("sh")
+        || lower.ends_with("ch")
+        || lower.ends_with('x')
+        || lower.ends_with('z')
+    {
         format!("{s}es")
-    } else if s.ends_with('y') && s.len() > 1 {
+    } else if lower.ends_with('y') && s.len() > 1 {
         format!("{}ies", &s[..s.len() - 1])
     } else {
         format!("{s}s")
@@ -1054,5 +1059,16 @@ mod tests {
 
         // Multi-segment hyphens
         assert_eq!(sanitize_field_name("a-b-c-d"), "aBCD");
+    }
+
+    #[test]
+    fn test_pluralize_preserving_case() {
+        assert_eq!(pluralize_preserving_case("contact"), "contacts");
+        assert_eq!(pluralize_preserving_case("testItem"), "testItems");
+        assert_eq!(pluralize_preserving_case("savedSearch"), "savedSearches");
+        assert_eq!(pluralize_preserving_case("testClass"), "testClasses");
+        assert_eq!(pluralize_preserving_case("testBox"), "testBoxes");
+        assert_eq!(pluralize_preserving_case("testBuzz"), "testBuzzes");
+        assert_eq!(pluralize_preserving_case("categoryMembership"), "categoryMemberships");
     }
 }
