@@ -50,6 +50,29 @@ fn unquote_identifier(s: &str) -> String {
     s.trim_matches('"').to_lowercase()
 }
 
+/// Extract the primary table name from a statement's FROM clause.
+/// Returns the first plain table relation found, or None for subqueries/joins/CTEs.
+fn extract_from_table(stmt: &Statement) -> Option<String> {
+    let query = match stmt {
+        Statement::Query(q) => q,
+        _ => return None,
+    };
+    let select = match query.body.as_ref() {
+        SetExpr::Select(s) => s,
+        _ => return None,
+    };
+    if select.from.len() != 1 {
+        return None;
+    }
+    let relation = &select.from[0].relation;
+    match relation {
+        sqlparser::ast::TableFactor::Table { name, .. } => {
+            Some(unquote_identifier(&name.to_string()))
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug)]
 pub enum SqlResult {
     Rows {
@@ -319,6 +342,7 @@ impl<'a> SqlEngine<'a> {
                 // Pass through (SELECT and anything else) to raw query
                 let sql_str = stmt.to_string();
                 let (columns, rows) = self.index.query_raw_with_columns(&sql_str)?;
+                let rows = self.coerce_boolean_columns(stmt, &columns, rows);
                 Ok(SqlResult::Rows { columns, rows })
             }
         }
@@ -1298,6 +1322,53 @@ impl<'a> SqlEngine<'a> {
         let content = self.repo.read_file(&path)?;
         let parsed = parser::parse(&content, &path)?;
         schema_from_parsed(&parsed)
+    }
+
+    /// Coerce BOOLEAN columns in SELECT results from "1"/"0" to "true"/"false".
+    /// Extracts table name from the statement's FROM clause, loads its schema,
+    /// and applies coercion to matching columns. Falls back to uncoerced rows
+    /// when the table can't be determined or has no typedef.
+    fn coerce_boolean_columns(
+        &mut self,
+        stmt: &Statement,
+        columns: &[String],
+        mut rows: Vec<Vec<String>>,
+    ) -> Vec<Vec<String>> {
+        let table_name = match extract_from_table(stmt) {
+            Some(t) => t,
+            None => return rows,
+        };
+        let schema = match self.load_schema(&table_name) {
+            Ok(s) => s,
+            Err(_) => return rows,
+        };
+        // Build a set of column indices that are BOOLEAN
+        let bool_indices: Vec<usize> = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(i, col_name)| {
+                let is_bool = schema.columns.iter().any(|c| {
+                    c.name.eq_ignore_ascii_case(col_name)
+                        && c.data_type.eq_ignore_ascii_case("BOOLEAN")
+                });
+                if is_bool { Some(i) } else { None }
+            })
+            .collect();
+        if bool_indices.is_empty() {
+            return rows;
+        }
+        for row in &mut rows {
+            for &idx in &bool_indices {
+                if idx < row.len() {
+                    row[idx] = match row[idx].as_str() {
+                        "1" => "true".to_string(),
+                        "0" => "false".to_string(),
+                        other => other.to_string(),
+                    };
+                }
+            }
+        }
+        rows
     }
 
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
@@ -4631,14 +4702,14 @@ mod tests {
             .execute("INSERT INTO flagged (pinned) VALUES (false)")
             .unwrap();
 
-        // Materialized table should store 1/0
+        // Materialized table stores as INTEGER but SELECT coerces to "true"/"false"
         let result = engine
             .execute("SELECT pinned FROM flagged WHERE pinned = 1")
             .unwrap();
         match result {
             SqlResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
-                assert_eq!(rows[0][0], "1");
+                assert_eq!(rows[0][0], "true");
             }
             _ => panic!("expected Rows"),
         }
@@ -4649,7 +4720,7 @@ mod tests {
         match result {
             SqlResult::Rows { rows, .. } => {
                 assert_eq!(rows.len(), 1);
-                assert_eq!(rows[0][0], "0");
+                assert_eq!(rows[0][0], "false");
             }
             _ => panic!("expected Rows"),
         }
