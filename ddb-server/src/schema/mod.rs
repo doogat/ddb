@@ -1986,10 +1986,9 @@ pub fn build_schema(
 
     // Per-type subscription fields (e.g., contactChanged, bookmarkChanged)
     for schema in &type_schemas {
-        let _type_name = match known_types.get(&schema.table_name) {
-            Some(name) => name.clone(),
-            None => continue,
-        };
+        if !known_types.contains_key(&schema.table_name) {
+            continue;
+        }
         let field_name = format!("{}Changed", sanitize_field_name(&schema.table_name));
         let table_name = schema.table_name.clone();
         subscription = subscription.field(SubscriptionField::new(
