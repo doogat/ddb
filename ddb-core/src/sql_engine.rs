@@ -522,6 +522,15 @@ impl<'a> SqlEngine<'a> {
             };
             let allowed_values = extract_allowed_values(&col.data_type);
             let default_value = extract_default(&col.options);
+            if let Some(ref dv) = default_value {
+                if dv == "NEXT" || dv.starts_with("NEXT(") {
+                    if !data_type.eq_ignore_ascii_case("integer") {
+                        return Err(DoogatError::SqlEngine(format!(
+                            "DEFAULT NEXT is only valid on INTEGER columns, not {data_type}"
+                        )));
+                    }
+                }
+            }
             out.push(ColumnDef {
                 name,
                 data_type,
@@ -1901,6 +1910,26 @@ fn extract_allowed_values(dt: &DataType) -> Option<Vec<String>> {
 fn extract_default(options: &[sqlparser::ast::ColumnOptionDef]) -> Option<String> {
     for opt in options {
         if let ColumnOption::Default(expr) = &opt.option {
+            // Bare DEFAULT NEXT
+            if let Expr::Identifier(ident) = expr {
+                if ident.value.eq_ignore_ascii_case("next") {
+                    return Some("NEXT".to_string());
+                }
+            }
+            // DEFAULT NEXT(partition_col)
+            if let Expr::Function(func) = expr {
+                let func_name = func.name.to_string();
+                if func_name.eq_ignore_ascii_case("next") {
+                    if let sqlparser::ast::FunctionArguments::List(arg_list) = &func.args {
+                        if let Some(sqlparser::ast::FunctionArg::Unnamed(
+                            sqlparser::ast::FunctionArgExpr::Expr(Expr::Identifier(ident)),
+                        )) = arg_list.args.first()
+                        {
+                            return Some(format!("NEXT({})", ident.value));
+                        }
+                    }
+                }
+            }
             return expr_to_string(expr).ok();
         }
     }
