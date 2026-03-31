@@ -186,17 +186,22 @@ impl DoogatService {
         self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
         let content = self.repo.read_file(&path)?;
-        parser::parse(&content, &path)
+        let mut parsed = parser::parse(&content, &path)?;
+        parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
+        Ok(parsed)
     }
 
     /// Batch-fetch multiple doogats by ID, skipping any that fail to resolve or parse.
     pub fn get_doogats_batch(&self, ids: &[String]) -> Result<Vec<ParsedDoogat>> {
         self.ensure_fresh()?;
+        let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        let updated_map = self.index.lookup_updated_at_batch(&id_refs).unwrap_or_default();
         let mut results = Vec::with_capacity(ids.len());
         for id in ids {
             if let Ok(path) = self.index.resolve_path(id) {
                 if let Ok(content) = self.repo.read_file(&path) {
-                    if let Ok(parsed) = parser::parse(&content, &path) {
+                    if let Ok(mut parsed) = parser::parse(&content, &path) {
+                        parsed.updated_at = updated_map.get(id.as_str()).cloned();
                         results.push(parsed);
                     }
                 }
@@ -471,8 +476,10 @@ impl DoogatService {
         for row in rows {
             if row.len() >= 2 {
                 let path = &row[1];
+                let updated_at = row.get(2).cloned();
                 if let Ok(content) = self.repo.read_file(path) {
-                    if let Ok(parsed) = parser::parse(&content, path) {
+                    if let Ok(mut parsed) = parser::parse(&content, path) {
+                        parsed.updated_at = updated_at;
                         doogats.push(parsed);
                     }
                 }
@@ -573,12 +580,15 @@ impl DoogatService {
         );
 
         let rows = self.index.query_raw_with_params(&sql, &query.params)?;
+        let ids: Vec<&str> = rows.iter().filter_map(|r| r.first().map(|s| s.as_str())).collect();
+        let updated_map = self.index.lookup_updated_at_batch(&ids).unwrap_or_default();
         let mut doogats = Vec::new();
         for row in rows {
             if let Some(id) = row.first() {
                 if let Ok(path) = self.index.resolve_path(id) {
                     if let Ok(content) = self.repo.read_file(&path) {
-                        if let Ok(parsed) = parser::parse(&content, &path) {
+                        if let Ok(mut parsed) = parser::parse(&content, &path) {
+                            parsed.updated_at = updated_map.get(id.as_str()).cloned();
                             doogats.push(parsed);
                         }
                     }
@@ -1039,7 +1049,7 @@ impl DoogatService {
 }
 
 /// Sortable columns on the doogats table.
-pub const SORTABLE_COLUMNS: &[&str] = &["id", "title", "date", "type"];
+pub const SORTABLE_COLUMNS: &[&str] = &["id", "title", "date", "type", "updated_at"];
 
 /// Build SQL query with filters for doogat listing.
 fn build_filtered_sql(filter: &ListFilter) -> String {
@@ -1094,7 +1104,7 @@ fn build_filtered_sql(filter: &ListFilter) -> String {
         None => " ORDER BY z.date DESC, z.id DESC".to_string(),
     };
 
-    format!("SELECT z.id, z.path FROM doogats z{where_clause}{order_clause}{limit_clause}")
+    format!("SELECT z.id, z.path, z.updated_at FROM doogats z{where_clause}{order_clause}{limit_clause}")
 }
 
 #[cfg(test)]

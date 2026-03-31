@@ -17,6 +17,45 @@ impl Index {
             .map_err(|_| crate::error::DoogatError::NotFound(format!("doogat {id}")))
     }
 
+    /// Look up the `updated_at` timestamp for a doogat from the index.
+    pub fn lookup_updated_at(&self, id: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT updated_at FROM doogats WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|_| crate::error::DoogatError::NotFound(format!("doogat {id}")))
+            .map(Some)
+    }
+
+    /// Batch look up `updated_at` timestamps for multiple doogat IDs.
+    pub fn lookup_updated_at_batch(
+        &self,
+        ids: &[&str],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT id, updated_at FROM doogats WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (id, ts) = row?;
+            map.insert(id, ts);
+        }
+        Ok(map)
+    }
+
     /// Check if a type's typedef has `folder: true`.
     /// Returns false if no typedef exists or folder is not set.
     pub fn type_uses_folder(

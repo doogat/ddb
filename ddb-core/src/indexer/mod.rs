@@ -715,7 +715,7 @@ impl Index {
         let filter_sql = filter_clauses.join(" ");
         let base = format!(
             "SELECT z.id, z.title, z.path, \
-             snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank \
+             snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank, z.updated_at \
              FROM _ddb_fts \
              JOIN doogats z ON z.rowid = _ddb_fts.rowid \
              WHERE _ddb_fts MATCH ?1 {filter_sql}\
@@ -824,7 +824,7 @@ impl Index {
             path: row.get(2)?,
             snippet: row.get(3)?,
             rank: row.get(4)?,
-            updated_at: String::new(),
+            updated_at: row.get::<_, String>(5).unwrap_or_default(),
         })
     }
 
