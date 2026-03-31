@@ -523,12 +523,12 @@ impl<'a> SqlEngine<'a> {
             let allowed_values = extract_allowed_values(&col.data_type);
             let default_value = extract_default(&col.options);
             if let Some(ref dv) = default_value {
-                if dv == "NEXT" || dv.starts_with("NEXT(") {
-                    if !data_type.eq_ignore_ascii_case("integer") {
-                        return Err(DoogatError::SqlEngine(format!(
-                            "DEFAULT NEXT is only valid on INTEGER columns, not {data_type}"
-                        )));
-                    }
+                if (dv == "NEXT" || dv.starts_with("NEXT("))
+                    && !data_type.eq_ignore_ascii_case("integer")
+                {
+                    return Err(DoogatError::SqlEngine(format!(
+                        "DEFAULT NEXT is only valid on INTEGER columns, not {data_type}"
+                    )));
                 }
             }
             out.push(ColumnDef {
