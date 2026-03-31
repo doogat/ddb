@@ -1,5 +1,7 @@
 # Design Decisions
 
+Architectural choices that constrain the system. New requirements and feature proposals should be checked against these decisions before creating PRDs or writing code. If a proposal conflicts with a decision here, the decision should be revisited and updated first, not silently overridden.
+
 ## Hybrid Git-CRDT Merge
 
 **Decision**: Use Git for >99% of merges; Automerge CRDT for the rest.
@@ -40,13 +42,15 @@
 
 **Tradeoff**: Stale nodes (offline beyond a threshold) block compaction from advancing past their last known head. This is an unresolved concern for post-MVP.
 
-## No Server Required
+## Git Remotes as Sync Transport
 
-**Decision**: All sync happens via Git remotes. No HTTP/REST/GraphQL server in the MVP.
+**Decision**: All sync uses Git remotes (SSH, HTTPS, local paths, bare repos). No custom transport protocol, peer discovery, or LAN sync layer.
 
-**Why**: Git provides the transport layer (SSH, local paths, bare repos). Adding a server adds complexity, authentication concerns, and deployment burden. The CLI + library API is sufficient for validating the core model.
+**Why**: Git already handles transport, authentication (SSH keys, credential helpers), NAT traversal (via hosted remotes), and incremental transfer (packfiles). The merge/CRDT/HLC conflict resolution layer is transport-agnostic by design - it operates on commits, not connections. Adding a second transport gains nothing that `git remote add` doesn't already provide.
 
-**Tradeoff**: No web UI or mobile app without building a server layer. This is a post-MVP concern — the architecture supports adding a server that wraps the core library.
+**Tradeoff**: No zero-config device discovery on local networks. Users must configure a Git remote (hosted service, NAS, or local path). For air-gapped scenarios, bundle export/import fills the gap without requiring network infrastructure.
+
+**Rejected alternative - Peer LAN sync (mDNS/Bonjour discovery)**: Evaluated and rejected. mDNS discovery, trust bootstrapping, and a custom exchange protocol add substantial complexity (platform-specific network APIs, firewall handling, iOS/Android background networking restrictions) for a marginal UX improvement over `git remote add ssh://...`. The bundle system already covers the offline transfer case. See also: spec FE-13 (deferred indefinitely).
 
 ## Rust
 
@@ -66,7 +70,24 @@
 
 **What replaces it**: Commit-graph integration (done), incremental reindex (done), and future fsmonitor/file-watcher support address the same large-repo scalability concern through different mechanisms.
 
-## Known Limitations (MVP)
+## Non-Goals
+
+Approaches evaluated and explicitly rejected. If a future requirement conflicts with an item here, revisit the decision with new evidence before proceeding.
+
+| Area | Non-Goal | Why | Alternative |
+|------|----------|-----|-------------|
+| Sync transport | Peer LAN discovery (mDNS/Bonjour) | Git remotes already provide transport + auth. Custom discovery adds platform-specific complexity with no functional gain. | `git remote add` (SSH, HTTPS, local path) |
+| Sync transport | Custom sync protocol (libp2p, etc.) | Git packfiles are already efficient incremental transfer. A second protocol doubles the attack/failure surface. | Git fetch/push |
+| Scalability | Git sparse checkout / sparse index | DDB requires full-clone semantics on every device. Sparse checkout breaks the "all doogats locally available" contract. | Commit-graph, incremental reindex, fsmonitor |
+| Multi-user | Real-time collaborative editing | CRDT merge is designed for async multi-device sync, not live cursors. Real-time adds WebSocket/OT complexity for a single-user system. | Async sync with conflict resolution |
+
+## Per-Parent Batch Loading (Not Page-Level DataLoader)
+
+**Decision**: REFERENCES fields resolve via per-parent batch calls, not a page-level DataLoader.
+
+**Why**: Each parent item calls `get_doogats_batch(ids)` with its own reference IDs. With 20 items on a page, that's ~20 batch calls rather than the 1 call a true DataLoader would make. However, SQLite is in-process with no network round-trips, so the difference is microseconds. A page-level DataLoader requires async-graphql shared request state and deferred resolution, adding substantial complexity for no measurable gain at personal scale.
+
+**Tradeoff**: Fetching 50 items with relations issues ~50 queries instead of 3. Acceptable because SQLite in-process queries take <1ms each. Revisit only if profiling shows relation resolution as a bottleneck at >10K doogats.
 
 ## Broadcast Channel for Subscriptions
 
@@ -76,12 +97,9 @@
 
 **Tradeoff**: Slow clients that can't keep up will miss events (broadcast receiver lag). Acceptable for MVP — clients can refetch state on reconnect. A future improvement could add a replay buffer or persistent event log.
 
-| Area | Limitation | Post-MVP Plan |
-|------|-----------|---------------|
-| Clock source | Git commit timestamps, not Lamport/HLC | Add hybrid logical clocks |
-| Compaction | Removes all temp files, not history-aware | Implement history-based CRDT compaction |
-| Air-gapped sync | Not implemented | Bundle-based sync protocol |
-| Binary assets | No conflict resolution strategy | Define binary merge policy |
-| Performance | Untested beyond small collections | Benchmark at 5K+ doogats |
-| Plugin system | Not implemented | Type-specific behaviors via plugins |
-| ID type | `i64` in CLI read/update, `String` in types | Align to `String` everywhere |
+## Known Limitations
+
+| Area | Limitation | Plan |
+|------|-----------|------|
+| Plugin system | No type-specific behaviors via plugins | Type-driven behavior hooks |
+| Subscriptions | Slow clients miss broadcast events | Replay buffer or persistent event log |
