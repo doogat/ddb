@@ -2101,3 +2101,110 @@ pub fn build_schema(
     builder.finish().map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::EventBus;
+    use ddb_core::service::DoogatService;
+    use ddb_core::types::{ColumnDef, TableSchema, Zone};
+
+    /// Helper: spin up ActorHandle + ReadPool backed by a temp ddb repo.
+    fn test_actor_and_pool(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
+        DoogatService::init(dir).expect("init repo");
+        let event_bus = EventBus::new();
+        let actor = ActorHandle::spawn(dir.to_path_buf(), event_bus)
+            .expect("spawn actor");
+        let pool = ReadPool::new(dir.to_path_buf(), 1).expect("read pool");
+        (actor, pool)
+    }
+
+    fn make_table_schema(name: &str, columns: Vec<ColumnDef>) -> TableSchema {
+        TableSchema {
+            table_name: name.into(),
+            columns,
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+        }
+    }
+
+    fn simple_column(name: &str) -> ColumnDef {
+        ColumnDef {
+            name: name.into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: Some(Zone::Frontmatter),
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn build_schema_includes_hyphenated_type() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let schemas = vec![make_table_schema(
+            "test-item",
+            vec![simple_column("status")],
+        )];
+
+        let schema = build_schema(actor, pool, schemas, None)
+            .expect("schema should build successfully");
+        let sdl = schema.sdl();
+
+        // Type name: kebab-case → PascalCase
+        assert!(
+            sdl.contains("type TestItem"),
+            "SDL should contain 'type TestItem', got:\n{sdl}"
+        );
+
+        // Query field: camelCase + pluralized
+        assert!(
+            sdl.contains("testItems"),
+            "SDL should contain query field 'testItems', got:\n{sdl}"
+        );
+
+        // Subscription field: camelCase + "Changed"
+        assert!(
+            sdl.contains("testItemChanged"),
+            "SDL should contain subscription field 'testItemChanged', got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_schema_detects_name_collision() {
+        // "my-type" and "myType" both sanitize to PascalCase "MyType".
+        // The second should be skipped (collision detection).
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let schemas = vec![
+            make_table_schema("my-type", vec![simple_column("a")]),
+            make_table_schema("myType", vec![simple_column("b")]),
+        ];
+
+        let schema = build_schema(actor, pool, schemas, None)
+            .expect("schema should build despite collision");
+        let sdl = schema.sdl();
+
+        // First type registered
+        assert!(
+            sdl.contains("type MyType"),
+            "SDL should contain 'type MyType' from the first registrant"
+        );
+
+        // Count occurrences - there should be exactly one 'type MyType'
+        let count = sdl.matches("type MyType").count();
+        assert_eq!(
+            count, 1,
+            "expected exactly 1 'type MyType' but found {count} (collision not detected)"
+        );
+    }
+}
+

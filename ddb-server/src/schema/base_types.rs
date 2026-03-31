@@ -949,6 +949,55 @@ mod tests {
     }
 
     #[test]
+    fn ref_target_gql_type_handles_hyphenated() {
+        let col = ColumnDef {
+            name: "membership".into(),
+            data_type: "TEXT".into(),
+            references: Some("category-membership".into()),
+            zone: Some(Zone::Reference),
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        };
+
+        // After the change, known_types is HashMap<String, String>
+        // mapping original table_name → sanitized PascalCase name.
+        let mut known_types: HashMap<String, String> = HashMap::new();
+        known_types.insert(
+            "category-membership".into(),
+            "CategoryMembership".into(),
+        );
+
+        let result = ref_target_gql_type(&col, &known_types);
+        assert_eq!(
+            result, "CategoryMembership",
+            "ref_target_gql_type should return sanitized PascalCase for hyphenated target"
+        );
+    }
+
+    #[test]
+    fn ref_target_gql_type_falls_back_to_doogat() {
+        let col = ColumnDef {
+            name: "owner".into(),
+            data_type: "TEXT".into(),
+            references: Some("unknown-type".into()),
+            zone: Some(Zone::Reference),
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+        };
+
+        let known_types: HashMap<String, String> = HashMap::new();
+        let result = ref_target_gql_type(&col, &known_types);
+        assert_eq!(
+            result, "Doogat",
+            "ref_target_gql_type should fall back to 'Doogat' for unknown targets"
+        );
+    }
+
+    #[test]
     fn test_sanitize_type_name() {
         // Kebab-case to PascalCase
         assert_eq!(sanitize_type_name("category-membership"), "CategoryMembership");
