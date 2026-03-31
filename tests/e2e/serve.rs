@@ -1230,3 +1230,44 @@ fn search_malformed_query_returns_bad_request() {
     let err_msg = result["errors"][0]["message"].as_str().unwrap();
     assert!(err_msg.contains("invalid search query"), "expected user-facing error, got: {err_msg}");
 }
+
+#[test]
+fn graphql_introspection_hides_internal_tables() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a user type so we have something to check for
+    let r = server.graphql(
+        r#"mutation { executeSql(sql: "CREATE TABLE widget (color TEXT)") { message } }"#,
+    );
+    assert!(r.get("errors").is_none(), "create table failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Introspect query type fields
+    let result = server.graphql(
+        r#"{ __schema { queryType { fields { name } } } }"#,
+    );
+    assert!(result.get("errors").is_none(), "introspection failed: {result}");
+
+    let fields: Vec<&str> = result["data"]["__schema"]["queryType"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["name"].as_str())
+        .collect();
+
+    // User type should appear (pluralized)
+    assert!(
+        fields.contains(&"widgets"),
+        "user type 'widgets' should appear in query fields, got: {fields:?}"
+    );
+
+    // Internal _ddb_* tables must not appear as query fields
+    // Note: "doogats" is an intentional user-facing query, not a leaked internal table
+    for field in &fields {
+        assert!(
+            !field.starts_with("_ddb_"),
+            "internal table field '{field}' should not appear in GraphQL schema"
+        );
+    }
+}
