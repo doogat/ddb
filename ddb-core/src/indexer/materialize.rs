@@ -206,6 +206,8 @@ impl Index {
             }
         }
 
+        self.refresh_boost_table(&typedef_schemas)?;
+
         Ok((tables_materialized, types_inferred))
     }
 
@@ -345,6 +347,8 @@ impl Index {
                 tables_materialized += 1;
             }
         }
+
+        self.refresh_boost_table(&typedef_schemas)?;
 
         Ok((tables_materialized, types_inferred))
     }
@@ -601,6 +605,30 @@ impl Index {
             }
         }
         schemas
+    }
+
+    /// Rebuild the `_ddb_boost` table from typedef schemas.
+    /// Stores max(search_boost) per type for FTS5 bm25() weighting.
+    fn refresh_boost_table(
+        &self,
+        schemas: &std::collections::HashMap<String, crate::types::TableSchema>,
+    ) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM _ddb_boost", [])?;
+        for (type_name, schema) in schemas {
+            let max_boost = schema
+                .columns
+                .iter()
+                .filter_map(|c| c.search_boost)
+                .fold(1.0_f64, f64::max);
+            if max_boost > 1.0 {
+                self.conn.execute(
+                    "INSERT INTO _ddb_boost (type_name, max_boost) VALUES (?1, ?2)",
+                    rusqlite::params![type_name, max_boost],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Re-materialize a single doogat row (main table + junction tables).
