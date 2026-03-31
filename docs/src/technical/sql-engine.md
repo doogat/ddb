@@ -259,6 +259,23 @@ These SQL features are explicitly rejected with descriptive error messages. They
 | `INSERT ... ON CONFLICT` | Bypasses git; use explicit `INSERT` + `UPDATE` |
 | `UPDATE ... FROM` | Ambiguous join-to-document mapping; decompose into `SELECT` + individual `UPDATE`s |
 
+## Self-Contained Type Tables
+
+Materialized type tables include all core doogat columns directly: `id`, `title`, `date`, `updated_at`, plus any type-specific columns from the typedef. No JOIN against the internal `doogats` table is needed.
+
+```sql
+-- All core fields available directly on the type table
+SELECT id, title, date, updated_at, status FROM task
+```
+
+### Internal table visibility
+
+Internal tables (`doogats`, `_ddb_tags`, `_ddb_fts`, `_ddb_links`, etc.) are hidden from schema introspection:
+
+- **PgWire**: psql `\dt` shows only user type tables. Queries referencing `pg_catalog` return filtered results.
+- **GraphQL**: introspection exposes only user-defined typed queries. The `doogats` query field is an intentional user-facing query for listing all doogats.
+- **Direct access**: `SELECT * FROM _ddb_tags` still works for power users. Tables are hidden from catalog listings, not blocked from queries.
+
 ## Test Coverage
 
 65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 9 rejection tests for unsupported SQL features, and 7 type-aware inference tests. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns).

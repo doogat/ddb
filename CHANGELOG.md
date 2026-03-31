@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `columns` field in GraphQL `SqlResult` type returns column names alongside row data
 - Optional `format: "objects"` argument on `sql`, `executeSql`, and `executeBatch` returns rows as JSON objects keyed by column name instead of positional arrays
 - Core doogat fields (`title`, `date`, `updated_at`) in materialized type tables, removing need for `JOIN doogats`
+- PgWire `pg_catalog` support: psql `\dt` and tab-completion show only user type tables, hiding internal `_ddb_*` tables
 - `DoogatError` now includes `Conflict`, `Sync`, `Index`, `BadRequest` variants for precise error discrimination; server returns 409 for conflicts, 400 for bad requests
 
 ### Changed
