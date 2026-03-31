@@ -403,6 +403,11 @@ try {
 }
 pass "serve: not-found returns 404"
 
+# GraphQL introspection hides internal tables
+$intro = gql '{"query":"{ __schema { queryType { fields { name } } } }"}'
+if ($intro -match "_ddb_") { throw "introspection leaked internal table: $intro" }
+pass "serve: introspection hides internal tables"
+
 # compact mutation
 $result = gql '{"query":"mutation { compact { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter crdtTempFilesBefore crdtTempFilesAfter repoBytesBefore repoBytesAfter backupPath } }"}'
 if ($result -notmatch "gcSuccess") { throw "compact mutation failed" }
