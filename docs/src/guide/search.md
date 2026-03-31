@@ -8,6 +8,22 @@ ddb search "your query"
 
 Searches doogat titles, bodies, and tags using SQLite FTS5 with porter stemming. Results are ranked by relevance with highlighted snippets.
 
+### Query syntax
+
+FTS5's full query syntax is available:
+
+| Syntax | Example | Meaning |
+|--------|---------|---------|
+| Terms | `rust crdt` | Both terms must appear (implicit AND) |
+| AND | `rust AND crdt` | Both terms must appear |
+| OR | `rust OR golang` | Either term matches |
+| NOT | `rust NOT draft` | Exclude doogats containing a term |
+| Phrase | `"conflict resolution"` | Exact phrase match |
+
+These operators work in both the CLI and the GraphQL `search` query.
+
+Malformed queries (e.g., `AND AND`) return an error rather than silently failing.
+
 ### Example
 
 ```bash
