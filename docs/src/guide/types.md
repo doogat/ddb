@@ -43,7 +43,7 @@ Column properties:
 - `zone`: frontmatter, body, reference
 - `required`: if true, missing values produce consistency warnings
 - `references`: FK target type name
-- `search_boost`: FTS weight (future)
+- `search_boost`: FTS weight -- boosts search ranking for matches in this type's frontmatter fields via bm25() (e.g. `search_boost: 1.5` on a contact's `email` column makes email matches rank higher)
 - `allowed_values`: list of valid values (enum constraint); generates CHECK in SQLite
 - `default_value`: default value filled on INSERT when column is omitted
 

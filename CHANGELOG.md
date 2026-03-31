@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- FTS5 search boost weighting - typedef columns with `search_boost` now influence search ranking via bm25()
 - `DEFAULT NEXT` and `DEFAULT NEXT(partition_col)` expressions for auto-incrementing INTEGER columns; resolves to `MAX(col) + 1` at insert time, with optional per-partition scoping
 - `batchUpdate` GraphQL mutation for atomic multi-doogat updates in a single git commit; accepts `[UpdateDoogatInput!]!`, returns `[Doogat!]!`
 - `updated_at` and `created_at` fields in all GraphQL doogat responses (generic, typed, and search hits); `updated_at` also available as a sort field

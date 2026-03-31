@@ -25,11 +25,18 @@ _ddb_aliases(doogat_id FK, alias COLLATE NOCASE)  -- index on alias
 _ddb_attachments(doogat_id FK, name, mime, size INTEGER, path)
 _ddb_checkboxes(doogat_id FK, state, content, date, due_date, line_number INTEGER, indent_level INTEGER)
                                          -- indexes on state, doogat_id
-_ddb_fts(title, body, tags)              -- FTS5 virtual table
+_ddb_fts(title, body, tags, fields)      -- FTS5 virtual table
+_ddb_boost(type_name TEXT PK, max_boost REAL DEFAULT 1.0) -- per-type FTS weight
 _ddb_meta(key PK, value)                 -- staleness tracking
 ```
 
-FTS5 uses `porter unicode61` tokenizer — porter stemming with Unicode support.
+FTS5 uses `porter unicode61` tokenizer -- porter stemming with Unicode support.
+
+The `fields` column (4th FTS5 column) contains space-joined frontmatter extra values (strings, numbers, booleans -- skipping `aliases` and `attachments`). This makes frontmatter field values searchable alongside title, body, and tags.
+
+The `_ddb_boost` table stores `max(search_boost)` per type, derived from typedef column definitions during materialization. When a search is filtered to a single type that has boosted columns, the FTS5 `bm25()` weight for the `fields` column is set to that type's max boost value (e.g. `bm25(_ddb_fts, 1.0, 1.0, 1.0, 2.0)` for a type with `search_boost: 2.0`). Unfiltered searches and types without boosts use a weight of 1.0.
+
+**Auto-upgrade**: on open, the indexer detects old 3-column FTS5 schemas (missing `fields`) or missing `_ddb_boost` table. When detected, all tables are dropped and recreated from the current schema. FTS5 virtual tables cannot be ALTERed, so a full drop/recreate is required.
 
 WAL journal mode is enabled for better concurrent read performance.
 

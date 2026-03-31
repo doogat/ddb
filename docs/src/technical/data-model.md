@@ -242,7 +242,7 @@ pub struct ColumnDef {
     pub references: Option<String>, // FK target type name
     pub zone: Option<Zone>,         // which doogat zone this maps to
     pub required: bool,             // enforced during consistency checks
-    pub search_boost: Option<f64>,  // FTS boost weight (future)
+    pub search_boost: Option<f64>,  // FTS boost weight for bm25() ranking
     pub allowed_values: Option<Vec<String>>, // enum constraint
     pub default_value: Option<String>,       // default on INSERT
 }
@@ -350,7 +350,10 @@ _ddb_links(source_id FK, target_path, display, zone, kind TEXT DEFAULT 'wikilink
 _ddb_attachments(doogat_id FK, name, mime, size INTEGER, path)
 
 -- FTS5 full-text search (porter stemming, unicode61 tokenizer)
-_ddb_fts(title, body, tags)
+_ddb_fts(title, body, tags, fields)
+
+-- Per-type FTS boost weight (max search_boost from typedef columns)
+_ddb_boost(type_name TEXT PK, max_boost REAL DEFAULT 1.0)
 
 -- Staleness tracking
 _ddb_meta(key PK, value)  -- key="head", value=current Git HEAD OID
