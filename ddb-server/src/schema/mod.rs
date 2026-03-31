@@ -1,5 +1,6 @@
 mod base_types;
 pub use base_types::is_valid_graphql_name;
+pub(crate) use base_types::{sanitize_field_name, sanitize_type_name};
 use base_types::*;
 
 use async_graphql::dynamic::*;

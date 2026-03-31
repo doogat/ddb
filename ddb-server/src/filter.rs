@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use rusqlite::types::Value as SqlValue;
 use ddb_core::types::TableSchema;
 
-use crate::schema::is_valid_graphql_name;
+use crate::schema::{is_valid_graphql_name, sanitize_field_name, sanitize_type_name};
 
 // -- Shared scalar filter input types --
 
@@ -83,11 +83,13 @@ pub fn build_where_input(type_name: &str, schema: &TableSchema) -> InputObject {
     let mut input = InputObject::new(&name);
 
     for col in &schema.columns {
-        if !is_valid_graphql_name(&col.name) {
-            continue;
-        }
+        let gql_name = if is_valid_graphql_name(&col.name) {
+            col.name.clone()
+        } else {
+            sanitize_field_name(&col.name)
+        };
         let filter_type = filter_type_for_column(col);
-        input = input.field(InputValue::new(&col.name, TypeRef::named(filter_type)));
+        input = input.field(InputValue::new(&gql_name, TypeRef::named(filter_type)));
     }
 
     // Compound combinators (self-referencing)
@@ -111,10 +113,12 @@ pub fn build_order_by_input(type_name: &str, schema: &TableSchema) -> InputObjec
     let mut input = InputObject::new(format!("{type_name}OrderBy"));
 
     for col in &schema.columns {
-        if !is_valid_graphql_name(&col.name) {
-            continue;
-        }
-        input = input.field(InputValue::new(&col.name, TypeRef::named("SortOrder")));
+        let gql_name = if is_valid_graphql_name(&col.name) {
+            col.name.clone()
+        } else {
+            sanitize_field_name(&col.name)
+        };
+        input = input.field(InputValue::new(&gql_name, TypeRef::named("SortOrder")));
     }
 
     input
@@ -133,11 +137,14 @@ pub fn build_order_sql(input: &GqlValue, schema: &TableSchema) -> Option<String>
 
     let mut parts = Vec::new();
     for (name, value) in obj {
-        let col = name.as_str();
-        // Validate column exists in schema
-        if !schema.columns.iter().any(|c| c.name == col) {
-            continue;
-        }
+        let field = name.as_str();
+        // Find column by original or sanitized name
+        let sql_col = schema
+            .columns
+            .iter()
+            .find(|c| c.name == field || sanitize_field_name(&c.name) == field)
+            .map(|c| c.name.as_str());
+        let Some(col) = sql_col else { continue };
         let dir = match value {
             GqlValue::Enum(e) => e.as_str(),
             GqlValue::String(s) => s.as_str(),
@@ -235,10 +242,14 @@ fn add_aggregate_fields(obj: Object, schema: &TableSchema) -> Object {
 
     // Numeric aggregate fields
     for col in &schema.columns {
-        if !is_numeric(&col.data_type) || !is_valid_graphql_name(&col.name) {
+        if !is_numeric(&col.data_type) {
             continue;
         }
-        let cap = capitalize_first(&col.name);
+        let cap = if is_valid_graphql_name(&col.name) {
+            capitalize_first(&col.name)
+        } else {
+            sanitize_type_name(&col.name)
+        };
         for prefix in ["min", "max", "sum", "avg"] {
             let field_name = format!("{prefix}{cap}");
             let key = field_name.clone();
@@ -347,7 +358,11 @@ pub fn build_aggregate_sql_grouped(
         if !is_numeric(&col.data_type) {
             continue;
         }
-        let cap = capitalize_first(&col.name);
+        let cap = if is_valid_graphql_name(&col.name) {
+            capitalize_first(&col.name)
+        } else {
+            sanitize_type_name(&col.name)
+        };
         let c = &col.name;
         for (func, prefix) in [
             ("MIN", "min"),
@@ -478,12 +493,17 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
                 }
             }
             _ => {
-                // Column filter — validate name exists in schema
-                if schema.columns.iter().any(|c| c.name == field) {
+                // Column filter — find by original name or sanitized GQL name
+                let sql_col = schema
+                    .columns
+                    .iter()
+                    .find(|c| c.name == field || sanitize_field_name(&c.name) == field)
+                    .map(|c| c.name.as_str());
+                if let Some(col_name) = sql_col {
                     if let GqlValue::Object(filter_obj) = value {
                         for (op, val) in filter_obj {
                             if let Some(cond) =
-                                build_operator_condition(field, op.as_str(), val, &mut params)
+                                build_operator_condition(col_name, op.as_str(), val, &mut params)
                             {
                                 conditions.push(cond);
                             }
