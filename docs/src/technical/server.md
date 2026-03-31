@@ -298,6 +298,20 @@ const client = createClient({
 
 ### Dynamic Types
 
+#### Type Name Conventions
+
+Type names containing hyphens (kebab-case) are converted to valid GraphQL identifiers:
+
+| Original name | GraphQL type | Query field | Subscription |
+|--------------|-------------|-------------|-------------|
+| `contact` | `Contact` | `contacts` | `contactChanged` |
+| `category-membership` | `CategoryMembership` | `categoryMemberships` | `categoryMembershipChanged` |
+| `saved-search` | `SavedSearch` | `savedSearches` | `savedSearchChanged` |
+
+The original table name is preserved for SQL queries. Column names with hyphens follow the same conversion for GraphQL field names, with the original name used for data extraction.
+
+If two types produce the same GraphQL name after conversion (e.g. `my-type` and `myType` both become `MyType`), the second type is skipped with a warning.
+
 For each `_typedef` doogat (e.g. "project"), the server generates:
 - A typed GraphQL object (e.g. `Project`) with native fields from the typedef columns
 - A `{Type}Connection` wrapper with `items` and `totalCount`
