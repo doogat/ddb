@@ -1,4 +1,5 @@
 use crate::common::{ServerGuard, DdbTestRepo};
+use std::collections::HashSet;
 use tokio_postgres::SimpleQueryMessage;
 
 #[test]
@@ -223,5 +224,83 @@ fn pgwire_insert_update_delete() {
             })
             .expect("missing delete completion");
         assert_eq!(deleted, 1);
+    });
+}
+
+#[test]
+fn pgwire_pg_catalog_hides_internal_tables() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a user type table
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let (client, connection) = tokio_postgres::Config::new()
+            .host("127.0.0.1")
+            .port(server.pg_port)
+            .user("ddb")
+            .password(&server.token)
+            .dbname("ddb")
+            .connect(tokio_postgres::NoTls)
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            connection.await.ok();
+        });
+
+        client
+            .simple_query("CREATE TABLE project (status TEXT)")
+            .await
+            .unwrap();
+
+        // psql \dt sends a pg_catalog query - simulate it
+        let messages = client
+            .simple_query(
+                "SELECT n.nspname as \"Schema\", c.relname as \"Name\", \
+                 CASE c.relkind WHEN 'r' THEN 'table' END as \"Type\", \
+                 pg_catalog.pg_get_userbyid(c.relowner) as \"Owner\" \
+                 FROM pg_catalog.pg_class c \
+                 LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE c.relkind IN ('r','p','') \
+                 ORDER BY 1,2",
+            )
+            .await
+            .unwrap();
+
+        let table_names: HashSet<String> = messages
+            .iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(row) => row.get(1).map(|s| s.to_string()),
+                _ => None,
+            })
+            .collect();
+
+        // User table should be visible
+        assert!(
+            table_names.contains("project"),
+            "user table 'project' should be listed, got: {table_names:?}"
+        );
+
+        // Internal tables should be hidden
+        assert!(
+            !table_names.contains("doogats"),
+            "internal table 'doogats' should be hidden"
+        );
+        assert!(
+            !table_names.contains("_ddb_tags"),
+            "internal table '_ddb_tags' should be hidden"
+        );
+        assert!(
+            !table_names.contains("_ddb_fts"),
+            "internal table '_ddb_fts' should be hidden"
+        );
+
+        // Direct access to internal tables should still work
+        let direct = client
+            .simple_query("SELECT COUNT(*) FROM _ddb_tags")
+            .await;
+        assert!(
+            direct.is_ok(),
+            "direct query on internal table should still work"
+        );
     });
 }

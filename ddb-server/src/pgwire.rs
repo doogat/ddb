@@ -28,6 +28,25 @@ use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
 use crate::reload::SchemaReloader;
 
+/// True when `sql` references pg_catalog (e.g. psql's \dt, tab-completion).
+fn is_pg_catalog_query(sql: &str) -> bool {
+    let upper = sql.to_uppercase();
+    upper.contains("PG_CATALOG")
+}
+
+/// True when a pg_catalog query is requesting a table listing (pg_class).
+fn is_table_listing_query(sql: &str) -> bool {
+    let upper = sql.to_uppercase();
+    upper.contains("PG_CLASS") || upper.contains("PG_TABLES")
+}
+
+/// True when the table name is internal and should be hidden from introspection.
+fn is_internal_table(name: &str) -> bool {
+    name == "doogats"
+        || name.starts_with("_ddb_")
+        || name.starts_with("sqlite_")
+}
+
 /// True when `sql` is a single pure SELECT statement.
 ///
 /// Conservative: multi-statement batches, INSERT...SELECT,
@@ -78,6 +97,70 @@ impl SimpleQueryHandler for DdbBackend {
         C::Error: Debug,
         PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
+        // Intercept pg_catalog queries (psql \dt, tab-completion) before the SQL engine
+        if is_pg_catalog_query(query) {
+            return if is_table_listing_query(query) {
+                // Query user-visible tables from sqlite_master
+                let table_result = self
+                    .read_pool
+                    .execute_select(
+                        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                            .to_string(),
+                    )
+                    .await
+                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+
+                let schema = Arc::new(vec![
+                    FieldInfo::new("Schema".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+                    FieldInfo::new("Name".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+                    FieldInfo::new("Type".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+                    FieldInfo::new("Owner".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+                ]);
+
+                let data_rows: Vec<PgWireResult<_>> = match table_result {
+                    SqlResult::Rows { rows, .. } => rows
+                        .iter()
+                        .filter(|row| !row.is_empty() && !is_internal_table(&row[0]))
+                        .map(|row| {
+                            let mut encoder = DataRowEncoder::new(schema.clone());
+                            encoder
+                                .encode_field(&Some("public"))
+                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                            encoder
+                                .encode_field(&Some(row[0].as_str()))
+                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                            encoder
+                                .encode_field(&Some("table"))
+                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                            encoder
+                                .encode_field(&Some("ddb"))
+                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                            encoder.finish()
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+
+                Ok(vec![Response::Query(QueryResponse::new(
+                    schema,
+                    stream::iter(data_rows),
+                ))])
+            } else {
+                // Other pg_catalog queries (pg_type, pg_namespace, etc.) - return empty result
+                let schema = Arc::new(vec![FieldInfo::new(
+                    "name".into(),
+                    None,
+                    None,
+                    Type::VARCHAR,
+                    FieldFormat::Text,
+                )]);
+                Ok(vec![Response::Query(QueryResponse::new(
+                    schema,
+                    stream::iter(Vec::new()),
+                ))])
+            };
+        }
+
         let (result, upper) = if is_select_only(query) {
             let r = self
                 .read_pool
@@ -347,5 +430,43 @@ mod tests {
             "INSERT 0 1"
         );
         assert_eq!(normalize_ok_tag("UNKNOWN STMT", "something"), "OK");
+    }
+
+    #[test]
+    fn is_pg_catalog_query_detects_catalog_refs() {
+        assert!(is_pg_catalog_query(
+            "SELECT c.relname FROM pg_catalog.pg_class c"
+        ));
+        assert!(is_pg_catalog_query(
+            "select * from PG_CATALOG.pg_type"
+        ));
+        assert!(!is_pg_catalog_query("SELECT * FROM books"));
+        assert!(!is_pg_catalog_query("SELECT 1"));
+    }
+
+    #[test]
+    fn is_table_listing_query_detects_dt_style() {
+        assert!(is_table_listing_query(
+            "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r'"
+        ));
+        assert!(is_table_listing_query(
+            "SELECT tablename FROM pg_catalog.pg_tables"
+        ));
+        assert!(!is_table_listing_query(
+            "SELECT typname FROM pg_catalog.pg_type"
+        ));
+    }
+
+    #[test]
+    fn is_internal_table_filters_correctly() {
+        assert!(is_internal_table("doogats"));
+        assert!(is_internal_table("_ddb_tags"));
+        assert!(is_internal_table("_ddb_fts"));
+        assert!(is_internal_table("_ddb_links"));
+        assert!(is_internal_table("_ddb_meta"));
+        assert!(is_internal_table("sqlite_sequence"));
+        assert!(!is_internal_table("project"));
+        assert!(!is_internal_table("contact"));
+        assert!(!is_internal_table("bookmark_category"));
     }
 }
