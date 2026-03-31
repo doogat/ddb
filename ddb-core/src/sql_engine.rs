@@ -1365,11 +1365,11 @@ impl<'a> SqlEngine<'a> {
         for row in &mut rows {
             for &idx in &bool_indices {
                 if idx < row.len() {
-                    row[idx] = match row[idx].as_str() {
-                        "1" => "true".to_string(),
-                        "0" => "false".to_string(),
-                        other => other.to_string(),
-                    };
+                    match row[idx].as_str() {
+                        "1" => row[idx] = "true".to_string(),
+                        "0" => row[idx] = "false".to_string(),
+                        _ => {}
+                    }
                 }
             }
         }

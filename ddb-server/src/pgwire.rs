@@ -139,8 +139,7 @@ impl SimpleQueryHandler for DdbBackend {
                                 let b = match val.as_str() {
                                     "true" => Some(true),
                                     "false" => Some(false),
-                                    "NULL" => None,
-                                    _ => Some(val == "1"),
+                                    _ => None,
                                 };
                                 encoder
                                     .encode_field(&b)
