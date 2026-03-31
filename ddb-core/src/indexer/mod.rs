@@ -727,7 +727,11 @@ impl Index {
         filters: &SearchFilters,
     ) -> Result<PaginatedSearchResult> {
         let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
-        let hits = self.search_hits_inner(query, Some((limit, offset)), &filter_clauses, filter_params.clone())?;
+        let boost_type = filters
+            .types
+            .as_ref()
+            .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
+        let hits = self.search_hits_inner(query, Some((limit, offset)), &filter_clauses, filter_params.clone(), boost_type)?;
 
         let filter_sql = filter_clauses.join(" ");
         let count_sql = if filter_sql.is_empty() {
@@ -760,7 +764,22 @@ impl Index {
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
         let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
-        self.search_hits_inner(query, pagination, &filter_clauses, filter_params)
+        let boost_type = filters
+            .types
+            .as_ref()
+            .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
+        self.search_hits_inner(query, pagination, &filter_clauses, filter_params, boost_type)
+    }
+
+    /// Look up the max search_boost for a type from the `_ddb_boost` table.
+    fn lookup_boost(&self, type_name: &str) -> f64 {
+        self.conn
+            .query_row(
+                "SELECT max_boost FROM _ddb_boost WHERE type_name = ?1",
+                params![type_name],
+                |row| row.get(0),
+            )
+            .unwrap_or(1.0)
     }
 
     fn search_hits_inner(
@@ -769,15 +788,18 @@ impl Index {
         pagination: Option<(usize, usize)>,
         filter_clauses: &[String],
         filter_params: Vec<String>,
+        boost_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
         let filter_sql = filter_clauses.join(" ");
+        let boost = boost_type.map_or(1.0, |t| self.lookup_boost(t));
+        let order_clause = format!("ORDER BY bm25(_ddb_fts, 1.0, 1.0, 1.0, {boost})");
         let base = format!(
             "SELECT z.id, z.title, z.path, \
              snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank, z.updated_at \
              FROM _ddb_fts \
              JOIN doogats z ON z.rowid = _ddb_fts.rowid \
              WHERE _ddb_fts MATCH ?1 {filter_sql}\
-             ORDER BY rank"
+             {order_clause}"
         );
 
         let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> =
