@@ -23,10 +23,9 @@ impl Index {
             .query_row(
                 "SELECT updated_at FROM doogats WHERE id = ?1",
                 params![id],
-                |row| row.get(0),
+                |row| row.get::<_, Option<String>>(0),
             )
             .map_err(|_| crate::error::DoogatError::NotFound(format!("doogat {id}")))
-            .map(Some)
     }
 
     /// Batch look up `updated_at` timestamps for multiple doogat IDs.
@@ -46,12 +45,16 @@ impl Index {
         let params: Vec<&dyn rusqlite::types::ToSql> =
             ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
         let rows = stmt.query_map(params.as_slice(), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            let id: String = row.get(0)?;
+            let ts: Option<String> = row.get(1)?;
+            Ok((id, ts))
         })?;
         let mut map = std::collections::HashMap::new();
         for row in rows {
             let (id, ts) = row?;
-            map.insert(id, ts);
+            if let Some(ts) = ts {
+                map.insert(id, ts);
+            }
         }
         Ok(map)
     }
