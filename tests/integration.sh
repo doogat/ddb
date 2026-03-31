@@ -588,6 +588,28 @@ pass "serve: executeBatch failure rolls back all statements"
 # cleanup
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE batchtest CASCADE\") { message } }"}' >/dev/null
 
+# 38g. batchUpdate mutation
+BU1=$(gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Alpha\" }) { id } }"}')
+BU1_ID=$(echo "$BU1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+BU2=$(gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Beta\" }) { id } }"}')
+BU2_ID=$(echo "$BU2" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+BU3=$(gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Gamma\" }) { id } }"}')
+BU3_ID=$(echo "$BU3" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+RESULT=$(gql "{\"query\":\"mutation { batchUpdate(updates: [{id: \\\"$BU1_ID\\\", title: \\\"Updated Alpha\\\"}, {id: \\\"$BU2_ID\\\", title: \\\"Updated Beta\\\"}, {id: \\\"$BU3_ID\\\", title: \\\"Updated Gamma\\\"}]) { id title } }\"}")
+COUNT=$(echo "$RESULT" | jq '.data.batchUpdate | length')
+[ "$COUNT" = "3" ]
+pass "serve: batchUpdate returns 3 items"
+
+echo "$RESULT" | jq -e '.data.batchUpdate[] | select(.id == "'"$BU1_ID"'" and .title == "Updated Alpha")' >/dev/null
+echo "$RESULT" | jq -e '.data.batchUpdate[] | select(.id == "'"$BU2_ID"'" and .title == "Updated Beta")' >/dev/null
+echo "$RESULT" | jq -e '.data.batchUpdate[] | select(.id == "'"$BU3_ID"'" and .title == "Updated Gamma")' >/dev/null
+pass "serve: batchUpdate correct titles"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU1_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU2_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU3_ID\\\") }\"}" >/dev/null
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

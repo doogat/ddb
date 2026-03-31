@@ -616,6 +616,31 @@ pass "serve: executeBatch failure rolls back all statements"
 
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE batchtest CASCADE\") { message } }"}' | Out-Null
 
+# 38g. batchUpdate mutation
+$bu1 = gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Alpha\" }) { id } }"}'
+$BU1_ID = if ($bu1 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no bu1 id" }
+$bu2 = gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Beta\" }) { id } }"}'
+$BU2_ID = if ($bu2 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no bu2 id" }
+$bu3 = gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Gamma\" }) { id } }"}'
+$BU3_ID = if ($bu3 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no bu3 id" }
+
+$result = gql "{`"query`":`"mutation { batchUpdate(updates: [{id: \`"$BU1_ID\`", title: \`"Updated Alpha\`"}, {id: \`"$BU2_ID\`", title: \`"Updated Beta\`"}, {id: \`"$BU3_ID\`", title: \`"Updated Gamma\`"}]) { id title } }`"}"
+$parsed = $result | ConvertFrom-Json
+if ($parsed.data.batchUpdate.Count -ne 3) { throw "batchUpdate expected 3 items, got $($parsed.data.batchUpdate.Count)" }
+pass "serve: batchUpdate returns 3 items"
+
+$item1 = $parsed.data.batchUpdate | Where-Object { $_.id -eq $BU1_ID }
+$item2 = $parsed.data.batchUpdate | Where-Object { $_.id -eq $BU2_ID }
+$item3 = $parsed.data.batchUpdate | Where-Object { $_.id -eq $BU3_ID }
+if ($item1.title -ne "Updated Alpha") { throw "batchUpdate item1 title: $($item1.title)" }
+if ($item2.title -ne "Updated Beta") { throw "batchUpdate item2 title: $($item2.title)" }
+if ($item3.title -ne "Updated Gamma") { throw "batchUpdate item3 title: $($item3.title)" }
+pass "serve: batchUpdate correct titles"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU1_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU2_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU3_ID\`") }`"}" | Out-Null
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
