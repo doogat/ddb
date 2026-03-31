@@ -224,11 +224,11 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF3_ID\`") }`"}" | Out-Null
 
 # 18e. Boolean and phrase search queries
-$bq1 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", body: \"rust crdt patterns\" }) { id } }"}'
+$bq1 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", content: \"rust crdt patterns\" }) { id } }"}'
 $BQ1_ID = if ($bq1 -match '"id":"([^"]+)"') { $Matches[1] }
-$bq2 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust Only\", body: \"rust programming\" }) { id } }"}'
+$bq2 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust Only\", content: \"rust programming\" }) { id } }"}'
 $BQ2_ID = if ($bq2 -match '"id":"([^"]+)"') { $Matches[1] }
-$bq3 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Golang\", body: \"golang programming\" }) { id } }"}'
+$bq3 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Golang\", content: \"golang programming\" }) { id } }"}'
 $BQ3_ID = if ($bq3 -match '"id":"([^"]+)"') { $Matches[1] }
 
 $result = gql '{"query":"{ search(query: \"rust AND crdt\") { totalCount } }"}'

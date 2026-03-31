@@ -166,11 +166,11 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF2_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF3_ID\\\") }\"}" >/dev/null
 
 # 18e. Boolean and phrase search queries
-BQ1=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", body: \"rust crdt patterns\" }) { id } }"}')
+BQ1=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", content: \"rust crdt patterns\" }) { id } }"}')
 BQ1_ID=$(echo "$BQ1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-BQ2=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust Only\", body: \"rust programming\" }) { id } }"}')
+BQ2=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust Only\", content: \"rust programming\" }) { id } }"}')
 BQ2_ID=$(echo "$BQ2" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-BQ3=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Golang\", body: \"golang programming\" }) { id } }"}')
+BQ3=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Golang\", content: \"golang programming\" }) { id } }"}')
 BQ3_ID=$(echo "$BQ3" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 
 RESULT=$(gql '{"query":"{ search(query: \"rust AND crdt\") { totalCount } }"}')
