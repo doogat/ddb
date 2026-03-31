@@ -656,6 +656,28 @@ impl<'a> SqlEngine<'a> {
         let mut created_ids = Vec::with_capacity(rows.len());
         let mut files: Vec<(String, String)> = Vec::with_capacity(rows.len());
 
+        // Pre-compute NEXT counters for auto-increment columns
+        let mut next_counters: BTreeMap<String, i64> = BTreeMap::new();
+        for col_def in &schema.columns {
+            if let Some(ref dv) = col_def.default_value {
+                if dv == "NEXT" {
+                    let max_val: i64 = self
+                        .index
+                        .conn
+                        .query_row(
+                            &format!(
+                                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
+                                col_def.name, schema.table_name
+                            ),
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0);
+                    next_counters.insert(col_def.name.clone(), max_val);
+                }
+            }
+        }
+
         for (row_values, id) in rows.iter().zip(ids.into_iter()) {
             if col_names.len() != row_values.len() {
                 return Err(DoogatError::SqlEngine(
@@ -673,7 +695,41 @@ impl<'a> SqlEngine<'a> {
             for col_def in &schema.columns {
                 if !col_values.contains_key(&col_def.name) {
                     if let Some(ref default) = col_def.default_value {
-                        col_values.insert(col_def.name.clone(), default.clone());
+                        if default == "NEXT" {
+                            let counter =
+                                next_counters.get_mut(&col_def.name).unwrap();
+                            *counter += 1;
+                            col_values
+                                .insert(col_def.name.clone(), counter.to_string());
+                        } else if default.starts_with("NEXT(")
+                            && default.ends_with(')')
+                        {
+                            let partition_col =
+                                &default[5..default.len() - 1];
+                            let partition_val = col_values
+                                .get(partition_col)
+                                .cloned()
+                                .unwrap_or_default();
+                            let max_val: i64 = self
+                                .index
+                                .conn
+                                .query_row(
+                                    &format!(
+                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                                        col_def.name, schema.table_name, partition_col
+                                    ),
+                                    params![partition_val],
+                                    |row| row.get(0),
+                                )
+                                .unwrap_or(0);
+                            col_values.insert(
+                                col_def.name.clone(),
+                                (max_val + 1).to_string(),
+                            );
+                        } else {
+                            col_values
+                                .insert(col_def.name.clone(), default.clone());
+                        }
                     }
                 }
             }
