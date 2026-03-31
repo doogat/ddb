@@ -669,6 +669,39 @@ pub(crate) fn pluralize(s: &str) -> String {
     }
 }
 
+/// Convert a kebab-case type name to PascalCase for GraphQL type names.
+/// If no hyphens, capitalizes the first character only.
+pub(crate) fn sanitize_type_name(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    if s.contains('-') {
+        s.split('-').map(|seg| capitalize(seg)).collect()
+    } else {
+        capitalize(s)
+    }
+}
+
+/// Convert a kebab-case field name to camelCase for GraphQL field names.
+/// First segment is lowercased, subsequent segments are capitalized.
+pub(crate) fn sanitize_field_name(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    if s.contains('-') {
+        let mut parts = s.split('-');
+        let first = parts.next().unwrap().to_lowercase();
+        let rest: String = parts.map(|seg| capitalize(seg)).collect();
+        format!("{first}{rest}")
+    } else {
+        let mut c = s.chars();
+        match c.next() {
+            None => String::new(),
+            Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
+        }
+    }
+}
+
 /// Convert a broadcast::Receiver into a Stream that skips lag errors and ends on close.
 pub(crate) fn event_stream(
     rx: broadcast::Receiver<events::DoogatEvent>,
