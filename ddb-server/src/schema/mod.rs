@@ -8,7 +8,7 @@ use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use futures_util::StreamExt;
 use indexmap::IndexMap;
-use ddb_core::types::{ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
+use ddb_core::types::{BatchUpdateInput, ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -1360,6 +1360,62 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "input",
                 TypeRef::named_nn("UpdateDoogatInput"),
+            )),
+        );
+    }
+
+    // batchUpdate
+    {
+        mutation = mutation.field(
+            Field::new(
+                "batchUpdate",
+                TypeRef::named_nn_list_nn("Doogat"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let a = ctx.data::<ActorHandle>()?;
+                        let updates_val = ctx.args.try_get("updates")?.list()?;
+                        let mut updates = Vec::with_capacity(updates_val.len());
+                        for item in updates_val.iter() {
+                            let obj = item.object()?;
+                            let id = obj.try_get("id")?.string()?.to_string();
+                            let title = obj
+                                .get("title")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string());
+                            let body = obj
+                                .get("content")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string());
+                            let tags =
+                                obj.get("tags").and_then(|v| v.list().ok()).map(|l| {
+                                    l.iter()
+                                        .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                        .collect()
+                                });
+                            let doogat_type = obj
+                                .get("type")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string());
+                            updates.push(BatchUpdateInput {
+                                id,
+                                title,
+                                body,
+                                tags,
+                                doogat_type,
+                            });
+                        }
+                        let results =
+                            a.batch_update(updates).await.map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(
+                            results.iter().map(|z| FieldValue::owned_any(doogat_to_value(z))),
+                        )))
+                    })
+                },
+            )
+            .description("Update multiple doogats atomically in a single git commit. All succeed or none.")
+            .argument(InputValue::new(
+                "updates",
+                TypeRef::named_nn_list_nn("UpdateDoogatInput"),
             )),
         );
     }
