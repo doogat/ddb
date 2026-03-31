@@ -366,12 +366,16 @@ impl Index {
             }
         }
 
+        // Collect frontmatter extra values for FTS fields column.
+        // Skip internal keys that have dedicated tables.
+        let fields_str = collect_fts_fields(&doogat.meta.extra);
+
         // Insert FTS entry
         self.conn.execute(
             "INSERT INTO _ddb_fts (rowid, title, body, tags, fields) VALUES (
                 (SELECT rowid FROM doogats WHERE id = ?1), ?2, ?3, ?4, ?5
             )",
-            params![id, title, doogat.body, tags_str, ""],
+            params![id, title, doogat.body, tags_str, fields_str],
         )?;
 
         Ok(())
@@ -1069,6 +1073,39 @@ impl crate::traits::DoogatIndex for Index {
 }
 
 /// Recursively flatten a `Value` into `_ddb_fields` rows with dot-notation keys.
+/// Collect scalar frontmatter extra values into a space-separated string
+/// for the FTS5 `fields` column. Skips internal keys that have dedicated tables.
+fn collect_fts_fields(extras: &std::collections::BTreeMap<String, crate::types::Value>) -> String {
+    const SKIP_KEYS: &[&str] = &["aliases", "attachments"];
+    let mut parts = Vec::new();
+    for (key, value) in extras {
+        if SKIP_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        collect_value_strings(value, &mut parts);
+    }
+    parts.join(" ")
+}
+
+/// Recursively extract string representations from a Value tree.
+fn collect_value_strings(value: &crate::types::Value, out: &mut Vec<String>) {
+    match value {
+        crate::types::Value::String(s) => out.push(s.clone()),
+        crate::types::Value::Number(n) => out.push(n.to_string()),
+        crate::types::Value::Bool(b) => out.push(b.to_string()),
+        crate::types::Value::Map(map) => {
+            for v in map.values() {
+                collect_value_strings(v, out);
+            }
+        }
+        crate::types::Value::List(list) => {
+            for v in list {
+                collect_value_strings(v, out);
+            }
+        }
+    }
+}
+
 fn flatten_value_into_fields(
     conn: &rusqlite::Connection,
     id: &str,
