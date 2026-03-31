@@ -243,7 +243,7 @@ $result = gql '{"query":"{ search(query: \"rust NOT crdt\") { totalCount } }"}'
 if ($result -notmatch '"totalCount":1') { throw "search NOT: expected 1, got $result" }
 pass "serve: search boolean NOT"
 
-$result = gql '{"query":"{ search(query: \"\\\""rust crdt\\\""\" ) { totalCount } }"}'
+$result = gql '{"query":"{ search(query: \"\\\"rust crdt\\\"\") { totalCount } }"}'
 if ($result -notmatch '"totalCount":1') { throw "search phrase: expected 1, got $result" }
 pass "serve: search quoted phrase"
 
