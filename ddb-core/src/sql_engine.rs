@@ -5543,4 +5543,195 @@ mod tests {
         let prio_col = schema.columns.iter().find(|c| c.name == "priority").unwrap();
         assert_eq!(prio_col.default_value, Some("0".to_string()));
     }
+
+    #[test]
+    fn insert_next_default_auto_increments() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (name TEXT, pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('a')")
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('b')")
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('c')")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT pos FROM foo ORDER BY pos")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], "1");
+        assert_eq!(rows[1][0], "2");
+        assert_eq!(rows[2][0], "3");
+    }
+
+    #[test]
+    fn insert_next_default_after_delete_uses_max_plus_one() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (name TEXT, pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('a')")
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let id2 = match engine
+            .execute("INSERT INTO foo (name) VALUES ('b')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('c')")
+            .unwrap();
+
+        // Delete row with pos=2
+        engine
+            .execute(&format!("DELETE FROM foo WHERE id = '{id2}'"))
+            .unwrap();
+
+        // Next insert should get 4, not 2 (no gap-filling)
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('d')")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT pos FROM foo ORDER BY pos")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], "1");
+        assert_eq!(rows[1][0], "3");
+        assert_eq!(rows[2][0], "4");
+    }
+
+    #[test]
+    fn insert_next_default_partitioned_independent_sequences() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute(
+                "CREATE TABLE items (category_id TEXT, sort_order INTEGER DEFAULT NEXT(category_id))",
+            )
+            .unwrap();
+
+        // cat1 first insert -> sort_order=1
+        engine
+            .execute("INSERT INTO items (category_id) VALUES ('cat1')")
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // cat2 first insert -> sort_order=1
+        engine
+            .execute("INSERT INTO items (category_id) VALUES ('cat2')")
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // cat1 second insert -> sort_order=2
+        engine
+            .execute("INSERT INTO items (category_id) VALUES ('cat1')")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT category_id, sort_order FROM items ORDER BY category_id, sort_order")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        // cat1 rows
+        assert_eq!(rows[0][0], "cat1");
+        assert_eq!(rows[0][1], "1");
+        assert_eq!(rows[1][0], "cat1");
+        assert_eq!(rows[1][1], "2");
+        // cat2 row
+        assert_eq!(rows[2][0], "cat2");
+        assert_eq!(rows[2][1], "1");
+    }
+
+    #[test]
+    fn insert_next_default_explicit_override() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (name TEXT, pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        // Explicit value should be respected
+        engine
+            .execute("INSERT INTO foo (name, pos) VALUES ('x', 99)")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT pos FROM foo ORDER BY pos")
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "99");
+
+        // Next auto insert should get 100
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('y')")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT pos FROM foo ORDER BY pos")
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], "99");
+        assert_eq!(rows[1][0], "100");
+    }
+
+    #[test]
+    fn insert_next_default_empty_table_starts_at_one() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (name TEXT, pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('first')")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT pos FROM foo")
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "1");
+    }
+
+    #[test]
+    fn insert_next_default_multi_row_assigns_sequential() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE foo (name TEXT, pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        engine
+            .execute("INSERT INTO foo (name) VALUES ('a'), ('b'), ('c')")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT pos FROM foo ORDER BY pos")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0], "1");
+        assert_eq!(rows[1][0], "2");
+        assert_eq!(rows[2][0], "3");
+    }
 }
