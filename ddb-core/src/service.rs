@@ -1781,4 +1781,228 @@ mod tests {
             "update_doogat_parsed should return updated_at in the response"
         );
     }
+
+    // ---- batch_update tests ----
+
+    fn count_commits(path: &std::path::Path) -> usize {
+        let repo = git2::Repository::open(path).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let mut revwalk = repo.revwalk().unwrap();
+        revwalk.push(head.id()).unwrap();
+        revwalk.count()
+    }
+
+    #[test]
+    fn batch_update_basic() {
+        let (tmp, svc) = fresh_svc();
+        let id1 = svc.create_doogat("One", &[], None, "").unwrap();
+        let id2 = svc.create_doogat("Two", &[], None, "").unwrap();
+        let id3 = svc.create_doogat("Three", &[], None, "").unwrap();
+
+        let updates = vec![
+            crate::types::BatchUpdateInput {
+                id: id1.clone(),
+                title: Some("One Updated".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+            crate::types::BatchUpdateInput {
+                id: id2.clone(),
+                title: Some("Two Updated".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+            crate::types::BatchUpdateInput {
+                id: id3.clone(),
+                title: Some("Three Updated".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+        ];
+
+        let results = svc.batch_update(&updates).unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].meta.title.as_deref(), Some("One Updated"));
+        assert_eq!(results[1].meta.title.as_deref(), Some("Two Updated"));
+        assert_eq!(results[2].meta.title.as_deref(), Some("Three Updated"));
+
+        // Verify persistence by re-reading
+        let p1 = svc.get_doogat_parsed(&id1).unwrap();
+        let p2 = svc.get_doogat_parsed(&id2).unwrap();
+        let p3 = svc.get_doogat_parsed(&id3).unwrap();
+        assert_eq!(p1.meta.title.as_deref(), Some("One Updated"));
+        assert_eq!(p2.meta.title.as_deref(), Some("Two Updated"));
+        assert_eq!(p3.meta.title.as_deref(), Some("Three Updated"));
+    }
+
+    #[test]
+    fn batch_update_atomicity() {
+        let (tmp, svc) = fresh_svc();
+        let id1 = svc.create_doogat("Alpha", &[], None, "body1").unwrap();
+        let id2 = svc.create_doogat("Beta", &[], None, "body2").unwrap();
+        let id3 = svc.create_doogat("Gamma", &[], None, "body3").unwrap();
+
+        let updates = vec![
+            crate::types::BatchUpdateInput {
+                id: id1.clone(),
+                title: Some("Alpha Changed".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+            crate::types::BatchUpdateInput {
+                id: "99999999999999".to_string(), // non-existent
+                title: Some("Ghost".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+            crate::types::BatchUpdateInput {
+                id: id3.clone(),
+                title: Some("Gamma Changed".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+        ];
+
+        let result = svc.batch_update(&updates);
+        assert!(result.is_err(), "batch_update should fail when an ID doesn't exist");
+
+        // All originals must be unchanged
+        let p1 = svc.get_doogat_parsed(&id1).unwrap();
+        let p2 = svc.get_doogat_parsed(&id2).unwrap();
+        let p3 = svc.get_doogat_parsed(&id3).unwrap();
+        assert_eq!(p1.meta.title.as_deref(), Some("Alpha"));
+        assert_eq!(p2.meta.title.as_deref(), Some("Beta"));
+        assert_eq!(p3.meta.title.as_deref(), Some("Gamma"));
+    }
+
+    #[test]
+    fn batch_update_single_commit() {
+        let (tmp, svc) = fresh_svc();
+        for i in 0..5 {
+            svc.create_doogat(&format!("Item {i}"), &[], None, "").unwrap();
+        }
+
+        let before = count_commits(tmp.path());
+
+        let ids: Vec<String> = svc
+            .list_doogats()
+            .unwrap()
+            .into_iter()
+            .map(|d| d.meta.id.unwrap().0)
+            .collect();
+        assert_eq!(ids.len(), 5);
+
+        let updates: Vec<crate::types::BatchUpdateInput> = ids
+            .iter()
+            .map(|id| crate::types::BatchUpdateInput {
+                id: id.clone(),
+                title: Some(format!("Updated {id}")),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            })
+            .collect();
+
+        svc.batch_update(&updates).unwrap();
+
+        let after = count_commits(tmp.path());
+        assert_eq!(
+            after - before,
+            1,
+            "batch_update should create exactly 1 commit, not {}",
+            after - before,
+        );
+    }
+
+    #[test]
+    fn batch_update_empty() {
+        let (tmp, svc) = fresh_svc();
+        let before = count_commits(tmp.path());
+
+        let results = svc.batch_update(&[]).unwrap();
+        assert!(results.is_empty(), "empty input should return empty vec");
+
+        let after = count_commits(tmp.path());
+        assert_eq!(before, after, "empty batch_update should not create a commit");
+    }
+
+    #[test]
+    fn batch_update_mixed_fields() {
+        let (tmp, svc) = fresh_svc();
+        let id1 = svc.create_doogat("Title1", &["tag1".to_string()], None, "body1").unwrap();
+        let id2 = svc.create_doogat("Title2", &["tag2".to_string()], None, "body2").unwrap();
+        let id3 = svc.create_doogat("Title3", &["tag3".to_string()], None, "body3").unwrap();
+
+        let updates = vec![
+            // Only title changes
+            crate::types::BatchUpdateInput {
+                id: id1.clone(),
+                title: Some("NewTitle1".to_string()),
+                body: None,
+                tags: None,
+                doogat_type: None,
+            },
+            // Only body changes
+            crate::types::BatchUpdateInput {
+                id: id2.clone(),
+                title: None,
+                body: Some("newbody2".to_string()),
+                tags: None,
+                doogat_type: None,
+            },
+            // Only tags change
+            crate::types::BatchUpdateInput {
+                id: id3.clone(),
+                title: None,
+                body: None,
+                tags: Some(vec!["newtag3".to_string()]),
+                doogat_type: None,
+            },
+        ];
+
+        let results = svc.batch_update(&updates).unwrap();
+        assert_eq!(results.len(), 3);
+
+        // First: title changed, body and tags unchanged
+        assert_eq!(results[0].meta.title.as_deref(), Some("NewTitle1"));
+        assert_eq!(results[0].body, "body1");
+        assert_eq!(results[0].meta.tags, vec!["tag1".to_string()]);
+
+        // Second: body changed, title and tags unchanged
+        assert_eq!(results[1].meta.title.as_deref(), Some("Title2"));
+        assert_eq!(results[1].body, "newbody2");
+        assert_eq!(results[1].meta.tags, vec!["tag2".to_string()]);
+
+        // Third: tags changed, title and body unchanged
+        assert_eq!(results[2].meta.title.as_deref(), Some("Title3"));
+        assert_eq!(results[2].body, "body3");
+        assert_eq!(results[2].meta.tags, vec!["newtag3".to_string()]);
+    }
+
+    #[test]
+    fn batch_update_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.create_doogat("Original", &[], None, "body").unwrap();
+
+        let updates = vec![crate::types::BatchUpdateInput {
+            id: id.clone(),
+            title: Some("Changed".to_string()),
+            body: None,
+            tags: None,
+            doogat_type: None,
+        }];
+
+        let results = svc.batch_update(&updates).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].updated_at.is_some(),
+            "batch_update should populate updated_at on returned doogats"
+        );
+    }
 }
