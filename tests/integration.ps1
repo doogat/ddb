@@ -199,6 +199,25 @@ pass "serve: graphql doogats tag filter"
 
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TAG_ID\`") }`"}" | Out-Null
 
+# 18c2. GraphQL updated_at and created_at fields
+$ts_result = gql '{"query":"mutation { createDoogat(input: { title: \"Timestamp Test\" }) { id } }"}'
+$TS_ID = if ($ts_result -match '"id":"([^"]+)"') { $Matches[1] }
+$ts_query = gql "{`"query`":`"{ doogat(id: \`"$TS_ID\`") { updated_at created_at date } }`"}"
+if ($ts_query -notmatch '"updated_at"') { throw "missing updated_at" }
+if ($ts_query -notmatch '"created_at"') { throw "missing created_at" }
+pass "serve: graphql updated_at and created_at fields"
+
+$ts_date = if ($ts_query -match '"date":"([^"]+)"') { $Matches[1] }
+$ts_created = if ($ts_query -match '"created_at":"([^"]+)"') { $Matches[1] }
+if ($ts_date -ne $ts_created) { throw "created_at does not equal date" }
+pass "serve: created_at equals date"
+
+$ts_search = gql '{"query":"{ search(query: \"Timestamp Test\") { hits { id updated_at } } }"}'
+if ($ts_search -notmatch '"updated_at"') { throw "search hit missing updated_at" }
+pass "serve: search hits include updated_at"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TS_ID\`") }`"}" | Out-Null
+
 # 18d. GraphQL search filters
 $sf1 = gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Alpha\", type: \"link\", tags: [\"sf-tag\"] }) { id } }"}'
 $SF1_ID = if ($sf1 -match '"id":"([^"]+)"') { $Matches[1] }

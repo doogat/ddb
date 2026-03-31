@@ -138,6 +138,27 @@ pass "serve: graphql doogats tag filter"
 
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TAG_ID\\\") }\"}" >/dev/null
 
+# 18c2. GraphQL updated_at and created_at fields
+TS_RESULT=$(gql '{"query":"mutation { createDoogat(input: { title: \"Timestamp Test\" }) { id } }"}')
+TS_ID=$(echo "$TS_RESULT" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+TS_QUERY=$(gql "{\"query\":\"{ doogat(id: \\\"$TS_ID\\\") { updated_at created_at date } }\"}")
+echo "$TS_QUERY" | grep -q '"updated_at"'
+echo "$TS_QUERY" | grep -q '"created_at"'
+pass "serve: graphql updated_at and created_at fields"
+
+# Verify created_at equals date
+TS_DATE=$(echo "$TS_QUERY" | sed -n 's/.*"date":"\([^"]*\)".*/\1/p')
+TS_CREATED=$(echo "$TS_QUERY" | sed -n 's/.*"created_at":"\([^"]*\)".*/\1/p')
+[ "$TS_DATE" = "$TS_CREATED" ]
+pass "serve: created_at equals date"
+
+# Search hits include updated_at
+TS_SEARCH=$(gql '{"query":"{ search(query: \"Timestamp Test\") { hits { id updated_at } } }"}')
+echo "$TS_SEARCH" | grep -q '"updated_at"'
+pass "serve: search hits include updated_at"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TS_ID\\\") }\"}" >/dev/null
+
 # 18d. GraphQL search filters
 SF1=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Alpha\", type: \"link\", tags: [\"sf-tag\"] }) { id } }"}')
 SF1_ID=$(echo "$SF1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')

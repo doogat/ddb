@@ -1637,4 +1637,101 @@ mod tests {
         assert_eq!(batch[0].meta.title, single.meta.title);
         assert_eq!(batch[0].body, single.body);
     }
+
+    #[test]
+    fn get_doogat_parsed_has_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.create_doogat("Note", &[], None, "body").unwrap();
+        let parsed = svc.get_doogat_parsed(&id).unwrap();
+        assert!(
+            parsed.updated_at.is_some(),
+            "updated_at should be populated from the index"
+        );
+        assert!(
+            !parsed.updated_at.as_ref().unwrap().is_empty(),
+            "updated_at should be a non-empty timestamp"
+        );
+    }
+
+    #[test]
+    fn updated_at_changes_on_update() {
+        let (_tmp, svc) = fresh_svc();
+        let id = svc.create_doogat("Original", &[], None, "body").unwrap();
+        let before = svc.get_doogat_parsed(&id).unwrap();
+        let created_date = before.meta.date.clone();
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        svc.update_doogat(&id, Some("Updated"), None, None, None).unwrap();
+
+        let after = svc.get_doogat_parsed(&id).unwrap();
+        assert_eq!(after.meta.date, created_date, "date (created_at) should not change");
+        assert!(
+            after.updated_at.as_ref().unwrap() >= before.updated_at.as_ref().unwrap(),
+            "updated_at should advance after an update"
+        );
+    }
+
+    #[test]
+    fn list_doogats_filtered_has_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("A", &[], None, "").unwrap();
+        svc.create_doogat("B", &[], None, "").unwrap();
+
+        let filter = crate::types::ListFilter::default();
+        let doogats = svc.list_doogats_filtered(&filter).unwrap();
+        assert_eq!(doogats.len(), 2);
+        for d in &doogats {
+            assert!(d.updated_at.is_some(), "each listed doogat should have updated_at");
+        }
+    }
+
+    #[test]
+    fn get_doogats_batch_has_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        let id1 = svc.create_doogat("First", &[], None, "").unwrap();
+        let id2 = svc.create_doogat("Second", &[], None, "").unwrap();
+
+        let batch = svc.get_doogats_batch(&[id1, id2]).unwrap();
+        assert_eq!(batch.len(), 2);
+        for d in &batch {
+            assert!(d.updated_at.is_some(), "batch doogat should have updated_at");
+        }
+    }
+
+    #[test]
+    fn search_results_have_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("Searchable", &[], None, "findme content").unwrap();
+
+        let results = svc.search_paginated_filtered(
+            "findme",
+            10,
+            0,
+            &crate::types::SearchFilters::default(),
+        ).unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert!(
+            !results.hits[0].updated_at.is_empty(),
+            "search hit should have updated_at"
+        );
+    }
+
+    #[test]
+    fn sort_by_updated_at() {
+        let (_tmp, svc) = fresh_svc();
+        svc.create_doogat("First", &[], None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        svc.create_doogat("Second", &[], None, "").unwrap();
+        svc.reindex().unwrap();
+
+        let filter = crate::types::ListFilter {
+            sort_field: Some("updated_at".to_string()),
+            sort_desc: Some(false),
+            ..Default::default()
+        };
+        let doogats = svc.list_doogats_filtered(&filter).unwrap();
+        assert_eq!(doogats.len(), 2);
+        assert_eq!(doogats[0].meta.title.as_deref(), Some("First"));
+        assert_eq!(doogats[1].meta.title.as_deref(), Some("Second"));
+    }
 }
