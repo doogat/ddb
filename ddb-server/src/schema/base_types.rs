@@ -134,7 +134,14 @@ pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
             .map(GqlValue::from)
             .unwrap_or(GqlValue::Null),
     );
-    obj.insert(Name::new("created_at"), GqlValue::from(date));
+    obj.insert(
+        Name::new("created_at"),
+        if date.is_empty() {
+            GqlValue::Null
+        } else {
+            GqlValue::from(date)
+        },
+    );
 
     GqlValue::Object(obj)
 }

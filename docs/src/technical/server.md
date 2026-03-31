@@ -119,7 +119,7 @@ type Doogat {
   fields: [InlineField!]!
   links: [Link!]!
   attachments: [Attachment!]!
-  updated_at: String     # last-modified timestamp from git (RFC 3339)
+  updated_at: String     # last-indexed timestamp (RFC 3339, set at index time)
   created_at: String     # alias for date (frontmatter creation timestamp)
 }
 

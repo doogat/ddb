@@ -21,6 +21,7 @@ dictionary SearchResult {
     string path;
     string snippet;
     double rank;
+    string updated_at;
 };
 
 dictionary RebuildReport {
