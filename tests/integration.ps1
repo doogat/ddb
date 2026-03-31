@@ -524,8 +524,15 @@ gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\
 $smokepinId = (gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)\`"){message}}`"}") -replace '.*"message":"(\d+)".*','$1'
 if (-not $smokepinId) { throw "smokepin insert failed" }
 $result = gql "{`"query`":`"{ sql(query: \`"SELECT pinned FROM smokepin WHERE pinned = 1\`") { rows } }`"}"
-if ($result -notmatch '[\\"]1[\\"]') { throw "boolean not normalized to 1" }
-pass "serve: boolean normalized to 1/0"
+if ($result -notmatch '[\\"]true[\\"]') { throw "boolean not coerced to true" }
+pass "serve: boolean coerced to true/false"
+
+# Boolean false
+Start-Sleep -Seconds 1
+gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO smokepin (title, pinned) VALUES ('FalseTest', false)\`"){message}}`"}" | Out-Null
+$result = gql "{`"query`":`"{ sql(query: \`"SELECT pinned FROM smokepin WHERE pinned = 0\`") { rows } }`"}"
+if ($result -notmatch '[\\"]false[\\"]') { throw "boolean false not coerced" }
+pass "serve: boolean false coerced"
 
 $result = gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }"}'
 if ($result -notmatch 'PinTest') { throw "core fields: title missing from type table" }

@@ -394,4 +394,27 @@ $DDB query "DROP TABLE cdbm2 CASCADE" >/dev/null
 $DDB query "DROP TABLE cdcat2 CASCADE" >/dev/null
 pass "cascade delete (service path)"
 
+# 19. boolean consistency in SQL responses
+$DDB query "CREATE TABLE booltest (label TEXT, active BOOLEAN)" | grep -q "table booltest created"
+$DDB query "INSERT INTO booltest (label, active) VALUES ('on', true)" >/dev/null
+sleep 1
+$DDB query "INSERT INTO booltest (label, active) VALUES ('off', false)" >/dev/null
+# Boolean true should be "true", not "1"
+BOOL_TRUE=$($DDB query "SELECT active FROM booltest WHERE active = 1")
+echo "$BOOL_TRUE" | grep -q "true"
+# Boolean false should be "false", not "0"
+BOOL_FALSE=$($DDB query "SELECT active FROM booltest WHERE active = 0")
+echo "$BOOL_FALSE" | grep -q "false"
+# NULL boolean stays NULL
+sleep 1
+$DDB query "INSERT INTO booltest (label) VALUES ('none')" >/dev/null
+BOOL_NULL=$($DDB query "SELECT active FROM booltest WHERE label = 'none'")
+echo "$BOOL_NULL" | grep -q "NULL"
+# Mixed columns: only booleans coerced
+BOOL_MIX=$($DDB query "SELECT label, active FROM booltest WHERE label = 'on'")
+echo "$BOOL_MIX" | grep -q "on"
+echo "$BOOL_MIX" | grep -q "true"
+$DDB query "DROP TABLE booltest CASCADE" >/dev/null
+pass "boolean consistency (SQL responses)"
+
 echo "=== all smoke tests passed ==="

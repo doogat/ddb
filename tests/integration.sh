@@ -301,6 +301,15 @@ if command -v psql >/dev/null 2>&1; then
 
   ! PGPASSWORD="wrong" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -c "SELECT 1" 2>/dev/null
   pass "pgwire: auth rejection"
+
+  # pgwire boolean type: BOOLEAN columns should return t/f
+  gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE pgbooltest (label TEXT, active BOOLEAN)\"){message}}"}' >/dev/null
+  sleep 1
+  gql '{"query":"mutation{executeSql(sql:\"INSERT INTO pgbooltest (label, active) VALUES ('\''yes'\'', true)\"){message}}"}' >/dev/null
+  PG_BOOL=$(PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -t -A -c "SELECT active FROM pgbooltest WHERE label = 'yes'")
+  echo "$PG_BOOL" | grep -q "t"
+  pass "pgwire: boolean type"
+  gql '{"query":"mutation{executeSql(sql:\"DROP TABLE pgbooltest CASCADE\"){message}}"}' >/dev/null
 else
   pass "pgwire: skipped (no psql)"
 fi
@@ -471,8 +480,15 @@ sleep 1
 SMOKEPIN_ID=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)\\\"){message}}\"}" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
 [ -n "$SMOKEPIN_ID" ]
 RESULT=$(gql "{\"query\":\"{ sql(query: \\\"SELECT pinned FROM smokepin WHERE pinned = 1\\\") { rows } }\"}")
-echo "$RESULT" | grep -q '\\"1\\"'
-pass "serve: boolean normalized to 1/0"
+echo "$RESULT" | grep -q '\\"true\\"'
+pass "serve: boolean coerced to true/false"
+
+# Boolean false
+sleep 1
+gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO smokepin (title, pinned) VALUES ('FalseTest', false)\\\"){message}}\"}" >/dev/null
+RESULT=$(gql "{\"query\":\"{ sql(query: \\\"SELECT pinned FROM smokepin WHERE pinned = 0\\\") { rows } }\"}")
+echo "$RESULT" | grep -q '\\"false\\"'
+pass "serve: boolean false coerced"
 
 RESULT=$(gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }"}')
 echo "$RESULT" | grep -q 'PinTest'

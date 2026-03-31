@@ -478,5 +478,28 @@ ddb query "DROP TABLE cdbm2 CASCADE" | Out-Null
 ddb query "DROP TABLE cdcat2 CASCADE" | Out-Null
 pass "cascade delete (service path)"
 
+# 19. boolean consistency in SQL responses
+ddb query "CREATE TABLE booltest (label TEXT, active BOOLEAN)" | Out-Null
+ddb query "INSERT INTO booltest (label, active) VALUES ('on', true)" | Out-Null
+Start-Sleep -Seconds 1
+ddb query "INSERT INTO booltest (label, active) VALUES ('off', false)" | Out-Null
+# Boolean true should be "true", not "1"
+$output = ddb query "SELECT active FROM booltest WHERE active = 1"
+if ($output -notmatch "true") { throw "boolean true not coerced: $output" }
+# Boolean false should be "false", not "0"
+$output = ddb query "SELECT active FROM booltest WHERE active = 0"
+if ($output -notmatch "false") { throw "boolean false not coerced: $output" }
+# NULL boolean stays NULL
+Start-Sleep -Seconds 1
+ddb query "INSERT INTO booltest (label) VALUES ('none')" | Out-Null
+$output = ddb query "SELECT active FROM booltest WHERE label = 'none'"
+if ($output -notmatch "NULL") { throw "boolean null not preserved: $output" }
+# Mixed columns: only booleans coerced
+$output = ddb query "SELECT label, active FROM booltest WHERE label = 'on'"
+if ($output -notmatch "on") { throw "non-boolean column corrupted: $output" }
+if ($output -notmatch "true") { throw "boolean column not coerced in mix: $output" }
+ddb query "DROP TABLE booltest CASCADE" | Out-Null
+pass "boolean consistency (SQL responses)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
