@@ -163,18 +163,15 @@ impl Index {
         if !fts_exists {
             return false; // fresh DB, SCHEMA_DDL will create everything
         }
-        // Probe for the `fields` column by attempting an insert
-        let has_fields = conn
-            .execute(
-                "INSERT INTO _ddb_fts (title, body, tags, fields) VALUES ('', '', '', '')",
+        // Check FTS5 column list via sqlite_master DDL for the `fields` column
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='_ddb_fts'",
                 [],
+                |row| row.get(0),
             )
-            .is_ok();
-        if has_fields {
-            // Clean up the probe row
-            let _ = conn.execute("DELETE FROM _ddb_fts WHERE title = '' AND body = ''", []);
-        }
-        !has_fields
+            .unwrap_or_default();
+        !sql.contains("fields")
     }
 
     /// Drop every table (internal + materialized) so the schema can be
@@ -1094,7 +1091,6 @@ impl crate::traits::DoogatIndex for Index {
     }
 }
 
-/// Recursively flatten a `Value` into `_ddb_fields` rows with dot-notation keys.
 /// Collect scalar frontmatter extra values into a space-separated string
 /// for the FTS5 `fields` column. Skips internal keys that have dedicated tables.
 fn collect_fts_fields(extras: &std::collections::BTreeMap<String, crate::types::Value>) -> String {
