@@ -396,9 +396,9 @@ query {
 }
 ```
 
-#### Batch mutations
+#### Batch mutations (atomic)
 
-Execute multiple SQL statements atomically in one call:
+Execute multiple SQL statements in one call. **All DML statements run in an implicit transaction** - if any statement fails, every preceding statement is rolled back. No partial state.
 
 ```graphql
 mutation {
@@ -412,7 +412,12 @@ mutation {
 }
 ```
 
-Multi-statement batches run in an implicit transaction: if any DML fails, all are rolled back. DDL (CREATE/DROP/ALTER TABLE) commits immediately and is not rolled back on subsequent failures. DDL triggers a schema reload.
+Transaction rules:
+- **DML** (INSERT, UPDATE, DELETE): wrapped in implicit BEGIN/COMMIT. Failure at any point rolls back all prior statements.
+- **DDL** (CREATE/DROP/ALTER TABLE): commits to git immediately and is not covered by the implicit transaction. DDL triggers a schema reload.
+- **Explicit transactions**: if your batch includes `BEGIN`/`COMMIT`, the implicit transaction is skipped and you manage it yourself.
+
+The same atomicity applies to multi-statement strings passed to `ddb query` and `DoogatDriver.executeSql()` in embedded mode.
 
 ### CLI
 

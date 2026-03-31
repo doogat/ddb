@@ -259,10 +259,10 @@ enum Command {
     },
     /// Execute SQL (DDL/DML routed through SQL engine; SELECT queries index)
     #[command(
-        after_long_help = "For app data modeling, see: ddb help create-app"
+        after_long_help = "Multi-statement strings run in an implicit transaction: if any DML fails, all are rolled back.\n\nFor app data modeling, see: ddb help create-app"
     )]
     Query {
-        /// SQL statement
+        /// SQL statement (multiple statements separated by ';' are atomic)
         sql: String,
     },
     /// Full-text search

@@ -1484,6 +1484,7 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(sql_result_to_value(&result, fmt))))
                 })
             })
+            .description("Execute a single SQL statement (DDL or DML). DDL triggers schema reload.")
             .argument(InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING)))
             .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING))),
         );
@@ -1527,6 +1528,7 @@ pub fn build_schema(
                     })
                 },
             )
+            .description("Execute multiple SQL statements atomically. DML statements run in an implicit transaction: if any fails, all are rolled back. DDL commits immediately and triggers schema reload.")
             .argument(InputValue::new(
                 "statements",
                 TypeRef::named_nn_list_nn(TypeRef::STRING),
