@@ -743,7 +743,8 @@ impl Index {
         }
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
-        let mut stmt = self.conn.prepare(&sql)?;
+        let mut stmt = self.conn.prepare(&sql)
+            .map_err(|e| Self::classify_search_error(e, query))?;
         let rows = stmt
             .query_map(param_refs.as_slice(), Self::map_search_row)
             .map_err(|e| Self::classify_search_error(e, query))?;
