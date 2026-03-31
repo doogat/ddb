@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Hyphenated type names now generate typed GraphQL queries, mutations, and subscriptions (e.g. `category-membership` becomes type `CategoryMembership`, query `categoryMemberships`, subscription `categoryMembershipChanged`); colliding names are detected at schema build time
+- Hyphenated type names now generate typed GraphQL queries and subscriptions (e.g. `category-membership` becomes type `CategoryMembership`, query `categoryMemberships`, subscription `categoryMembershipChanged`); colliding names are detected at schema build time
 - FTS5 search boost weighting - typedef columns with `search_boost` now influence search ranking via bm25()
 - `DEFAULT NEXT` and `DEFAULT NEXT(partition_col)` expressions for auto-incrementing INTEGER columns; resolves to `MAX(col) + 1` at insert time, with optional per-partition scoping
 - `batchUpdate` GraphQL mutation for atomic multi-doogat updates in a single git commit; accepts `[UpdateDoogatInput!]!`, returns `[Doogat!]!`
