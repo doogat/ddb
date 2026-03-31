@@ -1363,3 +1363,201 @@ processed: true
         assert_eq!(result.total_count, unfiltered.total_count);
     }
 
+    // ── FTS5 schema + _ddb_boost table tests ───────────────────────────
+
+    #[test]
+    fn new_index_fts5_has_fields_column() {
+        let idx = in_memory_index();
+
+        // Insert a row with 4 FTS columns: title, body, tags, fields
+        idx.conn
+            .execute(
+                "INSERT INTO _ddb_fts (title, body, tags, fields) VALUES (?1, ?2, ?3, ?4)",
+                params!["t", "b", "tag1", "key=val"],
+            )
+            .expect("FTS5 table should accept 4 columns (title, body, tags, fields)");
+
+        // Read it back to verify the fields column is present
+        let fields_val: String = idx
+            .conn
+            .query_row("SELECT fields FROM _ddb_fts LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fields_val, "key=val");
+    }
+
+    #[test]
+    fn new_index_has_ddb_boost_table() {
+        let idx = in_memory_index();
+
+        // _ddb_boost table should exist with correct schema
+        let table_exists: bool = idx
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='_ddb_boost'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(table_exists, "_ddb_boost table should exist after open");
+
+        // Verify columns: type_name TEXT PK, max_boost REAL NOT NULL DEFAULT 1.0
+        idx.conn
+            .execute(
+                "INSERT INTO _ddb_boost (type_name) VALUES (?1)",
+                params!["contact"],
+            )
+            .expect("should accept insert with only type_name (max_boost has default)");
+
+        let boost: f64 = idx
+            .conn
+            .query_row(
+                "SELECT max_boost FROM _ddb_boost WHERE type_name = 'contact'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            (boost - 1.0).abs() < f64::EPSILON,
+            "default max_boost should be 1.0, got {boost}"
+        );
+
+        // type_name should be PK (duplicate insert fails)
+        let dup = idx.conn.execute(
+            "INSERT INTO _ddb_boost (type_name, max_boost) VALUES (?1, ?2)",
+            params!["contact", 2.0],
+        );
+        assert!(dup.is_err(), "duplicate type_name should violate PK constraint");
+    }
+
+    #[test]
+    fn upgrade_old_3col_fts_to_4col() {
+        // Simulate an OLD database with the 3-column FTS schema
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        conn.execute_batch("PRAGMA busy_timeout=5000;").unwrap();
+
+        // Create old-style tables (3-column FTS, no _ddb_boost)
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS doogats (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                date TEXT,
+                type TEXT,
+                path TEXT UNIQUE NOT NULL,
+                body TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS _ddb_tags (
+                doogat_id TEXT NOT NULL REFERENCES doogats(id),
+                tag TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'frontmatter'
+            );
+            CREATE TABLE IF NOT EXISTS _ddb_fields (
+                doogat_id TEXT NOT NULL REFERENCES doogats(id),
+                key TEXT NOT NULL,
+                value TEXT,
+                zone TEXT
+            );
+            CREATE TABLE IF NOT EXISTS _ddb_links (
+                source_id TEXT NOT NULL REFERENCES doogats(id),
+                target_path TEXT NOT NULL,
+                display TEXT,
+                zone TEXT,
+                kind TEXT NOT NULL DEFAULT 'wikilink'
+            );
+            CREATE TABLE IF NOT EXISTS _ddb_aliases (
+                doogat_id TEXT NOT NULL REFERENCES doogats(id),
+                alias TEXT COLLATE NOCASE NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS _ddb_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS _ddb_attachments (
+                doogat_id TEXT NOT NULL REFERENCES doogats(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                mime TEXT,
+                size INTEGER,
+                path TEXT,
+                PRIMARY KEY (doogat_id, name)
+            );
+            CREATE TABLE IF NOT EXISTS _ddb_checkboxes (
+                doogat_id TEXT NOT NULL REFERENCES doogats(id),
+                state TEXT NOT NULL CHECK (state IN ('open', 'done', 'info')),
+                content TEXT NOT NULL,
+                date TEXT,
+                due_date TEXT,
+                line_number INTEGER,
+                indent_level INTEGER DEFAULT 0
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
+                title, body, tags,
+                tokenize = 'porter unicode61'
+            );",
+        )
+        .unwrap();
+
+        // Verify old schema only has 3 FTS columns
+        let old_insert = conn.execute(
+            "INSERT INTO _ddb_fts (title, body, tags) VALUES ('t', 'b', 'tag')",
+            [],
+        );
+        assert!(old_insert.is_ok(), "old 3-column insert should work");
+
+        // Now run configure_connection which should detect and upgrade
+        let idx = Index::configure_connection(conn)
+            .expect("configure_connection should upgrade old schema");
+
+        // After upgrade: FTS should accept 4 columns
+        idx.conn
+            .execute(
+                "INSERT INTO _ddb_fts (title, body, tags, fields) VALUES (?1, ?2, ?3, ?4)",
+                params!["t2", "b2", "tag2", "field_data"],
+            )
+            .expect("after upgrade, FTS5 should accept 4 columns");
+
+        // After upgrade: _ddb_boost should exist
+        let boost_exists: bool = idx
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='_ddb_boost'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(boost_exists, "_ddb_boost should exist after upgrade");
+    }
+
+    #[test]
+    fn rebuild_produces_new_schema() {
+        use crate::traits::mock::MockSource;
+
+        let mut source = MockSource::new();
+        let content = "---\nid: 20260401120000\ntitle: Rebuild Test\ndate: 2026-04-01\n---\nBody content";
+        source
+            .files
+            .insert("ddb/20260401120000.md".into(), content.into());
+
+        let idx = in_memory_index();
+        let _report = idx.rebuild(&source).unwrap();
+
+        // FTS should have the fields column
+        idx.conn
+            .execute(
+                "INSERT INTO _ddb_fts (title, body, tags, fields) VALUES (?1, ?2, ?3, ?4)",
+                params!["t", "b", "tags", "extra"],
+            )
+            .expect("after rebuild, FTS5 should have fields column");
+
+        // _ddb_boost should exist
+        let boost_exists: bool = idx
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='_ddb_boost'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(boost_exists, "_ddb_boost should exist after rebuild");
+    }
+
