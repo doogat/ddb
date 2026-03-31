@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_graphql::dynamic::*;
@@ -503,31 +503,28 @@ pub(crate) fn doogat_object(name: &str) -> Object {
 
 /// Determine the GQL type name for a REFERENCES column's target.
 /// Falls back to "Doogat" if the target type isn't in the known set.
-fn ref_target_gql_type(col: &ColumnDef, known_types: &HashSet<String>) -> String {
+fn ref_target_gql_type(col: &ColumnDef, known_types: &HashMap<String, String>) -> String {
     let target = col.references.as_deref().unwrap_or("");
-    if known_types.contains(target) {
-        capitalize(target)
-    } else {
-        "Doogat".to_string()
-    }
+    known_types
+        .get(target)
+        .cloned()
+        .unwrap_or_else(|| "Doogat".to_string())
 }
 
 /// Build a dynamic GraphQL object type for a _typedef schema.
 pub(crate) fn build_typed_object(
     type_name: &str,
     schema: &TableSchema,
-    known_types: &HashSet<String>,
+    known_types: &HashMap<String, String>,
 ) -> Object {
     let mut obj = doogat_object(type_name);
 
     for col in &schema.columns {
-        if !is_valid_graphql_name(&col.name) {
-            tracing::warn!(
-                "skipping column '{}' in type {type_name}: not a valid GraphQL identifier",
-                col.name
-            );
-            continue;
-        }
+        let gql_col_name = if is_valid_graphql_name(&col.name) {
+            col.name.clone()
+        } else {
+            sanitize_field_name(&col.name)
+        };
 
         if col.references.is_some() {
             // Singular: resolves as the referenced typed object (nullable)
@@ -535,7 +532,7 @@ pub(crate) fn build_typed_object(
             let target_ref_name = col.references.clone().unwrap_or_default();
             let col_name = col.name.clone();
             obj = obj.field(Field::new(
-                &col.name,
+                &gql_col_name,
                 TypeRef::named(&target_type),
                 move |ctx| {
                     let col_name = col_name.clone();
@@ -566,20 +563,25 @@ pub(crate) fn build_typed_object(
 
             // Plural: resolves as list of referenced typed objects
             let list_name = pluralize(&col.name);
-            if is_valid_graphql_name(&list_name) {
+            let gql_list_name = if is_valid_graphql_name(&list_name) {
+                list_name
+            } else {
+                pluralize_preserving_case(&sanitize_field_name(&col.name))
+            };
+            {
                 let target_type = ref_target_gql_type(col, known_types);
                 let target_ref_name = col.references.clone().unwrap_or_default();
-                let list_col_name = list_name.clone();
+                let data_list_name = pluralize(&col.name);
                 obj = obj.field(Field::new(
-                    &list_name,
+                    &gql_list_name,
                     TypeRef::named_nn_list_nn(&target_type),
                     move |ctx| {
-                        let list_col_name = list_col_name.clone();
+                        let data_list_name = data_list_name.clone();
                         let target_ref_name = target_ref_name.clone();
                         FieldFuture::new(async move {
                             let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
                             let ids: Vec<String> = match parent {
-                                GqlValue::Object(map) => match map.get(list_col_name.as_str()) {
+                                GqlValue::Object(map) => match map.get(data_list_name.as_str()) {
                                     Some(GqlValue::List(items)) => items
                                         .iter()
                                         .filter_map(|v| match v {
@@ -628,7 +630,7 @@ pub(crate) fn build_typed_object(
             // Non-REFERENCES scalar field
             let gql_type = column_to_gql_type(col);
             let col_name = col.name.clone();
-            obj = obj.field(Field::new(&col.name, gql_type, move |ctx| {
+            obj = obj.field(Field::new(&gql_col_name, gql_type, move |ctx| {
                 let col_name = col_name.clone();
                 FieldFuture::new(async move {
                     let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
@@ -669,6 +671,18 @@ pub(crate) fn pluralize(s: &str) -> String {
     }
 }
 
+/// Pluralize without lowercasing - preserves camelCase.
+pub(crate) fn pluralize_preserving_case(s: &str) -> String {
+    let lower = s.to_ascii_lowercase();
+    if lower.ends_with('s') {
+        format!("{s}es")
+    } else if s.ends_with('y') && s.len() > 1 {
+        format!("{}ies", &s[..s.len() - 1])
+    } else {
+        format!("{s}s")
+    }
+}
+
 /// Convert a kebab-case type name to PascalCase for GraphQL type names.
 /// If no hyphens, capitalizes the first character only.
 pub(crate) fn sanitize_type_name(s: &str) -> String {
@@ -676,7 +690,7 @@ pub(crate) fn sanitize_type_name(s: &str) -> String {
         return String::new();
     }
     if s.contains('-') {
-        s.split('-').map(|seg| capitalize(seg)).collect()
+        s.split('-').map(capitalize).collect()
     } else {
         capitalize(s)
     }
@@ -691,7 +705,7 @@ pub(crate) fn sanitize_field_name(s: &str) -> String {
     if s.contains('-') {
         let mut parts = s.split('-');
         let first = parts.next().unwrap().to_lowercase();
-        let rest: String = parts.map(|seg| capitalize(seg)).collect();
+        let rest: String = parts.map(capitalize).collect();
         format!("{first}{rest}")
     } else {
         let mut c = s.chars();

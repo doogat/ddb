@@ -1014,23 +1014,29 @@ pub fn build_schema(
     }
 
     // -- Dynamic per-type queries --
-    let known_types: HashSet<String> = type_schemas
-        .iter()
-        .filter(|s| is_valid_graphql_name(&s.table_name))
-        .map(|s| s.table_name.clone())
-        .collect();
-    let mut dynamic_types: Vec<Object> = Vec::new();
-    let mut dynamic_inputs: Vec<InputObject> = Vec::new();
-    for schema in &type_schemas {
-        if !is_valid_graphql_name(&schema.table_name) {
+    let mut known_types: HashMap<String, String> = HashMap::new();
+    let mut seen_gql_names: HashSet<String> = HashSet::new();
+    for s in &type_schemas {
+        let gql_name = sanitize_type_name(&s.table_name);
+        if !seen_gql_names.insert(gql_name.clone()) {
             tracing::warn!(
-                "skipping typedef '{}': not a valid GraphQL identifier",
-                schema.table_name
+                "skipping typedef '{}': GraphQL name '{}' collides with another type",
+                s.table_name,
+                gql_name
             );
             continue;
         }
-        let type_name = capitalize(&schema.table_name);
-        let plural = pluralize(&schema.table_name);
+        known_types.insert(s.table_name.clone(), gql_name);
+    }
+    let mut dynamic_types: Vec<Object> = Vec::new();
+    let mut dynamic_inputs: Vec<InputObject> = Vec::new();
+    for schema in &type_schemas {
+        let type_name = match known_types.get(&schema.table_name) {
+            Some(name) => name.clone(),
+            None => continue,
+        };
+        let field_base = sanitize_field_name(&schema.table_name);
+        let plural = pluralize_preserving_case(&field_base);
 
         // Create typed object
         let typed_obj = build_typed_object(&type_name, schema, &known_types);
@@ -1980,11 +1986,11 @@ pub fn build_schema(
 
     // Per-type subscription fields (e.g., contactChanged, bookmarkChanged)
     for schema in &type_schemas {
-        if !is_valid_graphql_name(&schema.table_name) {
-            // Already warned in the query/mutation loop above.
-            continue;
-        }
-        let field_name = format!("{}Changed", schema.table_name);
+        let _type_name = match known_types.get(&schema.table_name) {
+            Some(name) => name.clone(),
+            None => continue,
+        };
+        let field_name = format!("{}Changed", sanitize_field_name(&schema.table_name));
         let table_name = schema.table_name.clone();
         subscription = subscription.field(SubscriptionField::new(
             &field_name,
@@ -2193,17 +2199,17 @@ mod tests {
             .expect("schema should build despite collision");
         let sdl = schema.sdl();
 
-        // First type registered
+        // First type registered (match with " {" to avoid substring-matching MyTypeConnection etc.)
         assert!(
-            sdl.contains("type MyType"),
+            sdl.contains("type MyType {"),
             "SDL should contain 'type MyType' from the first registrant"
         );
 
-        // Count occurrences - there should be exactly one 'type MyType'
-        let count = sdl.matches("type MyType").count();
+        // Count occurrences - there should be exactly one 'type MyType {'
+        let count = sdl.matches("type MyType {").count();
         assert_eq!(
             count, 1,
-            "expected exactly 1 'type MyType' but found {count} (collision not detected)"
+            "expected exactly 1 'type MyType {{' but found {count} (collision not detected)"
         );
     }
 }
