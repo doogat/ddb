@@ -914,4 +914,49 @@ mod tests {
             _ => panic!("expected list, got {tags:?}"),
         }
     }
+
+    #[test]
+    fn test_sanitize_type_name() {
+        // Kebab-case to PascalCase
+        assert_eq!(sanitize_type_name("category-membership"), "CategoryMembership");
+        assert_eq!(sanitize_type_name("saved-search"), "SavedSearch");
+        assert_eq!(sanitize_type_name("pinned-result"), "PinnedResult");
+        assert_eq!(sanitize_type_name("jink-config"), "JinkConfig");
+
+        // Single word - capitalize first char
+        assert_eq!(sanitize_type_name("contact"), "Contact");
+        assert_eq!(sanitize_type_name("bookmark"), "Bookmark");
+
+        // Already PascalCase - pass through
+        assert_eq!(sanitize_type_name("MyType"), "MyType");
+
+        // Underscored names - capitalize first char only, underscores preserved
+        assert_eq!(sanitize_type_name("my_type"), "My_type");
+
+        // Empty string
+        assert_eq!(sanitize_type_name(""), "");
+
+        // Multi-segment hyphens
+        assert_eq!(sanitize_type_name("a-b-c-d"), "ABCD");
+    }
+
+    #[test]
+    fn test_sanitize_field_name() {
+        // Kebab-case to camelCase
+        assert_eq!(sanitize_field_name("category-membership"), "categoryMembership");
+        assert_eq!(sanitize_field_name("saved-search"), "savedSearch");
+        assert_eq!(sanitize_field_name("jink-config"), "jinkConfig");
+
+        // Single word - no change
+        assert_eq!(sanitize_field_name("title"), "title");
+
+        // Already capitalized first char - lowercase it
+        assert_eq!(sanitize_field_name("MyField"), "myField");
+
+        // Empty string
+        assert_eq!(sanitize_field_name(""), "");
+
+        // Multi-segment hyphens
+        assert_eq!(sanitize_field_name("a-b-c-d"), "aBCD");
+    }
 }
