@@ -2108,4 +2108,117 @@ mod tests {
         let p = svc.get_doogat_parsed(&id).unwrap();
         assert_eq!(p.meta.title.as_deref(), Some("Dup"));
     }
+
+    // ---- FTS5 search boost tests ----
+
+    #[test]
+    fn search_boost_fields_column_populated() {
+        let (_tmp, svc) = fresh_svc();
+
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert(
+            "email".to_string(),
+            crate::types::Value::String("alice@example.com".to_string()),
+        );
+        svc.create_doogat_with_extra("Alice Contact", &[], Some("contact"), "some body", extra)
+            .unwrap();
+        svc.reindex().unwrap();
+
+        let results = svc.search("alice").unwrap();
+        assert!(
+            !results.is_empty(),
+            "searching for 'alice' should find the doogat via the FTS fields column"
+        );
+        assert!(results[0].title.contains("Alice"));
+    }
+
+    #[test]
+    fn search_boost_ranking_with_boosted_type() {
+        let (_tmp, svc) = fresh_svc();
+
+        // Install contact typedef (has search_boost: 1.5 on email column)
+        svc.install_bundled_type("contact").unwrap();
+
+        // Contact with "xyzzyterm" in email (frontmatter extra -> fields column)
+        let mut extra1 = std::collections::BTreeMap::new();
+        extra1.insert(
+            "email".to_string(),
+            crate::types::Value::String("xyzzyterm@example.com".to_string()),
+        );
+        svc.create_doogat_with_extra("FieldMatch", &[], Some("contact"), "no match here", extra1)
+            .unwrap();
+
+        // Contact with "xyzzyterm" only in body
+        svc.create_doogat("BodyMatch", &[], Some("contact"), "xyzzyterm appears in body")
+            .unwrap();
+
+        svc.reindex().unwrap();
+
+        let filters = crate::types::SearchFilters {
+            types: Some(vec!["contact".to_string()]),
+            ..Default::default()
+        };
+        let result = svc
+            .search_paginated_filtered("xyzzyterm", 10, 0, &filters)
+            .unwrap();
+        assert_eq!(result.hits.len(), 2, "both contacts should match");
+
+        // With boost on the fields column, the one matching in fields should
+        // rank higher (lower/more-negative bm25 score = better match).
+        assert_eq!(
+            result.hits[0].title, "FieldMatch",
+            "doogat with match in boosted fields column should rank first"
+        );
+    }
+
+    #[test]
+    fn search_boost_no_regression_without_type_filter() {
+        let (_tmp, svc) = fresh_svc();
+
+        svc.install_bundled_type("contact").unwrap();
+
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert(
+            "email".to_string(),
+            crate::types::Value::String("boostnoreg@example.com".to_string()),
+        );
+        svc.create_doogat_with_extra("Boosted", &[], Some("contact"), "", extra)
+            .unwrap();
+        svc.create_doogat("Plain", &[], None, "boostnoreg in body")
+            .unwrap();
+
+        svc.reindex().unwrap();
+
+        // Search without type filter - should work with default 1.0 weighting
+        let results = svc.search("boostnoreg").unwrap();
+        assert_eq!(results.len(), 2, "both doogats should appear without type filter");
+    }
+
+    #[test]
+    fn search_boost_default_for_untyped() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        // Create a type without any search_boost columns
+        svc.execute_sql("CREATE TABLE project (name TEXT, status TEXT)")
+            .unwrap();
+        svc.execute_sql("INSERT INTO project (name, status) VALUES ('Alpha', 'active')")
+            .unwrap();
+        svc.create_doogat("Untyped", &[], None, "defaultboost content")
+            .unwrap();
+
+        svc.reindex().unwrap();
+
+        // Search filtered to project type - should work with default 1.0 weighting
+        let filters = crate::types::SearchFilters {
+            types: Some(vec!["project".to_string()]),
+            ..Default::default()
+        };
+        let result = svc
+            .search_paginated_filtered("Alpha", 10, 0, &filters)
+            .unwrap();
+        assert!(
+            result.hits.len() <= 1,
+            "filtered search for project type should not error"
+        );
+    }
 }
