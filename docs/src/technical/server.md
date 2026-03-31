@@ -119,13 +119,15 @@ type Doogat {
   fields: [InlineField!]!
   links: [Link!]!
   attachments: [Attachment!]!
+  updated_at: String     # last-modified timestamp from git (RFC 3339)
+  created_at: String     # alias for date (frontmatter creation timestamp)
 }
 
 type Attachment { name: String!, mime: String!, size: Int!, url: String! }
 
 type InlineField { key: String!, value: String!, zone: String! }
 type Link { target: String!, display: String, zone: String! }
-type SearchHit { id: ID!, title: String!, path: String!, snippet: String!, rank: Float! }
+type SearchHit { id: ID!, title: String!, path: String!, snippet: String!, rank: Float!, updated_at: String }
 type SearchConnection { hits: [SearchHit!]!, totalCount: Int! }
 type TypeDef { name: String!, columns: [ColumnInfo!]!, crdtStrategy: String, templateSections: [String!]! }
 type ColumnInfo { name: String!, dataType: String!, zone: String, required: Boolean!, references: String }
