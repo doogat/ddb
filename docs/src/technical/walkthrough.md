@@ -150,6 +150,7 @@ Six primary paths move data through the system. Each path touches a specific sub
 2. The FTS5 virtual table `_ddb_fts` is queried with `MATCH` using porter stemming and unicode61 tokenization.
 3. Results are ranked by BM25 score and returned with highlighted snippets.
 4. `search_paginated()` adds limit/offset support and a total count.
+5. `search_query::normalize()` parses the query string into an AST and serializes it to a canonical form (lowercased, sorted AND operands, explicit AND). The server exposes this as `queryNormalized` on SearchConnection and `normalizeSearchQuery` standalone query.
 
 ### Sync
 

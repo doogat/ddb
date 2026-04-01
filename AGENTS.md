@@ -16,6 +16,7 @@ Hybrid Git-CRDT decentralized database. Git is source of truth; SQLite index is 
 ```
 ddb-core/src/       Library crate
   parser.rs         Three-zone Markdown parsing (frontmatter/body/references)
+  search_query.rs   Search query parsing and normalization to canonical form
   git_ops.rs        Git repository CRUD, merge, remote sync
   crdt_resolver.rs  Automerge CRDT conflict resolution
   indexer.rs        SQLite FTS5 index, type inference, materialization

@@ -17,6 +17,7 @@
 //! - [`indexer`] — SQLite FTS5 search index, type inference, materialization
 //! - [`maintenance`] — Git maintenance runner and auto-trigger
 //! - [`parser`] — Parse and serialize three-zone Markdown doogats
+//! - [`search_query`] — Search query parsing and normalization
 //! - [`service`] — Unified orchestration layer (DoogatService) for CLI, FFI, and server
 //! - [`sql_engine`] — SQL DDL/DML translation (tables as doogat types)
 //! - [`sync_manager`] — Multi-device sync orchestration
