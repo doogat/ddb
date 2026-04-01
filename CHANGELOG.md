@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `id` (IDFilter) and `title` (StringFilter) base field filters on all typed GraphQL Where inputs, enabling single-record lookups and title searches on any typed query
 - `--set key=value` (repeatable) on `ddb create` and `ddb update` for setting arbitrary frontmatter fields; `--unset key` on `ddb update` for removing fields
 - SQL expression support in INSERT/UPDATE: COALESCE, IFNULL, NULLIF, ABS, LENGTH, LOWER, UPPER, TRIM, TYPEOF, MIN, MAX scalar functions, subqueries, and arithmetic operators
 - Hyphenated type names now generate typed GraphQL queries and subscriptions (e.g. `category-membership` becomes type `CategoryMembership`, query `categoryMemberships`, subscription `categoryMembershipChanged`); colliding names are detected at schema build time
