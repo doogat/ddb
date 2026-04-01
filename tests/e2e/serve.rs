@@ -1544,7 +1544,7 @@ fn search_returns_enriched_fields() {
         .next()
         .unwrap()
         .trim();
-    // Extract just the doogat ID (format: "insert 1 row(s) into link\n20260401...")
+    // First line is "insert 1 row(s) into link", second line is the ID
     let id = id.split_whitespace().last().unwrap_or(id);
 
     // Add tags to the doogat

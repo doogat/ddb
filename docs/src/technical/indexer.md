@@ -217,6 +217,11 @@ pub struct SearchResult {
     pub path: String,
     pub snippet: String,
     pub rank: f64,
+    pub updated_at: String,
+    pub tags: Vec<String>,
+    pub doogat_type: Option<String>,
+    pub fields: Option<BTreeMap<String, String>>,
+    pub created_at: Option<String>,
 }
 
 pub struct PaginatedSearchResult {

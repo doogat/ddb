@@ -217,7 +217,10 @@ pub(crate) fn search_hit_to_value(r: &SearchResult) -> GqlValue {
                     .iter()
                     .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
                     .collect();
-                GqlValue::from(serde_json::to_string(&json_map).unwrap_or_default())
+                match serde_json::to_string(&json_map) {
+                    Ok(s) => GqlValue::from(s),
+                    Err(_) => GqlValue::Null,
+                }
             }
             None => GqlValue::Null,
         },
