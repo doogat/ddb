@@ -3,6 +3,7 @@ mod cascade_delete;
 mod checkboxes;
 mod collision;
 mod common;
+mod date_default;
 mod delete_backlinks;
 mod discover;
 mod fix;
