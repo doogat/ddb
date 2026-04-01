@@ -915,6 +915,11 @@ impl Index {
         })
     }
 
+    /// Escape a SQL identifier by doubling embedded double-quotes.
+    fn escape_sql_ident(name: &str) -> String {
+        name.replace('"', "\"\"")
+    }
+
     fn enrich_search_hits(&self, hits: &mut [SearchResult]) {
         if hits.is_empty() {
             return;
@@ -930,22 +935,29 @@ impl Index {
             let sql = format!(
                 "SELECT doogat_id, tag FROM _ddb_tags WHERE doogat_id IN ({placeholders})"
             );
-            if let Ok(mut stmt) = self.conn.prepare(&sql) {
+            match self.conn.prepare(&sql).and_then(|mut stmt| {
                 let params: Vec<&dyn rusqlite::types::ToSql> =
                     ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
-                if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
+                let rows = stmt.query_map(params.as_slice(), |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                }) {
-                    let mut tag_map: std::collections::HashMap<String, Vec<String>> =
-                        std::collections::HashMap::new();
-                    for row in rows.flatten() {
-                        tag_map.entry(row.0).or_default().push(row.1);
-                    }
+                })?;
+                let mut tag_map: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+                for row in rows.flatten() {
+                    tag_map.entry(row.0).or_default().push(row.1);
+                }
+                Ok(tag_map)
+            }) {
+                Ok(mut tag_map) => {
                     for hit in hits.iter_mut() {
                         if let Some(tags) = tag_map.remove(&hit.id) {
                             hit.tags = tags;
                         }
                     }
+                }
+                Err(_e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("enrich_search_hits: tags query failed: {_e}");
                 }
             }
         }
@@ -955,30 +967,37 @@ impl Index {
             let sql = format!(
                 "SELECT doogat_id, key, value FROM _ddb_fields WHERE doogat_id IN ({placeholders})"
             );
-            if let Ok(mut stmt) = self.conn.prepare(&sql) {
+            match self.conn.prepare(&sql).and_then(|mut stmt| {
                 let params: Vec<&dyn rusqlite::types::ToSql> =
                     ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
-                if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
+                let rows = stmt.query_map(params.as_slice(), |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
                     ))
-                }) {
-                    let mut field_map: std::collections::HashMap<
-                        String,
-                        std::collections::BTreeMap<String, String>,
-                    > = std::collections::HashMap::new();
-                    for row in rows.flatten() {
-                        if let Some(val) = row.2 {
-                            field_map.entry(row.0).or_default().insert(row.1, val);
-                        }
+                })?;
+                let mut field_map: std::collections::HashMap<
+                    String,
+                    std::collections::BTreeMap<String, String>,
+                > = std::collections::HashMap::new();
+                for row in rows.flatten() {
+                    if let Some(val) = row.2 {
+                        field_map.entry(row.0).or_default().insert(row.1, val);
                     }
+                }
+                Ok(field_map)
+            }) {
+                Ok(mut field_map) => {
                     for hit in hits.iter_mut() {
                         if let Some(fields) = field_map.remove(&hit.id) {
                             hit.fields = Some(fields);
                         }
                     }
+                }
+                Err(_e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("enrich_search_hits: fields query failed: {_e}");
                 }
             }
         }
@@ -997,8 +1016,9 @@ impl Index {
             }
 
             for (type_name, hit_indices) in &type_groups {
+                let safe_name = Self::escape_sql_ident(type_name);
                 // Get type-specific column names from the materialized table
-                let pragma_sql = format!("PRAGMA table_info(\"{}\")", type_name);
+                let pragma_sql = format!("PRAGMA table_info(\"{}\")", safe_name);
                 let col_names: Vec<String> = match self.conn.prepare(&pragma_sql) {
                     Ok(mut stmt) => stmt
                         .query_map([], |row| row.get::<_, String>(1))
@@ -1009,7 +1029,11 @@ impl Index {
                                 .collect()
                         })
                         .unwrap_or_default(),
-                    Err(_) => continue,
+                    Err(_e) => {
+                        #[cfg(debug_assertions)]
+                        eprintln!("enrich_search_hits: PRAGMA for {type_name} failed: {_e}");
+                        continue;
+                    }
                 };
                 if col_names.is_empty() {
                     continue;
@@ -1025,12 +1049,12 @@ impl Index {
                     .join(", ");
                 let col_select: String = col_names
                     .iter()
-                    .map(|c| format!("\"{}\"", c))
+                    .map(|c| format!("\"{}\"", Self::escape_sql_ident(c)))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let sql = format!(
                     "SELECT id, {} FROM \"{}\" WHERE id IN ({})",
-                    col_select, type_name, type_placeholders
+                    col_select, safe_name, type_placeholders
                 );
 
                 if let Ok(mut stmt) = self.conn.prepare(&sql) {
