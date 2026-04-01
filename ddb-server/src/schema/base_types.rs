@@ -1105,4 +1105,96 @@ mod tests {
         assert_eq!(pluralize_preserving_case("testBuzz"), "testBuzzes");
         assert_eq!(pluralize_preserving_case("categoryMembership"), "categoryMemberships");
     }
+
+    #[test]
+    fn search_hit_to_value_includes_enriched_fields() {
+        use ddb_core::types::SearchResult;
+        use std::collections::BTreeMap;
+
+        let mut fields = BTreeMap::new();
+        fields.insert("url".into(), "https://example.com".into());
+        fields.insert("description".into(), "Example".into());
+
+        let r = SearchResult {
+            id: "20260301120000".into(),
+            title: "Test".into(),
+            path: "ddb/20260301120000.md".into(),
+            snippet: "test snippet".into(),
+            rank: -1.5,
+            updated_at: "2026-03-01T12:00:00Z".into(),
+            tags: vec!["rust".into(), "cli".into()],
+            doogat_type: Some("link".into()),
+            fields: Some(fields),
+            created_at: Some("2026-03-01".into()),
+        };
+
+        let val = search_hit_to_value(&r);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+
+        // tags
+        let tags = obj.get("tags").unwrap();
+        match tags {
+            GqlValue::List(items) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0], GqlValue::from("rust"));
+                assert_eq!(items[1], GqlValue::from("cli"));
+            }
+            _ => panic!("expected list for tags"),
+        }
+
+        // type
+        assert_eq!(obj.get("type").unwrap(), &GqlValue::from("link"));
+
+        // fields (JSON string)
+        match obj.get("fields").unwrap() {
+            GqlValue::String(s) => {
+                let parsed: serde_json::Value = serde_json::from_str(s).unwrap();
+                assert_eq!(parsed["url"], "https://example.com");
+                assert_eq!(parsed["description"], "Example");
+            }
+            _ => panic!("expected string for fields"),
+        }
+
+        // created_at
+        assert_eq!(obj.get("created_at").unwrap(), &GqlValue::from("2026-03-01"));
+    }
+
+    #[test]
+    fn search_hit_to_value_nulls_for_untyped() {
+        use ddb_core::types::SearchResult;
+
+        let r = SearchResult {
+            id: "20260301120000".into(),
+            title: "Test".into(),
+            path: "ddb/20260301120000.md".into(),
+            snippet: "test snippet".into(),
+            rank: -1.5,
+            updated_at: String::new(),
+            tags: vec![],
+            doogat_type: None,
+            fields: None,
+            created_at: None,
+        };
+
+        let val = search_hit_to_value(&r);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+
+        // empty tags list
+        match obj.get("tags").unwrap() {
+            GqlValue::List(items) => assert!(items.is_empty()),
+            _ => panic!("expected list for tags"),
+        }
+
+        // nulls
+        assert_eq!(obj.get("type").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("fields").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("created_at").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("updated_at").unwrap(), &GqlValue::Null);
+    }
 }
