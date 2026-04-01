@@ -263,6 +263,48 @@ When a doogat is deleted via `DELETE FROM`, two cascade operations happen automa
 
 Both operations, plus the original delete, land in a single atomic git commit. Inside a transaction, they are buffered and committed together with other transaction operations.
 
+## Expressions in INSERT and UPDATE
+
+INSERT VALUES and UPDATE SET positions accept expressions beyond literal values.
+
+### Scalar Functions
+
+An allowlist of deterministic scalar functions is supported:
+
+| Function | Description |
+|----------|-------------|
+| `COALESCE(a, b, ...)` | First non-NULL argument |
+| `IFNULL(a, b)` | `a` if non-NULL, else `b` |
+| `NULLIF(a, b)` | NULL if `a = b`, else `a` |
+| `ABS(x)` | Absolute value |
+| `LENGTH(s)` | String length |
+| `LOWER(s)` | Lowercase |
+| `UPPER(s)` | Uppercase |
+| `TRIM(s)` | Strip leading/trailing whitespace |
+| `TYPEOF(x)` | SQLite type name |
+| `MIN(a, b)` | Smaller of two values |
+| `MAX(a, b)` | Larger of two values |
+
+Unlisted functions are rejected with a descriptive error.
+
+### Subqueries
+
+Scalar subqueries work in expression positions:
+
+```sql
+INSERT INTO items (sort_order) VALUES ((SELECT MAX(sort_order) FROM items))
+UPDATE items SET sort_order = (SELECT MAX(sort_order) FROM items) + 1 WHERE id = '20260401120000'
+```
+
+### Arithmetic Operators
+
+Binary operators `+`, `-`, `*`, `/`, and `||` (concatenation) work in expression positions, including nested/parenthesized expressions:
+
+```sql
+INSERT INTO items (sort_order) VALUES (COALESCE((SELECT MAX(sort_order) FROM items), 0) + 1)
+UPDATE items SET name = LOWER(name) || '-archived' WHERE status = 'done'
+```
+
 ## Not Supported
 
 These SQL features are explicitly rejected with descriptive error messages. They either operate only on the materialized cache (lost on reindex) or bypass git storage (causing doogat-cache divergence).
