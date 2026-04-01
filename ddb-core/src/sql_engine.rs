@@ -2508,7 +2508,10 @@ fn build_data_doogat(
         meta: DoogatMeta {
             id: Some(id.clone()),
             title: title_value,
-            date: None,
+            date: col_values
+                .get("date")
+                .cloned()
+                .or_else(|| Some(format!("{}-{}-{}", &id.0[0..4], &id.0[4..6], &id.0[6..8]))),
             doogat_type: Some(schema.table_name.clone()),
             tags: vec![],
             extra,
