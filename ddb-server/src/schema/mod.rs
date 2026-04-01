@@ -8,6 +8,7 @@ use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use futures_util::StreamExt;
 use indexmap::IndexMap;
+use ddb_core::search_query;
 use ddb_core::types::{BatchUpdateInput, ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
 use std::collections::{HashMap, HashSet};
@@ -152,6 +153,10 @@ pub fn build_schema(
                     Ok(obj_field(obj, "totalCount"))
                 })
             },
+        ))
+        .field(simple_field(
+            "queryNormalized",
+            TypeRef::named_nn(TypeRef::STRING),
         ));
 
     let column_info_type = Object::new("ColumnInfo")
@@ -540,6 +545,7 @@ pub fn build_schema(
                         where_filters,
                     };
 
+                    let normalized = search_query::normalize(&q);
                     let result = pool
                         .search(q, limit, offset, filters)
                         .await
@@ -552,6 +558,10 @@ pub fn build_schema(
                     obj.insert(
                         Name::new("totalCount"),
                         GqlValue::from(result.total_count as i64),
+                    );
+                    obj.insert(
+                        Name::new("queryNormalized"),
+                        GqlValue::from(normalized),
                     );
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
@@ -568,6 +578,24 @@ pub fn build_schema(
             ))
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
             .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),
+        );
+    }
+
+    // normalizeSearchQuery(query) — normalize without executing
+    {
+        query = query.field(
+            Field::new(
+                "normalizeSearchQuery",
+                TypeRef::named_nn(TypeRef::STRING),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let q = ctx.args.try_get("query")?.string()?.to_string();
+                        let normalized = search_query::normalize(&q);
+                        Ok(Some(FieldValue::from(GqlValue::from(normalized))))
+                    })
+                },
+            )
+            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING))),
         );
     }
 
