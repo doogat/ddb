@@ -116,3 +116,35 @@ fn create_with_malformed_set_returns_error() {
         .failure()
         .stderr(predicate::str::contains("invalid --set format"));
 }
+
+#[test]
+fn update_set_empty_value_clears_field() {
+    let repo = DdbTestRepo::init();
+    let out = repo
+        .ddb()
+        .args(["create", "--title", "Clearable", "--set", "status=active"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    // Confirm field exists
+    repo.ddb()
+        .args(["read", &id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status: active"));
+
+    // Clear with --set status=
+    repo.ddb()
+        .args(["update", &id, "--set", "status="])
+        .assert()
+        .success();
+
+    // Field should have empty value (YAML serializes as status: '')
+    repo.ddb()
+        .args(["read", &id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status: active").not());
+}
