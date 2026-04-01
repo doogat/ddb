@@ -652,6 +652,35 @@ if ($parsed.data.testWidgets.items[0].status -ne "active") { throw "status expec
 if ($parsed.data.testWidgets.items[0].priority -ne 1) { throw "priority expected 1, got $($parsed.data.testWidgets.items[0].priority)" }
 pass "serve: hyphenated type typed query"
 
+# 42. base field filters on typed queries (id, title)
+gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO \\\`"test-widget\\\`" (title, status, priority) VALUES ('FilterTarget', 'pending', 5)\`") { message } }`"}" | Out-Null
+Start-Sleep -Seconds 1
+
+$result = gql "{`"query`":`"{ testWidgets(where: { title: { eq: \\\`"FilterTarget\\\`" } }) { items { id title } totalCount } }`"}"
+$parsed = $result | ConvertFrom-Json
+if ($parsed.data.testWidgets.totalCount -ne 1) { throw "title eq filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
+$BF_ID = $parsed.data.testWidgets.items[0].id
+pass "serve: base field title eq filter"
+
+$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \\\`"$BF_ID\\\`" } }) { items { id title } totalCount } }`"}"
+$parsed = $result | ConvertFrom-Json
+if ($parsed.data.testWidgets.totalCount -ne 1) { throw "id eq filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
+if ($parsed.data.testWidgets.items[0].id -ne $BF_ID) { throw "id mismatch" }
+pass "serve: base field id eq filter"
+
+$result = gql "{`"query`":`"{ testWidgets(where: { title: { contains: \\\`"Target\\\`" } }) { items { id } totalCount } }`"}"
+$parsed = $result | ConvertFrom-Json
+if ($parsed.data.testWidgets.totalCount -ne 1) { throw "title contains filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
+pass "serve: base field title contains filter"
+
+$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \\\`"99999999999999\\\`" } }) { items { id } totalCount } }`"}"
+$parsed = $result | ConvertFrom-Json
+if ($parsed.data.testWidgets.totalCount -ne 0) { throw "nonexistent id expected 0, got $($parsed.data.testWidgets.totalCount)" }
+pass "serve: base field id nonexistent returns empty"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \\\`"$BF_ID\\\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { executeSql(sql: \`"DROP TABLE \\\`"test-widget\\\`"\`") { message } }`"}" | Out-Null
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

@@ -620,6 +620,37 @@ echo "$RESULT" | jq -e '.data.testWidgets.items[0].status == "active"' >/dev/nul
 echo "$RESULT" | jq -e '.data.testWidgets.items[0].priority == 1' >/dev/null
 pass "serve: hyphenated type typed query"
 
+# 42. base field filters on typed queries (id, title)
+# Insert a row with known title into the existing test-widget type
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO \\\"test-widget\\\" (title, status, priority) VALUES ('"'"'FilterTarget'"'"', '"'"'pending'"'"', 5)\") { message } }"}' >/dev/null
+sleep 1
+
+# Get the ID of the row we just inserted
+BF_RESULT=$(gql '{"query":"{ testWidgets(where: { title: { eq: \"FilterTarget\" } }) { items { id title } totalCount } }"}')
+echo "$BF_RESULT" | jq -e '.data.testWidgets.totalCount == 1' >/dev/null
+BF_ID=$(echo "$BF_RESULT" | jq -r '.data.testWidgets.items[0].id')
+pass "serve: base field title eq filter"
+
+# Filter by id eq
+BF_RESULT=$(gql "{\"query\":\"{ testWidgets(where: { id: { eq: \\\"$BF_ID\\\" } }) { items { id title } totalCount } }\"}")
+echo "$BF_RESULT" | jq -e '.data.testWidgets.totalCount == 1' >/dev/null
+echo "$BF_RESULT" | jq -e ".data.testWidgets.items[0].id == \"$BF_ID\"" >/dev/null
+pass "serve: base field id eq filter"
+
+# Filter by title contains
+BF_RESULT=$(gql '{"query":"{ testWidgets(where: { title: { contains: \"Target\" } }) { items { id } totalCount } }"}')
+echo "$BF_RESULT" | jq -e '.data.testWidgets.totalCount == 1' >/dev/null
+pass "serve: base field title contains filter"
+
+# Nonexistent ID returns empty
+BF_RESULT=$(gql '{"query":"{ testWidgets(where: { id: { eq: \"99999999999999\" } }) { items { id } totalCount } }"}')
+echo "$BF_RESULT" | jq -e '.data.testWidgets.totalCount == 0' >/dev/null
+pass "serve: base field id nonexistent returns empty"
+
+# Cleanup
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BF_ID\\\") }\"}" >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"test-widget\\\"\") { message } }"}' >/dev/null
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
