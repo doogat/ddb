@@ -224,6 +224,24 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ2_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ3_ID\\\") }\"}" >/dev/null
 
+# 18g. Search query normalization
+RESULT=$(gql '{"query":"{ normalizeSearchQuery(query: \"B AND A\") }"}')
+echo "$RESULT" | grep -q '"a and b"'
+pass "serve: normalizeSearchQuery sorts AND operands"
+
+RESULT=$(gql '{"query":"{ normalizeSearchQuery(query: \"Tag=svelte AND category=work.portals\") }"}')
+echo "$RESULT" | grep -q '"category=work.portals and tag=svelte"'
+pass "serve: normalizeSearchQuery sorts field filters"
+
+RESULT=$(gql '{"query":"{ normalizeSearchQuery(query: \"  MEETING   Minutes  \") }"}')
+echo "$RESULT" | grep -q '"meeting and minutes"'
+pass "serve: normalizeSearchQuery implicit AND and lowercase"
+
+RESULT=$(gql '{"query":"{ search(query: \"rust AND crdt\") { queryNormalized } }"}')
+echo "$RESULT" | grep -q '"queryNormalized"'
+echo "$RESULT" | grep -q '"crdt and rust"'
+pass "serve: search returns queryNormalized"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \

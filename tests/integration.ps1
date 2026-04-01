@@ -276,6 +276,24 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ3_ID\`") }`"}" | Out-Null
 
+# 18g. Search query normalization
+$result = gql '{"query":"{ normalizeSearchQuery(query: \"B AND A\") }"}'
+if ($result -notmatch '"a and b"') { throw "normalizeSearchQuery sort: expected 'a and b', got $result" }
+pass "serve: normalizeSearchQuery sorts AND operands"
+
+$result = gql '{"query":"{ normalizeSearchQuery(query: \"Tag=svelte AND category=work.portals\") }"}'
+if ($result -notmatch '"category=work.portals and tag=svelte"') { throw "normalizeSearchQuery fields: unexpected $result" }
+pass "serve: normalizeSearchQuery sorts field filters"
+
+$result = gql '{"query":"{ normalizeSearchQuery(query: \"  MEETING   Minutes  \") }"}'
+if ($result -notmatch '"meeting and minutes"') { throw "normalizeSearchQuery implicit AND: unexpected $result" }
+pass "serve: normalizeSearchQuery implicit AND and lowercase"
+
+$result = gql '{"query":"{ search(query: \"rust AND crdt\") { queryNormalized } }"}'
+if ($result -notmatch '"queryNormalized"') { throw "search queryNormalized missing: $result" }
+if ($result -notmatch '"crdt and rust"') { throw "search queryNormalized value: unexpected $result" }
+pass "serve: search returns queryNormalized"
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `
