@@ -2504,7 +2504,7 @@ fn build_data_doogat(
         format!("{}\n", ref_lines.join("\n"))
     };
 
-    // Promote "date" from extra to meta.date (avoid duplicate YAML keys)
+    // Derive date: schema column "date" in extra > ad-hoc INSERT "date" column > ID-derived
     let date = extra
         .remove("date")
         .and_then(|v| match v {
@@ -6438,6 +6438,51 @@ mod tests {
             parsed.meta.date.as_deref(),
             Some("2025-12-25"),
             "explicit date should win over ID-derived date ({id_derived})"
+        );
+    }
+
+    #[test]
+    fn insert_schema_date_column_no_duplicate() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // Type with "date" as an explicit schema column (like meeting-minutes)
+        engine
+            .execute(
+                "CREATE TABLE minutes (date TEXT, attendees TEXT)",
+            )
+            .unwrap();
+
+        // ALTER to put date in frontmatter zone (default for TEXT is body)
+        engine
+            .execute("ALTER TABLE minutes SET ZONE frontmatter FOR date")
+            .unwrap();
+
+        let id = match engine
+            .execute(
+                "INSERT INTO minutes (date, attendees) VALUES ('2026-03-15', 'Alice')",
+            )
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+
+        // Should have exactly one "date:" in frontmatter, not a duplicate
+        let date_count = content.matches("date:").count();
+        assert_eq!(
+            date_count, 1,
+            "expected exactly one date: field, got {date_count} in: {content}"
+        );
+
+        let parsed = crate::parser::parse(&content, &path).unwrap();
+        assert_eq!(
+            parsed.meta.date.as_deref(),
+            Some("2026-03-15"),
+            "schema column date should be promoted to meta.date"
         );
     }
 }
