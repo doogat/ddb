@@ -28,7 +28,6 @@ fn tokenize(input: &str) -> Vec<Token> {
     let mut i = 0;
 
     while i < len {
-        // skip whitespace
         if chars[i].is_ascii_whitespace() {
             i += 1;
             continue;
@@ -49,7 +48,6 @@ fn tokenize(input: &str) -> Vec<Token> {
         // Read a word (alphanum, dot, dash, underscore, etc. -- anything not whitespace/parens/=/: )
         // But also handle field=value and field:value and field:"quoted"
         if chars[i] == '"' {
-            // quoted string as a standalone token
             i += 1;
             let mut s = String::new();
             while i < len && chars[i] != '"' {
@@ -57,7 +55,7 @@ fn tokenize(input: &str) -> Vec<Token> {
                 i += 1;
             }
             if i < len {
-                i += 1; // skip closing quote
+                i += 1;
             }
             tokens.push(Token::Word(s.to_lowercase()));
             continue;
@@ -85,21 +83,19 @@ fn tokenize(input: &str) -> Vec<Token> {
             continue;
         }
 
-        // Check if followed by = or : (field filter)
         if i < len && (chars[i] == '=' || chars[i] == ':') {
             let field = word.to_lowercase();
-            i += 1; // skip = or :
+            i += 1;
 
-            // read value (possibly quoted)
             let value = if i < len && chars[i] == '"' {
-                i += 1; // skip opening quote
+                i += 1;
                 let mut v = String::new();
                 while i < len && chars[i] != '"' {
                     v.push(chars[i]);
                     i += 1;
                 }
                 if i < len {
-                    i += 1; // skip closing quote
+                    i += 1;
                 }
                 v.to_lowercase()
             } else {
@@ -119,7 +115,6 @@ fn tokenize(input: &str) -> Vec<Token> {
             continue;
         }
 
-        // Check for keywords
         let lower = word.to_lowercase();
         match lower.as_str() {
             "and" => tokens.push(Token::And),
@@ -174,7 +169,7 @@ impl Parser {
     fn parse_or(&mut self) -> Option<SearchExpr> {
         let mut operands = vec![self.parse_and()?];
         while matches!(self.peek(), Some(Token::Or)) {
-            self.advance(); // consume OR
+            self.advance();
             operands.push(self.parse_and()?);
         }
         if operands.len() == 1 {
@@ -239,12 +234,12 @@ impl Parser {
     fn parse_primary(&mut self) -> Option<SearchExpr> {
         match self.peek()? {
             Token::LParen => {
-                self.advance(); // consume (
+                self.advance();
                 let expr = self.parse_or()?;
                 if !matches!(self.peek(), Some(Token::RParen)) {
-                    return None; // missing closing paren
+                    return None;
                 }
-                self.advance(); // consume )
+                self.advance();
                 Some(expr)
             }
             Token::Word(_) => {
@@ -298,7 +293,7 @@ fn serialize(expr: &SearchExpr) -> String {
             parts.join(" and ")
         }
         SearchExpr::Or(children) => {
-            let parts: Vec<String> = children.iter().map(serialize_or_child).collect();
+            let parts: Vec<String> = children.iter().map(serialize).collect();
             parts.join(" or ")
         }
         SearchExpr::Not(inner) => {
@@ -315,12 +310,6 @@ fn serialize_and_child(expr: &SearchExpr) -> String {
     }
 }
 
-/// OR children: wrap if it's an AND (for clarity), though AND is higher precedence.
-/// Actually, OR children that are AND don't need parens since AND binds tighter.
-fn serialize_or_child(expr: &SearchExpr) -> String {
-    serialize(expr)
-}
-
 /// NOT child: wrap in parens if compound (AND or OR).
 fn serialize_not_child(expr: &SearchExpr) -> String {
     match expr {
@@ -332,9 +321,7 @@ fn serialize_not_child(expr: &SearchExpr) -> String {
 // ── Fallback ────────────────────────────────────────────────────────
 
 fn fallback_normalize(query: &str) -> String {
-    let lower = query.to_lowercase();
-    let collapsed: String = lower.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed
+    query.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 // ── Public API ──────────────────────────────────────────────────────
