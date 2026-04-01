@@ -691,6 +691,15 @@ $dcCreated = ($dcQuery | ConvertFrom-Json).data.datechecks.items[0].created_at
 if ($dcCreated -ne $dcExpected) { throw "created_at '$dcCreated' != expected '$dcExpected'" }
 pass "serve: SQL INSERT defaults date, created_at matches ID"
 
+# executeBatch also defaults date
+$ebResult = gql "{`"query`":`"mutation{executeBatch(statements:[\`"INSERT INTO datecheck (name) VALUES (\\\`"BatchTest\\\`")\`"]){message}}`"}"
+$ebId = ($ebResult | ConvertFrom-Json).data.executeBatch[0].message
+$ebExpected = "$($ebId.Substring(0,4))-$($ebId.Substring(4,2))-$($ebId.Substring(6,2))"
+$ebQuery = gql "{`"query`":`"{ doogat(id: \\\`"$ebId\\\`") { created_at } }`"}"
+$ebCreated = ($ebQuery | ConvertFrom-Json).data.doogat.created_at
+if ($ebCreated -ne $ebExpected) { throw "executeBatch created_at '$ebCreated' != expected '$ebExpected'" }
+pass "serve: executeBatch INSERT defaults date, created_at matches ID"
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

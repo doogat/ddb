@@ -661,6 +661,15 @@ DC_CREATED=$(echo "$DC_QUERY" | sed -n 's/.*"created_at":"\([^"]*\)".*/\1/p')
 [ "$DC_CREATED" = "$DC_EXPECTED" ]
 pass "serve: SQL INSERT defaults date, created_at matches ID"
 
+# executeBatch also defaults date
+EB_RESULT=$(gql '{"query":"mutation{executeBatch(statements:[\"INSERT INTO datecheck (name) VALUES (\\\"BatchTest\\\")\"]){message}}"}')
+EB_ID=$(echo "$EB_RESULT" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+EB_EXPECTED="$(echo "$EB_ID" | cut -c1-4)-$(echo "$EB_ID" | cut -c5-6)-$(echo "$EB_ID" | cut -c7-8)"
+EB_QUERY=$(gql "{\"query\":\"{ doogat(id: \\\"$EB_ID\\\") { created_at } }\"}")
+EB_CREATED=$(echo "$EB_QUERY" | sed -n 's/.*"created_at":"\([^"]*\)".*/\1/p')
+[ "$EB_CREATED" = "$EB_EXPECTED" ]
+pass "serve: executeBatch INSERT defaults date, created_at matches ID"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
