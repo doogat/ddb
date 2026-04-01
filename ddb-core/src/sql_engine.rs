@@ -2504,14 +2504,21 @@ fn build_data_doogat(
         format!("{}\n", ref_lines.join("\n"))
     };
 
+    // Promote "date" from extra to meta.date (avoid duplicate YAML keys)
+    let date = extra
+        .remove("date")
+        .and_then(|v| match v {
+            Value::String(s) => Some(s),
+            _ => None,
+        })
+        .or_else(|| col_values.get("date").cloned())
+        .or_else(|| Some(format!("{}-{}-{}", &id.0[0..4], &id.0[4..6], &id.0[6..8])));
+
     ParsedDoogat {
         meta: DoogatMeta {
             id: Some(id.clone()),
             title: title_value,
-            date: col_values
-                .get("date")
-                .cloned()
-                .or_else(|| Some(format!("{}-{}-{}", &id.0[0..4], &id.0[4..6], &id.0[6..8]))),
+            date,
             doogat_type: Some(schema.table_name.clone()),
             tags: vec![],
             extra,

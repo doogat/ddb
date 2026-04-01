@@ -584,5 +584,16 @@ if ($output -match "size:") { throw "--unset should remove field" }
 if (-not (ddb-fails create --title "Bad" --set "noequals")) { throw "malformed --set should error" }
 pass "--set / --unset flags"
 
+# 25. SQL INSERT defaults date from doogat ID
+ddb query "CREATE TABLE datetest (name TEXT)"
+$DATE_ID = ddb query "INSERT INTO datetest (name) VALUES ('hello')"
+$DATE_EXPECTED = "$($DATE_ID.Substring(0,4))-$($DATE_ID.Substring(4,2))-$($DATE_ID.Substring(6,2))"
+$output = ddb read $DATE_ID
+if ($output -notmatch "date: $DATE_EXPECTED") { throw "date not derived from ID: $output" }
+$EXPLICIT_ID = ddb query "INSERT INTO datetest (name, date) VALUES ('world', '2025-01-15')"
+$output = ddb read $EXPLICIT_ID
+if ($output -notmatch "date: 2025-01-15") { throw "explicit date not preserved: $output" }
+pass "SQL INSERT defaults date from ID"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

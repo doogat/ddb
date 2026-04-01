@@ -493,4 +493,13 @@ if $DDB create --title "Bad" --set "noequals" 2>/dev/null; then
 fi
 pass "--set / --unset flags"
 
+# 25. SQL INSERT defaults date from doogat ID
+$DDB query "CREATE TABLE datetest (name TEXT)"
+DATE_ID=$($DDB query "INSERT INTO datetest (name) VALUES ('hello')")
+DATE_EXPECTED="$(echo "$DATE_ID" | cut -c1-4)-$(echo "$DATE_ID" | cut -c5-6)-$(echo "$DATE_ID" | cut -c7-8)"
+$DDB read "$DATE_ID" | grep -q "date: $DATE_EXPECTED"
+EXPLICIT_ID=$($DDB query "INSERT INTO datetest (name, date) VALUES ('world', '2025-01-15')")
+$DDB read "$EXPLICIT_ID" | grep -q "date: 2025-01-15"
+pass "SQL INSERT defaults date from ID"
+
 echo "=== all smoke tests passed ==="
