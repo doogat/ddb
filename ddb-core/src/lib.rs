@@ -41,6 +41,7 @@ pub mod hlc;
 pub mod indexer;
 pub mod maintenance;
 pub mod parser;
+pub mod search_query;
 pub mod service;
 pub mod sql_engine;
 pub mod sync_manager;
