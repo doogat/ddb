@@ -641,6 +641,29 @@ fn fmt_bytes(b: u64) -> String {
     }
 }
 
+fn parse_set_pairs(
+    pairs: &[String],
+) -> ddb_core::error::Result<std::collections::BTreeMap<String, ddb_core::types::Value>> {
+    let mut map = std::collections::BTreeMap::new();
+    for pair in pairs {
+        let Some((key, value)) = pair.split_once('=') else {
+            return Err(ddb_core::error::DoogatError::Validation(format!(
+                "invalid --set format: expected key=value, got '{pair}'"
+            )));
+        };
+        if key.is_empty() {
+            return Err(ddb_core::error::DoogatError::Validation(
+                "invalid --set format: key cannot be empty".into(),
+            ));
+        }
+        map.insert(
+            key.to_string(),
+            ddb_core::types::Value::String(value.to_string()),
+        );
+    }
+    Ok(map)
+}
+
 fn run(cli: Cli) -> ddb_core::error::Result<()> {
     match cli.command {
         Command::Help { topic } => {
@@ -675,35 +698,35 @@ fn run(cli: Cli) -> ddb_core::error::Result<()> {
             tags,
             r#type,
             body,
-            set: _set,
+            set,
         } => {
             let svc = DoogatService::open(&cli.repo)?;
             let tags_list: Vec<String> = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                 .unwrap_or_default();
             let body_text = body.unwrap_or_default();
+            let mut extra = parse_set_pairs(&set)?;
 
             if r#type.as_deref() == Some("_typedef") {
                 eprintln!("Warning: type definitions should be created with CREATE TABLE via 'ddb query'.");
                 eprintln!("Manual typedefs are not CRDT-tracked and may be stripped by 'ddb fix'.");
                 eprintln!("See: ddb help create-app");
-                let mut extra = std::collections::BTreeMap::new();
                 extra.insert(
                     "origin".to_string(),
                     ddb_core::types::Value::String("manual".into()),
                 );
-                let parsed = svc.create_doogat_with_extra(
-                    &title,
-                    &tags_list,
-                    r#type.as_deref(),
-                    &body_text,
-                    extra,
-                )?;
-                outln!("{}", parsed.meta.id.map(|z| z.0).unwrap_or_default())?;
-            } else {
-                let id = svc.create_doogat(&title, &tags_list, r#type.as_deref(), &body_text)?;
-                outln!("{id}")?;
             }
+            let parsed = svc.create_doogat_with_extra(
+                &title,
+                &tags_list,
+                r#type.as_deref(),
+                &body_text,
+                extra,
+            )?;
+            outln!(
+                "{}",
+                parsed.meta.id.map(|z| z.0).unwrap_or_default()
+            )?;
         }
 
         Command::Read { id } => {
