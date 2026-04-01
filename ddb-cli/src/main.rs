@@ -741,18 +741,21 @@ fn run(cli: Cli) -> ddb_core::error::Result<()> {
             tags,
             r#type,
             body,
-            set: _set,
-            unset: _unset,
+            set,
+            unset,
         } => {
             let svc = DoogatService::open(&cli.repo)?;
             let tags_vec: Option<Vec<String>> =
                 tags.map(|t| t.split(',').map(|s| s.trim().to_string()).collect());
+            let extra = parse_set_pairs(&set)?;
             svc.update_doogat(
                 &id,
                 title.as_deref(),
                 tags_vec.as_deref(),
                 r#type.as_deref(),
                 body.as_deref(),
+                &extra,
+                &unset,
             )?;
             outln!("updated {id}")?;
         }
