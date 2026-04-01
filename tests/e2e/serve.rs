@@ -1494,3 +1494,27 @@ fn filter_base_field_id_hyphenated_type() {
     assert_eq!(items[0]["id"].as_str().unwrap(), the_id);
     assert_eq!(result["data"]["testItems"]["totalCount"].as_i64().unwrap(), 1);
 }
+
+#[test]
+fn filter_base_field_introspection() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+    setup_task_type(&server);
+
+    // Introspect TaskWhere to verify id and title fields are present
+    let result = server.graphql(
+        r#"{ __type(name: "TaskWhere") { inputFields { name } } }"#,
+    );
+    assert!(result.get("errors").is_none(), "introspection failed: {result}");
+    let fields = result["data"]["__type"]["inputFields"]
+        .as_array()
+        .expect("inputFields should be array");
+    let field_names: Vec<&str> = fields
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+    assert!(field_names.contains(&"id"), "TaskWhere must have id field, got: {field_names:?}");
+    assert!(field_names.contains(&"title"), "TaskWhere must have title field, got: {field_names:?}");
+    assert!(field_names.contains(&"status"), "TaskWhere must still have user-defined status field, got: {field_names:?}");
+    assert!(field_names.contains(&"_and"), "TaskWhere must have _and combinator, got: {field_names:?}");
+}

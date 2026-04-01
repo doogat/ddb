@@ -89,11 +89,11 @@ pub fn build_where_input(type_name: &str, schema: &TableSchema) -> InputObject {
     }
 
     // Base doogat fields (always present in materialized tables)
-    let col_names: Vec<&str> = schema.columns.iter().map(|c| c.name.as_str()).collect();
-    if !col_names.contains(&"id") {
+    let sanitized: Vec<String> = schema.columns.iter().map(|c| sanitize_field_name(&c.name)).collect();
+    if !sanitized.iter().any(|n| n == "id") {
         input = input.field(InputValue::new("id", TypeRef::named("IDFilter")));
     }
-    if !col_names.contains(&"title") {
+    if !sanitized.iter().any(|n| n == "title") {
         input = input.field(InputValue::new("title", TypeRef::named("StringFilter")));
     }
 
@@ -1012,7 +1012,7 @@ mod tests {
 
     #[test]
     fn test_base_field_title_eq() {
-        // title IS in test_schema columns — verify it still works via base field path
+        // title IS in test_schema columns — resolved via resolve_column, not BASE_FILTER_FIELDS
         let input = filter("title", "eq", GqlValue::String("My Bookmark".into()));
         let wc = build_where_sql(&input, &test_schema());
         assert_eq!(wc.sql, r#""title" = ?"#);
@@ -1056,22 +1056,59 @@ mod tests {
     }
 
     #[test]
+    fn test_base_field_or_compound() {
+        // _or: [{id: {eq: "id1"}}, {id: {eq: "id2"}}]
+        let mut or1 = IndexMap::new();
+        let mut f1 = IndexMap::new();
+        f1.insert(Name::new("eq"), GqlValue::String("20260401120000".into()));
+        or1.insert(Name::new("id"), GqlValue::Object(f1));
+
+        let mut or2 = IndexMap::new();
+        let mut f2 = IndexMap::new();
+        f2.insert(Name::new("eq"), GqlValue::String("20260401130000".into()));
+        or2.insert(Name::new("id"), GqlValue::Object(f2));
+
+        let mut obj = IndexMap::new();
+        obj.insert(
+            Name::new("_or"),
+            GqlValue::List(vec![GqlValue::Object(or1), GqlValue::Object(or2)]),
+        );
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#"(("id" = ?) OR ("id" = ?))"#);
+        assert_eq!(
+            wc.params,
+            vec![
+                SqlValue::Text("20260401120000".into()),
+                SqlValue::Text("20260401130000".into()),
+            ]
+        );
+    }
+
+    #[test]
     fn test_build_where_input_includes_base_fields() {
+        // Verify build_where_input registers id and title on the InputObject.
+        // test_schema has columns [title, priority, status, category].
+        // title is deduped (already in columns), so base fields add only id.
+        // Expected: id + title + priority + status + category + _and + _or = 7 fields.
         let schema = test_schema();
-        let _input = build_where_input("Bookmark", &schema);
-        // Introspect the InputObject by checking its type name is correct
-        // and that we can verify field count.
-        // Expected fields: id, title, + schema.columns (title, priority, status, category) + _and, _or
-        // Note: title appears in schema.columns AND as a base field.
-        // After dedup, expect: id + 4 schema columns + _and + _or = 7 fields
-        // (or id + title + 4 schema columns + _and + _or = 8 if title is not deduped)
-        //
-        // The implementation must include "id" and "title" as base fields.
-        // We verify by building a filter on "id" and confirming build_where_sql handles it.
-        // This is a structural test — the Where input must accept id filters.
-        let id_filter_input = filter("id", "eq", GqlValue::String("20260401120000".into()));
-        let wc = build_where_sql(&id_filter_input, &schema);
-        assert!(!wc.is_empty(), "id field must be accepted by build_where_sql");
-        assert_eq!(wc.sql, r#""id" = ?"#);
+        let input = build_where_input("Bookmark", &schema);
+        // InputObject doesn't expose field introspection directly, but we can
+        // register it in a dynamic schema and check the SDL.
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(string_filter())
+            .register(int_filter())
+            .register(id_filter())
+            .register(input)
+            .register(async_graphql::dynamic::Object::new("Query").field(
+                Field::new("dummy", TypeRef::named(TypeRef::STRING), |_| {
+                    FieldFuture::new(async { Ok(Option::<FieldValue>::None) })
+                }),
+            ))
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+        assert!(sdl.contains("id: IDFilter"), "SDL must contain 'id: IDFilter' in BookmarkWhere, got:\n{sdl}");
+        assert!(sdl.contains("title: StringFilter"), "SDL must contain 'title: StringFilter' in BookmarkWhere, got:\n{sdl}");
     }
 }
