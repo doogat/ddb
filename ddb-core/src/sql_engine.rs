@@ -6358,4 +6358,76 @@ mod tests {
             .unwrap_err();
         assert!(format!("{err}").contains("not in allowed values"));
     }
+
+    #[test]
+    fn insert_defaults_date_from_id() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE events (name TEXT, priority INTEGER)")
+            .unwrap();
+
+        let id = match engine
+            .execute("INSERT INTO events (name, priority) VALUES ('Launch', 1)")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        // Derive expected date from the 14-digit ID (YYYYMMDDHHmmss → YYYY-MM-DD)
+        let expected_date = format!("{}-{}-{}", &id[0..4], &id[4..6], &id[6..8]);
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(
+            content.contains(&format!("date: {expected_date}")),
+            "expected date derived from ID in frontmatter: {content}"
+        );
+
+        // Also verify via parser that meta.date is set
+        let parsed = crate::parser::parse(&content, &path).unwrap();
+        assert_eq!(
+            parsed.meta.date.as_deref(),
+            Some(expected_date.as_str()),
+            "parsed date should match ID-derived date"
+        );
+    }
+
+    #[test]
+    fn insert_explicit_date_preserved() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE meetings (name TEXT, priority INTEGER)")
+            .unwrap();
+
+        let id = match engine
+            .execute(
+                "INSERT INTO meetings (name, date, priority) VALUES ('Standup', '2025-12-25', 2)",
+            )
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            _ => panic!("expected Ok"),
+        };
+
+        let path = index.resolve_path(&id).unwrap();
+        let content = repo.read_file(&path).unwrap();
+        assert!(
+            content.contains("date: 2025-12-25"),
+            "explicit date should be preserved in frontmatter: {content}"
+        );
+
+        // Verify the explicit date is NOT overridden by the ID-derived date
+        let id_derived = format!("{}-{}-{}", &id[0..4], &id[4..6], &id[6..8]);
+        let parsed = crate::parser::parse(&content, &path).unwrap();
+        assert_eq!(
+            parsed.meta.date.as_deref(),
+            Some("2025-12-25"),
+            "explicit date should win over ID-derived date ({id_derived})"
+        );
+    }
 }
