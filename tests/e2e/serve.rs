@@ -1613,3 +1613,44 @@ fn search_untyped_doogat_has_null_enriched_fields() {
     assert!(hit["type"].is_null(), "untyped doogat should have null type");
     assert!(hit["fields"].is_null(), "untyped doogat should have null fields");
 }
+
+#[test]
+fn search_returns_query_normalized() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a doogat so search has content
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({
+            "input": { "title": "Normalization Test", "content": "normalizeword body" }
+        }),
+    );
+    assert!(r.get("errors").is_none(), "create failed: {r}");
+
+    // Search with unsorted AND query
+    let result = server.graphql(
+        r#"{ search(query: "b AND a") { queryNormalized totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "search failed: {result}");
+    assert_eq!(
+        result["data"]["search"]["queryNormalized"].as_str().unwrap(),
+        "a and b",
+        "queryNormalized should sort AND operands"
+    );
+}
+
+#[test]
+fn normalize_search_query_standalone() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let result = server.graphql(
+        r#"{ normalizeSearchQuery(query: "Tag=svelte AND category=work.portals") }"#,
+    );
+    assert!(result.get("errors").is_none(), "normalize failed: {result}");
+    assert_eq!(
+        result["data"]["normalizeSearchQuery"].as_str().unwrap(),
+        "category=work.portals and tag=svelte"
+    );
+}
