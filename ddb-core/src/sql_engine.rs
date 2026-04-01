@@ -859,19 +859,26 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
-        // Validate allowed_values for literal assignments
-        for col_def in &schema.columns {
-            if let Some(ref allowed) = col_def.allowed_values {
-                if let Some(val) = updates.get(&col_def.name) {
-                    if !val.is_empty() && !allowed.contains(val) {
-                        return Err(DoogatError::Validation(format!(
-                            "column '{}': value '{}' not in allowed values {:?}",
-                            col_def.name, val, allowed
-                        )));
+        // Helper: validate allowed_values constraints on all updates
+        let validate_allowed_values =
+            |schema: &TableSchema, updates: &BTreeMap<String, String>| -> Result<()> {
+                for col_def in &schema.columns {
+                    if let Some(ref allowed) = col_def.allowed_values {
+                        if let Some(val) = updates.get(&col_def.name) {
+                            if !val.is_empty() && !allowed.contains(val) {
+                                return Err(DoogatError::Validation(format!(
+                                    "column '{}': value '{}' not in allowed values {:?}",
+                                    col_def.name, val, allowed
+                                )));
+                            }
+                        }
                     }
                 }
-            }
-        }
+                Ok(())
+            };
+
+        // Validate literal assignments early (fail fast before touching rows)
+        validate_allowed_values(&schema, &updates)?;
 
         // Helper: evaluate deferred expressions in a row context, merge into updates
         let eval_deferred = |conn: &rusqlite::Connection,
@@ -882,24 +889,13 @@ impl<'a> SqlEngine<'a> {
          -> Result<()> {
             for (col, sql) in deferred {
                 let eval_sql =
-                    format!("SELECT {sql} FROM \"{table_name}\" WHERE id = '{doogat_id}'");
+                    format!("SELECT {sql} FROM \"{table_name}\" WHERE id = ?1");
                 let result: rusqlite::types::Value = conn
-                    .query_row(&eval_sql, [], |row| row.get(0))
+                    .query_row(&eval_sql, rusqlite::params![doogat_id], |row| row.get(0))
                     .map_err(|e| {
                         DoogatError::SqlEngine(format!("expression eval failed: {e}"))
                     })?;
-                let val = match result {
-                    rusqlite::types::Value::Text(s) => s,
-                    rusqlite::types::Value::Integer(n) => n.to_string(),
-                    rusqlite::types::Value::Real(f) => f.to_string(),
-                    rusqlite::types::Value::Null => String::new(),
-                    rusqlite::types::Value::Blob(_) => {
-                        return Err(DoogatError::SqlEngine(
-                            "BLOB result not supported in expression".into(),
-                        ))
-                    }
-                };
-                updates.insert(col.clone(), val);
+                updates.insert(col.clone(), sqlite_value_to_string(result)?);
             }
             Ok(())
         };
@@ -914,6 +910,8 @@ impl<'a> SqlEngine<'a> {
                     &doogat_id,
                     &mut updates,
                 )?;
+                // Re-validate after deferred expressions are resolved
+                validate_allowed_values(&schema, &updates)?;
             }
             let path = self.index.resolve_path(&doogat_id)?;
             let content = self.read_content(&path)?;
@@ -950,6 +948,7 @@ impl<'a> SqlEngine<'a> {
             let mut row_updates = updates.clone();
             if !deferred.is_empty() {
                 eval_deferred(&self.index.conn, &deferred, &table_name, id, &mut row_updates)?;
+                validate_allowed_values(&schema, &row_updates)?;
             }
             let content = self.read_content(path)?;
             let mut parsed = parser::parse(&content, path)?;
@@ -2203,6 +2202,19 @@ fn expr_to_string(expr: &Expr) -> Result<String> {
     }
 }
 
+/// Convert a rusqlite Value to a String for use as a frontmatter field value.
+fn sqlite_value_to_string(result: rusqlite::types::Value) -> Result<String> {
+    match result {
+        rusqlite::types::Value::Text(s) => Ok(s),
+        rusqlite::types::Value::Integer(n) => Ok(n.to_string()),
+        rusqlite::types::Value::Real(f) => Ok(f.to_string()),
+        rusqlite::types::Value::Null => Ok(String::new()),
+        rusqlite::types::Value::Blob(_) => Err(DoogatError::SqlEngine(
+            "BLOB result not supported in expression".into(),
+        )),
+    }
+}
+
 /// Evaluate a SQL expression, using SQLite for complex expressions.
 /// Simple literals are returned directly without a SQLite roundtrip.
 fn eval_expr(conn: &rusqlite::Connection, expr: &Expr) -> Result<String> {
@@ -2213,15 +2225,7 @@ fn eval_expr(conn: &rusqlite::Connection, expr: &Expr) -> Result<String> {
     let result: rusqlite::types::Value = conn
         .query_row(&format!("SELECT {sql}"), [], |row| row.get(0))
         .map_err(|e| DoogatError::SqlEngine(format!("expression eval failed: {e}")))?;
-    match result {
-        rusqlite::types::Value::Text(s) => Ok(s),
-        rusqlite::types::Value::Integer(n) => Ok(n.to_string()),
-        rusqlite::types::Value::Real(f) => Ok(f.to_string()),
-        rusqlite::types::Value::Null => Ok(String::new()),
-        rusqlite::types::Value::Blob(_) => Err(DoogatError::SqlEngine(
-            "BLOB result not supported in expression".into(),
-        )),
-    }
+    sqlite_value_to_string(result)
 }
 
 fn eval_values(conn: &rusqlite::Connection, exprs: &[Expr]) -> Result<Vec<String>> {
@@ -6321,5 +6325,39 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], "5");
+    }
+
+    #[test]
+    fn update_expression_rejects_invalid_allowed_value() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE expr_enum (name TEXT, status ENUM('open','closed'))")
+            .unwrap();
+
+        let id = match engine
+            .execute("INSERT INTO expr_enum (name, status) VALUES ('item', 'open')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        // Literal update with invalid value should be rejected
+        let err = engine
+            .execute(&format!(
+                "UPDATE expr_enum SET status = 'invalid' WHERE id = '{id}'"
+            ))
+            .unwrap_err();
+        assert!(format!("{err}").contains("not in allowed values"));
+
+        // Expression update with invalid value should also be rejected
+        let err = engine
+            .execute(&format!(
+                "UPDATE expr_enum SET status = UPPER('invalid') WHERE id = '{id}'"
+            ))
+            .unwrap_err();
+        assert!(format!("{err}").contains("not in allowed values"));
     }
 }
