@@ -838,8 +838,9 @@ impl<'a> SqlEngine<'a> {
         let table_name = unquote_identifier(&table.relation.to_string());
         let schema = self.load_schema(&table_name)?;
 
-        // Build assignment map
+        // Build assignment map: literals evaluated now, complex expressions deferred
         let mut updates: BTreeMap<String, String> = BTreeMap::new();
+        let mut deferred: Vec<(String, String)> = Vec::new(); // (col_name, sql_text)
         for assignment in assignments {
             let col_name = match &assignment.target {
                 AssignmentTarget::ColumnName(name) => name.to_string().to_lowercase(),
@@ -849,11 +850,16 @@ impl<'a> SqlEngine<'a> {
                     .collect::<Vec<_>>()
                     .join("."),
             };
-            let val = eval_expr(&self.index.conn, &assignment.value)?;
-            updates.insert(col_name, val);
+            if is_literal_expr(&assignment.value) {
+                let val = expr_to_string(&assignment.value)?;
+                updates.insert(col_name, val);
+            } else {
+                let sql = value_to_sql(&assignment.value)?;
+                deferred.push((col_name, sql));
+            }
         }
 
-        // Validate allowed_values constraints
+        // Validate allowed_values for literal assignments
         for col_def in &schema.columns {
             if let Some(ref allowed) = col_def.allowed_values {
                 if let Some(val) = updates.get(&col_def.name) {
@@ -867,8 +873,48 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
+        // Helper: evaluate deferred expressions in a row context, merge into updates
+        let eval_deferred = |conn: &rusqlite::Connection,
+                             deferred: &[(String, String)],
+                             table_name: &str,
+                             doogat_id: &str,
+                             updates: &mut BTreeMap<String, String>|
+         -> Result<()> {
+            for (col, sql) in deferred {
+                let eval_sql =
+                    format!("SELECT {sql} FROM \"{table_name}\" WHERE id = '{doogat_id}'");
+                let result: rusqlite::types::Value = conn
+                    .query_row(&eval_sql, [], |row| row.get(0))
+                    .map_err(|e| {
+                        DoogatError::SqlEngine(format!("expression eval failed: {e}"))
+                    })?;
+                let val = match result {
+                    rusqlite::types::Value::Text(s) => s,
+                    rusqlite::types::Value::Integer(n) => n.to_string(),
+                    rusqlite::types::Value::Real(f) => f.to_string(),
+                    rusqlite::types::Value::Null => String::new(),
+                    rusqlite::types::Value::Blob(_) => {
+                        return Err(DoogatError::SqlEngine(
+                            "BLOB result not supported in expression".into(),
+                        ))
+                    }
+                };
+                updates.insert(col.clone(), val);
+            }
+            Ok(())
+        };
+
         // Fast path: single-row WHERE id = '...'
         if let Ok(doogat_id) = extract_where_id(selection) {
+            if !deferred.is_empty() {
+                eval_deferred(
+                    &self.index.conn,
+                    &deferred,
+                    &table_name,
+                    &doogat_id,
+                    &mut updates,
+                )?;
+            }
             let path = self.index.resolve_path(&doogat_id)?;
             let content = self.read_content(&path)?;
             let mut parsed = parser::parse(&content, &path)?;
@@ -899,11 +945,17 @@ impl<'a> SqlEngine<'a> {
         }
 
         let mut files: Vec<(String, String)> = Vec::with_capacity(matches.len());
-        for (_, path) in &matches {
+        let mut per_row_updates: Vec<BTreeMap<String, String>> = Vec::with_capacity(matches.len());
+        for (id, path) in &matches {
+            let mut row_updates = updates.clone();
+            if !deferred.is_empty() {
+                eval_deferred(&self.index.conn, &deferred, &table_name, id, &mut row_updates)?;
+            }
             let content = self.read_content(path)?;
             let mut parsed = parser::parse(&content, path)?;
-            apply_updates_to_doogat(&mut parsed, &schema, &updates);
+            apply_updates_to_doogat(&mut parsed, &schema, &row_updates);
             files.push((path.clone(), parser::serialize(&parsed)));
+            per_row_updates.push(row_updates);
         }
 
         if let Some(ref mut buf) = self.txn {
@@ -923,11 +975,11 @@ impl<'a> SqlEngine<'a> {
         }
 
         // Re-index and update materialized rows
-        for (id, path) in &matches {
+        for ((id, path), row_updates) in matches.iter().zip(per_row_updates.iter()) {
             let content = self.read_content(path)?;
             let reparsed = parser::parse(&content, path)?;
             self.index.index_doogat(&reparsed)?;
-            self.update_materialized_row(&schema, id, &updates)?;
+            self.update_materialized_row(&schema, id, row_updates)?;
         }
 
         Ok(SqlResult::Affected(matches.len()))

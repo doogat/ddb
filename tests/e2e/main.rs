@@ -21,6 +21,7 @@ mod search_links;
 mod sequence;
 mod serve;
 mod server_mutations;
+mod sql_expressions_test;
 mod sql_lifecycle;
 mod subscriptions;
 mod sync_crdt;
