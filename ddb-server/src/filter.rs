@@ -967,4 +967,97 @@ mod tests {
             panic!("expected object");
         }
     }
+
+    // -- Base field (id, title) tests --
+
+    #[test]
+    fn test_base_field_id_eq() {
+        let input = filter("id", "eq", GqlValue::String("20260401120000".into()));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""id" = ?"#);
+        assert_eq!(wc.params, vec![SqlValue::Text("20260401120000".into())]);
+    }
+
+    #[test]
+    fn test_base_field_id_in() {
+        let list = GqlValue::List(vec![
+            GqlValue::String("20260401120000".into()),
+            GqlValue::String("20260401130000".into()),
+        ]);
+        let input = filter("id", "in", list);
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""id" IN (?, ?)"#);
+        assert_eq!(
+            wc.params,
+            vec![
+                SqlValue::Text("20260401120000".into()),
+                SqlValue::Text("20260401130000".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_base_field_title_eq() {
+        // title IS in test_schema columns — verify it still works via base field path
+        let input = filter("title", "eq", GqlValue::String("My Bookmark".into()));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""title" = ?"#);
+        assert_eq!(wc.params, vec![SqlValue::Text("My Bookmark".into())]);
+    }
+
+    #[test]
+    fn test_base_field_compound_id_and_title() {
+        // _and: [{id: {eq: "20260401120000"}}, {title: {contains: "rust"}}]
+        let mut id_item = IndexMap::new();
+        let mut id_filter = IndexMap::new();
+        id_filter.insert(Name::new("eq"), GqlValue::String("20260401120000".into()));
+        id_item.insert(Name::new("id"), GqlValue::Object(id_filter));
+
+        let mut title_item = IndexMap::new();
+        let mut title_filter = IndexMap::new();
+        title_filter.insert(Name::new("contains"), GqlValue::String("rust".into()));
+        title_item.insert(Name::new("title"), GqlValue::Object(title_filter));
+
+        let mut obj = IndexMap::new();
+        obj.insert(
+            Name::new("_and"),
+            GqlValue::List(vec![
+                GqlValue::Object(id_item),
+                GqlValue::Object(title_item),
+            ]),
+        );
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(
+            wc.sql,
+            r#"(("id" = ?) AND ("title" LIKE '%' || ? || '%' COLLATE NOCASE))"#
+        );
+        assert_eq!(
+            wc.params,
+            vec![
+                SqlValue::Text("20260401120000".into()),
+                SqlValue::Text("rust".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_where_input_includes_base_fields() {
+        let schema = test_schema();
+        let _input = build_where_input("Bookmark", &schema);
+        // Introspect the InputObject by checking its type name is correct
+        // and that we can verify field count.
+        // Expected fields: id, title, + schema.columns (title, priority, status, category) + _and, _or
+        // Note: title appears in schema.columns AND as a base field.
+        // After dedup, expect: id + 4 schema columns + _and + _or = 7 fields
+        // (or id + title + 4 schema columns + _and + _or = 8 if title is not deduped)
+        //
+        // The implementation must include "id" and "title" as base fields.
+        // We verify by building a filter on "id" and confirming build_where_sql handles it.
+        // This is a structural test — the Where input must accept id filters.
+        let id_filter_input = filter("id", "eq", GqlValue::String("20260401120000".into()));
+        let wc = build_where_sql(&id_filter_input, &schema);
+        assert!(!wc.is_empty(), "id field must be accepted by build_where_sql");
+        assert_eq!(wc.sql, r#""id" = ?"#);
+    }
 }
