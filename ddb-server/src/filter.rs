@@ -88,6 +88,15 @@ pub fn build_where_input(type_name: &str, schema: &TableSchema) -> InputObject {
         input = input.field(InputValue::new(&gql_name, TypeRef::named(filter_type)));
     }
 
+    // Base doogat fields (always present in materialized tables)
+    let col_names: Vec<&str> = schema.columns.iter().map(|c| c.name.as_str()).collect();
+    if !col_names.contains(&"id") {
+        input = input.field(InputValue::new("id", TypeRef::named("IDFilter")));
+    }
+    if !col_names.contains(&"title") {
+        input = input.field(InputValue::new("title", TypeRef::named("StringFilter")));
+    }
+
     // Compound combinators (self-referencing)
     input = input.field(InputValue::new("_and", TypeRef::named_list(&name)));
     input = input.field(InputValue::new("_or", TypeRef::named_list(&name)));
@@ -409,6 +418,9 @@ impl WhereClause {
     }
 }
 
+/// Base doogat fields present in every materialized table but not in `schema.columns`.
+const BASE_FILTER_FIELDS: &[&str] = &["id", "title"];
+
 /// Build a parameterized WHERE clause from a GraphQL filter input value.
 ///
 /// The `input` should be the resolved `{Type}Where` object value.
@@ -464,7 +476,9 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
                 }
             }
             _ => {
-                if let Some(col_name) = resolve_column(&schema.columns, field) {
+                let col_name = resolve_column(&schema.columns, field)
+                    .or_else(|| BASE_FILTER_FIELDS.iter().find(|&&f| f == field).copied());
+                if let Some(col_name) = col_name {
                     if let GqlValue::Object(filter_obj) = value {
                         for (op, val) in filter_obj {
                             if let Some(cond) =
