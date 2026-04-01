@@ -1518,3 +1518,106 @@ fn filter_base_field_introspection() {
     assert!(field_names.contains(&"status"), "TaskWhere must still have user-defined status field, got: {field_names:?}");
     assert!(field_names.contains(&"_and"), "TaskWhere must have _and combinator, got: {field_names:?}");
 }
+
+#[test]
+fn search_returns_enriched_fields() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a typedef via SQL
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE link (url TEXT NOT NULL, description TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    // Insert a typed doogat with tags and fields via SQL
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Enriched Search Test', 'https://example.com', 'Example site')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT link failed: {r}");
+    let id = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .trim();
+    // Extract just the doogat ID (format: "insert 1 row(s) into link\n20260401...")
+    let id = id.split_whitespace().last().unwrap_or(id);
+
+    // Add tags to the doogat
+    let r = server.graphql_with_vars(
+        r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id } }"#,
+        serde_json::json!({
+            "input": {
+                "id": id,
+                "tags": ["rust", "testing"]
+            }
+        }),
+    );
+    assert!(r.get("errors").is_none(), "update tags failed: {r}");
+
+    // Search with enriched fields
+    let result = server.graphql(
+        r#"{ search(query: "Enriched Search Test") { hits { id title tags type fields created_at snippet } totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "search failed: {result}");
+
+    let hits = result["data"]["search"]["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "expected 1 hit, got: {hits:?}");
+    let hit = &hits[0];
+
+    // tags
+    let tags = hit["tags"].as_array().unwrap();
+    let tag_strs: Vec<&str> = tags.iter().map(|t| t.as_str().unwrap()).collect();
+    assert!(tag_strs.contains(&"rust"), "tags should contain 'rust', got: {tag_strs:?}");
+    assert!(tag_strs.contains(&"testing"), "tags should contain 'testing', got: {tag_strs:?}");
+
+    // type
+    assert_eq!(hit["type"].as_str().unwrap(), "link");
+
+    // fields (JSON string containing url and description)
+    let fields_str = hit["fields"].as_str().expect("fields should be a JSON string");
+    let fields: serde_json::Value = serde_json::from_str(fields_str).expect("fields should be valid JSON");
+    assert_eq!(fields["url"].as_str().unwrap(), "https://example.com");
+    assert_eq!(fields["description"].as_str().unwrap(), "Example site");
+
+    // created_at (should be non-null since date defaults from ID)
+    assert!(hit["created_at"].is_string(), "created_at should be present");
+}
+
+#[test]
+fn search_untyped_doogat_has_null_enriched_fields() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create an untyped doogat
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({
+            "input": {
+                "title": "Untyped Note",
+                "content": "untypedsearchword body"
+            }
+        }),
+    );
+    assert!(r.get("errors").is_none(), "create doogat failed: {r}");
+
+    // Search
+    let result = server.graphql(
+        r#"{ search(query: "untypedsearchword") { hits { id tags type fields created_at } } }"#,
+    );
+    assert!(result.get("errors").is_none(), "search failed: {result}");
+
+    let hits = result["data"]["search"]["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1);
+    let hit = &hits[0];
+
+    // Empty tags, null type and fields
+    let tags = hit["tags"].as_array().unwrap();
+    assert!(tags.is_empty(), "untyped doogat should have empty tags");
+    assert!(hit["type"].is_null(), "untyped doogat should have null type");
+    assert!(hit["fields"].is_null(), "untyped doogat should have null fields");
+}

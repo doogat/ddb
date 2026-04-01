@@ -104,9 +104,11 @@ RESULT=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$GQL_ID\\\",
 echo "$RESULT" | grep -q '"Smoke Updated"'
 pass "serve: graphql update"
 
-RESULT=$(gql '{"query":"{ search(query: \"Smoke\") { totalCount hits { id title } } }"}')
+RESULT=$(gql '{"query":"{ search(query: \"Smoke\") { totalCount hits { id title tags type fields created_at } } }"}')
 echo "$RESULT" | grep -q '"search"'
-pass "serve: graphql search"
+echo "$RESULT" | grep -q '"tags"'
+echo "$RESULT" | grep -q '"created_at"'
+pass "serve: graphql search with enriched fields"
 
 RESULT=$(gql '{"query":"{ doogats { id title } }"}')
 echo "$RESULT" | grep -q '"doogats"'

@@ -165,9 +165,11 @@ $result = gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$GQL_ID\`", 
 if ($result -notmatch '"Smoke Updated"') { throw "graphql update failed" }
 pass "serve: graphql update"
 
-$result = gql '{"query":"{ search(query: \"Smoke\") { totalCount hits { id title } } }"}'
+$result = gql '{"query":"{ search(query: \"Smoke\") { totalCount hits { id title tags type fields created_at } } }"}'
 if ($result -notmatch '"search"') { throw "graphql search failed" }
-pass "serve: graphql search"
+if ($result -notmatch '"tags"') { throw "graphql search missing tags" }
+if ($result -notmatch '"created_at"') { throw "graphql search missing created_at" }
+pass "serve: graphql search with enriched fields"
 
 $result = gql '{"query":"{ doogats { id title } }"}'
 if ($result -notmatch '"doogats"') { throw "graphql doogats failed" }

@@ -950,7 +950,7 @@ impl Index {
             }
         }
 
-        // Batch-fetch fields
+        // Batch-fetch fields from _ddb_fields (frontmatter extras + inline fields)
         {
             let sql = format!(
                 "SELECT doogat_id, key, value FROM _ddb_fields WHERE doogat_id IN ({placeholders})"
@@ -977,6 +977,91 @@ impl Index {
                     for hit in hits.iter_mut() {
                         if let Some(fields) = field_map.remove(&hit.id) {
                             hit.fields = Some(fields);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Supplement with fields from materialized type tables (covers body-zone columns)
+        {
+            use materialize::is_core_column;
+
+            // Group hit indices by type
+            let mut type_groups: std::collections::HashMap<String, Vec<usize>> =
+                std::collections::HashMap::new();
+            for (i, hit) in hits.iter().enumerate() {
+                if let Some(ref t) = hit.doogat_type {
+                    type_groups.entry(t.clone()).or_default().push(i);
+                }
+            }
+
+            for (type_name, hit_indices) in &type_groups {
+                // Get type-specific column names from the materialized table
+                let pragma_sql = format!("PRAGMA table_info(\"{}\")", type_name);
+                let col_names: Vec<String> = match self.conn.prepare(&pragma_sql) {
+                    Ok(mut stmt) => stmt
+                        .query_map([], |row| row.get::<_, String>(1))
+                        .ok()
+                        .map(|rows| {
+                            rows.flatten()
+                                .filter(|name| !is_core_column(name))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    Err(_) => continue,
+                };
+                if col_names.is_empty() {
+                    continue;
+                }
+
+                let type_ids: Vec<&str> = hit_indices
+                    .iter()
+                    .map(|&i| hits[i].id.as_str())
+                    .collect();
+                let type_placeholders: String = (1..=type_ids.len())
+                    .map(|i| format!("?{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let col_select: String = col_names
+                    .iter()
+                    .map(|c| format!("\"{}\"", c))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT id, {} FROM \"{}\" WHERE id IN ({})",
+                    col_select, type_name, type_placeholders
+                );
+
+                if let Ok(mut stmt) = self.conn.prepare(&sql) {
+                    let params: Vec<&dyn rusqlite::types::ToSql> =
+                        type_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+                    if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
+                        let id: String = row.get(0)?;
+                        let mut fields = std::collections::BTreeMap::new();
+                        for (col_idx, col_name) in col_names.iter().enumerate() {
+                            if let Ok(Some(val)) = row.get::<_, Option<String>>(col_idx + 1) {
+                                fields.insert(col_name.clone(), val);
+                            }
+                        }
+                        Ok((id, fields))
+                    }) {
+                        let mut field_map: std::collections::HashMap<
+                            String,
+                            std::collections::BTreeMap<String, String>,
+                        > = std::collections::HashMap::new();
+                        for row in rows.flatten() {
+                            if !row.1.is_empty() {
+                                field_map.insert(row.0, row.1);
+                            }
+                        }
+                        for &i in hit_indices {
+                            if let Some(new_fields) = field_map.remove(&hits[i].id) {
+                                match hits[i].fields.as_mut() {
+                                    Some(existing) => existing.extend(new_fields),
+                                    None => hits[i].fields = Some(new_fields),
+                                }
+                            }
                         }
                     }
                 }
