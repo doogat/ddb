@@ -955,9 +955,8 @@ impl Index {
                         }
                     }
                 }
-                Err(_e) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("enrich_search_hits: tags query failed: {_e}");
+                Err(e) => {
+                    tracing::warn!(error = %e, "enrich_search_hits: tags query failed");
                 }
             }
         }
@@ -995,9 +994,8 @@ impl Index {
                         }
                     }
                 }
-                Err(_e) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("enrich_search_hits: fields query failed: {_e}");
+                Err(e) => {
+                    tracing::warn!(error = %e, "enrich_search_hits: fields query failed");
                 }
             }
         }
@@ -1029,9 +1027,8 @@ impl Index {
                                 .collect()
                         })
                         .unwrap_or_default(),
-                    Err(_e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("enrich_search_hits: PRAGMA for {type_name} failed: {_e}");
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, "enrich_search_hits: PRAGMA failed");
                         continue;
                     }
                 };

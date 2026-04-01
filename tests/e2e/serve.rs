@@ -1537,15 +1537,7 @@ fn search_returns_enriched_fields() {
         serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Enriched Search Test', 'https://example.com', 'Example site')" }),
     );
     assert!(r.get("errors").is_none(), "INSERT link failed: {r}");
-    let id = r["data"]["executeSql"]["message"]
-        .as_str()
-        .unwrap()
-        .lines()
-        .next()
-        .unwrap()
-        .trim();
-    // First line is "insert 1 row(s) into link", second line is the ID
-    let id = id.split_whitespace().last().unwrap_or(id);
+    let id = r["data"]["executeSql"]["message"].as_str().unwrap().trim();
 
     // Add tags to the doogat
     let r = server.graphql_with_vars(
