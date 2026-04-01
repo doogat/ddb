@@ -271,7 +271,13 @@ impl Parser {
 fn serialize(expr: &SearchExpr) -> String {
     match expr {
         SearchExpr::FullText(w) => w.clone(),
-        SearchExpr::FieldEquals { field, value } => format!("{field}={value}"),
+        SearchExpr::FieldEquals { field, value } => {
+            if value.contains(' ') {
+                format!("{field}=\"{value}\"")
+            } else {
+                format!("{field}={value}")
+            }
+        }
         SearchExpr::And(children) => {
             let mut pairs: Vec<(String, String)> = children
                 .iter()
@@ -435,7 +441,7 @@ mod tests {
     fn quoted_string_in_field_filter_preserves_spaces() {
         assert_eq!(
             normalize("title:\"meeting minutes\""),
-            "title=meeting minutes"
+            "title=\"meeting minutes\""
         );
     }
 
@@ -443,7 +449,7 @@ mod tests {
     fn equals_quoted_value_preserves_spaces() {
         assert_eq!(
             normalize("field=\"quoted value\""),
-            "field=quoted value"
+            "field=\"quoted value\""
         );
     }
 
@@ -534,5 +540,46 @@ mod tests {
         assert_eq!(normalize("not a"), "not a");
         assert_eq!(normalize("Not a"), "not a");
         assert_eq!(normalize("NOT a"), "not a");
+    }
+
+    // ── Idempotency ────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_is_idempotent() {
+        let inputs = [
+            "Tag=Svelte",
+            "b AND a",
+            "  meeting   minutes  ",
+            "Tag=svelte AND category=work.portals",
+            "(a OR b) AND c",
+            "NOT tag=archive",
+            ")))bad((( query",
+            "field=\"quoted value\"",
+            "title:\"meeting minutes\"",
+            "a AND b OR c",
+            "(c OR d) AND (a OR b)",
+            "NOT (a AND (b OR c))",
+        ];
+        for input in &inputs {
+            let once = normalize(input);
+            let twice = normalize(&once);
+            assert_eq!(once, twice, "not idempotent for input: {input}");
+        }
+    }
+
+    // ── Edge cases from PRD risks ──────────────────────────────────
+
+    #[test]
+    fn empty_field_value_fallback() {
+        // field= with empty value: treated as field filter with empty value
+        let result = normalize("field=");
+        assert_eq!(result, "field=");
+    }
+
+    #[test]
+    fn empty_field_name_parses_as_terms() {
+        // =value with no field: = becomes a word, value becomes a word, implicit AND
+        let result = normalize("=value");
+        assert_eq!(result, "= and value");
     }
 }
