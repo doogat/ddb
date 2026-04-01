@@ -270,7 +270,13 @@ impl Parser {
 
 fn serialize(expr: &SearchExpr) -> String {
     match expr {
-        SearchExpr::FullText(w) => w.clone(),
+        SearchExpr::FullText(w) => {
+            if w.contains(' ') {
+                format!("\"{w}\"")
+            } else {
+                w.clone()
+            }
+        }
         SearchExpr::FieldEquals { field, value } => {
             if value.contains(' ') {
                 format!("{field}=\"{value}\"")
@@ -559,6 +565,7 @@ mod tests {
             "a AND b OR c",
             "(c OR d) AND (a OR b)",
             "NOT (a AND (b OR c))",
+            "\"meeting minutes\"",
         ];
         for input in &inputs {
             let once = normalize(input);
@@ -568,6 +575,14 @@ mod tests {
     }
 
     // ── Edge cases from PRD risks ──────────────────────────────────
+
+    #[test]
+    fn standalone_quoted_string_preserves_quotes() {
+        assert_eq!(
+            normalize("\"meeting minutes\""),
+            "\"meeting minutes\""
+        );
+    }
 
     #[test]
     fn empty_field_value_fallback() {
