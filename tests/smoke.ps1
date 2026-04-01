@@ -555,6 +555,12 @@ $output = ddb query "UPDATE exprtbl SET sort_order = IFNULL(NULL, 42) WHERE id =
 if ($output -notmatch "1 row") { throw "update ifnull failed: $output" }
 $output = ddb query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID1'"
 if ($output -notmatch "42") { throw "ifnull should yield 42: $output" }
+# NULLIF returns null (empty in ddb) for equal args
+ddb query "INSERT INTO exprtbl (sort_order) VALUES (NULLIF(0, 0))" | Out-Null
+# Nested expression: ABS(-1) + LENGTH('hi') = 1 + 2 = 3
+$NESTED_ID = ddb query "INSERT INTO exprtbl (sort_order) VALUES (COALESCE(ABS(-1) + LENGTH('hi'), 0))"
+$output = ddb query "SELECT sort_order FROM exprtbl WHERE id = '$NESTED_ID'"
+if ($output -notmatch "3") { throw "nested expression should yield 3: $output" }
 # Unlisted function should be rejected
 if (-not (ddb-fails query "INSERT INTO exprtbl (sort_order) VALUES (BADFUNC(1))")) { throw "unlisted function should be rejected" }
 ddb query "DROP TABLE exprtbl CASCADE" | Out-Null

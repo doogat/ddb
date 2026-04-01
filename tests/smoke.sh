@@ -465,6 +465,11 @@ echo "$EXPR_ID2" | grep -qE "^[0-9]{14}$"
 $DDB query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID2'" | grep -q "1"
 $DDB query "UPDATE exprtbl SET sort_order = IFNULL(NULL, 42) WHERE id = '$EXPR_ID1'" | grep -q "1 row(s) affected"
 $DDB query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID1'" | grep -q "42"
+# NULLIF returns null (empty in ddb) for equal args
+$DDB query "INSERT INTO exprtbl (sort_order) VALUES (NULLIF(0, 0))" >/dev/null
+# Nested expression: ABS(-1) + LENGTH('hi') = 1 + 2 = 3
+NESTED_ID=$($DDB query "INSERT INTO exprtbl (sort_order) VALUES (COALESCE(ABS(-1) + LENGTH('hi'), 0))")
+$DDB query "SELECT sort_order FROM exprtbl WHERE id = '$NESTED_ID'" | grep -q "3"
 # Unlisted function should be rejected
 if $DDB query "INSERT INTO exprtbl (sort_order) VALUES (BADFUNC(1))" 2>/dev/null; then
   echo "FAIL: unlisted function should be rejected" >&2; exit 1
