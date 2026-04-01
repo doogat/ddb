@@ -3,7 +3,7 @@
 ## Create
 
 ```bash
-ddb create --title "Note Title" [--tags "tag1,tag2"] [--type "permanent"] [--body "Content"]
+ddb create --title "Note Title" [--tags "tag1,tag2"] [--type "permanent"] [--body "Content"] [--set key=value ...]
 ```
 
 | Flag | Required | Description |
@@ -12,6 +12,7 @@ ddb create --title "Note Title" [--tags "tag1,tag2"] [--type "permanent"] [--bod
 | `--tags` | No | Comma-separated tags |
 | `--type` | No | Doogat type (e.g., permanent, literature, fleeting) |
 | `--body` | No | Body text (default: empty) |
+| `--set` | No | Set a frontmatter field (repeatable, format: `key=value`) |
 
 The command:
 1. Generates a timestamp ID
@@ -41,10 +42,10 @@ Prints the raw Markdown content from the Git tree.
 ## Update
 
 ```bash
-ddb update <ID> [--title "New Title"] [--tags "new,tags"] [--type "new-type"] [--body "New body"]
+ddb update <ID> [--title "New Title"] [--tags "new,tags"] [--type "new-type"] [--body "New body"] [--set key=value ...] [--unset key ...]
 ```
 
-Only specified fields are changed. Unspecified fields remain as-is. The update:
+Only specified fields are changed. Unspecified fields remain as-is. `--set key=value` adds or overwrites a frontmatter field. `--set key=` clears a field's value. `--unset key` removes a field entirely. The update:
 1. Reads the current doogat from Git
 2. Parses it
 3. Applies changes

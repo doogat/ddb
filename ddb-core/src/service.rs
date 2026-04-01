@@ -16,6 +16,23 @@ use crate::types::{
     UnlinkedMention, DoogatId, DoogatMeta,
 };
 
+/// Extra frontmatter fields to set or remove during an update.
+pub struct ExtraFieldUpdates<'a> {
+    pub set: &'a std::collections::BTreeMap<String, crate::types::Value>,
+    pub unset: &'a [String],
+}
+
+impl Default for ExtraFieldUpdates<'_> {
+    fn default() -> Self {
+        static EMPTY_MAP: std::sync::LazyLock<std::collections::BTreeMap<String, crate::types::Value>> =
+            std::sync::LazyLock::new(std::collections::BTreeMap::new);
+        Self {
+            set: &EMPTY_MAP,
+            unset: &[],
+        }
+    }
+}
+
 /// Unified orchestration layer composing GitRepo, Index, and optional NoSQL
 /// index into a single entry point for all high-level operations.
 ///
@@ -219,10 +236,9 @@ impl DoogatService {
         tags: Option<&[String]>,
         doogat_type: Option<&str>,
         body: Option<&str>,
-        extra: &std::collections::BTreeMap<String, crate::types::Value>,
-        unset: &[String],
+        extra: &ExtraFieldUpdates<'_>,
     ) -> Result<()> {
-        self.update_doogat_parsed(id, title, tags, doogat_type, body, extra, unset)?;
+        self.update_doogat_parsed(id, title, tags, doogat_type, body, extra)?;
         Ok(())
     }
 
@@ -234,8 +250,7 @@ impl DoogatService {
         tags: Option<&[String]>,
         doogat_type: Option<&str>,
         body: Option<&str>,
-        extra: &std::collections::BTreeMap<String, crate::types::Value>,
-        unset: &[String],
+        extra: &ExtraFieldUpdates<'_>,
     ) -> Result<ParsedDoogat> {
         self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
@@ -254,10 +269,10 @@ impl DoogatService {
         if let Some(b) = body {
             parsed.body = b.to_owned();
         }
-        for key in unset {
+        for key in extra.unset {
             parsed.meta.extra.remove(key);
         }
-        for (key, value) in extra {
+        for (key, value) in extra.set {
             parsed.meta.extra.insert(key.clone(), value.clone());
         }
 
@@ -1223,7 +1238,7 @@ mod tests {
         assert!(content.contains("Test Note"));
         assert!(content.contains("Hello world"));
 
-        svc.update_doogat(&id, Some("Updated"), None, None, Some("New body"), &Default::default(), &[])
+        svc.update_doogat(&id, Some("Updated"), None, None, Some("New body"), &ExtraFieldUpdates::default())
             .unwrap();
         let content = svc.read_doogat(&id).unwrap();
         assert!(content.contains("Updated"));
@@ -1745,7 +1760,7 @@ mod tests {
         let created_date = before.meta.date.clone();
 
         std::thread::sleep(std::time::Duration::from_millis(50));
-        svc.update_doogat(&id, Some("Updated"), None, None, None, &Default::default(), &[]).unwrap();
+        svc.update_doogat(&id, Some("Updated"), None, None, None, &ExtraFieldUpdates::default()).unwrap();
 
         let after = svc.get_doogat_parsed(&id).unwrap();
         assert_eq!(after.meta.date, created_date, "date (created_at) should not change");
@@ -1857,7 +1872,7 @@ mod tests {
     fn update_returns_updated_at() {
         let (_tmp, svc) = fresh_svc();
         let id = svc.create_doogat("Before", &[], None, "body").unwrap();
-        let parsed = svc.update_doogat_parsed(&id, Some("After"), None, None, None, &Default::default(), &[]).unwrap();
+        let parsed = svc.update_doogat_parsed(&id, Some("After"), None, None, None, &ExtraFieldUpdates::default()).unwrap();
         assert!(
             parsed.updated_at.is_some(),
             "update_doogat_parsed should return updated_at in the response"

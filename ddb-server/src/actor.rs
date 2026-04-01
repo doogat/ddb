@@ -736,8 +736,7 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
                 tags.as_deref(),
                 doogat_type.as_deref(),
                 body.as_deref(),
-                &Default::default(),
-                &[],
+                &ddb_core::service::ExtraFieldUpdates::default(),
             );
             ActorReply::Doogat(Box::new(result))
         }
