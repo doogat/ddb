@@ -368,6 +368,13 @@ input BoolFilter   { eq: Boolean }
 input IDFilter     { eq: ID, in: [ID] }
 ```
 
+Every `{Type}Where` input includes `id: IDFilter` and `title: StringFilter` in addition to user-defined columns. These base fields exist in all materialized type tables, enabling single-record lookups and title searches on any typed query:
+
+```graphql
+{ links(where: { id: { eq: "20260401074007" } }) { items { id title url } } }
+{ links(where: { title: { contains: "example" } }) { items { id title } } }
+```
+
 Where inputs support compound logic with `_and` and `_or`:
 
 ```graphql
