@@ -1185,6 +1185,10 @@ pub struct SearchResult {
     pub snippet: String,
     pub rank: f64,
     pub updated_at: String,
+    pub tags: Vec<String>,
+    pub doogat_type: Option<String>,
+    pub fields: Option<BTreeMap<String, String>>,
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -792,7 +792,8 @@ impl Index {
         let order_clause = format!("ORDER BY bm25(_ddb_fts, 1.0, 1.0, 1.0, {boost})");
         let base = format!(
             "SELECT z.id, z.title, z.path, \
-             snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank, z.updated_at \
+             snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank, z.updated_at, \
+             z.type, z.date \
              FROM _ddb_fts \
              JOIN doogats z ON z.rowid = _ddb_fts.rowid \
              WHERE _ddb_fts MATCH ?1 {filter_sql}\
@@ -895,6 +896,8 @@ impl Index {
     }
 
     fn map_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {
+        let doogat_type: Option<String> = row.get(6)?;
+        let doogat_type = doogat_type.filter(|s| !s.is_empty());
         Ok(SearchResult {
             id: row.get(0)?,
             title: row.get(1)?,
@@ -902,6 +905,10 @@ impl Index {
             snippet: row.get(3)?,
             rank: row.get(4)?,
             updated_at: row.get::<_, String>(5).unwrap_or_default(),
+            tags: Vec::new(),
+            doogat_type,
+            fields: None,
+            created_at: row.get(7)?,
         })
     }
 
