@@ -651,6 +651,16 @@ pass "serve: base field id nonexistent returns empty"
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BF_ID\\\") }\"}" >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"test-widget\\\"\") { message } }"}' >/dev/null
 
+# 43. SQL INSERT via executeSql defaults date, created_at non-null
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE datecheck (name TEXT)\"){message}}"}' >/dev/null
+DC_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO datecheck (name) VALUES (\\\"DateTest\\\")\"){message}}"}')
+DC_ID=$(echo "$DC_RESULT" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+DC_EXPECTED="$(echo "$DC_ID" | cut -c1-4)-$(echo "$DC_ID" | cut -c5-6)-$(echo "$DC_ID" | cut -c7-8)"
+DC_QUERY=$(gql "{\"query\":\"{ datechecks { items { id created_at } } }\"}")
+DC_CREATED=$(echo "$DC_QUERY" | sed -n 's/.*"created_at":"\([^"]*\)".*/\1/p')
+[ "$DC_CREATED" = "$DC_EXPECTED" ]
+pass "serve: SQL INSERT defaults date, created_at matches ID"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

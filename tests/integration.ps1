@@ -681,6 +681,16 @@ pass "serve: base field id nonexistent returns empty"
 gql "{`"query`":`"mutation { deleteDoogat(id: \\\`"$BF_ID\\\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { executeSql(sql: \`"DROP TABLE \\\`"test-widget\\\`"\`") { message } }`"}" | Out-Null
 
+# 43. SQL INSERT via executeSql defaults date, created_at non-null
+gql "{`"query`":`"mutation{executeSql(sql:\`"CREATE TABLE datecheck (name TEXT)\`"){message}}`"}" | Out-Null
+$dcResult = gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO datecheck (name) VALUES (\\\`"DateTest\\\`")\`"){message}}`"}"
+$dcId = ($dcResult | ConvertFrom-Json).data.executeSql.message
+$dcExpected = "$($dcId.Substring(0,4))-$($dcId.Substring(4,2))-$($dcId.Substring(6,2))"
+$dcQuery = gql "{`"query`":`"{ datechecks { items { id created_at } } }`"}"
+$dcCreated = ($dcQuery | ConvertFrom-Json).data.datechecks.items[0].created_at
+if ($dcCreated -ne $dcExpected) { throw "created_at '$dcCreated' != expected '$dcExpected'" }
+pass "serve: SQL INSERT defaults date, created_at matches ID"
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

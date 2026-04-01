@@ -84,6 +84,16 @@ CREATE TABLE memberships (cat TEXT, sort_order INTEGER DEFAULT NEXT(cat))
 - **Transaction-aware**: within a `BEGIN`/`COMMIT` block, writes are buffered as usual
 - **Folder-aware paths**: if the typedef has `folder: true`, created files go to `ddb/{type}/{id}.md`; otherwise they stay flat at `ddb/{id}.md`
 
+## Date Defaulting
+
+`INSERT` without an explicit `date` column defaults the doogat's `date` field to the date portion of its ID. Since DoogatId is a 14-digit timestamp (`YYYYMMDDHHmmss`), slicing `id[0..4]-id[4..6]-id[6..8]` produces a `YYYY-MM-DD` date.
+
+- **No date column in INSERT**: `date` derived from the doogat ID (e.g. ID `20260401074007` produces `date: 2026-04-01`)
+- **Explicit date column in INSERT**: the provided value is used as-is
+- **Schema column named `date`**: promoted to `meta.date` (not duplicated in frontmatter extras)
+
+This ensures `created_at` in GraphQL responses is always non-null for SQL-inserted doogats, matching the behavior of CLI-created doogats (which use `chrono::Local::now()`).
+
 ## Zone Mapping
 
 Each column maps to a doogat zone based on explicit `zone` field or inference:
