@@ -6047,4 +6047,227 @@ mod tests {
         assert_eq!(rows[1][0], "2");
         assert_eq!(rows[2][0], "3");
     }
+
+    // ── Helpers for expression tests ────────────────────────────────
+
+    /// Parse a SQL expression string into an `Expr` via a SELECT wrapper.
+    fn parse_expr(sql: &str) -> Expr {
+        let stmts =
+            Parser::parse_sql(&GenericDialect, &format!("SELECT {sql}")).unwrap();
+        match &stmts[0] {
+            Statement::Query(q) => match q.body.as_ref() {
+                SetExpr::Select(s) => match &s.projection[0] {
+                    sqlparser::ast::SelectItem::UnnamedExpr(expr) => expr.clone(),
+                    other => panic!("expected UnnamedExpr, got {other:?}"),
+                },
+                _ => panic!("expected Select"),
+            },
+            _ => panic!("expected Query"),
+        }
+    }
+
+    // ── Part A: unit tests for formatting and evaluation ────────────
+
+    #[test]
+    fn value_to_sql_formats_coalesce() {
+        let expr = parse_expr("COALESCE(NULL, 'fallback')");
+        let sql = value_to_sql(&expr).unwrap();
+        assert_eq!(sql, "COALESCE(NULL, 'fallback')");
+    }
+
+    #[test]
+    fn value_to_sql_rejects_unlisted_function() {
+        let expr = parse_expr("RANDOM()");
+        let err = value_to_sql(&expr).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("not allowed"), "expected 'not allowed' in: {msg}");
+    }
+
+    #[test]
+    fn value_to_sql_formats_subquery() {
+        let expr = parse_expr("(SELECT MAX(x) FROM t)");
+        let sql = value_to_sql(&expr).unwrap();
+        assert!(sql.contains("SELECT"), "expected SELECT in: {sql}");
+        assert!(sql.starts_with('(') && sql.ends_with(')'), "expected parens in: {sql}");
+    }
+
+    #[test]
+    fn value_to_sql_formats_binary_op() {
+        let expr = parse_expr("1 + 2");
+        let sql = value_to_sql(&expr).unwrap();
+        assert_eq!(sql, "(1 + 2)");
+    }
+
+    #[test]
+    fn value_to_sql_formats_nested() {
+        let expr = parse_expr("(42)");
+        let sql = value_to_sql(&expr).unwrap();
+        assert_eq!(sql, "(42)");
+    }
+
+    #[test]
+    fn is_literal_expr_true_for_value() {
+        let expr = parse_expr("'hello'");
+        assert!(is_literal_expr(&expr));
+    }
+
+    #[test]
+    fn is_literal_expr_false_for_function() {
+        let expr = parse_expr("COALESCE(1, 2)");
+        assert!(!is_literal_expr(&expr));
+    }
+
+    #[test]
+    fn eval_expr_coalesce_null_fallback() {
+        let (_dir, _repo, index) = setup();
+        let expr = parse_expr("COALESCE(NULL, 'fallback')");
+        let result = eval_expr(&index.conn, &expr).unwrap();
+        assert_eq!(result, "fallback");
+    }
+
+    #[test]
+    fn eval_expr_ifnull() {
+        let (_dir, _repo, index) = setup();
+        let expr = parse_expr("IFNULL(NULL, 'default')");
+        let result = eval_expr(&index.conn, &expr).unwrap();
+        assert_eq!(result, "default");
+    }
+
+    #[test]
+    fn eval_expr_nullif_returns_empty() {
+        let (_dir, _repo, index) = setup();
+        let expr = parse_expr("NULLIF('', '')");
+        let result = eval_expr(&index.conn, &expr).unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn eval_expr_abs() {
+        let (_dir, _repo, index) = setup();
+        let expr = parse_expr("ABS(-5)");
+        let result = eval_expr(&index.conn, &expr).unwrap();
+        assert_eq!(result, "5");
+    }
+
+    #[test]
+    fn eval_expr_binary_op() {
+        let (_dir, _repo, index) = setup();
+        let expr = parse_expr("2 + 3");
+        let result = eval_expr(&index.conn, &expr).unwrap();
+        assert_eq!(result, "5");
+    }
+
+    #[test]
+    fn eval_expr_literal_passthrough() {
+        let (_dir, _repo, index) = setup();
+        let expr = parse_expr("'hello'");
+        let result = eval_expr(&index.conn, &expr).unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    // ── Part B: integration tests (full SQL engine flow) ────────────
+
+    #[test]
+    fn insert_with_coalesce_subquery() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE expr_coal (name TEXT, sort_order INTEGER)")
+            .unwrap();
+
+        // First insert: COALESCE over empty table gives 0
+        engine
+            .execute(
+                "INSERT INTO expr_coal (name, sort_order) VALUES ('first', COALESCE((SELECT MAX(sort_order) FROM expr_coal), 0))",
+            )
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT sort_order FROM expr_coal WHERE name = 'first'")
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "0");
+
+        // Second insert: COALESCE picks up the existing max (0) + 1 = 1
+        engine
+            .execute(
+                "INSERT INTO expr_coal (name, sort_order) VALUES ('second', COALESCE((SELECT MAX(sort_order) FROM expr_coal), 0) + 1)",
+            )
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT sort_order FROM expr_coal WHERE name = 'second'")
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "1");
+    }
+
+    #[test]
+    fn update_with_ifnull() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE expr_ifn (name TEXT, status TEXT)")
+            .unwrap();
+
+        let id = match engine
+            .execute("INSERT INTO expr_ifn (name, status) VALUES ('row1', 'active')")
+            .unwrap()
+        {
+            SqlResult::Ok(id) => id,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+
+        engine
+            .execute(&format!(
+                "UPDATE expr_ifn SET status = IFNULL(NULL, 'default') WHERE id = '{id}'"
+            ))
+            .unwrap();
+
+        let rows = index
+            .query_raw(&format!(
+                "SELECT status FROM expr_ifn WHERE id = '{id}'"
+            ))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "default");
+    }
+
+    #[test]
+    fn insert_rejects_unlisted_function() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE expr_rej (name TEXT, val INTEGER)")
+            .unwrap();
+
+        let err = engine
+            .execute("INSERT INTO expr_rej (name, val) VALUES ('x', RANDOM())")
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("not allowed"), "expected 'not allowed' in: {msg}");
+    }
+
+    #[test]
+    fn insert_with_arithmetic() {
+        let (_dir, repo, index) = setup();
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        engine
+            .execute("CREATE TABLE expr_arith (name TEXT, val INTEGER)")
+            .unwrap();
+
+        engine
+            .execute("INSERT INTO expr_arith (name, val) VALUES ('sum', (2 + 3))")
+            .unwrap();
+
+        let rows = index
+            .query_raw("SELECT val FROM expr_arith WHERE name = 'sum'")
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "5");
+    }
 }
