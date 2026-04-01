@@ -1271,3 +1271,226 @@ fn graphql_introspection_hides_internal_tables() {
         );
     }
 }
+
+// -- Base field (id, title) filter tests --
+
+/// Helper: create a "task" type, insert rows, return their IDs in insertion order.
+fn setup_task_type_with_ids(server: &ServerGuard) -> Vec<String> {
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE task (status TEXT NOT NULL, priority INTEGER)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE task failed: {r}");
+
+    let mut ids = Vec::new();
+    for (status, priority) in [("open", 1), ("open", 3), ("closed", 2)] {
+        let sql = format!("INSERT INTO task (status, priority) VALUES ('{status}', {priority})");
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({ "sql": sql }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+        std::thread::sleep(Duration::from_secs(1)); // avoid ID collision
+    }
+
+    // Fetch all IDs ordered by priority ASC
+    let r = server.graphql(
+        r#"{ tasks(orderBy: { priority: ASC }) { items { id } } }"#,
+    );
+    assert!(r.get("errors").is_none(), "list tasks failed: {r}");
+    for item in r["data"]["tasks"]["items"].as_array().unwrap() {
+        ids.push(item["id"].as_str().unwrap().to_string());
+    }
+    ids
+}
+
+#[test]
+fn filter_base_field_id_eq() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+    let ids = setup_task_type_with_ids(&server);
+
+    let query = format!(
+        r#"{{ tasks(where: {{ id: {{ eq: "{}" }} }}) {{ items {{ id status }} totalCount }} }}"#,
+        ids[0]
+    );
+    let result = server.graphql(&query);
+    assert!(result.get("errors").is_none(), "filter id eq failed: {result}");
+    let items = result["data"]["tasks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"].as_str().unwrap(), ids[0]);
+    assert_eq!(result["data"]["tasks"]["totalCount"].as_i64().unwrap(), 1);
+}
+
+#[test]
+fn filter_base_field_id_in() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+    let ids = setup_task_type_with_ids(&server);
+
+    let query = format!(
+        r#"{{ tasks(where: {{ id: {{ in: ["{}", "{}"] }} }}) {{ items {{ id }} totalCount }} }}"#,
+        ids[0], ids[1]
+    );
+    let result = server.graphql(&query);
+    assert!(result.get("errors").is_none(), "filter id in failed: {result}");
+    let items = result["data"]["tasks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(result["data"]["tasks"]["totalCount"].as_i64().unwrap(), 2);
+}
+
+#[test]
+fn filter_base_field_title_eq() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE task (status TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    // Insert with known title via SQL
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO task (title, status) VALUES ('Alpha Task', 'open')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO task (title, status) VALUES ('Beta Task', 'closed')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+
+    let result = server.graphql(
+        r#"{ tasks(where: { title: { eq: "Alpha Task" } }) { items { id title } totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "filter title eq failed: {result}");
+    let items = result["data"]["tasks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["title"].as_str().unwrap(), "Alpha Task");
+}
+
+#[test]
+fn filter_base_field_title_contains() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE task (status TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO task (title, status) VALUES ('Find the needle here', 'open')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO task (title, status) VALUES ('No match', 'closed')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+
+    let result = server.graphql(
+        r#"{ tasks(where: { title: { contains: "needle" } }) { items { id title } totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "filter title contains failed: {result}");
+    let items = result["data"]["tasks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert!(items[0]["title"].as_str().unwrap().contains("needle"));
+}
+
+#[test]
+fn filter_base_field_compound_id_and_title() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE task (status TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO task (title, status) VALUES ('Target', 'open')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO task (title, status) VALUES ('Other', 'closed')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+
+    // Get the ID of "Target"
+    let result = server.graphql(
+        r#"{ tasks(where: { title: { eq: "Target" } }) { items { id } } }"#,
+    );
+    let target_id = result["data"]["tasks"]["items"][0]["id"].as_str().unwrap();
+
+    // Compound: id eq AND title contains
+    let query = format!(
+        r#"{{ tasks(where: {{ _and: [{{ id: {{ eq: "{target_id}" }} }}, {{ title: {{ contains: "Tar" }} }}] }}) {{ items {{ id title }} totalCount }} }}"#,
+    );
+    let result = server.graphql(&query);
+    assert!(result.get("errors").is_none(), "compound filter failed: {result}");
+    let items = result["data"]["tasks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"].as_str().unwrap(), target_id);
+}
+
+#[test]
+fn filter_base_field_id_nonexistent() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+    setup_task_type_with_ids(&server);
+
+    let result = server.graphql(
+        r#"{ tasks(where: { id: { eq: "99999999999999" } }) { items { id } totalCount } }"#,
+    );
+    assert!(result.get("errors").is_none(), "nonexistent id failed: {result}");
+    let items = result["data"]["tasks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 0);
+    assert_eq!(result["data"]["tasks"]["totalCount"].as_i64().unwrap(), 0);
+}
+
+#[test]
+fn filter_base_field_id_hyphenated_type() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE \"test-item\" (status TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE test-item failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO \"test-item\" (status) VALUES ('active')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT failed: {r}");
+
+    // Get the ID via the typed query
+    let result = server.graphql(r#"{ testItems { items { id } } }"#);
+    assert!(result.get("errors").is_none(), "list testItems failed: {result}");
+    let items = result["data"]["testItems"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let the_id = items[0]["id"].as_str().unwrap();
+
+    // Filter by id on hyphenated type
+    let query = format!(
+        r#"{{ testItems(where: {{ id: {{ eq: "{the_id}" }} }}) {{ items {{ id status }} totalCount }} }}"#,
+    );
+    let result = server.graphql(&query);
+    assert!(result.get("errors").is_none(), "filter id on hyphenated type failed: {result}");
+    let items = result["data"]["testItems"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"].as_str().unwrap(), the_id);
+    assert_eq!(result["data"]["testItems"]["totalCount"].as_i64().unwrap(), 1);
+}
