@@ -198,6 +198,37 @@ pub(crate) fn search_hit_to_value(r: &SearchResult) -> GqlValue {
             GqlValue::from(r.updated_at.as_str())
         },
     );
+    obj.insert(
+        Name::new("tags"),
+        GqlValue::List(r.tags.iter().map(|t| GqlValue::from(t.as_str())).collect()),
+    );
+    obj.insert(
+        Name::new("type"),
+        match &r.doogat_type {
+            Some(t) => GqlValue::from(t.as_str()),
+            None => GqlValue::Null,
+        },
+    );
+    obj.insert(
+        Name::new("fields"),
+        match &r.fields {
+            Some(f) => {
+                let json_map: serde_json::Map<String, serde_json::Value> = f
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect();
+                GqlValue::from(serde_json::to_string(&json_map).unwrap_or_default())
+            }
+            None => GqlValue::Null,
+        },
+    );
+    obj.insert(
+        Name::new("created_at"),
+        match &r.created_at {
+            Some(d) => GqlValue::from(d.as_str()),
+            None => GqlValue::Null,
+        },
+    );
     GqlValue::Object(obj)
 }
 

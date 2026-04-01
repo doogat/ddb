@@ -126,7 +126,11 @@ pub fn build_schema(
                 })
             },
         ))
-        .field(simple_field("updated_at", TypeRef::named(TypeRef::STRING)));
+        .field(simple_field("updated_at", TypeRef::named(TypeRef::STRING)))
+        .field(simple_field("tags", TypeRef::named_nn_list_nn(TypeRef::STRING)))
+        .field(simple_field("type", TypeRef::named(TypeRef::STRING)))
+        .field(simple_field("fields", TypeRef::named(TypeRef::STRING)))
+        .field(simple_field("created_at", TypeRef::named(TypeRef::STRING)));
 
     let search_connection_type = Object::new("SearchConnection")
         .field(Field::new(
