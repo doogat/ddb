@@ -6396,7 +6396,6 @@ mod tests {
             "expected date derived from ID in frontmatter: {content}"
         );
 
-        // Also verify via parser that meta.date is set
         let parsed = crate::parser::parse(&content, &path).unwrap();
         assert_eq!(
             parsed.meta.date.as_deref(),
@@ -6471,7 +6470,6 @@ mod tests {
         let path = index.resolve_path(&id).unwrap();
         let content = repo.read_file(&path).unwrap();
 
-        // Should have exactly one "date:" in frontmatter, not a duplicate
         let date_count = content.matches("date:").count();
         assert_eq!(
             date_count, 1,
