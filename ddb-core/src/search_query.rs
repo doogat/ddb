@@ -8,10 +8,343 @@ pub enum SearchExpr {
     Not(Box<SearchExpr>),
 }
 
+// ── Tokenizer ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Token {
+    Word(String),
+    FieldFilter { field: String, value: String },
+    And,
+    Or,
+    Not,
+    LParen,
+    RParen,
+}
+
+fn tokenize(input: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // skip whitespace
+        if chars[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        if chars[i] == '(' {
+            tokens.push(Token::LParen);
+            i += 1;
+            continue;
+        }
+
+        if chars[i] == ')' {
+            tokens.push(Token::RParen);
+            i += 1;
+            continue;
+        }
+
+        // Read a word (alphanum, dot, dash, underscore, etc. -- anything not whitespace/parens/=/: )
+        // But also handle field=value and field:value and field:"quoted"
+        if chars[i] == '"' {
+            // quoted string as a standalone token
+            i += 1;
+            let mut s = String::new();
+            while i < len && chars[i] != '"' {
+                s.push(chars[i]);
+                i += 1;
+            }
+            if i < len {
+                i += 1; // skip closing quote
+            }
+            tokens.push(Token::Word(s.to_lowercase()));
+            continue;
+        }
+
+        // accumulate a word (no whitespace, no parens, no = or :)
+        let mut word = String::new();
+        while i < len
+            && !chars[i].is_ascii_whitespace()
+            && chars[i] != '('
+            && chars[i] != ')'
+            && chars[i] != '='
+            && chars[i] != ':'
+            && chars[i] != '"'
+        {
+            word.push(chars[i]);
+            i += 1;
+        }
+
+        if word.is_empty() {
+            // stray character we didn't handle - just push it as a word
+            word.push(chars[i]);
+            i += 1;
+            tokens.push(Token::Word(word.to_lowercase()));
+            continue;
+        }
+
+        // Check if followed by = or : (field filter)
+        if i < len && (chars[i] == '=' || chars[i] == ':') {
+            let field = word.to_lowercase();
+            i += 1; // skip = or :
+
+            // read value (possibly quoted)
+            let value = if i < len && chars[i] == '"' {
+                i += 1; // skip opening quote
+                let mut v = String::new();
+                while i < len && chars[i] != '"' {
+                    v.push(chars[i]);
+                    i += 1;
+                }
+                if i < len {
+                    i += 1; // skip closing quote
+                }
+                v.to_lowercase()
+            } else {
+                let mut v = String::new();
+                while i < len
+                    && !chars[i].is_ascii_whitespace()
+                    && chars[i] != '('
+                    && chars[i] != ')'
+                {
+                    v.push(chars[i]);
+                    i += 1;
+                }
+                v.to_lowercase()
+            };
+
+            tokens.push(Token::FieldFilter { field, value });
+            continue;
+        }
+
+        // Check for keywords
+        let lower = word.to_lowercase();
+        match lower.as_str() {
+            "and" => tokens.push(Token::And),
+            "or" => tokens.push(Token::Or),
+            "not" => tokens.push(Token::Not),
+            _ => tokens.push(Token::Word(lower)),
+        }
+    }
+
+    tokens
+}
+
+// ── Parser ──────────────────────────────────────────────────────────
+//
+// Grammar (precedence low to high):
+//   expr     = or_expr
+//   or_expr  = and_expr ("OR" and_expr)*
+//   and_expr = unary (("AND")? unary)*     -- implicit AND between adjacent terms
+//   unary    = "NOT" unary | primary
+//   primary  = "(" expr ")" | field_filter | word
+
+struct Parser {
+    tokens: Vec<Token>,
+    pos: usize,
+}
+
+impl Parser {
+    fn new(tokens: Vec<Token>) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
+    }
+
+    fn advance(&mut self) -> Option<Token> {
+        let tok = self.tokens.get(self.pos).cloned();
+        if tok.is_some() {
+            self.pos += 1;
+        }
+        tok
+    }
+
+    fn parse(&mut self) -> Option<SearchExpr> {
+        let expr = self.parse_or()?;
+        if self.pos < self.tokens.len() {
+            return None; // unconsumed tokens = parse error
+        }
+        Some(expr)
+    }
+
+    fn parse_or(&mut self) -> Option<SearchExpr> {
+        let mut operands = vec![self.parse_and()?];
+        while matches!(self.peek(), Some(Token::Or)) {
+            self.advance(); // consume OR
+            operands.push(self.parse_and()?);
+        }
+        if operands.len() == 1 {
+            Some(operands.remove(0))
+        } else {
+            // flatten nested ORs
+            let mut flat = Vec::new();
+            for op in operands {
+                match op {
+                    SearchExpr::Or(children) => flat.extend(children),
+                    other => flat.push(other),
+                }
+            }
+            Some(SearchExpr::Or(flat))
+        }
+    }
+
+    fn parse_and(&mut self) -> Option<SearchExpr> {
+        let mut operands = vec![self.parse_unary()?];
+        loop {
+            // explicit AND
+            if matches!(self.peek(), Some(Token::And)) {
+                self.advance();
+                operands.push(self.parse_unary()?);
+                continue;
+            }
+            // implicit AND: next token is a primary-starting token (not OR, not RParen, not EOF)
+            match self.peek() {
+                Some(Token::Word(_))
+                | Some(Token::FieldFilter { .. })
+                | Some(Token::Not)
+                | Some(Token::LParen) => {
+                    operands.push(self.parse_unary()?);
+                }
+                _ => break,
+            }
+        }
+        if operands.len() == 1 {
+            Some(operands.remove(0))
+        } else {
+            // flatten nested ANDs
+            let mut flat = Vec::new();
+            for op in operands {
+                match op {
+                    SearchExpr::And(children) => flat.extend(children),
+                    other => flat.push(other),
+                }
+            }
+            Some(SearchExpr::And(flat))
+        }
+    }
+
+    fn parse_unary(&mut self) -> Option<SearchExpr> {
+        if matches!(self.peek(), Some(Token::Not)) {
+            self.advance();
+            let inner = self.parse_unary()?;
+            return Some(SearchExpr::Not(Box::new(inner)));
+        }
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Option<SearchExpr> {
+        match self.peek()? {
+            Token::LParen => {
+                self.advance(); // consume (
+                let expr = self.parse_or()?;
+                if !matches!(self.peek(), Some(Token::RParen)) {
+                    return None; // missing closing paren
+                }
+                self.advance(); // consume )
+                Some(expr)
+            }
+            Token::Word(_) => {
+                if let Some(Token::Word(w)) = self.advance() {
+                    Some(SearchExpr::FullText(w))
+                } else {
+                    None
+                }
+            }
+            Token::FieldFilter { .. } => {
+                if let Some(Token::FieldFilter { field, value }) = self.advance() {
+                    Some(SearchExpr::FieldEquals { field, value })
+                } else {
+                    None
+                }
+            }
+            _ => None, // unexpected token
+        }
+    }
+}
+
+// ── Serializer ──────────────────────────────────────────────────────
+
+fn serialize(expr: &SearchExpr) -> String {
+    match expr {
+        SearchExpr::FullText(w) => w.clone(),
+        SearchExpr::FieldEquals { field, value } => format!("{field}={value}"),
+        SearchExpr::And(children) => {
+            let mut pairs: Vec<(String, String)> = children
+                .iter()
+                .map(|c| {
+                    let sort_key = serialize(c);
+                    let display = serialize_and_child(c);
+                    (sort_key, display)
+                })
+                .collect();
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let parts: Vec<String> = pairs.into_iter().map(|(_, display)| display).collect();
+            parts.join(" and ")
+        }
+        SearchExpr::Or(children) => {
+            let parts: Vec<String> = children.iter().map(serialize_or_child).collect();
+            parts.join(" or ")
+        }
+        SearchExpr::Not(inner) => {
+            format!("not {}", serialize_not_child(inner))
+        }
+    }
+}
+
+/// Wrap child in parens if it's an OR (lower precedence than AND).
+fn serialize_and_child(expr: &SearchExpr) -> String {
+    match expr {
+        SearchExpr::Or(_) => format!("({})", serialize(expr)),
+        _ => serialize(expr),
+    }
+}
+
+/// OR children: wrap if it's an AND (for clarity), though AND is higher precedence.
+/// Actually, OR children that are AND don't need parens since AND binds tighter.
+fn serialize_or_child(expr: &SearchExpr) -> String {
+    serialize(expr)
+}
+
+/// NOT child: wrap in parens if compound (AND or OR).
+fn serialize_not_child(expr: &SearchExpr) -> String {
+    match expr {
+        SearchExpr::And(_) | SearchExpr::Or(_) => format!("({})", serialize(expr)),
+        _ => serialize(expr),
+    }
+}
+
+// ── Fallback ────────────────────────────────────────────────────────
+
+fn fallback_normalize(query: &str) -> String {
+    let lower = query.to_lowercase();
+    let collapsed: String = lower.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed
+}
+
+// ── Public API ──────────────────────────────────────────────────────
+
 /// Normalize a search query to canonical form.
 /// On parse failure, falls back to lowercase + whitespace collapse.
-pub fn normalize(_query: &str) -> String {
-    String::new() // stub — tests should fail
+pub fn normalize(query: &str) -> String {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let tokens = tokenize(trimmed);
+    if tokens.is_empty() {
+        return String::new();
+    }
+
+    let mut parser = Parser::new(tokens);
+    match parser.parse() {
+        Some(expr) => serialize(&expr),
+        None => fallback_normalize(trimmed),
+    }
 }
 
 #[cfg(test)]
