@@ -539,5 +539,26 @@ $output = ddb search "uniquexyz"
 if ($output -notmatch $BOOST_ID) { throw "fts5 search boost: boosted field not found in results" }
 pass "fts5 search boost (boosted field match)"
 
+# 23. SQL expression support (COALESCE, IFNULL, arithmetic in VALUES/SET)
+$output = ddb query "CREATE TABLE exprtbl (sort_order INTEGER)"
+if ($output -notmatch "table exprtbl created") { throw "create exprtbl failed" }
+$EXPR_ID1 = ddb query "INSERT INTO exprtbl (sort_order) VALUES (COALESCE((SELECT MAX(sort_order) FROM exprtbl), 0))"
+if ($EXPR_ID1 -notmatch "^\d{14}$") { throw "insert coalesce bad id: $EXPR_ID1" }
+$output = ddb query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID1'"
+if ($output -notmatch "0") { throw "coalesce should yield 0: $output" }
+Start-Sleep -Seconds 1
+$EXPR_ID2 = ddb query "INSERT INTO exprtbl (sort_order) VALUES (COALESCE((SELECT MAX(sort_order) FROM exprtbl), 0) + 1)"
+if ($EXPR_ID2 -notmatch "^\d{14}$") { throw "insert coalesce+1 bad id: $EXPR_ID2" }
+$output = ddb query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID2'"
+if ($output -notmatch "1") { throw "coalesce+1 should yield 1: $output" }
+$output = ddb query "UPDATE exprtbl SET sort_order = IFNULL(NULL, 42) WHERE id = '$EXPR_ID1'"
+if ($output -notmatch "1 row") { throw "update ifnull failed: $output" }
+$output = ddb query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID1'"
+if ($output -notmatch "42") { throw "ifnull should yield 42: $output" }
+# Unlisted function should be rejected
+if (-not (ddb-fails query "INSERT INTO exprtbl (sort_order) VALUES (BADFUNC(1))")) { throw "unlisted function should be rejected" }
+ddb query "DROP TABLE exprtbl CASCADE" | Out-Null
+pass "sql expression support (COALESCE, IFNULL, arithmetic)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

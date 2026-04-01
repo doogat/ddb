@@ -454,4 +454,22 @@ $DDB reindex >/dev/null
 $DDB search "uniquexyz" | grep -q "$BOOST_ID"
 pass "fts5 search boost (boosted field match)"
 
+# 23. SQL expression support (COALESCE, IFNULL, arithmetic in VALUES/SET)
+$DDB query "CREATE TABLE exprtbl (sort_order INTEGER)" | grep -q "table exprtbl created"
+EXPR_ID1=$($DDB query "INSERT INTO exprtbl (sort_order) VALUES (COALESCE((SELECT MAX(sort_order) FROM exprtbl), 0))")
+echo "$EXPR_ID1" | grep -qE "^[0-9]{14}$"
+$DDB query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID1'" | grep -q "0"
+sleep 1
+EXPR_ID2=$($DDB query "INSERT INTO exprtbl (sort_order) VALUES (COALESCE((SELECT MAX(sort_order) FROM exprtbl), 0) + 1)")
+echo "$EXPR_ID2" | grep -qE "^[0-9]{14}$"
+$DDB query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID2'" | grep -q "1"
+$DDB query "UPDATE exprtbl SET sort_order = IFNULL(NULL, 42) WHERE id = '$EXPR_ID1'" | grep -q "1 row(s) affected"
+$DDB query "SELECT sort_order FROM exprtbl WHERE id = '$EXPR_ID1'" | grep -q "42"
+# Unlisted function should be rejected
+if $DDB query "INSERT INTO exprtbl (sort_order) VALUES (BADFUNC(1))" 2>/dev/null; then
+  echo "FAIL: unlisted function should be rejected" >&2; exit 1
+fi
+$DDB query "DROP TABLE exprtbl CASCADE" >/dev/null
+pass "sql expression support (COALESCE, IFNULL, arithmetic)"
+
 echo "=== all smoke tests passed ==="
