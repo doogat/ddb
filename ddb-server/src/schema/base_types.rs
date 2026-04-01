@@ -520,11 +520,7 @@ pub(crate) fn build_typed_object(
     let mut obj = doogat_object(type_name);
 
     for col in &schema.columns {
-        let gql_col_name = if is_valid_graphql_name(&col.name) {
-            col.name.clone()
-        } else {
-            sanitize_field_name(&col.name)
-        };
+        let gql_col_name = sanitize_field_name(&col.name);
 
         if col.references.is_some() {
             // Singular: resolves as the referenced typed object (nullable)
@@ -568,64 +564,62 @@ pub(crate) fn build_typed_object(
             } else {
                 pluralize_preserving_case(&sanitize_field_name(&col.name))
             };
-            {
-                let target_type = ref_target_gql_type(col, known_types);
-                let target_ref_name = col.references.clone().unwrap_or_default();
-                let data_list_name = pluralize(&col.name);
-                obj = obj.field(Field::new(
-                    &gql_list_name,
-                    TypeRef::named_nn_list_nn(&target_type),
-                    move |ctx| {
-                        let data_list_name = data_list_name.clone();
-                        let target_ref_name = target_ref_name.clone();
-                        FieldFuture::new(async move {
-                            let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-                            let ids: Vec<String> = match parent {
-                                GqlValue::Object(map) => match map.get(data_list_name.as_str()) {
-                                    Some(GqlValue::List(items)) => items
-                                        .iter()
-                                        .filter_map(|v| match v {
-                                            GqlValue::String(s) if !s.is_empty() => {
-                                                Some(s.to_string())
-                                            }
-                                            _ => None,
-                                        })
-                                        .collect(),
-                                    _ => return Ok(Some(FieldValue::list(
-                                        std::iter::empty::<FieldValue>(),
-                                    ))),
-                                },
-                                _ => {
-                                    return Ok(Some(FieldValue::list(
-                                        std::iter::empty::<FieldValue>(),
-                                    )))
-                                }
-                            };
-                            if ids.is_empty() {
+            let target_type = ref_target_gql_type(col, known_types);
+            let target_ref_name = col.references.clone().unwrap_or_default();
+            let data_list_name = pluralize(&col.name);
+            obj = obj.field(Field::new(
+                &gql_list_name,
+                TypeRef::named_nn_list_nn(&target_type),
+                move |ctx| {
+                    let data_list_name = data_list_name.clone();
+                    let target_ref_name = target_ref_name.clone();
+                    FieldFuture::new(async move {
+                        let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                        let ids: Vec<String> = match parent {
+                            GqlValue::Object(map) => match map.get(data_list_name.as_str()) {
+                                Some(GqlValue::List(items)) => items
+                                    .iter()
+                                    .filter_map(|v| match v {
+                                        GqlValue::String(s) if !s.is_empty() => {
+                                            Some(s.to_string())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect(),
+                                _ => return Ok(Some(FieldValue::list(
+                                    std::iter::empty::<FieldValue>(),
+                                ))),
+                            },
+                            _ => {
                                 return Ok(Some(FieldValue::list(
                                     std::iter::empty::<FieldValue>(),
-                                )));
+                                )))
                             }
-                            let pool = ctx.data::<crate::read_pool::ReadPool>()?;
-                            let schemas = ctx.data::<TypeSchemaMap>()?;
-                            let target_schema = schemas.0.get(&target_ref_name);
-                            let doogats = pool.get_doogats_batch(ids).await
-                                .map_err(crate::error::to_server_error)?;
-                            let resolved: Vec<FieldValue> = doogats
-                                .iter()
-                                .map(|z| {
-                                    let val = match target_schema {
-                                        Some(ts) => typed_doogat_to_value(z, ts),
-                                        None => doogat_to_value(z),
-                                    };
-                                    FieldValue::owned_any(val)
-                                })
-                                .collect();
-                            Ok(Some(FieldValue::list(resolved)))
-                        })
-                    },
-                ));
-            }
+                        };
+                        if ids.is_empty() {
+                            return Ok(Some(FieldValue::list(
+                                std::iter::empty::<FieldValue>(),
+                            )));
+                        }
+                        let pool = ctx.data::<crate::read_pool::ReadPool>()?;
+                        let schemas = ctx.data::<TypeSchemaMap>()?;
+                        let target_schema = schemas.0.get(&target_ref_name);
+                        let doogats = pool.get_doogats_batch(ids).await
+                            .map_err(crate::error::to_server_error)?;
+                        let resolved: Vec<FieldValue> = doogats
+                            .iter()
+                            .map(|z| {
+                                let val = match target_schema {
+                                    Some(ts) => typed_doogat_to_value(z, ts),
+                                    None => doogat_to_value(z),
+                                };
+                                FieldValue::owned_any(val)
+                            })
+                            .collect();
+                        Ok(Some(FieldValue::list(resolved)))
+                    })
+                },
+            ));
         } else {
             // Non-REFERENCES scalar field
             let gql_type = column_to_gql_type(col);
@@ -719,6 +713,15 @@ pub(crate) fn sanitize_field_name(s: &str) -> String {
             Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
         }
     }
+}
+
+/// Find a column by its GraphQL name (original or sanitized).
+/// Returns the original column name for use in SQL.
+pub(crate) fn resolve_column<'a>(columns: &'a [ColumnDef], gql_name: &str) -> Option<&'a str> {
+    columns
+        .iter()
+        .find(|c| c.name == gql_name || sanitize_field_name(&c.name) == gql_name)
+        .map(|c| c.name.as_str())
 }
 
 /// Convert a broadcast::Receiver into a Stream that skips lag errors and ends on close.

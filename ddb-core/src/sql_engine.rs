@@ -859,7 +859,6 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
-        // Helper: validate allowed_values constraints on all updates
         let validate_allowed_values =
             |schema: &TableSchema, updates: &BTreeMap<String, String>| -> Result<()> {
                 for col_def in &schema.columns {
@@ -880,7 +879,6 @@ impl<'a> SqlEngine<'a> {
         // Validate literal assignments early (fail fast before touching rows)
         validate_allowed_values(&schema, &updates)?;
 
-        // Helper: evaluate deferred expressions in a row context, merge into updates
         let eval_deferred = |conn: &rusqlite::Connection,
                              deferred: &[(String, String)],
                              table_name: &str,

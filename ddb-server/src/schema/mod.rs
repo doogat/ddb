@@ -1,6 +1,5 @@
 mod base_types;
-pub use base_types::is_valid_graphql_name;
-pub(crate) use base_types::{sanitize_field_name, sanitize_type_name};
+pub(crate) use base_types::{resolve_column, sanitize_field_name, sanitize_type_name};
 use base_types::*;
 
 use async_graphql::dynamic::*;
@@ -1089,9 +1088,8 @@ pub fn build_schema(
                                 .get("distinct")
                                 .and_then(|v| v.string().ok())
                                 .and_then(|col| {
-                                    schema_clone.columns.iter().find(|c| {
-                                        c.name == col || sanitize_field_name(&c.name) == col
-                                    }).map(|c| c.name.clone())
+                                    resolve_column(&schema_clone.columns, col)
+                                        .map(|s| s.to_string())
                                 });
 
                             // Parse optional orderBy
@@ -1209,9 +1207,8 @@ pub fn build_schema(
                                 .get("groupBy")
                                 .and_then(|v| v.string().ok())
                                 .and_then(|col| {
-                                    schema_clone.columns.iter().find(|c| {
-                                        c.name == col || sanitize_field_name(&c.name) == col
-                                    }).map(|c| c.name.clone())
+                                    resolve_column(&schema_clone.columns, col)
+                                        .map(|s| s.to_string())
                                 });
 
                             let (sql, names) = crate::filter::build_aggregate_sql_grouped(

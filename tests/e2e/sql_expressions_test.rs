@@ -12,7 +12,6 @@ fn insert_with_coalesce() {
         .assert()
         .success();
 
-    // Insert using COALESCE with subquery - first row gets 0
     let out = repo
         .ddb()
         .args([
@@ -93,7 +92,6 @@ fn insert_with_arithmetic() {
         .assert()
         .success();
 
-    // Seed a row with pos = 5
     repo.ddb()
         .args([
             "query",
