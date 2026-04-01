@@ -1627,13 +1627,32 @@ processed: true
     #[test]
     fn search_untyped_doogat_has_none_type_and_fields() {
         let idx = in_memory_index();
-        let z = sample_doogat();
+        let z = ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(DoogatId("20260301120000".into())),
+                title: Some("Untyped Note".into()),
+                date: Some("2026-03-01".into()),
+                doogat_type: None,
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "Searchable untyped content".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "ddb/20260301120000.md".into(),
+            updated_at: None,
+        };
         idx.index_doogat(&z).unwrap();
 
-        let hits = idx.search("Hello").unwrap();
+        let hits = idx.search("untyped").unwrap();
         assert_eq!(hits.len(), 1);
         assert!(hits[0].doogat_type.is_none());
         assert!(hits[0].fields.is_none());
+        assert!(hits[0].tags.is_empty());
     }
 
     #[test]

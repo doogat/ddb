@@ -728,7 +728,8 @@ impl Index {
             .types
             .as_ref()
             .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
-        let hits = self.search_hits_inner(query, Some((limit, offset)), &filter_clauses, filter_params.clone(), boost_type)?;
+        let mut hits = self.search_hits_inner(query, Some((limit, offset)), &filter_clauses, filter_params.clone(), boost_type)?;
+        self.enrich_search_hits(&mut hits);
 
         let filter_sql = filter_clauses.join(" ");
         let count_sql = if filter_sql.is_empty() {
@@ -765,7 +766,9 @@ impl Index {
             .types
             .as_ref()
             .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
-        self.search_hits_inner(query, pagination, &filter_clauses, filter_params, boost_type)
+        let mut hits = self.search_hits_inner(query, pagination, &filter_clauses, filter_params, boost_type)?;
+        self.enrich_search_hits(&mut hits);
+        Ok(hits)
     }
 
     /// Look up the max search_boost for a type from the `_ddb_boost` table.
@@ -910,6 +913,75 @@ impl Index {
             fields: None,
             created_at: row.get(7)?,
         })
+    }
+
+    fn enrich_search_hits(&self, hits: &mut [SearchResult]) {
+        if hits.is_empty() {
+            return;
+        }
+        let ids: Vec<String> = hits.iter().map(|h| h.id.clone()).collect();
+        let placeholders: String = (1..=ids.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        // Batch-fetch tags
+        {
+            let sql = format!(
+                "SELECT doogat_id, tag FROM _ddb_tags WHERE doogat_id IN ({placeholders})"
+            );
+            if let Ok(mut stmt) = self.conn.prepare(&sql) {
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+                if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                }) {
+                    let mut tag_map: std::collections::HashMap<String, Vec<String>> =
+                        std::collections::HashMap::new();
+                    for row in rows.flatten() {
+                        tag_map.entry(row.0).or_default().push(row.1);
+                    }
+                    for hit in hits.iter_mut() {
+                        if let Some(tags) = tag_map.remove(&hit.id) {
+                            hit.tags = tags;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Batch-fetch fields
+        {
+            let sql = format!(
+                "SELECT doogat_id, key, value FROM _ddb_fields WHERE doogat_id IN ({placeholders})"
+            );
+            if let Ok(mut stmt) = self.conn.prepare(&sql) {
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+                if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                }) {
+                    let mut field_map: std::collections::HashMap<
+                        String,
+                        std::collections::BTreeMap<String, String>,
+                    > = std::collections::HashMap::new();
+                    for row in rows.flatten() {
+                        if let Some(val) = row.2 {
+                            field_map.entry(row.0).or_default().insert(row.1, val);
+                        }
+                    }
+                    for hit in hits.iter_mut() {
+                        if let Some(fields) = field_map.remove(&hit.id) {
+                            hit.fields = Some(fields);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Return all tags with their usage counts, ordered by count descending then name ascending.
