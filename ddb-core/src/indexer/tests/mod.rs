@@ -1561,3 +1561,89 @@ processed: true
         assert!(boost_exists, "_ddb_boost should exist after rebuild");
     }
 
+    // ── Enriched search result tests ────────────────────────────────
+
+    #[test]
+    fn search_enriches_tags_from_frontmatter() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec!["rust", "cli"])).unwrap();
+
+        let hits = idx.search("Searchable").unwrap();
+        assert_eq!(hits.len(), 1);
+        let mut tags = hits[0].tags.clone();
+        tags.sort();
+        assert_eq!(tags, vec!["cli", "rust"]);
+    }
+
+    #[test]
+    fn search_enriches_tags_from_body_hashtags() {
+        let idx = in_memory_index();
+        let mut z = make_typed_doogat(0, "note", vec!["frontmatter-tag"]);
+        z.body_tags = vec!["body-tag".into()];
+        idx.index_doogat(&z).unwrap();
+
+        let hits = idx.search("Searchable").unwrap();
+        assert_eq!(hits.len(), 1);
+        let mut tags = hits[0].tags.clone();
+        tags.sort();
+        assert_eq!(tags, vec!["body-tag", "frontmatter-tag"]);
+    }
+
+    #[test]
+    fn search_enriches_doogat_type() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "link", vec![])).unwrap();
+
+        let hits = idx.search("Searchable").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].doogat_type.as_deref(), Some("link"));
+    }
+
+    #[test]
+    fn search_enriches_fields() {
+        let idx = in_memory_index();
+        let mut z = make_typed_doogat(0, "link", vec![]);
+        z.meta.extra.insert("url".into(), Value::String("https://example.com".into()));
+        z.meta.extra.insert("description".into(), Value::String("Example site".into()));
+        idx.index_doogat(&z).unwrap();
+
+        let hits = idx.search("Searchable").unwrap();
+        assert_eq!(hits.len(), 1);
+        let fields = hits[0].fields.as_ref().expect("fields should be Some");
+        assert_eq!(fields.get("url").unwrap(), "https://example.com");
+        assert_eq!(fields.get("description").unwrap(), "Example site");
+    }
+
+    #[test]
+    fn search_enriches_created_at() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+
+        let hits = idx.search("Searchable").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].created_at.as_deref(), Some("2026-03-01"));
+    }
+
+    #[test]
+    fn search_untyped_doogat_has_none_type_and_fields() {
+        let idx = in_memory_index();
+        let z = sample_doogat();
+        idx.index_doogat(&z).unwrap();
+
+        let hits = idx.search("Hello").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].doogat_type.is_none());
+        assert!(hits[0].fields.is_none());
+    }
+
+    #[test]
+    fn search_paginated_also_enriches() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "link", vec!["rust"])).unwrap();
+
+        let result = idx.search_paginated("Searchable", 10, 0).unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.hits[0].tags, vec!["rust"]);
+        assert_eq!(result.hits[0].doogat_type.as_deref(), Some("link"));
+    }
+
