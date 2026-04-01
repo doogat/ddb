@@ -1373,4 +1373,59 @@ mod tests {
         let err = ddb_core::error::DoogatError::Io(std::io::Error::other("boom"));
         assert!(!is_broken_pipe(&err));
     }
+
+    // ── parse_set_pairs ─────────────────────────────────────────────
+
+    use ddb_core::types::Value;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn parse_set_pairs_single_pair() {
+        let pairs = vec!["title=Hello".to_string()];
+        let map = super::parse_set_pairs(&pairs).unwrap();
+        let mut expected = BTreeMap::new();
+        expected.insert("title".to_string(), Value::String("Hello".to_string()));
+        assert_eq!(map, expected);
+    }
+
+    #[test]
+    fn parse_set_pairs_multiple_pairs() {
+        let pairs = vec![
+            "title=Hello".to_string(),
+            "status=active".to_string(),
+        ];
+        let map = super::parse_set_pairs(&pairs).unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map["title"], Value::String("Hello".to_string()));
+        assert_eq!(map["status"], Value::String("active".to_string()));
+    }
+
+    #[test]
+    fn parse_set_pairs_value_containing_equals() {
+        let pairs = vec!["url=https://example.com?a=1&b=2".to_string()];
+        let map = super::parse_set_pairs(&pairs).unwrap();
+        assert_eq!(
+            map["url"],
+            Value::String("https://example.com?a=1&b=2".to_string()),
+        );
+    }
+
+    #[test]
+    fn parse_set_pairs_empty_value() {
+        let pairs = vec!["tag=".to_string()];
+        let map = super::parse_set_pairs(&pairs).unwrap();
+        assert_eq!(map["tag"], Value::String(String::new()));
+    }
+
+    #[test]
+    fn parse_set_pairs_missing_equals_is_error() {
+        let pairs = vec!["noequals".to_string()];
+        assert!(super::parse_set_pairs(&pairs).is_err());
+    }
+
+    #[test]
+    fn parse_set_pairs_empty_key_is_error() {
+        let pairs = vec!["=value".to_string()];
+        assert!(super::parse_set_pairs(&pairs).is_err());
+    }
 }
