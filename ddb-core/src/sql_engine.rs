@@ -650,7 +650,7 @@ impl<'a> SqlEngine<'a> {
                 SetExpr::Values(v) => {
                     let mut rows = Vec::with_capacity(v.rows.len());
                     for row in &v.rows {
-                        rows.push(extract_values(row)?);
+                        rows.push(eval_values(&self.index.conn, row)?);
                     }
                     rows
                 }
@@ -849,7 +849,7 @@ impl<'a> SqlEngine<'a> {
                     .collect::<Vec<_>>()
                     .join("."),
             };
-            let val = expr_to_string(&assignment.value)?;
+            let val = eval_expr(&self.index.conn, &assignment.value)?;
             updates.insert(col_name, val);
         }
 
@@ -1594,7 +1594,7 @@ impl<'a> SqlEngine<'a> {
                 SetExpr::Values(v) => {
                     let mut rows = Vec::with_capacity(v.rows.len());
                     for row in &v.rows {
-                        rows.push(extract_values(row)?);
+                        rows.push(eval_values(&self.index.conn, row)?);
                     }
                     rows
                 }
@@ -2041,8 +2041,91 @@ fn extract_default(options: &[sqlparser::ast::ColumnOptionDef]) -> Result<Option
     Ok(None)
 }
 
-fn extract_values(exprs: &[Expr]) -> Result<Vec<String>> {
-    exprs.iter().map(expr_to_string).collect()
+/// Allowlisted scalar functions that may appear in INSERT/UPDATE expressions.
+const ALLOWED_SCALAR_FUNCTIONS: &[&str] = &[
+    "COALESCE", "IFNULL", "NULLIF", "ABS", "LENGTH", "LOWER", "UPPER", "TRIM", "TYPEOF", "MIN",
+    "MAX",
+];
+
+/// Returns true for expressions that are simple literals (no SQLite evaluation needed).
+fn is_literal_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Value(_) => true,
+        Expr::UnaryOp { expr, .. } => is_literal_expr(expr),
+        _ => false,
+    }
+}
+
+/// Format any expression as valid SQL text (with proper quoting for literals).
+fn value_to_sql(expr: &Expr) -> Result<String> {
+    match expr {
+        Expr::Value(v) => match &v.value {
+            SqlValue::SingleQuotedString(s) => {
+                let escaped = s.replace('\'', "''");
+                Ok(format!("'{escaped}'"))
+            }
+            SqlValue::DoubleQuotedString(s) => {
+                let escaped = s.replace('\'', "''");
+                Ok(format!("'{escaped}'"))
+            }
+            SqlValue::Number(n, _) => Ok(n.clone()),
+            SqlValue::Boolean(b) => Ok(if *b { "1" } else { "0" }.to_string()),
+            SqlValue::Null => Ok("NULL".to_string()),
+            _ => Err(DoogatError::SqlEngine(format!("unsupported value: {v}"))),
+        },
+        Expr::UnaryOp { op, expr } => {
+            let inner = value_to_sql(expr)?;
+            Ok(format!("{op}{inner}"))
+        }
+        Expr::Function(func) => {
+            let func_name = func.name.to_string().to_uppercase();
+            if !ALLOWED_SCALAR_FUNCTIONS.contains(&func_name.as_str()) {
+                return Err(DoogatError::SqlEngine(format!(
+                    "function not allowed: {func_name}. Allowed: {}",
+                    ALLOWED_SCALAR_FUNCTIONS.join(", ")
+                )));
+            }
+            let args = match &func.args {
+                sqlparser::ast::FunctionArguments::List(arg_list) => {
+                    let mut parts = Vec::new();
+                    for arg in &arg_list.args {
+                        match arg {
+                            sqlparser::ast::FunctionArg::Unnamed(
+                                sqlparser::ast::FunctionArgExpr::Expr(e),
+                            ) => parts.push(value_to_sql(e)?),
+                            _ => {
+                                return Err(DoogatError::SqlEngine(format!(
+                                    "unsupported function argument in {func_name}"
+                                )))
+                            }
+                        }
+                    }
+                    parts.join(", ")
+                }
+                sqlparser::ast::FunctionArguments::None => String::new(),
+                _ => {
+                    return Err(DoogatError::SqlEngine(format!(
+                        "unsupported function argument style in {func_name}"
+                    )))
+                }
+            };
+            Ok(format!("{func_name}({args})"))
+        }
+        Expr::Subquery(query) => Ok(format!("({query})")),
+        Expr::BinaryOp { left, op, right } => {
+            let l = value_to_sql(left)?;
+            let r = value_to_sql(right)?;
+            Ok(format!("({l} {op} {r})"))
+        }
+        Expr::Nested(inner) => {
+            let s = value_to_sql(inner)?;
+            Ok(format!("({s})"))
+        }
+        Expr::Identifier(ident) => Ok(format!("\"{}\"", ident.value)),
+        _ => Err(DoogatError::SqlEngine(format!(
+            "unsupported expression: {expr}"
+        ))),
+    }
 }
 
 fn expr_to_string(expr: &Expr) -> Result<String> {
@@ -2059,10 +2142,38 @@ fn expr_to_string(expr: &Expr) -> Result<String> {
             let inner = expr_to_string(expr)?;
             Ok(format!("{op}{inner}"))
         }
+        Expr::Function(_) | Expr::Subquery(_) | Expr::BinaryOp { .. } | Expr::Nested(_) => {
+            value_to_sql(expr)
+        }
         _ => Err(DoogatError::SqlEngine(format!(
             "unsupported expression: {expr}"
         ))),
     }
+}
+
+/// Evaluate a SQL expression, using SQLite for complex expressions.
+/// Simple literals are returned directly without a SQLite roundtrip.
+fn eval_expr(conn: &rusqlite::Connection, expr: &Expr) -> Result<String> {
+    if is_literal_expr(expr) {
+        return expr_to_string(expr);
+    }
+    let sql = value_to_sql(expr)?;
+    let result: rusqlite::types::Value = conn
+        .query_row(&format!("SELECT {sql}"), [], |row| row.get(0))
+        .map_err(|e| DoogatError::SqlEngine(format!("expression eval failed: {e}")))?;
+    match result {
+        rusqlite::types::Value::Text(s) => Ok(s),
+        rusqlite::types::Value::Integer(n) => Ok(n.to_string()),
+        rusqlite::types::Value::Real(f) => Ok(f.to_string()),
+        rusqlite::types::Value::Null => Ok(String::new()),
+        rusqlite::types::Value::Blob(_) => Err(DoogatError::SqlEngine(
+            "BLOB result not supported in expression".into(),
+        )),
+    }
+}
+
+fn eval_values(conn: &rusqlite::Connection, exprs: &[Expr]) -> Result<Vec<String>> {
+    exprs.iter().map(|e| eval_expr(conn, e)).collect()
 }
 
 fn extract_where_id(selection: &Option<Expr>) -> Result<String> {
