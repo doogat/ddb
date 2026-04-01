@@ -477,4 +477,20 @@ fi
 $DDB query "DROP TABLE exprtbl CASCADE" >/dev/null
 pass "sql expression support (COALESCE, IFNULL, arithmetic)"
 
+# 24. --set / --unset flags on create and update
+SET_ID=$($DDB create --title "SetTest" --set color=red --set size=large)
+echo "$SET_ID" | grep -qE "^[0-9]{14}$"
+$DDB read "$SET_ID" | grep -q "color: red"
+$DDB read "$SET_ID" | grep -q "size: large"
+$DDB update "$SET_ID" --set color=blue
+$DDB read "$SET_ID" | grep -q "color: blue"
+$DDB update "$SET_ID" --set color=
+$DDB read "$SET_ID" | grep -q "color: blue" && { echo "FAIL: --set k= should clear value" >&2; exit 1; } || true
+$DDB update "$SET_ID" --unset size
+$DDB read "$SET_ID" | grep -q "size:" && { echo "FAIL: --unset should remove field" >&2; exit 1; } || true
+if $DDB create --title "Bad" --set "noequals" 2>/dev/null; then
+  echo "FAIL: malformed --set should error" >&2; exit 1
+fi
+pass "--set / --unset flags"
+
 echo "=== all smoke tests passed ==="

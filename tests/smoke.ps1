@@ -566,5 +566,23 @@ if (-not (ddb-fails query "INSERT INTO exprtbl (sort_order) VALUES (BADFUNC(1))"
 ddb query "DROP TABLE exprtbl CASCADE" | Out-Null
 pass "sql expression support (COALESCE, IFNULL, arithmetic)"
 
+# 24. --set / --unset flags on create and update
+$SET_ID = ddb create --title "SetTest" --set color=red --set size=large
+if ($SET_ID -notmatch "^\d{14}$") { throw "--set create bad id: $SET_ID" }
+$output = ddb read $SET_ID
+if ($output -notmatch "color: red") { throw "--set color not found" }
+if ($output -notmatch "size: large") { throw "--set size not found" }
+ddb update $SET_ID --set color=blue
+$output = ddb read $SET_ID
+if ($output -notmatch "color: blue") { throw "--set update color failed" }
+ddb update $SET_ID --set "color="
+$output = ddb read $SET_ID
+if ($output -match "color: blue") { throw "--set k= should clear value" }
+ddb update $SET_ID --unset size
+$output = ddb read $SET_ID
+if ($output -match "size:") { throw "--unset should remove field" }
+if (-not (ddb-fails create --title "Bad" --set "noequals")) { throw "malformed --set should error" }
+pass "--set / --unset flags"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
