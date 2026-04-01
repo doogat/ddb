@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core doogat fields (`title`, `date`, `updated_at`) in materialized type tables, removing need for `JOIN doogats`
 - PgWire `pg_catalog` support: psql `\dt` and tab-completion show only user type tables, hiding internal `_ddb_*` tables
 - Enriched search results: `tags`, `type`, `fields` (JSON), and `created_at` on GraphQL SearchHit, eliminating need for follow-up queries to get type-specific data from search results
+- Search query normalization: `queryNormalized` field on SearchConnection and `normalizeSearchQuery` standalone GraphQL query for canonical comparison of semantically equivalent queries (sorts AND operands, lowercases, collapses whitespace, makes implicit AND explicit)
 - `DoogatError` now includes `Conflict`, `Sync`, `Index`, `BadRequest` variants for precise error discrimination; server returns 409 for conflicts, 400 for bad requests
 
 ### Changed

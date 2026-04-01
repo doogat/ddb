@@ -230,6 +230,28 @@ pub struct PaginatedSearchResult {
 }
 ```
 
+### Search query language
+
+The search query language supports the following constructs:
+
+- **Bare words**: `meeting`, `rust` - matched against FTS5 index
+- **Quoted strings**: `"conflict resolution"` - exact phrase match
+- **Field filters**: `tag=svelte`, `category:work.portals` - both `=` and `:` syntax, with optional quoted values (`title:"meeting minutes"`)
+- **Boolean operators**: `AND`, `OR`, `NOT` (case-insensitive)
+- **Implicit AND**: `meeting minutes` is equivalent to `meeting AND minutes`
+- **Parentheses**: `(a OR b) AND c` - override default precedence
+- **Operator precedence** (high to low): NOT, AND, OR
+
+Note: field filters (`tag=svelte`) are a normalization-layer concept used for canonical comparison and saved searches. The FTS5 index only sees the bare word and phrase portions of the query.
+
+### Query normalization
+
+`search_query::normalize(query: &str) -> String`
+
+Parses a search query into an AST and serializes it to a canonical form where semantically equivalent queries produce the same string. Used by the GraphQL server's `queryNormalized` and `normalizeSearchQuery` surfaces.
+
+Normalization rules: lowercase all terms, collapse whitespace, make implicit AND explicit, sort AND operands alphabetically, preserve OR order, normalize recursively inside NOT and parentheses. On parse failure, falls back to lowercase + whitespace collapse.
+
 ### by_tag
 
 `by_tag(prefix: &str) -> Result<Vec<String>>`

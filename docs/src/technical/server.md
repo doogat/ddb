@@ -128,7 +128,7 @@ type Attachment { name: String!, mime: String!, size: Int!, url: String! }
 type InlineField { key: String!, value: String!, zone: String! }
 type Link { target: String!, display: String, zone: String! }
 type SearchHit { id: ID!, title: String!, path: String!, snippet: String!, rank: Float!, updated_at: String, tags: [String!]!, type: String, fields: String, created_at: String }
-type SearchConnection { hits: [SearchHit!]!, totalCount: Int! }
+type SearchConnection { hits: [SearchHit!]!, totalCount: Int!, queryNormalized: String! }
 type TypeDef { name: String!, columns: [ColumnInfo!]!, crdtStrategy: String, templateSections: [String!]! }
 type ColumnInfo { name: String!, dataType: String!, zone: String, required: Boolean!, references: String }
 type SqlResult { columns: [String!], rows: [String!], affected: Int, message: String }
@@ -163,6 +163,7 @@ type Query {
   doogat(id: ID!): Doogat
   doogats(type: String, tag: String, backlinksOf: ID, limit: Int, offset: Int): [Doogat!]!
   search(query: String!, types: [String], tag: String, where: [SearchFieldFilter], limit: Int, offset: Int): SearchConnection!
+  normalizeSearchQuery(query: String!): String!
   typeDefs: [TypeDef!]!
   sql(query: String!, format: String): SqlResult!
   schemaVersion: Int!
@@ -230,6 +231,37 @@ The `search` query passes the `query` string directly to SQLite FTS5 MATCH. This
 Combine with the `types`, `tag`, and `where` parameters for structured filtering on top of full-text search.
 
 Malformed FTS5 queries (e.g., `"AND AND"`) return a `BAD_REQUEST` error with the message `"invalid search query: ..."`.
+
+### Query normalization
+
+The server can normalize search queries to a canonical form so that semantically equivalent queries always produce the same string. This is useful for saved searches, deduplication, and matching.
+
+**`queryNormalized` on SearchConnection**: Every `search()` response includes the normalized form of the input query.
+
+```graphql
+{ search(query: "Tag=svelte AND category=work.portals") { queryNormalized totalCount } }
+# Returns: queryNormalized = "category=work.portals and tag=svelte"
+```
+
+**`normalizeSearchQuery` standalone query**: Normalize a query without executing a search.
+
+```graphql
+{ normalizeSearchQuery(query: "B AND A") }
+# Returns: "a and b"
+```
+
+Normalization rules:
+
+1. Lowercase all terms, field names, values, and operators
+2. Collapse whitespace (trim, internal runs to single space)
+3. Make implicit AND explicit (`meeting minutes` becomes `meeting and minutes`)
+4. Sort AND operands alphabetically by serialized form
+5. Preserve OR operand order
+6. Normalize NOT and parenthesized subexpressions recursively
+7. Preserve internal spaces in quoted field values
+8. Invalid queries (unparseable) fall back to lowercase + whitespace collapse
+
+Note: normalization is for canonical comparison, not query rewriting. The normalized form may not be valid FTS5 syntax (e.g., field filters like `tag=svelte` are a normalization-layer concept, not FTS5).
 
 ### Enriched search results
 
