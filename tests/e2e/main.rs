@@ -20,6 +20,7 @@ mod rename;
 mod search_links;
 mod sequence;
 mod serve;
+mod set_flag;
 mod server_mutations;
 mod sql_expressions_test;
 mod sql_lifecycle;
