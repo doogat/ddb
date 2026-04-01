@@ -224,6 +224,9 @@ enum Command {
         r#type: Option<String>,
         #[arg(long, allow_hyphen_values = true)]
         body: Option<String>,
+        /// Set a frontmatter field (repeatable, format: key=value)
+        #[arg(long, allow_hyphen_values = true)]
+        set: Vec<String>,
     },
     /// Read a doogat by ID
     Read {
@@ -242,6 +245,12 @@ enum Command {
         r#type: Option<String>,
         #[arg(long, allow_hyphen_values = true)]
         body: Option<String>,
+        /// Set a frontmatter field (repeatable, format: key=value)
+        #[arg(long, allow_hyphen_values = true)]
+        set: Vec<String>,
+        /// Remove a frontmatter field (repeatable)
+        #[arg(long)]
+        unset: Vec<String>,
     },
     /// Delete a doogat by ID
     Delete {
@@ -666,6 +675,7 @@ fn run(cli: Cli) -> ddb_core::error::Result<()> {
             tags,
             r#type,
             body,
+            set: _set,
         } => {
             let svc = DoogatService::open(&cli.repo)?;
             let tags_list: Vec<String> = tags
@@ -708,6 +718,8 @@ fn run(cli: Cli) -> ddb_core::error::Result<()> {
             tags,
             r#type,
             body,
+            set: _set,
+            unset: _unset,
         } => {
             let svc = DoogatService::open(&cli.repo)?;
             let tags_vec: Option<Vec<String>> =
