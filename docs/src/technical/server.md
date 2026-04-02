@@ -186,7 +186,7 @@ type Mutation {
   createDoogat(input: CreateDoogatInput!): Doogat!
   updateDoogat(input: UpdateDoogatInput!): Doogat!
   batchUpdate(updates: [UpdateDoogatInput!]!): [Doogat!]!
-  createMany(inputs: [CreateDoogatInput!]!): [Doogat!]!
+  createMany(inputs: [CreateManyItemInput!]!): [Doogat!]!
   deleteDoogat(id: ID!): Boolean!
   executeSql(sql: String!, format: String): SqlResult!
   executeBatch(statements: [String!]!, format: String): [SqlResult!]!
@@ -196,7 +196,8 @@ type Mutation {
   compact(force: Boolean): CompactResult!
 }
 
-input CreateDoogatInput { title: String!, content: String, tags: [String!], type: String, fields: String }
+input CreateDoogatInput { title: String!, content: String, tags: [String!], type: String }
+input CreateManyItemInput { title: String!, content: String, tags: [String!], type: String, fields: String }
 input UpdateDoogatInput { id: ID!, title: String, content: String, tags: [String!], type: String }
 input AttachFileInput { doogatId: ID!, filename: String!, dataBase64: String!, mime: String }
 

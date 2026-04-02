@@ -390,6 +390,15 @@ pub fn build_schema(
             "tags",
             TypeRef::named_list(TypeRef::STRING),
         ))
+        .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)));
+
+    let create_many_item_input = InputObject::new("CreateManyItemInput")
+        .field(InputValue::new("title", TypeRef::named_nn(TypeRef::STRING)))
+        .field(InputValue::new("content", TypeRef::named(TypeRef::STRING)))
+        .field(InputValue::new(
+            "tags",
+            TypeRef::named_list(TypeRef::STRING),
+        ))
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)));
 
@@ -1530,7 +1539,7 @@ pub fn build_schema(
             )
             .argument(InputValue::new(
                 "inputs",
-                TypeRef::named_nn_list_nn("CreateDoogatInput"),
+                TypeRef::named_nn_list_nn("CreateManyItemInput"),
             )),
         );
     }
@@ -2166,6 +2175,7 @@ pub fn build_schema(
     .register(typedef_type)
     .register(sql_result_type)
     .register(create_input)
+    .register(create_many_item_input)
     .register(update_input)
     .register(search_field_filter_input)
     .register(attachment_type)
