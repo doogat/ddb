@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Raw ID scalar field on REFERENCES columns: `category_id` returns the raw reference ID alongside the existing `category` resolved object; for `_id` suffix columns (e.g., `link_id`), the scalar keeps the original name and a stripped resolver (`link`) is added
+- `orderBy`, `orderDir`, and `limit` arguments on plural reference resolvers for sorting and limiting nested collections (e.g., `categories(orderBy: "label", limit: 5)`)
 - `createMany` GraphQL mutation for atomic bulk record creation in a single git commit; accepts `[CreateDoogatInput!]!` with optional `fields` JSON for typed columns, resolves `DEFAULT NEXT` across the batch, validates constraints
 - `id` (IDFilter) and `title` (StringFilter) base field filters on all typed GraphQL Where inputs, enabling single-record lookups and title searches on any typed query
 - `--set key=value` (repeatable) on `ddb create` and `ddb update` for setting arbitrary frontmatter fields; `--unset key` on `ddb update` for removing fields

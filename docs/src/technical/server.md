@@ -415,8 +415,32 @@ Columns with `REFERENCES` resolve as nested typed objects instead of raw ID stri
 
 - **Singular field** (`category`): Returns the referenced typed object (e.g., `Category`) with all its fields, or `null` if no reference exists or the target doogat is missing.
 - **Plural field** (`categories`): Returns `[Category!]!` - a list of all referenced typed objects from the junction table. Returns an empty list if no references exist.
+- **Raw ID scalar** (`category_id`): Returns the raw reference ID as a `String`, or `null` if no reference exists. Useful when you need only the ID without resolving the full object.
 
-Resolution is single-level only (no recursive nesting). Plural fields batch-fetch all referenced IDs for each parent item in a single call (reducing per-reference overhead within each item). Singular fields resolve individually. If the target type schema is unknown, the resolver falls back to the base `Doogat` type. The pluralization follows English rules (category -> categories, tag -> tags).
+For columns with a `_id` suffix (e.g., `link_id TEXT REFERENCES link`), the naming adjusts: `link_id` returns the raw scalar, `link` returns the resolved object, and `links` returns the plural list.
+
+```graphql
+# Example: raw scalar + resolved object in one query
+{
+  bookmarks {
+    items {
+      category_id          # raw ID string
+      category { id label } # resolved Category object
+      categories(orderBy: "label", limit: 5) { id label }
+    }
+  }
+}
+```
+
+Plural fields accept optional sorting and limiting arguments:
+
+- `orderBy: String` - field name to sort by (e.g., `"label"`, `"title"`)
+- `orderDir: String` - `"ASC"` (default) or `"DESC"`
+- `limit: Int` - max items to return (applied after sorting)
+
+Sorting and limiting happen in-memory after batch-fetching, which is efficient at personal scale since SQLite is in-process with no network round-trips.
+
+Resolution is single-level only (no recursive nesting). Plural fields batch-fetch all referenced IDs for each parent item in a single call. Singular fields resolve individually. If the target type schema is unknown, the resolver falls back to the base `Doogat` type.
 
 Tags are always available on typed connection queries via the `tags` field, populated from the parsed doogat's frontmatter and body hashtags.
 
