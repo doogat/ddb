@@ -552,6 +552,19 @@ fn ref_target_gql_type(col: &ColumnDef, known_types: &HashMap<String, String>) -
         .unwrap_or_else(|| "Doogat".to_string())
 }
 
+/// Extract a string sort key from a `GqlValue::Object` by field name.
+fn extract_sort_key(val: &GqlValue, field: &str) -> String {
+    match val {
+        GqlValue::Object(map) => match map.get(field) {
+            Some(GqlValue::String(s)) => s.clone(),
+            Some(GqlValue::Number(n)) => format!("{:020}", n.as_f64().unwrap_or(0.0)),
+            Some(v) => format!("{v}"),
+            None => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
 /// Build a dynamic GraphQL object type for a _typedef schema.
 pub(crate) fn build_typed_object(
     type_name: &str,
@@ -631,59 +644,117 @@ pub(crate) fn build_typed_object(
                 let target_type = ref_target_gql_type(col, known_types);
                 let target_ref_name = col.references.clone().unwrap_or_default();
                 let data_list_name = pluralize(&col.name);
-                obj = obj.field(Field::new(
-                    &gql_list_name,
-                    TypeRef::named_nn_list_nn(&target_type),
-                    move |ctx| {
-                        let data_list_name = data_list_name.clone();
-                        let target_ref_name = target_ref_name.clone();
-                        FieldFuture::new(async move {
-                            let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-                            let ids: Vec<String> = match parent {
-                                GqlValue::Object(map) => match map.get(data_list_name.as_str()) {
-                                    Some(GqlValue::List(items)) => items
-                                        .iter()
-                                        .filter_map(|v| match v {
-                                            GqlValue::String(s) if !s.is_empty() => {
-                                                Some(s.to_string())
+                obj = obj.field(
+                    Field::new(
+                        &gql_list_name,
+                        TypeRef::named_nn_list_nn(&target_type),
+                        move |ctx| {
+                            let data_list_name = data_list_name.clone();
+                            let target_ref_name = target_ref_name.clone();
+                            FieldFuture::new(async move {
+                                let parent =
+                                    ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                                let ids: Vec<String> = match parent {
+                                    GqlValue::Object(map) => {
+                                        match map.get(data_list_name.as_str()) {
+                                            Some(GqlValue::List(items)) => items
+                                                .iter()
+                                                .filter_map(|v| match v {
+                                                    GqlValue::String(s)
+                                                        if !s.is_empty() =>
+                                                    {
+                                                        Some(s.to_string())
+                                                    }
+                                                    _ => None,
+                                                })
+                                                .collect(),
+                                            _ => {
+                                                return Ok(Some(FieldValue::list(
+                                                    std::iter::empty::<FieldValue>(),
+                                                )))
                                             }
-                                            _ => None,
-                                        })
-                                        .collect(),
-                                    _ => return Ok(Some(FieldValue::list(
-                                        std::iter::empty::<FieldValue>(),
-                                    ))),
-                                },
-                                _ => {
+                                        }
+                                    }
+                                    _ => {
+                                        return Ok(Some(FieldValue::list(
+                                            std::iter::empty::<FieldValue>(),
+                                        )))
+                                    }
+                                };
+                                if ids.is_empty() {
                                     return Ok(Some(FieldValue::list(
                                         std::iter::empty::<FieldValue>(),
-                                    )))
+                                    )));
                                 }
-                            };
-                            if ids.is_empty() {
-                                return Ok(Some(FieldValue::list(
-                                    std::iter::empty::<FieldValue>(),
-                                )));
-                            }
-                            let pool = ctx.data::<crate::read_pool::ReadPool>()?;
-                            let schemas = ctx.data::<TypeSchemaMap>()?;
-                            let target_schema = schemas.0.get(&target_ref_name);
-                            let doogats = pool.get_doogats_batch(ids).await
-                                .map_err(crate::error::to_server_error)?;
-                            let resolved: Vec<FieldValue> = doogats
-                                .iter()
-                                .map(|z| {
-                                    let val = match target_schema {
+                                let pool =
+                                    ctx.data::<crate::read_pool::ReadPool>()?;
+                                let schemas = ctx.data::<TypeSchemaMap>()?;
+                                let target_schema =
+                                    schemas.0.get(&target_ref_name);
+                                let doogats = pool
+                                    .get_doogats_batch(ids)
+                                    .await
+                                    .map_err(crate::error::to_server_error)?;
+                                let mut values: Vec<GqlValue> = doogats
+                                    .iter()
+                                    .map(|z| match target_schema {
                                         Some(ts) => typed_doogat_to_value(z, ts),
                                         None => doogat_to_value(z),
-                                    };
-                                    FieldValue::owned_any(val)
-                                })
-                                .collect();
-                            Ok(Some(FieldValue::list(resolved)))
-                        })
-                    },
-                ));
+                                    })
+                                    .collect();
+
+                                // Sort by field if orderBy is provided
+                                if let Some(order_field) = ctx
+                                    .args
+                                    .get("orderBy")
+                                    .and_then(|v| v.string().ok())
+                                {
+                                    let desc = ctx
+                                        .args
+                                        .get("orderDir")
+                                        .and_then(|v| v.string().ok())
+                                        .map(|d| d.eq_ignore_ascii_case("DESC"))
+                                        .unwrap_or(false);
+                                    values.sort_by(|a, b| {
+                                        let va =
+                                            extract_sort_key(a, order_field);
+                                        let vb =
+                                            extract_sort_key(b, order_field);
+                                        let cmp = va.cmp(&vb);
+                                        if desc { cmp.reverse() } else { cmp }
+                                    });
+                                }
+
+                                // Truncate if limit is provided
+                                if let Some(limit) = ctx
+                                    .args
+                                    .get("limit")
+                                    .and_then(|v| v.i64().ok())
+                                {
+                                    values.truncate(limit.max(0) as usize);
+                                }
+
+                                let resolved: Vec<FieldValue> = values
+                                    .into_iter()
+                                    .map(FieldValue::owned_any)
+                                    .collect();
+                                Ok(Some(FieldValue::list(resolved)))
+                            })
+                        },
+                    )
+                    .argument(InputValue::new(
+                        "limit",
+                        TypeRef::named(TypeRef::INT),
+                    ))
+                    .argument(InputValue::new(
+                        "orderBy",
+                        TypeRef::named(TypeRef::STRING),
+                    ))
+                    .argument(InputValue::new(
+                        "orderDir",
+                        TypeRef::named(TypeRef::STRING),
+                    )),
+                );
             }
 
             // Raw scalar field: exposes the raw reference ID as a String
