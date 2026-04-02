@@ -1470,6 +1470,85 @@ processed: true
         assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
     }
 
+    // ── Tag via where filter tests ─────────────────────────────────
+
+    #[test]
+    fn search_filter_tag_via_where_eq() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "note", vec!["rust"]);
+        let z1 = make_typed_doogat(1, "note", vec!["python"]);
+        let z2 = make_typed_doogat(2, "note", vec!["rust", "wasm"]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "tag".into(),
+                op: SearchFieldOp::Eq("rust".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match z0 and z2 tagged 'rust'");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120002"]);
+    }
+
+    #[test]
+    fn search_filter_tag_via_where_contains() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "note", vec!["javascript"]);
+        let z1 = make_typed_doogat(1, "note", vec!["java"]);
+        let z2 = make_typed_doogat(2, "note", vec!["python"]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "tag".into(),
+                op: SearchFieldOp::Contains("java".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match z0 ('javascript') and z1 ('java')");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
+    }
+
+    #[test]
+    fn search_filter_tag_via_where_combined_with_type() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec!["rust"]);
+        let z1 = make_typed_doogat(1, "note", vec!["rust"]);
+        let z2 = make_typed_doogat(2, "link", vec!["python"]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "tag".into(),
+                op: SearchFieldOp::Eq("rust".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1, "should only match z0 (link + rust)");
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
     // ── Boolean / phrase search tests ─────────────────────────────
 
     fn make_search_doogat(n: usize, title: &str, body: &str) -> ParsedDoogat {
