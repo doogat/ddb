@@ -793,6 +793,44 @@ EB_CREATED=$(echo "$EB_QUERY" | sed -n 's/.*"created_at":"\([^"]*\)".*/\1/p')
 [ "$EB_CREATED" = "$EB_EXPECTED" ]
 pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 
+# 44. DDL response consistency (no spurious errors)
+RESULT=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ddltest (name VARCHAR(100))\") { columns rows message } }"}')
+echo "$RESULT" | grep -qv '"errors"'
+echo "$RESULT" | grep -q '"columns":\[\]'
+echo "$RESULT" | grep -q '"rows":\[\]'
+echo "$RESULT" | grep -q '"message"'
+pass "serve: CREATE TABLE response has no errors"
+
+sleep 1
+RESULT=$(gql '{"query":"mutation { executeSql(sql: \"ALTER TABLE ddltest ADD COLUMN age INTEGER\") { columns rows message } }"}')
+echo "$RESULT" | grep -qv '"errors"'
+echo "$RESULT" | grep -q '"columns":\[\]'
+echo "$RESULT" | grep -q '"rows":\[\]'
+pass "serve: ALTER TABLE response has no errors"
+
+sleep 1
+RESULT=$(gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddltest\") { columns rows message } }"}')
+echo "$RESULT" | grep -qv '"errors"'
+echo "$RESULT" | grep -q '"columns":\[\]'
+echo "$RESULT" | grep -q '"rows":\[\]'
+pass "serve: DROP TABLE response has no errors"
+
+RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE ddlbatch1 (name VARCHAR)\", \"CREATE TABLE ddlbatch2 (val INTEGER)\"]) { columns rows message } }"}')
+echo "$RESULT" | grep -qv '"errors"'
+echo "$RESULT" | grep -q '"columns":\[\]'
+echo "$RESULT" | grep -q '"rows":\[\]'
+pass "serve: executeBatch DDL responses have no errors"
+
+sleep 1
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch1 CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch2 CASCADE\") { message } }"}' >/dev/null
+
+# DML regression: INSERT still returns affected count
+DML_RESULT=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO datecheck (name) VALUES (\\\"DmlRegression\\\")\") { affected message } }"}')
+echo "$DML_RESULT" | grep -qv '"errors"'
+echo "$DML_RESULT" | grep -q '"message"'
+pass "serve: DML INSERT response unchanged"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

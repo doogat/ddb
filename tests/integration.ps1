@@ -815,6 +815,43 @@ $ebCreated = ($ebQuery | ConvertFrom-Json).data.doogat.created_at
 if ($ebCreated -ne $ebExpected) { throw "executeBatch created_at '$ebCreated' != expected '$ebExpected'" }
 pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 
+# 44. DDL response consistency (no spurious errors)
+$result = gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ddltest (name VARCHAR(100))\") { columns rows message } }"}'
+if ($result -match '"errors"') { throw "CREATE TABLE has errors: $result" }
+if ($result -notmatch '"columns":\[\]') { throw "CREATE TABLE columns not empty: $result" }
+if ($result -notmatch '"rows":\[\]') { throw "CREATE TABLE rows not empty: $result" }
+if ($result -notmatch '"message"') { throw "CREATE TABLE missing message: $result" }
+pass "serve: CREATE TABLE response has no errors"
+
+Start-Sleep -Seconds 1
+$result = gql '{"query":"mutation { executeSql(sql: \"ALTER TABLE ddltest ADD COLUMN age INTEGER\") { columns rows message } }"}'
+if ($result -match '"errors"') { throw "ALTER TABLE has errors: $result" }
+if ($result -notmatch '"columns":\[\]') { throw "ALTER TABLE columns not empty: $result" }
+if ($result -notmatch '"rows":\[\]') { throw "ALTER TABLE rows not empty: $result" }
+pass "serve: ALTER TABLE response has no errors"
+
+Start-Sleep -Seconds 1
+$result = gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddltest\") { columns rows message } }"}'
+if ($result -match '"errors"') { throw "DROP TABLE has errors: $result" }
+if ($result -notmatch '"columns":\[\]') { throw "DROP TABLE columns not empty: $result" }
+if ($result -notmatch '"rows":\[\]') { throw "DROP TABLE rows not empty: $result" }
+pass "serve: DROP TABLE response has no errors"
+
+$result = gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE ddlbatch1 (name VARCHAR)\", \"CREATE TABLE ddlbatch2 (val INTEGER)\"]) { columns rows message } }"}'
+if ($result -match '"errors"') { throw "executeBatch DDL has errors: $result" }
+if ($result -notmatch '"columns":\[\]') { throw "executeBatch DDL columns not empty: $result" }
+if ($result -notmatch '"rows":\[\]') { throw "executeBatch DDL rows not empty: $result" }
+pass "serve: executeBatch DDL responses have no errors"
+
+Start-Sleep -Seconds 1
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch1 CASCADE\") { message } }"}' | Out-Null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch2 CASCADE\") { message } }"}' | Out-Null
+
+$dmlResult = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO datecheck (name) VALUES (\\\"DmlRegression\\\")\") { affected message } }"}'
+if ($dmlResult -match '"errors"') { throw "DML INSERT has errors: $dmlResult" }
+if ($dmlResult -notmatch '"message"') { throw "DML INSERT missing message: $dmlResult" }
+pass "serve: DML INSERT response unchanged"
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
