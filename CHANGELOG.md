@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-register node on first sync using system hostname (FR-41)
 - Binary asset conflict resolution via LWW for `reference/` files during sync
 - Search `where` filters now resolve against materialized type columns and `_ddb_tags`, falling back to `_ddb_fields` for unrecognized fields
+- `tagEntries` GraphQL query exposing individual tag-doogat associations from `_ddb_tags` with `where` filters (`doogatId` and `tag` via `StringFilter`: `eq`, `contains`, `in`); returns `TagEntryConnection` with `items` and `totalCount`
 - FTS negation support: queries like `important NOT meeting` and `NOT archive` now work transparently by splitting into compound SQL (FTS MATCH for positive terms, NOT IN subqueries for negated terms); negated tag filters (`NOT tag=archive`) use `_ddb_tags` directly
 - Search query filters: `types`, `tag`, and `where` (field predicates) on GraphQL `search` query
 - GraphQL `tags` query returning all tags with usage counts (`TagInfo` type)

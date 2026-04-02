@@ -172,6 +172,23 @@ type Query {
   checkboxItems(state: String, doogatId: ID, limit: Int, offset: Int): [CheckboxItem!]!
   openActions(limit: Int): [CheckboxItem!]!
   tags: [TagInfo!]!
+  tagEntries(where: TagEntriesWhere): TagEntryConnection!
+}
+
+type TagEntry {
+  doogatId: ID!
+  tag: String!
+  source: String!
+}
+
+type TagEntryConnection {
+  items: [TagEntry!]!
+  totalCount: Int!
+}
+
+input TagEntriesWhere {
+  doogatId: StringFilter
+  tag: StringFilter
 }
 
 input SearchFieldFilter {
@@ -308,6 +325,31 @@ Example query:
 ```
 
 For a typed link doogat, `fields` might contain `{"url":"https://example.com","description":"Example"}`.
+
+### Tag entries
+
+The `tagEntries` query returns individual tag-doogat associations from the `_ddb_tags` table. Unlike `tags` (which returns aggregate name+count), `tagEntries` returns each row with `doogatId`, `tag`, and `source` (frontmatter or body).
+
+Filter with `TagEntriesWhere` using `StringFilter` operators (`eq`, `contains`, `in`):
+
+```graphql
+# Tags for specific doogats
+{ tagEntries(where: { doogatId: { in: ["20260401120000", "20260401120001"] } }) {
+    items { doogatId tag source } totalCount
+} }
+
+# Tags matching a pattern
+{ tagEntries(where: { tag: { contains: "client" } }) {
+    items { doogatId tag source } totalCount
+} }
+
+# Combined: specific doogat + tag filter
+{ tagEntries(where: { doogatId: { eq: "20260401120000" }, tag: { eq: "rust" } }) {
+    items { doogatId tag source } totalCount
+} }
+```
+
+The existing `tags` query (returns `[TagInfo!]!` with `name` and `count`) is unchanged.
 
 ### Subscriptions
 
