@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PgWire responses use proper BOOL type for BOOLEAN columns (psql shows `t`/`f`)
 - Malformed FTS5 search queries (e.g., `AND AND`) now return `BAD_REQUEST` instead of `INTERNAL_ERROR`
 - SQL INSERT without explicit `date` column now defaults to the date derived from the doogat ID, so `created_at` is non-null in GraphQL responses
+- DDL responses (CREATE/ALTER/DROP TABLE) via `executeSql` and `executeBatch` no longer emit spurious GraphQL errors; `columns` and `rows` return empty arrays instead of null
 
 ## [0.1.0] - 2026-03-26
 

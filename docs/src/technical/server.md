@@ -147,6 +147,8 @@ type CheckboxItem {
 
 Note: `SqlResult.rows` encodes each row as a JSON string to avoid nested list limitations. `SqlResult.columns` returns column names matching the SELECT clause order.
 
+DDL statements (CREATE TABLE, ALTER TABLE, DROP TABLE) return empty `columns` and `rows` arrays with a `message` field containing the created/affected doogat ID or confirmation. DML SELECT returns populated `columns` and `rows`; INSERT/UPDATE/DELETE returns `affected` count and the doogat ID in `message`.
+
 #### Row format option
 
 The `sql`, `executeSql`, and `executeBatch` fields accept an optional `format` argument:
