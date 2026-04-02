@@ -1259,6 +1259,217 @@ processed: true
         assert_eq!(result.hits[0].id, "20260301120000");
     }
 
+    // ── Materialized column filter resolution tests ───────────────
+
+    #[test]
+    fn search_filter_by_materialized_column_eq() {
+        let idx = in_memory_index();
+
+        // Index doogats of type "link" — no extra fields in meta (so nothing in _ddb_fields for "url")
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        let z2 = make_typed_doogat(2, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        // Create materialized "link" type table with a "url" column
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT,
+                    description TEXT
+                );
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120000', 'Typed link 0', '2026-03-01', 'https://example.com');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120001', 'Typed link 1', '2026-03-01', 'https://other.org');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120002', 'Typed link 2', '2026-03-01', 'https://example.com');",
+            )
+            .unwrap();
+
+        // Filter by url = "https://example.com" — should resolve against materialized "link" table
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "url".into(),
+                op: SearchFieldOp::Eq("https://example.com".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match z0 and z2 via materialized link table");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120002"]);
+    }
+
+    #[test]
+    fn search_filter_by_materialized_column_contains() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        // Materialized "link" table with url values
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT
+                );
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120000', 'Typed link 0', '2026-03-01', 'https://example.com/page');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120001', 'Typed link 1', '2026-03-01', 'https://other.org/page');",
+            )
+            .unwrap();
+
+        // Contains "example" — should match z0 via materialized table
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "url".into(),
+                op: SearchFieldOp::Contains("example".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1, "should match z0 via materialized link.url LIKE");
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_materialized_with_type_filter() {
+        let idx = in_memory_index();
+
+        // Index a "link" and a "note" doogat
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "note", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        // Create materialized tables for both types, both having a "url" column
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT
+                );
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120000', 'Typed link 0', '2026-03-01', 'https://example.com');
+
+                CREATE TABLE IF NOT EXISTS note (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT
+                );
+                INSERT INTO note (id, title, date, url) VALUES ('20260301120001', 'Typed note 1', '2026-03-01', 'https://example.com');",
+            )
+            .unwrap();
+
+        // Filter types=["link"] AND url="https://example.com" — should only check "link" table
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            tag: None,
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "url".into(),
+                op: SearchFieldOp::Eq("https://example.com".into()),
+            }]),
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1, "should only match z0 (link), not z1 (note)");
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_falls_back_to_ddb_fields() {
+        // When no materialized type table has the field, fall back to _ddb_fields
+        let idx = in_memory_index();
+        let mut z0 = make_typed_doogat(0, "note", vec![]);
+        z0.meta.extra.insert("status".into(), Value::String("active".into()));
+        let mut z1 = make_typed_doogat(1, "note", vec![]);
+        z1.meta.extra.insert("status".into(), Value::String("archived".into()));
+
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        // No materialized type table exists — "status" is only in _ddb_fields
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "status".into(),
+                op: SearchFieldOp::Eq("active".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1, "should fall back to _ddb_fields for status");
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_materialized_column_multiple_types() {
+        let idx = in_memory_index();
+
+        // Index doogats of two different types
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "bookmark", vec![]);
+        let z2 = make_typed_doogat(2, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        // Create two type tables both with "url" column
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT
+                );
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120000', 'Typed link 0', '2026-03-01', 'https://example.com');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120002', 'Typed link 2', '2026-03-01', 'https://other.org');
+
+                CREATE TABLE IF NOT EXISTS bookmark (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT
+                );
+                INSERT INTO bookmark (id, title, date, url) VALUES ('20260301120001', 'Typed bookmark 1', '2026-03-01', 'https://example.com');",
+            )
+            .unwrap();
+
+        // Filter url="https://example.com" without type restriction — should UNION across both tables
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "url".into(),
+                op: SearchFieldOp::Eq("https://example.com".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match z0 (link) and z1 (bookmark) via UNION");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
+    }
+
     // ── Boolean / phrase search tests ─────────────────────────────
 
     fn make_search_doogat(n: usize, title: &str, body: &str) -> ParsedDoogat {
