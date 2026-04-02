@@ -188,6 +188,48 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF2_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$SF3_ID\\\") }\"}" >/dev/null
 
+# 18d2. Search where field filters (materialized columns + tag)
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE wflink (url TEXT NOT NULL)\") { message } }"}' >/dev/null
+WF1=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES ('"'"'WFLink Alpha'"'"', '"'"'https://example.com'"'"')\") { message } }"}')
+WF1_ID=$(echo "$WF1" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tr -d ' ')
+WF2=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES ('"'"'WFLink Beta'"'"', '"'"'https://other.org'"'"')\") { message } }"}')
+WF2_ID=$(echo "$WF2" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tr -d ' ')
+WF3=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES ('"'"'WFLink Gamma'"'"', '"'"'https://example.com/page'"'"')\") { message } }"}')
+WF3_ID=$(echo "$WF3" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tr -d ' ')
+
+RESULT=$(gql '{"query":"{ search(query: \"WFLink\", where: [{field: \"url\", eq: \"https://example.com\"}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search where filter materialized column eq"
+
+RESULT=$(gql '{"query":"{ search(query: \"WFLink\", where: [{field: \"url\", contains: \"example\"}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "2" ]
+pass "serve: search where filter materialized column contains"
+
+# Tag via where filter
+WFT1=$(gql '{"query":"mutation { createDoogat(input: { title: \"WFTag Alpha\", tags: [\"wf-rust\"] }) { id } }"}')
+WFT1_ID=$(echo "$WFT1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+WFT2=$(gql '{"query":"mutation { createDoogat(input: { title: \"WFTag Beta\", tags: [\"wf-python\"] }) { id } }"}')
+WFT2_ID=$(echo "$WFT2" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+RESULT=$(gql '{"query":"{ search(query: \"WFTag\", where: [{field: \"tag\", eq: \"wf-rust\"}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search where filter tag eq"
+
+# Combined type + where field filter
+RESULT=$(gql '{"query":"{ search(query: \"WFLink\", types: [\"wflink\"], where: [{field: \"url\", eq: \"https://example.com\"}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search where filter combined type+field"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WF1_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WF2_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WF3_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WFT1_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WFT2_ID\\\") }\"}" >/dev/null
+
 # 18e. Boolean and phrase search queries
 BQ1=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", content: \"rust crdt patterns\" }) { id } }"}')
 BQ1_ID=$(echo "$BQ1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')

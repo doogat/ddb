@@ -244,6 +244,44 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF3_ID\`") }`"}" | Out-Null
 
+# 18d2. Search where field filters (materialized columns + tag)
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE wflink (url TEXT NOT NULL)\") { message } }"}' | Out-Null
+$wf1 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES (''WFLink Alpha'', ''https://example.com'')\") { message } }"}'
+$WF1_ID = if ($wf1 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
+$wf2 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES (''WFLink Beta'', ''https://other.org'')\") { message } }"}'
+$WF2_ID = if ($wf2 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
+$wf3 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES (''WFLink Gamma'', ''https://example.com/page'')\") { message } }"}'
+$WF3_ID = if ($wf3 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
+
+$result = gql '{"query":"{ search(query: \"WFLink\", where: [{field: \"url\", eq: \"https://example.com\"}]) { totalCount } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search where eq: expected 1, got $result" }
+pass "serve: search where filter materialized column eq"
+
+$result = gql '{"query":"{ search(query: \"WFLink\", where: [{field: \"url\", contains: \"example\"}]) { totalCount } }"}'
+if ($result -notmatch '"totalCount":2') { throw "search where contains: expected 2, got $result" }
+pass "serve: search where filter materialized column contains"
+
+# Tag via where filter
+$wft1 = gql '{"query":"mutation { createDoogat(input: { title: \"WFTag Alpha\", tags: [\"wf-rust\"] }) { id } }"}'
+$WFT1_ID = if ($wft1 -match '"id":"([^"]+)"') { $Matches[1] }
+$wft2 = gql '{"query":"mutation { createDoogat(input: { title: \"WFTag Beta\", tags: [\"wf-python\"] }) { id } }"}'
+$WFT2_ID = if ($wft2 -match '"id":"([^"]+)"') { $Matches[1] }
+
+$result = gql '{"query":"{ search(query: \"WFTag\", where: [{field: \"tag\", eq: \"wf-rust\"}]) { totalCount } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search where tag: expected 1, got $result" }
+pass "serve: search where filter tag eq"
+
+# Combined type + where field filter
+$result = gql '{"query":"{ search(query: \"WFLink\", types: [\"wflink\"], where: [{field: \"url\", eq: \"https://example.com\"}]) { totalCount } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search where type+field: expected 1, got $result" }
+pass "serve: search where filter combined type+field"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WF1_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WF2_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WF3_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WFT1_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WFT2_ID\`") }`"}" | Out-Null
+
 # 18e. Boolean and phrase search queries
 $bq1 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", content: \"rust crdt patterns\" }) { id } }"}'
 $BQ1_ID = if ($bq1 -match '"id":"([^"]+)"') { $Matches[1] }
