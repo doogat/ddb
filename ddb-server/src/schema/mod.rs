@@ -9,7 +9,7 @@ use base64::Engine as _;
 use futures_util::StreamExt;
 use indexmap::IndexMap;
 use ddb_core::search_query;
-use ddb_core::types::{BatchUpdateInput, ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
+use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -390,7 +390,8 @@ pub fn build_schema(
             "tags",
             TypeRef::named_list(TypeRef::STRING),
         ))
-        .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)));
+        .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
+        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)));
 
     let update_input = InputObject::new("UpdateDoogatInput")
         .field(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
@@ -1451,6 +1452,85 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "updates",
                 TypeRef::named_nn_list_nn("UpdateDoogatInput"),
+            )),
+        );
+    }
+
+    // createMany
+    {
+        mutation = mutation.field(
+            Field::new(
+                "createMany",
+                TypeRef::named_nn_list_nn("Doogat"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let a = ctx.data::<ActorHandle>()?;
+                        let inputs_val = ctx.args.try_get("inputs")?.list()?;
+                        let mut inputs = Vec::with_capacity(inputs_val.len());
+                        for item in inputs_val.iter() {
+                            let obj = item.object()?;
+                            let title = obj.try_get("title")?.string()?.to_string();
+                            let body = obj
+                                .get("content")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string());
+                            let tags = obj
+                                .get("tags")
+                                .and_then(|v| v.list().ok())
+                                .map(|l| {
+                                    l.iter()
+                                        .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let doogat_type = obj
+                                .get("type")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string());
+                            let fields = match obj
+                                .get("fields")
+                                .and_then(|v| v.string().ok())
+                            {
+                                Some(json_str) => {
+                                    let map: std::collections::BTreeMap<String, String> =
+                                        serde_json::from_str(json_str).map_err(|e| {
+                                            async_graphql::ServerError::new(
+                                                format!("invalid fields JSON: {e}"),
+                                                None,
+                                            )
+                                        })?;
+                                    map.into_iter()
+                                        .map(|(k, v)| {
+                                            (k, ddb_core::types::Value::String(v))
+                                        })
+                                        .collect()
+                                }
+                                None => std::collections::BTreeMap::new(),
+                            };
+                            inputs.push(BatchCreateInput {
+                                title,
+                                body,
+                                tags,
+                                doogat_type,
+                                fields,
+                            });
+                        }
+                        let results =
+                            a.create_many(inputs).await.map_err(to_server_error)?;
+                        Ok(Some(FieldValue::list(
+                            results
+                                .iter()
+                                .map(|z| FieldValue::owned_any(doogat_to_value(z))),
+                        )))
+                    })
+                },
+            )
+            .description(
+                "Create multiple doogats atomically in a single git commit. All succeed or none.",
+            )
+            .argument(InputValue::new(
+                "inputs",
+                TypeRef::named_nn_list_nn("CreateDoogatInput"),
             )),
         );
     }
