@@ -454,3 +454,113 @@ fn batch_update_single_commit_via_graphql() {
         commits_after - commits_before
     );
 }
+
+#[test]
+fn create_many_basic() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let result = server.graphql(
+        r#"mutation { createMany(inputs: [
+            {title: "Bulk A"},
+            {title: "Bulk B"},
+            {title: "Bulk C"}
+        ]) { id title } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "createMany failed: {result}"
+    );
+    let created = result["data"]["createMany"].as_array().unwrap();
+    assert_eq!(created.len(), 3, "expected 3 results: {result}");
+    assert_eq!(created[0]["title"].as_str().unwrap(), "Bulk A");
+    assert_eq!(created[1]["title"].as_str().unwrap(), "Bulk B");
+    assert_eq!(created[2]["title"].as_str().unwrap(), "Bulk C");
+
+    // All IDs distinct
+    let ids: Vec<&str> = created.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+    assert_eq!(unique.len(), 3, "all IDs must be distinct");
+
+    // Verify persistence
+    for item in created {
+        let id = item["id"].as_str().unwrap();
+        let q = format!(r#"{{ doogat(id: "{id}") {{ id title }} }}"#);
+        let r = server.graphql(&q);
+        assert!(r.get("errors").is_none(), "re-query {id} failed: {r}");
+        assert_eq!(r["data"]["doogat"]["title"], item["title"]);
+    }
+}
+
+#[test]
+fn create_many_single_commit() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let before = commit_count(repo.path());
+
+    let result = server.graphql(
+        r#"mutation { createMany(inputs: [
+            {title: "Commit A"},
+            {title: "Commit B"},
+            {title: "Commit C"}
+        ]) { id } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "createMany failed: {result}"
+    );
+
+    let after = commit_count(repo.path());
+    assert_eq!(
+        after - before,
+        1,
+        "createMany should produce exactly 1 commit, got {}",
+        after - before
+    );
+}
+
+#[test]
+fn create_many_with_type_and_fields() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a type via SQL
+    let result = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE item (category TEXT, priority INTEGER)" }),
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "CREATE TABLE failed: {result}"
+    );
+
+    let result = server.graphql(
+        r#"mutation { createMany(inputs: [
+            {title: "Item 1", type: "item", fields: "{\"category\":\"books\",\"priority\":\"1\"}"},
+            {title: "Item 2", type: "item", fields: "{\"category\":\"music\",\"priority\":\"2\"}"}
+        ]) { id title type } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "createMany with fields failed: {result}"
+    );
+    let created = result["data"]["createMany"].as_array().unwrap();
+    assert_eq!(created.len(), 2);
+    assert_eq!(created[0]["type"].as_str().unwrap(), "item");
+    assert_eq!(created[1]["type"].as_str().unwrap(), "item");
+}
+
+#[test]
+fn create_many_empty() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let result = server.graphql(r#"mutation { createMany(inputs: []) { id } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "createMany([]) should succeed: {result}"
+    );
+    let created = result["data"]["createMany"].as_array().unwrap();
+    assert!(created.is_empty(), "expected empty array: {result}");
+}
