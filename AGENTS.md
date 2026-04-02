@@ -151,6 +151,7 @@ Walkthroughs are local working documents (`dev/local/` is gitignored). They can 
 
 ## Gotchas
 
+- Never run `ddb` commands (init, create, SQL, etc.) in the project root. Use `/tmp` or a temp directory. Running in-repo creates `ddb/`, `.ddb/`, `.crdt/`, `.nodes/` artifacts that pollute the source tree and git history
 - E2E tests require the `ddb` binary — run `cargo build -p ddb-cli` before `cargo test -p ddb-e2e`
 - `head_oid()` returns `CommitHash` (a String newtype, access inner via `.0`), not `git2::Oid`
 - `merge_frontmatter` is called from both `resolve_conflicts` and `resolve_append_log`

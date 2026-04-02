@@ -38,4 +38,14 @@ tests/kotlin/src/main/kotlin/uniffi/
 .claude/
 .serena/
 
+# ddb runtime (test artifacts from running ddb in project root)
 .ddb/
+.ddb-version
+.ddb.toml
+.zetteldb-version
+.zetteldb.toml
+.crdt/
+.nodes/
+ddb/
+zettelkasten/
+reference/
