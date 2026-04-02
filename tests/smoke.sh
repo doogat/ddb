@@ -502,4 +502,18 @@ EXPLICIT_ID=$($DDB query "INSERT INTO datetest (name, date) VALUES ('world', '20
 $DDB read "$EXPLICIT_ID" | grep -q "date: 2025-01-15"
 pass "SQL INSERT defaults date from ID"
 
+# 26. FTS negation search
+NEG_ID1=$($DDB create --title "Important Design" --body "important design review")
+NEG_ID2=$($DDB create --title "Important Meeting" --body "important meeting notes")
+NEG_ID3=$($DDB create --title "Daily Standup" --body "daily standup agenda")
+$DDB reindex >/dev/null
+NEG_RESULT=$($DDB search "important NOT meeting")
+echo "$NEG_RESULT" | grep -q "$NEG_ID1"
+echo "$NEG_RESULT" | grep -q "$NEG_ID2" && { echo "FAIL: negated term should be excluded" >&2; exit 1; } || true
+pass "fts negation (positive NOT negative)"
+NEG_ALL=$($DDB search "NOT standup")
+echo "$NEG_ALL" | grep -q "$NEG_ID3" && { echo "FAIL: all-negative should exclude matching" >&2; exit 1; } || true
+echo "$NEG_ALL" | grep -q "$NEG_ID1"
+pass "fts negation (all-negative query)"
+
 echo "=== all smoke tests passed ==="

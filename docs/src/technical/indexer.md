@@ -254,6 +254,32 @@ The search query language supports the following constructs:
 
 Note: field filters (`tag=svelte`) are a normalization-layer concept used for canonical comparison and saved searches. The FTS5 index only sees the bare word and phrase portions of the query.
 
+### FTS negation handling
+
+FTS5's MATCH operator cannot handle standalone negation (`NOT term` is a syntax error, `a NOT b` requires a positive term). The search engine transparently works around this limitation by splitting queries that contain NOT expressions into a compound SQL query.
+
+**How it works**: `search_query::extract_negations()` partitions the parsed AST into positive and negative parts at the top-level AND boundary. The positive part goes to FTS5 MATCH for ranking and snippets. Each negated term becomes a `NOT IN` subquery:
+
+```sql
+-- "important NOT meeting" becomes:
+WHERE _ddb_fts MATCH 'important'
+AND z.id NOT IN (
+  SELECT z2.id FROM _ddb_fts
+  JOIN doogats z2 ON z2.rowid = _ddb_fts.rowid
+  WHERE _ddb_fts MATCH 'meeting'
+)
+```
+
+**Negated tag filters** (`NOT tag=archive`) use `_ddb_tags` instead of FTS:
+
+```sql
+AND z.id NOT IN (SELECT doogat_id FROM _ddb_tags WHERE tag = ?)
+```
+
+**All-negative queries** (`NOT archive`) have no positive MATCH clause, so the search scans `doogats` directly with exclusion subqueries, ordered by title instead of relevance rank. No snippets are returned.
+
+Ranking is always based on the positive terms only - negated terms affect filtering but not result ordering.
+
 ### Query normalization
 
 `search_query::normalize(query: &str) -> String`

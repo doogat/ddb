@@ -595,5 +595,19 @@ $output = ddb read $EXPLICIT_ID
 if ($output -notmatch "date: 2025-01-15") { throw "explicit date not preserved: $output" }
 pass "SQL INSERT defaults date from ID"
 
+# 26. FTS negation search
+$NEG_ID1 = ddb create --title "Important Design" --body "important design review"
+$NEG_ID2 = ddb create --title "Important Meeting" --body "important meeting notes"
+$NEG_ID3 = ddb create --title "Daily Standup" --body "daily standup agenda"
+ddb reindex | Out-Null
+$NEG_RESULT = ddb search "important NOT meeting"
+if ($NEG_RESULT -notmatch $NEG_ID1) { throw "fts negation: positive term not found" }
+if ($NEG_RESULT -match $NEG_ID2) { throw "fts negation: negated term should be excluded" }
+pass "fts negation (positive NOT negative)"
+$NEG_ALL = ddb search "NOT standup"
+if ($NEG_ALL -match $NEG_ID3) { throw "fts negation: all-negative should exclude matching" }
+if ($NEG_ALL -notmatch $NEG_ID1) { throw "fts negation: all-negative should include non-matching" }
+pass "fts negation (all-negative query)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
