@@ -19,7 +19,7 @@ impl From<rusqlite::Error> for DoogatError {
 }
 
 pub use crate::types::{PaginatedSearchResult, SearchResult};
-use crate::types::{SearchFieldOp, SearchFilters};
+use crate::types::{SearchFieldOp, SearchFilters, TagEntry, TagQueryFilter};
 
 pub struct Index {
     pub(crate) conn: Connection,
@@ -1432,6 +1432,68 @@ impl Index {
         let mut out = Vec::new();
         for id in ids {
             out.push(id?);
+        }
+        Ok(out)
+    }
+
+    /// Query individual tag-doogat associations with optional filters.
+    pub fn query_tags(&self, filter: &TagQueryFilter) -> Result<Vec<TagEntry>> {
+        let mut sql = String::from("SELECT doogat_id, tag, source FROM _ddb_tags");
+        let mut conditions: Vec<String> = Vec::new();
+        let mut params: Vec<rusqlite::types::Value> = Vec::new();
+
+        if let Some(ref id) = filter.doogat_id_eq {
+            params.push(id.clone().into());
+            conditions.push(format!("doogat_id = ?{}", params.len()));
+        }
+        if let Some(ref ids) = filter.doogat_id_in {
+            let placeholders: Vec<String> = ids
+                .iter()
+                .map(|id| {
+                    params.push(id.clone().into());
+                    format!("?{}", params.len())
+                })
+                .collect();
+            conditions.push(format!("doogat_id IN ({})", placeholders.join(",")));
+        }
+        if let Some(ref tag) = filter.tag_eq {
+            params.push(tag.clone().into());
+            conditions.push(format!("tag = ?{}", params.len()));
+        }
+        if let Some(ref substr) = filter.tag_contains {
+            params.push(format!("%{substr}%").into());
+            conditions.push(format!("tag LIKE ?{}", params.len()));
+        }
+        if let Some(ref tags) = filter.tag_in {
+            let placeholders: Vec<String> = tags
+                .iter()
+                .map(|t| {
+                    params.push(t.clone().into());
+                    format!("?{}", params.len())
+                })
+                .collect();
+            conditions.push(format!("tag IN ({})", placeholders.join(",")));
+        }
+
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+        sql.push_str(" ORDER BY doogat_id, tag");
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            Ok(TagEntry {
+                doogat_id: row.get(0)?,
+                tag: row.get(1)?,
+                source: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
         }
         Ok(out)
     }
