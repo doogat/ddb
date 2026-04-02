@@ -446,12 +446,15 @@ impl DoogatService {
                                         })
                                         .unwrap_or_default();
                                     let sql = format!(
-                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = '{}'",
-                                        col.name, schema.table_name, partition_col, partition_val
+                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                                        col.name, schema.table_name, partition_col
                                     );
                                     let max_val: i64 = self
                                         .index
-                                        .query_raw(&sql)?
+                                        .query_raw_with_params(
+                                            &sql,
+                                            &[rusqlite::types::Value::Text(partition_val.clone())],
+                                        )?
                                         .first()
                                         .and_then(|r| r.first())
                                         .and_then(|v| v.parse().ok())
@@ -492,13 +495,12 @@ impl DoogatService {
                                     crate::types::Value::String(s) => s.clone(),
                                     other => format!("{other:?}"),
                                 };
-                                let sql = format!(
-                                    "SELECT COUNT(*) > 0 FROM doogats WHERE id = '{}'",
-                                    val_str
-                                );
                                 let exists = self
                                     .index
-                                    .query_raw(&sql)?
+                                    .query_raw_with_params(
+                                        "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
+                                        &[rusqlite::types::Value::Text(val_str.clone())],
+                                    )?
                                     .first()
                                     .and_then(|r| r.first())
                                     .map(|v| v == "1")
