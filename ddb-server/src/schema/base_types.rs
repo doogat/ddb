@@ -598,6 +598,10 @@ pub(crate) fn build_typed_object(
             };
 
             // Singular: resolves as the referenced typed object (nullable)
+            // Skip if the computed object field name collides with a base doogat field
+            if BASE_DOOGAT_FIELDS.contains(&obj_field_name.as_str()) {
+                // Still add the raw scalar (below) but skip the object resolver
+            } else {
             let target_type = ref_target_gql_type(col, known_types);
             let target_ref_name = col.references.clone().unwrap_or_default();
             let col_name = col.name.clone();
@@ -630,6 +634,7 @@ pub(crate) fn build_typed_object(
                     })
                 },
             ));
+            } // end BASE_DOOGAT_FIELDS guard for singular
 
             // Plural: resolves as list of referenced typed objects
             // Skip if the computed plural name collides with a base doogat field
@@ -1341,5 +1346,17 @@ mod tests {
         assert_eq!(strip_id_suffix("link_name"), "link_name");
         // Ends with "id" but not "_id"
         assert_eq!(strip_id_suffix("valid"), "valid");
+    }
+
+    #[test]
+    fn base_field_collision_guard_covers_singular_and_plural() {
+        // Verify that BASE_DOOGAT_FIELDS contains expected base fields
+        assert!(BASE_DOOGAT_FIELDS.contains(&"title"));
+        assert!(BASE_DOOGAT_FIELDS.contains(&"tags"));
+        assert!(BASE_DOOGAT_FIELDS.contains(&"body"));
+        assert!(BASE_DOOGAT_FIELDS.contains(&"id"));
+        // Normal column names should NOT be in the set
+        assert!(!BASE_DOOGAT_FIELDS.contains(&"category"));
+        assert!(!BASE_DOOGAT_FIELDS.contains(&"link"));
     }
 }
