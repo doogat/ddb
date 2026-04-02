@@ -1654,3 +1654,208 @@ fn normalize_search_query_standalone() {
         "category=work.portals and tag=svelte"
     );
 }
+
+// ── Search where filter tests ──────────────────────────────────
+
+#[test]
+fn search_where_filter_materialized_column_eq() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a link type with url column
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE link (url TEXT NOT NULL, description TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    // Insert 3 links: two with example.com, one with other.org
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Link A', 'https://example.com', 'filterable alpha content')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT A failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Link B', 'https://example.com', 'filterable beta content')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT B failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Link C', 'https://other.org', 'filterable gamma content')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT C failed: {r}");
+
+    // Search with where filter on materialized url column
+    let result = server.graphql(
+        r#"{ search(query: "filterable", where: [{field: "url", eq: "https://example.com"}]) { hits { id title } totalCount } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "search where eq failed: {result}"
+    );
+    let hits = result["data"]["search"]["hits"].as_array().unwrap();
+    assert_eq!(
+        hits.len(),
+        2,
+        "expected 2 hits for url=example.com, got: {hits:?}"
+    );
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 2);
+}
+
+#[test]
+fn search_where_filter_materialized_column_contains() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create a link type with url column
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE link (url TEXT NOT NULL)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
+
+    // Insert links with different urls
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url) VALUES ('Example Link', 'https://example.com/page')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT 1 failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url) VALUES ('Other Link', 'https://other.org/page')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT 2 failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url) VALUES ('Another Example', 'https://example.net/stuff')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT 3 failed: {r}");
+
+    // Search with contains filter on url
+    let result = server.graphql(
+        r#"{ search(query: "Link OR Example", where: [{field: "url", contains: "example"}]) { hits { id title } totalCount } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "search where contains failed: {result}"
+    );
+    let hits = result["data"]["search"]["hits"].as_array().unwrap();
+    assert_eq!(
+        hits.len(),
+        2,
+        "expected 2 hits for url containing 'example', got: {hits:?}"
+    );
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 2);
+}
+
+#[test]
+fn search_where_filter_tag() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create doogats with different tags
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({ "input": { "title": "Rust Doogat", "content": "tagfilterable rust content", "tags": ["rust", "programming"] } }),
+    );
+    assert!(r.get("errors").is_none(), "create rust doogat failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({ "input": { "title": "Go Doogat", "content": "tagfilterable golang content", "tags": ["golang", "programming"] } }),
+    );
+    assert!(r.get("errors").is_none(), "create go doogat failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
+        serde_json::json!({ "input": { "title": "Rust Tools", "content": "tagfilterable tooling content", "tags": ["rust", "tools"] } }),
+    );
+    assert!(r.get("errors").is_none(), "create tools doogat failed: {r}");
+
+    // Search with where filter on tag
+    let result = server.graphql(
+        r#"{ search(query: "tagfilterable", where: [{field: "tag", eq: "rust"}]) { hits { id title } totalCount } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "search where tag failed: {result}"
+    );
+    let hits = result["data"]["search"]["hits"].as_array().unwrap();
+    assert_eq!(
+        hits.len(),
+        2,
+        "expected 2 hits for tag=rust, got: {hits:?}"
+    );
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 2);
+}
+
+#[test]
+fn search_where_filter_combined_type_and_field() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create two types, both with a url column
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE link (url TEXT NOT NULL)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE TABLE link failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE bookmark (url TEXT NOT NULL)" }),
+    );
+    assert!(
+        r.get("errors").is_none(),
+        "CREATE TABLE bookmark failed: {r}"
+    );
+
+    // Insert data into both types with the same url
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url) VALUES ('Link Match', 'https://example.com')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT link failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO bookmark (title, url) VALUES ('Bookmark Match', 'https://example.com')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT bookmark failed: {r}");
+    std::thread::sleep(Duration::from_secs(1));
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO link (title, url) VALUES ('Link Other', 'https://other.org')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT link other failed: {r}");
+
+    // Search with types filter AND where filter: only link type with matching url
+    let result = server.graphql(
+        r#"{ search(query: "Match OR Other", types: ["link"], where: [{field: "url", eq: "https://example.com"}]) { hits { id title } totalCount } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "search types+where failed: {result}"
+    );
+    let hits = result["data"]["search"]["hits"].as_array().unwrap();
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected 1 hit for type=link AND url=example.com, got: {hits:?}"
+    );
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
+    assert_eq!(hits[0]["title"].as_str().unwrap(), "Link Match");
+}
