@@ -723,7 +723,7 @@ impl Index {
         offset: usize,
         filters: &SearchFilters,
     ) -> Result<PaginatedSearchResult> {
-        let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
+        let (filter_clauses, filter_params) = self.build_filter_clauses(filters);
         let boost_type = filters
             .types
             .as_ref()
@@ -761,7 +761,7 @@ impl Index {
         pagination: Option<(usize, usize)>,
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
-        let (filter_clauses, filter_params) = Self::build_filter_clauses(filters);
+        let (filter_clauses, filter_params) = self.build_filter_clauses(filters);
         let boost_type = filters
             .types
             .as_ref()
@@ -837,7 +837,9 @@ impl Index {
         Ok(hits)
     }
 
-    fn build_filter_clauses(filters: &SearchFilters) -> (Vec<String>, Vec<String>) {
+    fn build_filter_clauses(&self, filters: &SearchFilters) -> (Vec<String>, Vec<String>) {
+        use materialize::is_core_column;
+
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         let mut idx = 2; // ?1 is always the FTS query
@@ -860,26 +862,96 @@ impl Index {
         }
 
         if let Some(ref where_filters) = filters.where_filters {
+            // Determine candidate type tables for materialized column lookup
+            let candidate_tables: Vec<String> = if let Some(ref types) = filters.types {
+                types.clone()
+            } else {
+                self.conn
+                    .prepare(
+                        "SELECT name FROM sqlite_master WHERE type='table' \
+                         AND name NOT LIKE '_ddb%' AND name != 'doogats'",
+                    )
+                    .and_then(|mut stmt| {
+                        stmt.query_map([], |row| row.get::<_, String>(0))
+                            .map(|rows| rows.flatten().collect())
+                    })
+                    .unwrap_or_default()
+            };
+
             for wf in where_filters {
-                match &wf.op {
-                    SearchFieldOp::Eq(val) => {
-                        clauses.push(format!(
-                            "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value = ?{})",
-                            idx, idx + 1
-                        ));
-                        params.push(wf.field.clone());
-                        params.push(val.clone());
-                        idx += 2;
+                // Find which candidate tables have this field as a non-core column
+                let mut tables_with_field: Vec<String> = Vec::new();
+                for table in &candidate_tables {
+                    let has_col = self
+                        .conn
+                        .prepare(&format!(
+                            "PRAGMA table_info(\"{}\")",
+                            Self::escape_sql_ident(table)
+                        ))
+                        .and_then(|mut stmt| {
+                            stmt.query_map([], |row| row.get::<_, String>(1))
+                                .map(|rows| {
+                                    rows.flatten()
+                                        .any(|col| !is_core_column(&col) && col == wf.field)
+                                })
+                        })
+                        .unwrap_or(false);
+                    if has_col {
+                        tables_with_field.push(table.clone());
                     }
-                    SearchFieldOp::Contains(val) => {
-                        clauses.push(format!(
-                            "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value LIKE '%' || ?{} || '%')",
-                            idx, idx + 1
-                        ));
-                        params.push(wf.field.clone());
-                        params.push(val.clone());
-                        idx += 2;
+                }
+
+                if tables_with_field.is_empty() {
+                    // Fallback: use _ddb_fields key-value store (two params)
+                    match &wf.op {
+                        SearchFieldOp::Eq(val) => {
+                            clauses.push(format!(
+                                "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value = ?{})",
+                                idx, idx + 1
+                            ));
+                            params.push(wf.field.clone());
+                            params.push(val.clone());
+                            idx += 2;
+                        }
+                        SearchFieldOp::Contains(val) => {
+                            clauses.push(format!(
+                                "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value LIKE '%' || ?{} || '%')",
+                                idx, idx + 1
+                            ));
+                            params.push(wf.field.clone());
+                            params.push(val.clone());
+                            idx += 2;
+                        }
                     }
+                } else {
+                    // Resolve against materialized type table(s) (one param)
+                    let safe_col = Self::escape_sql_ident(&wf.field);
+                    let val = match &wf.op {
+                        SearchFieldOp::Eq(v) | SearchFieldOp::Contains(v) => v.clone(),
+                    };
+                    let param_placeholder = format!("?{idx}");
+                    idx += 1;
+
+                    let subqueries: Vec<String> = tables_with_field
+                        .iter()
+                        .map(|t| {
+                            let safe_table = Self::escape_sql_ident(t);
+                            match &wf.op {
+                                SearchFieldOp::Eq(_) => format!(
+                                    "SELECT id FROM \"{}\" WHERE \"{}\" = {}",
+                                    safe_table, safe_col, param_placeholder
+                                ),
+                                SearchFieldOp::Contains(_) => format!(
+                                    "SELECT id FROM \"{}\" WHERE \"{}\" LIKE '%' || {} || '%'",
+                                    safe_table, safe_col, param_placeholder
+                                ),
+                            }
+                        })
+                        .collect();
+
+                    let combined = subqueries.join(" UNION ");
+                    clauses.push(format!("AND z.id IN ({combined})"));
+                    params.push(val);
                 }
             }
         }
