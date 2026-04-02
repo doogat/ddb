@@ -917,7 +917,7 @@ impl Index {
                 }
 
                 // Route core doogat columns directly to the z (doogats) alias
-                if matches!(wf.field.as_str(), "title" | "date" | "updated_at") {
+                if is_core_column(&wf.field) {
                     let safe_col = Self::escape_sql_ident(&wf.field);
                     match &wf.op {
                         SearchFieldOp::Eq(val) => {
