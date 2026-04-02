@@ -1200,4 +1200,20 @@ mod tests {
         assert_eq!(obj.get("created_at").unwrap(), &GqlValue::Null);
         assert_eq!(obj.get("updated_at").unwrap(), &GqlValue::Null);
     }
+
+    #[test]
+    fn test_strip_id_suffix() {
+        // Column name with _id suffix: strip it
+        assert_eq!(strip_id_suffix("link_id"), "link");
+        // Multi-word with _id suffix
+        assert_eq!(strip_id_suffix("category_membership_id"), "category_membership");
+        // Bare "id" should NOT be stripped (no prefix before _id)
+        assert_eq!(strip_id_suffix("id"), "id");
+        // No _id suffix: return as-is
+        assert_eq!(strip_id_suffix("category"), "category");
+        // Underscore but not _id suffix
+        assert_eq!(strip_id_suffix("link_name"), "link_name");
+        // Ends with "id" but not "_id"
+        assert_eq!(strip_id_suffix("valid"), "valid");
+    }
 }

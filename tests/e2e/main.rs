@@ -16,6 +16,7 @@ mod multi_device;
 mod path_navigation;
 mod pgwire;
 mod read_pool;
+mod reference_raw_id;
 mod relation_resolution;
 mod rename;
 mod search_links;
