@@ -391,6 +391,33 @@ pub fn to_fts_query(expr: &SearchExpr) -> String {
     fts_serialize(expr)
 }
 
+/// Partition a `SearchExpr` into positive and negated parts.
+/// Returns `(positive_ast, negated_inner_exprs)` where negated_inner_exprs
+/// are the inner expressions unwrapped from NOT nodes.
+/// Only decomposes top-level AND and standalone NOT; OR nodes pass through intact.
+pub fn extract_negations(expr: SearchExpr) -> (Option<SearchExpr>, Vec<SearchExpr>) {
+    match expr {
+        SearchExpr::Not(inner) => (None, vec![*inner]),
+        SearchExpr::And(children) => {
+            let mut positives = Vec::new();
+            let mut negatives = Vec::new();
+            for child in children {
+                match child {
+                    SearchExpr::Not(inner) => negatives.push(*inner),
+                    other => positives.push(other),
+                }
+            }
+            let pos = match positives.len() {
+                0 => None,
+                1 => Some(positives.remove(0)),
+                _ => Some(SearchExpr::And(positives)),
+            };
+            (pos, negatives)
+        }
+        other => (Some(other), Vec::new()),
+    }
+}
+
 /// Normalize a search query to canonical form.
 /// On parse failure, falls back to lowercase + whitespace collapse.
 pub fn normalize(query: &str) -> String {
