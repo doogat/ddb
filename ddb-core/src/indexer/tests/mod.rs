@@ -1294,6 +1294,26 @@ processed: true
         assert!(entries.is_empty());
     }
 
+    #[test]
+    fn query_tags_empty_in_list_returns_empty() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            doogat_id_in: Some(vec![]),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+        assert!(entries.is_empty());
+
+        let filter = TagQueryFilter {
+            tag_in: Some(vec![]),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+        assert!(entries.is_empty());
+    }
+
     // ── Search filter tests ────────────────────────────────────────
 
     fn make_typed_doogat(n: usize, dtype: &str, tags: Vec<&str>) -> ParsedDoogat {

@@ -1447,6 +1447,9 @@ impl Index {
             conditions.push(format!("doogat_id = ?{}", params.len()));
         }
         if let Some(ref ids) = filter.doogat_id_in {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
             let placeholders: Vec<String> = ids
                 .iter()
                 .map(|id| {
@@ -1465,6 +1468,9 @@ impl Index {
             conditions.push(format!("tag LIKE ?{}", params.len()));
         }
         if let Some(ref tags) = filter.tag_in {
+            if tags.is_empty() {
+                return Ok(Vec::new());
+            }
             let placeholders: Vec<String> = tags
                 .iter()
                 .map(|t| {
