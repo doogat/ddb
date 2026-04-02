@@ -2853,4 +2853,98 @@ mod tests {
             _ => panic!("expected Rows from SELECT"),
         }
     }
+
+    #[test]
+    fn batch_create_rollback_on_failure() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE linked (target VARCHAR REFERENCES doogats)")
+            .unwrap();
+
+        let count_before = svc.list_doogats().unwrap().len();
+
+        let mut bad_fields = std::collections::BTreeMap::new();
+        bad_fields.insert(
+            "target".to_string(),
+            crate::types::Value::String("99999999999999".to_string()),
+        );
+
+        let inputs = vec![
+            crate::types::BatchCreateInput {
+                title: "Good One".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("linked".to_string()),
+                fields: std::collections::BTreeMap::new(),
+            },
+            crate::types::BatchCreateInput {
+                title: "Bad FK".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("linked".to_string()),
+                fields: bad_fields,
+            },
+        ];
+
+        let result = svc.batch_create(&inputs);
+        assert!(result.is_err(), "should fail on invalid FK reference");
+
+        let count_after = svc.list_doogats().unwrap().len();
+        assert_eq!(
+            count_before, count_after,
+            "no doogats should be created on failure (rollback)"
+        );
+    }
+
+    #[test]
+    fn batch_create_mixed_types() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE note (content VARCHAR)")
+            .unwrap();
+        svc.execute_sql("CREATE TABLE task (status VARCHAR)")
+            .unwrap();
+
+        let mut note_fields = std::collections::BTreeMap::new();
+        note_fields.insert(
+            "content".to_string(),
+            crate::types::Value::String("some content".to_string()),
+        );
+
+        let mut task_fields = std::collections::BTreeMap::new();
+        task_fields.insert(
+            "status".to_string(),
+            crate::types::Value::String("open".to_string()),
+        );
+
+        let inputs = vec![
+            crate::types::BatchCreateInput {
+                title: "My Note".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("note".to_string()),
+                fields: note_fields,
+            },
+            crate::types::BatchCreateInput {
+                title: "My Task".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("task".to_string()),
+                fields: task_fields,
+            },
+            crate::types::BatchCreateInput {
+                title: "Untyped".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+        ];
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].meta.doogat_type.as_deref(), Some("note"));
+        assert_eq!(results[1].meta.doogat_type.as_deref(), Some("task"));
+        assert_eq!(results[2].meta.doogat_type, None);
+    }
 }
