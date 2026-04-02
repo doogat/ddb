@@ -755,7 +755,10 @@ impl Index {
                 let adjusted_filter_sql = Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
                 let neg_sql = self.resolve_negation_clauses(neg_clauses, neg_params, &mut params);
                 let conditions = format!("{adjusted_filter_sql}{neg_sql}");
-                let trimmed = conditions.strip_prefix(" AND ").unwrap_or(&conditions);
+                let trimmed = conditions
+                    .strip_prefix(" AND ")
+                    .or_else(|| conditions.strip_prefix("AND "))
+                    .unwrap_or(&conditions);
                 let sql = if trimmed.is_empty() {
                     "SELECT COUNT(*) FROM doogats".to_string()
                 } else {
@@ -860,8 +863,11 @@ impl Index {
                     String::new()
                 } else {
                     let conditions = format!("{adjusted_filter_sql}{neg_sql}");
-                    // Strip leading " AND " to form valid WHERE
-                    let trimmed = conditions.strip_prefix(" AND ").unwrap_or(&conditions);
+                    // Strip leading "AND " or " AND " to form valid WHERE
+                    let trimmed = conditions
+                        .strip_prefix(" AND ")
+                        .or_else(|| conditions.strip_prefix("AND "))
+                        .unwrap_or(&conditions);
                     format!("WHERE {trimmed}")
                 };
                 let sql = format!(
@@ -996,13 +1002,16 @@ impl Index {
         if filter_params.is_empty() {
             return String::new();
         }
-        let mut result = filter_sql.to_string();
-        // Original filter SQL uses ?2, ?3, ... (assuming ?1 is FTS query).
-        // For all-negative queries there's no ?1, so re-map to ?1, ?2, ...
-        for (i, p) in filter_params.iter().enumerate() {
+        // Collect new indices first, then replace from highest to lowest
+        // to avoid substring corruption (?2 matching inside ?20).
+        let base = all_params.len();
+        for p in filter_params {
             all_params.push(Box::new(p.clone()));
+        }
+        let mut result = filter_sql.to_string();
+        for i in (0..filter_params.len()).rev() {
             let old = format!("?{}", i + 2);
-            let new = format!("?{}", all_params.len());
+            let new = format!("?{}", base + i + 1);
             result = result.replace(&old, &new);
         }
         result

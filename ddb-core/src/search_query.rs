@@ -350,7 +350,7 @@ fn fts_serialize(expr: &SearchExpr) -> String {
             let parts: Vec<String> = children.iter().map(fts_serialize).collect();
             parts.join(" OR ")
         }
-        SearchExpr::Not(inner) => fts_not_child(inner),
+        SearchExpr::Not(inner) => format!("NOT {}", fts_not_child(inner)),
     }
 }
 
@@ -831,6 +831,30 @@ mod tests {
             value: "svelte".into(),
         };
         assert_eq!(to_fts_query(&expr), "svelte");
+    }
+
+    #[test]
+    fn to_fts_query_not() {
+        let expr = SearchExpr::Not(Box::new(SearchExpr::FullText("a".into())));
+        assert_eq!(to_fts_query(&expr), "NOT a");
+    }
+
+    #[test]
+    fn to_fts_query_and_with_not() {
+        let expr = SearchExpr::And(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::Not(Box::new(SearchExpr::FullText("b".into()))),
+        ]);
+        assert_eq!(to_fts_query(&expr), "a AND NOT b");
+    }
+
+    #[test]
+    fn to_fts_query_not_compound() {
+        let expr = SearchExpr::Not(Box::new(SearchExpr::And(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::FullText("b".into()),
+        ])));
+        assert_eq!(to_fts_query(&expr), "NOT (a AND b)");
     }
 
     // ── extract_negations() tests ─────────────────────────────────────

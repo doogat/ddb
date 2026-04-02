@@ -2158,13 +2158,54 @@ processed: true
         idx.index_doogat(&make_search_doogat(2, "CRDT Only", "crdt patterns")).unwrap();
         idx.index_doogat(&make_search_doogat(3, "Other", "unrelated content")).unwrap();
 
-        // NOT (a AND b) passes through as an OR NOT node, not decomposed
-        // This should work since the OR passes through intact in extract_negations
+        // NOT(AND(rust, crdt)) is an all-negative query with a compound negated term.
+        // extract_negations returns (None, [And(rust, crdt)]).
+        // The compound term becomes a single FTS MATCH subquery: "rust AND crdt".
+        // Only docs matching BOTH rust AND crdt are excluded.
         let results = idx.search("NOT (rust AND crdt)").unwrap();
-        // This is NOT(AND(rust, crdt)) which should exclude docs matching both
-        // But since OR nodes pass through in extract_negations, this is treated
-        // as the full expression and goes through FTS5 directly
-        // FTS5 handles NOT for compound expressions - let's just verify it doesn't crash
-        assert!(results.len() <= 4);
+        assert_eq!(results.len(), 3);
+        let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+        assert!(!ids.contains(&"20260401120000")); // "Rust CRDT" excluded
+        assert!(ids.contains(&"20260401120001")); // "Rust Only" kept
+        assert!(ids.contains(&"20260401120002")); // "CRDT Only" kept
+        assert!(ids.contains(&"20260401120003")); // "Other" kept
+    }
+
+    #[test]
+    fn search_negation_stemming() {
+        let idx = in_memory_index();
+        // "meeting" and "meetings" share stem "meet" via porter stemmer
+        idx.index_doogat(&make_search_doogat(0, "Important Design", "important design review")).unwrap();
+        idx.index_doogat(&make_search_doogat(1, "Meeting Notes", "important meeting notes")).unwrap();
+        idx.index_doogat(&make_search_doogat(2, "Meetings List", "important meetings summary")).unwrap();
+
+        // Negating "meetings" (plural) should also exclude doc with "meeting" (singular)
+        let results = idx.search("important NOT meetings").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260401120000");
+    }
+
+    #[test]
+    fn search_negation_all_negative_with_type_filter() {
+        let idx = in_memory_index();
+        let mut d0 = make_typed_doogat(0, "note", vec![]);
+        d0.body = "archive old content".into();
+        let mut d1 = make_typed_doogat(1, "note", vec![]);
+        d1.body = "active current content".into();
+        let mut d2 = make_typed_doogat(2, "link", vec![]);
+        d2.body = "active link content".into();
+
+        idx.index_doogat(&d0).unwrap();
+        idx.index_doogat(&d1).unwrap();
+        idx.index_doogat(&d2).unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["note".into()]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("NOT archive", 10, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.hits[0].id, "20260301120001");
+        assert_eq!(result.total_count, 1);
     }
 
