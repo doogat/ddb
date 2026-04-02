@@ -374,8 +374,11 @@ impl DoogatService {
         // Load type schemas once for default/validation resolution
         let schemas = self.list_type_schemas()?;
 
-        // Pre-compute NEXT counters per (table, column)
+        // Pre-compute NEXT counters per (table, column) for bare NEXT
         let mut next_counters: std::collections::BTreeMap<(String, String), i64> =
+            std::collections::BTreeMap::new();
+        // Track NEXT(partition) counters per (table, column, partition_value)
+        let mut partitioned_counters: std::collections::BTreeMap<(String, String, String), i64> =
             std::collections::BTreeMap::new();
         for input in inputs {
             if let Some(ref type_name) = input.doogat_type {
@@ -394,6 +397,40 @@ impl DoogatService {
                                     let max_val: i64 = self
                                         .index
                                         .query_raw(&sql)?
+                                        .first()
+                                        .and_then(|r| r.first())
+                                        .and_then(|v| v.parse().ok())
+                                        .unwrap_or(0);
+                                    e.insert(max_val);
+                                }
+                            } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                                let partition_col = &dv[5..dv.len() - 1];
+                                let partition_val = input
+                                    .fields
+                                    .get(partition_col)
+                                    .map(|v| match v {
+                                        crate::types::Value::String(s) => s.clone(),
+                                        other => format!("{other:?}"),
+                                    })
+                                    .unwrap_or_default();
+                                let key = (
+                                    type_name.clone(),
+                                    col.name.clone(),
+                                    partition_val.clone(),
+                                );
+                                if let std::collections::btree_map::Entry::Vacant(e) =
+                                    partitioned_counters.entry(key)
+                                {
+                                    let sql = format!(
+                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                                        col.name, schema.table_name, partition_col
+                                    );
+                                    let max_val: i64 = self
+                                        .index
+                                        .query_raw_with_params(
+                                            &sql,
+                                            &[rusqlite::types::Value::Text(partition_val)],
+                                        )?
                                         .first()
                                         .and_then(|r| r.first())
                                         .and_then(|v| v.parse().ok())
@@ -445,23 +482,17 @@ impl DoogatService {
                                             other => format!("{other:?}"),
                                         })
                                         .unwrap_or_default();
-                                    let sql = format!(
-                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
-                                        col.name, schema.table_name, partition_col
+                                    let key = (
+                                        type_name.clone(),
+                                        col.name.clone(),
+                                        partition_val,
                                     );
-                                    let max_val: i64 = self
-                                        .index
-                                        .query_raw_with_params(
-                                            &sql,
-                                            &[rusqlite::types::Value::Text(partition_val.clone())],
-                                        )?
-                                        .first()
-                                        .and_then(|r| r.first())
-                                        .and_then(|v| v.parse().ok())
-                                        .unwrap_or(0);
+                                    let counter =
+                                        partitioned_counters.get_mut(&key).unwrap();
+                                    *counter += 1;
                                     extra.insert(
                                         col.name.clone(),
-                                        crate::types::Value::String((max_val + 1).to_string()),
+                                        crate::types::Value::String(counter.to_string()),
                                     );
                                 } else {
                                     extra.insert(
@@ -2772,6 +2803,52 @@ mod tests {
                 assert_eq!(rows[0][1], "1");
                 assert_eq!(rows[1][1], "2");
                 assert_eq!(rows[2][1], "3");
+            }
+            _ => panic!("expected Rows from SELECT"),
+        }
+    }
+
+    #[test]
+    fn batch_create_partitioned_next() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql(
+            "CREATE TABLE items (cat VARCHAR, sort_order INTEGER DEFAULT NEXT(cat))",
+        )
+        .unwrap();
+
+        let inputs: Vec<crate::types::BatchCreateInput> = [("A", "x"), ("A", "y"), ("B", "z"), ("A", "w")]
+            .iter()
+            .map(|(cat, name)| {
+                let mut fields = std::collections::BTreeMap::new();
+                fields.insert(
+                    "cat".to_string(),
+                    crate::types::Value::String(cat.to_string()),
+                );
+                crate::types::BatchCreateInput {
+                    title: format!("Item {name}"),
+                    body: None,
+                    tags: vec![],
+                    doogat_type: Some("items".to_string()),
+                    fields,
+                }
+            })
+            .collect();
+
+        svc.batch_create(&inputs).unwrap();
+        svc.reindex().unwrap();
+
+        let result = svc
+            .execute_sql("SELECT cat, sort_order FROM items ORDER BY cat, sort_order")
+            .unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                // Cat A: 3 items with sort_order 1, 2, 3
+                assert_eq!(rows[0], vec!["A", "1"]);
+                assert_eq!(rows[1], vec!["A", "2"]);
+                assert_eq!(rows[2], vec!["A", "3"]);
+                // Cat B: 1 item with sort_order 1
+                assert_eq!(rows[3], vec!["B", "1"]);
             }
             _ => panic!("expected Rows from SELECT"),
         }
