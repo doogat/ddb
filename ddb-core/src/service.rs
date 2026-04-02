@@ -14,7 +14,7 @@ use crate::types::{
     MaintenanceReport, NodeConfig, OrphanDoogat, PaginatedSearchResult, ParsedDoogat,
     RebuildReport, RenameReport, SearchFilters, SearchResult, SequenceInfo, SequenceNode,
     StaleDoogat, Suggestion, SyncReport, TableSchema, TypedListQuery, UnlinkedMention,
-    DoogatId, DoogatMeta,
+    DoogatId, DoogatMeta, TagEntry, TagQueryFilter,
 };
 
 /// Extra frontmatter fields to set or remove during an update.
@@ -857,6 +857,12 @@ impl DoogatService {
     pub fn list_tags(&self) -> Result<Vec<(String, i64)>> {
         self.ensure_fresh()?;
         self.index.list_tags()
+    }
+
+    /// Query individual tag-doogat associations with optional filters.
+    pub fn query_tags(&self, filter: &TagQueryFilter) -> Result<Vec<TagEntry>> {
+        self.ensure_fresh()?;
+        self.index.query_tags(filter)
     }
 
     /// Execute a raw SQL query with params, returning the first result row.
