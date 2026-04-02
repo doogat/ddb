@@ -584,4 +584,160 @@ mod tests {
         let result = normalize("=value");
         assert_eq!(result, "= and value");
     }
+
+    // ── parse() tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_simple_word() {
+        assert_eq!(parse("hello"), Some(SearchExpr::FullText("hello".into())));
+    }
+
+    #[test]
+    fn parse_two_words_implicit_and() {
+        assert_eq!(
+            parse("a b"),
+            Some(SearchExpr::And(vec![
+                SearchExpr::FullText("a".into()),
+                SearchExpr::FullText("b".into()),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_explicit_and() {
+        assert_eq!(
+            parse("a AND b"),
+            Some(SearchExpr::And(vec![
+                SearchExpr::FullText("a".into()),
+                SearchExpr::FullText("b".into()),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_or() {
+        assert_eq!(
+            parse("a OR b"),
+            Some(SearchExpr::Or(vec![
+                SearchExpr::FullText("a".into()),
+                SearchExpr::FullText("b".into()),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_not() {
+        assert_eq!(
+            parse("NOT a"),
+            Some(SearchExpr::Not(Box::new(SearchExpr::FullText("a".into()))))
+        );
+    }
+
+    #[test]
+    fn parse_complex_negation() {
+        assert_eq!(
+            parse("important NOT meeting"),
+            Some(SearchExpr::And(vec![
+                SearchExpr::FullText("important".into()),
+                SearchExpr::Not(Box::new(SearchExpr::FullText("meeting".into()))),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_field_filter() {
+        assert_eq!(
+            parse("tag=svelte"),
+            Some(SearchExpr::FieldEquals {
+                field: "tag".into(),
+                value: "svelte".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_quoted_phrase() {
+        assert_eq!(
+            parse("\"meeting minutes\""),
+            Some(SearchExpr::FullText("meeting minutes".into()))
+        );
+    }
+
+    #[test]
+    fn parse_nested_parens() {
+        assert_eq!(
+            parse("(a OR b) AND c"),
+            Some(SearchExpr::And(vec![
+                SearchExpr::Or(vec![
+                    SearchExpr::FullText("a".into()),
+                    SearchExpr::FullText("b".into()),
+                ]),
+                SearchExpr::FullText("c".into()),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_returns_none_on_bad_input() {
+        assert_eq!(parse(")))bad((("), None);
+    }
+
+    #[test]
+    fn parse_empty_returns_none() {
+        assert_eq!(parse(""), None);
+    }
+
+    // ── to_fts_query() tests ───────────────────────────────────────────
+
+    #[test]
+    fn to_fts_query_single_word() {
+        assert_eq!(to_fts_query(&SearchExpr::FullText("hello".into())), "hello");
+    }
+
+    #[test]
+    fn to_fts_query_quoted_phrase() {
+        assert_eq!(
+            to_fts_query(&SearchExpr::FullText("meeting minutes".into())),
+            "\"meeting minutes\""
+        );
+    }
+
+    #[test]
+    fn to_fts_query_and() {
+        let expr = SearchExpr::And(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::FullText("b".into()),
+        ]);
+        assert_eq!(to_fts_query(&expr), "a AND b");
+    }
+
+    #[test]
+    fn to_fts_query_or() {
+        let expr = SearchExpr::Or(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::FullText("b".into()),
+        ]);
+        assert_eq!(to_fts_query(&expr), "a OR b");
+    }
+
+    #[test]
+    fn to_fts_query_nested() {
+        let expr = SearchExpr::And(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::Or(vec![
+                SearchExpr::FullText("b".into()),
+                SearchExpr::FullText("c".into()),
+            ]),
+        ]);
+        assert_eq!(to_fts_query(&expr), "a AND (b OR c)");
+    }
+
+    #[test]
+    fn to_fts_query_field_equals_uses_value() {
+        let expr = SearchExpr::FieldEquals {
+            field: "tag".into(),
+            value: "svelte".into(),
+        };
+        assert_eq!(to_fts_query(&expr), "svelte");
+    }
 }
