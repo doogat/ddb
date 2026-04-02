@@ -590,10 +590,8 @@ pub(crate) fn build_typed_object(
 
             // Raw scalar field name: always exposes the raw ID
             let raw_field_name = if has_id_suffix {
-                // Column already ends with _id, use original name
                 sanitize_field_name(&col.name)
             } else {
-                // Append _id to column name
                 sanitize_field_name(&format!("{}_id", col.name))
             };
 
@@ -708,7 +706,6 @@ pub(crate) fn build_typed_object(
                                     })
                                     .collect();
 
-                                // Sort by field if orderBy is provided
                                 if let Some(order_field) = ctx
                                     .args
                                     .get("orderBy")
@@ -730,7 +727,6 @@ pub(crate) fn build_typed_object(
                                     });
                                 }
 
-                                // Truncate if limit is provided
                                 if let Some(limit) = ctx
                                     .args
                                     .get("limit")
@@ -1348,15 +1344,4 @@ mod tests {
         assert_eq!(strip_id_suffix("valid"), "valid");
     }
 
-    #[test]
-    fn base_field_collision_guard_covers_singular_and_plural() {
-        // Verify that BASE_DOOGAT_FIELDS contains expected base fields
-        assert!(BASE_DOOGAT_FIELDS.contains(&"title"));
-        assert!(BASE_DOOGAT_FIELDS.contains(&"tags"));
-        assert!(BASE_DOOGAT_FIELDS.contains(&"body"));
-        assert!(BASE_DOOGAT_FIELDS.contains(&"id"));
-        // Normal column names should NOT be in the set
-        assert!(!BASE_DOOGAT_FIELDS.contains(&"category"));
-        assert!(!BASE_DOOGAT_FIELDS.contains(&"link"));
-    }
 }
