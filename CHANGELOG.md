@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `createMany` GraphQL mutation for atomic bulk record creation in a single git commit; accepts `[CreateDoogatInput!]!` with optional `fields` JSON for typed columns, resolves `DEFAULT NEXT` across the batch, validates constraints
 - `id` (IDFilter) and `title` (StringFilter) base field filters on all typed GraphQL Where inputs, enabling single-record lookups and title searches on any typed query
 - `--set key=value` (repeatable) on `ddb create` and `ddb update` for setting arbitrary frontmatter fields; `--unset key` on `ddb update` for removing fields
 - SQL expression support in INSERT/UPDATE: COALESCE, IFNULL, NULLIF, ABS, LENGTH, LOWER, UPPER, TRIM, TYPEOF, MIN, MAX scalar functions, subqueries, and arithmetic operators

@@ -186,6 +186,7 @@ type Mutation {
   createDoogat(input: CreateDoogatInput!): Doogat!
   updateDoogat(input: UpdateDoogatInput!): Doogat!
   batchUpdate(updates: [UpdateDoogatInput!]!): [Doogat!]!
+  createMany(inputs: [CreateDoogatInput!]!): [Doogat!]!
   deleteDoogat(id: ID!): Boolean!
   executeSql(sql: String!, format: String): SqlResult!
   executeBatch(statements: [String!]!, format: String): [SqlResult!]!
@@ -195,7 +196,7 @@ type Mutation {
   compact(force: Boolean): CompactResult!
 }
 
-input CreateDoogatInput { title: String!, content: String, tags: [String!], type: String }
+input CreateDoogatInput { title: String!, content: String, tags: [String!], type: String, fields: String }
 input UpdateDoogatInput { id: ID!, title: String, content: String, tags: [String!], type: String }
 input AttachFileInput { doogatId: ID!, filename: String!, dataBase64: String!, mime: String }
 
@@ -214,6 +215,8 @@ type CompactResult {
 ```
 
 `batchUpdate` applies multiple updates atomically in a single git commit. All updates must succeed or none are applied. If any ID is not found, the entire batch fails with no changes committed. An empty updates array returns an empty array with no git commit. Reuses `UpdateDoogatInput` so any fields accepted by `updateDoogat` work in a batch.
+
+`createMany` creates multiple doogats atomically in a single git commit. All records are created or none (rollback on any failure). Returns created records in input order. The optional `fields` parameter accepts a JSON string of key-value pairs for typed columns (e.g. `"{\"category\":\"books\",\"priority\":\"1\"}"`). When the record has a type with a typedef, column defaults (including `DEFAULT NEXT` auto-increment) are resolved automatically for omitted fields. Allowed-value and foreign-key constraints are validated per record.
 
 `sync` defaults to `remote: "origin"`, `branch: "master"` (override via arguments for repos using a different default branch). Returns an error if no remote is configured.
 `compact` defaults to `force: false`. When no node is registered, returns a no-op report (zeros).
