@@ -343,11 +343,11 @@ fn fts_serialize(expr: &SearchExpr) -> String {
             }
         }
         SearchExpr::And(children) => {
-            let parts: Vec<String> = children.iter().map(|c| fts_and_child(c)).collect();
+            let parts: Vec<String> = children.iter().map(fts_and_child).collect();
             parts.join(" AND ")
         }
         SearchExpr::Or(children) => {
-            let parts: Vec<String> = children.iter().map(|c| fts_serialize(c)).collect();
+            let parts: Vec<String> = children.iter().map(fts_serialize).collect();
             parts.join(" OR ")
         }
         SearchExpr::Not(inner) => fts_not_child(inner),
