@@ -1002,17 +1002,23 @@ impl Index {
         if filter_params.is_empty() {
             return String::new();
         }
-        // Collect new indices first, then replace from highest to lowest
-        // to avoid substring corruption (?2 matching inside ?20).
         let base = all_params.len();
         for p in filter_params {
             all_params.push(Box::new(p.clone()));
         }
+        // Two-pass replacement to avoid overlapping index corruption.
+        // Pass 1: old indices -> unique markers
         let mut result = filter_sql.to_string();
         for i in (0..filter_params.len()).rev() {
             let old = format!("?{}", i + 2);
+            let marker = format!("__P{i}__");
+            result = result.replace(&old, &marker);
+        }
+        // Pass 2: markers -> new indices
+        for i in 0..filter_params.len() {
+            let marker = format!("__P{i}__");
             let new = format!("?{}", base + i + 1);
-            result = result.replace(&old, &new);
+            result = result.replace(&marker, &new);
         }
         result
     }

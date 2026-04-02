@@ -2186,6 +2186,32 @@ processed: true
     }
 
     #[test]
+    fn search_negation_all_negative_with_tag_and_type_filter() {
+        let idx = in_memory_index();
+        let mut d0 = make_typed_doogat(0, "note", vec!["rust"]);
+        d0.body = "archive old content".into();
+        let mut d1 = make_typed_doogat(1, "note", vec!["rust"]);
+        d1.body = "active current content".into();
+        let mut d2 = make_typed_doogat(2, "link", vec!["rust"]);
+        d2.body = "active link content".into();
+
+        idx.index_doogat(&d0).unwrap();
+        idx.index_doogat(&d1).unwrap();
+        idx.index_doogat(&d2).unwrap();
+
+        // All-negative with type + tag filters (2+ filter params)
+        let filters = SearchFilters {
+            types: Some(vec!["note".into()]),
+            tag: Some("rust".into()),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("NOT archive", 10, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.hits[0].id, "20260301120001");
+        assert_eq!(result.total_count, 1);
+    }
+
+    #[test]
     fn search_negation_all_negative_with_type_filter() {
         let idx = in_memory_index();
         let mut d0 = make_typed_doogat(0, "note", vec![]);
