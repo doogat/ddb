@@ -477,12 +477,10 @@ fn create_many_basic() {
     assert_eq!(created[1]["title"].as_str().unwrap(), "Bulk B");
     assert_eq!(created[2]["title"].as_str().unwrap(), "Bulk C");
 
-    // All IDs distinct
     let ids: Vec<&str> = created.iter().map(|c| c["id"].as_str().unwrap()).collect();
     let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
     assert_eq!(unique.len(), 3, "all IDs must be distinct");
 
-    // Verify persistence
     for item in created {
         let id = item["id"].as_str().unwrap();
         let q = format!(r#"{{ doogat(id: "{id}") {{ id title }} }}"#);

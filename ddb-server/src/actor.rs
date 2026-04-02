@@ -660,7 +660,7 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
             }
         }
 
-        // Emit events for batch update (one per updated doogat)
+        // Emit events for batch mutations (one per doogat)
         if is_batch_update || is_create_many {
             if let ActorReply::DoogatList(Ok(ref doogats)) = reply {
                 let event_kind = if is_create_many {

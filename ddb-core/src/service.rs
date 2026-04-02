@@ -2525,12 +2525,10 @@ mod tests {
         let results = svc.batch_create(&inputs).unwrap();
         assert_eq!(results.len(), 3);
 
-        // All titles correct
         assert_eq!(results[0].meta.title.as_deref(), Some("Alpha"));
         assert_eq!(results[1].meta.title.as_deref(), Some("Beta"));
         assert_eq!(results[2].meta.title.as_deref(), Some("Gamma"));
 
-        // All IDs distinct
         let ids: Vec<_> = results
             .iter()
             .map(|r| r.meta.id.as_ref().unwrap().0.clone())
@@ -2538,7 +2536,6 @@ mod tests {
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(unique.len(), 3, "all IDs must be distinct");
 
-        // Verify persistence by re-reading each
         for result in &results {
             let id = &result.meta.id.as_ref().unwrap().0;
             let parsed = svc.get_doogat_parsed(id).unwrap();
@@ -2720,7 +2717,6 @@ mod tests {
         let results = svc.batch_create(&inputs).unwrap();
         assert_eq!(results.len(), 2);
 
-        // Verify extra frontmatter fields
         assert_eq!(
             results[0].meta.extra.get("category"),
             Some(&crate::types::Value::String("electronics".to_string()))
