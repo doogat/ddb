@@ -549,6 +549,39 @@ pass "serve: relation null returns null and empty list"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' >/dev/null
 
+# 38b2b. raw ID scalar + orderBy/limit on plural references
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlcat (label TEXT)\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlbm (url TEXT, rlcat TEXT REFERENCES rlcat)\") { message } }"}' >/dev/null
+RL_C1=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"cherry\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+sleep 1
+RL_C2=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"apple\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+sleep 1
+RL_C3=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"banana\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+sleep 1
+RL_BM=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlbm (url) VALUES (\\\"https://example.com\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+for CID in "$RL_C1" "$RL_C2" "$RL_C3"; do
+  gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO rlbm_rlcat (rlbm_id, rlcat_id) VALUES ('$RL_BM', '$CID')\\\") { message } }\"}" >/dev/null
+done
+# raw ID scalar
+RESULT=$(gql '{"query":"{ rlbms { items { rlcat_id rlcat { id label } } } }"}')
+echo "$RESULT" | grep -q "\"rlcat_id\":\"$RL_C1\""
+echo "$RESULT" | grep -q "\"label\":\"cherry\""
+pass "serve: relation raw ID scalar coexists with object resolver"
+# orderBy ASC
+RESULT=$(gql '{"query":"{ rlbms { items { rlcats(orderBy: \"label\") { label } } } }"}')
+LABELS=$(echo "$RESULT" | sed -n 's/.*"rlcats":\[\(.*\)\].*/\1/p')
+echo "$LABELS" | grep -q '"apple".*"banana".*"cherry"'
+pass "serve: relation plural orderBy ASC"
+# orderBy DESC + limit
+RESULT=$(gql '{"query":"{ rlbms { items { rlcats(orderBy: \"label\", orderDir: \"DESC\", limit: 2) { label } } } }"}')
+LABELS=$(echo "$RESULT" | sed -n 's/.*"rlcats":\[\(.*\)\].*/\1/p')
+echo "$LABELS" | grep -q '"cherry".*"banana"'
+# make sure only 2 items (no "apple")
+echo "$LABELS" | grep -qv '"apple"'
+pass "serve: relation plural orderBy DESC + limit"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rlbm CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rlcat CASCADE\") { message } }"}' >/dev/null
+
 # 38b3. typed connection includes tags
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tagarticle (topic TEXT)\") { message } }"}' >/dev/null
 TA_ID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tagarticle (topic) VALUES (\\\"rust\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')

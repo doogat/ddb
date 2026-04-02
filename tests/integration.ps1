@@ -580,6 +580,36 @@ pass "serve: relation null returns null and empty list"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' | Out-Null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' | Out-Null
 
+# 38b2b. raw ID scalar + orderBy/limit on plural references
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlcat (label TEXT)\") { message } }"}' | Out-Null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlbm (url TEXT, rlcat TEXT REFERENCES rlcat)\") { message } }"}' | Out-Null
+$rlC1 = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"cherry\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+Start-Sleep -Seconds 1
+$rlC2 = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"apple\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+Start-Sleep -Seconds 1
+$rlC3 = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"banana\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+Start-Sleep -Seconds 1
+$rlBm = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlbm (url) VALUES (\\\"https://example.com\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+foreach ($cid in @($rlC1, $rlC2, $rlC3)) {
+    gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO rlbm_rlcat (rlbm_id, rlcat_id) VALUES ('$rlBm', '$cid')\`") { message } }`"}" | Out-Null
+}
+# raw ID scalar
+$result = gql '{"query":"{ rlbms { items { rlcat_id rlcat { id label } } } }"}'
+if ($result -notmatch "rlcat_id`":`"$rlC1") { throw "raw ID scalar missing: $result" }
+if ($result -notmatch '"label":"cherry"') { throw "object resolver missing label: $result" }
+pass "serve: relation raw ID scalar coexists with object resolver"
+# orderBy ASC
+$result = gql '{"query":"{ rlbms { items { rlcats(orderBy: \"label\") { label } } } }"}'
+if ($result -notmatch '"apple".*"banana".*"cherry"') { throw "orderBy ASC wrong: $result" }
+pass "serve: relation plural orderBy ASC"
+# orderBy DESC + limit
+$result = gql '{"query":"{ rlbms { items { rlcats(orderBy: \"label\", orderDir: \"DESC\", limit: 2) { label } } } }"}'
+if ($result -notmatch '"cherry".*"banana"') { throw "orderBy DESC wrong: $result" }
+if ($result -match '"apple"') { throw "limit not applied: $result" }
+pass "serve: relation plural orderBy DESC + limit"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rlbm CASCADE\") { message } }"}' | Out-Null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rlcat CASCADE\") { message } }"}' | Out-Null
+
 # 38b3. typed connection includes tags
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tagarticle (topic TEXT)\") { message } }"}' | Out-Null
 $taId = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tagarticle (topic) VALUES (\\\"rust\\\")\") { message } }"}') -replace '.*"message":"(\d+)".*','$1'
