@@ -274,14 +274,14 @@ pub(crate) fn sql_result_to_value(r: &SqlResult, format: &str) -> GqlValue {
             obj.insert(Name::new("message"), GqlValue::Null);
         }
         SqlResult::Affected(n) => {
-            obj.insert(Name::new("columns"), GqlValue::Null);
-            obj.insert(Name::new("rows"), GqlValue::Null);
+            obj.insert(Name::new("columns"), GqlValue::List(vec![]));
+            obj.insert(Name::new("rows"), GqlValue::List(vec![]));
             obj.insert(Name::new("affected"), GqlValue::from(*n as i64));
             obj.insert(Name::new("message"), GqlValue::Null);
         }
         SqlResult::Ok(msg) => {
-            obj.insert(Name::new("columns"), GqlValue::Null);
-            obj.insert(Name::new("rows"), GqlValue::Null);
+            obj.insert(Name::new("columns"), GqlValue::List(vec![]));
+            obj.insert(Name::new("rows"), GqlValue::List(vec![]));
             obj.insert(Name::new("affected"), GqlValue::Null);
             obj.insert(Name::new("message"), GqlValue::from(msg.as_str()));
         }
@@ -1030,28 +1030,28 @@ mod tests {
     }
 
     #[test]
-    fn sql_result_affected_has_null_columns() {
+    fn sql_result_affected_has_empty_columns() {
         let result = SqlResult::Affected(3);
         let val = sql_result_to_value(&result, "array");
         let obj = match &val {
             GqlValue::Object(o) => o,
             _ => panic!("expected object"),
         };
-        assert_eq!(obj.get("columns").unwrap(), &GqlValue::Null);
-        assert_eq!(obj.get("rows").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("columns").unwrap(), &GqlValue::List(vec![]));
+        assert_eq!(obj.get("rows").unwrap(), &GqlValue::List(vec![]));
         assert_eq!(obj.get("affected").unwrap(), &GqlValue::from(3i64));
     }
 
     #[test]
-    fn sql_result_ok_has_null_columns() {
+    fn sql_result_ok_has_empty_columns() {
         let result = SqlResult::Ok("done".into());
         let val = sql_result_to_value(&result, "array");
         let obj = match &val {
             GqlValue::Object(o) => o,
             _ => panic!("expected object"),
         };
-        assert_eq!(obj.get("columns").unwrap(), &GqlValue::Null);
-        assert_eq!(obj.get("rows").unwrap(), &GqlValue::Null);
+        assert_eq!(obj.get("columns").unwrap(), &GqlValue::List(vec![]));
+        assert_eq!(obj.get("rows").unwrap(), &GqlValue::List(vec![]));
         assert_eq!(
             obj.get("message").unwrap(),
             &GqlValue::from("done")
