@@ -28,4 +28,5 @@ mod sql_expressions_test;
 mod sql_lifecycle;
 mod subscriptions;
 mod sync_crdt;
+mod tag_entries;
 mod tags;
