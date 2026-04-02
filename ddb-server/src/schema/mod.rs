@@ -1349,48 +1349,46 @@ pub fn build_schema(
 
                         let mut filter = ddb_core::types::TagQueryFilter::default();
 
-                        if let Some(Ok(where_val)) =
+                        if let Some(Ok(GqlValue::Object(map))) =
                             ctx.args.get("where").map(|v| v.deserialize::<GqlValue>())
                         {
-                            if let GqlValue::Object(map) = &where_val {
-                                if let Some(GqlValue::Object(id_filter)) = map.get("doogatId") {
-                                    if let Some(GqlValue::String(eq)) = id_filter.get("eq") {
-                                        filter.doogat_id_eq = Some(eq.to_string());
-                                    }
-                                    if let Some(GqlValue::List(vals)) = id_filter.get("in") {
-                                        filter.doogat_id_in = Some(
-                                            vals.iter()
-                                                .filter_map(|v| {
-                                                    if let GqlValue::String(s) = v {
-                                                        Some(s.to_string())
-                                                    } else {
-                                                        None
-                                                    }
-                                                })
-                                                .collect(),
-                                        );
-                                    }
+                            if let Some(GqlValue::Object(id_filter)) = map.get("doogatId") {
+                                if let Some(GqlValue::String(eq)) = id_filter.get("eq") {
+                                    filter.doogat_id_eq = Some(eq.to_string());
                                 }
-                                if let Some(GqlValue::Object(tag_filter)) = map.get("tag") {
-                                    if let Some(GqlValue::String(eq)) = tag_filter.get("eq") {
-                                        filter.tag_eq = Some(eq.to_string());
-                                    }
-                                    if let Some(GqlValue::String(c)) = tag_filter.get("contains") {
-                                        filter.tag_contains = Some(c.to_string());
-                                    }
-                                    if let Some(GqlValue::List(vals)) = tag_filter.get("in") {
-                                        filter.tag_in = Some(
-                                            vals.iter()
-                                                .filter_map(|v| {
-                                                    if let GqlValue::String(s) = v {
-                                                        Some(s.to_string())
-                                                    } else {
-                                                        None
-                                                    }
-                                                })
-                                                .collect(),
-                                        );
-                                    }
+                                if let Some(GqlValue::List(vals)) = id_filter.get("in") {
+                                    filter.doogat_id_in = Some(
+                                        vals.iter()
+                                            .filter_map(|v| {
+                                                if let GqlValue::String(s) = v {
+                                                    Some(s.to_string())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect(),
+                                    );
+                                }
+                            }
+                            if let Some(GqlValue::Object(tag_filter)) = map.get("tag") {
+                                if let Some(GqlValue::String(eq)) = tag_filter.get("eq") {
+                                    filter.tag_eq = Some(eq.to_string());
+                                }
+                                if let Some(GqlValue::String(c)) = tag_filter.get("contains") {
+                                    filter.tag_contains = Some(c.to_string());
+                                }
+                                if let Some(GqlValue::List(vals)) = tag_filter.get("in") {
+                                    filter.tag_in = Some(
+                                        vals.iter()
+                                            .filter_map(|v| {
+                                                if let GqlValue::String(s) = v {
+                                                    Some(s.to_string())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect(),
+                                    );
                                 }
                             }
                         }
