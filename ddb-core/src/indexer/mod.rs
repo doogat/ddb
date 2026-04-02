@@ -900,6 +900,28 @@ impl Index {
                     continue;
                 }
 
+                // Route core doogat columns directly to the z (doogats) alias
+                if matches!(wf.field.as_str(), "title" | "date" | "updated_at") {
+                    let safe_col = Self::escape_sql_ident(&wf.field);
+                    match &wf.op {
+                        SearchFieldOp::Eq(val) => {
+                            clauses.push(format!(
+                                "AND z.\"{}\" = ?{idx}", safe_col
+                            ));
+                            params.push(val.clone());
+                            idx += 1;
+                        }
+                        SearchFieldOp::Contains(val) => {
+                            clauses.push(format!(
+                                "AND z.\"{}\" LIKE '%' || ?{idx} || '%'", safe_col
+                            ));
+                            params.push(val.clone());
+                            idx += 1;
+                        }
+                    }
+                    continue;
+                }
+
                 // Find which candidate tables have this field as a non-core column
                 let mut tables_with_field: Vec<String> = Vec::new();
                 for table in &candidate_tables {

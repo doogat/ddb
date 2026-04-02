@@ -1470,6 +1470,45 @@ processed: true
         assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
     }
 
+    // ── Core column where filter tests ──────────────────────────────
+
+    #[test]
+    fn search_filter_by_core_column_title() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "note", vec![])).unwrap();
+        idx.index_doogat(&make_typed_doogat(2, "link", vec![])).unwrap();
+
+        // Titles are "Typed note 0", "Typed note 1", "Typed link 2"
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "title".into(),
+                op: SearchFieldOp::Contains("note".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match titles containing 'note'");
+        assert_eq!(result.total_count, 2);
+    }
+
+    #[test]
+    fn search_filter_by_core_column_date_eq() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "note", vec![])).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "date".into(),
+                op: SearchFieldOp::Eq("2026-03-01".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match doogats with date 2026-03-01");
+    }
+
     // ── Tag via where filter tests ─────────────────────────────────
 
     #[test]
