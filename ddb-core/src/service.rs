@@ -2246,4 +2246,320 @@ mod tests {
             "filtered search for project type should not error"
         );
     }
+
+    // ---- batch_create tests ----
+
+    #[test]
+    fn batch_create_basic() {
+        let (_tmp, svc) = fresh_svc();
+
+        let inputs = vec![
+            crate::types::BatchCreateInput {
+                title: "Alpha".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+            crate::types::BatchCreateInput {
+                title: "Beta".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+            crate::types::BatchCreateInput {
+                title: "Gamma".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+        ];
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 3);
+
+        // All titles correct
+        assert_eq!(results[0].meta.title.as_deref(), Some("Alpha"));
+        assert_eq!(results[1].meta.title.as_deref(), Some("Beta"));
+        assert_eq!(results[2].meta.title.as_deref(), Some("Gamma"));
+
+        // All IDs distinct
+        let ids: Vec<_> = results
+            .iter()
+            .map(|r| r.meta.id.as_ref().unwrap().0.clone())
+            .collect();
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(unique.len(), 3, "all IDs must be distinct");
+
+        // Verify persistence by re-reading each
+        for result in &results {
+            let id = &result.meta.id.as_ref().unwrap().0;
+            let parsed = svc.get_doogat_parsed(id).unwrap();
+            assert_eq!(parsed.meta.title, result.meta.title);
+        }
+    }
+
+    #[test]
+    fn batch_create_empty() {
+        let (_tmp, svc) = fresh_svc();
+        let results = svc.batch_create(&[]).unwrap();
+        assert!(results.is_empty(), "empty input should return empty vec");
+    }
+
+    #[test]
+    fn batch_create_return_order() {
+        let (_tmp, svc) = fresh_svc();
+
+        let titles = ["First", "Second", "Third"];
+        let inputs: Vec<crate::types::BatchCreateInput> = titles
+            .iter()
+            .map(|t| crate::types::BatchCreateInput {
+                title: t.to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            })
+            .collect();
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 3);
+
+        for (i, title) in titles.iter().enumerate() {
+            assert_eq!(
+                results[i].meta.title.as_deref(),
+                Some(*title),
+                "result at index {i} should have title '{title}'"
+            );
+        }
+    }
+
+    #[test]
+    fn batch_create_with_type() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE task (name TEXT)").unwrap();
+
+        let inputs = vec![
+            crate::types::BatchCreateInput {
+                title: "Task A".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("task".to_string()),
+                fields: std::collections::BTreeMap::new(),
+            },
+            crate::types::BatchCreateInput {
+                title: "Task B".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("task".to_string()),
+                fields: std::collections::BTreeMap::new(),
+            },
+        ];
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 2);
+
+        for result in &results {
+            assert_eq!(
+                result.meta.doogat_type.as_deref(),
+                Some("task"),
+                "doogat_type should be 'task'"
+            );
+        }
+    }
+
+    #[test]
+    fn batch_create_with_tags() {
+        let (_tmp, svc) = fresh_svc();
+
+        let inputs = vec![
+            crate::types::BatchCreateInput {
+                title: "Tagged One".to_string(),
+                body: None,
+                tags: vec!["rust".to_string(), "testing".to_string()],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+            crate::types::BatchCreateInput {
+                title: "Tagged Two".to_string(),
+                body: None,
+                tags: vec!["python".to_string()],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+        ];
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].meta.tags, vec!["rust", "testing"]);
+        assert_eq!(results[1].meta.tags, vec!["python"]);
+    }
+
+    #[test]
+    fn batch_create_with_body() {
+        let (_tmp, svc) = fresh_svc();
+
+        let inputs = vec![
+            crate::types::BatchCreateInput {
+                title: "With Body".to_string(),
+                body: Some("Hello world content".to_string()),
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+            crate::types::BatchCreateInput {
+                title: "Empty Body".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            },
+        ];
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].body, "Hello world content");
+        assert!(
+            results[1].body.is_empty(),
+            "None body should produce empty body"
+        );
+    }
+
+    #[test]
+    fn batch_create_with_fields() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE items (category TEXT, priority INTEGER)")
+            .unwrap();
+
+        let mut fields1 = std::collections::BTreeMap::new();
+        fields1.insert(
+            "category".to_string(),
+            crate::types::Value::String("electronics".to_string()),
+        );
+        fields1.insert(
+            "priority".to_string(),
+            crate::types::Value::String("5".to_string()),
+        );
+
+        let mut fields2 = std::collections::BTreeMap::new();
+        fields2.insert(
+            "category".to_string(),
+            crate::types::Value::String("books".to_string()),
+        );
+        fields2.insert(
+            "priority".to_string(),
+            crate::types::Value::String("3".to_string()),
+        );
+
+        let inputs = vec![
+            crate::types::BatchCreateInput {
+                title: "Item One".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("items".to_string()),
+                fields: fields1,
+            },
+            crate::types::BatchCreateInput {
+                title: "Item Two".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("items".to_string()),
+                fields: fields2,
+            },
+        ];
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Verify extra frontmatter fields
+        assert_eq!(
+            results[0].meta.extra.get("category"),
+            Some(&crate::types::Value::String("electronics".to_string()))
+        );
+        assert_eq!(
+            results[0].meta.extra.get("priority"),
+            Some(&crate::types::Value::String("5".to_string()))
+        );
+        assert_eq!(
+            results[1].meta.extra.get("category"),
+            Some(&crate::types::Value::String("books".to_string()))
+        );
+        assert_eq!(
+            results[1].meta.extra.get("priority"),
+            Some(&crate::types::Value::String("3".to_string()))
+        );
+    }
+
+    #[test]
+    fn batch_create_single_commit() {
+        let (tmp, svc) = fresh_svc();
+
+        let before = count_commits(tmp.path());
+
+        let inputs: Vec<crate::types::BatchCreateInput> = (0..3)
+            .map(|i| crate::types::BatchCreateInput {
+                title: format!("Commit Test {i}"),
+                body: None,
+                tags: vec![],
+                doogat_type: None,
+                fields: std::collections::BTreeMap::new(),
+            })
+            .collect();
+
+        svc.batch_create(&inputs).unwrap();
+
+        let after = count_commits(tmp.path());
+        assert_eq!(
+            after - before,
+            1,
+            "batch_create should create exactly 1 commit, not {}",
+            after - before,
+        );
+    }
+
+    #[test]
+    fn batch_create_default_next() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE ranked (name TEXT, pos INTEGER DEFAULT NEXT)")
+            .unwrap();
+
+        let inputs: Vec<crate::types::BatchCreateInput> = ["Alice", "Bob", "Carol"]
+            .iter()
+            .map(|name| {
+                let mut fields = std::collections::BTreeMap::new();
+                fields.insert(
+                    "name".to_string(),
+                    crate::types::Value::String(name.to_string()),
+                );
+                crate::types::BatchCreateInput {
+                    title: format!("Ranked {name}"),
+                    body: None,
+                    tags: vec![],
+                    doogat_type: Some("ranked".to_string()),
+                    fields,
+                }
+            })
+            .collect();
+
+        svc.batch_create(&inputs).unwrap();
+        svc.reindex().unwrap();
+
+        let result = svc
+            .execute_sql("SELECT name, pos FROM ranked ORDER BY pos")
+            .unwrap();
+        match result {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 3, "should have 3 rows");
+                assert_eq!(rows[0][1], "1");
+                assert_eq!(rows[1][1], "2");
+                assert_eq!(rows[2][1], "3");
+            }
+            _ => panic!("expected Rows from SELECT"),
+        }
+    }
 }
