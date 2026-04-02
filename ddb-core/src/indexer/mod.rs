@@ -879,6 +879,27 @@ impl Index {
             };
 
             for wf in where_filters {
+                // Route "tag" field to _ddb_tags table
+                if wf.field == "tag" {
+                    match &wf.op {
+                        SearchFieldOp::Eq(val) => {
+                            clauses.push(format!(
+                                "AND z.id IN (SELECT doogat_id FROM _ddb_tags WHERE tag = ?{idx})"
+                            ));
+                            params.push(val.clone());
+                            idx += 1;
+                        }
+                        SearchFieldOp::Contains(val) => {
+                            clauses.push(format!(
+                                "AND z.id IN (SELECT doogat_id FROM _ddb_tags WHERE tag LIKE '%' || ?{idx} || '%')"
+                            ));
+                            params.push(val.clone());
+                            idx += 1;
+                        }
+                    }
+                    continue;
+                }
+
                 // Find which candidate tables have this field as a non-core column
                 let mut tables_with_field: Vec<String> = Vec::new();
                 for table in &candidate_tables {
