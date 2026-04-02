@@ -869,13 +869,29 @@ impl Index {
                 self.conn
                     .prepare(
                         "SELECT name FROM sqlite_master WHERE type='table' \
-                         AND name NOT LIKE '_ddb%' AND name != 'doogats'",
+                         AND name NOT LIKE '_ddb%' AND name != 'doogats' \
+                         AND name NOT LIKE 'sqlite_%'",
                     )
                     .and_then(|mut stmt| {
                         stmt.query_map([], |row| row.get::<_, String>(0))
-                            .map(|rows| rows.flatten().collect())
+                            .map(|rows| rows.flatten().collect::<Vec<String>>())
                     })
                     .unwrap_or_default()
+                    .into_iter()
+                    .filter(|name| {
+                        // Exclude junction tables (they have no `id` column)
+                        self.conn
+                            .prepare(&format!(
+                                "PRAGMA table_info(\"{}\")",
+                                Self::escape_sql_ident(name)
+                            ))
+                            .and_then(|mut stmt| {
+                                stmt.query_map([], |row| row.get::<_, String>(1))
+                                    .map(|rows| rows.flatten().any(|col| col == "id"))
+                            })
+                            .unwrap_or(false)
+                    })
+                    .collect::<Vec<String>>()
             };
 
             for wf in where_filters {
