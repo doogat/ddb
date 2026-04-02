@@ -1317,6 +1317,16 @@ pub struct ListFilter {
     pub sort_desc: Option<bool>,
 }
 
+/// Input for batch creation of doogats.
+#[derive(Debug, Clone)]
+pub struct BatchCreateInput {
+    pub title: String,
+    pub body: Option<String>,
+    pub tags: Vec<String>,
+    pub doogat_type: Option<String>,
+    pub fields: std::collections::BTreeMap<String, Value>,
+}
+
 /// Input for a single item in a batch update operation.
 #[derive(Debug, Clone)]
 pub struct BatchUpdateInput {

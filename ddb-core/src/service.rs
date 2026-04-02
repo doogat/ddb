@@ -9,11 +9,12 @@ use crate::parser;
 use crate::sql_engine::{SqlEngine, SqlResult, TransactionBuffer};
 use crate::sync_manager::SyncManager;
 use crate::types::{
-    AttachmentInfo, BatchUpdateInput, BrokenSequence, CommitHash, CompactDryRunInfo, CompactOptions,
-    CompactionReport, FixReport, ListFilter, MaintenanceReport, NodeConfig, OrphanDoogat,
-    PaginatedSearchResult, ParsedDoogat, RebuildReport, RenameReport, SearchFilters, SearchResult,
-    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, TypedListQuery,
-    UnlinkedMention, DoogatId, DoogatMeta,
+    AttachmentInfo, BatchCreateInput, BatchUpdateInput, BrokenSequence, CommitHash,
+    CompactDryRunInfo, CompactOptions, CompactionReport, FixReport, ListFilter,
+    MaintenanceReport, NodeConfig, OrphanDoogat, PaginatedSearchResult, ParsedDoogat,
+    RebuildReport, RenameReport, SearchFilters, SearchResult, SequenceInfo, SequenceNode,
+    StaleDoogat, Suggestion, SyncReport, TableSchema, TypedListQuery, UnlinkedMention,
+    DoogatId, DoogatMeta,
 };
 
 /// Extra frontmatter fields to set or remove during an update.
@@ -353,6 +354,217 @@ impl DoogatService {
             self.nosql_index_doogat(&parsed);
             let id = &updates[i].id;
             parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
+            results.push(parsed);
+        }
+
+        Ok(results)
+    }
+
+    /// Batch-create multiple doogats in a single atomic commit.
+    ///
+    /// Generates unique IDs, resolves typedef defaults (including DEFAULT NEXT),
+    /// validates constraints, and commits all files atomically.
+    pub fn batch_create(&self, inputs: &[BatchCreateInput]) -> Result<Vec<ParsedDoogat>> {
+        if inputs.is_empty() {
+            return Ok(vec![]);
+        }
+
+        self.ensure_fresh()?;
+
+        // Load type schemas once for default/validation resolution
+        let schemas = self.list_type_schemas()?;
+
+        // Pre-compute NEXT counters per (table, column)
+        let mut next_counters: std::collections::BTreeMap<(String, String), i64> =
+            std::collections::BTreeMap::new();
+        for input in inputs {
+            if let Some(ref type_name) = input.doogat_type {
+                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
+                    for col in &schema.columns {
+                        if let Some(ref dv) = col.default_value {
+                            if dv == "NEXT" {
+                                let key = (type_name.clone(), col.name.clone());
+                                if let std::collections::btree_map::Entry::Vacant(e) =
+                                    next_counters.entry(key)
+                                {
+                                    let sql = format!(
+                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
+                                        col.name, schema.table_name
+                                    );
+                                    let max_val: i64 = self
+                                        .index
+                                        .query_raw(&sql)?
+                                        .first()
+                                        .and_then(|r| r.first())
+                                        .and_then(|v| v.parse().ok())
+                                        .unwrap_or(0);
+                                    e.insert(max_val);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Phase 1: prepare all writes
+        let mut writes: Vec<(String, String)> = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            let id = self.unique_id();
+            let id_str = id.to_string();
+
+            let folder = input
+                .doogat_type
+                .as_deref()
+                .map(|t| self.index.type_uses_folder(t, &self.repo))
+                .unwrap_or(false);
+            let path = git_ops::doogat_path(&id_str, input.doogat_type.as_deref(), folder);
+
+            let mut extra = input.fields.clone();
+
+            // Resolve typedef defaults and validate
+            if let Some(ref type_name) = input.doogat_type {
+                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
+                    for col in &schema.columns {
+                        if !extra.contains_key(&col.name) {
+                            if let Some(ref dv) = col.default_value {
+                                if dv == "NEXT" {
+                                    let key = (type_name.clone(), col.name.clone());
+                                    let counter = next_counters.get_mut(&key).unwrap();
+                                    *counter += 1;
+                                    extra.insert(
+                                        col.name.clone(),
+                                        crate::types::Value::String(counter.to_string()),
+                                    );
+                                } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                                    let partition_col = &dv[5..dv.len() - 1];
+                                    let partition_val = extra
+                                        .get(partition_col)
+                                        .map(|v| match v {
+                                            crate::types::Value::String(s) => s.clone(),
+                                            other => format!("{other:?}"),
+                                        })
+                                        .unwrap_or_default();
+                                    let sql = format!(
+                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = '{}'",
+                                        col.name, schema.table_name, partition_col, partition_val
+                                    );
+                                    let max_val: i64 = self
+                                        .index
+                                        .query_raw(&sql)?
+                                        .first()
+                                        .and_then(|r| r.first())
+                                        .and_then(|v| v.parse().ok())
+                                        .unwrap_or(0);
+                                    extra.insert(
+                                        col.name.clone(),
+                                        crate::types::Value::String((max_val + 1).to_string()),
+                                    );
+                                } else {
+                                    extra.insert(
+                                        col.name.clone(),
+                                        crate::types::Value::String(dv.clone()),
+                                    );
+                                }
+                            }
+                        }
+
+                        // Validate allowed_values
+                        if let Some(ref allowed) = col.allowed_values {
+                            if let Some(val) = extra.get(&col.name) {
+                                let val_str = match val {
+                                    crate::types::Value::String(s) => s.clone(),
+                                    other => format!("{other:?}"),
+                                };
+                                if !allowed.contains(&val_str) {
+                                    return Err(DoogatError::Validation(format!(
+                                        "field '{}' value '{}' not in allowed values: {:?}",
+                                        col.name, val_str, allowed
+                                    )));
+                                }
+                            }
+                        }
+
+                        // Validate FK references
+                        if let Some(ref _ref_table) = col.references {
+                            if let Some(val) = extra.get(&col.name) {
+                                let val_str = match val {
+                                    crate::types::Value::String(s) => s.clone(),
+                                    other => format!("{other:?}"),
+                                };
+                                let sql = format!(
+                                    "SELECT COUNT(*) > 0 FROM doogats WHERE id = '{}'",
+                                    val_str
+                                );
+                                let exists = self
+                                    .index
+                                    .query_raw(&sql)?
+                                    .first()
+                                    .and_then(|r| r.first())
+                                    .map(|v| v == "1")
+                                    .unwrap_or(false);
+                                if !exists {
+                                    return Err(DoogatError::Validation(format!(
+                                        "field '{}' references non-existent doogat '{}'",
+                                        col.name, val_str
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let meta = DoogatMeta {
+                id: Some(id),
+                title: Some(input.title.clone()),
+                date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
+                doogat_type: input.doogat_type.clone(),
+                tags: input.tags.clone(),
+                extra,
+            };
+
+            let parsed = ParsedDoogat {
+                meta,
+                body: input.body.clone().unwrap_or_default(),
+                sections: vec![],
+                reference_section: String::new(),
+                inline_fields: vec![],
+                links: vec![],
+                body_tags: vec![],
+                checkboxes: vec![],
+                path: path.clone(),
+                updated_at: None,
+            };
+
+            let content = parser::serialize(&parsed);
+            writes.push((path, content));
+        }
+
+        // Phase 2: atomic commit
+        let write_refs: Vec<(&str, &str)> = writes
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        self.repo.commit_batch(
+            &write_refs,
+            &[],
+            &format!("batch create {} doogats", inputs.len()),
+        )?;
+
+        // Phase 3: index and return
+        let mut results = Vec::with_capacity(writes.len());
+        for (path, content) in &writes {
+            let mut parsed = parser::parse(content, path)?;
+            self.index.index_doogat(&parsed)?;
+            self.nosql_index_doogat(&parsed);
+            let id_str = parsed
+                .meta
+                .id
+                .as_ref()
+                .map(|z| z.0.clone())
+                .unwrap_or_default();
+            parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
             results.push(parsed);
         }
 
