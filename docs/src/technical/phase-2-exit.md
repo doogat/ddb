@@ -60,7 +60,7 @@ All 10 deliverables complete.
 
 | Item | Original Plan | Actual Outcome | Rationale |
 |---|---|---|---|
-| GitBackend trait | Trait abstraction over libgit2 to enable per-feature gitoxide swap (DD-17) | No trait. `git_ops.rs` uses git2 directly. | Trait was speculative - gitoxide was not mature enough to swap any feature during Phase 1. Direct git2 usage is simpler. **Blocks Phase 3.** PRD 00092 created to address before mobile work begins. |
+| GitBackend trait | Trait abstraction over libgit2 to enable per-feature gitoxide swap (DD-17) | No trait. `git_ops.rs` uses git2 directly. | Trait was speculative - gitoxide was not mature enough to swap any feature during Phase 1. Direct git2 usage is simpler. **Blocks Phase 3.** PRD 00099 created to address before mobile work begins. |
 
 ### Phase 2 deviations
 
@@ -130,7 +130,7 @@ All criteria must be met before starting Phase 3 work:
 
 ### Phase 3 risks to monitor
 
-- **libgit2 on mobile**: iOS sandbox restricts git CLI fallback. No GitBackend trait exists yet (Phase 1 deviation, PRD 00092 created) - introducing it is a prerequisite for mobile. See `git-scalability-audit.md` for the feature matrix.
-- **Commit-graph write on mobile**: currently shells out to `git commit-graph write`, unavailable in mobile sandbox. Likely acceptable to skip on mobile (performance optimization, not correctness; small repos; desktop nodes generate it on sync). If needed, gitoxide has partial write support - evaluate as part of PRD 00092.
+- **libgit2 on mobile**: iOS sandbox restricts git CLI fallback. No GitBackend trait exists yet (Phase 1 deviation, PRD 00099 created) - introducing it is a prerequisite for mobile. See `git-scalability-audit.md` for the feature matrix.
+- **Commit-graph write on mobile**: currently shells out to `git commit-graph write`, unavailable in mobile sandbox. Likely acceptable to skip on mobile (performance optimization, not correctness; small repos; desktop nodes generate it on sync). If needed, gitoxide has partial write support - evaluate as part of PRD 00099.
 - **Battery and storage**: full clone is ~5-25 MB for 5K doogats (acceptable). Foreground sync preferred; background sync via BackgroundTasks (iOS) / WorkManager (Android) is best-effort.
 - **No embedded server on mobile**: driver accessed via UniFFI directly (DD-14). All server-dependent features (GraphQL, REST, NoSQL, pgwire) are desktop/server only.
