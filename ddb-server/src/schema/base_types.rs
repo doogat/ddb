@@ -483,6 +483,13 @@ pub(crate) fn obj_field(obj: &GqlValue, key: &str) -> Option<FieldValue<'static>
     }
 }
 
+/// Field names already defined by `doogat_object` (base type).
+/// Used to avoid duplicate field registration on typed objects.
+const BASE_DOOGAT_FIELDS: &[&str] = &[
+    "id", "title", "date", "type", "tags", "body", "path", "fields", "links", "attachments",
+    "updated_at", "created_at",
+];
+
 pub(crate) fn doogat_object(name: &str) -> Object {
     Object::new(name)
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
@@ -557,12 +564,32 @@ pub(crate) fn build_typed_object(
         let gql_col_name = sanitize_field_name(&col.name);
 
         if col.references.is_some() {
+            // Determine field names based on whether column ends with `_id`
+            let stripped = strip_id_suffix(&col.name);
+            let has_id_suffix = stripped.len() < col.name.len();
+
+            // Object resolver field name: use stripped name for _id suffix columns
+            let obj_field_name = if has_id_suffix {
+                sanitize_field_name(stripped)
+            } else {
+                gql_col_name.clone()
+            };
+
+            // Raw scalar field name: always exposes the raw ID
+            let raw_field_name = if has_id_suffix {
+                // Column already ends with _id, use original name
+                sanitize_field_name(&col.name)
+            } else {
+                // Append _id to column name
+                sanitize_field_name(&format!("{}_id", col.name))
+            };
+
             // Singular: resolves as the referenced typed object (nullable)
             let target_type = ref_target_gql_type(col, known_types);
             let target_ref_name = col.references.clone().unwrap_or_default();
             let col_name = col.name.clone();
             obj = obj.field(Field::new(
-                &gql_col_name,
+                &obj_field_name,
                 TypeRef::named(&target_type),
                 move |ctx| {
                     let col_name = col_name.clone();
@@ -592,65 +619,83 @@ pub(crate) fn build_typed_object(
             ));
 
             // Plural: resolves as list of referenced typed objects
-            let list_name = pluralize(&col.name);
+            // Skip if the computed plural name collides with a base doogat field
+            let plural_base = if has_id_suffix { stripped } else { &col.name };
+            let list_name = pluralize(plural_base);
             let gql_list_name = if is_valid_graphql_name(&list_name) {
                 list_name
             } else {
-                pluralize_preserving_case(&sanitize_field_name(&col.name))
+                pluralize_preserving_case(&sanitize_field_name(plural_base))
             };
-            let target_type = ref_target_gql_type(col, known_types);
-            let target_ref_name = col.references.clone().unwrap_or_default();
-            let data_list_name = pluralize(&col.name);
-            obj = obj.field(Field::new(
-                &gql_list_name,
-                TypeRef::named_nn_list_nn(&target_type),
-                move |ctx| {
-                    let data_list_name = data_list_name.clone();
-                    let target_ref_name = target_ref_name.clone();
-                    FieldFuture::new(async move {
-                        let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-                        let ids: Vec<String> = match parent {
-                            GqlValue::Object(map) => match map.get(data_list_name.as_str()) {
-                                Some(GqlValue::List(items)) => items
-                                    .iter()
-                                    .filter_map(|v| match v {
-                                        GqlValue::String(s) if !s.is_empty() => {
-                                            Some(s.to_string())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect(),
-                                _ => return Ok(Some(FieldValue::list(
-                                    std::iter::empty::<FieldValue>(),
-                                ))),
-                            },
-                            _ => {
+            if !BASE_DOOGAT_FIELDS.contains(&gql_list_name.as_str()) {
+                let target_type = ref_target_gql_type(col, known_types);
+                let target_ref_name = col.references.clone().unwrap_or_default();
+                let data_list_name = pluralize(&col.name);
+                obj = obj.field(Field::new(
+                    &gql_list_name,
+                    TypeRef::named_nn_list_nn(&target_type),
+                    move |ctx| {
+                        let data_list_name = data_list_name.clone();
+                        let target_ref_name = target_ref_name.clone();
+                        FieldFuture::new(async move {
+                            let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                            let ids: Vec<String> = match parent {
+                                GqlValue::Object(map) => match map.get(data_list_name.as_str()) {
+                                    Some(GqlValue::List(items)) => items
+                                        .iter()
+                                        .filter_map(|v| match v {
+                                            GqlValue::String(s) if !s.is_empty() => {
+                                                Some(s.to_string())
+                                            }
+                                            _ => None,
+                                        })
+                                        .collect(),
+                                    _ => return Ok(Some(FieldValue::list(
+                                        std::iter::empty::<FieldValue>(),
+                                    ))),
+                                },
+                                _ => {
+                                    return Ok(Some(FieldValue::list(
+                                        std::iter::empty::<FieldValue>(),
+                                    )))
+                                }
+                            };
+                            if ids.is_empty() {
                                 return Ok(Some(FieldValue::list(
                                     std::iter::empty::<FieldValue>(),
-                                )))
+                                )));
                             }
-                        };
-                        if ids.is_empty() {
-                            return Ok(Some(FieldValue::list(
-                                std::iter::empty::<FieldValue>(),
-                            )));
-                        }
-                        let pool = ctx.data::<crate::read_pool::ReadPool>()?;
-                        let schemas = ctx.data::<TypeSchemaMap>()?;
-                        let target_schema = schemas.0.get(&target_ref_name);
-                        let doogats = pool.get_doogats_batch(ids).await
-                            .map_err(crate::error::to_server_error)?;
-                        let resolved: Vec<FieldValue> = doogats
-                            .iter()
-                            .map(|z| {
-                                let val = match target_schema {
-                                    Some(ts) => typed_doogat_to_value(z, ts),
-                                    None => doogat_to_value(z),
-                                };
-                                FieldValue::owned_any(val)
-                            })
-                            .collect();
-                        Ok(Some(FieldValue::list(resolved)))
+                            let pool = ctx.data::<crate::read_pool::ReadPool>()?;
+                            let schemas = ctx.data::<TypeSchemaMap>()?;
+                            let target_schema = schemas.0.get(&target_ref_name);
+                            let doogats = pool.get_doogats_batch(ids).await
+                                .map_err(crate::error::to_server_error)?;
+                            let resolved: Vec<FieldValue> = doogats
+                                .iter()
+                                .map(|z| {
+                                    let val = match target_schema {
+                                        Some(ts) => typed_doogat_to_value(z, ts),
+                                        None => doogat_to_value(z),
+                                    };
+                                    FieldValue::owned_any(val)
+                                })
+                                .collect();
+                            Ok(Some(FieldValue::list(resolved)))
+                        })
+                    },
+                ));
+            }
+
+            // Raw scalar field: exposes the raw reference ID as a String
+            let col_name = col.name.clone();
+            obj = obj.field(Field::new(
+                &raw_field_name,
+                TypeRef::named(TypeRef::STRING),
+                move |ctx| {
+                    let col_name = col_name.clone();
+                    FieldFuture::new(async move {
+                        let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                        Ok(obj_field(obj, &col_name))
                     })
                 },
             ));
@@ -685,6 +730,16 @@ pub(crate) fn capitalize(s: &str) -> String {
     match c.next() {
         None => String::new(),
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
+}
+
+/// Strip trailing `_id` suffix from a column name.
+/// Returns the input unchanged if it doesn't end with `_id` or is just `"id"`.
+pub(crate) fn strip_id_suffix(s: &str) -> &str {
+    if s.len() > 3 && s.ends_with("_id") {
+        &s[..s.len() - 3]
+    } else {
+        s
     }
 }
 
