@@ -12,8 +12,8 @@ use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
     BrokenSequence, ListFilter, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SearchFilters,
-    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, TableSchema, TypedListQuery,
-    UnlinkedMention,
+    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, TableSchema, TagEntry, TagQueryFilter,
+    TypedListQuery, UnlinkedMention,
 };
 
 type Result<T> = std::result::Result<T, DoogatError>;
@@ -226,6 +226,10 @@ impl ReadPool {
 
     pub async fn list_tags(&self) -> Result<Vec<(String, i64)>> {
         self.with_service(move |svc| svc.list_tags()).await
+    }
+
+    pub async fn query_tags(&self, filter: TagQueryFilter) -> Result<Vec<TagEntry>> {
+        self.with_service(move |svc| svc.query_tags(&filter)).await
     }
 
     // --- Dispatch helpers ---

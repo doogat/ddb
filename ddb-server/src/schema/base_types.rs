@@ -242,6 +242,14 @@ pub(crate) fn tag_info_to_value(name: &str, count: i64) -> GqlValue {
     GqlValue::Object(obj)
 }
 
+pub(crate) fn tag_entry_to_value(entry: &ddb_core::types::TagEntry) -> GqlValue {
+    let mut obj = IndexMap::new();
+    obj.insert(Name::new("doogatId"), GqlValue::from(entry.doogat_id.as_str()));
+    obj.insert(Name::new("tag"), GqlValue::from(entry.tag.as_str()));
+    obj.insert(Name::new("source"), GqlValue::from(entry.source.as_str()));
+    GqlValue::Object(obj)
+}
+
 pub(crate) fn sql_result_to_value(r: &SqlResult, format: &str) -> GqlValue {
     let mut obj = IndexMap::new();
     match r {

@@ -292,6 +292,17 @@ pub fn build_schema(
         .field(simple_field("name", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field("count", TypeRef::named_nn(TypeRef::INT)));
 
+    let tag_entry_type = Object::new("TagEntry")
+        .field(simple_field("doogatId", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field("tag", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("source", TypeRef::named_nn(TypeRef::STRING)));
+
+    let tag_entries_connection_type = crate::filter::build_connection_type("TagEntry");
+
+    let tag_entries_where_input = InputObject::new("TagEntriesWhere")
+        .field(InputValue::new("doogatId", TypeRef::named("StringFilter")))
+        .field(InputValue::new("tag", TypeRef::named("StringFilter")));
+
     // -- Discovery output types --
     let unlinked_mention_type = Object::new("UnlinkedMention")
         .field(simple_field("sourceId", TypeRef::named_nn(TypeRef::ID)))
@@ -1326,6 +1337,87 @@ pub fn build_schema(
         ));
     }
 
+    // tagEntries
+    {
+        query = query.field(
+            Field::new(
+                "tagEntries",
+                TypeRef::named_nn("TagEntryConnection"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+
+                        let mut filter = ddb_core::types::TagQueryFilter::default();
+
+                        if let Some(Ok(where_val)) =
+                            ctx.args.get("where").map(|v| v.deserialize::<GqlValue>())
+                        {
+                            if let GqlValue::Object(map) = &where_val {
+                                if let Some(GqlValue::Object(id_filter)) = map.get("doogatId") {
+                                    if let Some(GqlValue::String(eq)) = id_filter.get("eq") {
+                                        filter.doogat_id_eq = Some(eq.to_string());
+                                    }
+                                    if let Some(GqlValue::List(vals)) = id_filter.get("in") {
+                                        filter.doogat_id_in = Some(
+                                            vals.iter()
+                                                .filter_map(|v| {
+                                                    if let GqlValue::String(s) = v {
+                                                        Some(s.to_string())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect(),
+                                        );
+                                    }
+                                }
+                                if let Some(GqlValue::Object(tag_filter)) = map.get("tag") {
+                                    if let Some(GqlValue::String(eq)) = tag_filter.get("eq") {
+                                        filter.tag_eq = Some(eq.to_string());
+                                    }
+                                    if let Some(GqlValue::String(c)) = tag_filter.get("contains") {
+                                        filter.tag_contains = Some(c.to_string());
+                                    }
+                                    if let Some(GqlValue::List(vals)) = tag_filter.get("in") {
+                                        filter.tag_in = Some(
+                                            vals.iter()
+                                                .filter_map(|v| {
+                                                    if let GqlValue::String(s) = v {
+                                                        Some(s.to_string())
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect(),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        let entries =
+                            pool.query_tags(filter).await.map_err(to_server_error)?;
+                        let total_count = entries.len() as i64;
+                        let items = GqlValue::List(
+                            entries.iter().map(tag_entry_to_value).collect(),
+                        );
+                        let mut conn = IndexMap::new();
+                        conn.insert(Name::new("items"), items);
+                        conn.insert(
+                            Name::new("totalCount"),
+                            GqlValue::from(total_count),
+                        );
+                        Ok(Some(FieldValue::owned_any(GqlValue::Object(conn))))
+                    })
+                },
+            )
+            .argument(InputValue::new(
+                "where",
+                TypeRef::named("TagEntriesWhere"),
+            )),
+        );
+    }
+
     // -- Mutation fields --
     let mut mutation = Object::new("Mutation");
 
@@ -2185,6 +2277,9 @@ pub fn build_schema(
     .register(stale_doogat_type)
     .register(orphan_doogat_type)
     .register(tag_info_type)
+    .register(tag_entry_type)
+    .register(tag_entries_connection_type)
+    .register(tag_entries_where_input)
     .register(sequence_node_type)
     .register(sequence_info_type)
     .register(broken_sequence_type)
