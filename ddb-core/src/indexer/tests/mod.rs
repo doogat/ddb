@@ -2048,7 +2048,6 @@ processed: true
 
         let results = idx.search("important NOT meeting").unwrap();
         assert_eq!(results.len(), 2);
-        // Both should be present, excluded doc should not be
         let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"20260401120000"));
         assert!(ids.contains(&"20260401120001"));
