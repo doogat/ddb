@@ -1,6 +1,6 @@
     use super::*;
     use crate::git_ops::GitRepo;
-    use crate::types::{InlineField, Link, SearchFieldFilter, SearchFieldOp, SearchFilters, Value, DoogatId, DoogatMeta, Zone};
+    use crate::types::{InlineField, Link, SearchFieldFilter, SearchFieldOp, SearchFilters, TagQueryFilter, Value, DoogatId, DoogatMeta, Zone};
 
 mod graph_tests;
 mod materialize_tests;
@@ -1115,6 +1115,183 @@ processed: true
         assert_eq!(tags[0], ("rust".into(), 3));
         assert_eq!(tags[1], ("cli".into(), 2));
         assert_eq!(tags[2], ("tools".into(), 2));
+    }
+
+    // ── query_tags tests ───────────────────────────────────────────
+
+    fn make_tagged_doogat(n: usize, tags: Vec<&str>, body_tags: Vec<&str>) -> ParsedDoogat {
+        let id = format!("2026040112{n:04}");
+        ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(DoogatId(id.clone())),
+                title: Some(format!("Tagged {n}")),
+                date: Some("2026-04-01".into()),
+                doogat_type: Some("permanent".into()),
+                tags: tags.into_iter().map(|s| s.to_string()).collect(),
+                extra: Default::default(),
+            },
+            body: format!("Body of tagged doogat {n}"),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: body_tags.into_iter().map(|s| s.to_string()).collect(),
+            checkboxes: vec![],
+            path: format!("ddb/{id}.md"),
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn query_tags_no_filter_returns_all() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust", "cli"], vec!["tools"])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(1, vec!["rust"], vec![])).unwrap();
+
+        let filter = TagQueryFilter::default();
+        let entries = idx.query_tags(&filter).unwrap();
+
+        // doogat 0: rust(fm), cli(fm), tools(body) = 3
+        // doogat 1: rust(fm) = 1
+        assert_eq!(entries.len(), 4);
+    }
+
+    #[test]
+    fn query_tags_doogat_id_eq() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust", "cli"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(1, vec!["python"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            doogat_id_eq: Some("20260401120000".into()),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        for entry in &entries {
+            assert_eq!(entry.doogat_id, "20260401120000");
+        }
+        let tag_names: Vec<&str> = entries.iter().map(|e| e.tag.as_str()).collect();
+        assert!(tag_names.contains(&"rust"));
+        assert!(tag_names.contains(&"cli"));
+    }
+
+    #[test]
+    fn query_tags_doogat_id_in() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(1, vec!["python"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(2, vec!["go"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            doogat_id_in: Some(vec!["20260401120000".into(), "20260401120002".into()]),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        let ids: Vec<&str> = entries.iter().map(|e| e.doogat_id.as_str()).collect();
+        assert!(ids.contains(&"20260401120000"));
+        assert!(ids.contains(&"20260401120002"));
+        assert!(!ids.contains(&"20260401120001"));
+    }
+
+    #[test]
+    fn query_tags_tag_eq() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust", "cli"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(1, vec!["rust"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(2, vec!["python"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            tag_eq: Some("rust".into()),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        for entry in &entries {
+            assert_eq!(entry.tag, "rust");
+            assert_eq!(entry.source, "frontmatter");
+        }
+    }
+
+    #[test]
+    fn query_tags_tag_contains() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["client/acme", "client/beta"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(1, vec!["server"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            tag_contains: Some("client".into()),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        for entry in &entries {
+            assert!(entry.tag.contains("client"));
+        }
+    }
+
+    #[test]
+    fn query_tags_tag_in() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust", "cli", "tools"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(1, vec!["python"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            tag_in: Some(vec!["rust".into(), "python".into()]),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        let tags: Vec<&str> = entries.iter().map(|e| e.tag.as_str()).collect();
+        assert!(tags.contains(&"rust"));
+        assert!(tags.contains(&"python"));
+        assert!(!tags.contains(&"cli"));
+        assert!(!tags.contains(&"tools"));
+    }
+
+    #[test]
+    fn query_tags_combined_filters() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust", "cli"], vec![])).unwrap();
+        idx.index_doogat(&make_tagged_doogat(1, vec!["rust", "python"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            doogat_id_eq: Some("20260401120000".into()),
+            tag_eq: Some("rust".into()),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].doogat_id, "20260401120000");
+        assert_eq!(entries[0].tag, "rust");
+        assert_eq!(entries[0].source, "frontmatter");
+    }
+
+    #[test]
+    fn query_tags_empty_result() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_tagged_doogat(0, vec!["rust"], vec![])).unwrap();
+
+        let filter = TagQueryFilter {
+            tag_eq: Some("nonexistent".into()),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+        assert!(entries.is_empty());
+
+        let filter = TagQueryFilter {
+            doogat_id_eq: Some("99999999999999".into()),
+            ..Default::default()
+        };
+        let entries = idx.query_tags(&filter).unwrap();
+        assert!(entries.is_empty());
     }
 
     // ── Search filter tests ────────────────────────────────────────

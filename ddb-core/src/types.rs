@@ -1304,6 +1304,24 @@ pub struct CompactDryRunInfo {
     pub default_backup_path: std::path::PathBuf,
 }
 
+/// A single tag-doogat association from the `_ddb_tags` table.
+#[derive(Debug, Clone)]
+pub struct TagEntry {
+    pub doogat_id: String,
+    pub tag: String,
+    pub source: String,
+}
+
+/// Filters for querying individual tag entries.
+#[derive(Debug, Clone, Default)]
+pub struct TagQueryFilter {
+    pub doogat_id_eq: Option<String>,
+    pub doogat_id_in: Option<Vec<String>>,
+    pub tag_eq: Option<String>,
+    pub tag_contains: Option<String>,
+    pub tag_in: Option<Vec<String>>,
+}
+
 /// Filter parameters for querying doogats by type, tag, backlinks, and fields.
 #[derive(Debug, Clone, Default)]
 pub struct ListFilter {
