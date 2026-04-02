@@ -324,7 +324,72 @@ fn fallback_normalize(query: &str) -> String {
     query.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+// ── FTS5 Serializer ────────────────────────────────────────────────
+
+fn fts_serialize(expr: &SearchExpr) -> String {
+    match expr {
+        SearchExpr::FullText(w) => {
+            if w.contains(' ') {
+                format!("\"{w}\"")
+            } else {
+                w.clone()
+            }
+        }
+        SearchExpr::FieldEquals { value, .. } => {
+            if value.contains(' ') {
+                format!("\"{value}\"")
+            } else {
+                value.clone()
+            }
+        }
+        SearchExpr::And(children) => {
+            let parts: Vec<String> = children.iter().map(|c| fts_and_child(c)).collect();
+            parts.join(" AND ")
+        }
+        SearchExpr::Or(children) => {
+            let parts: Vec<String> = children.iter().map(|c| fts_serialize(c)).collect();
+            parts.join(" OR ")
+        }
+        SearchExpr::Not(inner) => fts_not_child(inner),
+    }
+}
+
+/// Wrap child in parens if it's an OR (lower precedence than AND).
+fn fts_and_child(expr: &SearchExpr) -> String {
+    match expr {
+        SearchExpr::Or(_) => format!("({})", fts_serialize(expr)),
+        _ => fts_serialize(expr),
+    }
+}
+
+/// NOT child: wrap in parens if compound (AND or OR).
+fn fts_not_child(expr: &SearchExpr) -> String {
+    match expr {
+        SearchExpr::And(_) | SearchExpr::Or(_) => format!("({})", fts_serialize(expr)),
+        _ => fts_serialize(expr),
+    }
+}
+
 // ── Public API ──────────────────────────────────────────────────────
+
+/// Parse a search query into a `SearchExpr` AST.
+/// Returns `None` for empty input or parse failure.
+pub fn parse(query: &str) -> Option<SearchExpr> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let tokens = tokenize(trimmed);
+    if tokens.is_empty() {
+        return None;
+    }
+    Parser::new(tokens).parse()
+}
+
+/// Serialize a `SearchExpr` to valid FTS5 MATCH syntax.
+pub fn to_fts_query(expr: &SearchExpr) -> String {
+    fts_serialize(expr)
+}
 
 /// Normalize a search query to canonical form.
 /// On parse failure, falls back to lowercase + whitespace collapse.
