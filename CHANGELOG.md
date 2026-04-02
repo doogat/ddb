@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - REST list endpoint `sort` query parameter: `sort=-field` for descending; supports id, title, date, type; date/id default descending, title/type default ascending; omitting sort defaults to date descending (FR-50)
 - Auto-register node on first sync using system hostname (FR-41)
 - Binary asset conflict resolution via LWW for `reference/` files during sync
+- Search `where` filters now resolve against materialized type columns and `_ddb_tags`, falling back to `_ddb_fields` for unrecognized fields
 - Search query filters: `types`, `tag`, and `where` (field predicates) on GraphQL `search` query
 - GraphQL `tags` query returning all tags with usage counts (`TagInfo` type)
 - Body hashtags now included in GraphQL doogat `tags` field (merged with frontmatter, deduplicated)
