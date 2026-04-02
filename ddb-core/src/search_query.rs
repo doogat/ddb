@@ -805,4 +805,164 @@ mod tests {
         };
         assert_eq!(to_fts_query(&expr), "svelte");
     }
+
+    // ── extract_negations() tests ─────────────────────────────────────
+
+    #[test]
+    fn extract_negations_standalone_fulltext() {
+        let (pos, negs) = extract_negations(SearchExpr::FullText("a".into()));
+        assert_eq!(pos, Some(SearchExpr::FullText("a".into())));
+        assert!(negs.is_empty());
+    }
+
+    #[test]
+    fn extract_negations_standalone_field_equals() {
+        let (pos, negs) = extract_negations(SearchExpr::FieldEquals {
+            field: "tag".into(),
+            value: "x".into(),
+        });
+        assert_eq!(
+            pos,
+            Some(SearchExpr::FieldEquals {
+                field: "tag".into(),
+                value: "x".into(),
+            })
+        );
+        assert!(negs.is_empty());
+    }
+
+    #[test]
+    fn extract_negations_standalone_not() {
+        let (pos, negs) =
+            extract_negations(SearchExpr::Not(Box::new(SearchExpr::FullText("a".into()))));
+        assert_eq!(pos, None);
+        assert_eq!(negs, vec![SearchExpr::FullText("a".into())]);
+    }
+
+    #[test]
+    fn extract_negations_and_with_one_not() {
+        let (pos, negs) = extract_negations(SearchExpr::And(vec![
+            SearchExpr::FullText("important".into()),
+            SearchExpr::Not(Box::new(SearchExpr::FullText("meeting".into()))),
+        ]));
+        assert_eq!(pos, Some(SearchExpr::FullText("important".into())));
+        assert_eq!(negs, vec![SearchExpr::FullText("meeting".into())]);
+    }
+
+    #[test]
+    fn extract_negations_and_with_multiple_nots() {
+        let (pos, negs) = extract_negations(SearchExpr::And(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::Not(Box::new(SearchExpr::FullText("b".into()))),
+            SearchExpr::Not(Box::new(SearchExpr::FullText("c".into()))),
+        ]));
+        assert_eq!(pos, Some(SearchExpr::FullText("a".into())));
+        assert_eq!(
+            negs,
+            vec![
+                SearchExpr::FullText("b".into()),
+                SearchExpr::FullText("c".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_negations_and_all_negative() {
+        let (pos, negs) = extract_negations(SearchExpr::And(vec![
+            SearchExpr::Not(Box::new(SearchExpr::FullText("a".into()))),
+            SearchExpr::Not(Box::new(SearchExpr::FullText("b".into()))),
+        ]));
+        assert_eq!(pos, None);
+        assert_eq!(
+            negs,
+            vec![
+                SearchExpr::FullText("a".into()),
+                SearchExpr::FullText("b".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_negations_and_multiple_positives_after_removing_nots() {
+        let (pos, negs) = extract_negations(SearchExpr::And(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::FullText("b".into()),
+            SearchExpr::Not(Box::new(SearchExpr::FullText("c".into()))),
+        ]));
+        assert_eq!(
+            pos,
+            Some(SearchExpr::And(vec![
+                SearchExpr::FullText("a".into()),
+                SearchExpr::FullText("b".into()),
+            ]))
+        );
+        assert_eq!(negs, vec![SearchExpr::FullText("c".into())]);
+    }
+
+    #[test]
+    fn extract_negations_not_with_compound_inner() {
+        let (pos, negs) = extract_negations(SearchExpr::Not(Box::new(SearchExpr::And(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::FullText("b".into()),
+        ]))));
+        assert_eq!(pos, None);
+        assert_eq!(
+            negs,
+            vec![SearchExpr::And(vec![
+                SearchExpr::FullText("a".into()),
+                SearchExpr::FullText("b".into()),
+            ])]
+        );
+    }
+
+    #[test]
+    fn extract_negations_or_not_decomposed() {
+        let (pos, negs) = extract_negations(SearchExpr::Or(vec![
+            SearchExpr::FullText("a".into()),
+            SearchExpr::Not(Box::new(SearchExpr::FullText("b".into()))),
+        ]));
+        assert_eq!(
+            pos,
+            Some(SearchExpr::Or(vec![
+                SearchExpr::FullText("a".into()),
+                SearchExpr::Not(Box::new(SearchExpr::FullText("b".into()))),
+            ]))
+        );
+        assert!(negs.is_empty());
+    }
+
+    #[test]
+    fn extract_negations_not_field_equals() {
+        let (pos, negs) = extract_negations(SearchExpr::Not(Box::new(SearchExpr::FieldEquals {
+            field: "tag".into(),
+            value: "archive".into(),
+        })));
+        assert_eq!(pos, None);
+        assert_eq!(
+            negs,
+            vec![SearchExpr::FieldEquals {
+                field: "tag".into(),
+                value: "archive".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn extract_negations_and_with_not_field_equals() {
+        let (pos, negs) = extract_negations(SearchExpr::And(vec![
+            SearchExpr::FullText("important".into()),
+            SearchExpr::Not(Box::new(SearchExpr::FieldEquals {
+                field: "tag".into(),
+                value: "archive".into(),
+            })),
+        ]));
+        assert_eq!(pos, Some(SearchExpr::FullText("important".into())));
+        assert_eq!(
+            negs,
+            vec![SearchExpr::FieldEquals {
+                field: "tag".into(),
+                value: "archive".into(),
+            }]
+        );
+    }
 }
