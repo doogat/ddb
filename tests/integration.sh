@@ -592,6 +592,29 @@ echo "$RESULT" | grep -q '"systems"'
 pass "serve: typed connection includes tags"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tagarticle CASCADE\") { message } }"}' >/dev/null
 
+# 38b4. tagEntries query with filters
+TE1=$(gql '{"query":"mutation { createDoogat(input: { title: \"TagEntry A\", tags: [\"te-rust\", \"te-cli\"] }) { id } }"}' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+sleep 1
+TE2=$(gql '{"query":"mutation { createDoogat(input: { title: \"TagEntry B\", tags: [\"te-rust\"] }) { id } }"}' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+RESULT=$(gql "{\"query\":\"{ tagEntries(where: { doogatId: { eq: \\\"$TE1\\\" } }) { items { doogatId tag } totalCount } }\"}")
+echo "$RESULT" | grep -q '"totalCount":2'
+pass "serve: tagEntries filter by doogatId eq"
+
+RESULT=$(gql '{"query":"{ tagEntries(where: { tag: { eq: \"te-rust\" } }) { items { tag } totalCount } }"}')
+echo "$RESULT" | grep -q '"te-rust"'
+TECOUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$TECOUNT" -ge 2 ]
+pass "serve: tagEntries filter by tag eq"
+
+RESULT=$(gql '{"query":"{ tagEntries(where: { tag: { contains: \"te-\" } }) { totalCount } }"}')
+TECOUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$TECOUNT" -ge 3 ]
+pass "serve: tagEntries filter by tag contains"
+
+# cleanup
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TE1\\\") { id } }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TE2\\\") { id } }\"}" >/dev/null
+
 # 38c. sql-materialization (columns, boolean normalization, core fields)
 RESULT=$(gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}')
 echo "$RESULT" | grep -q '"columns"'

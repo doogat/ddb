@@ -620,6 +620,28 @@ if ($result -notmatch '"systems"') { throw "typed connection tags: missing syste
 pass "serve: typed connection includes tags"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tagarticle CASCADE\") { message } }"}' | Out-Null
 
+# 38b4. tagEntries query with filters
+$te1 = (gql '{"query":"mutation { createDoogat(input: { title: \"TagEntry A\", tags: [\"te-rust\", \"te-cli\"] }) { id } }"}') -replace '.*"id":"(\d+)".*','$1'
+Start-Sleep -Seconds 1
+$te2 = (gql '{"query":"mutation { createDoogat(input: { title: \"TagEntry B\", tags: [\"te-rust\"] }) { id } }"}') -replace '.*"id":"(\d+)".*','$1'
+$result = gql "{`"query`":`"{ tagEntries(where: { doogatId: { eq: \`"$te1\`" } }) { items { doogatId tag } totalCount } }`"}"
+if ($result -notmatch '"totalCount":2') { throw "tagEntries doogatId eq: expected 2, got: $result" }
+pass "serve: tagEntries filter by doogatId eq"
+
+$result = gql '{"query":"{ tagEntries(where: { tag: { eq: \"te-rust\" } }) { items { tag } totalCount } }"}'
+if ($result -notmatch '"te-rust"') { throw "tagEntries tag eq: missing te-rust: $result" }
+$teCount = if ($result -match '"totalCount":(\d+)') { [int]$Matches[1] } else { 0 }
+if ($teCount -lt 2) { throw "tagEntries tag eq: expected >=2, got $teCount" }
+pass "serve: tagEntries filter by tag eq"
+
+$result = gql '{"query":"{ tagEntries(where: { tag: { contains: \"te-\" } }) { totalCount } }"}'
+$teCount = if ($result -match '"totalCount":(\d+)') { [int]$Matches[1] } else { 0 }
+if ($teCount -lt 3) { throw "tagEntries tag contains: expected >=3, got $teCount" }
+pass "serve: tagEntries filter by tag contains"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$te1\`") { id } }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$te2\`") { id } }`"}" | Out-Null
+
 # 38c. sql-materialization (columns, boolean normalization, core fields)
 $result = gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}'
 if ($result -notmatch '"columns"') { throw "sql columns: missing columns field" }
