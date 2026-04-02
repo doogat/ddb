@@ -672,6 +672,34 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU2_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BU3_ID\\\") }\"}" >/dev/null
 
+# 38h. createMany mutation
+CM_RESULT=$(gql '{"query":"mutation { createMany(inputs: [{title: \"Bulk A\"}, {title: \"Bulk B\"}, {title: \"Bulk C\"}]) { id title } }"}')
+COUNT=$(echo "$CM_RESULT" | jq '.data.createMany | length')
+[ "$COUNT" = "3" ]
+echo "$CM_RESULT" | jq -e '.data.createMany[0].title == "Bulk A"' >/dev/null
+echo "$CM_RESULT" | jq -e '.data.createMany[1].title == "Bulk B"' >/dev/null
+echo "$CM_RESULT" | jq -e '.data.createMany[2].title == "Bulk C"' >/dev/null
+pass "serve: createMany returns 3 items in order"
+
+# verify persistence
+CM_ID0=$(echo "$CM_RESULT" | jq -r '.data.createMany[0].id')
+VERIFY=$(gql "{\"query\":\"{ doogat(id: \\\"$CM_ID0\\\") { title } }\"}")
+echo "$VERIFY" | jq -e '.data.doogat.title == "Bulk A"' >/dev/null
+pass "serve: createMany persists records"
+
+# createMany empty
+RESULT=$(gql '{"query":"mutation { createMany(inputs: []) { id } }"}')
+COUNT=$(echo "$RESULT" | jq '.data.createMany | length')
+[ "$COUNT" = "0" ]
+pass "serve: createMany empty input"
+
+# cleanup
+CM_ID1=$(echo "$CM_RESULT" | jq -r '.data.createMany[1].id')
+CM_ID2=$(echo "$CM_RESULT" | jq -r '.data.createMany[2].id')
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID0\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID1\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID2\\\") }\"}" >/dev/null
+
 # Hyphenated type names in GraphQL
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"test-widget\\\" (status TEXT, priority INTEGER)\") { message } }"}' >/dev/null
 sleep 1

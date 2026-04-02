@@ -699,6 +699,33 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU3_ID\`") }`"}" | Out-Null
 
+# 38h. createMany mutation
+$result = gql '{\"query\":\"mutation { createMany(inputs: [{title: \\\"Bulk A\\\"}, {title: \\\"Bulk B\\\"}, {title: \\\"Bulk C\\\"}]) { id title } }\"}'
+$parsed = $result | ConvertFrom-Json
+if ($parsed.data.createMany.Count -ne 3) { throw "createMany expected 3, got $($parsed.data.createMany.Count)" }
+if ($parsed.data.createMany[0].title -ne "Bulk A") { throw "createMany[0] title: $($parsed.data.createMany[0].title)" }
+if ($parsed.data.createMany[1].title -ne "Bulk B") { throw "createMany[1] title: $($parsed.data.createMany[1].title)" }
+if ($parsed.data.createMany[2].title -ne "Bulk C") { throw "createMany[2] title: $($parsed.data.createMany[2].title)" }
+pass "serve: createMany returns 3 items in order"
+
+$CM_ID0 = $parsed.data.createMany[0].id
+$verify = gql "{`"query`":`"{ doogat(id: \`"$CM_ID0\`") { title } }`"}"
+$vp = $verify | ConvertFrom-Json
+if ($vp.data.doogat.title -ne "Bulk A") { throw "createMany persistence check failed" }
+pass "serve: createMany persists records"
+
+$emptyResult = gql '{"query":"mutation { createMany(inputs: []) { id } }"}'
+$ep = $emptyResult | ConvertFrom-Json
+if ($ep.data.createMany.Count -ne 0) { throw "createMany empty expected 0, got $($ep.data.createMany.Count)" }
+pass "serve: createMany empty input"
+
+# cleanup
+$CM_ID1 = $parsed.data.createMany[1].id
+$CM_ID2 = $parsed.data.createMany[2].id
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID0\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID1\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID2\`") }`"}" | Out-Null
+
 # Hyphenated type names in GraphQL
 gql "{`"query`":`"mutation { executeSql(sql: \`"CREATE TABLE \\\`"test-widget\\\`" (status TEXT, priority INTEGER)\`") { message } }`"}" | Out-Null
 Start-Sleep -Seconds 1
