@@ -31,7 +31,7 @@
 - [Performance](./technical/performance.md)
 - [Storage Budget](./technical/storage-budget.md)
 - [Server Read-Path Decision](./technical/server-read-path.md)
-- [Phase 2 Exit Gate](./technical/phase-2-exit.md)
+- [Phase 1 & 2 Exit Gate](./technical/phase-2-exit.md)
 
 # User Guide
 
