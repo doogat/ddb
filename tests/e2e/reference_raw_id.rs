@@ -222,3 +222,321 @@ fn id_suffix_column_exposes_scalar_and_object() {
     assert_eq!(scalar_id, resolved_id, "link_id and link.id must be identical");
     assert_eq!(title, "Example Link");
 }
+
+#[test]
+fn plural_resolver_with_limit() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create lcat type and lbm type with REFERENCES
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE lcat (label TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE lcat failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE lbm (url TEXT, lcat TEXT REFERENCES lcat)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE lbm failed: {r}");
+
+    // Insert 3 categories
+    let mut cat_ids = Vec::new();
+    for label in ["alpha", "beta", "gamma"] {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({ "sql": format!("INSERT INTO lcat (label) VALUES ('{label}')") }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT lcat '{label}' failed: {r}");
+        cat_ids.push(
+            r["data"]["executeSql"]["message"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    // Insert a bookmark
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO lbm (url) VALUES ('https://example.com')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT lbm failed: {r}");
+    let bm_id = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Link all 3 categories to the bookmark
+    for cat_id in &cat_ids {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({
+                "sql": format!(
+                    "INSERT INTO lbm_lcat (lbm_id, lcat_id) VALUES ('{bm_id}', '{cat_id}')"
+                )
+            }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT junction failed: {r}");
+    }
+
+    // Query with limit: 2
+    let r = server.graphql(r#"{ lbms { items { lcats(limit: 2) { id label } } } }"#);
+    assert!(
+        r.get("errors").is_none(),
+        "plural resolver limit query failed: {r}"
+    );
+    let items = r["data"]["lbms"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let cats = items[0]["lcats"].as_array().unwrap();
+    assert_eq!(
+        cats.len(),
+        2,
+        "expected exactly 2 categories with limit: 2, got {}: {r}",
+        cats.len()
+    );
+}
+
+#[test]
+fn plural_resolver_with_order_by() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create ocat type and obm type with REFERENCES
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE ocat (label TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE ocat failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE obm (url TEXT, ocat TEXT REFERENCES ocat)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE obm failed: {r}");
+
+    // Insert 3 categories in non-alphabetical order
+    let mut cat_ids = Vec::new();
+    for label in ["cherry", "apple", "banana"] {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({ "sql": format!("INSERT INTO ocat (label) VALUES ('{label}')") }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT ocat '{label}' failed: {r}");
+        cat_ids.push(
+            r["data"]["executeSql"]["message"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    // Insert a bookmark
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO obm (url) VALUES ('https://example.com')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT obm failed: {r}");
+    let bm_id = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Link all 3 categories
+    for cat_id in &cat_ids {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({
+                "sql": format!(
+                    "INSERT INTO obm_ocat (obm_id, ocat_id) VALUES ('{bm_id}', '{cat_id}')"
+                )
+            }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT junction failed: {r}");
+    }
+
+    // Query with orderBy: "label" (ascending by default)
+    let r = server.graphql(
+        r#"{ obms { items { ocats(orderBy: "label") { label } } } }"#,
+    );
+    assert!(
+        r.get("errors").is_none(),
+        "plural resolver orderBy query failed: {r}"
+    );
+    let items = r["data"]["obms"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let cats = items[0]["ocats"].as_array().unwrap();
+    assert_eq!(cats.len(), 3, "expected 3 categories: {r}");
+    let labels: Vec<&str> = cats.iter().map(|c| c["label"].as_str().unwrap()).collect();
+    assert_eq!(
+        labels,
+        vec!["apple", "banana", "cherry"],
+        "expected alphabetical order: {r}"
+    );
+}
+
+#[test]
+fn plural_resolver_with_order_by_desc() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create dcat type and dbm type with REFERENCES
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE dcat (label TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE dcat failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE dbm (url TEXT, dcat TEXT REFERENCES dcat)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE dbm failed: {r}");
+
+    // Insert 3 categories in non-alphabetical order
+    let mut cat_ids = Vec::new();
+    for label in ["cherry", "apple", "banana"] {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({ "sql": format!("INSERT INTO dcat (label) VALUES ('{label}')") }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT dcat '{label}' failed: {r}");
+        cat_ids.push(
+            r["data"]["executeSql"]["message"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    // Insert a bookmark
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO dbm (url) VALUES ('https://example.com')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT dbm failed: {r}");
+    let bm_id = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Link all 3 categories
+    for cat_id in &cat_ids {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({
+                "sql": format!(
+                    "INSERT INTO dbm_dcat (dbm_id, dcat_id) VALUES ('{bm_id}', '{cat_id}')"
+                )
+            }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT junction failed: {r}");
+    }
+
+    // Query with orderBy: "label", orderDir: "DESC"
+    let r = server.graphql(
+        r#"{ dbms { items { dcats(orderBy: "label", orderDir: "DESC") { label } } } }"#,
+    );
+    assert!(
+        r.get("errors").is_none(),
+        "plural resolver orderBy DESC query failed: {r}"
+    );
+    let items = r["data"]["dbms"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let cats = items[0]["dcats"].as_array().unwrap();
+    assert_eq!(cats.len(), 3, "expected 3 categories: {r}");
+    let labels: Vec<&str> = cats.iter().map(|c| c["label"].as_str().unwrap()).collect();
+    assert_eq!(
+        labels,
+        vec!["cherry", "banana", "apple"],
+        "expected reverse alphabetical order: {r}"
+    );
+}
+
+#[test]
+fn plural_resolver_with_order_by_and_limit() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Create olcat type and olbm type with REFERENCES
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE olcat (label TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE olcat failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE olbm (url TEXT, olcat TEXT REFERENCES olcat)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE olbm failed: {r}");
+
+    // Insert 3 categories in non-alphabetical order
+    let mut cat_ids = Vec::new();
+    for label in ["cherry", "apple", "banana"] {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({ "sql": format!("INSERT INTO olcat (label) VALUES ('{label}')") }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT olcat '{label}' failed: {r}");
+        cat_ids.push(
+            r["data"]["executeSql"]["message"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    // Insert a bookmark
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO olbm (url) VALUES ('https://example.com')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT olbm failed: {r}");
+    let bm_id = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Link all 3 categories
+    for cat_id in &cat_ids {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({
+                "sql": format!(
+                    "INSERT INTO olbm_olcat (olbm_id, olcat_id) VALUES ('{bm_id}', '{cat_id}')"
+                )
+            }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT junction failed: {r}");
+    }
+
+    // Query with orderBy: "label" and limit: 2
+    let r = server.graphql(
+        r#"{ olbms { items { olcats(orderBy: "label", limit: 2) { label } } } }"#,
+    );
+    assert!(
+        r.get("errors").is_none(),
+        "plural resolver orderBy + limit query failed: {r}"
+    );
+    let items = r["data"]["olbms"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let cats = items[0]["olcats"].as_array().unwrap();
+    assert_eq!(
+        cats.len(),
+        2,
+        "expected 2 categories with limit: 2, got {}: {r}",
+        cats.len()
+    );
+    let labels: Vec<&str> = cats.iter().map(|c| c["label"].as_str().unwrap()).collect();
+    assert_eq!(
+        labels,
+        vec!["apple", "banana"],
+        "expected first 2 alphabetically: {r}"
+    );
+}
