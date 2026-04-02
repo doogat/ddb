@@ -232,6 +232,29 @@ Combine with the `types`, `tag`, and `where` parameters for structured filtering
 
 Malformed FTS5 queries (e.g., `"AND AND"`) return a `BAD_REQUEST` error with the message `"invalid search query: ..."`.
 
+### Search where filter resolution
+
+The `where` parameter accepts `[SearchFieldFilter]` with `field`, `eq`, and `contains` operators. Filters resolve in this order:
+
+1. **Tag**: if `field` is `"tag"`, resolves against the `_ddb_tags` table. Works with both `eq` (exact match) and `contains` (substring match).
+2. **Materialized type columns**: if the field matches a column in any materialized type table, resolves against that table. When `types` is also set, only those type tables are checked. When a field exists in multiple type tables, results are UNIONed across all matching tables.
+3. **Fallback to `_ddb_fields`**: if the field is not found in any type table, resolves against the generic `_ddb_fields` key-value store (frontmatter extras and inline fields).
+
+Examples:
+
+```graphql
+# Filter by materialized column (url on link type table)
+{ search(query: "example", where: [{field: "url", eq: "https://example.com"}]) { hits { id } totalCount } }
+
+# Filter by tag via where
+{ search(query: "rust", where: [{field: "tag", eq: "svelte"}]) { hits { id } totalCount } }
+
+# Combined: type restriction + materialized column filter
+{ search(query: "docs", types: ["link"], where: [{field: "url", contains: "github"}]) { hits { id } totalCount } }
+```
+
+The dedicated `tag` argument on `search` and the `where` tag filter work independently. Both can be used in the same query.
+
 ### Query normalization
 
 The server can normalize search queries to a canonical form so that semantically equivalent queries always produce the same string. This is useful for saved searches, deduplication, and matching.

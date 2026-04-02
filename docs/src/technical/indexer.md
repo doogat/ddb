@@ -230,6 +230,16 @@ pub struct PaginatedSearchResult {
 }
 ```
 
+### Search where filter resolution
+
+`build_filter_clauses` resolves `SearchFieldFilter` entries against the best available data source:
+
+1. **Tag**: `field == "tag"` routes to `_ddb_tags` (exact or substring match).
+2. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. Uses one SQL parameter per filter (the value).
+3. **`_ddb_fields` fallback**: if the field is not found in any type table, falls back to the generic key-value store. Uses two SQL parameters (key + value).
+
+This method is an instance method (`&self`) because it needs `self.conn` for type table introspection.
+
 ### Search query language
 
 The search query language supports the following constructs:
