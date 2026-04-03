@@ -2553,3 +2553,45 @@ processed: true
         assert_eq!(result.hits[0].id, "20260301120000");
     }
 
+    #[test]
+    fn search_filter_materialized_column_in() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        let z2 = make_typed_doogat(2, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        // Create materialized "link" type table with a "url" column
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT
+                );
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120000', 'Link 0', '2026-03-01', 'https://github.com');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120001', 'Link 1', '2026-03-01', 'https://gitlab.com');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120002', 'Link 2', '2026-03-01', 'https://sr.ht');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "url".into(),
+                op: SearchFieldOp::In(vec!["https://github.com".into(), "https://sr.ht".into()]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match z0 and z2 via materialized link table");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120002"]);
+    }
+
