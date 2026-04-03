@@ -29,6 +29,7 @@ pub fn build_schema(
     reloader: Option<Arc<SchemaReloader>>,
 ) -> Result<Schema, String> {
     let inline_field_type = Object::new("InlineField")
+        .description("A key-value pair from a doogat's frontmatter, body, or reference zone.")
         .field(Field::new(
             "key",
             TypeRef::named_nn(TypeRef::STRING),
@@ -61,6 +62,7 @@ pub fn build_schema(
         ));
 
     let link_type = Object::new("Link")
+        .description("A wikilink or reference from one doogat to another.")
         .field(Field::new(
             "target",
             TypeRef::named_nn(TypeRef::STRING),
@@ -162,6 +164,7 @@ pub fn build_schema(
         ).description("Canonical form of the search query. Use for deduplication and saved search comparison."));
 
     let column_info_type = Object::new("ColumnInfo")
+        .description("Schema definition for a single column in a type definition.")
         .field(simple_field("name", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field("dataType", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field("zone", TypeRef::named(TypeRef::STRING)))
@@ -192,6 +195,7 @@ pub fn build_schema(
         ));
 
     let typedef_type = Object::new("TypeDef")
+        .description("A registered type definition with its column schema and CRDT strategy.")
         .field(simple_field("name", TypeRef::named_nn(TypeRef::STRING)))
         .field(Field::new(
             "columns",
@@ -219,6 +223,7 @@ pub fn build_schema(
         ));
 
     let sql_result_type = Object::new("SqlResult")
+        .description("Result of a SQL query or statement execution.")
         .field(Field::new(
             "columns",
             TypeRef::named_nn_list(TypeRef::STRING),
@@ -252,6 +257,7 @@ pub fn build_schema(
         .field(simple_field("message", TypeRef::named(TypeRef::STRING)));
 
     let attachment_type = Object::new("Attachment")
+        .description("A file attached to a doogat.")
         .field(simple_field("name", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field("mime", TypeRef::named_nn(TypeRef::STRING)))
         .field(Field::new("size", TypeRef::named_nn(TypeRef::INT), |ctx| {
@@ -263,6 +269,7 @@ pub fn build_schema(
         .field(simple_field("url", TypeRef::named_nn(TypeRef::STRING)));
 
     let checkbox_item_type = Object::new("CheckboxItem")
+        .description("A checkbox or task item extracted from a doogat's body.")
         .field(simple_field("doogatId", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("doogatTitle", TypeRef::named(TypeRef::STRING)))
         .field(simple_field("state", TypeRef::named_nn(TypeRef::STRING)))
@@ -291,10 +298,12 @@ pub fn build_schema(
         ));
 
     let tag_info_type = Object::new("TagInfo")
+        .description("A tag with its usage count across all doogats.")
         .field(simple_field("name", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field("count", TypeRef::named_nn(TypeRef::INT)));
 
     let tag_entry_type = Object::new("TagEntry")
+        .description("A single tag-to-doogat assignment with its source (frontmatter or body).")
         .field(simple_field("doogatId", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("tag", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field("source", TypeRef::named_nn(TypeRef::STRING)));
@@ -302,11 +311,13 @@ pub fn build_schema(
     let tag_entries_connection_type = crate::filter::build_connection_type("TagEntry");
 
     let tag_entries_where_input = InputObject::new("TagEntriesWhere")
+        .description("Filter conditions for querying tag entries.")
         .field(InputValue::new("doogatId", TypeRef::named("StringFilter")))
         .field(InputValue::new("tag", TypeRef::named("StringFilter")));
 
     // -- Discovery output types --
     let unlinked_mention_type = Object::new("UnlinkedMention")
+        .description("A doogat that mentions another doogat's title as plain text without a wikilink.")
         .field(simple_field("sourceId", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field(
             "sourceTitle",
@@ -315,6 +326,7 @@ pub fn build_schema(
         .field(simple_field("snippet", TypeRef::named_nn(TypeRef::STRING)));
 
     let suggestion_type = Object::new("Suggestion")
+        .description("A suggested doogat to link based on shared tags and content similarity.")
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)))
         .field(Field::new(
@@ -339,6 +351,7 @@ pub fn build_schema(
         ));
 
     let stale_doogat_type = Object::new("StaleDoogat")
+        .description("A typed doogat that hasn't been updated within its staleness threshold.")
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field(
@@ -375,6 +388,7 @@ pub fn build_schema(
         ));
 
     let orphan_doogat_type = Object::new("OrphanDoogat")
+        .description("A typed doogat with no inbound links from other doogats.")
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field(
@@ -397,6 +411,7 @@ pub fn build_schema(
 
     // Input types
     let create_input = InputObject::new("CreateDoogatInput")
+        .description("Input for creating a new doogat.")
         .field(InputValue::new("title", TypeRef::named_nn(TypeRef::STRING)))
         .field(InputValue::new("content", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new(
@@ -406,6 +421,7 @@ pub fn build_schema(
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)));
 
     let create_many_item_input = InputObject::new("CreateManyItemInput")
+        .description("Input for a single item in a batch create operation.")
         .field(InputValue::new("title", TypeRef::named_nn(TypeRef::STRING)))
         .field(InputValue::new("content", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new(
@@ -416,6 +432,7 @@ pub fn build_schema(
         .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)));
 
     let update_input = InputObject::new("UpdateDoogatInput")
+        .description("Input for updating an existing doogat. Omitted fields are left unchanged.")
         .field(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
         .field(InputValue::new("title", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new("content", TypeRef::named(TypeRef::STRING)))
@@ -910,10 +927,12 @@ pub fn build_schema(
 
     // -- Sequence output types --
     let sequence_node_type = Object::new("SequenceNode")
+        .description("A node in a sequence hierarchy (parent-child relationship).")
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)));
 
     let sequence_info_type = Object::new("SequenceInfo")
+        .description("Full sequence context for a doogat: parent, children, and breadcrumb.")
         .field(Field::new(
             "parent",
             TypeRef::named("SequenceNode"),
@@ -968,6 +987,7 @@ pub fn build_schema(
         ));
 
     let broken_sequence_type = Object::new("BrokenSequence")
+        .description("A doogat whose sequence parent reference points to a non-existent doogat.")
         .field(simple_field("doogatId", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field(
             "brokenParentId",
@@ -1677,6 +1697,7 @@ pub fn build_schema(
     // attachFile(doogatId, filename, dataBase64, mime?)
     {
         let attach_input = InputObject::new("AttachFileInput")
+            .description("Input for attaching a file to a doogat.")
             .field(InputValue::new("doogatId", TypeRef::named_nn(TypeRef::ID)))
             .field(InputValue::new(
                 "filename",
@@ -1837,6 +1858,7 @@ pub fn build_schema(
 
     // -- SyncResult output type --
     let sync_result_type = Object::new("SyncResult")
+        .description("Result of a sync operation with a remote repository.")
         .field(simple_field(
             "direction",
             TypeRef::named_nn(TypeRef::STRING),
@@ -1857,6 +1879,7 @@ pub fn build_schema(
 
     // -- CompactResult output type --
     let compact_result_type = Object::new("CompactResult")
+        .description("Result of CRDT compaction and git garbage collection.")
         .field(simple_field(
             "filesRemoved",
             TypeRef::named_nn(TypeRef::INT),
@@ -2027,6 +2050,7 @@ pub fn build_schema(
 
     // -- GitMaintenanceResult output type --
     let git_maintenance_result_type = Object::new("GitMaintenanceResult")
+        .description("Result of git maintenance tasks (gc, repack, commit-graph).")
         .field(simple_field("success", TypeRef::named_nn(TypeRef::BOOLEAN)))
         .field(simple_field("durationMs", TypeRef::named_nn(TypeRef::INT)))
         .field(simple_field(
@@ -2086,6 +2110,7 @@ pub fn build_schema(
 
     // -- DoogatChangeEvent type --
     let change_event_type = Object::new("DoogatChangeEvent")
+        .description("Real-time event emitted when a doogat is created, updated, or deleted.")
         .field(simple_field("action", TypeRef::named_nn(TypeRef::STRING)))
         .field(Field::new("doogat", TypeRef::named("Doogat"), |ctx| {
             FieldFuture::new(async move {
