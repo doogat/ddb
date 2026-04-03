@@ -213,14 +213,11 @@ pub(crate) fn search_hit_to_value(r: &SearchResult) -> GqlValue {
         Name::new("fields"),
         match &r.fields {
             Some(f) => {
-                let json_map: serde_json::Map<String, serde_json::Value> = f
+                let field_map: IndexMap<Name, GqlValue> = f
                     .iter()
-                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .map(|(k, v)| (Name::new(k), GqlValue::from(v.as_str())))
                     .collect();
-                match serde_json::to_string(&json_map) {
-                    Ok(s) => GqlValue::from(s),
-                    Err(_) => GqlValue::Null,
-                }
+                GqlValue::Object(field_map)
             }
             None => GqlValue::Null,
         },
