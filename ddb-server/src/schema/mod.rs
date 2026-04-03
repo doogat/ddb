@@ -133,7 +133,18 @@ pub fn build_schema(
         .field(simple_field("updated_at", TypeRef::named(TypeRef::STRING)))
         .field(simple_field("tags", TypeRef::named_nn_list_nn(TypeRef::STRING)))
         .field(simple_field("type", TypeRef::named(TypeRef::STRING)))
-        .field(simple_field("fields", TypeRef::named(TypeRef::STRING)).description("JSON string of type-specific frontmatter fields (key-value pairs). Null for untyped doogats."))
+        .field(Field::new("fields", TypeRef::named("JSON"), |ctx| {
+            FieldFuture::new(async move {
+                let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                match obj {
+                    GqlValue::Object(map) => match map.get("fields") {
+                        Some(val) => Ok(Some(FieldValue::value(val.clone()))),
+                        None => Ok(None),
+                    },
+                    _ => Ok(None),
+                }
+            })
+        }).description("Type-specific frontmatter fields as a JSON object (key-value pairs). Null for untyped doogats."))
         .field(simple_field("created_at", TypeRef::named(TypeRef::STRING)));
 
     let search_connection_type = Object::new("SearchConnection")
@@ -2322,6 +2333,7 @@ pub fn build_schema(
         Some(mutation.type_name()),
         Some(subscription.type_name()),
     )
+    .register(Scalar::new("JSON"))
     .register(doogat_type)
     .register(inline_field_type)
     .register(link_type)
