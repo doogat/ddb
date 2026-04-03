@@ -1471,7 +1471,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "input",
                 TypeRef::named_nn("CreateDoogatInput"),
-            )),
+            ))
+            .description("Create a new doogat with a title, optional content, tags, and type."),
         );
     }
 
@@ -1511,7 +1512,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "input",
                 TypeRef::named_nn("UpdateDoogatInput"),
-            )),
+            ))
+            .description("Update an existing doogat. Omitted fields are left unchanged."),
         );
     }
 
@@ -1661,7 +1663,8 @@ pub fn build_schema(
                     Ok(Some(FieldValue::value(GqlValue::from(true))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .description("Delete a doogat by ID. Cascades: removes junction table rows referencing this ID and cleans dangling wikilinks. All changes in a single atomic commit."),
         );
     }
 
@@ -1716,7 +1719,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "input",
                 TypeRef::named_nn("AttachFileInput"),
-            )),
+            ))
+            .description("Attach a file to a doogat. Provide base64-encoded data. MIME type is auto-detected from filename if omitted."),
         );
 
         // Register attach input type
@@ -1743,7 +1747,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "filename",
                 TypeRef::named_nn(TypeRef::STRING),
-            )),
+            ))
+            .description("Remove an attached file from a doogat."),
         );
     }
 
@@ -1928,7 +1933,8 @@ pub fn build_schema(
                 })
             })
             .argument(InputValue::new("remote", TypeRef::named(TypeRef::STRING)))
-            .argument(InputValue::new("branch", TypeRef::named(TypeRef::STRING))),
+            .argument(InputValue::new("branch", TypeRef::named(TypeRef::STRING)))
+            .description("Sync with a remote git repository. Pushes local commits, pulls remote changes, and resolves conflicts via CRDT."),
         );
     }
 
@@ -2008,7 +2014,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "backupPath",
                 TypeRef::named(TypeRef::STRING),
-            )),
+            ))
+            .description("Run CRDT compaction and git garbage collection. Reduces repository size by merging CRDT temp files and pruning unreachable objects."),
         );
     }
 
@@ -2066,7 +2073,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("task", TypeRef::named(TypeRef::STRING))),
+            .argument(InputValue::new("task", TypeRef::named(TypeRef::STRING)))
+            .description("Run git maintenance tasks (gc, repack, commit-graph). Optionally specify a single task to run."),
         );
     }
 
