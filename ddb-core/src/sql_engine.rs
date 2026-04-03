@@ -6485,4 +6485,98 @@ mod tests {
             "schema column date should be promoted to meta.date"
         );
     }
+
+    fn make_typedef_parsed(title: &str, extra: BTreeMap<String, Value>) -> ParsedDoogat {
+        ParsedDoogat {
+            meta: DoogatMeta {
+                id: None,
+                title: Some(title.to_string()),
+                date: None,
+                doogat_type: Some("_typedef".into()),
+                tags: vec![],
+                extra,
+            },
+            body: String::new(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "ddb/_typedef/test.md".into(),
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn schema_from_parsed_unique_together_absent() {
+        let mut extra = BTreeMap::new();
+        extra.insert("columns".to_string(), Value::List(vec![]));
+        let parsed = make_typedef_parsed("my_type", extra);
+        let schema = schema_from_parsed(&parsed).unwrap();
+        assert_eq!(schema.unique_together, None);
+    }
+
+    #[test]
+    fn schema_from_parsed_unique_together_flat() {
+        let mut extra = BTreeMap::new();
+        extra.insert("columns".to_string(), Value::List(vec![]));
+        extra.insert(
+            "unique_together".to_string(),
+            Value::List(vec![
+                Value::String("link_id".to_string()),
+                Value::String("category_fqn".to_string()),
+            ]),
+        );
+        let parsed = make_typedef_parsed("my_type", extra);
+        let schema = schema_from_parsed(&parsed).unwrap();
+        assert_eq!(
+            schema.unique_together,
+            Some(vec![vec![
+                "link_id".to_string(),
+                "category_fqn".to_string()
+            ]])
+        );
+    }
+
+    #[test]
+    fn schema_from_parsed_unique_together_nested() {
+        let mut extra = BTreeMap::new();
+        extra.insert("columns".to_string(), Value::List(vec![]));
+        extra.insert(
+            "unique_together".to_string(),
+            Value::List(vec![
+                Value::List(vec![
+                    Value::String("a".to_string()),
+                    Value::String("b".to_string()),
+                ]),
+                Value::List(vec![
+                    Value::String("c".to_string()),
+                    Value::String("d".to_string()),
+                ]),
+            ]),
+        );
+        let parsed = make_typedef_parsed("my_type", extra);
+        let schema = schema_from_parsed(&parsed).unwrap();
+        assert_eq!(
+            schema.unique_together,
+            Some(vec![
+                vec!["a".to_string(), "b".to_string()],
+                vec!["c".to_string(), "d".to_string()],
+            ])
+        );
+    }
+
+    #[test]
+    fn schema_from_parsed_unique_together_empty_list() {
+        let mut extra = BTreeMap::new();
+        extra.insert("columns".to_string(), Value::List(vec![]));
+        extra.insert(
+            "unique_together".to_string(),
+            Value::List(vec![]),
+        );
+        let parsed = make_typedef_parsed("my_type", extra);
+        let schema = schema_from_parsed(&parsed).unwrap();
+        assert_eq!(schema.unique_together, None);
+    }
 }
