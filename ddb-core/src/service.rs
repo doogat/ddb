@@ -445,9 +445,84 @@ impl DoogatService {
             }
         }
 
-        // Phase 1: prepare all writes
-        let mut writes: Vec<(String, String)> = Vec::with_capacity(inputs.len());
-        for input in inputs {
+        // Phase 1: prepare all writes.
+        // Each result slot is either an existing doogat (conflict-Ignore) or
+        // None (pending creation).  Writes track the result-slot index so we
+        // can fill them in after the atomic commit.
+        let mut results: Vec<Option<ParsedDoogat>> = Vec::with_capacity(inputs.len());
+        let mut writes: Vec<(usize, String, String)> = Vec::with_capacity(inputs.len());
+        'inputs: for input in inputs {
+            // ── on_conflict pre-check against unique_together ──
+            if let Some(ref type_name) = input.doogat_type {
+                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
+                    if let Some(ref unique_groups) = schema.unique_together {
+                        for group in unique_groups {
+                            let mut joins = Vec::with_capacity(group.len());
+                            let mut param_vals = Vec::with_capacity(group.len() + 1);
+                            let mut all_present = true;
+                            for (i, col_name) in group.iter().enumerate() {
+                                if let Some(val) = input.fields.get(col_name) {
+                                    let val_str = match val {
+                                        crate::types::Value::String(s) => s.clone(),
+                                        other => format!("{other:?}"),
+                                    };
+                                    let alias = format!("f{}", i + 1);
+                                    joins.push(format!(
+                                        "JOIN _ddb_fields {alias} ON \
+                                         {alias}.doogat_id = d.id AND \
+                                         {alias}.key = '{}' AND \
+                                         {alias}.value = ?{}",
+                                        col_name,
+                                        i + 1
+                                    ));
+                                    param_vals.push(
+                                        rusqlite::types::Value::Text(val_str),
+                                    );
+                                } else {
+                                    all_present = false;
+                                    break;
+                                }
+                            }
+                            if !all_present {
+                                continue;
+                            }
+                            param_vals.push(rusqlite::types::Value::Text(
+                                type_name.clone(),
+                            ));
+                            let sql = format!(
+                                "SELECT d.id FROM doogats d {} WHERE d.type = ?{} LIMIT 1",
+                                joins.join(" "),
+                                param_vals.len()
+                            );
+                            let rows =
+                                self.index.query_raw_with_params(&sql, &param_vals)?;
+                            if let Some(existing_id) =
+                                rows.first().and_then(|r| r.first())
+                            {
+                                match input.on_conflict {
+                                    crate::types::ConflictAction::Ignore => {
+                                        results.push(Some(
+                                            self.get_doogat_parsed(existing_id)?,
+                                        ));
+                                        continue 'inputs;
+                                    }
+                                    crate::types::ConflictAction::Error => {
+                                        return Err(DoogatError::Validation(format!(
+                                            "duplicate unique constraint on \
+                                             type '{}' for columns {:?}",
+                                            type_name, group
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let slot = results.len();
+            results.push(None); // placeholder for the new doogat
+
             let id = self.unique_id();
             let id_str = id.to_string();
 
@@ -572,23 +647,24 @@ impl DoogatService {
             };
 
             let content = parser::serialize(&parsed);
-            writes.push((path, content));
+            writes.push((slot, path, content));
         }
 
-        // Phase 2: atomic commit
-        let write_refs: Vec<(&str, &str)> = writes
-            .iter()
-            .map(|(p, c)| (p.as_str(), c.as_str()))
-            .collect();
-        self.repo.commit_batch(
-            &write_refs,
-            &[],
-            &format!("batch create {} doogats", inputs.len()),
-        )?;
+        // Phase 2: atomic commit (only if there are new writes)
+        if !writes.is_empty() {
+            let write_refs: Vec<(&str, &str)> = writes
+                .iter()
+                .map(|(_, p, c)| (p.as_str(), c.as_str()))
+                .collect();
+            self.repo.commit_batch(
+                &write_refs,
+                &[],
+                &format!("batch create {} doogats", writes.len()),
+            )?;
+        }
 
-        // Phase 3: index and return
-        let mut results = Vec::with_capacity(writes.len());
-        for (path, content) in &writes {
+        // Phase 3: index new writes and fill result slots
+        for (slot, path, content) in &writes {
             let mut parsed = parser::parse(content, path)?;
             self.index.index_doogat(&parsed)?;
             self.nosql_index_doogat(&parsed);
@@ -599,10 +675,10 @@ impl DoogatService {
                 .map(|z| z.0.clone())
                 .unwrap_or_default();
             parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
-            results.push(parsed);
+            results[*slot] = Some(parsed);
         }
 
-        Ok(results)
+        Ok(results.into_iter().flatten().collect())
     }
 
     /// Update a doogat from raw content (for FFI consumers).
