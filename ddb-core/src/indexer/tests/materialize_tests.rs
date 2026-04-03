@@ -830,6 +830,156 @@ Widget
     }
 
     #[test]
+    fn unique_index_created_for_unique_together_constraint() {
+        use crate::traits::mock::MockSource;
+
+        let typedef_content = "\
+---
+id: 20260401100000
+title: membership
+type: _typedef
+columns:
+  - name: link_id
+    data_type: TEXT
+    zone: frontmatter
+  - name: cat
+    data_type: TEXT
+    zone: frontmatter
+unique_together:
+  - - link_id
+    - cat
+---\n";
+
+        let mut source = MockSource::new();
+        source.files.insert(
+            "ddb/_typedef/20260401100000.md".into(),
+            typedef_content.into(),
+        );
+
+        let idx = in_memory_index();
+        idx.rebuild(&source).unwrap();
+
+        // Query for a unique index covering both link_id and cat columns
+        let mut stmt = idx
+            .conn
+            .prepare(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='membership' AND sql LIKE '%UNIQUE%'",
+            )
+            .unwrap();
+        let index_sqls: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let has_composite_unique = index_sqls
+            .iter()
+            .any(|sql| sql.contains("link_id") && sql.contains("cat"));
+
+        assert!(
+            has_composite_unique,
+            "expected a unique index covering (link_id, cat) on 'membership', found: {index_sqls:?}"
+        );
+    }
+
+    #[test]
+    fn unique_constraint_enforced_on_duplicate_values() {
+        use crate::traits::mock::MockSource;
+
+        let typedef_content = "\
+---
+id: 20260401110000
+title: membership
+type: _typedef
+columns:
+  - name: link_id
+    data_type: TEXT
+    zone: frontmatter
+  - name: cat
+    data_type: TEXT
+    zone: frontmatter
+unique_together:
+  - - link_id
+    - cat
+---\n";
+
+        let mut source = MockSource::new();
+        source.files.insert(
+            "ddb/_typedef/20260401110000.md".into(),
+            typedef_content.into(),
+        );
+
+        let idx = in_memory_index();
+        idx.rebuild(&source).unwrap();
+
+        // First insert should succeed
+        idx.conn
+            .execute(
+                "INSERT INTO membership (id, title, date, updated_at, link_id, cat) VALUES ('1', 'A', NULL, NULL, 'L1', 'work')",
+                [],
+            )
+            .expect("first insert should succeed");
+
+        // Duplicate (link_id, cat) must fail with a UNIQUE constraint violation
+        let result = idx.conn.execute(
+            "INSERT INTO membership (id, title, date, updated_at, link_id, cat) VALUES ('2', 'B', NULL, NULL, 'L1', 'work')",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "duplicate (link_id, cat) insert should fail"
+        );
+
+        // Different cat value should succeed
+        idx.conn
+            .execute(
+                "INSERT INTO membership (id, title, date, updated_at, link_id, cat) VALUES ('3', 'C', NULL, NULL, 'L1', 'tech')",
+                [],
+            )
+            .expect("insert with different cat should succeed");
+    }
+
+    #[test]
+    fn no_unique_index_when_unique_together_absent() {
+        use crate::traits::mock::MockSource;
+
+        let typedef_content = "\
+---
+id: 20260401120000
+title: item
+type: _typedef
+columns:
+  - name: name
+    data_type: TEXT
+    zone: frontmatter
+---\n";
+
+        let mut source = MockSource::new();
+        source.files.insert(
+            "ddb/_typedef/20260401120000.md".into(),
+            typedef_content.into(),
+        );
+
+        let idx = in_memory_index();
+        idx.rebuild(&source).unwrap();
+
+        // Both inserts with the same name should succeed (no unique constraint)
+        idx.conn
+            .execute(
+                "INSERT INTO item (id, title, date, updated_at, name) VALUES ('1', 'A', NULL, NULL, 'foo')",
+                [],
+            )
+            .expect("first insert should succeed");
+
+        idx.conn
+            .execute(
+                "INSERT INTO item (id, title, date, updated_at, name) VALUES ('2', 'B', NULL, NULL, 'foo')",
+                [],
+            )
+            .expect("second insert with same name should succeed when unique_together is absent");
+    }
+
+    #[test]
     fn incremental_reindex_only_processes_changed_files() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo = GitRepo::init(dir.path()).unwrap();
