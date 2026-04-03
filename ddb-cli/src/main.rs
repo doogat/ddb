@@ -522,6 +522,21 @@ enum DiscoverAction {
         #[arg(long, name = "type")]
         type_filter: Option<String>,
     },
+    /// List recently modified doogats
+    Recent {
+        /// Number of days to look back
+        #[arg(long, default_value = "7")]
+        days: u32,
+        /// Filter by type
+        #[arg(long, name = "type")]
+        type_filter: Option<String>,
+    },
+    /// Show inbound/outbound link counts per doogat
+    LinkDensity {
+        /// Filter by type
+        #[arg(long, name = "type")]
+        type_filter: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1319,6 +1334,40 @@ fn run(cli: Cli) -> ddb_core::error::Result<()> {
                                 o.title,
                                 o.doogat_type,
                                 o.outgoing_links
+                            )?;
+                        }
+                    }
+                }
+                DiscoverAction::Recent { days, type_filter } => {
+                    let recent = svc.recent_doogats(days, type_filter.as_deref())?;
+                    if recent.is_empty() {
+                        outln!("no recent doogats")?;
+                    } else {
+                        for r in &recent {
+                            outln!(
+                                "{}\t{}\t{}\t{}",
+                                r.id,
+                                r.title,
+                                r.doogat_type,
+                                r.last_modified
+                            )?;
+                        }
+                    }
+                }
+                DiscoverAction::LinkDensity { type_filter } => {
+                    let entries = svc.link_density(type_filter.as_deref())?;
+                    if entries.is_empty() {
+                        outln!("no doogats found")?;
+                    } else {
+                        for e in &entries {
+                            outln!(
+                                "{}\t{}\t{}\tin:{}\tout:{}\tdensity:{}",
+                                e.id,
+                                e.title,
+                                e.doogat_type,
+                                e.inbound_links,
+                                e.outbound_links,
+                                e.density_score
                             )?;
                         }
                     }
