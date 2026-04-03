@@ -2521,6 +2521,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Beta".to_string(),
@@ -2528,6 +2529,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Gamma".to_string(),
@@ -2535,6 +2537,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
         ];
 
@@ -2579,6 +2582,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             })
             .collect();
 
@@ -2607,6 +2611,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("task".to_string()),
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Task B".to_string(),
@@ -2614,6 +2619,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("task".to_string()),
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
         ];
 
@@ -2640,6 +2646,7 @@ mod tests {
                 tags: vec!["rust".to_string(), "testing".to_string()],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Tagged Two".to_string(),
@@ -2647,6 +2654,7 @@ mod tests {
                 tags: vec!["python".to_string()],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
         ];
 
@@ -2667,6 +2675,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Empty Body".to_string(),
@@ -2674,6 +2683,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
         ];
 
@@ -2720,6 +2730,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("items".to_string()),
                 fields: fields1,
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Item Two".to_string(),
@@ -2727,6 +2738,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("items".to_string()),
                 fields: fields2,
+                on_conflict: crate::types::ConflictAction::Error,
             },
         ];
 
@@ -2764,6 +2776,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             })
             .collect();
 
@@ -2799,6 +2812,7 @@ mod tests {
                     tags: vec![],
                     doogat_type: Some("ranked".to_string()),
                     fields,
+                    on_conflict: crate::types::ConflictAction::Error,
                 }
             })
             .collect();
@@ -2843,6 +2857,7 @@ mod tests {
                     tags: vec![],
                     doogat_type: Some("items".to_string()),
                     fields,
+                    on_conflict: crate::types::ConflictAction::Error,
                 }
             })
             .collect();
@@ -2888,6 +2903,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("linked".to_string()),
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Bad FK".to_string(),
@@ -2895,6 +2911,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("linked".to_string()),
                 fields: bad_fields,
+                on_conflict: crate::types::ConflictAction::Error,
             },
         ];
 
@@ -2936,6 +2953,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("note".to_string()),
                 fields: note_fields,
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "My Task".to_string(),
@@ -2943,6 +2961,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: Some("task".to_string()),
                 fields: task_fields,
+                on_conflict: crate::types::ConflictAction::Error,
             },
             crate::types::BatchCreateInput {
                 title: "Untyped".to_string(),
@@ -2950,6 +2969,7 @@ mod tests {
                 tags: vec![],
                 doogat_type: None,
                 fields: std::collections::BTreeMap::new(),
+                on_conflict: crate::types::ConflictAction::Error,
             },
         ];
 

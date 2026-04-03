@@ -9,7 +9,7 @@ use base64::Engine as _;
 use futures_util::StreamExt;
 use indexmap::IndexMap;
 use ddb_core::search_query;
-use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
+use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ConflictAction, ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -1681,6 +1681,7 @@ pub fn build_schema(
                                 tags,
                                 doogat_type,
                                 fields,
+                                on_conflict: ConflictAction::Error,
                             });
                         }
                         let results =

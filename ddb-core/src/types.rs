@@ -1355,6 +1355,16 @@ pub struct ListFilter {
     pub sort_desc: Option<bool>,
 }
 
+/// Action to take when an INSERT violates a unique constraint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConflictAction {
+    /// Fail with an error if a duplicate unique constraint is violated (default).
+    #[default]
+    Error,
+    /// Skip the insert and return the existing doogat when a unique constraint matches.
+    Ignore,
+}
+
 /// Input for batch creation of doogats.
 #[derive(Debug, Clone)]
 pub struct BatchCreateInput {
@@ -1363,6 +1373,7 @@ pub struct BatchCreateInput {
     pub tags: Vec<String>,
     pub doogat_type: Option<String>,
     pub fields: std::collections::BTreeMap<String, Value>,
+    pub on_conflict: ConflictAction,
 }
 
 /// Input for a single item in a batch update operation.
