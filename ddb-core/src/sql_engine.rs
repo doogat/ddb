@@ -6632,4 +6632,118 @@ mod tests {
         let schema = schema_from_parsed(&parsed).unwrap();
         assert_eq!(schema.unique_together, None);
     }
+
+    // Helper: set up a table with a unique_together constraint on (code) by manually
+    // building the typedef and indexing it, then returning the engine ready to use.
+    fn setup_unique_table(repo: &crate::git_ops::GitRepo, index: &crate::indexer::Index) {
+        let typedef = "\
+---
+id: 20260501000000
+title: uqtest
+type: _typedef
+columns:
+  - name: code
+    data_type: TEXT
+    zone: frontmatter
+  - name: label
+    data_type: TEXT
+    zone: frontmatter
+unique_together:
+  - - code
+---
+";
+        let typedef_path = "ddb/_typedef/20260501000000.md";
+        repo.commit_file(typedef_path, typedef, "add uqtest typedef")
+            .unwrap();
+        let parsed = crate::parser::parse(typedef, typedef_path).unwrap();
+        index.index_doogat(&parsed).unwrap();
+        index.materialize_all_types(repo).unwrap();
+    }
+
+    #[test]
+    fn on_conflict_do_nothing_skips_duplicate_row() {
+        let (_dir, repo, index) = setup();
+        setup_unique_table(&repo, &index);
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // First insert succeeds normally
+        engine
+            .execute("INSERT INTO uqtest (code, label) VALUES ('ABC', 'first')")
+            .unwrap();
+
+        // Second insert with the same unique key and ON CONFLICT DO NOTHING must be skipped
+        let result = engine
+            .execute("INSERT INTO uqtest (code, label) VALUES ('ABC', 'second') ON CONFLICT DO NOTHING")
+            .unwrap();
+
+        match result {
+            SqlResult::Affected(0) => {}
+            other => panic!("expected Affected(0) for skipped duplicate, got {other:?}"),
+        }
+
+        // Only one row in the table - the original value is unchanged
+        let rows = index.query_raw("SELECT label FROM uqtest").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "first");
+    }
+
+    #[test]
+    fn on_conflict_do_nothing_inserts_when_no_duplicate() {
+        let (_dir, repo, index) = setup();
+        setup_unique_table(&repo, &index);
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // No existing row - ON CONFLICT DO NOTHING should behave like a normal insert
+        let result = engine
+            .execute("INSERT INTO uqtest (code, label) VALUES ('XYZ', 'new') ON CONFLICT DO NOTHING")
+            .unwrap();
+
+        match result {
+            SqlResult::Affected(1) => {}
+            other => panic!("expected Affected(1) for successful insert, got {other:?}"),
+        }
+
+        let rows = index.query_raw("SELECT code, label FROM uqtest").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "XYZ");
+        assert_eq!(rows[0][1], "new");
+    }
+
+    #[test]
+    fn on_conflict_do_update_rejected() {
+        let (_dir, repo, index) = setup();
+        setup_unique_table(&repo, &index);
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // ON CONFLICT DO UPDATE SET is not supported
+        let err = engine
+            .execute(
+                "INSERT INTO uqtest (code, label) VALUES ('ABC', 'x') ON CONFLICT (code) DO UPDATE SET label = 'x'",
+            )
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("not supported"),
+            "expected 'not supported' error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn plain_insert_duplicate_still_errors() {
+        let (_dir, repo, index) = setup();
+        setup_unique_table(&repo, &index);
+        let mut engine = SqlEngine::new(&index, &repo);
+
+        // First insert succeeds
+        engine
+            .execute("INSERT INTO uqtest (code, label) VALUES ('DUP', 'original')")
+            .unwrap();
+
+        // Second plain insert (no ON CONFLICT) with same unique key must still error
+        let result =
+            engine.execute("INSERT INTO uqtest (code, label) VALUES ('DUP', 'conflict')");
+        assert!(
+            result.is_err(),
+            "plain INSERT with duplicate unique key should error, got: {result:?}"
+        );
+    }
 }
