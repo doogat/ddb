@@ -238,6 +238,12 @@ pass "discover mentions"
 $DDB discover similar "$ID1" | head -1 | grep -q "."
 pass "discover similar"
 
+$DDB discover recent --days 30 | grep -q "$ID1"
+pass "discover recent"
+
+$DDB discover link-density | head -1 | grep -q "density:"
+pass "discover link-density"
+
 # 16e. consistency fix
 FIX_ID=$($DDB create --title "Fix Test" --tags "#gtd,zebra,apple")
 BEFORE_HEAD=$(git rev-parse HEAD)

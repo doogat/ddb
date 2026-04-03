@@ -314,6 +314,14 @@ $output = ddb discover similar $ID1
 if ($output -notmatch "\d{14}") { throw "discover similar returned nothing" }
 pass "discover similar"
 
+$output = ddb discover recent --days 30
+if ($output -notmatch $ID1) { throw "discover recent should include $ID1" }
+pass "discover recent"
+
+$output = ddb discover link-density
+if ($output -notmatch "density:") { throw "discover link-density output missing density:" }
+pass "discover link-density"
+
 # 16e. consistency fix
 $FIX_ID = ddb create --title "Fix Test" --tags "#gtd,zebra,apple"
 $beforeHead = git rev-parse HEAD
