@@ -704,18 +704,18 @@ impl Index {
         type_filter: Option<&str>,
     ) -> Result<Vec<LinkDensityEntry>> {
         let base_sql = if type_filter.is_some() {
-            "SELECT z.id, z.title, z.type FROM doogats z \
+            "SELECT z.id, z.title, z.type, z.path FROM doogats z \
              WHERE z.path NOT LIKE 'ddb/_typedef/%' AND z.type = ?1"
         } else {
-            "SELECT z.id, z.title, z.type FROM doogats z \
+            "SELECT z.id, z.title, z.type, z.path FROM doogats z \
              WHERE z.path NOT LIKE 'ddb/_typedef/%'"
         };
 
         let mut stmt = self.conn.prepare(base_sql)?;
 
-        type Row = (String, String, String);
+        type Row = (String, String, String, String);
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         };
 
         let doogats: Vec<Row> = if let Some(t) = type_filter {
@@ -733,16 +733,16 @@ impl Index {
             .prepare("SELECT COUNT(*) FROM _ddb_links WHERE source_id = ?1")?;
         let mut in_stmt = self.conn.prepare(
             "SELECT COUNT(*) FROM _ddb_links \
-             WHERE target_path = ?1 OR target_path = ?2",
+             WHERE target_path = ?1 OR target_path = ?2 \
+                OR target_path IN (SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1)",
         )?;
 
         let mut entries = Vec::with_capacity(doogats.len());
-        for (id, title, doogat_type) in &doogats {
+        for (id, title, doogat_type, path) in &doogats {
             let outbound: usize = out_stmt
                 .query_row(params![id], |row| row.get::<_, i64>(0))
                 .unwrap_or(0) as usize;
 
-            let path = format!("ddb/{id}.md");
             let inbound: usize = in_stmt
                 .query_row(params![id, path], |row| row.get::<_, i64>(0))
                 .unwrap_or(0) as usize;
