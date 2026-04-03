@@ -609,6 +609,15 @@ type ProjectConnection {
 
 `totalCount` reflects the total matching rows (respecting `where` and `distinct` filters but ignoring `limit`/`offset`), enabling pagination UI.
 
+### Introspection
+
+All schema fields include descriptions visible via standard GraphQL introspection. Clients can discover capabilities, filter behavior, and cascade semantics without external documentation:
+
+```graphql
+{ __type(name: "Query") { fields { name description } } }
+{ __type(name: "SearchFieldFilter") { inputFields { name description } } }
+```
+
 ### Hot Schema Reload
 
 The schema updates automatically when types change at runtime. After an `executeSql` mutation containing `CREATE TABLE` or `DROP TABLE`:
