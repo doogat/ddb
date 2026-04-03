@@ -2455,6 +2455,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn all_query_fields_have_descriptions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let schemas = vec![make_table_schema(
+            "contact",
+            vec![simple_column("email")],
+        )];
+
+        let schema = build_schema(actor, pool, schemas, None)
+            .expect("schema should build");
+
+        let res = schema
+            .execute(r#"{ __type(name: "Query") { fields { name description } } }"#)
+            .await;
+        let data = res.data.into_json().unwrap();
+        let fields = data["__type"]["fields"].as_array().unwrap();
+
+        let missing: Vec<&str> = fields
+            .iter()
+            .filter(|f| {
+                f["description"].is_null()
+                    || f["description"].as_str().unwrap_or("").is_empty()
+            })
+            .map(|f| f["name"].as_str().unwrap_or("?"))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "Query fields missing descriptions: {missing:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn all_mutation_fields_have_descriptions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let schemas = vec![make_table_schema(
+            "contact",
+            vec![simple_column("email")],
+        )];
+
+        let schema = build_schema(actor, pool, schemas, None)
+            .expect("schema should build");
+
+        let res = schema
+            .execute(r#"{ __type(name: "Mutation") { fields { name description } } }"#)
+            .await;
+        let data = res.data.into_json().unwrap();
+        let fields = data["__type"]["fields"].as_array().unwrap();
+
+        let missing: Vec<&str> = fields
+            .iter()
+            .filter(|f| {
+                f["description"].is_null()
+                    || f["description"].as_str().unwrap_or("").is_empty()
+            })
+            .map(|f| f["name"].as_str().unwrap_or("?"))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "Mutation fields missing descriptions: {missing:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_field_filter_inputs_have_descriptions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let schema = build_schema(actor, pool, vec![], None)
+            .expect("schema should build");
+
+        let res = schema
+            .execute(
+                r#"{ __type(name: "SearchFieldFilter") { inputFields { name description } } }"#,
+            )
+            .await;
+        let data = res.data.into_json().unwrap();
+        let fields = data["__type"]["inputFields"].as_array().unwrap();
+
+        let missing: Vec<&str> = fields
+            .iter()
+            .filter(|f| {
+                f["description"].is_null()
+                    || f["description"].as_str().unwrap_or("").is_empty()
+            })
+            .map(|f| f["name"].as_str().unwrap_or("?"))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "SearchFieldFilter input fields missing descriptions: {missing:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn build_schema_hyphenated_query_and_aggregate() {
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
