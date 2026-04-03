@@ -1274,46 +1274,46 @@ impl Index {
                             }
                         }
                     } else {
-                    // Fallback: use _ddb_fields key-value store (two params)
-                    match &wf.op {
-                        SearchFieldOp::Eq(val) => {
-                            clauses.push(format!(
-                                "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value = ?{})",
-                                idx, idx + 1
-                            ));
-                            params.push(wf.field.clone());
-                            params.push(val.clone());
-                            idx += 2;
-                        }
-                        SearchFieldOp::Contains(val) => {
-                            clauses.push(format!(
-                                "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value LIKE '%' || ?{} || '%')",
-                                idx, idx + 1
-                            ));
-                            params.push(wf.field.clone());
-                            params.push(val.clone());
-                            idx += 2;
-                        }
-                        SearchFieldOp::In(vals) => {
-                            if vals.is_empty() {
-                                clauses.push("AND 0".to_string());
-                            } else {
-                                let key_idx = idx;
-                                idx += 1;
-                                let placeholders: Vec<String> = vals.iter().map(|_| {
-                                    let p = format!("?{idx}");
-                                    idx += 1;
-                                    p
-                                }).collect();
+                        // Fallback: use _ddb_fields key-value store (two params)
+                        match &wf.op {
+                            SearchFieldOp::Eq(val) => {
                                 clauses.push(format!(
-                                    "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value IN ({}))",
-                                    key_idx, placeholders.join(", ")
+                                    "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value = ?{})",
+                                    idx, idx + 1
                                 ));
                                 params.push(wf.field.clone());
-                                params.extend(vals.clone());
+                                params.push(val.clone());
+                                idx += 2;
+                            }
+                            SearchFieldOp::Contains(val) => {
+                                clauses.push(format!(
+                                    "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value LIKE '%' || ?{} || '%')",
+                                    idx, idx + 1
+                                ));
+                                params.push(wf.field.clone());
+                                params.push(val.clone());
+                                idx += 2;
+                            }
+                            SearchFieldOp::In(vals) => {
+                                if vals.is_empty() {
+                                    clauses.push("AND 0".to_string());
+                                } else {
+                                    let key_idx = idx;
+                                    idx += 1;
+                                    let placeholders: Vec<String> = vals.iter().map(|_| {
+                                        let p = format!("?{idx}");
+                                        idx += 1;
+                                        p
+                                    }).collect();
+                                    clauses.push(format!(
+                                        "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value IN ({}))",
+                                        key_idx, placeholders.join(", ")
+                                    ));
+                                    params.push(wf.field.clone());
+                                    params.extend(vals.clone());
+                                }
                             }
                         }
-                    }
                     } // end junction_tables else (fallback)
                 } else {
                     // Resolve against materialized type table(s)
@@ -1347,35 +1347,75 @@ impl Index {
                                 params.extend(vals.clone());
                             }
                         }
-                        _ => {
-                            let val = match &wf.op {
-                                SearchFieldOp::Eq(v) | SearchFieldOp::Contains(v) => v.clone(),
-                                SearchFieldOp::In(_) => unreachable!(),
-                            };
+                        SearchFieldOp::Contains(val) => {
+                            // For REFERENCES columns, the materialized column stores raw IDs.
+                            // Prefer junction table JOIN so Contains matches on referenced title.
+                            let jt_tables: Vec<String> = tables_with_field
+                                .iter()
+                                .filter(|t| {
+                                    let jt_name = format!("{}_{}", t, wf.field);
+                                    self.conn
+                                        .query_row(
+                                            "SELECT COUNT(*) > 0 FROM sqlite_master \
+                                             WHERE type='table' AND name=?1",
+                                            [&jt_name],
+                                            |row| row.get::<_, bool>(0),
+                                        )
+                                        .unwrap_or(false)
+                                })
+                                .cloned()
+                                .collect();
+
+                            if !jt_tables.is_empty() {
+                                let ph = format!("?{idx}");
+                                idx += 1;
+                                let subs: Vec<String> = jt_tables
+                                    .iter()
+                                    .map(|t| {
+                                        let st = Self::escape_sql_ident(t);
+                                        let jt = format!("{st}_{safe_col}");
+                                        format!(
+                                            "SELECT jt.\"{st}_id\" FROM \"{jt}\" jt \
+                                             JOIN doogats d ON d.id = jt.\"{safe_col}_id\" \
+                                             WHERE d.title LIKE '%' || {ph} || '%'"
+                                        )
+                                    })
+                                    .collect();
+                                clauses.push(format!("AND z.id IN ({})", subs.join(" UNION ")));
+                                params.push(val.clone());
+                            } else {
+                                let param_placeholder = format!("?{idx}");
+                                idx += 1;
+                                let subqueries: Vec<String> = tables_with_field
+                                    .iter()
+                                    .map(|t| {
+                                        let safe_table = Self::escape_sql_ident(t);
+                                        format!(
+                                            "SELECT id FROM \"{}\" WHERE \"{}\" LIKE '%' || {} || '%'",
+                                            safe_table, safe_col, param_placeholder
+                                        )
+                                    })
+                                    .collect();
+                                clauses.push(format!("AND z.id IN ({})", subqueries.join(" UNION ")));
+                                params.push(val.clone());
+                            }
+                        }
+                        SearchFieldOp::Eq(val) => {
                             let param_placeholder = format!("?{idx}");
                             idx += 1;
-
                             let subqueries: Vec<String> = tables_with_field
                                 .iter()
                                 .map(|t| {
                                     let safe_table = Self::escape_sql_ident(t);
-                                    match &wf.op {
-                                        SearchFieldOp::Eq(_) => format!(
-                                            "SELECT id FROM \"{}\" WHERE \"{}\" = {}",
-                                            safe_table, safe_col, param_placeholder
-                                        ),
-                                        SearchFieldOp::Contains(_) => format!(
-                                            "SELECT id FROM \"{}\" WHERE \"{}\" LIKE '%' || {} || '%'",
-                                            safe_table, safe_col, param_placeholder
-                                        ),
-                                        SearchFieldOp::In(_) => unreachable!(),
-                                    }
+                                    format!(
+                                        "SELECT id FROM \"{}\" WHERE \"{}\" = {}",
+                                        safe_table, safe_col, param_placeholder
+                                    )
                                 })
                                 .collect();
-
                             let combined = subqueries.join(" UNION ");
                             clauses.push(format!("AND z.id IN ({combined})"));
-                            params.push(val);
+                            params.push(val.clone());
                         }
                     }
                 }

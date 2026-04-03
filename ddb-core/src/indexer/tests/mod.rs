@@ -2741,3 +2741,68 @@ processed: true
         ids.sort();
         assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
     }
+
+    #[test]
+    fn search_filter_by_junction_union_multi_type() {
+        // When two different types both have a junction table for the same field,
+        // build_filter_clauses should generate a UNION across both junction tables
+        // so items from either type are matched.
+        let idx = in_memory_index();
+
+        // link 0 and article 1 will be linked to cat001; link 2 will not
+        let link0 = make_typed_doogat(0, "link", vec![]);
+        let article1 = make_typed_doogat(1, "article", vec![]);
+        let link2 = make_typed_doogat(2, "link", vec![]);
+        idx.index_doogat(&link0).unwrap();
+        idx.index_doogat(&article1).unwrap();
+        idx.index_doogat(&link2).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120002', 'Link 2', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS article (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO article (id, title, date) \
+                     VALUES ('20260301120001', 'Article 1', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS link_category (\
+                     \"link_id\" TEXT NOT NULL, \
+                     \"category_id\" TEXT NOT NULL, \
+                     PRIMARY KEY (\"link_id\", \"category_id\")\
+                 );\
+                 CREATE TABLE IF NOT EXISTS article_category (\
+                     \"article_id\" TEXT NOT NULL, \
+                     \"category_id\" TEXT NOT NULL, \
+                     PRIMARY KEY (\"article_id\", \"category_id\")\
+                 );\
+                 INSERT INTO link_category VALUES ('20260301120000', 'cat001');\
+                 INSERT INTO article_category VALUES ('20260301120001', 'cat001');",
+            )
+            .unwrap();
+
+        // No types filter: both link and article junction tables should be searched via UNION
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Eq("cat001".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            2,
+            "junction UNION should match link0 and article1 across both type tables"
+        );
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
+    }
