@@ -127,7 +127,7 @@ type Attachment { name: String!, mime: String!, size: Int!, url: String! }
 
 type InlineField { key: String!, value: String!, zone: String! }
 type Link { target: String!, display: String, zone: String! }
-type SearchHit { id: ID!, title: String!, path: String!, snippet: String!, rank: Float!, updated_at: String, tags: [String!]!, type: String, fields: String, created_at: String }
+type SearchHit { id: ID!, title: String!, path: String!, snippet: String!, rank: Float!, updated_at: String, tags: [String!]!, type: String, fields: JSON, created_at: String }
 type SearchConnection { hits: [SearchHit!]!, totalCount: Int!, queryNormalized: String! }
 type TypeDef { name: String!, columns: [ColumnInfo!]!, crdtStrategy: String, templateSections: [String!]! }
 type ColumnInfo { name: String!, dataType: String!, zone: String, required: Boolean!, references: String }
@@ -321,7 +321,7 @@ Each `SearchHit` includes enriched fields beyond the basic FTS5 result:
 
 - **tags** `[String!]!` - all tags from both frontmatter and body hashtags (always present, may be empty)
 - **type** `String` - the doogat's type name, or null for untyped doogats
-- **fields** `String` - a JSON string containing type-specific column values as key-value pairs (null if untyped or no columns). Fields come from both frontmatter extras and materialized type tables.
+- **fields** `JSON` - type-specific column values as a JSON object (null if untyped or no columns). Fields come from both frontmatter extras and materialized type tables. Access keys directly: `fields.url`, `fields.description`.
 - **created_at** `String` - the date from the doogats table (derived from frontmatter `date:` or the doogat ID)
 
 Example query:
@@ -330,7 +330,9 @@ Example query:
 { search(query: "rust") { hits { id title tags type fields created_at } } }
 ```
 
-For a typed link doogat, `fields` might contain `{"url":"https://example.com","description":"Example"}`.
+For a typed link doogat, `fields` returns `{"url":"https://example.com","description":"Example"}` as a native JSON object - no `JSON.parse()` needed.
+
+**Breaking change (experimental):** Clients previously calling `JSON.parse(hit.fields)` should now use `hit.fields` directly.
 
 ### Tag entries
 
