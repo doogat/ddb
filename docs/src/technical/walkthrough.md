@@ -424,7 +424,7 @@ ddb fix [--dry-run] [-v/--verbose] [--migrate]
 
 ## 9. Discovery
 
-The discovery system surfaces latent connections, maintenance issues, and knowledge gaps across the doogat graph. Six queries are available via CLI and GraphQL.
+The discovery system surfaces latent connections, maintenance issues, and knowledge gaps across the doogat graph. Six queries are available: four via both CLI and GraphQL, two (recent changes, link density) via CLI only.
 
 ### Unlinked mentions
 
