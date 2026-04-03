@@ -11,11 +11,11 @@ use crate::sync_manager::SyncManager;
 use crate::traits::GitBackend;
 use crate::types::{
     AttachmentInfo, BatchCreateInput, BatchUpdateInput, BrokenSequence, CommitHash,
-    CompactDryRunInfo, CompactOptions, CompactionReport, FixReport, ListFilter,
-    MaintenanceReport, NodeConfig, OrphanDoogat, PaginatedSearchResult, ParsedDoogat,
-    RebuildReport, RenameReport, SearchFilters, SearchResult, SequenceInfo, SequenceNode,
-    StaleDoogat, Suggestion, SyncReport, TableSchema, TypedListQuery, UnlinkedMention,
-    DoogatId, DoogatMeta, TagEntry, TagQueryFilter,
+    CompactDryRunInfo, CompactOptions, CompactionReport, FixReport, LinkDensityEntry,
+    ListFilter, MaintenanceReport, NodeConfig, OrphanDoogat, PaginatedSearchResult,
+    ParsedDoogat, RebuildReport, RecentDoogat, RenameReport, SearchFilters, SearchResult,
+    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema,
+    TypedListQuery, UnlinkedMention, DoogatId, DoogatMeta, TagEntry, TagQueryFilter,
 };
 
 /// Extra frontmatter fields to set or remove during an update.
@@ -1075,6 +1075,16 @@ impl DoogatService {
     pub fn orphan_doogats(&self, type_filter: Option<&str>) -> Result<Vec<OrphanDoogat>> {
         self.ensure_fresh()?;
         self.index.orphan_doogats(type_filter)
+    }
+
+    pub fn recent_doogats(&self, days: u32, type_filter: Option<&str>) -> Result<Vec<RecentDoogat>> {
+        self.ensure_fresh()?;
+        self.index.recent_doogats(days, type_filter)
+    }
+
+    pub fn link_density(&self, type_filter: Option<&str>) -> Result<Vec<LinkDensityEntry>> {
+        self.ensure_fresh()?;
+        self.index.link_density(type_filter)
     }
 
     pub fn sequence_tree(
