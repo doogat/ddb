@@ -10,13 +10,13 @@ types (depends: error — no adapter crate imports)
   │
   v
 traits (depends: error, types — defines DoogatSource, DoogatStore,
-  │                               DoogatIndex, ConflictResolver)
+  │                               DoogatIndex, ConflictResolver, GitBackend)
   │
   ├──> parser (depends: error, types)
   │      │
   │      └──> crdt_resolver (depends: error, types, parser, traits)
   │
-  ├──> git_ops (depends: error, types, traits — implements DoogatSource/Store)
+  ├──> git_ops (depends: error, types, traits — implements DoogatSource/Store/GitBackend)
   │      │
   │      ├──> indexer (depends: error, types, traits, parser, sql_engine
   │      │             — accepts &impl DoogatSource, implements DoogatIndex)
@@ -64,10 +64,10 @@ traits (depends: error, types — defines DoogatSource, DoogatStore,
 |--------|---------|-----------------|
 | `error` | `DoogatError` enum + `Result<T>` alias | thiserror only |
 | `types` | Domain types (CommitHash, Value, ParsedDoogat, TableSchema) | no adapter crates |
-| `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, ConflictResolver) | error, types |
+| `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, ConflictResolver, GitBackend) | error, types |
 | `parser` | Parse/serialize three-zone Markdown | regex, chrono, serde_yaml |
 | `search_query` | Search query parsing and normalization to canonical form | — (std only) |
-| `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store | git2 |
+| `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store/GitBackend | git2 |
 | `crdt_resolver` | Automerge conflict resolution; implements ConflictResolver | automerge, similar |
 | `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/search, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements DoogatIndex | rusqlite |
 | `sql_engine` | SQL DDL/DML → doogat CRUD, _typedef management | sqlparser, rusqlite |

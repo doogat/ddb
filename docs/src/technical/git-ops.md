@@ -1,10 +1,28 @@
 # Git Operations
 
-**Source**: `ddb-core/src/git_ops.rs` (454 lines)
+**Source**: `ddb-core/src/git_ops.rs`
 
-Wraps libgit2 (`git2` crate) for all Git repository interactions. `GitRepo` is the central handle.
+Wraps libgit2 (`git2` crate) for all Git repository interactions. `GitRepo` is the concrete implementation behind the `GitBackend` trait.
+
+## GitBackend Trait
+
+All callers access git operations through the `GitBackend` trait (defined in `traits.rs`), not through `GitRepo` directly. This enables swapping libgit2 for gitoxide per-feature in Phase 3 without changing callers.
+
+`GitBackend` extends `DoogatSource + DoogatStore` with:
+
+- **Remote ops**: `add_remote`, `fetch`, `push`
+- **Merge ops**: `merge_remote`, `commit_merge`
+- **Binary file ops**: `commit_binary_file`, `commit_binary_and_text`, `read_blob`
+- **Commit introspection**: `merge_base`, `commit_parent_count`, `commit_parent_oid`, `read_file_at`, `walk_tree_files`
+- **History queries**: `find_hlc_for_path`, `revision_date`
+- **Config**: `load_config`, `repo_path`
+- **Desktop-only hooks** (default no-ops): `set_skip_commit_graph`, `write_commit_graph`, `increment_session_commits`, `reset_session_commits`
+
+No `git2` types appear in the trait signature. All OIDs are passed as `&str` hex strings.
 
 ## GitRepo
+
+The sole concrete `GitBackend` implementation. Constructors (`init`, `open`) and format migration remain inherent methods on `GitRepo`.
 
 ```rust
 pub struct GitRepo {

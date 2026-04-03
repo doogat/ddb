@@ -291,10 +291,11 @@ The crate defines a `Result<T>` alias as `std::result::Result<T, DoogatError>`. 
 
 ### Core traits
 
-Four traits define the module boundaries (see `traits.rs`):
+Five traits define the module boundaries (see `traits.rs`):
 
 - **DoogatSource** -- Read-only access to doogat storage: `list_doogats()`, `read_file()`, `head_oid()`, `diff_paths()`, and `read_files_batch()`. Implemented by `GitRepo`. The batch read has a default sequential implementation that concrete types can override.
 - **DoogatStore** -- Read-write access extending DoogatSource: `commit_file()`, `commit_files()`, `delete_file()`, `delete_files()`, and `commit_batch()`. Implemented by `GitRepo`.
+- **GitBackend** -- Full git backend abstraction extending DoogatSource + DoogatStore with remote ops, merge ops, binary file ops, commit introspection, and history queries. All OIDs are passed as `&str` hex strings (no `git2` types in the trait). Desktop-only hooks (commit-graph write, session counters) have default no-op implementations. Implemented by `GitRepo`. Enables swapping libgit2 for gitoxide per-feature.
 - **DoogatIndex** -- Query and mutation operations on the search index: `index_doogat()`, `remove_doogat()`, `search()`, `search_paginated()`, `resolve_path()`, `query_raw()`, `find_typedef_path()`, and `execute_sql()`. Implemented by `Index`.
 - **ConflictResolver** -- CRDT-based conflict resolution: `resolve_conflicts()` takes a list of `ConflictFile` structs and an optional strategy string, returning `ResolvedFile` results. The free function `crdt_resolver::resolve_conflicts()` implements this logic.
 
