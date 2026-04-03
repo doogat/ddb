@@ -1570,9 +1570,9 @@ fn search_returns_enriched_fields() {
     // type
     assert_eq!(hit["type"].as_str().unwrap(), "link");
 
-    // fields (JSON string containing url and description)
-    let fields_str = hit["fields"].as_str().expect("fields should be a JSON string");
-    let fields: serde_json::Value = serde_json::from_str(fields_str).expect("fields should be valid JSON");
+    // fields (JSON object with url and description)
+    let fields = &hit["fields"];
+    assert!(fields.is_object(), "fields should be a JSON object, got: {fields}");
     assert_eq!(fields["url"].as_str().unwrap(), "https://example.com");
     assert_eq!(fields["description"].as_str().unwrap(), "Example site");
 
