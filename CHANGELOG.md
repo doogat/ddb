@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search query normalization: `queryNormalized` field on SearchConnection and `normalizeSearchQuery` standalone GraphQL query for canonical comparison of semantically equivalent queries (sorts AND operands, lowercases, collapses whitespace, makes implicit AND explicit)
 - `DoogatError` now includes `Conflict`, `Sync`, `Index`, `BadRequest` variants for precise error discrimination; server returns 409 for conflicts, 400 for bad requests
 - GraphQL schema introspection hints: every query, mutation, input, and object field now has a description visible via standard introspection queries
+- Search `in` operator for set membership filtering (`where: [{field: "tag", in: ["a", "b"]}]`)
 
 ### Changed
 

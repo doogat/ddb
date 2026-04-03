@@ -195,6 +195,7 @@ input SearchFieldFilter {
   field: String!
   eq: String
   contains: String
+  in: [String]
 }
 ```
 
@@ -257,7 +258,7 @@ Malformed FTS5 queries (e.g., `"AND AND"`) return a `BAD_REQUEST` error with the
 
 ### Search where filter resolution
 
-The `where` parameter accepts `[SearchFieldFilter]` with `field`, `eq`, and `contains` operators. Filters resolve in this order:
+The `where` parameter accepts `[SearchFieldFilter]` with `field`, `eq`, `contains`, and `in` operators. Filters resolve in this order:
 
 1. **Tag**: if `field` is `"tag"`, resolves against the `_ddb_tags` table. Works with both `eq` (exact match) and `contains` (substring match).
 2. **Materialized type columns**: if the field matches a column in any materialized type table, resolves against that table. When `types` is also set, only those type tables are checked. When a field exists in multiple type tables, results are UNIONed across all matching tables.
@@ -274,7 +275,12 @@ Examples:
 
 # Combined: type restriction + materialized column filter
 { search(query: "docs", types: ["link"], where: [{field: "url", contains: "github"}]) { hits { id } totalCount } }
+
+# Set membership: match doogats with any of the listed tags
+{ search(query: "rust", where: [{field: "tag", in: ["systems", "performance", "concurrency"]}]) { hits { id } totalCount } }
 ```
+
+An empty `in: []` produces no matches (the clause evaluates to false).
 
 The dedicated `tag` argument on `search` and the `where` tag filter work independently. Both can be used in the same query.
 

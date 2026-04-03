@@ -234,9 +234,20 @@ pub struct PaginatedSearchResult {
 
 `build_filter_clauses` resolves `SearchFieldFilter` entries against the best available data source:
 
-1. **Tag**: `field == "tag"` routes to `_ddb_tags` (exact or substring match).
-2. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. Uses one SQL parameter per filter (the value).
-3. **`_ddb_fields` fallback**: if the field is not found in any type table, falls back to the generic key-value store. Uses two SQL parameters (key + value).
+1. **Tag**: `field == "tag"` routes to `_ddb_tags` (exact match via `eq`, substring via `contains`, or set membership via `in`).
+2. **Core column**: if the field matches a core `doogats` column (e.g. `type`, `title`, `date`), resolves directly against that column.
+3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. Uses one SQL parameter per filter (the value).
+4. **`_ddb_fields` fallback**: if the field is not found in any type table, falls back to the generic key-value store. Uses two SQL parameters (key + value).
+
+#### SearchFieldOp
+
+Each `SearchFieldFilter` carries a `SearchFieldOp` discriminating the comparison:
+
+- `Eq(String)` - exact match (`= ?`)
+- `Contains(String)` - substring match (`LIKE '%?%'`)
+- `In(Vec<String>)` - set membership (`IN (?, ?, ...)`). An empty vec produces a `1=0` clause, returning no results.
+
+All four resolution paths (tag, core column, materialized column, `_ddb_fields` fallback) support all three operators.
 
 This method is an instance method (`&self`) because it needs `self.conn` for type table introspection.
 
