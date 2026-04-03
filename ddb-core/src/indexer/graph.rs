@@ -623,18 +623,28 @@ impl Index {
     ) -> Result<Vec<RecentDoogat>> {
         let today = chrono::Utc::now().date_naive();
         let cutoff = today - chrono::Duration::days(i64::from(days));
+        let cutoff_str = cutoff.format("%Y-%m-%d").to_string();
 
+        // COALESCE(NULLIF(date,''), updated_at) picks the frontmatter date
+        // when present, otherwise falls back to indexer updated_at. The SQL
+        // WHERE filters by cutoff to avoid fetching the entire table.
         let (sql, filter_val) = if let Some(t) = type_filter {
             (
-                "SELECT id, title, type, date, updated_at FROM doogats \
-                 WHERE path NOT LIKE 'ddb/_typedef/%' AND type = ?1"
+                "SELECT id, title, type, COALESCE(NULLIF(date,''), updated_at) AS effective \
+                 FROM doogats \
+                 WHERE path NOT LIKE 'ddb/_typedef/%' AND type = ?1 \
+                   AND COALESCE(NULLIF(date,''), updated_at) >= ?2 \
+                 ORDER BY effective DESC"
                     .to_string(),
                 Some(t.to_string()),
             )
         } else {
             (
-                "SELECT id, title, type, date, updated_at FROM doogats \
-                 WHERE path NOT LIKE 'ddb/_typedef/%'"
+                "SELECT id, title, type, COALESCE(NULLIF(date,''), updated_at) AS effective \
+                 FROM doogats \
+                 WHERE path NOT LIKE 'ddb/_typedef/%' \
+                   AND COALESCE(NULLIF(date,''), updated_at) >= ?1 \
+                 ORDER BY effective DESC"
                     .to_string(),
                 None,
             )
@@ -642,58 +652,33 @@ impl Index {
 
         let mut stmt = self.conn.prepare(&sql)?;
 
-        type Row = (String, String, String, Option<String>, Option<String>);
+        type Row = (String, String, String, String);
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         };
 
         let collected: Vec<Row> = if let Some(ref t) = filter_val {
-            let rows = stmt.query_map(params![t], map_row)?;
+            let rows = stmt.query_map(params![t, cutoff_str], map_row)?;
             rows.filter_map(|r| r.ok()).collect()
         } else {
-            let rows = stmt.query_map([], map_row)?;
+            let rows = stmt.query_map(params![cutoff_str], map_row)?;
             rows.filter_map(|r| r.ok()).collect()
         };
 
-        let mut recent = Vec::new();
-        for (id, title, doogat_type, fm_date, updated_at) in collected {
-            // Priority: date > updated_at (updated_at is set to now() by the
-            // indexer on every reindex, so it reflects index time rather than
-            // actual modification time; frontmatter date is more meaningful)
-            let effective_date =
-                if let Some(ref d) = fm_date.as_deref().filter(|s| !s.is_empty()) {
-                    d.to_string()
-                } else if let Some(ref u) = updated_at {
-                    u.clone()
-                } else {
-                    continue;
-                };
-
-            let parsed = parse_date_to_naive(&effective_date);
-            let Some(naive) = parsed else { continue };
-            if naive < cutoff {
-                continue;
-            }
-
-            recent.push(RecentDoogat {
-                id,
-                title,
-                doogat_type,
-                last_modified: effective_date,
-            });
-        }
-
-        recent.sort_by(|a, b| {
-            let da = parse_date_to_naive(&a.last_modified);
-            let db = parse_date_to_naive(&b.last_modified);
-            db.cmp(&da)
-        });
+        let recent: Vec<RecentDoogat> = collected
+            .into_iter()
+            .filter_map(|(id, title, doogat_type, effective_date)| {
+                // Double-check parse succeeds (handles edge cases like
+                // malformed dates that pass string comparison)
+                parse_date_to_naive(&effective_date)?;
+                Some(RecentDoogat {
+                    id,
+                    title,
+                    doogat_type,
+                    last_modified: effective_date,
+                })
+            })
+            .collect();
 
         Ok(recent)
     }
