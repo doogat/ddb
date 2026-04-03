@@ -2431,3 +2431,125 @@ processed: true
         assert_eq!(result.total_count, 1);
     }
 
+    // ── In operator tests ─────────────────────────────
+
+    #[test]
+    fn search_filter_tag_via_where_in() {
+        // tags "rust", "svelte", "python" - In ["rust", "svelte"] returns 2
+        let idx = in_memory_index();
+        let z0 = make_typed_doogat(0, "note", vec!["rust"]);
+        let z1 = make_typed_doogat(1, "note", vec!["svelte"]);
+        let z2 = make_typed_doogat(2, "note", vec!["python"]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "tag".into(),
+                op: SearchFieldOp::In(vec!["rust".into(), "svelte".into()]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match z0 (rust) and z1 (svelte)");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
+    }
+
+    #[test]
+    fn search_filter_core_column_in() {
+        // type In ["link", "note"] should match both types
+        let idx = in_memory_index();
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "note", vec![]);
+        let z2 = make_typed_doogat(2, "contact", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "type".into(),
+                op: SearchFieldOp::In(vec!["link".into(), "note".into()]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match link and note, not contact");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
+    }
+
+    #[test]
+    fn search_filter_fields_fallback_in() {
+        // field not in any type table - uses _ddb_fields fallback
+        let idx = in_memory_index();
+        let mut z0 = make_typed_doogat(0, "note", vec![]);
+        z0.meta.extra.insert("color".into(), Value::String("red".into()));
+        let mut z1 = make_typed_doogat(1, "note", vec![]);
+        z1.meta.extra.insert("color".into(), Value::String("blue".into()));
+        let mut z2 = make_typed_doogat(2, "note", vec![]);
+        z2.meta.extra.insert("color".into(), Value::String("green".into()));
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "color".into(),
+                op: SearchFieldOp::In(vec!["red".into(), "green".into()]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 2, "should match red and green, not blue");
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120002"]);
+    }
+
+    #[test]
+    fn search_filter_in_empty_returns_no_results() {
+        let idx = in_memory_index();
+        let z0 = make_typed_doogat(0, "note", vec!["rust"]);
+        idx.index_doogat(&z0).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "tag".into(),
+                op: SearchFieldOp::In(vec![]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 0, "empty In list should match nothing");
+        assert_eq!(result.total_count, 0);
+    }
+
+    #[test]
+    fn search_filter_in_single_element() {
+        let idx = in_memory_index();
+        let z0 = make_typed_doogat(0, "note", vec!["rust"]);
+        let z1 = make_typed_doogat(1, "note", vec!["python"]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "tag".into(),
+                op: SearchFieldOp::In(vec!["rust".into()]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx.search_paginated_filtered("Searchable", 100, 0, &filters).unwrap();
+        assert_eq!(result.hits.len(), 1, "single-element In should work like Eq");
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+

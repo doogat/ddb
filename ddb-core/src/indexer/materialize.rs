@@ -8,7 +8,7 @@ use super::Index;
 
 /// Column names reserved for core doogat fields in materialized tables.
 pub(crate) fn is_core_column(name: &str) -> bool {
-    matches!(name, "id" | "title" | "date" | "updated_at")
+    matches!(name, "id" | "title" | "type" | "date" | "updated_at")
 }
 
 /// Normalize a boolean string to "1" or "0" for SQLite storage.

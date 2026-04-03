@@ -895,7 +895,7 @@ impl Index {
                      z.type, z.date \
                      FROM _ddb_fts \
                      JOIN doogats z ON z.rowid = _ddb_fts.rowid \
-                     WHERE _ddb_fts MATCH ?1 {filter_sql}\
+                     WHERE _ddb_fts MATCH ?1 {filter_sql} \
                      {order_clause}"
                 );
                 (sql, params)
