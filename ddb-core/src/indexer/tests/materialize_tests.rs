@@ -452,6 +452,7 @@ Widget
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
         let inferred = TableSchema {
             table_name: "foo".to_string(),
@@ -462,6 +463,7 @@ Widget
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -491,6 +493,7 @@ Widget
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
 
         let merged = Index::merge_schemas(None, inferred);
@@ -520,6 +523,7 @@ Widget
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
         let inferred = TableSchema {
             table_name: "baz".to_string(),
@@ -551,6 +555,7 @@ Widget
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -583,6 +588,7 @@ Widget
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
         let inferred = TableSchema {
             table_name: "qux".to_string(),
@@ -614,6 +620,7 @@ Widget
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);

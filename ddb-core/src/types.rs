@@ -1030,6 +1030,7 @@ pub struct TableSchema {
     pub stale_after_days: Option<u32>,
     pub title_template: Option<String>,
     pub origin: Option<String>,
+    pub unique_together: Option<Vec<Vec<String>>>,
 }
 
 #[derive(Debug, Clone)]

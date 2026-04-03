@@ -484,6 +484,7 @@ impl<'a> SqlEngine<'a> {
             stale_after_days: None,
             title_template: None,
             origin: Some("ddl".into()),
+            unique_together: None,
         };
 
         // Build and commit typedef doogat
@@ -2705,6 +2706,7 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         stale_after_days,
         title_template,
         origin,
+        unique_together: None,
     })
 }
 

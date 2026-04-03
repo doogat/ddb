@@ -1415,6 +1415,7 @@ mod tests {
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
         let fixes = detect_fixes(&parsed, Some(&schema));
         assert!(
@@ -1450,6 +1451,7 @@ mod tests {
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
         let fixes = detect_fixes(&parsed, Some(&schema));
         assert!(
@@ -1821,6 +1823,7 @@ mod tests {
             stale_after_days: None,
             title_template: Some(template.into()),
             origin: Some("ddl".into()),
+            unique_together: None,
         }
     }
 
@@ -1931,6 +1934,7 @@ mod tests {
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
         let fixes = detect_fixes(&parsed, Some(&schema));
         assert!(

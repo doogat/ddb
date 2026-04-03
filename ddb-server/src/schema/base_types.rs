@@ -987,6 +987,7 @@ mod tests {
             stale_after_days: None,
             title_template: None,
             origin: None,
+            unique_together: None,
         };
 
         let val = typed_doogat_to_value(&z, &schema);
