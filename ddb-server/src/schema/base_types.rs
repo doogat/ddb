@@ -1288,14 +1288,19 @@ mod tests {
         // type
         assert_eq!(obj.get("type").unwrap(), &GqlValue::from("link"));
 
-        // fields (JSON string)
+        // fields (JSON object)
         match obj.get("fields").unwrap() {
-            GqlValue::String(s) => {
-                let parsed: serde_json::Value = serde_json::from_str(s).unwrap();
-                assert_eq!(parsed["url"], "https://example.com");
-                assert_eq!(parsed["description"], "Example");
+            GqlValue::Object(map) => {
+                assert_eq!(
+                    map.get(&Name::new("url")).unwrap(),
+                    &GqlValue::String("https://example.com".into())
+                );
+                assert_eq!(
+                    map.get(&Name::new("description")).unwrap(),
+                    &GqlValue::String("Example".into())
+                );
             }
-            _ => panic!("expected string for fields"),
+            _ => panic!("expected object for fields"),
         }
 
         // created_at
