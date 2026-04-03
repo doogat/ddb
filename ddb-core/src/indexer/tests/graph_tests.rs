@@ -1352,3 +1352,296 @@ use super::*;
         assert!(results.is_empty());
     }
 
+    // ---- link_density tests ----
+
+    /// Helper: create a doogat with outbound links to given target IDs.
+    fn make_linked_doogat(
+        id: &str,
+        title: &str,
+        dtype: &str,
+        path: &str,
+        link_targets: &[&str],
+    ) -> ParsedDoogat {
+        let links = link_targets
+            .iter()
+            .map(|target| crate::types::Link {
+                target: (*target).into(),
+                display: None,
+                section: None,
+                kind: crate::types::LinkKind::WikiLink,
+                zone: Zone::Body,
+            })
+            .collect();
+
+        ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(DoogatId(id.into())),
+                title: Some(title.into()),
+                date: Some("2026-04-03".into()),
+                doogat_type: Some(dtype.into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: String::new(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links,
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: path.into(),
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn link_density_counts_outbound_links() {
+        let idx = in_memory_index();
+
+        let a = make_linked_doogat(
+            "20260403100000",
+            "Alpha",
+            "note",
+            "ddb/20260403100000.md",
+            &["20260403100001", "20260403100002"],
+        );
+        let b = make_doogat_with_date(
+            "20260403100001",
+            "Bravo",
+            "2026-04-03",
+            "note",
+            "ddb/20260403100001.md",
+        );
+        let c = make_doogat_with_date(
+            "20260403100002",
+            "Charlie",
+            "2026-04-03",
+            "note",
+            "ddb/20260403100002.md",
+        );
+        idx.index_doogat(&a).unwrap();
+        idx.index_doogat(&b).unwrap();
+        idx.index_doogat(&c).unwrap();
+
+        let results = idx.link_density(None).unwrap();
+        let alpha = results.iter().find(|e| e.id == "20260403100000").unwrap();
+        assert_eq!(alpha.outbound_links, 2);
+    }
+
+    #[test]
+    fn link_density_counts_inbound_links() {
+        let idx = in_memory_index();
+
+        // A and C both link to B
+        let a = make_linked_doogat(
+            "20260403100000",
+            "Alpha",
+            "note",
+            "ddb/20260403100000.md",
+            &["20260403100001"],
+        );
+        let b = make_doogat_with_date(
+            "20260403100001",
+            "Bravo",
+            "2026-04-03",
+            "note",
+            "ddb/20260403100001.md",
+        );
+        let c = make_linked_doogat(
+            "20260403100002",
+            "Charlie",
+            "note",
+            "ddb/20260403100002.md",
+            &["20260403100001"],
+        );
+        idx.index_doogat(&a).unwrap();
+        idx.index_doogat(&b).unwrap();
+        idx.index_doogat(&c).unwrap();
+
+        let results = idx.link_density(None).unwrap();
+        let bravo = results.iter().find(|e| e.id == "20260403100001").unwrap();
+        assert_eq!(bravo.inbound_links, 2);
+    }
+
+    #[test]
+    fn link_density_score_is_sum() {
+        let idx = in_memory_index();
+
+        // A links to B; C links to A. So A has outbound=1, inbound=1, density=2
+        let a = make_linked_doogat(
+            "20260403100000",
+            "Alpha",
+            "note",
+            "ddb/20260403100000.md",
+            &["20260403100001"],
+        );
+        let b = make_doogat_with_date(
+            "20260403100001",
+            "Bravo",
+            "2026-04-03",
+            "note",
+            "ddb/20260403100001.md",
+        );
+        let c = make_linked_doogat(
+            "20260403100002",
+            "Charlie",
+            "note",
+            "ddb/20260403100002.md",
+            &["20260403100000"],
+        );
+        idx.index_doogat(&a).unwrap();
+        idx.index_doogat(&b).unwrap();
+        idx.index_doogat(&c).unwrap();
+
+        let results = idx.link_density(None).unwrap();
+        let alpha = results.iter().find(|e| e.id == "20260403100000").unwrap();
+        assert_eq!(alpha.inbound_links, 1);
+        assert_eq!(alpha.outbound_links, 1);
+        assert_eq!(alpha.density_score, alpha.inbound_links + alpha.outbound_links);
+        assert_eq!(alpha.density_score, 2);
+    }
+
+    #[test]
+    fn link_density_sorted_by_density_descending() {
+        let idx = in_memory_index();
+
+        // A links to B, C, D (outbound=3, density=3)
+        let a = make_linked_doogat(
+            "20260403100000",
+            "Alpha",
+            "note",
+            "ddb/20260403100000.md",
+            &["20260403100001", "20260403100002", "20260403100003"],
+        );
+        // B links to C (outbound=1, density=1 + inbound from A = 2)
+        let b = make_linked_doogat(
+            "20260403100001",
+            "Bravo",
+            "note",
+            "ddb/20260403100001.md",
+            &["20260403100002"],
+        );
+        // C has no outbound (inbound from A and B = 2, density=2)
+        let c = make_doogat_with_date(
+            "20260403100002",
+            "Charlie",
+            "2026-04-03",
+            "note",
+            "ddb/20260403100002.md",
+        );
+        // D has no outbound (inbound from A = 1, density=1)
+        let d = make_doogat_with_date(
+            "20260403100003",
+            "Delta",
+            "2026-04-03",
+            "note",
+            "ddb/20260403100003.md",
+        );
+        idx.index_doogat(&a).unwrap();
+        idx.index_doogat(&b).unwrap();
+        idx.index_doogat(&c).unwrap();
+        idx.index_doogat(&d).unwrap();
+
+        let results = idx.link_density(None).unwrap();
+
+        // Verify descending order
+        for w in results.windows(2) {
+            assert!(
+                w[0].density_score >= w[1].density_score,
+                "expected {} (density {}) >= {} (density {})",
+                w[0].id,
+                w[0].density_score,
+                w[1].id,
+                w[1].density_score,
+            );
+        }
+
+        // Alpha has highest density (outbound=3)
+        assert_eq!(results[0].id, "20260403100000");
+        assert_eq!(results[0].density_score, 3);
+    }
+
+    #[test]
+    fn link_density_respects_type_filter() {
+        let idx = in_memory_index();
+
+        let note = make_linked_doogat(
+            "20260403100000",
+            "A Note",
+            "note",
+            "ddb/20260403100000.md",
+            &["20260403100001"],
+        );
+        let project = make_linked_doogat(
+            "20260403100001",
+            "A Project",
+            "project",
+            "ddb/20260403100001.md",
+            &["20260403100000"],
+        );
+        idx.index_doogat(&note).unwrap();
+        idx.index_doogat(&project).unwrap();
+
+        let results = idx.link_density(Some("project")).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260403100001");
+        assert_eq!(results[0].doogat_type, "project");
+    }
+
+    #[test]
+    fn link_density_excludes_typedefs() {
+        let idx = in_memory_index();
+
+        let regular = make_linked_doogat(
+            "20260403100000",
+            "Regular",
+            "note",
+            "ddb/20260403100000.md",
+            &["20260403100001"],
+        );
+        let typedef = make_linked_doogat(
+            "20260403100001",
+            "My Typedef",
+            "note",
+            "ddb/_typedef/20260403100001.md",
+            &["20260403100000"],
+        );
+        idx.index_doogat(&regular).unwrap();
+        idx.index_doogat(&typedef).unwrap();
+
+        let results = idx.link_density(None).unwrap();
+        // Only the regular doogat should appear
+        assert!(
+            results.iter().all(|e| e.id != "20260403100001"),
+            "typedef should be excluded from results"
+        );
+        assert!(results.iter().any(|e| e.id == "20260403100000"));
+    }
+
+    #[test]
+    fn link_density_empty_index() {
+        let idx = in_memory_index();
+        let results = idx.link_density(None).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn link_density_zero_links() {
+        let idx = in_memory_index();
+
+        let lonely = make_doogat_with_date(
+            "20260403100000",
+            "Lonely",
+            "2026-04-03",
+            "note",
+            "ddb/20260403100000.md",
+        );
+        idx.index_doogat(&lonely).unwrap();
+
+        let results = idx.link_density(None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260403100000");
+        assert_eq!(results[0].inbound_links, 0);
+        assert_eq!(results[0].outbound_links, 0);
+        assert_eq!(results[0].density_score, 0);
+    }

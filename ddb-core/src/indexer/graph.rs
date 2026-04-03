@@ -698,6 +698,69 @@ impl Index {
         Ok(recent)
     }
 
+    /// Report inbound/outbound link counts per doogat.
+    pub fn link_density(
+        &self,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<LinkDensityEntry>> {
+        let base_sql = if type_filter.is_some() {
+            "SELECT z.id, z.title, z.type FROM doogats z \
+             WHERE z.path NOT LIKE 'ddb/_typedef/%' AND z.type = ?1"
+        } else {
+            "SELECT z.id, z.title, z.type FROM doogats z \
+             WHERE z.path NOT LIKE 'ddb/_typedef/%'"
+        };
+
+        let mut stmt = self.conn.prepare(base_sql)?;
+
+        type Row = (String, String, String);
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        };
+
+        let doogats: Vec<Row> = if let Some(t) = type_filter {
+            stmt.query_map(params![t], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
+        } else {
+            stmt.query_map([], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        let mut out_stmt = self
+            .conn
+            .prepare("SELECT COUNT(*) FROM _ddb_links WHERE source_id = ?1")?;
+        let mut in_stmt = self.conn.prepare(
+            "SELECT COUNT(*) FROM _ddb_links \
+             WHERE target_path = ?1 OR target_path = ?2",
+        )?;
+
+        let mut entries = Vec::with_capacity(doogats.len());
+        for (id, title, doogat_type) in &doogats {
+            let outbound: usize = out_stmt
+                .query_row(params![id], |row| row.get::<_, i64>(0))
+                .unwrap_or(0) as usize;
+
+            let path = format!("ddb/{id}.md");
+            let inbound: usize = in_stmt
+                .query_row(params![id, path], |row| row.get::<_, i64>(0))
+                .unwrap_or(0) as usize;
+
+            entries.push(LinkDensityEntry {
+                id: id.clone(),
+                title: title.clone(),
+                doogat_type: doogat_type.clone(),
+                inbound_links: inbound,
+                outbound_links: outbound,
+                density_score: inbound + outbound,
+            });
+        }
+
+        entries.sort_by(|a, b| b.density_score.cmp(&a.density_score));
+        Ok(entries)
+    }
+
     // ── Sequence queries ──────────────────────────────────────────
 
     /// Return direct children of a doogat in a sequence (sorted by ID).

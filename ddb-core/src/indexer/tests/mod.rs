@@ -1,6 +1,6 @@
     use super::*;
     use crate::git_ops::GitRepo;
-    use crate::types::{InlineField, Link, RecentDoogat, SearchFieldFilter, SearchFieldOp, SearchFilters, TagQueryFilter, Value, DoogatId, DoogatMeta, Zone};
+    use crate::types::{InlineField, Link, LinkDensityEntry, RecentDoogat, SearchFieldFilter, SearchFieldOp, SearchFilters, TagQueryFilter, Value, DoogatId, DoogatMeta, Zone};
 
 mod graph_tests;
 mod materialize_tests;
