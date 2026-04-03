@@ -1098,6 +1098,22 @@ impl Index {
                             params.push(val.clone());
                             idx += 1;
                         }
+                        SearchFieldOp::In(vals) => {
+                            if vals.is_empty() {
+                                clauses.push("AND 0".to_string());
+                            } else {
+                                let placeholders: Vec<String> = vals.iter().map(|_| {
+                                    let p = format!("?{idx}");
+                                    idx += 1;
+                                    p
+                                }).collect();
+                                clauses.push(format!(
+                                    "AND z.id IN (SELECT doogat_id FROM _ddb_tags WHERE tag IN ({}))",
+                                    placeholders.join(", ")
+                                ));
+                                params.extend(vals.clone());
+                            }
+                        }
                     }
                     continue;
                 }
@@ -1119,6 +1135,21 @@ impl Index {
                             ));
                             params.push(val.clone());
                             idx += 1;
+                        }
+                        SearchFieldOp::In(vals) => {
+                            if vals.is_empty() {
+                                clauses.push("AND 0".to_string());
+                            } else {
+                                let placeholders: Vec<String> = vals.iter().map(|_| {
+                                    let p = format!("?{idx}");
+                                    idx += 1;
+                                    p
+                                }).collect();
+                                clauses.push(format!(
+                                    "AND z.\"{}\" IN ({})", safe_col, placeholders.join(", ")
+                                ));
+                                params.extend(vals.clone());
+                            }
                         }
                     }
                     continue;
@@ -1167,36 +1198,89 @@ impl Index {
                             params.push(val.clone());
                             idx += 2;
                         }
+                        SearchFieldOp::In(vals) => {
+                            if vals.is_empty() {
+                                clauses.push("AND 0".to_string());
+                            } else {
+                                let key_idx = idx;
+                                idx += 1;
+                                let placeholders: Vec<String> = vals.iter().map(|_| {
+                                    let p = format!("?{idx}");
+                                    idx += 1;
+                                    p
+                                }).collect();
+                                clauses.push(format!(
+                                    "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value IN ({}))",
+                                    key_idx, placeholders.join(", ")
+                                ));
+                                params.push(wf.field.clone());
+                                params.extend(vals.clone());
+                            }
+                        }
                     }
                 } else {
-                    // Resolve against materialized type table(s) (one param)
+                    // Resolve against materialized type table(s)
                     let safe_col = Self::escape_sql_ident(&wf.field);
-                    let val = match &wf.op {
-                        SearchFieldOp::Eq(v) | SearchFieldOp::Contains(v) => v.clone(),
-                    };
-                    let param_placeholder = format!("?{idx}");
-                    idx += 1;
 
-                    let subqueries: Vec<String> = tables_with_field
-                        .iter()
-                        .map(|t| {
-                            let safe_table = Self::escape_sql_ident(t);
-                            match &wf.op {
-                                SearchFieldOp::Eq(_) => format!(
-                                    "SELECT id FROM \"{}\" WHERE \"{}\" = {}",
-                                    safe_table, safe_col, param_placeholder
-                                ),
-                                SearchFieldOp::Contains(_) => format!(
-                                    "SELECT id FROM \"{}\" WHERE \"{}\" LIKE '%' || {} || '%'",
-                                    safe_table, safe_col, param_placeholder
-                                ),
+                    match &wf.op {
+                        SearchFieldOp::In(vals) => {
+                            if vals.is_empty() {
+                                clauses.push("AND 0".to_string());
+                            } else {
+                                let placeholders: Vec<String> = vals.iter().map(|_| {
+                                    let p = format!("?{idx}");
+                                    idx += 1;
+                                    p
+                                }).collect();
+                                let in_list = placeholders.join(", ");
+
+                                let subqueries: Vec<String> = tables_with_field
+                                    .iter()
+                                    .map(|t| {
+                                        let safe_table = Self::escape_sql_ident(t);
+                                        format!(
+                                            "SELECT id FROM \"{}\" WHERE \"{}\" IN ({})",
+                                            safe_table, safe_col, in_list
+                                        )
+                                    })
+                                    .collect();
+
+                                let combined = subqueries.join(" UNION ");
+                                clauses.push(format!("AND z.id IN ({combined})"));
+                                params.extend(vals.clone());
                             }
-                        })
-                        .collect();
+                        }
+                        _ => {
+                            let val = match &wf.op {
+                                SearchFieldOp::Eq(v) | SearchFieldOp::Contains(v) => v.clone(),
+                                SearchFieldOp::In(_) => unreachable!(),
+                            };
+                            let param_placeholder = format!("?{idx}");
+                            idx += 1;
 
-                    let combined = subqueries.join(" UNION ");
-                    clauses.push(format!("AND z.id IN ({combined})"));
-                    params.push(val);
+                            let subqueries: Vec<String> = tables_with_field
+                                .iter()
+                                .map(|t| {
+                                    let safe_table = Self::escape_sql_ident(t);
+                                    match &wf.op {
+                                        SearchFieldOp::Eq(_) => format!(
+                                            "SELECT id FROM \"{}\" WHERE \"{}\" = {}",
+                                            safe_table, safe_col, param_placeholder
+                                        ),
+                                        SearchFieldOp::Contains(_) => format!(
+                                            "SELECT id FROM \"{}\" WHERE \"{}\" LIKE '%' || {} || '%'",
+                                            safe_table, safe_col, param_placeholder
+                                        ),
+                                        SearchFieldOp::In(_) => unreachable!(),
+                                    }
+                                })
+                                .collect();
+
+                            let combined = subqueries.join(" UNION ");
+                            clauses.push(format!("AND z.id IN ({combined})"));
+                            params.push(val);
+                        }
+                    }
                 }
             }
         }
