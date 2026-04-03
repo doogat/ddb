@@ -1201,6 +1201,7 @@ pub struct PaginatedSearchResult {
 pub enum SearchFieldOp {
     Eq(String),
     Contains(String),
+    In(Vec<String>),
 }
 
 #[derive(Debug, Clone)]
