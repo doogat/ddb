@@ -465,7 +465,7 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The 14-digit timestamp ID of the doogat to fetch."))
             .description("Fetch a single doogat by its 14-digit timestamp ID."),
         );
     }
@@ -511,11 +511,11 @@ pub fn build_schema(
                     )))
                 })
             })
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
-            .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
-            .argument(InputValue::new("backlinksOf", TypeRef::named(TypeRef::ID)))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
+            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)).description("Filter by doogat type name."))
+            .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)).description("Filter by tag name."))
+            .argument(InputValue::new("backlinksOf", TypeRef::named(TypeRef::ID)).description("Return doogats that link to this ID."))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
+            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip for pagination."))
             .description("List doogats with optional type, tag, and backlink filters."),
         );
     }
@@ -639,7 +639,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
+            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)).description("The search query string to normalize."))
             .description("Return the canonical form of a search query without executing it. Useful for deduplication and saved searches."),
         );
     }
@@ -680,8 +680,8 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(sql_result_to_value(&result, fmt))))
                 })
             })
-            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
-            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING)))
+            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)).description("SQL SELECT query to execute."))
+            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING)).description("Response format: 'array' (default) or 'objects'."))
             .description("Execute a read-only SQL SELECT query. Non-SELECT statements route through the mutation actor."),
         );
     }
@@ -733,10 +733,10 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("state", TypeRef::named(TypeRef::STRING)))
-            .argument(InputValue::new("doogatId", TypeRef::named(TypeRef::ID)))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
+            .argument(InputValue::new("state", TypeRef::named(TypeRef::STRING)).description("Filter by checkbox state (open, done, cancelled)."))
+            .argument(InputValue::new("doogatId", TypeRef::named(TypeRef::ID)).description("Filter to a specific doogat's checkboxes."))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
+            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip."))
             .description("Query checkbox/task items across doogats. Filter by state (open/done/cancelled) or doogat ID."),
         );
     }
@@ -761,7 +761,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
             .description("Shorthand for checkboxItems(state: \"open\"). Returns uncompleted action items."),
         );
     }
@@ -790,7 +790,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to find unlinked mentions for."))
             .description("Find doogats that mention this doogat's title as plain text without a wikilink."),
         );
     }
@@ -830,8 +830,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to get link suggestions for."))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum suggestions to return. Default 10."))
             .description("Suggest doogats to link based on shared tags and content similarity."),
         );
     }
@@ -880,7 +880,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
+            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)).description("Filter to a specific doogat type."))
             .description("Find typed doogats not updated within their type's staleness threshold."),
         );
     }
@@ -920,7 +920,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
+            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)).description("Filter to a specific doogat type."))
             .description("Find typed doogats with no inbound links from other doogats."),
         );
     }
@@ -1026,7 +1026,7 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to get sequence info for."))
             .description("Get parent, children, and breadcrumb for a doogat in a sequence hierarchy."),
         );
     }
@@ -1050,7 +1050,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to list children of."))
             .description("List direct children of a doogat in a sequence hierarchy."),
         );
     }
@@ -1075,7 +1075,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to get breadcrumb for."))
             .description("Get ancestor chain from root to the given doogat in a sequence hierarchy."),
         );
     }
@@ -1261,15 +1261,15 @@ pub fn build_schema(
                         })
                     },
                 )
-                .argument(InputValue::new("where", TypeRef::named(&where_type_name)))
+                .argument(InputValue::new("where", TypeRef::named(&where_type_name)).description("Filter conditions."))
                 .argument(InputValue::new(
                     "orderBy",
                     TypeRef::named(&order_by_type_name),
-                ))
-                .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
-                .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-                .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
-                .argument(InputValue::new("distinct", TypeRef::named(TypeRef::STRING)))
+                ).description("Sort order specification."))
+                .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)).description("Filter by tag name."))
+                .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
+                .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip."))
+                .argument(InputValue::new("distinct", TypeRef::named(TypeRef::STRING)).description("Column to deduplicate results by."))
                 .description(&query_desc),
             );
         }
@@ -1353,8 +1353,8 @@ pub fn build_schema(
                         })
                     },
                 )
-                .argument(InputValue::new("where", TypeRef::named(&where_type_name)))
-                .argument(InputValue::new("groupBy", TypeRef::named(TypeRef::STRING)))
+                .argument(InputValue::new("where", TypeRef::named(&where_type_name)).description("Filter conditions for aggregation."))
+                .argument(InputValue::new("groupBy", TypeRef::named(TypeRef::STRING)).description("Column to group results by."))
                 .description(&agg_desc),
             );
         }
@@ -1453,7 +1453,7 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "where",
                 TypeRef::named("TagEntriesWhere"),
-            ))
+            ).description("Filter conditions for tag entries."))
             .description("Query individual tag assignments with where filters on doogatId and tag name."),
         );
     }
@@ -1497,7 +1497,7 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "input",
                 TypeRef::named_nn("CreateDoogatInput"),
-            ))
+            ).description("The doogat to create."))
             .description("Create a new doogat with a title, optional content, tags, and type."),
         );
     }
@@ -1538,7 +1538,7 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "input",
                 TypeRef::named_nn("UpdateDoogatInput"),
-            ))
+            ).description("Fields to update on the doogat."))
             .description("Update an existing doogat. Omitted fields are left unchanged."),
         );
     }
@@ -1595,7 +1595,7 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "updates",
                 TypeRef::named_nn_list_nn("UpdateDoogatInput"),
-            )),
+            ).description("List of doogats to update atomically.")),
         );
     }
 
@@ -1674,7 +1674,7 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "inputs",
                 TypeRef::named_nn_list_nn("CreateManyItemInput"),
-            )),
+            ).description("List of doogats to create atomically.")),
         );
     }
 
@@ -1689,7 +1689,7 @@ pub fn build_schema(
                     Ok(Some(FieldValue::value(GqlValue::from(true))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The ID of the doogat to delete."))
             .description("Delete a doogat by ID. Cascades: removes junction table rows referencing this ID and cleans dangling wikilinks. All changes in a single atomic commit."),
         );
     }
@@ -1746,7 +1746,7 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "input",
                 TypeRef::named_nn("AttachFileInput"),
-            ))
+            ).description("File attachment details."))
             .description("Attach a file to a doogat. Provide base64-encoded data. MIME type is auto-detected from filename if omitted."),
         );
 
@@ -1770,11 +1770,11 @@ pub fn build_schema(
                     Ok(Some(FieldValue::value(GqlValue::from(true))))
                 })
             })
-            .argument(InputValue::new("doogatId", TypeRef::named_nn(TypeRef::ID)))
+            .argument(InputValue::new("doogatId", TypeRef::named_nn(TypeRef::ID)).description("The doogat to remove the file from."))
             .argument(InputValue::new(
                 "filename",
                 TypeRef::named_nn(TypeRef::STRING),
-            ))
+            ).description("Name of the file to detach."))
             .description("Remove an attached file from a doogat."),
         );
     }
@@ -1804,8 +1804,8 @@ pub fn build_schema(
                 })
             })
             .description("Execute a single SQL statement (DDL or DML). DDL triggers schema reload.")
-            .argument(InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING)))
-            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING))),
+            .argument(InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING)).description("SQL statement to execute."))
+            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING)).description("Response format: 'array' (default) or 'objects'.")),
         );
     }
 
@@ -1851,8 +1851,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "statements",
                 TypeRef::named_nn_list_nn(TypeRef::STRING),
-            ))
-            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING))),
+            ).description("SQL statements to execute atomically."))
+            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING)).description("Response format: 'array' (default) or 'objects'.")),
         );
     }
 
@@ -1961,8 +1961,8 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
             })
-            .argument(InputValue::new("remote", TypeRef::named(TypeRef::STRING)))
-            .argument(InputValue::new("branch", TypeRef::named(TypeRef::STRING)))
+            .argument(InputValue::new("remote", TypeRef::named(TypeRef::STRING)).description("Git remote name. Default 'origin'."))
+            .argument(InputValue::new("branch", TypeRef::named(TypeRef::STRING)).description("Branch name. Default 'master'."))
             .description("Sync with a remote git repository. Pushes local commits, pulls remote changes, and resolves conflicts via CRDT."),
         );
     }
@@ -2035,15 +2035,15 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
             })
-            .argument(InputValue::new("force", TypeRef::named(TypeRef::BOOLEAN)))
+            .argument(InputValue::new("force", TypeRef::named(TypeRef::BOOLEAN)).description("Force compaction even if below thresholds."))
             .argument(InputValue::new(
                 "noBackup",
                 TypeRef::named(TypeRef::BOOLEAN),
-            ))
+            ).description("Skip creating a backup before compaction."))
             .argument(InputValue::new(
                 "backupPath",
                 TypeRef::named(TypeRef::STRING),
-            ))
+            ).description("Custom backup directory path."))
             .description("Run CRDT compaction and git garbage collection. Reduces repository size by merging CRDT temp files and pruning unreachable objects."),
         );
     }
@@ -2103,7 +2103,7 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("task", TypeRef::named(TypeRef::STRING)))
+            .argument(InputValue::new("task", TypeRef::named(TypeRef::STRING)).description("Specific maintenance task to run. Omit to run all."))
             .description("Run git maintenance tasks (gc, repack, commit-graph). Optionally specify a single task to run."),
         );
     }
