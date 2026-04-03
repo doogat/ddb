@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DoogatError` now includes `Conflict`, `Sync`, `Index`, `BadRequest` variants for precise error discrimination; server returns 409 for conflicts, 400 for bad requests
 - GraphQL schema introspection hints: every query, mutation, input, and object field now has a description visible via standard introspection queries
 - Search `in` operator for set membership filtering (`where: [{field: "tag", in: ["a", "b"]}]`)
+- Search `where` filters now resolve REFERENCES columns via junction tables (`{type}_{col}`): `eq` matches the referenced doogat ID, `contains` matches the referenced doogat title, `in` matches a set of IDs; UNION is used when multiple types share the same field name
 
 ### Changed
 
