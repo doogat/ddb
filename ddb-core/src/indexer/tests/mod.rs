@@ -2595,3 +2595,149 @@ processed: true
         assert_eq!(ids, vec!["20260301120000", "20260301120002"]);
     }
 
+    #[test]
+    fn search_filter_by_junction_eq() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        // Create type table + junction table; link z0 to cat001
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS link_category (\
+                     \"link_id\" TEXT NOT NULL, \
+                     \"category_id\" TEXT NOT NULL, \
+                     PRIMARY KEY (\"link_id\", \"category_id\")\
+                 );\
+                 INSERT INTO link_category VALUES ('20260301120000', 'cat001');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Eq("cat001".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(result.hits.len(), 1, "junction Eq should match z0 only");
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_by_junction_contains() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        // Insert category doogats so title-based Contains can join them
+        idx.conn
+            .execute_batch(
+                "INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat001', 'Technology Hub', 'category', 'ddb/cat001.md');\
+                 INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat002', 'Science Corner', 'category', 'ddb/cat002.md');\
+                 CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS link_category (\
+                     \"link_id\" TEXT NOT NULL, \
+                     \"category_id\" TEXT NOT NULL, \
+                     PRIMARY KEY (\"link_id\", \"category_id\")\
+                 );\
+                 INSERT INTO link_category VALUES ('20260301120000', 'cat001');\
+                 INSERT INTO link_category VALUES ('20260301120001', 'cat002');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Contains("Tech".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            1,
+            "junction Contains should match z0 via 'Technology Hub' title"
+        );
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_by_junction_in() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        let z2 = make_typed_doogat(2, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120002', 'Link 2', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS link_category (\
+                     \"link_id\" TEXT NOT NULL, \
+                     \"category_id\" TEXT NOT NULL, \
+                     PRIMARY KEY (\"link_id\", \"category_id\")\
+                 );\
+                 INSERT INTO link_category VALUES ('20260301120000', 'cat001');\
+                 INSERT INTO link_category VALUES ('20260301120001', 'cat002');\
+                 INSERT INTO link_category VALUES ('20260301120002', 'cat003');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::In(vec!["cat001".into(), "cat002".into()]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            2,
+            "junction In should match z0 and z1"
+        );
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
+    }

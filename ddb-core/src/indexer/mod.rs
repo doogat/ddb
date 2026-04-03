@@ -1178,6 +1178,102 @@ impl Index {
                 }
 
                 if tables_with_field.is_empty() {
+                    // Check for junction tables ({type}_{field}) before
+                    // falling back to _ddb_fields.
+                    let safe_field = Self::escape_sql_ident(&wf.field);
+                    let mut junction_tables: Vec<String> = Vec::new();
+                    for table in &candidate_tables {
+                        let jt_name = format!("{}_{}", table, wf.field);
+                        let exists: bool = self
+                            .conn
+                            .query_row(
+                                "SELECT COUNT(*) > 0 FROM sqlite_master \
+                                 WHERE type='table' AND name=?1",
+                                [&jt_name],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(false);
+                        if exists {
+                            junction_tables.push(table.clone());
+                        }
+                    }
+
+                    if !junction_tables.is_empty() {
+                        match &wf.op {
+                            SearchFieldOp::Eq(val) => {
+                                let ph = format!("?{idx}");
+                                idx += 1;
+                                let subs: Vec<String> = junction_tables
+                                    .iter()
+                                    .map(|t| {
+                                        let st = Self::escape_sql_ident(t);
+                                        let jt = format!("{st}_{safe_field}");
+                                        format!(
+                                            "SELECT \"{st}_id\" FROM \"{jt}\" \
+                                             WHERE \"{safe_field}_id\" = {ph}"
+                                        )
+                                    })
+                                    .collect();
+                                clauses.push(format!(
+                                    "AND z.id IN ({})",
+                                    subs.join(" UNION ")
+                                ));
+                                params.push(val.clone());
+                            }
+                            SearchFieldOp::Contains(val) => {
+                                let ph = format!("?{idx}");
+                                idx += 1;
+                                let subs: Vec<String> = junction_tables
+                                    .iter()
+                                    .map(|t| {
+                                        let st = Self::escape_sql_ident(t);
+                                        let jt = format!("{st}_{safe_field}");
+                                        format!(
+                                            "SELECT jt.\"{st}_id\" FROM \"{jt}\" jt \
+                                             JOIN doogats d ON d.id = jt.\"{safe_field}_id\" \
+                                             WHERE d.title LIKE '%' || {ph} || '%'"
+                                        )
+                                    })
+                                    .collect();
+                                clauses.push(format!(
+                                    "AND z.id IN ({})",
+                                    subs.join(" UNION ")
+                                ));
+                                params.push(val.clone());
+                            }
+                            SearchFieldOp::In(vals) => {
+                                if vals.is_empty() {
+                                    clauses.push("AND 0".to_string());
+                                } else {
+                                    let phs: Vec<String> = vals
+                                        .iter()
+                                        .map(|_| {
+                                            let p = format!("?{idx}");
+                                            idx += 1;
+                                            p
+                                        })
+                                        .collect();
+                                    let in_list = phs.join(", ");
+                                    let subs: Vec<String> = junction_tables
+                                        .iter()
+                                        .map(|t| {
+                                            let st = Self::escape_sql_ident(t);
+                                            let jt = format!("{st}_{safe_field}");
+                                            format!(
+                                                "SELECT \"{st}_id\" FROM \"{jt}\" \
+                                                 WHERE \"{safe_field}_id\" IN ({in_list})"
+                                            )
+                                        })
+                                        .collect();
+                                    clauses.push(format!(
+                                        "AND z.id IN ({})",
+                                        subs.join(" UNION ")
+                                    ));
+                                    params.extend(vals.clone());
+                                }
+                            }
+                        }
+                    } else {
                     // Fallback: use _ddb_fields key-value store (two params)
                     match &wf.op {
                         SearchFieldOp::Eq(val) => {
@@ -1218,6 +1314,7 @@ impl Index {
                             }
                         }
                     }
+                    } // end junction_tables else (fallback)
                 } else {
                     // Resolve against materialized type table(s)
                     let safe_col = Self::escape_sql_ident(&wf.field);

@@ -247,9 +247,23 @@ Each `SearchFieldFilter` carries a `SearchFieldOp` discriminating the comparison
 - `Contains(String)` - substring match (`LIKE '%?%'`)
 - `In(Vec<String>)` - set membership (`IN (?, ?, ...)`). An empty vec produces an `AND 0` clause, returning no results.
 
-All four resolution paths (tag, core column, materialized column, `_ddb_fields` fallback) support all three operators.
+All five resolution paths (tag, core column, materialized column, junction table, `_ddb_fields` fallback) support all three operators.
 
 This method is an instance method (`&self`) because it needs `self.conn` for type table introspection.
+
+#### Junction table traversal
+
+When a where-filter field does not exist as a materialized scalar column on any candidate type table, the indexer checks for junction tables named `{type}_{field}` in `sqlite_master`. Junction tables are created during materialization for REFERENCES columns (see `junction_table_ddl`).
+
+If junction tables exist, the filter resolves via a subquery join:
+
+- **Eq**: `SELECT "{type}_id" FROM "{type}_{field}" WHERE "{field}_id" = ?` - direct FK match
+- **Contains**: `SELECT jt."{type}_id" FROM "{type}_{field}" jt JOIN doogats d ON d.id = jt."{field}_id" WHERE d.title LIKE '%' || ? || '%'` - joins to doogats to match by referenced doogat title
+- **In**: `SELECT "{type}_id" FROM "{type}_{field}" WHERE "{field}_id" IN (?, ?, ...)` - FK set membership
+
+When multiple type tables have junction tables for the same field, subqueries are UNIONed with shared parameter placeholders (same pattern as materialized column resolution).
+
+If no junction tables are found, the filter falls through to the `_ddb_fields` key-value fallback.
 
 ### Search query language
 
