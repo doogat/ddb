@@ -282,6 +282,54 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WF3_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WFT1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WFT2_ID\`") }`"}" | Out-Null
 
+# 18d3. Search where filter: in operator
+$in1 = gql '{"query":"mutation { createDoogat(input: { title: \"InOp Alpha\", tags: [\"in-rust\", \"in-systems\"] }) { id } }"}'
+$IN1_ID = if ($in1 -match '"id":"([^"]+)"') { $Matches[1] }
+$in2 = gql '{"query":"mutation { createDoogat(input: { title: \"InOp Beta\", tags: [\"in-python\"] }) { id } }"}'
+$IN2_ID = if ($in2 -match '"id":"([^"]+)"') { $Matches[1] }
+$in3 = gql '{"query":"mutation { createDoogat(input: { title: \"InOp Gamma\", tags: [\"in-go\"] }) { id } }"}'
+$IN3_ID = if ($in3 -match '"id":"([^"]+)"') { $Matches[1] }
+
+# in with multiple values — should match Alpha (in-rust) and Beta (in-python)
+$result = gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: [\"in-rust\", \"in-python\"]}]) { totalCount hits { id } } }"}'
+if ($result -notmatch '"totalCount":2') { throw "search where in multi: expected 2, got $result" }
+if ($result -notmatch $IN1_ID) { throw "search where in multi: missing Alpha" }
+if ($result -notmatch $IN2_ID) { throw "search where in multi: missing Beta" }
+pass "serve: search where filter in operator (multiple values)"
+
+# in with single value — should match Gamma only
+$result = gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: [\"in-go\"]}]) { totalCount } }"}'
+if ($result -notmatch '"totalCount":1') { throw "search where in single: expected 1, got $result" }
+pass "serve: search where filter in operator (single value)"
+
+# in with empty array — should match nothing
+$result = gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: []}]) { totalCount } }"}'
+if ($result -notmatch '"totalCount":0') { throw "search where in empty: expected 0, got $result" }
+pass "serve: search where filter in operator (empty array)"
+
+# in on materialized column
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE inlink (url TEXT NOT NULL)\") { message } }"}' | Out-Null
+$inl1 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES (''InLink A'', ''https://a.example.com'')\") { message } }"}'
+$INL1_ID = if ($inl1 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
+$inl2 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES (''InLink B'', ''https://b.example.com'')\") { message } }"}'
+$INL2_ID = if ($inl2 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
+$inl3 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES (''InLink C'', ''https://c.example.com'')\") { message } }"}'
+$INL3_ID = if ($inl3 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
+
+$result = gql '{"query":"{ search(query: \"InLink\", where: [{field: \"url\", in: [\"https://a.example.com\", \"https://c.example.com\"]}]) { totalCount hits { id } } }"}'
+if ($result -notmatch '"totalCount":2') { throw "search where in materialized: expected 2, got $result" }
+if ($result -notmatch $INL1_ID) { throw "search where in materialized: missing A" }
+if ($result -notmatch $INL3_ID) { throw "search where in materialized: missing C" }
+pass "serve: search where filter in operator (materialized column)"
+
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$IN1_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$IN2_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$IN3_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$INL1_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$INL2_ID\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$INL3_ID\`") }`"}" | Out-Null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE inlink CASCADE\") { message } }"}' | Out-Null
+
 # 18e. Boolean and phrase search queries
 $bq1 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", content: \"rust crdt patterns\" }) { id } }"}'
 $BQ1_ID = if ($bq1 -match '"id":"([^"]+)"') { $Matches[1] }

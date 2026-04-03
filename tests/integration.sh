@@ -230,6 +230,58 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WF3_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WFT1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$WFT2_ID\\\") }\"}" >/dev/null
 
+# 18d3. Search where filter: in operator
+IN1=$(gql '{"query":"mutation { createDoogat(input: { title: \"InOp Alpha\", tags: [\"in-rust\", \"in-systems\"] }) { id } }"}')
+IN1_ID=$(echo "$IN1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+IN2=$(gql '{"query":"mutation { createDoogat(input: { title: \"InOp Beta\", tags: [\"in-python\"] }) { id } }"}')
+IN2_ID=$(echo "$IN2" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+IN3=$(gql '{"query":"mutation { createDoogat(input: { title: \"InOp Gamma\", tags: [\"in-go\"] }) { id } }"}')
+IN3_ID=$(echo "$IN3" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+# in with multiple values — should match Alpha (in-rust) and Beta (in-python)
+RESULT=$(gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: [\"in-rust\", \"in-python\"]}]) { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "2" ]
+echo "$RESULT" | grep -q "$IN1_ID"
+echo "$RESULT" | grep -q "$IN2_ID"
+pass "serve: search where filter in operator (multiple values)"
+
+# in with single value — should match Gamma only
+RESULT=$(gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: [\"in-go\"]}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: search where filter in operator (single value)"
+
+# in with empty array — should match nothing
+RESULT=$(gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: []}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "0" ]
+pass "serve: search where filter in operator (empty array)"
+
+# in on materialized column
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE inlink (url TEXT NOT NULL)\") { message } }"}' >/dev/null
+INL1=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES ('"'"'InLink A'"'"', '"'"'https://a.example.com'"'"')\") { message } }"}')
+INL1_ID=$(echo "$INL1" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tr -d ' ')
+INL2=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES ('"'"'InLink B'"'"', '"'"'https://b.example.com'"'"')\") { message } }"}')
+INL2_ID=$(echo "$INL2" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tr -d ' ')
+INL3=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES ('"'"'InLink C'"'"', '"'"'https://c.example.com'"'"')\") { message } }"}')
+INL3_ID=$(echo "$INL3" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tr -d ' ')
+
+RESULT=$(gql '{"query":"{ search(query: \"InLink\", where: [{field: \"url\", in: [\"https://a.example.com\", \"https://c.example.com\"]}]) { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "2" ]
+echo "$RESULT" | grep -q "$INL1_ID"
+echo "$RESULT" | grep -q "$INL3_ID"
+pass "serve: search where filter in operator (materialized column)"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$IN1_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$IN2_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$IN3_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$INL1_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$INL2_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$INL3_ID\\\") }\"}" >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE inlink CASCADE\") { message } }"}' >/dev/null
+
 # 18e. Boolean and phrase search queries
 BQ1=$(gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", content: \"rust crdt patterns\" }) { id } }"}')
 BQ1_ID=$(echo "$BQ1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
