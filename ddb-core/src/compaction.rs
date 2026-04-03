@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Result, DoogatError};
-use crate::git_ops::GitRepo;
 use crate::sync_manager::SyncManager;
+use crate::traits::GitBackend;
 use crate::types::{CompactOptions, CompactionReport};
 
 /// Compute the default backup path for a pre-compaction bundle.
-pub fn default_backup_path(repo: &GitRepo) -> PathBuf {
+pub fn default_backup_path(repo: &impl GitBackend) -> PathBuf {
     let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-    repo.path
+    repo.repo_path()
         .join(".ddb/backups")
         .join(format!("pre-compact-{ts}.bundle.tar"))
 }
@@ -17,8 +17,8 @@ pub fn default_backup_path(repo: &GitRepo) -> PathBuf {
 /// Create a pre-compaction backup bundle.
 /// Default path: `.ddb/backups/pre-compact-{ISO8601}.bundle.tar`
 pub fn backup_before_compact(
-    repo: &GitRepo,
-    sync_mgr: &SyncManager,
+    repo: &impl GitBackend,
+    sync_mgr: &SyncManager<impl GitBackend>,
     backup_path: Option<&Path>,
 ) -> Result<PathBuf> {
     let path = match backup_path {
@@ -36,27 +36,26 @@ pub fn backup_before_compact(
 /// Find the greatest common ancestor commit reachable from all active nodes' known_heads.
 /// Stale and retired nodes are excluded from the calculation.
 pub fn shared_head(
-    repo: &GitRepo,
+    repo: &impl GitBackend,
     nodes: &[crate::types::NodeConfig],
-) -> Result<Option<git2::Oid>> {
-    let heads: Vec<git2::Oid> = nodes
+) -> Result<Option<String>> {
+    let heads: Vec<&String> = nodes
         .iter()
         .filter(|n| n.status == crate::types::NodeStatus::Active)
         .filter_map(|n| n.known_heads.first())
-        .filter_map(|h| git2::Oid::from_str(h).ok())
         .collect();
 
     if heads.is_empty() {
         return Ok(None);
     }
     if heads.len() == 1 {
-        return Ok(Some(heads[0]));
+        return Ok(Some(heads[0].clone()));
     }
 
     // Iteratively compute merge-base across all heads
-    let mut base = repo.repo.merge_base(heads[0], heads[1])?;
+    let mut base = repo.merge_base(heads[0], heads[1])?;
     for head in &heads[2..] {
-        base = repo.repo.merge_base(base, *head)?;
+        base = repo.merge_base(&base, head)?;
     }
 
     Ok(Some(base))
@@ -65,26 +64,31 @@ pub fn shared_head(
 /// Parse doogat ID from CRDT temp filename.
 /// Supports formats: `{oid}_{doogat_id}.crdt`, `{oid}_{doogat_id}_fm.crdt`,
 /// and legacy `{oid}` or `{oid}.crdt`.
-/// Returns `(oid, doogat_id, is_frontmatter)`.
-fn parse_crdt_temp_name(name: &str) -> Option<(git2::Oid, Option<String>, bool)> {
+/// Returns `(oid_hex, doogat_id, is_frontmatter)`.
+fn parse_crdt_temp_name(name: &str) -> Option<(String, Option<String>, bool)> {
     let stem = name.strip_suffix(".crdt").unwrap_or(name);
 
     if let Some((oid_part, rest)) = stem.split_once('_') {
-        let oid = git2::Oid::from_str(oid_part).ok()?;
+        // Validate hex OID (40 hex chars)
+        if oid_part.len() != 40 || !oid_part.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
         if let Some(doogat_id) = rest.strip_suffix("_fm") {
-            Some((oid, Some(doogat_id.to_string()), true))
+            Some((oid_part.to_string(), Some(doogat_id.to_string()), true))
         } else {
-            Some((oid, Some(rest.to_string()), false))
+            Some((oid_part.to_string(), Some(rest.to_string()), false))
         }
     } else {
-        let oid = git2::Oid::from_str(stem).ok()?;
-        Some((oid, None, false))
+        if stem.len() != 40 || !stem.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some((stem.to_string(), None, false))
     }
 }
 
 /// Remove temporary CRDT files older than the shared sync point.
-pub fn cleanup_crdt_temp(repo: &GitRepo, shared_head: Option<git2::Oid>) -> Result<usize> {
-    let temp_dir = repo.path.join(".crdt/temp");
+pub fn cleanup_crdt_temp(repo: &impl GitBackend, shared_head: Option<&str>) -> Result<usize> {
+    let temp_dir = repo.repo_path().join(".crdt/temp");
     if !temp_dir.exists() {
         return Ok(0);
     }
@@ -104,7 +108,7 @@ pub fn cleanup_crdt_temp(repo: &GitRepo, shared_head: Option<git2::Oid>) -> Resu
             continue;
         };
 
-        if repo.repo.merge_base(shared_head, temp_commit_oid).ok() == Some(temp_commit_oid) {
+        if repo.merge_base(shared_head, &temp_commit_oid).ok().as_deref() == Some(&temp_commit_oid) {
             std::fs::remove_file(entry.path())?;
             removed += 1;
         }
@@ -115,8 +119,8 @@ pub fn cleanup_crdt_temp(repo: &GitRepo, shared_head: Option<git2::Oid>) -> Resu
 
 /// Compact CRDT temp files by grouping per doogat and merging Automerge changes.
 /// Returns the number of doogats whose CRDT docs were compacted.
-pub fn compact_crdt_docs(repo: &GitRepo) -> Result<usize> {
-    let temp_dir = repo.path.join(".crdt/temp");
+pub fn compact_crdt_docs(repo: &impl GitBackend) -> Result<usize> {
+    let temp_dir = repo.repo_path().join(".crdt/temp");
     if !temp_dir.exists() {
         return Ok(0);
     }
@@ -172,8 +176,8 @@ pub fn compact_crdt_docs(repo: &GitRepo) -> Result<usize> {
 }
 
 /// Compact CRDT docs for a single doogat.
-pub fn compact_doogat(repo: &GitRepo, doogat_id: &str) -> Result<usize> {
-    let temp_dir = repo.path.join(".crdt/temp");
+pub fn compact_doogat(repo: &impl GitBackend, doogat_id: &str) -> Result<usize> {
+    let temp_dir = repo.repo_path().join(".crdt/temp");
     if !temp_dir.exists() {
         return Ok(0);
     }
@@ -215,8 +219,8 @@ pub fn compact_doogat(repo: &GitRepo, doogat_id: &str) -> Result<usize> {
 }
 
 /// Get total size and file count of `.crdt/temp/` directory.
-fn crdt_temp_stats(repo: &GitRepo) -> (u64, usize) {
-    let temp_dir = repo.path.join(".crdt/temp");
+fn crdt_temp_stats(repo: &impl GitBackend) -> (u64, usize) {
+    let temp_dir = repo.repo_path().join(".crdt/temp");
     if !temp_dir.exists() {
         return (0, 0);
     }
@@ -279,8 +283,8 @@ pub fn run_gc(repo_path: &Path) -> Result<bool> {
 /// Full compaction pipeline: threshold check → backup → shared head → cleanup → crdt doc compact → gc.
 #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
 pub fn compact(
-    repo: &GitRepo,
-    sync_mgr: &SyncManager,
+    repo: &impl GitBackend,
+    sync_mgr: &SyncManager<impl GitBackend>,
     opts: &CompactOptions,
 ) -> Result<CompactionReport> {
     // Threshold check: skip if under threshold (unless forced)
@@ -289,7 +293,7 @@ pub fn compact(
         let (crdt_bytes, crdt_files) = crdt_temp_stats(repo);
         let size_mb = crdt_bytes as f64 / (1024.0 * 1024.0);
         if size_mb < config.compaction.threshold_mb as f64 {
-            let repo_bytes = dir_size(&repo.path.join(".git"));
+            let repo_bytes = dir_size(&repo.repo_path().join(".git"));
             tracing::debug!(
                 size_mb,
                 threshold_mb = config.compaction.threshold_mb,
@@ -320,12 +324,12 @@ pub fn compact(
     };
 
     let (crdt_temp_bytes_before, crdt_temp_files_before) = crdt_temp_stats(repo);
-    let repo_bytes_before = dir_size(&repo.path.join(".git"));
+    let repo_bytes_before = dir_size(&repo.repo_path().join(".git"));
 
     let nodes = sync_mgr.list_nodes()?;
     let head = shared_head(repo, &nodes)?;
     tracing::debug!(shared_head = ?head, node_count = nodes.len(), "shared_head_computed");
-    let files_removed = cleanup_crdt_temp(repo, head)?;
+    let files_removed = cleanup_crdt_temp(repo, head.as_deref())?;
     if files_removed > 0 {
         tracing::info!(files_removed, "crdt_temp_cleanup");
     }
@@ -337,8 +341,8 @@ pub fn compact(
 
     let (crdt_temp_bytes_after, crdt_temp_files_after) = crdt_temp_stats(repo);
 
-    let gc_success = run_gc(&repo.path)?;
-    let repo_bytes_after = dir_size(&repo.path.join(".git"));
+    let gc_success = run_gc(repo.repo_path())?;
+    let repo_bytes_after = dir_size(&repo.repo_path().join(".git"));
 
     tracing::info!(
         gc_success,
@@ -369,6 +373,7 @@ pub fn compact(
 mod tests {
     use super::*;
     use automerge::transaction::Transactable;
+    use crate::git_ops::GitRepo;
 
     fn temp_repo() -> (tempfile::TempDir, GitRepo) {
         let dir = tempfile::TempDir::new().unwrap();
@@ -401,8 +406,7 @@ mod tests {
         std::fs::write(temp_dir.join(c2.0.clone()), "data").unwrap();
         std::fs::write(temp_dir.join(c3.0.clone()), "data").unwrap();
 
-        let c2_oid = git2::Oid::from_str(&c2.0).unwrap();
-        let removed = cleanup_crdt_temp(&repo, Some(c2_oid)).unwrap();
+        let removed = cleanup_crdt_temp(&repo, Some(&c2.0)).unwrap();
         assert_eq!(removed, 2);
         assert!(!temp_dir.join(&c1.0).exists());
         assert!(!temp_dir.join(&c2.0).exists());
@@ -428,8 +432,7 @@ mod tests {
         )
         .unwrap();
 
-        let c2_oid = git2::Oid::from_str(&c2.0).unwrap();
-        let removed = cleanup_crdt_temp(&repo, Some(c2_oid)).unwrap();
+        let removed = cleanup_crdt_temp(&repo, Some(&c2.0)).unwrap();
         assert_eq!(removed, 2);
     }
 
@@ -440,7 +443,7 @@ mod tests {
             parse_crdt_temp_name("abc123def456abc123def456abc123def456abcd").unwrap();
         assert!(zid.is_none());
         assert!(!is_fm);
-        assert_eq!(oid.to_string(), "abc123def456abc123def456abc123def456abcd");
+        assert_eq!(oid, "abc123def456abc123def456abc123def456abcd");
 
         // Legacy: OID.crdt
         let (_, zid, is_fm) =
@@ -718,8 +721,7 @@ mod tests {
         )
         .unwrap();
 
-        let c2_oid = git2::Oid::from_str(&c2.0).unwrap();
-        let removed = cleanup_crdt_temp(&repo, Some(c2_oid)).unwrap();
+        let removed = cleanup_crdt_temp(&repo, Some(&c2.0)).unwrap();
         assert_eq!(removed, 2);
     }
 
@@ -817,18 +819,16 @@ mod tests {
         let fm_crdt_name = format!("{}_20260301120000_fm.crdt", commit_new.0);
         std::fs::write(temp_dir.join(&fm_crdt_name), "fm-crdt-data").unwrap();
 
-        // cleanup with shared_head = commit_old → file is NEWER, should NOT be removed
-        let old_oid = git2::Oid::from_str(&commit_old.0).unwrap();
-        let removed = cleanup_crdt_temp(&repo, Some(old_oid)).unwrap();
+        // cleanup with shared_head = commit_old - file is NEWER, should NOT be removed
+        let removed = cleanup_crdt_temp(&repo, Some(&commit_old.0)).unwrap();
         assert_eq!(removed, 0, "file newer than shared_head should be preserved");
         assert!(
             temp_dir.join(&fm_crdt_name).exists(),
             "_fm.crdt file should still exist after cleanup with older shared_head"
         );
 
-        // cleanup with shared_head = commit_new → file is at or older, should be removed
-        let new_oid = git2::Oid::from_str(&commit_new.0).unwrap();
-        let removed = cleanup_crdt_temp(&repo, Some(new_oid)).unwrap();
+        // cleanup with shared_head = commit_new - file is at or older, should be removed
+        let removed = cleanup_crdt_temp(&repo, Some(&commit_new.0)).unwrap();
         assert_eq!(removed, 1, "file at shared_head should be removed");
         assert!(
             !temp_dir.join(&fm_crdt_name).exists(),

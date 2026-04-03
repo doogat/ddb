@@ -16,15 +16,15 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::error::{Result, DoogatError};
-use crate::git_ops::GitRepo;
 use crate::sync_manager::SyncManager;
+use crate::traits::GitBackend;
 use crate::types::{BundleManifest, SyncReport};
 
 /// Export a delta bundle targeting a specific node.
 /// Includes only commits the target hasn't seen (based on known_heads).
 pub fn export_bundle(
-    repo: &GitRepo,
-    sync_mgr: &SyncManager,
+    repo: &impl GitBackend,
+    sync_mgr: &SyncManager<impl GitBackend>,
     target_uuid: &str,
     output: &Path,
 ) -> Result<PathBuf> {
@@ -50,8 +50,8 @@ pub fn export_bundle(
 
 /// Export a full bundle (all refs) for bootstrapping a new node.
 pub fn export_full_bundle(
-    repo: &GitRepo,
-    sync_mgr: &SyncManager,
+    repo: &impl GitBackend,
+    sync_mgr: &SyncManager<impl GitBackend>,
     output: &Path,
 ) -> Result<PathBuf> {
     let local_uuid = sync_mgr.local_uuid()?;
@@ -67,8 +67,8 @@ pub fn export_full_bundle(
 
 /// Import a bundle into the repository, triggering the merge protocol.
 pub fn import_bundle(
-    repo: &GitRepo,
-    sync_mgr: &mut SyncManager,
+    repo: &impl GitBackend,
+    sync_mgr: &mut SyncManager<impl GitBackend>,
     index: &crate::indexer::Index,
     bundle_path: &Path,
 ) -> Result<SyncReport> {
@@ -92,7 +92,7 @@ pub fn import_bundle(
     if git_bundle_path.exists() {
         let output = std::process::Command::new("git")
             .args(["bundle", "unbundle", git_bundle_path.to_str().unwrap()])
-            .current_dir(&repo.path)
+            .current_dir(repo.repo_path())
             .output()?;
         if !output.status.success() {
             return Err(DoogatError::Sync(format!(
@@ -108,7 +108,7 @@ pub fn import_bundle(
                 git_bundle_path.to_str().unwrap(),
                 "refs/heads/*:refs/remotes/bundle/*",
             ])
-            .current_dir(&repo.path)
+            .current_dir(repo.repo_path())
             .output()?;
         if !output.status.success() {
             return Err(DoogatError::Sync(format!(
@@ -128,7 +128,7 @@ pub fn import_bundle(
             "--no-edit",
             "--allow-unrelated-histories",
         ])
-        .current_dir(&repo.path)
+        .current_dir(repo.repo_path())
         .output()?;
 
     let conflicts_resolved = if !merge_output.status.success() {
@@ -150,7 +150,7 @@ pub fn import_bundle(
             let entry = entry?;
             if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
                 let content = std::fs::read_to_string(entry.path())?;
-                let dest = repo.path.join(".nodes").join(entry.file_name());
+                let dest = repo.repo_path().join(".nodes").join(entry.file_name());
                 if !dest.exists() {
                     std::fs::write(&dest, &content)?;
                 }
@@ -161,7 +161,7 @@ pub fn import_bundle(
     // Clean up bundle remote refs
     let _ = std::process::Command::new("git")
         .args(["update-ref", "-d", "refs/remotes/bundle/master"])
-        .current_dir(&repo.path)
+        .current_dir(repo.repo_path())
         .output();
 
     // Reindex
@@ -217,7 +217,7 @@ fn make_temp_dir() -> Result<TempDir> {
 }
 
 fn build_tar_bundle(
-    repo: &GitRepo,
+    repo: &impl GitBackend,
     manifest: &BundleManifest,
     basis_args: &[String],
     output: &Path,
@@ -244,7 +244,7 @@ fn build_tar_bundle(
     }
     let output_cmd = std::process::Command::new("git")
         .args(&args)
-        .current_dir(&repo.path)
+        .current_dir(repo.repo_path())
         .output()?;
     if !output_cmd.status.success() {
         return Err(DoogatError::Sync(format!(
@@ -254,7 +254,7 @@ fn build_tar_bundle(
     }
 
     // Copy node files
-    let nodes_src = repo.path.join(".nodes");
+    let nodes_src = repo.repo_path().join(".nodes");
     if nodes_src.exists() {
         let nodes_dst = work_dir.path().join("nodes");
         std::fs::create_dir_all(&nodes_dst)?;
@@ -356,6 +356,7 @@ fn verify_extracted_checksum(dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git_ops::GitRepo;
 
     fn temp_repo() -> (::tempfile::TempDir, GitRepo) {
         let dir = ::tempfile::TempDir::new().unwrap();

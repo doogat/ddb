@@ -13,7 +13,7 @@ Hybrid Git-CRDT decentralized database. Git is source of truth; SQLite index is 
 
 ## Structure
 
-```
+```text
 ddb-core/src/       Library crate
   parser.rs         Three-zone Markdown parsing (frontmatter/body/references)
   search_query.rs   Search query parsing and normalization to canonical form
@@ -65,7 +65,7 @@ Follow SOLID and Clean Architecture principles as adapted for Rust. These are ma
 
 ## Setup
 
-```
+```text
 git config core.hooksPath dev/hooks
 ```
 
@@ -76,6 +76,7 @@ git config core.hooksPath dev/hooks
 - Doogats stored at `ddb/{id}.md`, typedefs at `ddb/_typedef/{id}.md`
 - Data dir: `.ddb/`, node file: `.git/ddb-node`, git signature: `ddb`
 - Plan documents go in `dev/local/plans/` (gitignored), NOT in `docs/`
+- Product Requirement Documents (PRDs) go in `dev/local/prds/` (gitignored), NOT in `docs/`
 - Git worktrees go in `dev/local/worktrees/` (gitignored), nowhere else
 - Releases: use `dev/bin/release` only. Never `gh release create` manually - CI creates the GitHub release with binary artifacts on tag push
 
@@ -102,7 +103,9 @@ Executable feature demos built with [showboat](https://github.com/simonw/showboa
 
 Run via uvx (no install needed):
 
-    uvx showboat --help
+```text
+uvx showboat --help
+```
 
 Or install persistently: `uv tool install showboat` / `pip install showboat`
 
@@ -132,18 +135,22 @@ Each `showboat exec` runs in its own shell. Variables, background jobs, and work
 
 **CLI walkthrough** — use `--workdir` with a fixed temp path (not `mktemp`, since the path must be reused across exec calls):
 
-    WD=/tmp/ddb-demo-feature
-    showboat init dev/local/walkthroughs/00001-feature.md "Feature Name"
-    showboat note dev/local/walkthroughs/00001-feature.md "Initialize a repo."
-    showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "mkdir -p $WD && ddb init"
-    showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "ddb create --title 'Test'"
-    showboat exec dev/local/walkthroughs/00001-feature.md bash "rm -rf $WD"
+```text
+WD=/tmp/ddb-demo-feature
+showboat init dev/local/walkthroughs/00001-feature.md "Feature Name"
+showboat note dev/local/walkthroughs/00001-feature.md "Initialize a repo."
+showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "mkdir -p $WD && ddb init"
+showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "ddb create --title 'Test'"
+showboat exec dev/local/walkthroughs/00001-feature.md bash "rm -rf $WD"
+```
 
 **Server walkthrough** — use PID file pattern since background jobs don't persist across exec calls:
 
-    showboat exec --workdir $WD ... bash "ddb serve --port 19201 --pg-port 19202 & echo \$! > /tmp/ddb-serve.pid"
-    showboat exec ... bash "sleep 1 && curl -s http://127.0.0.1:19201/graphql -H 'Content-Type: application/json' -d '{...}'"
-    showboat exec ... bash "kill \$(cat /tmp/ddb-serve.pid) && rm /tmp/ddb-serve.pid"
+```text
+showboat exec --workdir $WD ... bash "ddb serve --port 19201 --pg-port 19202 & echo \$! > /tmp/ddb-serve.pid"
+showboat exec ... bash "sleep 1 && curl -s http://127.0.0.1:19201/graphql -H 'Content-Type: application/json' -d '{...}'"
+showboat exec ... bash "kill \$(cat /tmp/ddb-serve.pid) && rm /tmp/ddb-serve.pid"
+```
 
 ### Maintenance
 
@@ -158,7 +165,7 @@ Walkthroughs are local working documents (`dev/local/` is gitignored). They can 
 
 ## Commands
 
-```
+```text
 cargo build                           Build default workspace members (fast local loop)
 cargo build --workspace               Build all crates
 cargo test                            Run fast local test tier

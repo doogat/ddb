@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use crate::error::Result;
 use crate::types::{
-    CommitHash, ConflictFile, DiffKind, PaginatedSearchResult, ParsedDoogat, ResolvedFile,
-    SearchResult,
+    CommitHash, ConflictFile, DiffKind, MergeResult, PaginatedSearchResult, ParsedDoogat,
+    RepoConfig, ResolvedFile, SearchResult,
 };
 
 /// Read-only access to doogat storage.
@@ -61,6 +63,126 @@ pub trait ConflictResolver {
         conflicts: Vec<ConflictFile>,
         strategy: Option<&str>,
     ) -> Result<Vec<ResolvedFile>>;
+}
+
+/// Trait abstracting the git storage backend. Allows swapping libgit2 for
+/// gitoxide (or other backends) per-feature without changing callers.
+///
+/// Extends DoogatSource + DoogatStore with remote, merge, binary, and
+/// commit-introspection operations. Desktop-only hooks (commit-graph,
+/// session counters) have default no-op implementations.
+pub trait GitBackend: DoogatSource + DoogatStore {
+    /// Repository root path on the filesystem.
+    fn repo_path(&self) -> &Path;
+
+    /// Load repository config from `.ddb.toml`.
+    fn load_config(&self) -> Result<RepoConfig>;
+
+    // -- Remote operations --
+
+    /// Register a named remote.
+    fn add_remote(&self, name: &str, url: &str) -> Result<()>;
+
+    /// Fetch from a remote branch.
+    fn fetch(&self, remote: &str, branch: &str) -> Result<()>;
+
+    /// Push to a remote branch.
+    fn push(&self, remote: &str, branch: &str) -> Result<()>;
+
+    // -- Merge operations --
+
+    /// Merge a fetched remote branch, returning the merge result.
+    fn merge_remote(&self, remote: &str, branch: &str) -> Result<MergeResult>;
+
+    /// Create a merge commit with resolved files and two parents.
+    fn commit_merge(
+        &self,
+        files: &[(&str, &str)],
+        binary_paths: &[&str],
+        message: &str,
+        theirs: &CommitHash,
+    ) -> Result<CommitHash>;
+
+    // -- Binary file operations --
+
+    /// Write binary content to a file, stage it, and commit.
+    fn commit_binary_file(
+        &self,
+        rel_path: &str,
+        bytes: &[u8],
+        message: &str,
+    ) -> Result<CommitHash>;
+
+    /// Write a binary file and one or more text files in a single atomic commit.
+    fn commit_binary_and_text(
+        &self,
+        binary_path: &str,
+        bytes: &[u8],
+        text_files: &[(&str, &str)],
+        message: &str,
+    ) -> Result<CommitHash>;
+
+    /// Read raw blob bytes by OID string.
+    fn read_blob(&self, oid: &str) -> Result<Vec<u8>>;
+
+    // -- File operations --
+
+    /// Rename (move) a file in git.
+    fn rename_file(
+        &self,
+        old_path: &str,
+        new_path: &str,
+        message: &str,
+    ) -> Result<CommitHash>;
+
+    // -- Commit introspection --
+
+    /// Compute merge-base of two commit OIDs (as hex strings).
+    fn merge_base(&self, a: &str, b: &str) -> Result<String>;
+
+    /// Return the number of parents of the given commit.
+    fn commit_parent_count(&self, commit_oid: &str) -> Result<usize>;
+
+    /// Return the OID (hex string) of the nth parent of a commit.
+    fn commit_parent_oid(&self, commit_oid: &str, n: usize) -> Result<String>;
+
+    /// Read a file's text content from a specific commit's tree.
+    fn read_file_at(&self, commit_oid: &str, rel_path: &str) -> Result<String>;
+
+    /// Walk a commit's tree under `prefix`, returning `(path, text_content)` for
+    /// each blob that can be decoded as UTF-8. Non-UTF-8 blobs are silently skipped.
+    fn walk_tree_files(
+        &self,
+        commit_oid: &str,
+        prefix: &str,
+    ) -> Result<Vec<(String, String)>>;
+
+    // -- History queries --
+
+    /// Find the HLC timestamp from the most recent commit that touched `path`,
+    /// starting from the given commit OID.
+    fn find_hlc_for_path(
+        &self,
+        commit_oid: &str,
+        path: &str,
+    ) -> Option<crate::hlc::Hlc>;
+
+    /// Return the ISO 8601 date of the most recent commit that touched `rel_path`.
+    fn revision_date(&self, rel_path: &str) -> Result<Option<String>>;
+
+    // -- Desktop-only hooks (default no-ops) --
+
+    /// Suppress per-commit commit-graph writes (for batch operations).
+    fn set_skip_commit_graph(&self, _skip: bool) {}
+
+    /// Write the commit-graph file for faster traversal.
+    fn write_commit_graph(&self) {}
+
+    /// Increment session commit counter, return new value.
+    fn increment_session_commits(&self) -> u32 { 0 }
+
+    /// Reset session commit counter to zero.
+    fn reset_session_commits(&self) {}
 }
 
 #[cfg(test)]

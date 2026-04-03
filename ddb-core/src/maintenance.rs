@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use crate::error::{Result, DoogatError};
-use crate::git_ops::GitRepo;
+use crate::traits::GitBackend;
 use crate::types::MaintenanceReport;
 
 static GIT_MAINTENANCE_AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -67,7 +67,7 @@ pub fn run(repo_path: &Path, tasks: Option<&[&str]>) -> Result<MaintenanceReport
 
 /// Check if session commit count has crossed the write threshold;
 /// if so, run maintenance and reset the counter.
-pub fn check_write_threshold(repo: &GitRepo) {
+pub fn check_write_threshold(repo: &impl GitBackend) {
     let count = repo.increment_session_commits();
     let config = match repo.load_config() {
         Ok(c) => c,
@@ -78,7 +78,7 @@ pub fn check_write_threshold(repo: &GitRepo) {
     }
     if count >= config.maintenance.write_threshold {
         repo.reset_session_commits();
-        match run(&repo.path, None) {
+        match run(repo.repo_path(), None) {
             Ok(report) => {
                 tracing::info!(
                     success = report.success,
@@ -94,7 +94,7 @@ pub fn check_write_threshold(repo: &GitRepo) {
     }
 }
 
-pub fn maybe_auto_run(repo: &GitRepo) {
+pub fn maybe_auto_run(repo: &impl GitBackend) {
     let config = match repo.load_config() {
         Ok(c) => c,
         Err(e) => {
@@ -105,7 +105,7 @@ pub fn maybe_auto_run(repo: &GitRepo) {
     if !config.maintenance.auto_enabled {
         return;
     }
-    match run(&repo.path, None) {
+    match run(repo.repo_path(), None) {
         Ok(report) => {
             tracing::info!(
                 success = report.success,
@@ -123,6 +123,7 @@ pub fn maybe_auto_run(repo: &GitRepo) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git_ops::GitRepo;
 
     #[test]
     fn probe_returns_consistent_result() {

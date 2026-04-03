@@ -4,6 +4,7 @@ use crate::git_ops::GitRepo;
 use crate::hlc::Hlc;
 use crate::indexer::Index;
 use crate::parser;
+use crate::traits::GitBackend;
 use crate::types::{CommitHash, ConflictFile, MergeResult, NodeConfig, SyncReport};
 
 impl From<toml::de::Error> for DoogatError {
@@ -12,13 +13,13 @@ impl From<toml::de::Error> for DoogatError {
     }
 }
 
-pub struct SyncManager<'a> {
-    pub repo: &'a GitRepo,
+pub struct SyncManager<'a, G: GitBackend = GitRepo> {
+    pub repo: &'a G,
     pub node: NodeConfig,
 }
 
 /// Register a new sync node for the given repo.
-pub fn register_node(repo: &GitRepo, name: &str) -> Result<NodeConfig> {
+pub fn register_node(repo: &impl GitBackend, name: &str) -> Result<NodeConfig> {
     let uuid = uuid::Uuid::new_v4().to_string();
 
     let node = NodeConfig {
@@ -38,7 +39,7 @@ pub fn register_node(repo: &GitRepo, name: &str) -> Result<NodeConfig> {
     repo.commit_file(&node_path, &toml_content, &format!("register node {name}"))?;
 
     // Store UUID locally (not tracked by git)
-    let local_path = repo.path.join(".git/ddb-node");
+    let local_path = repo.repo_path().join(".git/ddb-node");
     std::fs::write(local_path, &uuid)?;
 
     Ok(node)
@@ -152,20 +153,20 @@ fn update_frontmatter_id(content: &str, new_id: &str) -> Result<String> {
 }
 
 /// Ensures `skip_commit_graph` is reset when sync exits (success or error).
-struct SkipCommitGraphResetGuard<'a> {
-    repo: &'a GitRepo,
+struct SkipCommitGraphResetGuard<'a, G: GitBackend> {
+    repo: &'a G,
 }
 
-impl<'a> Drop for SkipCommitGraphResetGuard<'a> {
+impl<G: GitBackend> Drop for SkipCommitGraphResetGuard<'_, G> {
     fn drop(&mut self) {
         self.repo.set_skip_commit_graph(false);
     }
 }
 
-impl<'a> SyncManager<'a> {
+impl<'a, G: GitBackend> SyncManager<'a, G> {
     /// Open a SyncManager from an existing repo with a registered node.
-    pub fn open(repo: &'a GitRepo) -> Result<Self> {
-        let local_path = repo.path.join(".git/ddb-node");
+    pub fn open(repo: &'a G) -> Result<Self> {
+        let local_path = repo.repo_path().join(".git/ddb-node");
         let uuid = std::fs::read_to_string(&local_path)
             .map_err(|_| DoogatError::NotFound("no node registered (.git/ddb-node)".into()))?;
         let uuid = uuid.trim().to_string();
@@ -179,24 +180,16 @@ impl<'a> SyncManager<'a> {
 
     /// List all registered nodes.
     pub fn list_nodes(&self) -> Result<Vec<NodeConfig>> {
+        let head_oid = self.repo.head_oid()?;
+        let entries = self.repo.walk_tree_files(&head_oid.0, ".nodes/")?;
         let mut nodes = Vec::new();
-        let head = self.repo.repo.head()?.peel_to_commit()?;
-        let tree = head.tree()?;
-
-        tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
-            let full_path = format!("{}{}", dir, entry.name().unwrap_or(""));
-            if full_path.starts_with(".nodes/") && full_path.ends_with(".toml") {
-                if let Ok(blob) = self.repo.repo.find_blob(entry.id()) {
-                    if let Ok(content) = std::str::from_utf8(blob.content()) {
-                        if let Ok(node) = toml::from_str::<NodeConfig>(content) {
-                            nodes.push(node);
-                        }
-                    }
+        for (path, content) in &entries {
+            if path.ends_with(".toml") {
+                if let Ok(node) = toml::from_str::<NodeConfig>(content) {
+                    nodes.push(node);
                 }
             }
-            git2::TreeWalkResult::Ok
-        })?;
-
+        }
         Ok(nodes)
     }
 
@@ -329,7 +322,7 @@ impl<'a> SyncManager<'a> {
                         ))
                     })?;
                     let bytes = self.repo.read_blob(oid)?;
-                    let full_path = self.repo.path.join(&conflict.path);
+                    let full_path = self.repo.repo_path().join(&conflict.path);
                     if let Some(parent) = full_path.parent() {
                         std::fs::create_dir_all(parent)?;
                     }
@@ -354,7 +347,7 @@ impl<'a> SyncManager<'a> {
 
                 // Persist frontmatter CRDT state for compaction
                 let commit_oid = self.repo.head_oid()?;
-                write_fm_crdt_files(&self.repo.path, &commit_oid, &resolved)?;
+                write_fm_crdt_files(self.repo.repo_path(), &commit_oid, &resolved)?;
 
                 // Post-merge: reassign collision losers
                 report.collisions_reassigned =
@@ -463,28 +456,22 @@ impl<'a> SyncManager<'a> {
         merge_hash: CommitHash,
         index: &Index,
     ) -> Result<usize> {
-        let merge_oid = git2::Oid::from_str(&merge_hash.0)?;
-        let merge_commit = self.repo.repo.find_commit(merge_oid)?;
-        if merge_commit.parent_count() < 2 {
+        let merge_oid_str = &merge_hash.0;
+        if self.repo.commit_parent_count(merge_oid_str)? < 2 {
             return Ok(0);
         }
 
-        let ours_commit = merge_commit.parent(0)?;
-        let theirs_commit = merge_commit.parent(1)?;
-        let ancestor_commit = self
-            .repo
-            .repo
-            .merge_base(ours_commit.id(), theirs_commit.id())
-            .ok()
-            .and_then(|oid| self.repo.repo.find_commit(oid).ok());
+        let ours_oid = self.repo.commit_parent_oid(merge_oid_str, 0)?;
+        let theirs_oid = self.repo.commit_parent_oid(merge_oid_str, 1)?;
+        let ancestor_oid = self.repo.merge_base(&ours_oid, &theirs_oid).ok();
 
-        let affected = self.affected_markdown_files(&ours_commit, &theirs_commit, &merge_commit)?;
+        let affected = self.affected_markdown_files(&ours_oid, &theirs_oid, merge_oid_str)?;
         if affected.is_empty() {
             return Ok(0);
         }
 
         let has_parse_failure = affected.iter().any(|path| {
-            self.read_file_from_commit(&merge_commit, path)
+            self.read_file_from_commit(merge_oid_str, path)
                 .map(|content| parser::parse(&content, path).is_err())
                 .unwrap_or(false)
         });
@@ -496,17 +483,17 @@ impl<'a> SyncManager<'a> {
             .iter()
             .map(|path| ConflictFile {
                 path: path.clone(),
-                ancestor: ancestor_commit
+                ancestor: ancestor_oid
                     .as_ref()
-                    .and_then(|c| self.read_file_from_commit(c, path)),
+                    .and_then(|oid| self.read_file_from_commit(oid, path)),
                 ours: self
-                    .read_file_from_commit(&ours_commit, path)
+                    .read_file_from_commit(&ours_oid, path)
                     .unwrap_or_default(),
                 theirs: self
-                    .read_file_from_commit(&theirs_commit, path)
+                    .read_file_from_commit(&theirs_oid, path)
                     .unwrap_or_default(),
-                ours_hlc: self.repo.find_hlc_for_path(&ours_commit, path),
-                theirs_hlc: self.repo.find_hlc_for_path(&theirs_commit, path),
+                ours_hlc: self.repo.find_hlc_for_path(&ours_oid, path),
+                theirs_hlc: self.repo.find_hlc_for_path(&theirs_oid, path),
                 ours_blob_oid: None,
                 theirs_blob_oid: None,
             })
@@ -523,59 +510,35 @@ impl<'a> SyncManager<'a> {
 
         // Persist frontmatter CRDT state for compaction
         let commit_oid = self.repo.head_oid()?;
-        write_fm_crdt_files(&self.repo.path, &commit_oid, &resolved)?;
+        write_fm_crdt_files(self.repo.repo_path(), &commit_oid, &resolved)?;
 
         Ok(files.len())
     }
 
     fn affected_markdown_files(
         &self,
-        ours: &git2::Commit<'_>,
-        theirs: &git2::Commit<'_>,
-        merged: &git2::Commit<'_>,
+        ours_oid: &str,
+        theirs_oid: &str,
+        merged_oid: &str,
     ) -> Result<Vec<String>> {
         let mut paths = std::collections::BTreeSet::new();
-        self.collect_changed_markdown_paths(ours, merged, &mut paths)?;
-        self.collect_changed_markdown_paths(theirs, merged, &mut paths)?;
+        for (kind, path) in self.repo.diff_paths(ours_oid, merged_oid)? {
+            let _ = kind;
+            if path.starts_with("ddb/") && path.ends_with(".md") {
+                paths.insert(path);
+            }
+        }
+        for (kind, path) in self.repo.diff_paths(theirs_oid, merged_oid)? {
+            let _ = kind;
+            if path.starts_with("ddb/") && path.ends_with(".md") {
+                paths.insert(path);
+            }
+        }
         Ok(paths.into_iter().collect())
     }
 
-    fn collect_changed_markdown_paths(
-        &self,
-        from: &git2::Commit<'_>,
-        to: &git2::Commit<'_>,
-        out: &mut std::collections::BTreeSet<String>,
-    ) -> Result<()> {
-        let from_tree = from.tree()?;
-        let to_tree = to.tree()?;
-        let diff = self
-            .repo
-            .repo
-            .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None)?;
-
-        for delta in diff.deltas() {
-            let path = delta
-                .new_file()
-                .path()
-                .or(delta.old_file().path())
-                .and_then(|p| p.to_str());
-            if let Some(path) = path {
-                if path.starts_with("ddb/") && path.ends_with(".md") {
-                    out.insert(path.to_string());
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn read_file_from_commit(&self, commit: &git2::Commit<'_>, rel_path: &str) -> Option<String> {
-        let tree = commit.tree().ok()?;
-        let entry = tree.get_path(std::path::Path::new(rel_path)).ok()?;
-        let blob = self.repo.repo.find_blob(entry.id()).ok()?;
-        std::str::from_utf8(blob.content())
-            .ok()
-            .map(|s| s.to_string())
+    fn read_file_from_commit(&self, commit_oid: &str, rel_path: &str) -> Option<String> {
+        self.repo.read_file_at(commit_oid, rel_path).ok()
     }
 
     /// Try to determine crdt_strategy for a set of conflict files by looking up the
@@ -608,11 +571,6 @@ impl<'a> SyncManager<'a> {
         losers: Vec<CollisionLoser>,
         theirs_oid: &CommitHash,
     ) -> Result<usize> {
-        let theirs_commit = self
-            .repo
-            .repo
-            .find_commit(git2::Oid::from_str(&theirs_oid.0)?)?;
-
         let mut count = 0;
         for loser in &losers {
             let winner_id = loser.old_id.clone();
@@ -644,7 +602,7 @@ impl<'a> SyncManager<'a> {
             );
 
             // Scan HEAD tree for files referencing the old ID and rewrite links.
-            // Skip files where theirs' version already contains the old ID —
+            // Skip files where theirs' version already contains the old ID -
             // those references are to the winner (which keeps the ID).
             let old_path_no_ext = loser.old_path.trim_end_matches(".md");
             let new_path_no_ext = new_path.trim_end_matches(".md");
@@ -653,7 +611,7 @@ impl<'a> SyncManager<'a> {
                 old_path_no_ext,
                 &new_id.0,
                 new_path_no_ext,
-                &theirs_commit,
+                &theirs_oid.0,
             )?;
 
             let mut files: Vec<(String, String)> = vec![(new_path.clone(), updated_content)];
@@ -681,57 +639,40 @@ impl<'a> SyncManager<'a> {
 
     /// Walk the HEAD tree and rewrite wikilinks from old ID/path to new ID/path.
     /// Skips files where theirs' (winner's) tree version already references the
-    /// old ID — those links point to the winner and should remain unchanged.
+    /// old ID - those links point to the winner and should remain unchanged.
     fn scan_and_rewrite_links(
         &self,
         old_id: &str,
         old_path_no_ext: &str,
         new_id: &str,
         new_path_no_ext: &str,
-        theirs_commit: &git2::Commit,
+        theirs_oid: &str,
     ) -> Result<Vec<(String, String)>> {
-        let head = self.repo.repo.head()?.peel_to_commit()?;
-        let tree = head.tree()?;
-        let theirs_tree = theirs_commit.tree()?;
+        let head_oid = self.repo.head_oid()?;
+        let head_files = self.repo.walk_tree_files(&head_oid.0, "ddb/")?;
         let mut rewrites = Vec::new();
 
-        tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
-            let full_path = format!("{}{}", dir, entry.name().unwrap_or(""));
-            if !full_path.starts_with("ddb/") || !full_path.ends_with(".md") {
-                return git2::TreeWalkResult::Ok;
+        for (full_path, content) in &head_files {
+            if !full_path.ends_with(".md") {
+                continue;
             }
-            if let Ok(blob) = self.repo.repo.find_blob(entry.id()) {
-                if let Ok(content) = std::str::from_utf8(blob.content()) {
-                    if content.contains(old_id) {
-                        // Skip if theirs' version of this file also references the
-                        // old ID — that reference is to the winner, not the loser.
-                        if let Ok(theirs_entry) =
-                            theirs_tree.get_path(std::path::Path::new(&full_path))
-                        {
-                            if let Ok(theirs_blob) =
-                                self.repo.repo.find_blob(theirs_entry.id())
-                            {
-                                if let Ok(theirs_content) =
-                                    std::str::from_utf8(theirs_blob.content())
-                                {
-                                    if theirs_content.contains(old_id) {
-                                        return git2::TreeWalkResult::Ok;
-                                    }
-                                }
-                            }
-                        }
-
-                        let rewritten = parser::rewrite_links(content, old_id, new_id);
-                        let rewritten =
-                            parser::rewrite_links(&rewritten, old_path_no_ext, new_path_no_ext);
-                        if rewritten != content {
-                            rewrites.push((full_path, rewritten));
-                        }
+            if content.contains(old_id) {
+                // Skip if theirs' version of this file also references the
+                // old ID - that reference is to the winner, not the loser.
+                if let Ok(theirs_content) = self.repo.read_file_at(theirs_oid, full_path) {
+                    if theirs_content.contains(old_id) {
+                        continue;
                     }
                 }
+
+                let rewritten = parser::rewrite_links(content, old_id, new_id);
+                let rewritten =
+                    parser::rewrite_links(&rewritten, old_path_no_ext, new_path_no_ext);
+                if rewritten != *content {
+                    rewrites.push((full_path.clone(), rewritten));
+                }
             }
-            git2::TreeWalkResult::Ok
-        })?;
+        }
 
         Ok(rewrites)
     }

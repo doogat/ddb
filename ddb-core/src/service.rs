@@ -8,6 +8,7 @@ use crate::indexer::Index;
 use crate::parser;
 use crate::sql_engine::{SqlEngine, SqlResult, TransactionBuffer};
 use crate::sync_manager::SyncManager;
+use crate::traits::GitBackend;
 use crate::types::{
     AttachmentInfo, BatchCreateInput, BatchUpdateInput, BrokenSequence, CommitHash,
     CompactDryRunInfo, CompactOptions, CompactionReport, FixReport, ListFilter,
@@ -954,7 +955,7 @@ impl DoogatService {
         let mut mgr = match SyncManager::open(&self.repo) {
             Ok(m) => m,
             Err(DoogatError::NotFound(msg)) => {
-                let node_file = self.repo.path.join(".git/ddb-node");
+                let node_file = self.repo.repo_path().join(".git/ddb-node");
                 if node_file.exists() {
                     return Err(DoogatError::NotFound(msg));
                 }
@@ -995,8 +996,7 @@ impl DoogatService {
     /// Dry-run compaction: return info without modifying anything.
     pub fn compact_dry_run(&self) -> Result<CompactDryRunInfo> {
         let nodes = self.list_nodes()?;
-        let shared_head = crate::compaction::shared_head(&self.repo, &nodes)?
-            .map(|oid| oid.to_string());
+        let shared_head = crate::compaction::shared_head(&self.repo, &nodes)?;
         let temp_dir = self.repo_path.join(".crdt/temp");
         let crdt_temp_files = if temp_dir.exists() {
             std::fs::read_dir(&temp_dir)
@@ -1038,7 +1038,7 @@ impl DoogatService {
     }
 
     pub fn run_maintenance(&self, tasks: Option<&[&str]>) -> Result<MaintenanceReport> {
-        crate::maintenance::run(&self.repo.path, tasks)
+        crate::maintenance::run(self.repo.repo_path(), tasks)
     }
 
     pub fn register_node(&self, name: &str) -> Result<NodeConfig> {

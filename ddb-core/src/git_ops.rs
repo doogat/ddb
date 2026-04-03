@@ -1084,6 +1084,163 @@ impl crate::traits::DoogatStore for GitRepo {
     }
 }
 
+impl crate::traits::GitBackend for GitRepo {
+    fn repo_path(&self) -> &Path {
+        &self.path
+    }
+
+    fn load_config(&self) -> Result<RepoConfig> {
+        self.load_config()
+    }
+
+    fn add_remote(&self, name: &str, url: &str) -> Result<()> {
+        self.add_remote(name, url)
+    }
+
+    fn fetch(&self, remote: &str, branch: &str) -> Result<()> {
+        self.fetch(remote, branch)
+    }
+
+    fn push(&self, remote: &str, branch: &str) -> Result<()> {
+        self.push(remote, branch)
+    }
+
+    fn merge_remote(&self, remote: &str, branch: &str) -> Result<MergeResult> {
+        self.merge_remote(remote, branch)
+    }
+
+    fn commit_merge(
+        &self,
+        files: &[(&str, &str)],
+        binary_paths: &[&str],
+        message: &str,
+        theirs: &CommitHash,
+    ) -> Result<CommitHash> {
+        self.commit_merge(files, binary_paths, message, theirs)
+    }
+
+    fn commit_binary_file(
+        &self,
+        rel_path: &str,
+        bytes: &[u8],
+        message: &str,
+    ) -> Result<CommitHash> {
+        self.commit_binary_file(rel_path, bytes, message)
+    }
+
+    fn commit_binary_and_text(
+        &self,
+        binary_path: &str,
+        bytes: &[u8],
+        text_files: &[(&str, &str)],
+        message: &str,
+    ) -> Result<CommitHash> {
+        self.commit_binary_and_text(binary_path, bytes, text_files, message)
+    }
+
+    fn read_blob(&self, oid_str: &str) -> Result<Vec<u8>> {
+        self.read_blob(oid_str)
+    }
+
+    fn rename_file(
+        &self,
+        old_path: &str,
+        new_path: &str,
+        message: &str,
+    ) -> Result<CommitHash> {
+        self.rename_file(old_path, new_path, message)
+    }
+
+    fn merge_base(&self, a: &str, b: &str) -> Result<String> {
+        let oid_a = Oid::from_str(a)?;
+        let oid_b = Oid::from_str(b)?;
+        let base = self.repo.merge_base(oid_a, oid_b)?;
+        Ok(base.to_string())
+    }
+
+    fn commit_parent_count(&self, commit_oid: &str) -> Result<usize> {
+        let oid = Oid::from_str(commit_oid)?;
+        let commit = self.repo.find_commit(oid)?;
+        Ok(commit.parent_count())
+    }
+
+    fn commit_parent_oid(&self, commit_oid: &str, n: usize) -> Result<String> {
+        let oid = Oid::from_str(commit_oid)?;
+        let commit = self.repo.find_commit(oid)?;
+        let parent = commit.parent(n)?;
+        Ok(parent.id().to_string())
+    }
+
+    fn read_file_at(&self, commit_oid: &str, rel_path: &str) -> Result<String> {
+        let oid = Oid::from_str(commit_oid)?;
+        let commit = self.repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+        let entry = tree
+            .get_path(Path::new(rel_path))
+            .map_err(|_| DoogatError::NotFound(rel_path.to_string()))?;
+        let blob = self
+            .repo
+            .find_blob(entry.id())
+            .map_err(|_| DoogatError::NotFound(rel_path.to_string()))?;
+        let content =
+            std::str::from_utf8(blob.content()).map_err(|e| DoogatError::Parse(e.to_string()))?;
+        Ok(content.to_string())
+    }
+
+    fn walk_tree_files(
+        &self,
+        commit_oid: &str,
+        prefix: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let oid = Oid::from_str(commit_oid)?;
+        let commit = self.repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+        let mut files = Vec::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
+            let full_path = format!("{}{}", dir, entry.name().unwrap_or(""));
+            if full_path.starts_with(prefix) {
+                if let Ok(blob) = self.repo.find_blob(entry.id()) {
+                    if let Ok(content) = std::str::from_utf8(blob.content()) {
+                        files.push((full_path, content.to_string()));
+                    }
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+        Ok(files)
+    }
+
+    fn find_hlc_for_path(
+        &self,
+        commit_oid: &str,
+        path: &str,
+    ) -> Option<crate::hlc::Hlc> {
+        let oid = Oid::from_str(commit_oid).ok()?;
+        let commit = self.repo.find_commit(oid).ok()?;
+        self.find_hlc_for_path(&commit, path)
+    }
+
+    fn revision_date(&self, rel_path: &str) -> Result<Option<String>> {
+        self.revision_date(rel_path)
+    }
+
+    fn set_skip_commit_graph(&self, skip: bool) {
+        self.set_skip_commit_graph(skip);
+    }
+
+    fn write_commit_graph(&self) {
+        self.write_commit_graph();
+    }
+
+    fn increment_session_commits(&self) -> u32 {
+        self.increment_session_commits()
+    }
+
+    fn reset_session_commits(&self) {
+        self.reset_session_commits();
+    }
+}
+
 /// Rename a doogat and rewrite all backlinks pointing to it.
 ///
 /// 1. Moves the file via `rename_file()` (first commit).
@@ -1092,7 +1249,7 @@ impl crate::traits::DoogatStore for GitRepo {
 /// 4. Commits all rewritten files (second commit).
 /// 5. Detects remaining broken references via `broken_backlinks()` (FR-10a).
 pub fn rename_doogat(
-    repo: &GitRepo,
+    repo: &impl crate::traits::GitBackend,
     index: &crate::indexer::Index,
     old_path: &str,
     new_path: &str,

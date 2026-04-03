@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::Result;
-use crate::git_ops::GitRepo;
+use crate::traits::GitBackend;
 use crate::indexer::Index;
 use crate::parser;
 use crate::types::{AttachmentInfo, Value, DoogatId};
@@ -78,7 +78,7 @@ fn attachment_to_value(info: &AttachmentInfo) -> Value {
 }
 
 /// List attachments for a doogat by reading its frontmatter.
-pub fn list_attachments(repo: &GitRepo, id: &DoogatId) -> Result<Vec<AttachmentInfo>> {
+pub fn list_attachments(repo: &impl GitBackend, id: &DoogatId) -> Result<Vec<AttachmentInfo>> {
     validate_doogat_id_format(id)?;
     let doogat_path = format!("ddb/{}.md", id.0);
     let content = repo.read_file(&doogat_path)?;
@@ -88,7 +88,7 @@ pub fn list_attachments(repo: &GitRepo, id: &DoogatId) -> Result<Vec<AttachmentI
 
 /// Attach a file to a doogat: store in `reference/{id}/`, update frontmatter, commit.
 pub fn attach_file(
-    repo: &GitRepo,
+    repo: &impl GitBackend,
     index: &Index,
     id: &DoogatId,
     filename: &str,
@@ -146,7 +146,7 @@ pub fn attach_file(
 }
 
 /// Detach a file from a doogat: remove from git, update frontmatter, commit.
-pub fn detach_file(repo: &GitRepo, index: &Index, id: &DoogatId, filename: &str) -> Result<()> {
+pub fn detach_file(repo: &impl GitBackend, index: &Index, id: &DoogatId, filename: &str) -> Result<()> {
     validate_doogat_id_format(id)?;
     validate_attachment_filename(filename)?;
     let doogat_path = format!("ddb/{}.md", id.0);
