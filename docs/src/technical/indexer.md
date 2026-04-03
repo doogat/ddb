@@ -236,7 +236,7 @@ pub struct PaginatedSearchResult {
 
 1. **Tag**: `field == "tag"` routes to `_ddb_tags` (exact match via `eq`, substring via `contains`, or set membership via `in`).
 2. **Core column**: if the field matches a core `doogats` column (e.g. `type`, `title`, `date`), resolves directly against that column.
-3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. Uses one SQL parameter per filter (the value).
+3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. For `Eq` and `In`, compares the raw column value directly. For `Contains` on a REFERENCES-backed column (i.e. a junction table `{type}_{field}` also exists), routes through junction JOIN traversal to match against the referenced doogat's title rather than the raw stored ID.
 4. **`_ddb_fields` fallback**: if the field is not found in any type table, falls back to the generic key-value store. Uses two SQL parameters (key + value).
 
 #### SearchFieldOp
@@ -253,7 +253,12 @@ This method is an instance method (`&self`) because it needs `self.conn` for typ
 
 #### Junction table traversal
 
-When a where-filter field does not exist as a materialized scalar column on any candidate type table, the indexer checks for junction tables named `{type}_{field}` in `sqlite_master`. Junction tables are created during materialization for REFERENCES columns (see `junction_table_ddl`).
+Junction table traversal is triggered in two situations:
+
+1. The where-filter field does not exist as a materialized scalar column on any candidate type table.
+2. The field exists as a materialized column but the op is `Contains` - in this case the materialized column stores raw IDs, not titles, so a JOIN through the junction table is required to match by referenced doogat title.
+
+Junction tables are named `{type}_{field}` and are created during materialization for REFERENCES columns (see `junction_table_ddl`).
 
 If junction tables exist, the filter resolves via a subquery join:
 

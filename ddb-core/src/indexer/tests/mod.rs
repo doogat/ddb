@@ -2743,6 +2743,62 @@ processed: true
     }
 
     #[test]
+    fn search_filter_by_junction_contains_with_materialized_column() {
+        // Exercises the else branch: materialized `link` table HAS a `category` column
+        // (as real REFERENCES columns do), so tables_with_field is NOT empty.
+        // Contains should still route through the junction JOIN to match on title,
+        // not the raw ID stored in the materialized column.
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat001', 'Technology Hub', 'category', 'ddb/cat001.md');\
+                 INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat002', 'Science Corner', 'category', 'ddb/cat002.md');\
+                 CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT, \
+                     \"category\" TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date, \"category\") \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01', 'cat001');\
+                 INSERT OR REPLACE INTO link (id, title, date, \"category\") \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01', 'cat002');\
+                 CREATE TABLE IF NOT EXISTS link_category (\
+                     \"link_id\" TEXT NOT NULL, \
+                     \"category_id\" TEXT NOT NULL, \
+                     PRIMARY KEY (\"link_id\", \"category_id\")\
+                 );\
+                 INSERT INTO link_category VALUES ('20260301120000', 'cat001');\
+                 INSERT INTO link_category VALUES ('20260301120001', 'cat002');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Contains("Tech".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            1,
+            "junction Contains with materialized column should match z0 via title JOIN, got: {:?}",
+            result.hits.iter().map(|h| &h.id).collect::<Vec<_>>()
+        );
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
     fn search_filter_by_junction_union_multi_type() {
         // When two different types both have a junction table for the same field,
         // build_filter_clauses should generate a UNION across both junction tables
