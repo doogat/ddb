@@ -19,6 +19,7 @@ mod read_pool;
 mod reference_raw_id;
 mod relation_resolution;
 mod rename;
+mod search_in_filter;
 mod search_links;
 mod sequence;
 mod serve;
