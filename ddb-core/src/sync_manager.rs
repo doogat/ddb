@@ -522,14 +522,12 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         merged_oid: &str,
     ) -> Result<Vec<String>> {
         let mut paths = std::collections::BTreeSet::new();
-        for (kind, path) in self.repo.diff_paths(ours_oid, merged_oid)? {
-            let _ = kind;
+        for (_, path) in self.repo.diff_paths(ours_oid, merged_oid)? {
             if path.starts_with("ddb/") && path.ends_with(".md") {
                 paths.insert(path);
             }
         }
-        for (kind, path) in self.repo.diff_paths(theirs_oid, merged_oid)? {
-            let _ = kind;
+        for (_, path) in self.repo.diff_paths(theirs_oid, merged_oid)? {
             if path.starts_with("ddb/") && path.ends_with(".md") {
                 paths.insert(path);
             }
