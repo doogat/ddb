@@ -2979,4 +2979,193 @@ mod tests {
         assert_eq!(results[1].meta.doogat_type.as_deref(), Some("task"));
         assert_eq!(results[2].meta.doogat_type, None);
     }
+
+    // ---- on_conflict tests ----
+
+    /// Install a typedef for type "widget" with unique_together on [name].
+    fn setup_widget_typedef(svc: &DoogatService) {
+        let typedef = "---
+id: 20260601000000
+title: widget
+type: _typedef
+columns:
+  - name: name
+    data_type: TEXT
+    zone: frontmatter
+unique_together:
+  - - name
+---
+";
+        let typedef_path = "ddb/_typedef/20260601000000.md";
+        svc.repo
+            .commit_file(typedef_path, typedef, "add widget typedef")
+            .unwrap();
+        let parsed = crate::parser::parse(typedef, typedef_path).unwrap();
+        svc.index.index_doogat(&parsed).unwrap();
+        svc.index.materialize_all_types(&svc.repo).unwrap();
+    }
+
+    #[test]
+    fn batch_create_on_conflict_ignore_first_insert_succeeds() {
+        let (_tmp, svc) = fresh_svc();
+        setup_widget_typedef(&svc);
+
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "name".to_string(),
+            crate::types::Value::String("foo".to_string()),
+        );
+
+        let inputs = vec![crate::types::BatchCreateInput {
+            title: "Foo Widget".to_string(),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields,
+            on_conflict: crate::types::ConflictAction::Ignore,
+        }];
+
+        let results = svc.batch_create(&inputs).unwrap();
+        assert_eq!(results.len(), 1);
+        let id = results[0].meta.id.as_ref().unwrap().0.clone();
+        assert_eq!(id.len(), 14, "created doogat should have a valid 14-char ID");
+        assert_eq!(results[0].meta.title.as_deref(), Some("Foo Widget"));
+    }
+
+    #[test]
+    fn batch_create_on_conflict_ignore_duplicate_returns_existing() {
+        let (tmp, svc) = fresh_svc();
+        setup_widget_typedef(&svc);
+
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "name".to_string(),
+            crate::types::Value::String("foo".to_string()),
+        );
+
+        // First insert
+        let first = svc
+            .batch_create(&[crate::types::BatchCreateInput {
+                title: "Foo Widget".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields: fields.clone(),
+                on_conflict: crate::types::ConflictAction::Ignore,
+            }])
+            .unwrap();
+        let original_id = first[0].meta.id.as_ref().unwrap().0.clone();
+
+        let commits_after_first = count_commits(tmp.path());
+
+        // Second insert - same name, Ignore -> must return the existing doogat
+        let second = svc
+            .batch_create(&[crate::types::BatchCreateInput {
+                title: "Foo Widget Duplicate".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields,
+                on_conflict: crate::types::ConflictAction::Ignore,
+            }])
+            .unwrap();
+
+        assert_eq!(second.len(), 1, "should return exactly one result");
+        let returned_id = second[0].meta.id.as_ref().unwrap().0.clone();
+        assert_eq!(
+            returned_id, original_id,
+            "duplicate insert with Ignore must return the original doogat ID"
+        );
+        assert_eq!(
+            count_commits(tmp.path()),
+            commits_after_first,
+            "duplicate Ignore insert must not create a new git commit"
+        );
+    }
+
+    #[test]
+    fn batch_create_on_conflict_ignore_non_duplicate_creates_new() {
+        let (_tmp, svc) = fresh_svc();
+        setup_widget_typedef(&svc);
+
+        let mut fields_foo = std::collections::BTreeMap::new();
+        fields_foo.insert(
+            "name".to_string(),
+            crate::types::Value::String("foo".to_string()),
+        );
+
+        let mut fields_bar = std::collections::BTreeMap::new();
+        fields_bar.insert(
+            "name".to_string(),
+            crate::types::Value::String("bar".to_string()),
+        );
+
+        // Insert "foo" first
+        let first = svc
+            .batch_create(&[crate::types::BatchCreateInput {
+                title: "Foo Widget".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields: fields_foo,
+                on_conflict: crate::types::ConflictAction::Ignore,
+            }])
+            .unwrap();
+        let foo_id = first[0].meta.id.as_ref().unwrap().0.clone();
+
+        // Insert "bar" - different name, should create a new doogat
+        let second = svc
+            .batch_create(&[crate::types::BatchCreateInput {
+                title: "Bar Widget".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields: fields_bar,
+                on_conflict: crate::types::ConflictAction::Ignore,
+            }])
+            .unwrap();
+
+        assert_eq!(second.len(), 1);
+        let bar_id = second[0].meta.id.as_ref().unwrap().0.clone();
+        assert_ne!(bar_id, foo_id, "non-duplicate insert must create a new doogat");
+        assert_eq!(bar_id.len(), 14);
+    }
+
+    #[test]
+    fn batch_create_on_conflict_error_duplicate_fails() {
+        let (_tmp, svc) = fresh_svc();
+        setup_widget_typedef(&svc);
+
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "name".to_string(),
+            crate::types::Value::String("foo".to_string()),
+        );
+
+        // First insert - succeeds
+        svc.batch_create(&[crate::types::BatchCreateInput {
+            title: "Foo Widget".to_string(),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields: fields.clone(),
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .unwrap();
+
+        // Second insert with same unique key and Error -> must fail
+        let result = svc.batch_create(&[crate::types::BatchCreateInput {
+            title: "Foo Widget Again".to_string(),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields,
+            on_conflict: crate::types::ConflictAction::Error,
+        }]);
+
+        assert!(
+            result.is_err(),
+            "duplicate insert with on_conflict: Error must return an error"
+        );
+    }
 }
