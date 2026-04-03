@@ -138,6 +138,9 @@ pub fn build_schema(
                 let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
                 match obj {
                     GqlValue::Object(map) => match map.get("fields") {
+                        // FieldValue::value (not gql_to_field_value) because JSON is a scalar
+                        // leaf — gql_to_field_value would wrap Object in owned_any, causing
+                        // async-graphql to try to resolve sub-fields instead of serializing directly.
                         Some(val) => Ok(Some(FieldValue::value(val.clone()))),
                         None => Ok(None),
                     },

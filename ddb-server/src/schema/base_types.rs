@@ -1305,6 +1305,50 @@ mod tests {
     }
 
     #[test]
+    fn search_hit_to_value_fields_with_non_standard_keys() {
+        use ddb_core::types::SearchResult;
+        use std::collections::BTreeMap;
+
+        let mut fields = BTreeMap::new();
+        fields.insert("my-field".into(), "value1".into());
+        fields.insert("field with spaces".into(), "value2".into());
+
+        let r = SearchResult {
+            id: "20260301120000".into(),
+            title: "Test".into(),
+            path: "ddb/20260301120000.md".into(),
+            snippet: "test snippet".into(),
+            rank: -1.5,
+            updated_at: String::new(),
+            tags: vec![],
+            doogat_type: Some("custom".into()),
+            fields: Some(fields),
+            created_at: None,
+        };
+
+        let val = search_hit_to_value(&r);
+        let obj = match &val {
+            GqlValue::Object(o) => o,
+            _ => panic!("expected object"),
+        };
+
+        // Non-standard keys should be preserved as-is in the JSON object
+        match obj.get("fields").unwrap() {
+            GqlValue::Object(map) => {
+                assert_eq!(
+                    map.get(&Name::new("my-field")).unwrap(),
+                    &GqlValue::String("value1".into())
+                );
+                assert_eq!(
+                    map.get(&Name::new("field with spaces")).unwrap(),
+                    &GqlValue::String("value2".into())
+                );
+            }
+            _ => panic!("expected object for fields"),
+        }
+    }
+
+    #[test]
     fn search_hit_to_value_nulls_for_untyped() {
         use ddb_core::types::SearchResult;
 
