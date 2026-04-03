@@ -654,7 +654,7 @@ pub(crate) fn build_typed_object(
             if !BASE_DOOGAT_FIELDS.contains(&gql_list_name.as_str()) {
                 let target_type = ref_target_gql_type(col, known_types);
                 let target_ref_name = col.references.clone().unwrap_or_default();
-                let plural_desc = format!("Referenced {} doogats via junction table.", target_ref_name);
+                let plural_desc = format!("All referenced {} doogats.", target_ref_name);
                 let data_list_name = pluralize(&col.name);
                 obj = obj.field(
                     Field::new(

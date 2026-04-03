@@ -1152,8 +1152,8 @@ pub fn build_schema(
         let connection_type_name = format!("{type_name}Connection");
 
         // Per-type query returning Connection (items + totalCount)
-        let query_desc = format!("List all {} doogats with optional where, orderBy, tag, and pagination filters.", schema.table_name);
-        let agg_desc = format!("Aggregate {} doogats. Returns count with optional groupBy breakdown.", schema.table_name);
+        let query_desc = format!("List all {} doogats with optional where, orderBy, tag, and pagination filters.", type_name);
+        let agg_desc = format!("Aggregate {} doogats. Returns count with optional groupBy breakdown.", type_name);
         {
             let schema_clone = schema_clone.clone();
             let type_name_clone = type_name.clone();
