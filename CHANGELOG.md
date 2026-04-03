@@ -82,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Section parsing (`extract_sections()`) for structured heading navigation
 - Sequence navigation: tree, breadcrumb, broken chain detection
 - Path navigation: dot/bracket notation for nested frontmatter values (`get_path`, `set_path`, `remove_path`)
-- Discovery queries: orphans, stale doogats, recent changes, link density
+- Discovery queries: orphans, stale doogats, unlinked mentions, suggest links
 - Consistency auto-fix: H1 alignment, tag dedup, migration framework
 - Broken backlink detection and reporting on delete
 - Resurrection tracking for deleted-then-recreated doogats
