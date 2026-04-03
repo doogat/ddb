@@ -445,7 +445,8 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .description("Fetch a single doogat by its 14-digit timestamp ID."),
         );
     }
 
@@ -494,7 +495,8 @@ pub fn build_schema(
             .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
             .argument(InputValue::new("backlinksOf", TypeRef::named(TypeRef::ID)))
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),
+            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
+            .description("List doogats with optional type, tag, and backlink filters."),
         );
     }
 
@@ -598,7 +600,8 @@ pub fn build_schema(
                 TypeRef::named_list("SearchFieldFilter"),
             ))
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),
+            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
+            .description("Full-text search with optional structured where filters. Returns paginated hits with BM25 ranking."),
         );
     }
 
@@ -616,7 +619,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING))),
+            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
+            .description("Return the canonical form of a search query without executing it. Useful for deduplication and saved searches."),
         );
     }
 
@@ -636,7 +640,7 @@ pub fn build_schema(
                     )))
                 })
             },
-        ));
+        ).description("List all registered type definitions with their column schemas."));
     }
 
     // sql(query, format?) — SELECT via ReadPool, non-SELECT via actor
@@ -657,7 +661,8 @@ pub fn build_schema(
                 })
             })
             .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
-            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING))),
+            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING)))
+            .description("Execute a read-only SQL SELECT query. Non-SELECT statements route through the mutation actor."),
         );
     }
 
@@ -674,7 +679,7 @@ pub fn build_schema(
                     ))))
                 })
             },
-        ));
+        ).description("Current schema version counter. Increments on typedef creation, modification, or deletion."));
     }
 
     // checkboxItems(state?, doogatId?, limit?, offset?)
@@ -711,7 +716,8 @@ pub fn build_schema(
             .argument(InputValue::new("state", TypeRef::named(TypeRef::STRING)))
             .argument(InputValue::new("doogatId", TypeRef::named(TypeRef::ID)))
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT))),
+            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
+            .description("Query checkbox/task items across doogats. Filter by state (open/done/cancelled) or doogat ID."),
         );
     }
 
@@ -735,7 +741,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT))),
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+            .description("Shorthand for checkboxItems(state: \"open\"). Returns uncompleted action items."),
         );
     }
 
@@ -763,7 +770,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .description("Find doogats that mention this doogat's title as plain text without a wikilink."),
         );
     }
 
@@ -803,7 +811,8 @@ pub fn build_schema(
                 },
             )
             .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT))),
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+            .description("Suggest doogats to link based on shared tags and content similarity."),
         );
     }
 
@@ -851,7 +860,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING))),
+            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
+            .description("Find typed doogats not updated within their type's staleness threshold."),
         );
     }
 
@@ -890,7 +900,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING))),
+            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
+            .description("Find typed doogats with no inbound links from other doogats."),
         );
     }
 
@@ -992,7 +1003,8 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .description("Get parent, children, and breadcrumb for a doogat in a sequence hierarchy."),
         );
     }
 
@@ -1015,7 +1027,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .description("List direct children of a doogat in a sequence hierarchy."),
         );
     }
 
@@ -1039,7 +1052,8 @@ pub fn build_schema(
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+            .description("Get ancestor chain from root to the given doogat in a sequence hierarchy."),
         );
     }
 
@@ -1063,7 +1077,7 @@ pub fn build_schema(
                     }))))
                 })
             },
-        ));
+        ).description("Find doogats whose sequence parent reference points to a non-existent doogat."));
     }
 
     // -- Dynamic per-type queries --
@@ -1334,7 +1348,7 @@ pub fn build_schema(
                     )))
                 })
             },
-        ));
+        ).description("List all tags with their usage counts."));
     }
 
     // tagEntries
@@ -1412,7 +1426,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "where",
                 TypeRef::named("TagEntriesWhere"),
-            )),
+            ))
+            .description("Query individual tag assignments with where filters on doogatId and tag name."),
         );
     }
 
