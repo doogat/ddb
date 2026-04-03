@@ -113,10 +113,11 @@ pub fn build_schema(
         ));
 
     let search_hit_type = Object::new("SearchHit")
+        .description("A single search result with metadata and relevance score.")
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("title", TypeRef::named_nn(TypeRef::STRING)))
         .field(simple_field("path", TypeRef::named_nn(TypeRef::STRING)))
-        .field(simple_field("snippet", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("snippet", TypeRef::named_nn(TypeRef::STRING)).description("FTS5-generated snippet with <b> highlight tags. Empty string for all-negative queries."))
         .field(Field::new(
             "rank",
             TypeRef::named_nn(TypeRef::FLOAT),
@@ -126,14 +127,15 @@ pub fn build_schema(
                     Ok(obj_field(obj, "rank"))
                 })
             },
-        ))
+        ).description("BM25 relevance score. Lower values indicate better matches. 0.0 for non-FTS queries."))
         .field(simple_field("updated_at", TypeRef::named(TypeRef::STRING)))
         .field(simple_field("tags", TypeRef::named_nn_list_nn(TypeRef::STRING)))
         .field(simple_field("type", TypeRef::named(TypeRef::STRING)))
-        .field(simple_field("fields", TypeRef::named(TypeRef::STRING)))
+        .field(simple_field("fields", TypeRef::named(TypeRef::STRING)).description("JSON string of type-specific frontmatter fields (key-value pairs). Null for untyped doogats."))
         .field(simple_field("created_at", TypeRef::named(TypeRef::STRING)));
 
     let search_connection_type = Object::new("SearchConnection")
+        .description("Paginated search results with total count and normalized query.")
         .field(Field::new(
             "hits",
             TypeRef::named_nn_list_nn("SearchHit"),
@@ -157,7 +159,7 @@ pub fn build_schema(
         .field(simple_field(
             "queryNormalized",
             TypeRef::named_nn(TypeRef::STRING),
-        ));
+        ).description("Canonical form of the search query. Use for deduplication and saved search comparison."));
 
     let column_info_type = Object::new("ColumnInfo")
         .field(simple_field("name", TypeRef::named_nn(TypeRef::STRING)))
