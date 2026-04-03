@@ -1332,7 +1332,10 @@ mod tests {
             _ => panic!("expected object"),
         };
 
-        // Non-standard keys should be preserved as-is in the JSON object
+        // Verify Name::new() accepts non-standard strings without panicking (no validation
+        // in async-graphql-value 7.x - Name is just Arc<str>). Wire-level serialization
+        // through the JSON scalar is covered by E2E tests; this test confirms the
+        // GqlValue::Object is built correctly.
         match obj.get("fields").unwrap() {
             GqlValue::Object(map) => {
                 assert_eq!(
