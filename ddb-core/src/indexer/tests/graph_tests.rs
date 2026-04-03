@@ -1347,7 +1347,6 @@ use super::*;
     fn recent_doogats_empty_when_none_recent() {
         let idx = in_memory_index();
 
-        // Index nothing
         let results = idx.recent_doogats(7, None).unwrap();
         assert!(results.is_empty());
     }
@@ -1497,7 +1496,6 @@ use super::*;
         let alpha = results.iter().find(|e| e.id == "20260403100000").unwrap();
         assert_eq!(alpha.inbound_links, 1);
         assert_eq!(alpha.outbound_links, 1);
-        assert_eq!(alpha.density_score, alpha.inbound_links + alpha.outbound_links);
         assert_eq!(alpha.density_score, 2);
     }
 
@@ -1544,7 +1542,6 @@ use super::*;
 
         let results = idx.link_density(None).unwrap();
 
-        // Verify descending order
         for w in results.windows(2) {
             assert!(
                 w[0].density_score >= w[1].density_score,
