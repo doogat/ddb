@@ -424,7 +424,7 @@ ddb fix [--dry-run] [-v/--verbose] [--migrate]
 
 ## 9. Discovery
 
-The discovery system surfaces latent connections, maintenance issues, and knowledge gaps across the doogat graph. Four queries are available via CLI and GraphQL.
+The discovery system surfaces latent connections, maintenance issues, and knowledge gaps across the doogat graph. Six queries are available via CLI and GraphQL.
 
 ### Unlinked mentions
 
@@ -480,6 +480,26 @@ ddb discover orphans [--type <type>]
 ```graphql
 query { orphanDoogats(type: "note") { id title doogatType outgoingLinks } }
 ```
+
+### Recent changes
+
+Lists doogats modified within a configurable time window, sorted by recency. Uses the frontmatter `date` field as the primary date source, falling back to the indexer's `updated_at` timestamp when no frontmatter date exists. Typedefs are excluded.
+
+```bash
+ddb discover recent [--days N] [--type-filter <type>]
+```
+
+Default lookback is 7 days. Output columns: id, title, type, last_modified.
+
+### Link density
+
+Reports inbound and outbound link counts per doogat, sorted by total density (inbound + outbound) descending. Surfaces hub doogats with many connections and identifies isolated nodes with zero links. Typedefs are excluded.
+
+```bash
+ddb discover link-density [--type-filter <type>]
+```
+
+Output columns: id, title, type, inbound count, outbound count, density score.
 
 
 ## 10. Metadata Path Navigation
