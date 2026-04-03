@@ -1132,6 +1132,8 @@ pub fn build_schema(
         let connection_type_name = format!("{type_name}Connection");
 
         // Per-type query returning Connection (items + totalCount)
+        let query_desc = format!("List all {} doogats with optional where, orderBy, tag, and pagination filters.", schema.table_name);
+        let agg_desc = format!("Aggregate {} doogats. Returns count with optional groupBy breakdown.", schema.table_name);
         {
             let schema_clone = schema_clone.clone();
             let type_name_clone = type_name.clone();
@@ -1247,7 +1249,8 @@ pub fn build_schema(
                 .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
                 .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
                 .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
-                .argument(InputValue::new("distinct", TypeRef::named(TypeRef::STRING))),
+                .argument(InputValue::new("distinct", TypeRef::named(TypeRef::STRING)))
+                .description(&query_desc),
             );
         }
 
@@ -1331,7 +1334,8 @@ pub fn build_schema(
                     },
                 )
                 .argument(InputValue::new("where", TypeRef::named(&where_type_name)))
-                .argument(InputValue::new("groupBy", TypeRef::named(TypeRef::STRING))),
+                .argument(InputValue::new("groupBy", TypeRef::named(TypeRef::STRING)))
+                .description(&agg_desc),
             );
         }
     }

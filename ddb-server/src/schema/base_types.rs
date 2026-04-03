@@ -654,6 +654,7 @@ pub(crate) fn build_typed_object(
             if !BASE_DOOGAT_FIELDS.contains(&gql_list_name.as_str()) {
                 let target_type = ref_target_gql_type(col, known_types);
                 let target_ref_name = col.references.clone().unwrap_or_default();
+                let plural_desc = format!("Referenced {} doogats via junction table.", target_ref_name);
                 let data_list_name = pluralize(&col.name);
                 obj = obj.field(
                     Field::new(
@@ -762,7 +763,8 @@ pub(crate) fn build_typed_object(
                     .argument(InputValue::new(
                         "orderDir",
                         TypeRef::named(TypeRef::STRING),
-                    )),
+                    ))
+                    .description(&plural_desc),
                 );
             }
 
