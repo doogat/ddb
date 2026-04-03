@@ -450,7 +450,8 @@ pub fn build_schema(
             TypeRef::named_nn(TypeRef::STRING),
         ).description("Field name to filter on. Resolution order: 'tag' routes to tag index, then materialized type columns, then frontmatter key-value store fallback."))
         .field(InputValue::new("eq", TypeRef::named(TypeRef::STRING)).description("Exact match. For tags, matches the tag name exactly."))
-        .field(InputValue::new("contains", TypeRef::named(TypeRef::STRING)).description("Case-insensitive substring match (SQL LIKE %value%)."));
+        .field(InputValue::new("contains", TypeRef::named(TypeRef::STRING)).description("Case-insensitive substring match (SQL LIKE %value%)."))
+        .field(InputValue::new("in", TypeRef::named_list(TypeRef::STRING)).description("Set membership filter. Matches if field value equals any of the provided strings."));
 
     // -- Query fields --
     let mut query = Object::new("Query");
@@ -576,6 +577,15 @@ pub fn build_schema(
                                             field,
                                             op: SearchFieldOp::Contains(val),
                                         })
+                                    } else if let Some(in_val) = obj.get("in") {
+                                        let vals = in_val.list().ok()?
+                                            .iter()
+                                            .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                            .collect();
+                                        Some(SearchFieldFilter {
+                                            field,
+                                            op: SearchFieldOp::In(vals),
+                                        })
                                     } else {
                                         None
                                     }
@@ -619,7 +629,7 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "where",
                 TypeRef::named_list("SearchFieldFilter"),
-            ).description("Structured field filters. Each entry specifies a field name and either eq or contains operator."))
+            ).description("Structured field filters. Each entry specifies a field name and an eq, contains, or in operator."))
             .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return. Default 20."))
             .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip for pagination. Default 0."))
             .description("Full-text search with optional structured where filters. Returns paginated hits with BM25 ranking."),
