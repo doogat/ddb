@@ -407,7 +407,8 @@ pub fn build_schema(
         ));
 
     // Base Doogat type
-    let doogat_type = doogat_object("Doogat");
+    let doogat_type = doogat_object("Doogat")
+        .description("A doogat (document/note) with metadata, content, and relationships.");
 
     // Input types
     let create_input = InputObject::new("CreateDoogatInput")
@@ -429,7 +430,7 @@ pub fn build_schema(
             TypeRef::named_list(TypeRef::STRING),
         ))
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
-        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)));
+        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)).description("JSON object of frontmatter key-value pairs for typed columns."));
 
     let update_input = InputObject::new("UpdateDoogatInput")
         .description("Input for updating an existing doogat. Omitted fields are left unchanged.")
