@@ -99,6 +99,32 @@ impl Index {
             }
         }
 
+        // Create unique indexes for unique_together constraints
+        if let Some(ref constraints) = schema.unique_together {
+            for cols in constraints {
+                if cols.is_empty() {
+                    continue;
+                }
+                let col_list = cols
+                    .iter()
+                    .map(|c| format!("\"{}\"", c))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let index_name = format!(
+                    "{}_unique_{}",
+                    schema.table_name,
+                    cols.join("_")
+                );
+                self.conn.execute(
+                    &format!(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS \"{}\" ON \"{}\" ({})",
+                        index_name, schema.table_name, col_list
+                    ),
+                    [],
+                )?;
+            }
+        }
+
         Ok(())
     }
 
