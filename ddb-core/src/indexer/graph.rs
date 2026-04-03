@@ -2,7 +2,8 @@ use rusqlite::params;
 
 use crate::error::Result;
 use crate::types::{
-    BrokenSequence, OrphanDoogat, SequenceInfo, SequenceNode, Suggestion, UnlinkedMention,
+    BrokenSequence, LinkDensityEntry, OrphanDoogat, RecentDoogat, SequenceInfo, SequenceNode,
+    Suggestion, UnlinkedMention,
 };
 
 use super::Index;
@@ -612,6 +613,89 @@ impl Index {
         };
 
         Ok(out)
+    }
+
+    /// Find doogats modified within a recent time window.
+    pub fn recent_doogats(
+        &self,
+        days: u32,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<RecentDoogat>> {
+        let today = chrono::Utc::now().date_naive();
+        let cutoff = today - chrono::Duration::days(i64::from(days));
+
+        let (sql, filter_val) = if let Some(t) = type_filter {
+            (
+                "SELECT id, title, type, date, updated_at FROM doogats \
+                 WHERE path NOT LIKE 'ddb/_typedef/%' AND type = ?1"
+                    .to_string(),
+                Some(t.to_string()),
+            )
+        } else {
+            (
+                "SELECT id, title, type, date, updated_at FROM doogats \
+                 WHERE path NOT LIKE 'ddb/_typedef/%'"
+                    .to_string(),
+                None,
+            )
+        };
+
+        let mut stmt = self.conn.prepare(&sql)?;
+
+        type Row = (String, String, String, Option<String>, Option<String>);
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        };
+
+        let collected: Vec<Row> = if let Some(ref t) = filter_val {
+            let rows = stmt.query_map(params![t], map_row)?;
+            rows.filter_map(|r| r.ok()).collect()
+        } else {
+            let rows = stmt.query_map([], map_row)?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
+        let mut recent = Vec::new();
+        for (id, title, doogat_type, fm_date, updated_at) in collected {
+            // Priority: date > updated_at (updated_at is set to now() by the
+            // indexer on every reindex, so it reflects index time rather than
+            // actual modification time; frontmatter date is more meaningful)
+            let effective_date =
+                if let Some(ref d) = fm_date.as_deref().filter(|s| !s.is_empty()) {
+                    d.to_string()
+                } else if let Some(ref u) = updated_at {
+                    u.clone()
+                } else {
+                    continue;
+                };
+
+            let parsed = parse_date_to_naive(&effective_date);
+            let Some(naive) = parsed else { continue };
+            if naive < cutoff {
+                continue;
+            }
+
+            recent.push(RecentDoogat {
+                id,
+                title,
+                doogat_type,
+                last_modified: effective_date,
+            });
+        }
+
+        recent.sort_by(|a, b| {
+            let da = parse_date_to_naive(&a.last_modified);
+            let db = parse_date_to_naive(&b.last_modified);
+            db.cmp(&da)
+        });
+
+        Ok(recent)
     }
 
     // ── Sequence queries ──────────────────────────────────────────

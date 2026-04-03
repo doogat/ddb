@@ -1275,6 +1275,24 @@ pub struct OrphanDoogat {
     pub outgoing_links: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct RecentDoogat {
+    pub id: String,
+    pub title: String,
+    pub doogat_type: String,
+    pub last_modified: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkDensityEntry {
+    pub id: String,
+    pub title: String,
+    pub doogat_type: String,
+    pub inbound_links: usize,
+    pub outbound_links: usize,
+    pub density_score: usize,
+}
+
 // ── Sequence types ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]

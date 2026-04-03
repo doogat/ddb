@@ -1172,3 +1172,183 @@ use super::*;
         assert_eq!(bc[0].id, "20260315190000");
     }
 
+    // ---- recent_doogats tests ----
+
+    fn make_doogat_with_date(id: &str, title: &str, date: &str, dtype: &str, path: &str) -> ParsedDoogat {
+        ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(DoogatId(id.into())),
+                title: Some(title.into()),
+                date: Some(date.into()),
+                doogat_type: Some(dtype.into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: String::new(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: path.into(),
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn recent_doogats_returns_recently_modified() {
+        let idx = in_memory_index();
+        let today = chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string();
+
+        let z = make_doogat_with_date(
+            "20260403120000",
+            "Today Note",
+            &today,
+            "note",
+            "ddb/20260403120000.md",
+        );
+        idx.index_doogat(&z).unwrap();
+
+        let results = idx.recent_doogats(7, None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260403120000");
+        assert_eq!(results[0].title, "Today Note");
+        assert_eq!(results[0].doogat_type, "note");
+    }
+
+    #[test]
+    fn recent_doogats_excludes_old_entries() {
+        let idx = in_memory_index();
+
+        let z = make_doogat_with_date(
+            "20250101120000",
+            "Old Note",
+            "2025-01-01",
+            "note",
+            "ddb/20250101120000.md",
+        );
+        idx.index_doogat(&z).unwrap();
+
+        let results = idx.recent_doogats(7, None).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn recent_doogats_respects_type_filter() {
+        let idx = in_memory_index();
+        let today = chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string();
+
+        let note = make_doogat_with_date(
+            "20260403120000",
+            "A Note",
+            &today,
+            "note",
+            "ddb/20260403120000.md",
+        );
+        let project = make_doogat_with_date(
+            "20260403120001",
+            "A Project",
+            &today,
+            "project",
+            "ddb/20260403120001.md",
+        );
+        idx.index_doogat(&note).unwrap();
+        idx.index_doogat(&project).unwrap();
+
+        let results = idx.recent_doogats(7, Some("project")).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260403120001");
+        assert_eq!(results[0].doogat_type, "project");
+    }
+
+    #[test]
+    fn recent_doogats_excludes_typedefs() {
+        let idx = in_memory_index();
+        let today = chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string();
+
+        let typedef = make_doogat_with_date(
+            "20260403120000",
+            "My Typedef",
+            &today,
+            "note",
+            "ddb/_typedef/20260403120000.md",
+        );
+        idx.index_doogat(&typedef).unwrap();
+
+        let results = idx.recent_doogats(7, None).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn recent_doogats_sorted_by_date_descending() {
+        let idx = in_memory_index();
+        let today = chrono::Utc::now().date_naive();
+        let yesterday = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        let today_str = today.format("%Y-%m-%d").to_string();
+
+        let older = make_doogat_with_date(
+            "20260402120000",
+            "Yesterday Note",
+            &yesterday,
+            "note",
+            "ddb/20260402120000.md",
+        );
+        let newer = make_doogat_with_date(
+            "20260403120000",
+            "Today Note",
+            &today_str,
+            "note",
+            "ddb/20260403120000.md",
+        );
+        // Index older first to confirm sorting isn't insertion-order
+        idx.index_doogat(&older).unwrap();
+        idx.index_doogat(&newer).unwrap();
+
+        let results = idx.recent_doogats(7, None).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, "20260403120000", "most recent should be first");
+        assert_eq!(results[1].id, "20260402120000");
+    }
+
+    #[test]
+    fn recent_doogats_falls_back_to_updated_at_when_no_date() {
+        let idx = in_memory_index();
+
+        // Doogat with no frontmatter date - updated_at is set to now() by
+        // the indexer, so it should appear as recent
+        let z = ParsedDoogat {
+            meta: DoogatMeta {
+                id: Some(DoogatId("20260403120000".into())),
+                title: Some("No Date Note".into()),
+                date: None,
+                doogat_type: Some("note".into()),
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: String::new(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "ddb/20260403120000.md".into(),
+            updated_at: None,
+        };
+        idx.index_doogat(&z).unwrap();
+
+        let results = idx.recent_doogats(7, None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "20260403120000");
+    }
+
+    #[test]
+    fn recent_doogats_empty_when_none_recent() {
+        let idx = in_memory_index();
+
+        // Index nothing
+        let results = idx.recent_doogats(7, None).unwrap();
+        assert!(results.is_empty());
+    }
+
