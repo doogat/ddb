@@ -2378,6 +2378,20 @@ pub fn build_typedef_doogat(id: &DoogatId, schema: &TableSchema) -> ParsedDoogat
         extra.insert("origin".to_string(), Value::String(o.clone()));
     }
 
+    if let Some(ref constraints) = schema.unique_together {
+        if !constraints.is_empty() {
+            let outer = Value::List(
+                constraints
+                    .iter()
+                    .map(|cols| {
+                        Value::List(cols.iter().map(|c| Value::String(c.clone())).collect())
+                    })
+                    .collect(),
+            );
+            extra.insert("unique_together".to_string(), outer);
+        }
+    }
+
     ParsedDoogat {
         meta: DoogatMeta {
             id: Some(id.clone()),
@@ -2697,6 +2711,45 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let unique_together = doogat
+        .meta
+        .extra
+        .get("unique_together")
+        .and_then(|v| v.as_sequence())
+        .and_then(|outer| {
+            if outer.is_empty() {
+                return None;
+            }
+            let is_flat = outer.iter().all(|item| item.as_str().is_some());
+            let constraints = if is_flat {
+                let cols: Vec<String> = outer
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
+                if cols.is_empty() {
+                    return None;
+                }
+                vec![cols]
+            } else {
+                outer
+                    .iter()
+                    .filter_map(|item| item.as_sequence())
+                    .map(|inner| {
+                        inner
+                            .iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|cols| !cols.is_empty())
+                    .collect::<Vec<_>>()
+            };
+            if constraints.is_empty() {
+                None
+            } else {
+                Some(constraints)
+            }
+        });
+
     Ok(TableSchema {
         table_name,
         columns,
@@ -2706,7 +2759,7 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         stale_after_days,
         title_template,
         origin,
-        unique_together: None,
+        unique_together,
     })
 }
 
