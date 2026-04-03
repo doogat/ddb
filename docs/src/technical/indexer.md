@@ -245,7 +245,7 @@ Each `SearchFieldFilter` carries a `SearchFieldOp` discriminating the comparison
 
 - `Eq(String)` - exact match (`= ?`)
 - `Contains(String)` - substring match (`LIKE '%?%'`)
-- `In(Vec<String>)` - set membership (`IN (?, ?, ...)`). An empty vec produces a `1=0` clause, returning no results.
+- `In(Vec<String>)` - set membership (`IN (?, ?, ...)`). An empty vec produces an `AND 0` clause, returning no results.
 
 All four resolution paths (tag, core column, materialized column, `_ddb_fields` fallback) support all three operators.
 
