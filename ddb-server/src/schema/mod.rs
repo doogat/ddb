@@ -424,12 +424,13 @@ pub fn build_schema(
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)));
 
     let search_field_filter_input = InputObject::new("SearchFieldFilter")
+        .description("Filter condition for structured field-based search filtering.")
         .field(InputValue::new(
             "field",
             TypeRef::named_nn(TypeRef::STRING),
-        ))
-        .field(InputValue::new("eq", TypeRef::named(TypeRef::STRING)))
-        .field(InputValue::new("contains", TypeRef::named(TypeRef::STRING)));
+        ).description("Field name to filter on. Resolution order: 'tag' routes to tag index, then materialized type columns, then frontmatter key-value store fallback."))
+        .field(InputValue::new("eq", TypeRef::named(TypeRef::STRING)).description("Exact match. For tags, matches the tag name exactly."))
+        .field(InputValue::new("contains", TypeRef::named(TypeRef::STRING)).description("Case-insensitive substring match (SQL LIKE %value%)."));
 
     // -- Query fields --
     let mut query = Object::new("Query");
@@ -589,18 +590,18 @@ pub fn build_schema(
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
             })
-            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)))
+            .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)).description("FTS5 query string. Supports AND, OR, NOT, quoted phrases, and field:value syntax."))
             .argument(InputValue::new(
                 "types",
                 TypeRef::named_list(TypeRef::STRING),
-            ))
-            .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)))
+            ).description("Restrict results to these doogat types. Also limits where filter column resolution to matching type schemas."))
+            .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)).description("Shorthand for where: [{field: \"tag\", eq: value}]."))
             .argument(InputValue::new(
                 "where",
                 TypeRef::named_list("SearchFieldFilter"),
-            ))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)))
+            ).description("Structured field filters. Each entry specifies a field name and either eq or contains operator."))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return. Default 20."))
+            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip for pagination. Default 0."))
             .description("Full-text search with optional structured where filters. Returns paginated hits with BM25 ranking."),
         );
     }
