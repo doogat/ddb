@@ -253,3 +253,167 @@ fn discover_orphans_excludes_linked() {
         .success()
         .stdout(predicate::str::contains(&a_id).not());
 }
+
+#[test]
+fn discover_recent_shows_new_doogat() {
+    let repo = DdbTestRepo::init();
+
+    let out = repo
+        .ddb()
+        .args(["create", "--title", "Fresh Note", "--body", "Just created."])
+        .output()
+        .unwrap();
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    repo.ddb().arg("reindex").assert().success();
+
+    repo.ddb()
+        .args(["discover", "recent", "--days", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&id))
+        .stdout(predicate::str::contains("Fresh Note"));
+}
+
+#[test]
+fn discover_recent_type_filter() {
+    let repo = DdbTestRepo::init();
+
+    // Create a typedef so typed doogats work
+    repo.ddb()
+        .args(["query", "CREATE TABLE memo (content TEXT)"])
+        .assert()
+        .success();
+
+    let out = repo
+        .ddb()
+        .args([
+            "create",
+            "--title",
+            "My Memo",
+            "--type",
+            "memo",
+            "--body",
+            "Content here.",
+        ])
+        .output()
+        .unwrap();
+    let memo_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    repo.ddb()
+        .args([
+            "create",
+            "--title",
+            "Plain Note",
+            "--body",
+            "Not a memo.",
+        ])
+        .assert()
+        .success();
+
+    repo.ddb().arg("reindex").assert().success();
+
+    // Filter by memo type - should only show the memo
+    repo.ddb()
+        .args(["discover", "recent", "--days", "1", "--type-filter", "memo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&memo_id))
+        .stdout(predicate::str::contains("Plain Note").not());
+}
+
+#[test]
+fn discover_link_density_shows_hub() {
+    let repo = DdbTestRepo::init();
+
+    // Create a hub doogat
+    let hub_out = repo
+        .ddb()
+        .args(["create", "--title", "Hub", "--body", "Central node."])
+        .output()
+        .unwrap();
+    let hub_id = String::from_utf8_lossy(&hub_out.stdout).trim().to_string();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Create two doogats that link to the hub
+    repo.ddb()
+        .args([
+            "create",
+            "--title",
+            "Spoke A",
+            "--body",
+            &format!("Links to [[{hub_id}]]."),
+        ])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    repo.ddb()
+        .args([
+            "create",
+            "--title",
+            "Spoke B",
+            "--body",
+            &format!("Also links to [[{hub_id}]]."),
+        ])
+        .assert()
+        .success();
+
+    repo.ddb().arg("reindex").assert().success();
+
+    // Hub should appear with inbound links
+    repo.ddb()
+        .args(["discover", "link-density"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&hub_id))
+        .stdout(predicate::str::contains("density:"));
+}
+
+#[test]
+fn discover_link_density_type_filter() {
+    let repo = DdbTestRepo::init();
+
+    repo.ddb()
+        .args(["query", "CREATE TABLE article (content TEXT)"])
+        .assert()
+        .success();
+
+    repo.ddb()
+        .args([
+            "create",
+            "--title",
+            "Article One",
+            "--type",
+            "article",
+            "--body",
+            "First article.",
+        ])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    repo.ddb()
+        .args([
+            "create",
+            "--title",
+            "Random Note",
+            "--body",
+            "Not an article.",
+        ])
+        .assert()
+        .success();
+
+    repo.ddb().arg("reindex").assert().success();
+
+    // Filter by article - should only show articles
+    let output = repo
+        .ddb()
+        .args(["discover", "link-density", "--type-filter", "article"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Article One"));
+    assert!(!stdout.contains("Random Note"));
+}
