@@ -446,6 +446,12 @@ pub fn build_schema(
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)).description("JSON object of frontmatter key-value pairs for typed columns."));
 
+    let conflict_action_enum = Enum::new("ConflictAction")
+        .description("Action to take when a unique constraint violation occurs during creation.")
+        .item(EnumItem::new("ERROR").description("Fail with an error (default)."))
+        .item(EnumItem::new("IGNORE").description("Skip creation and return the existing doogat."));
+
+
     let update_input = InputObject::new("UpdateDoogatInput")
         .description("Input for updating an existing doogat. Omitted fields are left unchanged.")
         .field(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
@@ -1512,8 +1518,12 @@ pub fn build_schema(
                         .get("type")
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
+                    let on_conflict = match ctx.args.get("onConflict").map(|v| v.enum_name().ok().map(|s| s.to_string())) {
+                        Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
+                        _ => ConflictAction::Error,
+                    };
                     let z = a
-                        .create_doogat(title, content, tags, doogat_type, ConflictAction::Error)
+                        .create_doogat(title, content, tags, doogat_type, on_conflict)
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
@@ -1523,6 +1533,7 @@ pub fn build_schema(
                 "input",
                 TypeRef::named_nn("CreateDoogatInput"),
             ).description("The doogat to create."))
+            .argument(InputValue::new("onConflict", TypeRef::named("ConflictAction")).description("Action on unique constraint conflict. Defaults to ERROR."))
             .description("Create a new doogat with a title, optional content, tags, and type."),
         );
     }
@@ -1633,6 +1644,10 @@ pub fn build_schema(
                 |ctx| {
                     FieldFuture::new(async move {
                         let a = ctx.data::<ActorHandle>()?;
+                        let on_conflict = match ctx.args.get("onConflict").map(|v| v.enum_name().ok().map(|s| s.to_string())) {
+                            Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
+                            _ => ConflictAction::Error,
+                        };
                         let inputs_val = ctx.args.try_get("inputs")?.list()?;
                         let mut inputs = Vec::with_capacity(inputs_val.len());
                         for item in inputs_val.iter() {
@@ -1681,7 +1696,7 @@ pub fn build_schema(
                                 tags,
                                 doogat_type,
                                 fields,
-                                on_conflict: ConflictAction::Error,
+                                on_conflict,
                             });
                         }
                         let results =
@@ -1700,7 +1715,8 @@ pub fn build_schema(
             .argument(InputValue::new(
                 "inputs",
                 TypeRef::named_nn_list_nn("CreateManyItemInput"),
-            ).description("List of doogats to create atomically.")),
+            ).description("List of doogats to create atomically."))
+            .argument(InputValue::new("onConflict", TypeRef::named("ConflictAction")).description("Action on unique constraint conflict. Defaults to ERROR.")),
         );
     }
 
@@ -2350,6 +2366,7 @@ pub fn build_schema(
     .register(create_many_item_input)
     .register(update_input)
     .register(search_field_filter_input)
+    .register(conflict_action_enum)
     .register(attachment_type)
     .register(checkbox_item_type)
     .register(unlinked_mention_type)
