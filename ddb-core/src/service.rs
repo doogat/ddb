@@ -278,6 +278,13 @@ impl DoogatService {
             parsed.meta.extra.insert(key.clone(), value.clone());
         }
 
+        // Validate fields against typedef schema if this is a typed doogat with field changes
+        if !extra.set.is_empty() || !extra.unset.is_empty() {
+            if let Some(ref type_name) = parsed.meta.doogat_type {
+                self.validate_fields_against_schema(type_name, &parsed.meta.extra)?;
+            }
+        }
+
         let new_content = parser::serialize(&parsed);
         self.repo
             .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
@@ -700,6 +707,62 @@ impl DoogatService {
         let parsed = parser::parse(content, &rel_path)?;
         self.index.index_doogat(&parsed)?;
         self.nosql_index_doogat(&parsed);
+        Ok(())
+    }
+
+    /// Validate extra fields against the typedef schema for allowed_values and FK constraints.
+    fn validate_fields_against_schema(
+        &self,
+        type_name: &str,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let schemas = self.list_type_schemas()?;
+        let schema = match schemas.iter().find(|s| s.table_name == type_name) {
+            Some(s) => s,
+            None => return Ok(()), // no schema = no validation
+        };
+        for col in &schema.columns {
+            // Validate allowed_values
+            if let Some(ref allowed) = col.allowed_values {
+                if let Some(val) = extra.get(&col.name) {
+                    let val_str = match val {
+                        crate::types::Value::String(s) => s.clone(),
+                        other => format!("{other:?}"),
+                    };
+                    if !allowed.contains(&val_str) {
+                        return Err(DoogatError::Validation(format!(
+                            "field '{}' value '{}' not in allowed values: {:?}",
+                            col.name, val_str, allowed
+                        )));
+                    }
+                }
+            }
+            // Validate FK references
+            if let Some(ref _ref_table) = col.references {
+                if let Some(val) = extra.get(&col.name) {
+                    let val_str = match val {
+                        crate::types::Value::String(s) => s.clone(),
+                        other => format!("{other:?}"),
+                    };
+                    let exists = self
+                        .index
+                        .query_raw_with_params(
+                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
+                            &[rusqlite::types::Value::Text(val_str.clone())],
+                        )?
+                        .first()
+                        .and_then(|r| r.first())
+                        .map(|v| v == "1")
+                        .unwrap_or(false);
+                    if !exists {
+                        return Err(DoogatError::Validation(format!(
+                            "field '{}' references non-existent doogat '{}'",
+                            col.name, val_str
+                        )));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
