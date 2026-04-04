@@ -642,5 +642,58 @@ if ($UPSERT_ID3 -eq $UPSERT_ID1) { throw "upsert: non-duplicate should create ne
 ddb query "DROP TABLE upsert_test CASCADE" | Out-Null
 pass "ON CONFLICT DO NOTHING (upsert)"
 
+# 28. typed field updates via GraphQL (server round-trip)
+$TFU_PORT = 19200 + (Get-Random -Minimum 0 -Maximum 800)
+$tfuProc = Start-Process -FilePath $DDB -ArgumentList "serve","--port","$TFU_PORT" -PassThru -NoNewWindow
+$TFU_TOKEN = if (Test-Path "~/.config/ddb/token") { Get-Content "~/.config/ddb/token" } else { "" }
+for ($i = 0; $i -lt 20; $i++) {
+    try {
+        $null = Invoke-RestMethod -Uri "http://127.0.0.1:$TFU_PORT/graphql" `
+            -Method Post -ContentType "application/json" `
+            -Headers @{ Authorization = "Bearer $TFU_TOKEN" } `
+            -Body '{"query":"{ typeDefs { name } }"}'
+        break
+    } catch { Start-Sleep -Milliseconds 200 }
+}
+function tfu_gql($body) {
+    $resp = Invoke-RestMethod -Uri "http://127.0.0.1:$TFU_PORT/graphql" `
+        -Method Post -ContentType "application/json" `
+        -Headers @{ Authorization = "Bearer $TFU_TOKEN" } `
+        -Body $body
+    return ($resp | ConvertTo-Json -Depth 10 -Compress)
+}
+# Create typedef with VARCHAR(200) column
+$output = tfu_gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tfubookmark (url VARCHAR(200))\") { message } }"}'
+if ($output -notmatch "table tfubookmark created") { throw "create tfubookmark failed: $output" }
+# Create a typed doogat via SQL INSERT
+$output = tfu_gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tfubookmark (title, url) VALUES (\\\"TFU Test\\\", \\\"https://old.com\\\")\") { message } }"}'
+$TFU_ID = if ($output -match '"message":"(\d{14})"') { $Matches[1] } else { throw "insert tfubookmark bad id: $output" }
+# Verify initial materialized row
+$output = tfu_gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+if ($output -notmatch "https://old.com") { throw "initial url not found: $output" }
+# updateDoogat with fields to change url
+$output = tfu_gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$TFU_ID\`", fields: \`"{\\\`"url\\\`":\\\`"https://updated.com\\\`"}\`" }) { id } }`"}"
+if ($output -notmatch $TFU_ID) { throw "updateDoogat fields failed: $output" }
+# Verify via SQL SELECT that materialized row has updated url
+$output = tfu_gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+if ($output -notmatch "https://updated.com") { throw "url not updated: $output" }
+pass "typed field update via GraphQL"
+# updateDoogat with unsetFields to remove url
+$output = tfu_gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$TFU_ID\`", unsetFields: [\`"url\`"] }) { id } }`"}"
+if ($output -notmatch $TFU_ID) { throw "updateDoogat unsetFields failed: $output" }
+# Verify url is gone (NULL)
+$output = tfu_gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+if ($output -match "https://") { throw "url should be unset after unsetFields: $output" }
+pass "typed field unset via GraphQL"
+# Delete the doogat and verify materialized row is gone
+tfu_gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TFU_ID\`") }`"}" | Out-Null
+$output = tfu_gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT COUNT(*) FROM tfubookmark WHERE id = '$TFU_ID'\`") { rows } }`"}"
+if ($output -notmatch '"0"') { throw "materialized row not cleaned after delete: $output" }
+pass "typed field delete cleans materialized row"
+# Clean up
+tfu_gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tfubookmark CASCADE\") { message } }"}' | Out-Null
+Stop-Process -Id $tfuProc.Id -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 200
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
