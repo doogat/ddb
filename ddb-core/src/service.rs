@@ -278,10 +278,17 @@ impl DoogatService {
             parsed.meta.extra.insert(key.clone(), value.clone());
         }
 
+        // Load schemas once if we'll need them for validation or rematerialization
+        let schemas = if parsed.meta.doogat_type.is_some() {
+            Some(self.list_type_schemas()?)
+        } else {
+            None
+        };
+
         // Validate fields against typedef schema if this is a typed doogat with field changes
         if !extra.set.is_empty() || !extra.unset.is_empty() {
-            if let Some(ref type_name) = parsed.meta.doogat_type {
-                self.validate_fields_against_schema(type_name, &parsed.meta.extra)?;
+            if let (Some(ref type_name), Some(ref schemas)) = (&parsed.meta.doogat_type, &schemas) {
+                self.validate_fields_with_schemas(schemas, type_name, &parsed.meta.extra)?;
             }
         }
 
@@ -293,8 +300,7 @@ impl DoogatService {
         self.index.index_doogat(&parsed)?;
         self.nosql_index_doogat(&parsed);
         // Rematerialize type table row if this is a typed doogat
-        if let Some(ref type_name) = parsed.meta.doogat_type {
-            let schemas = self.list_type_schemas()?;
+        if let (Some(ref type_name), Some(ref schemas)) = (&parsed.meta.doogat_type, &schemas) {
             if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
                 let id_str = parsed.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
                 self.index.materialize_single(schema, id_str, &parsed)?;
@@ -326,6 +332,9 @@ impl DoogatService {
         }
 
         self.ensure_fresh()?;
+
+        // Load schemas once for validation and rematerialization across all items
+        let schemas = self.list_type_schemas()?;
 
         // Phase 1: prepare all writes (fail-fast, no side effects)
         let mut writes: Vec<(String, String)> = Vec::with_capacity(updates.len());
@@ -361,7 +370,7 @@ impl DoogatService {
             let has_field_changes = update.fields.is_some() || update.unset_fields.is_some();
             if has_field_changes {
                 if let Some(ref type_name) = parsed.meta.doogat_type {
-                    self.validate_fields_against_schema(type_name, &parsed.meta.extra)?;
+                    self.validate_fields_with_schemas(&schemas, type_name, &parsed.meta.extra)?;
                 }
             }
 
@@ -381,7 +390,6 @@ impl DoogatService {
         )?;
 
         // Phase 3: re-parse, index, rematerialize, return
-        let schemas = self.list_type_schemas()?;
         let mut results = Vec::with_capacity(updates.len());
         for (i, (path, new_content)) in writes.iter().enumerate() {
             let mut parsed = parser::parse(new_content, path)?;
@@ -744,13 +752,14 @@ impl DoogatService {
         Ok(())
     }
 
-    /// Validate extra fields against the typedef schema for allowed_values and FK constraints.
-    fn validate_fields_against_schema(
+    /// Validate extra fields against a pre-loaded typedef schema list.
+    /// Callers load schemas once per operation to avoid redundant queries.
+    fn validate_fields_with_schemas(
         &self,
+        schemas: &[TableSchema],
         type_name: &str,
         extra: &std::collections::BTreeMap<String, crate::types::Value>,
     ) -> Result<()> {
-        let schemas = self.list_type_schemas()?;
         let schema = match schemas.iter().find(|s| s.table_name == type_name) {
             Some(s) => s,
             None => return Ok(()), // no schema = no validation
