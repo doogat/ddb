@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **sql**: `INSERT ... ON CONFLICT DO NOTHING` now returns the existing row ID for duplicates (was returning affected count)
+- **server**: `deleteDoogat` now removes orphaned rows from materialized type tables
 
 ### Changed
 
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **server**: `fields` (JSON string) and `unsetFields` ([String!]) on `updateDoogat` and `batchUpdate` mutations for type-specific field updates with allowed_values and FK validation; materialized type table rows are now updated in place after field changes
 - Upsert support: `unique_together` in typedef frontmatter creates composite unique constraints; `onConflict: IGNORE` argument on `createDoogat`/`createMany` mutations skips creation on conflict and returns the existing doogat; `createDoogat` now accepts `fields` JSON input for typed columns (matching `createMany` behavior); `INSERT ... ON CONFLICT DO NOTHING` in SQL engine
 
 - `ddb discover recent` command: list recently modified doogats with `--days N` (default 7) and `--type` filters, sorted by recency
