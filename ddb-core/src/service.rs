@@ -3575,6 +3575,101 @@ unique_together:
     }
 
     #[test]
+    fn update_field_validation_rejects_invalid_fk_reference() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        // Create a referenced type and a referring type
+        svc.execute_sql("CREATE TABLE person (name VARCHAR(100))")
+            .unwrap();
+        svc.execute_sql("CREATE TABLE task (title VARCHAR(100), assignee VARCHAR(200) REFERENCES person)")
+            .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO task (title) VALUES ('Do stuff')")
+            .unwrap();
+        let task_id = match ins {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Try to update with a non-existent FK value
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "assignee".to_string(),
+            crate::types::Value::String("99999999999999".to_string()),
+        );
+        let result = svc.update_doogat_parsed(
+            &task_id,
+            None,
+            None,
+            None,
+            None,
+            &ExtraFieldUpdates {
+                set: &fields,
+                unset: &[],
+            },
+        );
+        assert!(result.is_err(), "should reject non-existent FK");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("non-existent"),
+            "error should mention non-existent, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn update_field_validation_rejects_fk_wrong_type() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        // Create two types, one referring to the other
+        svc.execute_sql("CREATE TABLE person (name VARCHAR(100))")
+            .unwrap();
+        svc.execute_sql("CREATE TABLE project (name VARCHAR(100))")
+            .unwrap();
+        svc.execute_sql("CREATE TABLE task (title VARCHAR(100), assignee VARCHAR(200) REFERENCES person)")
+            .unwrap();
+        // Create a project (wrong target type)
+        let ins_project = svc
+            .execute_sql("INSERT INTO project (name) VALUES ('Alpha')")
+            .unwrap();
+        let project_id = match ins_project {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+        // Create a task
+        let ins_task = svc
+            .execute_sql("INSERT INTO task (title) VALUES ('Do stuff')")
+            .unwrap();
+        let task_id = match ins_task {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Try to update assignee (which references person) with a project ID
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("assignee".to_string(), crate::types::Value::String(project_id.clone()));
+        let result = svc.update_doogat_parsed(
+            &task_id,
+            None,
+            None,
+            None,
+            None,
+            &ExtraFieldUpdates {
+                set: &fields,
+                unset: &[],
+            },
+        );
+        assert!(
+            result.is_err(),
+            "should reject FK pointing to wrong target type"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("non-existent") && err_msg.contains("person"),
+            "error should mention target type 'person', got: {err_msg}"
+        );
+    }
+
+    #[test]
     fn batch_update_with_fields() {
         let (_tmp, mut svc) = fresh_svc();
 
