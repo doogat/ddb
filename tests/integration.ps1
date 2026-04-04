@@ -699,8 +699,8 @@ pass "serve: sql columns in response"
 
 # 38c2. sql format:objects returns keyed rows
 $result = gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\", format: \"objects\") { columns rows } }"}'
-if ($result -notmatch '"id":') { throw "sql format objects: missing id key in row object" }
-if ($result -notmatch '"title":') { throw "sql format objects: missing title key in row object" }
+if ($result -notmatch '\\"id\\":') { throw "sql format objects: missing id key in row object" }
+if ($result -notmatch '\\"title\\":') { throw "sql format objects: missing title key in row object" }
 pass "serve: sql format objects returns keyed rows"
 
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' | Out-Null
@@ -825,6 +825,37 @@ $CM_ID2 = $parsed.data.createMany[2].id
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID0\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID1\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID2\`") }`"}" | Out-Null
+
+# 38i. typed field updates via GraphQL (updateDoogat fields/unsetFields, deleteDoogat cleanup)
+$output = gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tfubookmark (url VARCHAR(200))\") { message } }"}'
+if ($output -notmatch "table tfubookmark created") { throw "create tfubookmark failed: $output" }
+Start-Sleep -Seconds 1
+$output = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tfubookmark (title, url) VALUES (\\\"TFU Test\\\", \\\"https://old.com\\\")\") { message } }"}'
+$TFU_ID = if ($output -match '"message":"(\d{14})"') { $Matches[1] } else { throw "insert tfubookmark bad id: $output" }
+# Verify initial materialized row
+$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+if ($output -notmatch "https://old.com") { throw "initial url not found: $output" }
+# updateDoogat with fields to change url
+$output = gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$TFU_ID\`", fields: \`"{\\\`"url\\\`":\\\`"https://updated.com\\\`"}\`" }) { id } }`"}"
+if ($output -notmatch $TFU_ID) { throw "updateDoogat fields failed: $output" }
+# Verify via SQL SELECT that materialized row has updated url
+$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+if ($output -notmatch "https://updated.com") { throw "url not updated: $output" }
+pass "serve: typed field update via GraphQL updateDoogat"
+# updateDoogat with unsetFields to remove url
+$output = gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$TFU_ID\`", unsetFields: [\`"url\`"] }) { id } }`"}"
+if ($output -notmatch $TFU_ID) { throw "updateDoogat unsetFields failed: $output" }
+# Verify url is gone (NULL)
+$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+if ($output -match "https://") { throw "url should be unset after unsetFields: $output" }
+pass "serve: typed field unset via GraphQL updateDoogat"
+# Delete the doogat and verify materialized row is gone
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TFU_ID\`") }`"}" | Out-Null
+$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT COUNT(*) FROM tfubookmark WHERE id = '$TFU_ID'\`") { rows } }`"}"
+if ($output -notmatch '\[\\"0\\"\]') { throw "materialized row not cleaned after delete: $output" }
+pass "serve: deleteDoogat cleans materialized type table row"
+# Clean up typedef
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tfubookmark CASCADE\") { message } }"}' | Out-Null
 
 # Hyphenated type names in GraphQL
 gql "{`"query`":`"mutation { executeSql(sql: \`"CREATE TABLE \\\`"test-widget\\\`" (status TEXT, priority INTEGER)\`") { message } }`"}" | Out-Null

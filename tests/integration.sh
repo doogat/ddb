@@ -676,8 +676,8 @@ pass "serve: sql columns in response"
 
 # 38c2. sql format:objects returns keyed rows
 RESULT=$(gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\", format: \"objects\") { columns rows } }"}')
-echo "$RESULT" | grep -q '"id":'
-echo "$RESULT" | grep -q '"title":'
+echo "$RESULT" | grep -qF '\"id\":'
+echo "$RESULT" | grep -qF '\"title\":'
 pass "serve: sql format objects returns keyed rows"
 
 sleep 1
@@ -808,6 +808,36 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID0\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID1\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID2\\\") }\"}" >/dev/null
 
+# 38i. typed field updates via GraphQL (updateDoogat fields/unsetFields, deleteDoogat cleanup)
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tfubookmark (url VARCHAR(200))\") { message } }"}' | grep -q "table tfubookmark created"
+sleep 1
+TFU_ID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tfubookmark (title, url) VALUES (\\\"TFU Test\\\", \\\"https://old.com\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+echo "$TFU_ID" | grep -qE "^[0-9]{14}$"
+# Verify initial materialized row
+gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\\\", format: \\\"objects\\\") { rows } }\"}" | grep -q "https://old.com"
+# updateDoogat with fields to change url
+TFU_UPD=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$TFU_ID\\\", fields: \\\"{\\\\\\\"url\\\\\\\":\\\\\\\"https://updated.com\\\\\\\"}\\\" }) { id } }\"}")
+echo "$TFU_UPD" | grep -q "$TFU_ID"
+# Verify via SQL SELECT that materialized row has updated url
+gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\\\", format: \\\"objects\\\") { rows } }\"}" | grep -q "https://updated.com"
+pass "serve: typed field update via GraphQL updateDoogat"
+# updateDoogat with unsetFields to remove url
+TFU_UNSET=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$TFU_ID\\\", unsetFields: [\\\"url\\\"] }) { id } }\"}")
+echo "$TFU_UNSET" | grep -q "$TFU_ID"
+# Verify url is gone (NULL)
+TFU_AFTER=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\\\", format: \\\"objects\\\") { rows } }\"}")
+if echo "$TFU_AFTER" | grep -q "https://"; then
+  echo "FAIL: url should be unset after unsetFields" >&2; exit 1
+fi
+pass "serve: typed field unset via GraphQL updateDoogat"
+# Delete the doogat and verify materialized row is gone
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TFU_ID\\\") }\"}" >/dev/null
+TFU_COUNT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM tfubookmark WHERE id = '$TFU_ID'\\\") { rows } }\"}")
+echo "$TFU_COUNT" | grep -qF '[\"0\"]'
+pass "serve: deleteDoogat cleans materialized type table row"
+# Clean up typedef
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tfubookmark CASCADE\") { message } }"}' >/dev/null
+
 # Hyphenated type names in GraphQL
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"test-widget\\\" (status TEXT, priority INTEGER)\") { message } }"}' >/dev/null
 sleep 1
@@ -918,7 +948,7 @@ git add -A && git commit -m "add unique_together to upsertgql" --quiet
 $DDB reindex >/dev/null
 CM1=$(gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"first\\\"}\"}]) { id title } }"}')
 CM1_ID=$(echo "$CM1" | jq -r '.data.createMany[0].id')
-[ -n "$CM1_ID" ]
+[ -n "$CM1_ID" ] && [ "$CM1_ID" != "null" ]
 CM2=$(gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA Dup\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"second\\\"}\"}], onConflict: IGNORE) { id title } }"}')
 CM2_ID=$(echo "$CM2" | jq -r '.data.createMany[0].id')
 [ "$CM2_ID" = "$CM1_ID" ]
