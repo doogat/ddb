@@ -462,7 +462,9 @@ pub fn build_schema(
             "tags",
             TypeRef::named_list(TypeRef::STRING),
         ))
-        .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)));
+        .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
+        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)).description("JSON object of type-specific field key-value pairs to set."))
+        .field(InputValue::new("unsetFields", TypeRef::named_list(TypeRef::STRING)).description("Type-specific field names to remove."));
 
     let search_field_filter_input = InputObject::new("SearchFieldFilter")
         .description("Filter condition for structured field-based search filtering.")
