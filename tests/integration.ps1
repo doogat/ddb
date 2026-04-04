@@ -355,8 +355,8 @@ if ($result -notmatch '"totalCount":1') { throw "search phrase: expected 1, got 
 pass "serve: search quoted phrase"
 
 $result = try { gql '{"query":"{ search(query: \"AND AND\") { totalCount } }"}' } catch { $_.Exception.Message }
-if ($result -notmatch 'BAD_REQUEST') { throw "search malformed: expected BAD_REQUEST, got $result" }
-pass "serve: search malformed query returns BAD_REQUEST"
+if ($result -notmatch 'invalid search query') { throw "search malformed: expected error message, got $result" }
+pass "serve: search malformed query returns error"
 
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ1_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ2_ID\`") }`"}" | Out-Null

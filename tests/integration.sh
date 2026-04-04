@@ -311,8 +311,8 @@ COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
 pass "serve: search quoted phrase"
 
 RESULT=$(gql '{"query":"{ search(query: \"AND AND\") { totalCount } }"}' 2>&1 || true)
-echo "$RESULT" | grep -q "BAD_REQUEST"
-pass "serve: search malformed query returns BAD_REQUEST"
+echo "$RESULT" | grep -q "invalid search query"
+pass "serve: search malformed query returns error"
 
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ1_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BQ2_ID\\\") }\"}" >/dev/null
