@@ -203,10 +203,10 @@ input SearchFieldFilter {
 
 ```graphql
 type Mutation {
-  createDoogat(input: CreateDoogatInput!): Doogat!
+  createDoogat(input: CreateDoogatInput!, onConflict: ConflictAction): Doogat!
   updateDoogat(input: UpdateDoogatInput!): Doogat!
   batchUpdate(updates: [UpdateDoogatInput!]!): [Doogat!]!
-  createMany(inputs: [CreateManyItemInput!]!): [Doogat!]!
+  createMany(inputs: [CreateManyItemInput!]!, onConflict: ConflictAction): [Doogat!]!
   deleteDoogat(id: ID!): Boolean!
   executeSql(sql: String!, format: String): SqlResult!
   executeBatch(statements: [String!]!, format: String): [SqlResult!]!
@@ -220,6 +220,8 @@ input CreateDoogatInput { title: String!, content: String, tags: [String!], type
 input CreateManyItemInput { title: String!, content: String, tags: [String!], type: String, fields: String }
 input UpdateDoogatInput { id: ID!, title: String, content: String, tags: [String!], type: String }
 input AttachFileInput { doogatId: ID!, filename: String!, dataBase64: String!, mime: String }
+
+enum ConflictAction { ERROR, IGNORE }
 
 type SyncResult {
   direction: String!
@@ -238,6 +240,8 @@ type CompactResult {
 `batchUpdate` applies multiple updates atomically in a single git commit. All updates must succeed or none are applied. If any ID is not found, the entire batch fails with no changes committed. An empty updates array returns an empty array with no git commit. Reuses `UpdateDoogatInput` so any fields accepted by `updateDoogat` work in a batch.
 
 `createMany` creates multiple doogats atomically in a single git commit. All records are created or none (rollback on any failure). Returns created records in input order. The optional `fields` parameter accepts a JSON string of key-value pairs for typed columns (e.g. `"{\"category\":\"books\",\"priority\":\"1\"}"`). When the record has a type with a typedef, column defaults (including `DEFAULT NEXT` auto-increment) are resolved automatically for omitted fields. Allowed-value and foreign-key constraints are validated per record.
+
+Both `createDoogat` and `createMany` accept an optional `onConflict` argument. When set to `IGNORE`, if the new record would violate a `unique_together` constraint on the typedef, creation is skipped and the existing doogat is returned instead. When omitted or set to `ERROR` (default), a unique constraint violation returns an error. The pre-check matches field values against the `_ddb_fields` index, so the caller must pass the constrained fields via the `fields` parameter on `CreateManyItemInput`.
 
 `sync` defaults to `remote: "origin"`, `branch: "master"` (override via arguments for repos using a different default branch). Returns an error if no remote is configured.
 `compact` defaults to `force: false`. When no node is registered, returns a no-op report (zeros).

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Upsert support: `unique_together` in typedef frontmatter creates composite unique constraints; `onConflict: IGNORE` argument on `createDoogat`/`createMany` mutations skips creation on conflict and returns the existing doogat
+
 - `ddb discover recent` command: list recently modified doogats with `--days N` (default 7) and `--type` filters, sorted by recency
 - `ddb discover link-density` command: show inbound/outbound link counts and density score per doogat with `--type` filter, sorted by density descending
 - Raw ID scalar field on REFERENCES columns: `category_id` returns the raw reference ID alongside the existing `category` resolved object; for `_id` suffix columns (e.g., `link_id`), the scalar keeps the original name and a stripped resolver (`link`) is added
@@ -71,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-03-26
 
 ### Added
+
+- Upsert support: `unique_together` in typedef frontmatter creates composite unique constraints; `onConflict: IGNORE` argument on `createDoogat`/`createMany` mutations skips creation on conflict and returns the existing doogat
 
 - CLI (`ddb`) with CRUD operations: `init`, `create`, `read`, `update`, `delete`, `list`, `status`
 - Git-backed storage layer with full version history

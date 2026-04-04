@@ -154,6 +154,24 @@ For each distinct type in the index:
 
 Also creates empty tables for typedef-only types with no data doogats.
 
+### unique_together constraints
+
+Typedefs can declare composite unique constraints via the `unique_together` frontmatter field. The value is a list of column-name lists:
+
+```yaml
+unique_together:
+  - - code
+  - - tenant_id
+    - email
+```
+
+During materialization (`drop_and_create_materialized_table`), each group generates a `CREATE UNIQUE INDEX` on the materialized type table. These indexes enforce uniqueness at the SQLite level for direct SQL inserts.
+
+For GraphQL mutations, the `batch_create` service method performs a pre-check before writing: it queries the `_ddb_fields` key-value index to detect existing doogats matching the constrained columns. When a match is found, the behavior depends on the `ConflictAction`:
+
+- `Error` (default): returns a validation error
+- `Ignore`: skips creation and returns the existing doogat
+
 ## Consistency Warnings
 
 `collect_consistency_warnings(repo: &GitRepo) -> Vec<ConsistencyWarning>`
