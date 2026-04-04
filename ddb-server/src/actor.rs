@@ -17,6 +17,17 @@ use crate::events::{EventBus, EventKind, DoogatEvent};
 /// Serializable result from the actor.
 pub type ActorResult<T> = Result<T, DoogatError>;
 
+/// Parameters for updating a single doogat through the actor.
+pub struct UpdateDoogatParams {
+    pub id: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub doogat_type: Option<String>,
+    pub fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
+    pub unset_fields: Vec<String>,
+}
+
 /// Commands the actor understands.
 pub enum ActorCommand {
     GetDoogat {
@@ -310,23 +321,17 @@ impl ActorHandle {
 
     pub async fn update_doogat(
         &self,
-        id: String,
-        title: Option<String>,
-        body: Option<String>,
-        tags: Option<Vec<String>>,
-        doogat_type: Option<String>,
-        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
-        unset_fields: Vec<String>,
+        params: UpdateDoogatParams,
     ) -> ActorResult<ParsedDoogat> {
         match self
             .send(ActorCommand::UpdateDoogat {
-                id,
-                title,
-                body,
-                tags,
-                doogat_type,
-                fields,
-                unset_fields,
+                id: params.id,
+                title: params.title,
+                body: params.body,
+                tags: params.tags,
+                doogat_type: params.doogat_type,
+                fields: params.fields,
+                unset_fields: params.unset_fields,
             })
             .await
         {

@@ -345,7 +345,10 @@ async fn update_doogat(
     };
     let unset_fields = body.unset_fields.unwrap_or_default();
     let z = actor
-        .update_doogat(id, body.title, body.body, body.tags, body.doogat_type, fields, unset_fields)
+        .update_doogat(crate::actor::UpdateDoogatParams {
+            id, title: body.title, body: body.body, tags: body.tags,
+            doogat_type: body.doogat_type, fields, unset_fields,
+        })
         .await
         .map_err(rest_error)?;
     Ok(Json(SingleResponse {

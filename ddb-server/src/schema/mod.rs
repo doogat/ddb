@@ -1617,7 +1617,9 @@ pub fn build_schema(
                         })
                         .unwrap_or_default();
                     let z = a
-                        .update_doogat(id, title, content, tags, doogat_type, fields, unset_fields)
+                        .update_doogat(crate::actor::UpdateDoogatParams {
+                            id, title, body: content, tags, doogat_type, fields, unset_fields,
+                        })
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
