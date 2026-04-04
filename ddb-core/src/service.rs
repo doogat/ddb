@@ -3488,6 +3488,21 @@ unique_together:
             *parsed.meta.extra.get("url").unwrap(),
             crate::types::Value::String("https://new.example.com".to_string()),
         );
+
+        // Verify the materialized type table row was updated
+        let sel = svc
+            .execute_sql(&format!("SELECT url FROM bookmark WHERE id = '{id}'"))
+            .unwrap();
+        match sel {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1, "expected 1 materialized row");
+                assert_eq!(
+                    rows[0][0], "https://new.example.com",
+                    "materialized url should reflect update"
+                );
+            }
+            _ => panic!("expected rows"),
+        }
     }
 
     #[test]
@@ -3531,6 +3546,23 @@ unique_together:
             !parsed.meta.extra.contains_key("url"),
             "url field should be removed from frontmatter"
         );
+
+        // Verify the materialized type table row has NULL url
+        let sel = svc
+            .execute_sql(&format!("SELECT url FROM link WHERE id = '{id}'"))
+            .unwrap();
+        match sel {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1, "row should still exist");
+                // NULL is represented as empty string in the SQL result rows
+                assert!(
+                    rows[0][0].is_empty() || rows[0][0] == "NULL",
+                    "materialized url should be null/empty after unset, got: {:?}",
+                    rows[0][0]
+                );
+            }
+            _ => panic!("expected rows"),
+        }
     }
 
     #[test]
