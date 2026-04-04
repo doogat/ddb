@@ -726,9 +726,14 @@ impl DoogatService {
         // Update index
         self.index.remove_doogat(id)?;
         self.nosql_remove_doogat(id);
-        // Cascade: remove junction table rows referencing deleted doogat
+        // Cascade: remove materialized type table row and junction table rows
         if let Some(ref dtype) = doogat_type {
             if !dtype.is_empty() && dtype != "_typedef" {
+                // Remove from materialized type table (ignore error if table doesn't exist)
+                let _ = self.index.conn.execute(
+                    &format!("DELETE FROM \"{}\" WHERE id = ?1", dtype),
+                    params![id],
+                );
                 self.index.cascade_junction_cleanup(&self.repo, dtype, id)?;
             }
         }
@@ -3255,5 +3260,58 @@ unique_together:
             result.is_err(),
             "duplicate insert with on_conflict: Error must return an error"
         );
+    }
+
+    #[test]
+    fn delete_doogat_cleans_materialized_row() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        // Create type table and insert via SQL (which materializes the row)
+        svc.execute_sql("CREATE TABLE project (name TEXT)")
+            .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO project (name) VALUES ('Alpha')")
+            .unwrap();
+        let id = match ins {
+            SqlResult::Ok(msg) => {
+                // Extract ID from message like "created <id>"
+                msg.split_whitespace().last().unwrap().to_string()
+            }
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Verify materialized row exists
+        let sel = svc
+            .execute_sql(&format!("SELECT name FROM project WHERE id = '{id}'"))
+            .unwrap();
+        match sel {
+            SqlResult::Rows { rows, .. } => assert_eq!(rows.len(), 1, "materialized row should exist before delete"),
+            _ => panic!("expected rows"),
+        }
+
+        // Delete the doogat via service path (not SQL DELETE)
+        svc.delete_doogat(&id, "delete test").unwrap();
+
+        // Verify materialized row is gone
+        let sel = svc
+            .execute_sql("SELECT COUNT(*) FROM project")
+            .unwrap();
+        match sel {
+            SqlResult::Rows { rows, .. } => assert_eq!(rows[0][0], "0", "materialized row should be removed after delete"),
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn delete_untyped_doogat_no_error() {
+        let (_tmp, svc) = fresh_svc();
+
+        let id = svc
+            .create_doogat("Untyped Note", &[], None, "body")
+            .unwrap();
+
+        // Delete should succeed without error even though there's no type table
+        svc.delete_doogat(&id, "delete test").unwrap();
+        assert!(svc.read_doogat(&id).is_err());
     }
 }
