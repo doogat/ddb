@@ -151,8 +151,6 @@ fn batch_update_with_per_item_fields() {
         .trim()
         .to_string();
 
-    std::thread::sleep(std::time::Duration::from_secs(1));
-
     let r2 = exec_sql(
         &server,
         "INSERT INTO bookmark (title, url) VALUES ('Batch B', 'https://b.com')",
