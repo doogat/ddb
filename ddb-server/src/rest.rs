@@ -11,7 +11,7 @@ use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
 use ddb_core::error::DoogatError;
 use ddb_core::service::SORTABLE_COLUMNS;
-use ddb_core::types::{ListFilter, ParsedDoogat, SearchFilters, Value as DdbValue};
+use ddb_core::types::{ConflictAction, ListFilter, ParsedDoogat, SearchFilters, Value as DdbValue};
 
 // ── Query / body types ───────────────────────────────────────────
 
@@ -310,7 +310,7 @@ async fn create_doogat(
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<SingleResponse>), (StatusCode, Json<ErrorBody>)> {
     let z = actor
-        .create_doogat(body.title, body.body, body.tags, body.doogat_type)
+        .create_doogat(body.title, body.body, body.tags, body.doogat_type, ConflictAction::Error)
         .await
         .map_err(rest_error)?;
     Ok((

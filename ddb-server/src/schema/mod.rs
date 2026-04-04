@@ -1513,7 +1513,7 @@ pub fn build_schema(
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
                     let z = a
-                        .create_doogat(title, content, tags, doogat_type)
+                        .create_doogat(title, content, tags, doogat_type, ConflictAction::Error)
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))

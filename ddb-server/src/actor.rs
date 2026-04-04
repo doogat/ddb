@@ -6,9 +6,10 @@ use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
-    BatchCreateInput, BatchUpdateInput, BrokenSequence, CompactOptions, CompactionReport, ListFilter,
-    MaintenanceReport, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SearchFilters,
-    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, UnlinkedMention,
+    BatchCreateInput, BatchUpdateInput, BrokenSequence, CompactOptions, CompactionReport,
+    ConflictAction, ListFilter, MaintenanceReport, OrphanDoogat, PaginatedSearchResult,
+    ParsedDoogat, SearchFilters, SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport,
+    TableSchema, UnlinkedMention,
 };
 
 use crate::events::{EventBus, EventKind, DoogatEvent};
@@ -40,6 +41,7 @@ pub enum ActorCommand {
         body: Option<String>,
         tags: Vec<String>,
         doogat_type: Option<String>,
+        on_conflict: ConflictAction,
     },
     UpdateDoogat {
         id: String,
@@ -284,6 +286,7 @@ impl ActorHandle {
         body: Option<String>,
         tags: Vec<String>,
         doogat_type: Option<String>,
+        on_conflict: ConflictAction,
     ) -> ActorResult<ParsedDoogat> {
         match self
             .send(ActorCommand::CreateDoogat {
@@ -291,6 +294,7 @@ impl ActorHandle {
                 body,
                 tags,
                 doogat_type,
+                on_conflict,
             })
             .await
         {
@@ -733,13 +737,23 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
             body,
             tags,
             doogat_type,
+            on_conflict,
         } => {
-            let result = svc.create_doogat_parsed(
-                &title,
-                &tags,
-                doogat_type.as_deref(),
-                &body.unwrap_or_default(),
-            );
+            let input = BatchCreateInput {
+                title,
+                body,
+                tags,
+                doogat_type,
+                fields: std::collections::BTreeMap::new(),
+                on_conflict,
+            };
+            let result = svc
+                .batch_create(&[input])
+                .and_then(|mut v| {
+                    v.pop().ok_or_else(|| {
+                        ddb_core::error::DoogatError::Validation("no doogat created".into())
+                    })
+                });
             ActorReply::Doogat(Box::new(result))
         }
         ActorCommand::UpdateDoogat {
