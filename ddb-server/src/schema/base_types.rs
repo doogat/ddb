@@ -6,7 +6,7 @@ use async_graphql::{Name, Value as GqlValue};
 use indexmap::IndexMap;
 use tokio::sync::broadcast;
 use ddb_core::sql_engine::SqlResult;
-use ddb_core::types::{ColumnDef, ParsedDoogat, SearchResult, TableSchema, Zone};
+use ddb_core::types::{ColumnDef, ParsedDoogat, SearchResult, TableSchema, Value, Zone};
 
 use crate::events;
 
@@ -15,6 +15,17 @@ use crate::events;
 /// Map of type name → TableSchema, accessible to resolvers via `ctx.data()`.
 #[derive(Clone)]
 pub(crate) struct TypeSchemaMap(pub Arc<HashMap<String, TableSchema>>);
+
+/// Parse a JSON string of type-specific fields into a BTreeMap keyed by column name.
+/// All values are converted to `Value::String` since the transport layers only accept strings.
+/// Returns a plain String error; callers wrap it in their transport-specific error type.
+pub(crate) fn parse_fields_json(
+    json_str: &str,
+) -> Result<std::collections::BTreeMap<String, Value>, String> {
+    let map: std::collections::BTreeMap<String, String> = serde_json::from_str(json_str)
+        .map_err(|e| format!("invalid fields JSON: {e}"))?;
+    Ok(map.into_iter().map(|(k, v)| (k, Value::String(v))).collect())
+}
 
 // -- Value converters --
 
@@ -778,8 +789,8 @@ pub(crate) fn build_typed_object(
                     })
                 },
             ));
-        } else {
-            // Non-REFERENCES scalar field
+        } else if !BASE_DOOGAT_FIELDS.contains(&gql_col_name.as_str()) {
+            // Non-REFERENCES scalar field (skip if name collides with base doogat fields)
             let gql_type = column_to_gql_type(col);
             let col_name = col.name.clone();
             obj = obj.field(Field::new(&gql_col_name, gql_type, move |ctx| {

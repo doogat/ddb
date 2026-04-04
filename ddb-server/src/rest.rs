@@ -330,17 +330,8 @@ async fn update_doogat(
     Json(body): Json<UpdateBody>,
 ) -> Result<Json<SingleResponse>, (StatusCode, Json<ErrorBody>)> {
     let fields = match body.fields {
-        Some(json_str) => {
-            let map: std::collections::BTreeMap<String, String> =
-                serde_json::from_str(&json_str).map_err(|e| {
-                    rest_error(ddb_core::error::DoogatError::Validation(
-                        format!("invalid fields JSON: {e}"),
-                    ))
-                })?;
-            map.into_iter()
-                .map(|(k, v)| (k, ddb_core::types::Value::String(v)))
-                .collect()
-        }
+        Some(json_str) => crate::schema::parse_fields_json(&json_str)
+            .map_err(|msg| rest_error(ddb_core::error::DoogatError::Validation(msg)))?,
         None => std::collections::BTreeMap::new(),
     };
     let unset_fields = body.unset_fields.unwrap_or_default();

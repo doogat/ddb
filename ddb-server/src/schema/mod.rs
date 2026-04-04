@@ -1,5 +1,5 @@
 mod base_types;
-pub(crate) use base_types::{resolve_column, sanitize_field_name, sanitize_type_name};
+pub(crate) use base_types::{parse_fields_json, resolve_column, sanitize_field_name, sanitize_type_name};
 use base_types::*;
 
 use async_graphql::dynamic::*;
@@ -1525,20 +1525,8 @@ pub fn build_schema(
                         .get("fields")
                         .and_then(|v| v.string().ok())
                     {
-                        Some(json_str) => {
-                            let map: std::collections::BTreeMap<String, String> =
-                                serde_json::from_str(json_str).map_err(|e| {
-                                    async_graphql::ServerError::new(
-                                        format!("invalid fields JSON: {e}"),
-                                        None,
-                                    )
-                                })?;
-                            map.into_iter()
-                                .map(|(k, v)| {
-                                    (k, ddb_core::types::Value::String(v))
-                                })
-                                .collect()
-                        }
+                        Some(json_str) => parse_fields_json(json_str)
+                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
                         None => std::collections::BTreeMap::new(),
                     };
                     let on_conflict = match ctx.args.get("onConflict").map(|v| v.enum_name().ok().map(|s| s.to_string())) {
@@ -1591,20 +1579,8 @@ pub fn build_schema(
                         .get("fields")
                         .and_then(|v| v.string().ok())
                     {
-                        Some(json_str) => {
-                            let map: std::collections::BTreeMap<String, String> =
-                                serde_json::from_str(json_str).map_err(|e| {
-                                    async_graphql::ServerError::new(
-                                        format!("invalid fields JSON: {e}"),
-                                        None,
-                                    )
-                                })?;
-                            map.into_iter()
-                                .map(|(k, v)| {
-                                    (k, ddb_core::types::Value::String(v))
-                                })
-                                .collect()
-                        }
+                        Some(json_str) => parse_fields_json(json_str)
+                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
                         None => std::collections::BTreeMap::new(),
                     };
                     let unset_fields: Vec<String> = input
@@ -1669,22 +1645,10 @@ pub fn build_schema(
                                 .get("fields")
                                 .and_then(|v| v.string().ok())
                             {
-                                Some(json_str) => {
-                                    let map: std::collections::BTreeMap<String, String> =
-                                        serde_json::from_str(json_str).map_err(|e| {
-                                            async_graphql::ServerError::new(
-                                                format!("invalid fields JSON: {e}"),
-                                                None,
-                                            )
-                                        })?;
-                                    Some(
-                                        map.into_iter()
-                                            .map(|(k, v)| {
-                                                (k, ddb_core::types::Value::String(v))
-                                            })
-                                            .collect(),
-                                    )
-                                }
+                                Some(json_str) => Some(
+                                    parse_fields_json(json_str)
+                                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
+                                ),
                                 None => None,
                             };
                             let unset_fields: Option<Vec<String>> = obj
@@ -1760,20 +1724,8 @@ pub fn build_schema(
                                 .get("fields")
                                 .and_then(|v| v.string().ok())
                             {
-                                Some(json_str) => {
-                                    let map: std::collections::BTreeMap<String, String> =
-                                        serde_json::from_str(json_str).map_err(|e| {
-                                            async_graphql::ServerError::new(
-                                                format!("invalid fields JSON: {e}"),
-                                                None,
-                                            )
-                                        })?;
-                                    map.into_iter()
-                                        .map(|(k, v)| {
-                                            (k, ddb_core::types::Value::String(v))
-                                        })
-                                        .collect()
-                                }
+                                Some(json_str) => parse_fields_json(json_str)
+                                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
                                 None => std::collections::BTreeMap::new(),
                             };
                             inputs.push(BatchCreateInput {
