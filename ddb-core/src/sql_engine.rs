@@ -679,11 +679,14 @@ impl<'a> SqlEngine<'a> {
             None => return Err(DoogatError::SqlEngine("missing VALUES clause".into())),
         };
 
-        // When ON CONFLICT DO NOTHING, filter out rows that match an existing unique_together constraint
+        // When ON CONFLICT DO NOTHING, filter out rows that match an existing unique_together
+        // constraint and capture the existing row IDs so we can return them alongside new IDs.
+        let mut on_conflict_existing: Vec<Option<String>> = Vec::new();
         let rows: Vec<Vec<String>> = if on_conflict_ignore {
             if let Some(ref constraints) = schema.unique_together {
+                on_conflict_existing = vec![None; rows.len()];
                 let mut filtered = Vec::with_capacity(rows.len());
-                'row: for row_values in rows {
+                'row: for (row_idx, row_values) in rows.into_iter().enumerate() {
                     for constraint_cols in constraints {
                         // Build WHERE clause for this constraint group
                         let where_clause: String = constraint_cols
@@ -702,19 +705,20 @@ impl<'a> SqlEngine<'a> {
                                 col_names
                                     .iter()
                                     .position(|n| n == col)
-                                    .and_then(|idx| row_values.get(idx))
+                                    .and_then(|pos| row_values.get(pos))
                                     .cloned()
                             })
                             .collect();
                         if bind_vals.len() == constraint_cols.len() {
-                            let exists: bool = self
+                            let existing_id: Option<String> = self
                                 .index
                                 .conn
-                                .query_row(&sql, rusqlite::params_from_iter(bind_vals), |_| {
-                                    Ok(true)
+                                .query_row(&sql, rusqlite::params_from_iter(bind_vals), |row| {
+                                    row.get(0)
                                 })
-                                .unwrap_or(false);
-                            if exists {
+                                .ok();
+                            if let Some(id) = existing_id {
+                                on_conflict_existing[row_idx] = Some(id);
                                 continue 'row;
                             }
                         }
@@ -892,8 +896,17 @@ impl<'a> SqlEngine<'a> {
             )?;
         }
 
-        if on_conflict_ignore {
-            Ok(SqlResult::Affected(created_ids.len()))
+        if on_conflict_ignore && !on_conflict_existing.is_empty() {
+            // Merge existing IDs (for skipped duplicates) with newly created IDs
+            let mut created_iter = created_ids.into_iter();
+            let all_ids: Vec<String> = on_conflict_existing
+                .into_iter()
+                .map(|slot| match slot {
+                    Some(id) => id,
+                    None => created_iter.next().unwrap_or_default(),
+                })
+                .collect();
+            Ok(SqlResult::Ok(all_ids.join(",")))
         } else {
             Ok(SqlResult::Ok(created_ids.join(",")))
         }
@@ -6730,24 +6743,28 @@ unique_together:
     }
 
     #[test]
-    fn on_conflict_do_nothing_skips_duplicate_row() {
+    fn on_conflict_do_nothing_returns_existing_id() {
         let (_dir, repo, index) = setup();
         setup_unique_table(&repo, &index);
         let mut engine = SqlEngine::new(&index, &repo);
 
         // First insert succeeds normally
-        engine
+        let first_result = engine
             .execute("INSERT INTO uqtest (code, label) VALUES ('ABC', 'first')")
             .unwrap();
+        let first_id = match &first_result {
+            SqlResult::Ok(id) => id.clone(),
+            other => panic!("expected Ok(id) for first insert, got {other:?}"),
+        };
 
-        // Second insert with the same unique key and ON CONFLICT DO NOTHING must be skipped
+        // Second insert with the same unique key and ON CONFLICT DO NOTHING returns existing ID
         let result = engine
             .execute("INSERT INTO uqtest (code, label) VALUES ('ABC', 'second') ON CONFLICT DO NOTHING")
             .unwrap();
 
         match result {
-            SqlResult::Affected(0) => {}
-            other => panic!("expected Affected(0) for skipped duplicate, got {other:?}"),
+            SqlResult::Ok(ref id) => assert_eq!(id, &first_id, "should return existing row ID"),
+            other => panic!("expected Ok(existing_id) for skipped duplicate, got {other:?}"),
         }
 
         // Only one row in the table - the original value is unchanged
@@ -6757,19 +6774,24 @@ unique_together:
     }
 
     #[test]
-    fn on_conflict_do_nothing_inserts_when_no_duplicate() {
+    fn on_conflict_do_nothing_returns_new_id() {
         let (_dir, repo, index) = setup();
         setup_unique_table(&repo, &index);
         let mut engine = SqlEngine::new(&index, &repo);
 
-        // No existing row - ON CONFLICT DO NOTHING should behave like a normal insert
+        // No existing row - ON CONFLICT DO NOTHING returns new ID like a normal insert
         let result = engine
-            .execute("INSERT INTO uqtest (code, label) VALUES ('XYZ', 'new') ON CONFLICT DO NOTHING")
+            .execute(
+                "INSERT INTO uqtest (code, label) VALUES ('XYZ', 'new') ON CONFLICT DO NOTHING",
+            )
             .unwrap();
 
-        match result {
-            SqlResult::Affected(1) => {}
-            other => panic!("expected Affected(1) for successful insert, got {other:?}"),
+        match &result {
+            SqlResult::Ok(id) => assert!(
+                id.chars().all(|c| c.is_ascii_digit()) && id.len() == 14,
+                "expected 14-digit ID, got: {id}"
+            ),
+            other => panic!("expected Ok with new id, got {other:?}"),
         }
 
         let rows = index.query_raw("SELECT code, label FROM uqtest").unwrap();

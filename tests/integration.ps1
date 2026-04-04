@@ -22,10 +22,6 @@ if ($env:DDB_BIN) {
 }
 $env:DDB_BIN = $DDB
 
-# --- Run smoke tests first ---
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-& "$scriptDir/smoke.ps1"
-
 # --- Integration tests ---
 function New-TempDir {
     $p = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
@@ -50,6 +46,10 @@ function Cleanup {
 }
 
 trap { Cleanup }
+
+# --- Run smoke tests first (after Cleanup is defined so trap can call it) ---
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+& "$scriptDir/smoke.ps1"
 
 Push-Location $TMPDIR
 

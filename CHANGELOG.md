@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sql**: `INSERT ... ON CONFLICT DO NOTHING` now returns the existing row ID for duplicates (was returning affected count)
+
 ### Changed
 
 - `SearchHit.fields` is now a `JSON` scalar (object) instead of a JSON string - access `hit.fields.url` directly instead of parsing `JSON.parse(hit.fields)` (breaking change for GraphQL search clients)
