@@ -32,6 +32,9 @@ pub struct UpdateBody {
     pub tags: Option<Vec<String>>,
     #[serde(rename = "type")]
     pub doogat_type: Option<String>,
+    pub fields: Option<String>,
+    #[serde(rename = "unsetFields")]
+    pub unset_fields: Option<Vec<String>>,
 }
 
 // ── Response types ───────────────────────────────────────────────
@@ -326,8 +329,23 @@ async fn update_doogat(
     Path(id): Path<String>,
     Json(body): Json<UpdateBody>,
 ) -> Result<Json<SingleResponse>, (StatusCode, Json<ErrorBody>)> {
+    let fields = match body.fields {
+        Some(json_str) => {
+            let map: std::collections::BTreeMap<String, String> =
+                serde_json::from_str(&json_str).map_err(|e| {
+                    rest_error(ddb_core::error::DoogatError::Validation(
+                        format!("invalid fields JSON: {e}"),
+                    ))
+                })?;
+            map.into_iter()
+                .map(|(k, v)| (k, ddb_core::types::Value::String(v)))
+                .collect()
+        }
+        None => std::collections::BTreeMap::new(),
+    };
+    let unset_fields = body.unset_fields.unwrap_or_default();
     let z = actor
-        .update_doogat(id, body.title, body.body, body.tags, body.doogat_type)
+        .update_doogat(id, body.title, body.body, body.tags, body.doogat_type, fields, unset_fields)
         .await
         .map_err(rest_error)?;
     Ok(Json(SingleResponse {

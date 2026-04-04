@@ -1587,8 +1587,37 @@ pub fn build_schema(
                         .get("type")
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
+                    let fields = match input
+                        .get("fields")
+                        .and_then(|v| v.string().ok())
+                    {
+                        Some(json_str) => {
+                            let map: std::collections::BTreeMap<String, String> =
+                                serde_json::from_str(json_str).map_err(|e| {
+                                    async_graphql::ServerError::new(
+                                        format!("invalid fields JSON: {e}"),
+                                        None,
+                                    )
+                                })?;
+                            map.into_iter()
+                                .map(|(k, v)| {
+                                    (k, ddb_core::types::Value::String(v))
+                                })
+                                .collect()
+                        }
+                        None => std::collections::BTreeMap::new(),
+                    };
+                    let unset_fields: Vec<String> = input
+                        .get("unsetFields")
+                        .and_then(|v| v.list().ok())
+                        .map(|l| {
+                            l.iter()
+                                .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     let z = a
-                        .update_doogat(id, title, content, tags, doogat_type)
+                        .update_doogat(id, title, content, tags, doogat_type, fields, unset_fields)
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))

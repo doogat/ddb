@@ -50,6 +50,8 @@ pub enum ActorCommand {
         body: Option<String>,
         tags: Option<Vec<String>>,
         doogat_type: Option<String>,
+        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
+        unset_fields: Vec<String>,
     },
     DeleteDoogat {
         id: String,
@@ -313,6 +315,8 @@ impl ActorHandle {
         body: Option<String>,
         tags: Option<Vec<String>>,
         doogat_type: Option<String>,
+        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
+        unset_fields: Vec<String>,
     ) -> ActorResult<ParsedDoogat> {
         match self
             .send(ActorCommand::UpdateDoogat {
@@ -321,6 +325,8 @@ impl ActorHandle {
                 body,
                 tags,
                 doogat_type,
+                fields,
+                unset_fields,
             })
             .await
         {
@@ -766,14 +772,20 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
             body,
             tags,
             doogat_type,
+            fields,
+            unset_fields,
         } => {
+            let extra = ddb_core::service::ExtraFieldUpdates {
+                set: &fields,
+                unset: &unset_fields,
+            };
             let result = svc.update_doogat_parsed(
                 &id,
                 title.as_deref(),
                 tags.as_deref(),
                 doogat_type.as_deref(),
                 body.as_deref(),
-                &ddb_core::service::ExtraFieldUpdates::default(),
+                &extra,
             );
             ActorReply::Doogat(Box::new(result))
         }
