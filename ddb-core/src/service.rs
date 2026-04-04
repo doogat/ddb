@@ -3788,6 +3788,122 @@ unique_together:
             *parsed2.meta.extra.get("url").unwrap(),
             crate::types::Value::String("https://b-new.example.com".to_string()),
         );
+
+        // Verify materialized table rows reflect the batch update
+        let sel = svc
+            .execute_sql(&format!(
+                "SELECT id, url FROM item WHERE id IN ('{id1}', '{id2}') ORDER BY id"
+            ))
+            .unwrap();
+        match sel {
+            SqlResult::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 2, "expected 2 materialized rows");
+                let urls: Vec<&str> = rows.iter().map(|r| r[1].as_str()).collect();
+                assert!(
+                    urls.contains(&"https://a-new.example.com"),
+                    "materialized row for id1 should have updated url, got urls: {urls:?}"
+                );
+                assert!(
+                    urls.contains(&"https://b-new.example.com"),
+                    "materialized row for id2 should have updated url, got urls: {urls:?}"
+                );
+            }
+            _ => panic!("expected rows"),
+        }
+    }
+
+    #[test]
+    fn batch_update_rejects_invalid_allowed_values() {
+        let (tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql(
+            "CREATE TABLE task (status ENUM('todo','doing','done') DEFAULT 'todo')",
+        )
+        .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO task (status) VALUES ('todo')")
+            .unwrap();
+        let id = match ins {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+        let commits_before = count_commits(tmp.path());
+
+        // Batch update with invalid allowed_values
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "status".to_string(),
+            crate::types::Value::String("invalid".to_string()),
+        );
+        let result = svc.batch_update(&[BatchUpdateInput {
+            id: id.clone(),
+            title: None,
+            body: None,
+            tags: None,
+            doogat_type: None,
+            fields: Some(fields),
+            unset_fields: None,
+        }]);
+        assert!(result.is_err(), "batch_update should reject invalid allowed_values");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not in allowed values"),
+            "error should mention allowed values, got: {err_msg}"
+        );
+
+        // Verify no commit was made (fail-fast in Phase 1)
+        let commits_after = count_commits(tmp.path());
+        assert_eq!(
+            commits_before, commits_after,
+            "batch_update should not commit on validation failure"
+        );
+    }
+
+    #[test]
+    fn batch_update_rejects_invalid_fk_reference() {
+        let (tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE person (name VARCHAR(100))")
+            .unwrap();
+        svc.execute_sql("CREATE TABLE task (title VARCHAR(100), assignee VARCHAR(200) REFERENCES person)")
+            .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO task (title) VALUES ('Do stuff')")
+            .unwrap();
+        let id = match ins {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+        let commits_before = count_commits(tmp.path());
+
+        // Batch update with non-existent FK
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "assignee".to_string(),
+            crate::types::Value::String("99999999999999".to_string()),
+        );
+        let result = svc.batch_update(&[BatchUpdateInput {
+            id: id.clone(),
+            title: None,
+            body: None,
+            tags: None,
+            doogat_type: None,
+            fields: Some(fields),
+            unset_fields: None,
+        }]);
+        assert!(result.is_err(), "batch_update should reject non-existent FK");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("non-existent"),
+            "error should mention non-existent, got: {err_msg}"
+        );
+
+        // Verify no commit was made
+        let commits_after = count_commits(tmp.path());
+        assert_eq!(
+            commits_before, commits_after,
+            "batch_update should not commit on FK validation failure"
+        );
     }
 
     #[test]
