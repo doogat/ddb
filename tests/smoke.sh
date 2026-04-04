@@ -522,4 +522,23 @@ echo "$NEG_ALL" | grep -q "$NEG_ID3" && { echo "FAIL: all-negative should exclud
 echo "$NEG_ALL" | grep -q "$NEG_ID1"
 pass "fts negation (all-negative query)"
 
+# 27. ON CONFLICT DO NOTHING (upsert)
+$DDB query "CREATE TABLE upsert_test (code TEXT, label TEXT)"
+# Patch typedef to add unique_together on [code]
+UPSERT_TYPEDEF=$(find ddb/_typedef -name '*.md' -exec grep -l 'title: upsert_test' {} \;)
+sed -i.bak 's/type: _typedef/type: _typedef\nunique_together:\n  - - code/' "$UPSERT_TYPEDEF"
+rm -f "${UPSERT_TYPEDEF}.bak"
+git add -A && git commit -m "add unique_together" --quiet
+$DDB reindex >/dev/null
+UPSERT_ID1=$($DDB query "INSERT INTO upsert_test (title, code, label) VALUES ('First', 'ABC', 'original')")
+echo "$UPSERT_ID1" | grep -qE "^[0-9]{14}$"
+# Duplicate with ON CONFLICT DO NOTHING should return existing ID
+UPSERT_ID2=$($DDB query "INSERT INTO upsert_test (title, code, label) VALUES ('Second', 'ABC', 'duplicate') ON CONFLICT DO NOTHING")
+[ "$UPSERT_ID2" = "$UPSERT_ID1" ]
+# Non-duplicate should create new
+UPSERT_ID3=$($DDB query "INSERT INTO upsert_test (title, code, label) VALUES ('Third', 'DEF', 'new') ON CONFLICT DO NOTHING")
+[ "$UPSERT_ID3" != "$UPSERT_ID1" ]
+$DDB query "DROP TABLE upsert_test CASCADE" | grep -q "dropped"
+pass "ON CONFLICT DO NOTHING (upsert)"
+
 echo "=== all smoke tests passed ==="

@@ -411,7 +411,10 @@ impl DoogatService {
                                     .get(partition_col)
                                     .map(|v| match v {
                                         crate::types::Value::String(s) => s.clone(),
-                                        other => format!("{other:?}"),
+                                        crate::types::Value::Number(n) => n.to_string(),
+                                        crate::types::Value::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
+                                        crate::types::Value::List(l) => format!("{l:?}"),
+                                        crate::types::Value::Map(m) => format!("{m:?}"),
                                     })
                                     .unwrap_or_default();
                                 let key = (
@@ -458,26 +461,32 @@ impl DoogatService {
                     if let Some(ref unique_groups) = schema.unique_together {
                         for group in unique_groups {
                             let mut joins = Vec::with_capacity(group.len());
-                            let mut param_vals = Vec::with_capacity(group.len() + 1);
+                            let mut param_vals: Vec<rusqlite::types::Value> = Vec::with_capacity(group.len() * 2 + 1);
                             let mut all_present = true;
                             for (i, col_name) in group.iter().enumerate() {
                                 if let Some(val) = input.fields.get(col_name) {
                                     let val_str = match val {
                                         crate::types::Value::String(s) => s.clone(),
-                                        other => format!("{other:?}"),
+                                        crate::types::Value::Number(n) => n.to_string(),
+                                        crate::types::Value::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
+                                        crate::types::Value::List(l) => format!("{l:?}"),
+                                        crate::types::Value::Map(m) => format!("{m:?}"),
                                     };
                                     let alias = format!("f{}", i + 1);
-                                    joins.push(format!(
-                                        "JOIN _ddb_fields {alias} ON \
-                                         {alias}.doogat_id = d.id AND \
-                                         {alias}.key = '{}' AND \
-                                         {alias}.value = ?{}",
-                                        col_name,
-                                        i + 1
-                                    ));
+                                    let key_idx = param_vals.len() + 1;
+                                    param_vals.push(
+                                        rusqlite::types::Value::Text(col_name.clone()),
+                                    );
+                                    let val_idx = param_vals.len() + 1;
                                     param_vals.push(
                                         rusqlite::types::Value::Text(val_str),
                                     );
+                                    joins.push(format!(
+                                        "JOIN _ddb_fields {alias} ON \
+                                         {alias}.doogat_id = d.id AND \
+                                         {alias}.key = ?{key_idx} AND \
+                                         {alias}.value = ?{val_idx}"
+                                    ));
                                 } else {
                                     all_present = false;
                                     break;
@@ -555,7 +564,10 @@ impl DoogatService {
                                         .get(partition_col)
                                         .map(|v| match v {
                                             crate::types::Value::String(s) => s.clone(),
-                                            other => format!("{other:?}"),
+                                            crate::types::Value::Number(n) => n.to_string(),
+                                        crate::types::Value::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
+                                        crate::types::Value::List(l) => format!("{l:?}"),
+                                        crate::types::Value::Map(m) => format!("{m:?}"),
                                         })
                                         .unwrap_or_default();
                                     let key = (

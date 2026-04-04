@@ -922,6 +922,30 @@ if ($dmlResult -match '"errors"') { throw "DML INSERT has errors: $dmlResult" }
 if ($dmlResult -notmatch '"message"') { throw "DML INSERT missing message: $dmlResult" }
 pass "serve: DML INSERT response unchanged"
 
+# 45. createMany onConflict: IGNORE (upsert via GraphQL)
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE upsertgql (code TEXT, label TEXT)\") { message } }"}' | Out-Null
+Start-Sleep -Seconds 1
+Push-Location $TMPDIR
+$utFile = Get-ChildItem -Path ddb/_typedef -Filter *.md | Where-Object {
+    (Get-Content $_.FullName -Raw) -match "title: upsertgql"
+} | Select-Object -First 1
+$utContent = Get-Content $utFile.FullName -Raw
+$utContent = $utContent -replace "type: _typedef", "type: _typedef`nunique_together:`n  - - code"
+Set-Content -Path $utFile.FullName -Value $utContent -NoNewline
+git add -A | Out-Null
+git commit -m "add unique_together to upsertgql" --quiet | Out-Null
+ddb reindex | Out-Null
+$cm1 = gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"first\\\"}\"}]) { id title } }"}'
+$cm1Id = ($cm1 | ConvertFrom-Json).data.createMany[0].id
+if (-not $cm1Id) { throw "upsert seed failed: $cm1" }
+$cm2 = gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA Dup\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"second\\\"}\"}], onConflict: IGNORE) { id title } }"}'
+$cm2Obj = ($cm2 | ConvertFrom-Json).data.createMany[0]
+if ($cm2Obj.id -ne $cm1Id) { throw "upsert IGNORE should return existing ID: got $($cm2Obj.id) expected $cm1Id" }
+if ($cm2Obj.title -ne "UpsertA") { throw "upsert IGNORE should return original title: got $($cm2Obj.title)" }
+pass "serve: createMany onConflict IGNORE returns existing"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE upsertgql CASCADE\") { message } }"}' | Out-Null
+Pop-Location
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

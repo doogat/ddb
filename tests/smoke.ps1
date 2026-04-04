@@ -617,5 +617,30 @@ if ($NEG_ALL -match $NEG_ID3) { throw "fts negation: all-negative should exclude
 if ($NEG_ALL -notmatch $NEG_ID1) { throw "fts negation: all-negative should include non-matching" }
 pass "fts negation (all-negative query)"
 
+# 27. ON CONFLICT DO NOTHING (upsert)
+ddb query "CREATE TABLE upsert_test (code TEXT, label TEXT)" | Out-Null
+# Patch typedef to add unique_together on [code]
+$utFile = Get-ChildItem -Path ddb/_typedef -Filter *.md | Where-Object {
+    (Get-Content $_.FullName -Raw) -match "title: upsert_test"
+} | Select-Object -First 1
+$utContent = Get-Content $utFile.FullName -Raw
+$utContent = $utContent -replace "type: _typedef", "type: _typedef`nunique_together:`n  - - code"
+Set-Content -Path $utFile.FullName -Value $utContent -NoNewline
+git add -A | Out-Null
+git commit -m "add unique_together" --quiet | Out-Null
+ddb reindex | Out-Null
+$UPSERT_ID1 = ddb query "INSERT INTO upsert_test (title, code, label) VALUES ('First', 'ABC', 'original')"
+if ($UPSERT_ID1 -notmatch "^\d{14}$") { throw "upsert: bad id: $UPSERT_ID1" }
+Start-Sleep -Seconds 1
+# Duplicate with ON CONFLICT DO NOTHING should return existing ID
+$UPSERT_ID2 = ddb query "INSERT INTO upsert_test (title, code, label) VALUES ('Second', 'ABC', 'duplicate') ON CONFLICT DO NOTHING"
+if ($UPSERT_ID2 -ne $UPSERT_ID1) { throw "upsert: duplicate should return existing ID: got $UPSERT_ID2 expected $UPSERT_ID1" }
+Start-Sleep -Seconds 1
+# Non-duplicate should create new
+$UPSERT_ID3 = ddb query "INSERT INTO upsert_test (title, code, label) VALUES ('Third', 'DEF', 'new') ON CONFLICT DO NOTHING"
+if ($UPSERT_ID3 -eq $UPSERT_ID1) { throw "upsert: non-duplicate should create new ID" }
+ddb query "DROP TABLE upsert_test CASCADE" | Out-Null
+pass "ON CONFLICT DO NOTHING (upsert)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

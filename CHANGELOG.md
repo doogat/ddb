@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Upsert support: `unique_together` in typedef frontmatter creates composite unique constraints; `onConflict: IGNORE` argument on `createDoogat`/`createMany` mutations skips creation on conflict and returns the existing doogat
+- Upsert support: `unique_together` in typedef frontmatter creates composite unique constraints; `onConflict: IGNORE` argument on `createDoogat`/`createMany` mutations skips creation on conflict and returns the existing doogat; `createDoogat` now accepts `fields` JSON input for typed columns (matching `createMany` behavior); `INSERT ... ON CONFLICT DO NOTHING` in SQL engine
 
 - `ddb discover recent` command: list recently modified doogats with `--days N` (default 7) and `--type` filters, sorted by recency
 - `ddb discover link-density` command: show inbound/outbound link counts and density score per doogat with `--type` filter, sorted by density descending
@@ -69,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Malformed FTS5 search queries (e.g., `AND AND`) now return `BAD_REQUEST` instead of `INTERNAL_ERROR`
 - SQL INSERT without explicit `date` column now defaults to the date derived from the doogat ID, so `created_at` is non-null in GraphQL responses
 - DDL responses (CREATE/ALTER/DROP TABLE) via `executeSql` and `executeBatch` no longer emit spurious GraphQL errors; `columns` and `rows` return empty arrays instead of null
+- `createDoogat(onConflict: IGNORE)` now correctly detects duplicates by passing typed fields to the pre-check (previously always passed empty fields, making deduplication a no-op)
+- Unique constraint pre-check in `batch_create` now uses parameterized SQL for column name lookups, preventing malformed SQL from `unique_together` column names containing special characters
+- Non-string `Value` variants (numbers, booleans) in unique constraint pre-check now use proper string coercion instead of debug representation
 
 ## [0.1.0] - 2026-03-26
 

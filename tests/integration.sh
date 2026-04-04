@@ -906,6 +906,27 @@ echo "$DML_RESULT" | grep -qv '"errors"'
 echo "$DML_RESULT" | grep -q '"message"'
 pass "serve: DML INSERT response unchanged"
 
+# 45. createMany onConflict: IGNORE (upsert via GraphQL)
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE upsertgql (code TEXT, label TEXT)\") { message } }"}' >/dev/null
+sleep 1
+# Patch typedef to add unique_together on [code]
+cd "$TMPDIR"
+UPSERT_TYPEDEF=$(find ddb/_typedef -name '*.md' -exec grep -l 'title: upsertgql' {} \;)
+sed -i.bak 's/type: _typedef/type: _typedef\nunique_together:\n  - - code/' "$UPSERT_TYPEDEF"
+rm -f "${UPSERT_TYPEDEF}.bak"
+git add -A && git commit -m "add unique_together to upsertgql" --quiet
+$DDB reindex >/dev/null
+CM1=$(gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"first\\\"}\"}]) { id title } }"}')
+CM1_ID=$(echo "$CM1" | jq -r '.data.createMany[0].id')
+[ -n "$CM1_ID" ]
+CM2=$(gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA Dup\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"second\\\"}\"}], onConflict: IGNORE) { id title } }"}')
+CM2_ID=$(echo "$CM2" | jq -r '.data.createMany[0].id')
+[ "$CM2_ID" = "$CM1_ID" ]
+CM2_TITLE=$(echo "$CM2" | jq -r '.data.createMany[0].title')
+[ "$CM2_TITLE" = "UpsertA" ]
+pass "serve: createMany onConflict IGNORE returns existing"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE upsertgql CASCADE\") { message } }"}' >/dev/null
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

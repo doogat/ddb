@@ -310,7 +310,7 @@ async fn create_doogat(
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<SingleResponse>), (StatusCode, Json<ErrorBody>)> {
     let z = actor
-        .create_doogat(body.title, body.body, body.tags, body.doogat_type, ConflictAction::Error)
+        .create_doogat(body.title, body.body, body.tags, body.doogat_type, std::collections::BTreeMap::new(), ConflictAction::Error)
         .await
         .map_err(rest_error)?;
     Ok((

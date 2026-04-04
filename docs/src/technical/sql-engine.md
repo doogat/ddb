@@ -65,6 +65,7 @@ CREATE TABLE memberships (cat TEXT, sort_order INTEGER DEFAULT NEXT(cat))
 |-----------|--------|
 | `INSERT INTO foo (name, count) VALUES ('Widget', 42)` | Creates a data doogat with `type: foo` |
 | `INSERT INTO foo (name) VALUES ('A'), ('B'), ('C')` | Creates N doogats in a single git commit; returns comma-separated IDs |
+| `INSERT INTO foo (code) VALUES ('X') ON CONFLICT DO NOTHING` | Skips insert if `unique_together` constraint matches; returns existing ID |
 | `SELECT name, count FROM foo` | Queries the materialized table |
 | `SELECT ... WHERE id = '...'` | Filters by doogat ID |
 | `UPDATE foo SET count = 43 WHERE id = '...'` | Modifies the doogat and materialized row |
@@ -328,7 +329,6 @@ These SQL features are explicitly rejected with descriptive error messages. They
 | `ALTER INDEX` | Indexes are managed automatically |
 | `DROP INDEX` / `DROP VIEW` | Cannot be created, so cannot be dropped |
 | `INSERT OR REPLACE` / `REPLACE INTO` | Bypasses git; use explicit `DELETE` + `INSERT` |
-| `INSERT ... ON CONFLICT` | Bypasses git; use explicit `INSERT` + `UPDATE` |
 | `UPDATE ... FROM` | Ambiguous join-to-document mapping; decompose into `SELECT` + individual `UPDATE`s |
 
 ## Self-Contained Type Tables
@@ -350,4 +350,4 @@ Internal tables (`doogats`, `_ddb_tags`, `_ddb_fts`, `_ddb_links`, etc.) are hid
 
 ## Test Coverage
 
-65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 9 rejection tests for unsupported SQL features, and 7 type-aware inference tests. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns).
+65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 8 rejection tests for unsupported SQL features, and 7 type-aware inference tests. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns). 4 E2E tests for upsert/conflict handling in `tests/e2e/upsert.rs` (onConflict argument, IGNORE returns existing, ERROR on duplicate, mixed new/existing batch).

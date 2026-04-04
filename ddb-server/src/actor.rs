@@ -41,6 +41,7 @@ pub enum ActorCommand {
         body: Option<String>,
         tags: Vec<String>,
         doogat_type: Option<String>,
+        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
         on_conflict: ConflictAction,
     },
     UpdateDoogat {
@@ -286,6 +287,7 @@ impl ActorHandle {
         body: Option<String>,
         tags: Vec<String>,
         doogat_type: Option<String>,
+        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
         on_conflict: ConflictAction,
     ) -> ActorResult<ParsedDoogat> {
         match self
@@ -294,6 +296,7 @@ impl ActorHandle {
                 body,
                 tags,
                 doogat_type,
+                fields,
                 on_conflict,
             })
             .await
@@ -737,6 +740,7 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
             body,
             tags,
             doogat_type,
+            fields,
             on_conflict,
         } => {
             let input = BatchCreateInput {
@@ -744,7 +748,7 @@ fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
                 body,
                 tags,
                 doogat_type,
-                fields: std::collections::BTreeMap::new(),
+                fields,
                 on_conflict,
             };
             let result = svc

@@ -433,7 +433,8 @@ pub fn build_schema(
             "tags",
             TypeRef::named_list(TypeRef::STRING),
         ))
-        .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)));
+        .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
+        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)).description("JSON object of frontmatter key-value pairs for typed columns."));
 
     let create_many_item_input = InputObject::new("CreateManyItemInput")
         .description("Input for a single item in a batch create operation.")
@@ -1518,12 +1519,32 @@ pub fn build_schema(
                         .get("type")
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
+                    let fields = match input
+                        .get("fields")
+                        .and_then(|v| v.string().ok())
+                    {
+                        Some(json_str) => {
+                            let map: std::collections::BTreeMap<String, String> =
+                                serde_json::from_str(json_str).map_err(|e| {
+                                    async_graphql::ServerError::new(
+                                        format!("invalid fields JSON: {e}"),
+                                        None,
+                                    )
+                                })?;
+                            map.into_iter()
+                                .map(|(k, v)| {
+                                    (k, ddb_core::types::Value::String(v))
+                                })
+                                .collect()
+                        }
+                        None => std::collections::BTreeMap::new(),
+                    };
                     let on_conflict = match ctx.args.get("onConflict").map(|v| v.enum_name().ok().map(|s| s.to_string())) {
                         Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
                         _ => ConflictAction::Error,
                     };
                     let z = a
-                        .create_doogat(title, content, tags, doogat_type, on_conflict)
+                        .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
                         .await
                         .map_err(to_server_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
