@@ -1384,6 +1384,8 @@ pub struct BatchUpdateInput {
     pub body: Option<String>,
     pub tags: Option<Vec<String>>,
     pub doogat_type: Option<String>,
+    pub fields: Option<std::collections::BTreeMap<String, Value>>,
+    pub unset_fields: Option<Vec<String>>,
 }
 
 /// Query parameters for typed (materialized) table queries.

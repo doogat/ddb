@@ -1663,12 +1663,44 @@ pub fn build_schema(
                                 .get("type")
                                 .and_then(|v| v.string().ok())
                                 .map(|s| s.to_string());
+                            let fields = match obj
+                                .get("fields")
+                                .and_then(|v| v.string().ok())
+                            {
+                                Some(json_str) => {
+                                    let map: std::collections::BTreeMap<String, String> =
+                                        serde_json::from_str(json_str).map_err(|e| {
+                                            async_graphql::ServerError::new(
+                                                format!("invalid fields JSON: {e}"),
+                                                None,
+                                            )
+                                        })?;
+                                    Some(
+                                        map.into_iter()
+                                            .map(|(k, v)| {
+                                                (k, ddb_core::types::Value::String(v))
+                                            })
+                                            .collect(),
+                                    )
+                                }
+                                None => None,
+                            };
+                            let unset_fields: Option<Vec<String>> = obj
+                                .get("unsetFields")
+                                .and_then(|v| v.list().ok())
+                                .map(|l| {
+                                    l.iter()
+                                        .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                        .collect()
+                                });
                             updates.push(BatchUpdateInput {
                                 id,
                                 title,
                                 body,
                                 tags,
                                 doogat_type,
+                                fields,
+                                unset_fields,
                             });
                         }
                         let results =

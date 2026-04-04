@@ -338,6 +338,24 @@ impl DoogatService {
             if let Some(ref b) = update.body {
                 parsed.body = b.clone();
             }
+            if let Some(ref unset) = update.unset_fields {
+                for key in unset {
+                    parsed.meta.extra.remove(key);
+                }
+            }
+            if let Some(ref set) = update.fields {
+                for (key, value) in set {
+                    parsed.meta.extra.insert(key.clone(), value.clone());
+                }
+            }
+
+            // Validate fields against typedef schema if fields were modified
+            let has_field_changes = update.fields.is_some() || update.unset_fields.is_some();
+            if has_field_changes {
+                if let Some(ref type_name) = parsed.meta.doogat_type {
+                    self.validate_fields_against_schema(type_name, &parsed.meta.extra)?;
+                }
+            }
 
             let new_content = parser::serialize(&parsed);
             writes.push((path, new_content));
@@ -2320,6 +2338,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
             crate::types::BatchUpdateInput {
                 id: id2.clone(),
@@ -2327,6 +2347,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
             crate::types::BatchUpdateInput {
                 id: id3.clone(),
@@ -2334,6 +2356,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
         ];
 
@@ -2366,6 +2390,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
             crate::types::BatchUpdateInput {
                 id: "99999999999999".to_string(), // non-existent
@@ -2373,6 +2399,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
             crate::types::BatchUpdateInput {
                 id: id3.clone(),
@@ -2380,6 +2408,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
         ];
 
@@ -2421,6 +2451,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             })
             .collect();
 
@@ -2462,6 +2494,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
             // Only body changes
             crate::types::BatchUpdateInput {
@@ -2470,6 +2504,8 @@ mod tests {
                 body: Some("newbody2".to_string()),
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
             // Only tags change
             crate::types::BatchUpdateInput {
@@ -2478,6 +2514,8 @@ mod tests {
                 body: None,
                 tags: Some(vec!["newtag3".to_string()]),
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
         ];
 
@@ -2511,6 +2549,8 @@ mod tests {
             body: None,
             tags: None,
             doogat_type: None,
+            fields: None,
+            unset_fields: None,
         }];
 
         let results = svc.batch_update(&updates).unwrap();
@@ -2533,6 +2573,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
             crate::types::BatchUpdateInput {
                 id: id.clone(),
@@ -2540,6 +2582,8 @@ mod tests {
                 body: None,
                 tags: None,
                 doogat_type: None,
+                fields: None,
+                unset_fields: None,
             },
         ];
 
