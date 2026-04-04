@@ -32,4 +32,5 @@ mod subscriptions;
 mod sync_crdt;
 mod tag_entries;
 mod tags;
+mod typed_field_mutations;
 mod upsert;
