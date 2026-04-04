@@ -771,8 +771,8 @@ impl DoogatService {
                     }
                 }
             }
-            // Validate FK references
-            if let Some(ref _ref_table) = col.references {
+            // Validate FK references (both existence and target type match)
+            if let Some(ref ref_table) = col.references {
                 if let Some(val) = extra.get(&col.name) {
                     let val_str = match val {
                         crate::types::Value::String(s) => s.clone(),
@@ -781,8 +781,11 @@ impl DoogatService {
                     let exists = self
                         .index
                         .query_raw_with_params(
-                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                            &[rusqlite::types::Value::Text(val_str.clone())],
+                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
+                            &[
+                                rusqlite::types::Value::Text(val_str.clone()),
+                                rusqlite::types::Value::Text(ref_table.clone()),
+                            ],
                         )?
                         .first()
                         .and_then(|r| r.first())
@@ -790,8 +793,8 @@ impl DoogatService {
                         .unwrap_or(false);
                     if !exists {
                         return Err(DoogatError::Validation(format!(
-                            "field '{}' references non-existent doogat '{}'",
-                            col.name, val_str
+                            "field '{}' references non-existent {} doogat '{}'",
+                            col.name, ref_table, val_str
                         )));
                     }
                 }
