@@ -292,6 +292,14 @@ impl DoogatService {
         let mut parsed = parser::parse(&new_content, &path)?;
         self.index.index_doogat(&parsed)?;
         self.nosql_index_doogat(&parsed);
+        // Rematerialize type table row if this is a typed doogat
+        if let Some(ref type_name) = parsed.meta.doogat_type {
+            let schemas = self.list_type_schemas()?;
+            if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
+                let id_str = parsed.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
+                self.index.materialize_single(schema, id_str, &parsed)?;
+            }
+        }
         parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
         Ok(parsed)
     }
@@ -372,12 +380,20 @@ impl DoogatService {
             &format!("batch update {} doogats", updates.len()),
         )?;
 
-        // Phase 3: re-parse, index, return
+        // Phase 3: re-parse, index, rematerialize, return
+        let schemas = self.list_type_schemas()?;
         let mut results = Vec::with_capacity(updates.len());
         for (i, (path, new_content)) in writes.iter().enumerate() {
             let mut parsed = parser::parse(new_content, path)?;
             self.index.index_doogat(&parsed)?;
             self.nosql_index_doogat(&parsed);
+            // Rematerialize type table row if this is a typed doogat
+            if let Some(ref type_name) = parsed.meta.doogat_type {
+                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
+                    let id_str = parsed.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
+                    self.index.materialize_single(schema, id_str, &parsed)?;
+                }
+            }
             let id = &updates[i].id;
             parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
             results.push(parsed);
