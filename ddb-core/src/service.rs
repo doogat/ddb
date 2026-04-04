@@ -3421,4 +3421,285 @@ unique_together:
         svc.delete_doogat(&id, "delete test").unwrap();
         assert!(svc.read_doogat(&id).is_err());
     }
+
+    #[test]
+    fn update_with_fields_sets_frontmatter() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        // VARCHAR(200) maps to frontmatter zone (TEXT maps to body)
+        svc.execute_sql("CREATE TABLE bookmark (url VARCHAR(200))")
+            .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO bookmark (url) VALUES ('https://old.example.com')")
+            .unwrap();
+        let id = match ins {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Update the url field via update_doogat_parsed
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "url".to_string(),
+            crate::types::Value::String("https://new.example.com".to_string()),
+        );
+        let updated = svc
+            .update_doogat_parsed(
+                &id,
+                None,
+                None,
+                None,
+                None,
+                &ExtraFieldUpdates {
+                    set: &fields,
+                    unset: &[],
+                },
+            )
+            .unwrap();
+
+        // Verify returned ParsedDoogat has the new value
+        assert_eq!(
+            *updated.meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://new.example.com".to_string()),
+        );
+
+        // Verify re-reading from git has the new value
+        let parsed = svc.get_doogat_parsed(&id).unwrap();
+        assert_eq!(
+            *parsed.meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://new.example.com".to_string()),
+        );
+    }
+
+    #[test]
+    fn update_with_unset_fields_removes_field() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE link (url VARCHAR(200))")
+            .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO link (url) VALUES ('https://example.com')")
+            .unwrap();
+        let id = match ins {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Unset the url field
+        let updated = svc
+            .update_doogat_parsed(
+                &id,
+                None,
+                None,
+                None,
+                None,
+                &ExtraFieldUpdates {
+                    set: &std::collections::BTreeMap::new(),
+                    unset: &["url".to_string()],
+                },
+            )
+            .unwrap();
+
+        // Verify returned ParsedDoogat has no url
+        assert!(
+            !updated.meta.extra.contains_key("url"),
+            "url field should be removed from returned ParsedDoogat"
+        );
+
+        // Verify re-reading from git also has no url
+        let parsed = svc.get_doogat_parsed(&id).unwrap();
+        assert!(
+            !parsed.meta.extra.contains_key("url"),
+            "url field should be removed from frontmatter"
+        );
+    }
+
+    #[test]
+    fn update_field_validation_rejects_invalid_allowed_values() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql(
+            "CREATE TABLE task (status ENUM('todo','doing','done') DEFAULT 'todo')",
+        )
+        .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO task (status) VALUES ('todo')")
+            .unwrap();
+        let id = match ins {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Try to update with an invalid status value
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "status".to_string(),
+            crate::types::Value::String("invalid".to_string()),
+        );
+        let result = svc.update_doogat_parsed(
+            &id,
+            None,
+            None,
+            None,
+            None,
+            &ExtraFieldUpdates {
+                set: &fields,
+                unset: &[],
+            },
+        );
+        assert!(result.is_err(), "should reject invalid allowed_values");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not in allowed values"),
+            "error should mention allowed values, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn batch_update_with_fields() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE item (url VARCHAR(200))")
+            .unwrap();
+        let ins1 = svc
+            .execute_sql("INSERT INTO item (url) VALUES ('https://a.example.com')")
+            .unwrap();
+        let id1 = match ins1 {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+        let ins2 = svc
+            .execute_sql("INSERT INTO item (url) VALUES ('https://b.example.com')")
+            .unwrap();
+        let id2 = match ins2 {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Batch update both with different urls
+        let mut fields1 = std::collections::BTreeMap::new();
+        fields1.insert(
+            "url".to_string(),
+            crate::types::Value::String("https://a-new.example.com".to_string()),
+        );
+        let mut fields2 = std::collections::BTreeMap::new();
+        fields2.insert(
+            "url".to_string(),
+            crate::types::Value::String("https://b-new.example.com".to_string()),
+        );
+
+        let results = svc
+            .batch_update(&[
+                BatchUpdateInput {
+                    id: id1.clone(),
+                    title: None,
+                    body: None,
+                    tags: None,
+                    doogat_type: None,
+                    fields: Some(fields1),
+                    unset_fields: None,
+                },
+                BatchUpdateInput {
+                    id: id2.clone(),
+                    title: None,
+                    body: None,
+                    tags: None,
+                    doogat_type: None,
+                    fields: Some(fields2),
+                    unset_fields: None,
+                },
+            ])
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Verify returned results have updated fields
+        assert_eq!(
+            *results[0].meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://a-new.example.com".to_string()),
+        );
+        assert_eq!(
+            *results[1].meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://b-new.example.com".to_string()),
+        );
+
+        // Verify re-reading from git has updated fields
+        let parsed1 = svc.get_doogat_parsed(&id1).unwrap();
+        assert_eq!(
+            *parsed1.meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://a-new.example.com".to_string()),
+        );
+        let parsed2 = svc.get_doogat_parsed(&id2).unwrap();
+        assert_eq!(
+            *parsed2.meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://b-new.example.com".to_string()),
+        );
+    }
+
+    #[test]
+    fn batch_update_mixed_with_and_without_fields() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE entry (url VARCHAR(200))")
+            .unwrap();
+        let ins1 = svc
+            .execute_sql("INSERT INTO entry (url) VALUES ('https://keep.example.com')")
+            .unwrap();
+        let id1 = match ins1 {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+        let ins2 = svc
+            .execute_sql("INSERT INTO entry (url) VALUES ('https://change.example.com')")
+            .unwrap();
+        let id2 = match ins2 {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Update only id2's fields; id1 gets title change but no field changes
+        let mut fields2 = std::collections::BTreeMap::new();
+        fields2.insert(
+            "url".to_string(),
+            crate::types::Value::String("https://changed.example.com".to_string()),
+        );
+
+        let results = svc
+            .batch_update(&[
+                BatchUpdateInput {
+                    id: id1.clone(),
+                    title: Some("Renamed".to_string()),
+                    body: None,
+                    tags: None,
+                    doogat_type: None,
+                    fields: None,
+                    unset_fields: None,
+                },
+                BatchUpdateInput {
+                    id: id2.clone(),
+                    title: None,
+                    body: None,
+                    tags: None,
+                    doogat_type: None,
+                    fields: Some(fields2),
+                    unset_fields: None,
+                },
+            ])
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        // id1: title changed, url unchanged
+        let parsed1 = svc.get_doogat_parsed(&id1).unwrap();
+        assert_eq!(parsed1.meta.title.as_deref(), Some("Renamed"));
+        assert_eq!(
+            *parsed1.meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://keep.example.com".to_string()),
+        );
+
+        // id2: url changed
+        let parsed2 = svc.get_doogat_parsed(&id2).unwrap();
+        assert_eq!(
+            *parsed2.meta.extra.get("url").unwrap(),
+            crate::types::Value::String("https://changed.example.com".to_string()),
+        );
+    }
 }
