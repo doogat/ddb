@@ -32,3 +32,4 @@ mod subscriptions;
 mod sync_crdt;
 mod tag_entries;
 mod tags;
+mod upsert;
