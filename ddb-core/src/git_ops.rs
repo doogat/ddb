@@ -249,7 +249,12 @@ impl GitRepo {
         }
         std::fs::write(&full_path, bytes)?;
 
+        // Rebuild index from HEAD to prevent stale cache issues (see commit_batch)
+        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
         let mut index = self.repo.index()?;
+        if let Some(tree) = head_tree {
+            index.read_tree(&tree)?;
+        }
         index.add_path(Path::new(rel_path))?;
         index.write()?;
         let tree_oid = index.write_tree()?;
@@ -281,7 +286,13 @@ impl GitRepo {
             std::fs::write(&full_path, content)?;
         }
 
+        // Rebuild the index from HEAD so external git operations don't leave
+        // the in-memory index cache stale (see commit_batch for details).
+        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
         let mut index = self.repo.index()?;
+        if let Some(tree) = head_tree {
+            index.read_tree(&tree)?;
+        }
         for (rel_path, _) in files {
             index.add_path(Path::new(rel_path))?;
         }
@@ -656,7 +667,15 @@ impl GitRepo {
                 std::fs::remove_file(&full_path)?;
             }
         }
+        // Rebuild the index from HEAD so external git operations (e.g. CLI
+        // `git commit` from tests or concurrent tools) don't leave the
+        // in-memory index cache stale. Without this, commits can silently
+        // revert files that were modified outside the git2 library.
+        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
         let mut index = self.repo.index()?;
+        if let Some(tree) = head_tree {
+            index.read_tree(&tree)?;
+        }
         for (rel_path, _) in writes {
             index.add_path(Path::new(rel_path))?;
         }
@@ -706,8 +725,12 @@ impl GitRepo {
             std::fs::write(&full_path, content)?;
         }
 
-        // Stage all
+        // Rebuild index from HEAD to prevent stale cache (see commit_batch)
+        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
         let mut index = self.repo.index()?;
+        if let Some(tree) = head_tree {
+            index.read_tree(&tree)?;
+        }
         index.add_path(Path::new(binary_path))?;
         for (rel_path, _) in text_files {
             index.add_path(Path::new(rel_path))?;

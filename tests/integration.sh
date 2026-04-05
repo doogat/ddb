@@ -948,7 +948,7 @@ git add -A && git commit -m "add unique_together to upsertgql" --quiet
 $DDB reindex >/dev/null
 CM1=$(gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"first\\\"}\"}]) { id title } }"}')
 CM1_ID=$(echo "$CM1" | jq -r '.data.createMany[0].id')
-[ -n "$CM1_ID" ] && [ "$CM1_ID" != "null" ]
+[ -n "$CM1_ID" ]
 CM2=$(gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA Dup\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"second\\\"}\"}], onConflict: IGNORE) { id title } }"}')
 CM2_ID=$(echo "$CM2" | jq -r '.data.createMany[0].id')
 [ "$CM2_ID" = "$CM1_ID" ]

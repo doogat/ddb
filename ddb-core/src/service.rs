@@ -306,6 +306,8 @@ impl DoogatService {
                 self.index.materialize_single(schema, id_str, &parsed)?;
             }
         }
+        // Sync stored HEAD to avoid spurious incremental_reindex on next call
+        self.index.store_head(&self.repo.head_oid()?.0)?;
         parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
         Ok(parsed)
     }
@@ -406,6 +408,9 @@ impl DoogatService {
             parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
             results.push(parsed);
         }
+
+        // Sync stored HEAD to avoid spurious incremental_reindex on next call
+        self.index.store_head(&self.repo.head_oid()?.0)?;
 
         Ok(results)
     }
@@ -739,6 +744,13 @@ impl DoogatService {
             results[*slot] = Some(parsed);
         }
 
+        // Sync _ddb_meta.head with the new git HEAD so subsequent ensure_fresh()
+        // calls don't mistakenly think the index is stale and trigger
+        // unnecessary incremental_reindex work.
+        if !writes.is_empty() {
+            self.index.store_head(&self.repo.head_oid()?.0)?;
+        }
+
         Ok(results.into_iter().flatten().collect())
     }
 
@@ -864,6 +876,8 @@ impl DoogatService {
             .map(|(p, c)| (p.as_str(), c.as_str()))
             .collect();
         self.repo.commit_batch(&writes, &[&path], message)?;
+        // Sync stored HEAD to avoid spurious incremental_reindex on next call
+        self.index.store_head(&self.repo.head_oid()?.0)?;
         Ok(broken)
     }
 
