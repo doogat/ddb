@@ -224,6 +224,19 @@ impl GitRepo {
         self.repo.head().ok().and_then(|h| h.peel_to_commit().ok())
     }
 
+    /// Load the repo index, rebasing it on the HEAD tree so that entries
+    /// modified by external git operations (CLI, concurrent tools) are visible.
+    /// Without this, the in-memory index cache can silently revert those changes
+    /// on the next commit.
+    fn fresh_index(&self) -> Result<git2::Index> {
+        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
+        let mut index = self.repo.index()?;
+        if let Some(tree) = head_tree {
+            index.read_tree(&tree)?;
+        }
+        Ok(index)
+    }
+
     /// Get current HEAD as a domain-level CommitHash.
     pub fn head_oid(&self) -> Result<CommitHash> {
         let head = self.repo.head()?;
@@ -249,12 +262,7 @@ impl GitRepo {
         }
         std::fs::write(&full_path, bytes)?;
 
-        // Rebuild index from HEAD to prevent stale cache issues (see commit_batch)
-        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
-        let mut index = self.repo.index()?;
-        if let Some(tree) = head_tree {
-            index.read_tree(&tree)?;
-        }
+        let mut index = self.fresh_index()?;
         index.add_path(Path::new(rel_path))?;
         index.write()?;
         let tree_oid = index.write_tree()?;
@@ -286,13 +294,7 @@ impl GitRepo {
             std::fs::write(&full_path, content)?;
         }
 
-        // Rebuild the index from HEAD so external git operations don't leave
-        // the in-memory index cache stale (see commit_batch for details).
-        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
-        let mut index = self.repo.index()?;
-        if let Some(tree) = head_tree {
-            index.read_tree(&tree)?;
-        }
+        let mut index = self.fresh_index()?;
         for (rel_path, _) in files {
             index.add_path(Path::new(rel_path))?;
         }
@@ -667,15 +669,7 @@ impl GitRepo {
                 std::fs::remove_file(&full_path)?;
             }
         }
-        // Rebuild the index from HEAD so external git operations (e.g. CLI
-        // `git commit` from tests or concurrent tools) don't leave the
-        // in-memory index cache stale. Without this, commits can silently
-        // revert files that were modified outside the git2 library.
-        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
-        let mut index = self.repo.index()?;
-        if let Some(tree) = head_tree {
-            index.read_tree(&tree)?;
-        }
+        let mut index = self.fresh_index()?;
         for (rel_path, _) in writes {
             index.add_path(Path::new(rel_path))?;
         }
@@ -725,12 +719,7 @@ impl GitRepo {
             std::fs::write(&full_path, content)?;
         }
 
-        // Rebuild index from HEAD to prevent stale cache (see commit_batch)
-        let head_tree = self.head_commit().and_then(|c| c.tree().ok());
-        let mut index = self.repo.index()?;
-        if let Some(tree) = head_tree {
-            index.read_tree(&tree)?;
-        }
+        let mut index = self.fresh_index()?;
         index.add_path(Path::new(binary_path))?;
         for (rel_path, _) in text_files {
             index.add_path(Path::new(rel_path))?;
