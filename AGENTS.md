@@ -184,7 +184,7 @@ cargo doc --no-deps --document-private-items   Generate rustdoc
 cd docs && mdbook build               Build documentation
 cd docs && mdbook serve               Serve documentation locally
 
-# Performance thresholds (require --release, local only — advisory in CI)
+# Performance thresholds (require --release, local only — not run in CI)
 cargo test --release -p ddb-core --test query_thresholds nfr01_
 cargo test --release -p ddb-core --test growth_thresholds nfr02_
 cargo test --release -p ddb-core --test sync_thresholds nfr03_

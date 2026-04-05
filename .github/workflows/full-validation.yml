@@ -1,8 +1,14 @@
 name: Full Validation
 
 on:
+  push:
+    branches: [master]
   workflow_call:
   workflow_dispatch:
+
+concurrency:
+  group: full-validation-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   statuses: write
@@ -41,27 +47,6 @@ jobs:
         env:
           PROPTEST_CASES: 50
         run: cargo test -p ddb-core --test property_tests
-
-  linux-thresholds:
-    continue-on-error: true
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
-      - name: Configure git identity
-        run: |
-          git config --global user.email "ci@ddb.dev"
-          git config --global user.name "Doogat DB CI"
-      - name: Query thresholds (5K + 50K)
-        timeout-minutes: 30
-        run: cargo test --release -p ddb-core --test query_thresholds
-      - name: Growth thresholds
-        run: cargo test --release -p ddb-core --test growth_thresholds
-      - name: Sync thresholds
-        run: cargo test --release -p ddb-core --test sync_thresholds nfr03_
 
   linux-smoke:
     runs-on: ubuntu-latest
