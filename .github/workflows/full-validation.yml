@@ -1,14 +1,8 @@
 name: Full Validation
 
 on:
-  push:
-    branches: [master]
   workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: full-validation-${{ github.ref }}
-  cancel-in-progress: false
 
 permissions:
   statuses: write
