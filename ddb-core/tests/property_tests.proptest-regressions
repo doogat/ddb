@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+#
+# sql_update_modifies: BOOLEAN column + new_val "0" exposed missing coercion
+# handling in the comparator (stored "0" is returned as "false" on SELECT).
+cc a10d0dab4b2466bc0d1d451d17d40e627b0c4a9744551fb967fcc6987f9caf7d
