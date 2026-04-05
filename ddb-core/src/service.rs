@@ -752,6 +752,18 @@ impl DoogatService {
         Ok(())
     }
 
+    /// Convert a `Value` to its canonical string representation for comparison
+    /// against allowed_values and FK IDs. List/Map variants return None because
+    /// they are not comparable to scalar constraints.
+    fn value_to_comparable_string(val: &crate::types::Value) -> Option<String> {
+        match val {
+            crate::types::Value::String(s) => Some(s.clone()),
+            crate::types::Value::Number(n) => Some(n.to_string()),
+            crate::types::Value::Bool(b) => Some(if *b { "1".to_string() } else { "0".to_string() }),
+            crate::types::Value::List(_) | crate::types::Value::Map(_) => None,
+        }
+    }
+
     /// Validate extra fields against a pre-loaded typedef schema list.
     /// Callers load schemas once per operation to avoid redundant queries.
     fn validate_fields_with_schemas(
@@ -768,9 +780,9 @@ impl DoogatService {
             // Validate allowed_values
             if let Some(ref allowed) = col.allowed_values {
                 if let Some(val) = extra.get(&col.name) {
-                    let val_str = match val {
-                        crate::types::Value::String(s) => s.clone(),
-                        other => format!("{other:?}"),
+                    let val_str = match Self::value_to_comparable_string(val) {
+                        Some(s) => s,
+                        None => continue, // structured values can't match scalar allowed_values
                     };
                     if !allowed.contains(&val_str) {
                         return Err(DoogatError::Validation(format!(
@@ -783,9 +795,9 @@ impl DoogatService {
             // Validate FK references (both existence and target type match)
             if let Some(ref ref_table) = col.references {
                 if let Some(val) = extra.get(&col.name) {
-                    let val_str = match val {
-                        crate::types::Value::String(s) => s.clone(),
-                        other => format!("{other:?}"),
+                    let val_str = match Self::value_to_comparable_string(val) {
+                        Some(s) => s,
+                        None => continue, // structured values can't be FK IDs
                     };
                     let exists = self
                         .index
@@ -3654,6 +3666,46 @@ unique_together:
         assert!(
             err_msg.contains("non-existent"),
             "error should mention non-existent, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn update_field_validation_accepts_numeric_allowed_value() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        svc.execute_sql("CREATE TABLE priority_test (level ENUM('1','2','3'))")
+            .unwrap();
+        let ins = svc
+            .execute_sql("INSERT INTO priority_test (level) VALUES ('1')")
+            .unwrap();
+        let id = match ins {
+            SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+            _ => panic!("expected Ok from INSERT"),
+        };
+
+        // Update with a Value::Number that should match the string "2"
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "level".to_string(),
+            crate::types::Value::Number(2.0),
+        );
+        // The formatted number "2" should match allowed_values entry "2"
+        // (This was broken before: format!("{other:?}") produced "Number(2.0)")
+        let result = svc.update_doogat_parsed(
+            &id,
+            None,
+            None,
+            None,
+            None,
+            &ExtraFieldUpdates {
+                set: &fields,
+                unset: &[],
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "numeric value matching allowed_values should be accepted, got: {:?}",
+            result.err()
         );
     }
 
