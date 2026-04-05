@@ -1282,7 +1282,7 @@ if ($output -notmatch $ID1) { throw "nosql scan --tag failed" }
 pass "nosql: scan --tag"
 
 $output = ddb scan --type foo
-if ($output -notmatch "^\d{14}$") { throw "nosql scan --type failed" }
+if ($output -notmatch "(?m)^\d{14}$") { throw "nosql scan --type failed" }
 pass "nosql: scan --type"
 
 $output = ddb backlinks $ID1

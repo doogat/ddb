@@ -871,10 +871,22 @@ proptest! {
         if let Ok(ddb_core::sql_engine::SqlResult::Rows { rows, .. }) = &sel {
             prop_assert!(!rows.is_empty());
             // SQLite type affinity may normalize values (e.g. '00' → '0' for INTEGER).
-            // Compare with normalization: if both parse as the same number, they match.
+            // BOOLEAN columns also coerce stored "0"/"1" to "false"/"true" on SELECT.
+            // Compare with normalization: match exact, numeric equivalence, or boolean equivalence.
             let got = &rows[0][0];
+            let as_bool = |s: &str| -> Option<bool> {
+                match s.to_lowercase().as_str() {
+                    "true" | "1" | "yes" => Some(true),
+                    "false" | "0" | "no" => Some(false),
+                    _ => None,
+                }
+            };
+            let col_type = cols[0].1.to_uppercase();
             let matches = got.contains(&new_val)
-                || got.parse::<f64>().ok() == new_val.parse::<f64>().ok();
+                || got.parse::<f64>().ok() == new_val.parse::<f64>().ok()
+                || (col_type == "BOOLEAN"
+                    && as_bool(got).is_some()
+                    && as_bool(got) == as_bool(&new_val));
             prop_assert!(
                 matches,
                 "expected updated value '{}' in row, got '{}'",
