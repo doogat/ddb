@@ -114,6 +114,12 @@ function gql($body) {
     return $resp.Content
 }
 
+# Accepts a plain GraphQL query string; wraps it in a JSON envelope via
+# ConvertTo-Json so callers never hand-escape JSON inside PowerShell strings.
+function gqlq([string]$query) {
+    return gql (@{ query = $query } | ConvertTo-Json -Compress)
+}
+
 function rest {
     param([string]$path, [string]$method = "GET", [string]$body = $null)
     $params = @{
@@ -150,61 +156,61 @@ if ($health.status -ne "ok") { throw "health endpoint returned unexpected status
 pass "serve: health endpoint"
 
 # Test query
-$result = gql '{"query":"{ typeDefs { name } }"}'
+$result = gqlq '{ typeDefs { name } }'
 if ($result -notmatch '"typeDefs"') { throw "graphql query failed" }
 pass "serve: graphql query"
 
 # Test mutation -- create
-$result = gql '{"query":"mutation { createDoogat(input: { title: \"Smoke Server\" }) { id title } }"}'
+$result = gqlq 'mutation { createDoogat(input: { title: "Smoke Server" }) { id title } }'
 if ($result -notmatch '"Smoke Server"') { throw "graphql create failed" }
 $GQL_ID = if ($result -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no id in response" }
 pass "serve: graphql create"
 
 # 18. expanded GraphQL operations
-$result = gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$GQL_ID\`", title: \`"Smoke Updated\`" }) { id title } }`"}"
+$result = gqlq "mutation { updateDoogat(input: { id: `"$GQL_ID`", title: `"Smoke Updated`" }) { id title } }"
 if ($result -notmatch '"Smoke Updated"') { throw "graphql update failed" }
 pass "serve: graphql update"
 
-$result = gql '{"query":"{ search(query: \"Smoke\") { totalCount hits { id title tags type fields created_at } } }"}'
+$result = gqlq '{ search(query: "Smoke") { totalCount hits { id title tags type fields created_at } } }'
 if ($result -notmatch '"search"') { throw "graphql search failed" }
 if ($result -notmatch '"tags"') { throw "graphql search missing tags" }
 if ($result -notmatch '"created_at"') { throw "graphql search missing created_at" }
 pass "serve: graphql search with enriched fields"
 
-$result = gql '{"query":"{ doogats { id title } }"}'
+$result = gqlq '{ doogats { id title } }'
 if ($result -notmatch '"doogats"') { throw "graphql doogats failed" }
 pass "serve: graphql doogats"
 
-$result = gql "{`"query`":`"mutation { deleteDoogat(id: \`"$GQL_ID\`") }`"}"
+$result = gqlq "mutation { deleteDoogat(id: `"$GQL_ID`") }"
 if ($result -notmatch "true") { throw "graphql delete failed" }
 pass "serve: graphql delete"
 
 # 18b. GraphQL checkbox queries
-$result = gql '{"query":"{ openActions { state content } }"}'
+$result = gqlq '{ openActions { state content } }'
 if ($result -notmatch '"openActions"') { throw "graphql openActions failed" }
 pass "serve: graphql openActions"
 
 # 18c. GraphQL tag queries
-$result = gql '{"query":"mutation { createDoogat(input: { title: \"Tag Test\", tags: [\"alpha\", \"beta\"] }) { id title tags } }"}'
+$result = gqlq 'mutation { createDoogat(input: { title: "Tag Test", tags: ["alpha", "beta"] }) { id title tags } }'
 if ($result -notmatch '"alpha"') { throw "graphql create with tags failed" }
 $TAG_ID = if ($result -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no tag id in response" }
 pass "serve: graphql create with tags"
 
-$result = gql '{"query":"{ tags { name count } }"}'
+$result = gqlq '{ tags { name count } }'
 if ($result -notmatch '"alpha"') { throw "tags query missing alpha" }
 if ($result -notmatch '"beta"') { throw "tags query missing beta" }
 pass "serve: graphql tags query"
 
-$result = gql '{"query":"{ doogats(tag: \"alpha\") { id title tags } }"}'
+$result = gqlq '{ doogats(tag: "alpha") { id title tags } }'
 if ($result -notmatch $TAG_ID) { throw "tag filter missing expected doogat" }
 pass "serve: graphql doogats tag filter"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TAG_ID\`") }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$TAG_ID`") }" | Out-Null
 
 # 18c2. GraphQL updated_at and created_at fields
-$ts_result = gql '{"query":"mutation { createDoogat(input: { title: \"Timestamp Test\" }) { id } }"}'
+$ts_result = gqlq 'mutation { createDoogat(input: { title: "Timestamp Test" }) { id } }'
 $TS_ID = if ($ts_result -match '"id":"([^"]+)"') { $Matches[1] }
-$ts_query = gql "{`"query`":`"{ doogat(id: \`"$TS_ID\`") { updated_at created_at date } }`"}"
+$ts_query = gqlq "{ doogat(id: `"$TS_ID`") { updated_at created_at date } }"
 if ($ts_query -notmatch '"updated_at"') { throw "missing updated_at" }
 if ($ts_query -notmatch '"created_at"') { throw "missing created_at" }
 pass "serve: graphql updated_at and created_at fields"
@@ -214,168 +220,168 @@ $ts_created = if ($ts_query -match '"created_at":"([^"]+)"') { $Matches[1] }
 if ($ts_date -ne $ts_created) { throw "created_at does not equal date" }
 pass "serve: created_at equals date"
 
-$ts_search = gql '{"query":"{ search(query: \"Timestamp Test\") { hits { id updated_at } } }"}'
+$ts_search = gqlq '{ search(query: "Timestamp Test") { hits { id updated_at } } }'
 if ($ts_search -notmatch '"updated_at"') { throw "search hit missing updated_at" }
 pass "serve: search hits include updated_at"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TS_ID\`") }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$TS_ID`") }" | Out-Null
 
 # 18d. GraphQL search filters
-$sf1 = gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Alpha\", type: \"link\", tags: [\"sf-tag\"] }) { id } }"}'
+$sf1 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Alpha", type: "link", tags: ["sf-tag"] }) { id } }'
 $SF1_ID = if ($sf1 -match '"id":"([^"]+)"') { $Matches[1] }
-$sf2 = gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Beta\", type: \"note\", tags: [\"sf-tag\"] }) { id } }"}'
+$sf2 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Beta", type: "note", tags: ["sf-tag"] }) { id } }'
 $SF2_ID = if ($sf2 -match '"id":"([^"]+)"') { $Matches[1] }
-$sf3 = gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Gamma\", type: \"link\" }) { id } }"}'
+$sf3 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Gamma", type: "link" }) { id } }'
 $SF3_ID = if ($sf3 -match '"id":"([^"]+)"') { $Matches[1] }
 
-$result = gql '{"query":"{ search(query: \"SearchFilter\", types: [\"link\"]) { totalCount hits { id } } }"}'
+$result = gqlq '{ search(query: "SearchFilter", types: ["link"]) { totalCount hits { id } } }'
 if ($result -notmatch '"totalCount":2') { throw "search type filter: expected 2, got $result" }
 pass "serve: search filter by type"
 
-$result = gql '{"query":"{ search(query: \"SearchFilter\", tag: \"sf-tag\") { totalCount hits { id } } }"}'
+$result = gqlq '{ search(query: "SearchFilter", tag: "sf-tag") { totalCount hits { id } } }'
 if ($result -notmatch '"totalCount":2') { throw "search tag filter: expected 2, got $result" }
 pass "serve: search filter by tag"
 
-$result = gql '{"query":"{ search(query: \"SearchFilter\", types: [\"link\"], tag: \"sf-tag\") { totalCount hits { id } } }"}'
+$result = gqlq '{ search(query: "SearchFilter", types: ["link"], tag: "sf-tag") { totalCount hits { id } } }'
 if ($result -notmatch '"totalCount":1') { throw "search combined filter: expected 1, got $result" }
 pass "serve: search filter combined type+tag"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF1_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF2_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$SF3_ID\`") }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$SF1_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$SF2_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$SF3_ID`") }" | Out-Null
 
 # 18d2. Search where field filters (materialized columns + tag)
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE wflink (url TEXT NOT NULL)\") { message } }"}' | Out-Null
-$wf1 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES (''WFLink Alpha'', ''https://example.com'')\") { message } }"}'
+gqlq 'mutation { executeSql(sql: "CREATE TABLE wflink (url TEXT NOT NULL)") { message } }' | Out-Null
+$wf1 = gqlq 'mutation { executeSql(sql: "INSERT INTO wflink (title, url) VALUES (''WFLink Alpha'', ''https://example.com'')") { message } }'
 $WF1_ID = if ($wf1 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
-$wf2 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES (''WFLink Beta'', ''https://other.org'')\") { message } }"}'
+$wf2 = gqlq 'mutation { executeSql(sql: "INSERT INTO wflink (title, url) VALUES (''WFLink Beta'', ''https://other.org'')") { message } }'
 $WF2_ID = if ($wf2 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
-$wf3 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO wflink (title, url) VALUES (''WFLink Gamma'', ''https://example.com/page'')\") { message } }"}'
+$wf3 = gqlq 'mutation { executeSql(sql: "INSERT INTO wflink (title, url) VALUES (''WFLink Gamma'', ''https://example.com/page'')") { message } }'
 $WF3_ID = if ($wf3 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
 
-$result = gql '{"query":"{ search(query: \"WFLink\", where: [{field: \"url\", eq: \"https://example.com\"}]) { totalCount } }"}'
+$result = gqlq '{ search(query: "WFLink", where: [{field: "url", eq: "https://example.com"}]) { totalCount } }'
 if ($result -notmatch '"totalCount":1') { throw "search where eq: expected 1, got $result" }
 pass "serve: search where filter materialized column eq"
 
-$result = gql '{"query":"{ search(query: \"WFLink\", where: [{field: \"url\", contains: \"example\"}]) { totalCount } }"}'
+$result = gqlq '{ search(query: "WFLink", where: [{field: "url", contains: "example"}]) { totalCount } }'
 if ($result -notmatch '"totalCount":2') { throw "search where contains: expected 2, got $result" }
 pass "serve: search where filter materialized column contains"
 
 # Tag via where filter
-$wft1 = gql '{"query":"mutation { createDoogat(input: { title: \"WFTag Alpha\", tags: [\"wf-rust\"] }) { id } }"}'
+$wft1 = gqlq 'mutation { createDoogat(input: { title: "WFTag Alpha", tags: ["wf-rust"] }) { id } }'
 $WFT1_ID = if ($wft1 -match '"id":"([^"]+)"') { $Matches[1] }
-$wft2 = gql '{"query":"mutation { createDoogat(input: { title: \"WFTag Beta\", tags: [\"wf-python\"] }) { id } }"}'
+$wft2 = gqlq 'mutation { createDoogat(input: { title: "WFTag Beta", tags: ["wf-python"] }) { id } }'
 $WFT2_ID = if ($wft2 -match '"id":"([^"]+)"') { $Matches[1] }
 
-$result = gql '{"query":"{ search(query: \"WFTag\", where: [{field: \"tag\", eq: \"wf-rust\"}]) { totalCount } }"}'
+$result = gqlq '{ search(query: "WFTag", where: [{field: "tag", eq: "wf-rust"}]) { totalCount } }'
 if ($result -notmatch '"totalCount":1') { throw "search where tag: expected 1, got $result" }
 pass "serve: search where filter tag eq"
 
 # Combined type + where field filter
-$result = gql '{"query":"{ search(query: \"WFLink\", types: [\"wflink\"], where: [{field: \"url\", eq: \"https://example.com\"}]) { totalCount } }"}'
+$result = gqlq '{ search(query: "WFLink", types: ["wflink"], where: [{field: "url", eq: "https://example.com"}]) { totalCount } }'
 if ($result -notmatch '"totalCount":1') { throw "search where type+field: expected 1, got $result" }
 pass "serve: search where filter combined type+field"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WF1_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WF2_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WF3_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WFT1_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$WFT2_ID\`") }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$WF1_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$WF2_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$WF3_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$WFT1_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$WFT2_ID`") }" | Out-Null
 
 # 18d3. Search where filter: in operator
-$in1 = gql '{"query":"mutation { createDoogat(input: { title: \"InOp Alpha\", tags: [\"in-rust\", \"in-systems\"] }) { id } }"}'
+$in1 = gqlq 'mutation { createDoogat(input: { title: "InOp Alpha", tags: ["in-rust", "in-systems"] }) { id } }'
 $IN1_ID = if ($in1 -match '"id":"([^"]+)"') { $Matches[1] }
-$in2 = gql '{"query":"mutation { createDoogat(input: { title: \"InOp Beta\", tags: [\"in-python\"] }) { id } }"}'
+$in2 = gqlq 'mutation { createDoogat(input: { title: "InOp Beta", tags: ["in-python"] }) { id } }'
 $IN2_ID = if ($in2 -match '"id":"([^"]+)"') { $Matches[1] }
-$in3 = gql '{"query":"mutation { createDoogat(input: { title: \"InOp Gamma\", tags: [\"in-go\"] }) { id } }"}'
+$in3 = gqlq 'mutation { createDoogat(input: { title: "InOp Gamma", tags: ["in-go"] }) { id } }'
 $IN3_ID = if ($in3 -match '"id":"([^"]+)"') { $Matches[1] }
 
 # in with multiple values — should match Alpha (in-rust) and Beta (in-python)
-$result = gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: [\"in-rust\", \"in-python\"]}]) { totalCount hits { id } } }"}'
+$result = gqlq '{ search(query: "InOp", where: [{field: "tag", in: ["in-rust", "in-python"]}]) { totalCount hits { id } } }'
 if ($result -notmatch '"totalCount":2') { throw "search where in multi: expected 2, got $result" }
 if ($result -notmatch $IN1_ID) { throw "search where in multi: missing Alpha" }
 if ($result -notmatch $IN2_ID) { throw "search where in multi: missing Beta" }
 pass "serve: search where filter in operator (multiple values)"
 
 # in with single value — should match Gamma only
-$result = gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: [\"in-go\"]}]) { totalCount } }"}'
+$result = gqlq '{ search(query: "InOp", where: [{field: "tag", in: ["in-go"]}]) { totalCount } }'
 if ($result -notmatch '"totalCount":1') { throw "search where in single: expected 1, got $result" }
 pass "serve: search where filter in operator (single value)"
 
 # in with empty array — should match nothing
-$result = gql '{"query":"{ search(query: \"InOp\", where: [{field: \"tag\", in: []}]) { totalCount } }"}'
+$result = gqlq '{ search(query: "InOp", where: [{field: "tag", in: []}]) { totalCount } }'
 if ($result -notmatch '"totalCount":0') { throw "search where in empty: expected 0, got $result" }
 pass "serve: search where filter in operator (empty array)"
 
 # in on materialized column
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE inlink (url TEXT NOT NULL)\") { message } }"}' | Out-Null
-$inl1 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES (''InLink A'', ''https://a.example.com'')\") { message } }"}'
+gqlq 'mutation { executeSql(sql: "CREATE TABLE inlink (url TEXT NOT NULL)") { message } }' | Out-Null
+$inl1 = gqlq 'mutation { executeSql(sql: "INSERT INTO inlink (title, url) VALUES (''InLink A'', ''https://a.example.com'')") { message } }'
 $INL1_ID = if ($inl1 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
-$inl2 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES (''InLink B'', ''https://b.example.com'')\") { message } }"}'
+$inl2 = gqlq 'mutation { executeSql(sql: "INSERT INTO inlink (title, url) VALUES (''InLink B'', ''https://b.example.com'')") { message } }'
 $INL2_ID = if ($inl2 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
-$inl3 = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO inlink (title, url) VALUES (''InLink C'', ''https://c.example.com'')\") { message } }"}'
+$inl3 = gqlq 'mutation { executeSql(sql: "INSERT INTO inlink (title, url) VALUES (''InLink C'', ''https://c.example.com'')") { message } }'
 $INL3_ID = if ($inl3 -match '"message":"([^"]+)"') { $Matches[1].Trim() }
 
-$result = gql '{"query":"{ search(query: \"InLink\", where: [{field: \"url\", in: [\"https://a.example.com\", \"https://c.example.com\"]}]) { totalCount hits { id } } }"}'
+$result = gqlq '{ search(query: "InLink", where: [{field: "url", in: ["https://a.example.com", "https://c.example.com"]}]) { totalCount hits { id } } }'
 if ($result -notmatch '"totalCount":2') { throw "search where in materialized: expected 2, got $result" }
 if ($result -notmatch $INL1_ID) { throw "search where in materialized: missing A" }
 if ($result -notmatch $INL3_ID) { throw "search where in materialized: missing C" }
 pass "serve: search where filter in operator (materialized column)"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$IN1_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$IN2_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$IN3_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$INL1_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$INL2_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$INL3_ID\`") }`"}" | Out-Null
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE inlink CASCADE\") { message } }"}' | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$IN1_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$IN2_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$IN3_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$INL1_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$INL2_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$INL3_ID`") }" | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE inlink CASCADE") { message } }' | Out-Null
 
 # 18e. Boolean and phrase search queries
-$bq1 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust CRDT\", content: \"rust crdt patterns\" }) { id } }"}'
+$bq1 = gqlq 'mutation { createDoogat(input: { title: "BoolSearch Rust CRDT", content: "rust crdt patterns" }) { id } }'
 $BQ1_ID = if ($bq1 -match '"id":"([^"]+)"') { $Matches[1] }
-$bq2 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Rust Only\", content: \"rust programming\" }) { id } }"}'
+$bq2 = gqlq 'mutation { createDoogat(input: { title: "BoolSearch Rust Only", content: "rust programming" }) { id } }'
 $BQ2_ID = if ($bq2 -match '"id":"([^"]+)"') { $Matches[1] }
-$bq3 = gql '{"query":"mutation { createDoogat(input: { title: \"BoolSearch Golang\", content: \"golang programming\" }) { id } }"}'
+$bq3 = gqlq 'mutation { createDoogat(input: { title: "BoolSearch Golang", content: "golang programming" }) { id } }'
 $BQ3_ID = if ($bq3 -match '"id":"([^"]+)"') { $Matches[1] }
 
-$result = gql '{"query":"{ search(query: \"rust AND crdt\") { totalCount } }"}'
+$result = gqlq '{ search(query: "rust AND crdt") { totalCount } }'
 if ($result -notmatch '"totalCount":1') { throw "search AND: expected 1, got $result" }
 pass "serve: search boolean AND"
 
-$result = gql '{"query":"{ search(query: \"rust OR golang\") { totalCount } }"}'
+$result = gqlq '{ search(query: "rust OR golang") { totalCount } }'
 if ($result -notmatch '"totalCount":3') { throw "search OR: expected 3, got $result" }
 pass "serve: search boolean OR"
 
-$result = gql '{"query":"{ search(query: \"rust NOT crdt\") { totalCount } }"}'
+$result = gqlq '{ search(query: "rust NOT crdt") { totalCount } }'
 if ($result -notmatch '"totalCount":1') { throw "search NOT: expected 1, got $result" }
 pass "serve: search boolean NOT"
 
-$result = gql '{"query":"{ search(query: \"\\\"rust crdt\\\"\") { totalCount } }"}'
+$result = gqlq '{ search(query: "\"rust crdt\"") { totalCount } }'
 if ($result -notmatch '"totalCount":1') { throw "search phrase: expected 1, got $result" }
 pass "serve: search quoted phrase"
 
-$result = try { gql '{"query":"{ search(query: \"AND AND\") { totalCount } }"}' } catch { $_.Exception.Message }
+$result = try { gqlq '{ search(query: "AND AND") { totalCount } }' } catch { $_.Exception.Message }
 if ($result -notmatch 'invalid search query') { throw "search malformed: expected error message, got $result" }
 pass "serve: search malformed query returns error"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ1_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ2_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BQ3_ID\`") }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$BQ1_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$BQ2_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$BQ3_ID`") }" | Out-Null
 
 # 18g. Search query normalization
-$result = gql '{"query":"{ normalizeSearchQuery(query: \"B AND A\") }"}'
+$result = gqlq '{ normalizeSearchQuery(query: "B AND A") }'
 if ($result -notmatch '"a and b"') { throw "normalizeSearchQuery sort: expected 'a and b', got $result" }
 pass "serve: normalizeSearchQuery sorts AND operands"
 
-$result = gql '{"query":"{ normalizeSearchQuery(query: \"Tag=svelte AND category=work.portals\") }"}'
+$result = gqlq '{ normalizeSearchQuery(query: "Tag=svelte AND category=work.portals") }'
 if ($result -notmatch '"category=work.portals and tag=svelte"') { throw "normalizeSearchQuery fields: unexpected $result" }
 pass "serve: normalizeSearchQuery sorts field filters"
 
-$result = gql '{"query":"{ normalizeSearchQuery(query: \"  MEETING   Minutes  \") }"}'
+$result = gqlq '{ normalizeSearchQuery(query: "  MEETING   Minutes  ") }'
 if ($result -notmatch '"meeting and minutes"') { throw "normalizeSearchQuery implicit AND: unexpected $result" }
 pass "serve: normalizeSearchQuery implicit AND and lowercase"
 
-$result = gql '{"query":"{ search(query: \"rust AND crdt\") { queryNormalized } }"}'
+$result = gqlq '{ search(query: "rust AND crdt") { queryNormalized } }'
 if ($result -notmatch '"queryNormalized"') { throw "search queryNormalized missing: $result" }
 if ($result -notmatch '"crdt and rust"') { throw "search queryNormalized value: unexpected $result" }
 pass "serve: search returns queryNormalized"
@@ -408,8 +414,8 @@ if ((content $resp) -notmatch $REST_ID) { throw "rest list failed" }
 pass "rest: list with filter"
 
 # Field filtering
-gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokeitem (label TEXT NOT NULL, priority INTEGER)\"){message}}"}'
-gql '{"query":"mutation{executeSql(sql:\"INSERT INTO smokeitem (label, priority) VALUES (''Smoke1'', 7)\"){message}}"}'
+gqlq 'mutation{executeSql(sql:"CREATE TABLE smokeitem (label TEXT NOT NULL, priority INTEGER)"){message}}'
+gqlq 'mutation{executeSql(sql:"INSERT INTO smokeitem (label, priority) VALUES (''Smoke1'', 7)"){message}}'
 $resp = rest "/doogats?field.priority=7"
 if ((content $resp) -notmatch "Smoke1") { throw "field filter failed" }
 pass "rest: field filter"
@@ -512,7 +518,7 @@ try {
 pass "nosql-api: auth rejects missing token"
 
 # error sanitization — SQL error must not leak raw details
-$result = gql '{"query":"mutation { executeSql(sql: \"SELCT * FORM oops\") { message } }"}'
+$result = gqlq 'mutation { executeSql(sql: "SELCT * FORM oops") { message } }'
 if ($result -notmatch "errors") { throw "expected errors in response" }
 if ($result -notmatch "(?i)query failed|internal error") { throw "expected sanitized message" }
 if ($result -match "(?i)SELCT|syntax error|sqlite") { throw "raw SQL details leaked" }
@@ -529,23 +535,23 @@ try {
 pass "serve: not-found returns 404"
 
 # GraphQL introspection hides internal tables
-$intro = gql '{"query":"{ __schema { queryType { fields { name } } } }"}'
+$intro = gqlq '{ __schema { queryType { fields { name } } } }'
 if ($intro -match "_ddb_") { throw "introspection leaked internal table: $intro" }
 pass "serve: introspection hides internal tables"
 
 # compact mutation
-$result = gql '{"query":"mutation { compact { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter crdtTempFilesBefore crdtTempFilesAfter repoBytesBefore repoBytesAfter backupPath } }"}'
+$result = gqlq 'mutation { compact { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter crdtTempFilesBefore crdtTempFilesAfter repoBytesBefore repoBytesAfter backupPath } }'
 if ($result -notmatch "gcSuccess") { throw "compact mutation failed" }
 pass "serve: compact mutation"
 
 # compact(force: true)
-$result = gql '{"query":"mutation { compact(force: true) { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter repoBytesBefore repoBytesAfter backupPath } }"}'
+$result = gqlq 'mutation { compact(force: true) { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter repoBytesBefore repoBytesAfter backupPath } }'
 if ($result -notmatch "gcSuccess") { throw "compact(force:true) mutation failed" }
 if ($result -notmatch "backupPath") { throw "compact(force:true) missing backupPath" }
 pass "serve: compact(force: true) mutation"
 
 # compact(noBackup: true)
-$result = gql '{"query":"mutation { compact(force: true, noBackup: true) { gcSuccess backupPath } }"}'
+$result = gqlq 'mutation { compact(force: true, noBackup: true) { gcSuccess backupPath } }'
 if ($result -notmatch "gcSuccess") { throw "compact(noBackup:true) failed" }
 if ($result -notmatch '"backupPath":null') { throw "compact(noBackup:true) should have null backupPath" }
 pass "serve: compact(noBackup: true) mutation"
@@ -553,19 +559,19 @@ pass "serve: compact(noBackup: true) mutation"
 # compact(backupPath: custom)
 $gqlBackup = Join-Path $env:TEMP "gql-backup.bundle.tar"
 $gqlBackupEsc = $gqlBackup -replace '\\', '\\\\'
-$result = gql "{`"query`":`"mutation { compact(force: true, backupPath: \`"$gqlBackupEsc\`") { gcSuccess backupPath } }`"}"
+$result = gqlq "mutation { compact(force: true, backupPath: `"$gqlBackupEsc`") { gcSuccess backupPath } }"
 if ($result -notmatch "gcSuccess") { throw "compact(backupPath) failed" }
 if ($result -notmatch "backupPath") { throw "compact(backupPath) missing backupPath" }
 if (-not (Test-Path $gqlBackup)) { throw "compact(backupPath) file not created" }
 pass "serve: compact(backupPath) mutation"
 
 # maintenance mutation
-$result = gql '{"query":"mutation { maintenance { success durationMs fallbackUsed tasksRun } }"}'
+$result = gqlq 'mutation { maintenance { success durationMs fallbackUsed tasksRun } }'
 if ($result -notmatch "success") { throw "maintenance mutation failed" }
 pass "serve: maintenance mutation"
 
 # sync mutation — no remote configured, expect error not panic
-$result = gql '{"query":"mutation { sync { direction commitsTransferred conflictsResolved resurrected } }"}'
+$result = gqlq 'mutation { sync { direction commitsTransferred conflictsResolved resurrected } }'
 if ($result -notmatch "errors") { throw "sync should have errored without remote" }
 pass "serve: sync mutation (no remote)"
 
@@ -580,7 +586,7 @@ $writeJob = Start-Job -ScriptBlock {
     $headers = @{ "Authorization" = "Bearer $token"; "Content-Type" = "application/json" }
     Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body '{"query":"mutation { createDoogat(input: { title: \"ReadPoolWrite\" }) { id } }"}'
 } -ArgumentList $GQL_URL, $TOKEN
-$readResult = gql '{"query":"{ doogats { id title } }"}'
+$readResult = gqlq '{ doogats { id title } }'
 if ($readResult -notmatch "doogats") { throw "read-under-write: read failed" }
 $writeResult = Receive-Job -Job $writeJob -Wait | ConvertTo-Json
 if ($writeResult -notmatch "id") { throw "read-under-write: write failed" }
@@ -588,14 +594,14 @@ Remove-Job $writeJob
 pass "serve: read-under-write (concurrent read + write)"
 
 # 38b. multi-value references via GraphQL + REST
-gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvcategory (name VARCHAR(100))\"){message}}"}' | Out-Null
-gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)\"){message}}"}' | Out-Null
+gqlq 'mutation{executeSql(sql:"CREATE TABLE mvcategory (name VARCHAR(100))"){message}}' | Out-Null
+gqlq 'mutation{executeSql(sql:"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)"){message}}' | Out-Null
 Start-Sleep -Seconds 1
-$mvCat1 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (''Science'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
-$mvCat2 = (gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (''Math'')\"){message}}"}') -replace '.*"message":"(\d+)".*','$1'
-$mvBm = (gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO mvbookmark (mvcategory) VALUES ('$mvCat1')\`"){message}}`"}") -replace '.*"message":"(\d+)".*','$1'
-gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO mvbookmark_mvcategory (mvbookmark_id, mvcategory_id) VALUES ('$mvBm', '$mvCat2')\`"){message}}`"}" | Out-Null
-$mvResult = gql '{"query":"{ mvbookmarks { items { id mvcategories { id } } } }"}'
+$mvCat1 = (gqlq 'mutation{executeSql(sql:"INSERT INTO mvcategory (name) VALUES (''Science'')"){message}}') -replace '.*"message":"(\d+)".*','$1'
+$mvCat2 = (gqlq 'mutation{executeSql(sql:"INSERT INTO mvcategory (name) VALUES (''Math'')"){message}}') -replace '.*"message":"(\d+)".*','$1'
+$mvBm = (gqlq "mutation{executeSql(sql:`"INSERT INTO mvbookmark (mvcategory) VALUES ('$mvCat1')`"){message}}") -replace '.*"message":"(\d+)".*','$1'
+gqlq "mutation{executeSql(sql:`"INSERT INTO mvbookmark_mvcategory (mvbookmark_id, mvcategory_id) VALUES ('$mvBm', '$mvCat2')`"){message}}" | Out-Null
+$mvResult = gqlq '{ mvbookmarks { items { id mvcategories { id } } } }'
 if ($mvResult -notmatch $mvCat1) { throw "multi-value ref: cat1 not in graphql list field" }
 if ($mvResult -notmatch $mvCat2) { throw "multi-value ref: cat2 not in graphql list field" }
 pass "serve: graphql multi-value ref list field"
@@ -605,184 +611,184 @@ if ($mvRest -notmatch '"mvcategory"') { throw "multi-value ref: no category key 
 pass "serve: rest multi-value ref structured json"
 
 # 38b2. REFERENCES relation resolution
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokecat (label TEXT)\") { message } }"}' | Out-Null
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)\") { message } }"}' | Out-Null
-$scat = gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokecat (title, label) VALUES ('Tech', 'tech')\`") { message } }`"}"
+gqlq 'mutation { executeSql(sql: "CREATE TABLE smokecat (label TEXT)") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)") { message } }' | Out-Null
+$scat = gqlq "mutation { executeSql(sql: `"INSERT INTO smokecat (title, label) VALUES ('Tech', 'tech')`") { message } }"
 $SCAT_ID = if ($scat -match '"message":"([^"]+)"') { $Matches[1] }
 Start-Sleep -Seconds 1
-$sbm = gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokebm (title, url) VALUES ('Example', 'https://example.com')\`") { message } }`"}"
+$sbm = gqlq "mutation { executeSql(sql: `"INSERT INTO smokebm (title, url) VALUES ('Example', 'https://example.com')`") { message } }"
 $SBM_ID = if ($sbm -match '"message":"([^"]+)"') { $Matches[1] }
-gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokebm_smokecat (smokebm_id, smokecat_id) VALUES ('$SBM_ID', '$SCAT_ID')\`") { message } }`"}" | Out-Null
-$result = gql '{"query":"{ smokebms { items { smokecat { id label } } } }"}'
+gqlq "mutation { executeSql(sql: `"INSERT INTO smokebm_smokecat (smokebm_id, smokecat_id) VALUES ('$SBM_ID', '$SCAT_ID')`") { message } }" | Out-Null
+$result = gqlq '{ smokebms { items { smokecat { id label } } } }'
 if ($result -notmatch '"label":"tech"') { throw "singular relation resolution failed: $result" }
 pass "serve: relation singular resolves object"
-$result = gql '{"query":"{ smokebms { items { smokecats { id label } } } }"}'
+$result = gqlq '{ smokebms { items { smokecats { id label } } } }'
 if ($result -notmatch '"label":"tech"') { throw "plural relation resolution failed: $result" }
 pass "serve: relation plural resolves object list"
 Start-Sleep -Seconds 1
-gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO smokebm (title, url) VALUES ('No Cat', 'https://nocat.com')\`") { message } }`"}" | Out-Null
-$result = gql '{"query":"{ smokebms { items { id smokecat { id } smokecats { id } } } }"}'
+gqlq "mutation { executeSql(sql: `"INSERT INTO smokebm (title, url) VALUES ('No Cat', 'https://nocat.com')`") { message } }" | Out-Null
+$result = gqlq '{ smokebms { items { id smokecat { id } smokecats { id } } } }'
 if ($result -notmatch '"smokecat":null') { throw "null relation failed: $result" }
 if ($result -notmatch '"smokecats":\[\]') { throw "empty plural relation failed: $result" }
 pass "serve: relation null returns null and empty list"
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { message } }"}' | Out-Null
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE smokebm CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE smokecat CASCADE") { message } }' | Out-Null
 
 # 38b2b. raw ID scalar + orderBy/limit on plural references
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlcat (label TEXT)\") { message } }"}' | Out-Null
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlbm (url TEXT, rlcat TEXT REFERENCES rlcat)\") { message } }"}' | Out-Null
-$rlC1 = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"cherry\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+gqlq 'mutation { executeSql(sql: "CREATE TABLE rlcat (label TEXT)") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE rlbm (url TEXT, rlcat TEXT REFERENCES rlcat)") { message } }' | Out-Null
+$rlC1 = (gqlq 'mutation { executeSql(sql: "INSERT INTO rlcat (label) VALUES (\"cherry\")") { message } }') -replace '.*"message":"([^"]+)".*','$1'
 Start-Sleep -Seconds 1
-$rlC2 = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"apple\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+$rlC2 = (gqlq 'mutation { executeSql(sql: "INSERT INTO rlcat (label) VALUES (\"apple\")") { message } }') -replace '.*"message":"([^"]+)".*','$1'
 Start-Sleep -Seconds 1
-$rlC3 = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"banana\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+$rlC3 = (gqlq 'mutation { executeSql(sql: "INSERT INTO rlcat (label) VALUES (\"banana\")") { message } }') -replace '.*"message":"([^"]+)".*','$1'
 Start-Sleep -Seconds 1
-$rlBm = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlbm (url) VALUES (\\\"https://example.com\\\")\") { message } }"}') -replace '.*"message":"([^"]+)".*','$1'
+$rlBm = (gqlq 'mutation { executeSql(sql: "INSERT INTO rlbm (url) VALUES (\"https://example.com\")") { message } }') -replace '.*"message":"([^"]+)".*','$1'
 foreach ($cid in @($rlC1, $rlC2, $rlC3)) {
-    gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO rlbm_rlcat (rlbm_id, rlcat_id) VALUES ('$rlBm', '$cid')\`") { message } }`"}" | Out-Null
+    gqlq "mutation { executeSql(sql: `"INSERT INTO rlbm_rlcat (rlbm_id, rlcat_id) VALUES ('$rlBm', '$cid')`") { message } }" | Out-Null
 }
 # raw ID scalar
-$result = gql '{"query":"{ rlbms { items { rlcat_id rlcat { id label } } } }"}'
+$result = gqlq '{ rlbms { items { rlcat_id rlcat { id label } } } }'
 if ($result -notmatch "rlcat_id`":`"$rlC1") { throw "raw ID scalar missing: $result" }
 if ($result -notmatch '"label":"cherry"') { throw "object resolver missing label: $result" }
 pass "serve: relation raw ID scalar coexists with object resolver"
 # orderBy ASC
-$result = gql '{"query":"{ rlbms { items { rlcats(orderBy: \"label\") { label } } } }"}'
+$result = gqlq '{ rlbms { items { rlcats(orderBy: "label") { label } } } }'
 if ($result -notmatch '"apple".*"banana".*"cherry"') { throw "orderBy ASC wrong: $result" }
 pass "serve: relation plural orderBy ASC"
 # orderBy DESC + limit
-$result = gql '{"query":"{ rlbms { items { rlcats(orderBy: \"label\", orderDir: \"DESC\", limit: 2) { label } } } }"}'
+$result = gqlq '{ rlbms { items { rlcats(orderBy: "label", orderDir: "DESC", limit: 2) { label } } } }'
 if ($result -notmatch '"cherry".*"banana"') { throw "orderBy DESC wrong: $result" }
 if ($result -match '"apple"') { throw "limit not applied: $result" }
 pass "serve: relation plural orderBy DESC + limit"
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rlbm CASCADE\") { message } }"}' | Out-Null
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rlcat CASCADE\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE rlbm CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE rlcat CASCADE") { message } }' | Out-Null
 
 # 38b3. typed connection includes tags
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tagarticle (topic TEXT)\") { message } }"}' | Out-Null
-$taId = (gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tagarticle (topic) VALUES (\\\"rust\\\")\") { message } }"}') -replace '.*"message":"(\d+)".*','$1'
-gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$taId\`", tags: [\`"coding\`", \`"systems\`"] }) { id } }`"}" | Out-Null
-$result = gql '{"query":"{ tagarticles { items { id tags topic } } }"}'
+gqlq 'mutation { executeSql(sql: "CREATE TABLE tagarticle (topic TEXT)") { message } }' | Out-Null
+$taId = (gqlq 'mutation { executeSql(sql: "INSERT INTO tagarticle (topic) VALUES (\"rust\")") { message } }') -replace '.*"message":"(\d+)".*','$1'
+gqlq "mutation { updateDoogat(input: { id: `"$taId`", tags: [`"coding`", `"systems`"] }) { id } }" | Out-Null
+$result = gqlq '{ tagarticles { items { id tags topic } } }'
 if ($result -notmatch '"coding"') { throw "typed connection tags: missing coding tag: $result" }
 if ($result -notmatch '"systems"') { throw "typed connection tags: missing systems tag: $result" }
 pass "serve: typed connection includes tags"
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tagarticle CASCADE\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE tagarticle CASCADE") { message } }' | Out-Null
 
 # 38b4. tagEntries query with filters
-$te1 = (gql '{"query":"mutation { createDoogat(input: { title: \"TagEntry A\", tags: [\"te-rust\", \"te-cli\"] }) { id } }"}') -replace '.*"id":"(\d+)".*','$1'
+$te1 = (gqlq 'mutation { createDoogat(input: { title: "TagEntry A", tags: ["te-rust", "te-cli"] }) { id } }') -replace '.*"id":"(\d+)".*','$1'
 Start-Sleep -Seconds 1
-$te2 = (gql '{"query":"mutation { createDoogat(input: { title: \"TagEntry B\", tags: [\"te-rust\"] }) { id } }"}') -replace '.*"id":"(\d+)".*','$1'
-$result = gql "{`"query`":`"{ tagEntries(where: { doogatId: { eq: \`"$te1\`" } }) { items { doogatId tag } totalCount } }`"}"
+$te2 = (gqlq 'mutation { createDoogat(input: { title: "TagEntry B", tags: ["te-rust"] }) { id } }') -replace '.*"id":"(\d+)".*','$1'
+$result = gqlq "{ tagEntries(where: { doogatId: { eq: `"$te1`" } }) { items { doogatId tag } totalCount } }"
 if ($result -notmatch '"totalCount":2') { throw "tagEntries doogatId eq: expected 2, got: $result" }
 pass "serve: tagEntries filter by doogatId eq"
 
-$result = gql '{"query":"{ tagEntries(where: { tag: { eq: \"te-rust\" } }) { items { tag } totalCount } }"}'
+$result = gqlq '{ tagEntries(where: { tag: { eq: "te-rust" } }) { items { tag } totalCount } }'
 if ($result -notmatch '"te-rust"') { throw "tagEntries tag eq: missing te-rust: $result" }
 $teCount = if ($result -match '"totalCount":(\d+)') { [int]$Matches[1] } else { 0 }
 if ($teCount -lt 2) { throw "tagEntries tag eq: expected >=2, got $teCount" }
 pass "serve: tagEntries filter by tag eq"
 
-$result = gql '{"query":"{ tagEntries(where: { tag: { contains: \"te-\" } }) { totalCount } }"}'
+$result = gqlq '{ tagEntries(where: { tag: { contains: "te-" } }) { totalCount } }'
 $teCount = if ($result -match '"totalCount":(\d+)') { [int]$Matches[1] } else { 0 }
 if ($teCount -lt 3) { throw "tagEntries tag contains: expected >=3, got $teCount" }
 pass "serve: tagEntries filter by tag contains"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$te1\`") { id } }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$te2\`") { id } }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$te1`") { id } }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$te2`") { id } }" | Out-Null
 
 # 38c. sql-materialization (columns, boolean normalization, core fields)
-$result = gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\") { columns rows } }"}'
+$result = gqlq '{ sql(query: "SELECT id, title FROM doogats") { columns rows } }'
 if ($result -notmatch '"columns"') { throw "sql columns: missing columns field" }
 if ($result -notmatch '"id"') { throw "sql columns: missing id column" }
 if ($result -notmatch '"title"') { throw "sql columns: missing title column" }
 pass "serve: sql columns in response"
 
 # 38c2. sql format:objects returns keyed rows
-$result = gql '{"query":"{ sql(query: \"SELECT id, title FROM doogats\", format: \"objects\") { columns rows } }"}'
+$result = gqlq '{ sql(query: "SELECT id, title FROM doogats", format: "objects") { columns rows } }'
 if ($result -notmatch '\\"id\\":') { throw "sql format objects: missing id key in row object" }
 if ($result -notmatch '\\"title\\":') { throw "sql format objects: missing title key in row object" }
 pass "serve: sql format objects returns keyed rows"
 
-gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' | Out-Null
-$smokepinId = (gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)\`"){message}}`"}") -replace '.*"message":"(\d+)".*','$1'
+gqlq 'mutation{executeSql(sql:"CREATE TABLE smokepin (pinned BOOLEAN)"){message}}' | Out-Null
+$smokepinId = (gqlq "mutation{executeSql(sql:`"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)`"){message}}") -replace '.*"message":"(\d+)".*','$1'
 if (-not $smokepinId) { throw "smokepin insert failed" }
-$result = gql "{`"query`":`"{ sql(query: \`"SELECT pinned FROM smokepin WHERE pinned = 1\`") { rows } }`"}"
+$result = gqlq "{ sql(query: `"SELECT pinned FROM smokepin WHERE pinned = 1`") { rows } }"
 if ($result -notmatch '[\\"]true[\\"]') { throw "boolean not coerced to true" }
 pass "serve: boolean coerced to true/false"
 
 # Boolean false
 Start-Sleep -Seconds 1
-gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO smokepin (title, pinned) VALUES ('FalseTest', false)\`"){message}}`"}" | Out-Null
-$result = gql "{`"query`":`"{ sql(query: \`"SELECT pinned FROM smokepin WHERE pinned = 0\`") { rows } }`"}"
+gqlq "mutation{executeSql(sql:`"INSERT INTO smokepin (title, pinned) VALUES ('FalseTest', false)`"){message}}" | Out-Null
+$result = gqlq "{ sql(query: `"SELECT pinned FROM smokepin WHERE pinned = 0`") { rows } }"
 if ($result -notmatch '[\\"]false[\\"]') { throw "boolean false not coerced" }
 pass "serve: boolean false coerced"
 
-$result = gql '{"query":"{ sql(query: \"SELECT title FROM smokepin\") { rows } }"}'
+$result = gqlq '{ sql(query: "SELECT title FROM smokepin") { rows } }'
 if ($result -notmatch 'PinTest') { throw "core fields: title missing from type table" }
 pass "serve: core fields in type table"
 
 # 38d. DISTINCT on typed connection queries
-gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO foo (title, bar, baz) VALUES ('dup1', 'val', 2)\`"){message}}`"}" | Out-Null
-gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO foo (title, bar, baz) VALUES ('uniq', 'other', 3)\`"){message}}`"}" | Out-Null
+gqlq "mutation{executeSql(sql:`"INSERT INTO foo (title, bar, baz) VALUES ('dup1', 'val', 2)`"){message}}" | Out-Null
+gqlq "mutation{executeSql(sql:`"INSERT INTO foo (title, bar, baz) VALUES ('uniq', 'other', 3)`"){message}}" | Out-Null
 Start-Sleep -Seconds 1
-$result = gql '{"query":"{ foos(distinct: \"bar\") { items { bar } totalCount } }"}'
+$result = gqlq '{ foos(distinct: "bar") { items { bar } totalCount } }'
 if ($result -notmatch '"totalCount":2') { throw "distinct totalCount: $result" }
 pass "serve: distinct deduplicates and totalCount reflects unique count"
 
-$result = gql '{"query":"{ foos(distinct: \"bar\", where: { baz: { gte: 2 } }) { totalCount } }"}'
+$result = gqlq '{ foos(distinct: "bar", where: { baz: { gte: 2 } }) { totalCount } }'
 if ($result -notmatch '"totalCount":2') { throw "distinct with where: $result" }
 pass "serve: distinct with where filter"
 
 # 38e. GROUP BY on typed aggregate queries
-$result = gql '{"query":"{ foosAggregate(groupBy: \"bar\") { groups { key count } } }"}'
+$result = gqlq '{ foosAggregate(groupBy: "bar") { groups { key count } } }'
 if ($result -notmatch '"key":"val"') { throw "groupBy missing val: $result" }
 if ($result -notmatch '"key":"other"') { throw "groupBy missing other: $result" }
 pass "serve: groupBy returns per-group counts"
 
-$result = gql '{"query":"{ foosAggregate(groupBy: \"bar\") { groups { key count minBaz maxBaz } } }"}'
+$result = gqlq '{ foosAggregate(groupBy: "bar") { groups { key count minBaz maxBaz } } }'
 if ($result -notmatch '"minBaz"') { throw "groupBy missing minBaz: $result" }
 if ($result -notmatch '"maxBaz"') { throw "groupBy missing maxBaz: $result" }
 pass "serve: groupBy with numeric aggregates"
 
-$result = gql '{"query":"{ foosAggregate(groupBy: \"bar\", where: { baz: { gte: 2 } }) { groups { key count } } }"}'
+$result = gqlq '{ foosAggregate(groupBy: "bar", where: { baz: { gte: 2 } }) { groups { key count } } }'
 if ($result -notmatch '"key"') { throw "groupBy with where: $result" }
 pass "serve: groupBy with where filter"
 
-$result = gql '{"query":"{ foosAggregate { count } }"}'
+$result = gqlq '{ foosAggregate { count } }'
 if ($result -notmatch '"count":3') { throw "aggregate without groupBy: $result" }
 pass "serve: aggregate without groupBy still works"
 
 # 38f. executeBatch mutation
-$result = gql '{"query":"mutation { executeBatch(statements: [\"INSERT INTO foo (title, bar, baz) VALUES (''batch1'', ''b1'', 10)\", \"INSERT INTO foo (title, bar, baz) VALUES (''batch2'', ''b2'', 20)\"]) { message affected } }"}'
+$result = gqlq 'mutation { executeBatch(statements: ["INSERT INTO foo (title, bar, baz) VALUES (''batch1'', ''b1'', 10)", "INSERT INTO foo (title, bar, baz) VALUES (''batch2'', ''b2'', 20)"]) { message affected } }'
 if ($result -match '"errors"') { throw "executeBatch errors: $result" }
 pass "serve: executeBatch multiple INSERTs"
 
-$result = gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE batchtest (col1 TEXT)\"]) { message } }"}'
+$result = gqlq 'mutation { executeBatch(statements: ["CREATE TABLE batchtest (col1 TEXT)"]) { message } }'
 if ($result -notmatch '"message"') { throw "executeBatch DDL: $result" }
 Start-Sleep -Seconds 1
-$result = gql '{"query":"{ batchtests { totalCount } }"}'
+$result = gqlq '{ batchtests { totalCount } }'
 if ($result -notmatch '"totalCount":0') { throw "executeBatch schema reload: $result" }
 pass "serve: executeBatch DDL triggers schema reload"
 
 # executeBatch failure rolls back
-$preCount = (gql '{"query":"{ foosAggregate { count } }"}') -replace '.*"count":(\d+).*','$1'
-try { gql '{"query":"mutation { executeBatch(statements: [\"INSERT INTO foo (title, bar, baz) VALUES (''rollback_test'', ''rb'', 99)\", \"INSERT INTO no_such_table (title) VALUES (''bad'')\"]) { message } }"}' } catch {}
+$preCount = (gqlq '{ foosAggregate { count } }') -replace '.*"count":(\d+).*','$1'
+try { gqlq 'mutation { executeBatch(statements: ["INSERT INTO foo (title, bar, baz) VALUES (''rollback_test'', ''rb'', 99)", "INSERT INTO no_such_table (title) VALUES (''bad'')"]) { message } }' } catch {}
 Start-Sleep -Seconds 1
-$postCount = (gql '{"query":"{ foosAggregate { count } }"}') -replace '.*"count":(\d+).*','$1'
+$postCount = (gqlq '{ foosAggregate { count } }') -replace '.*"count":(\d+).*','$1'
 if ($preCount -ne $postCount) { throw "executeBatch rollback failed: pre=$preCount post=$postCount" }
 pass "serve: executeBatch failure rolls back all statements"
 
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE batchtest CASCADE\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE batchtest CASCADE") { message } }' | Out-Null
 
 # 38g. batchUpdate mutation
-$bu1 = gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Alpha\" }) { id } }"}'
+$bu1 = gqlq 'mutation { createDoogat(input: { title: "BatchUp Alpha" }) { id } }'
 $BU1_ID = if ($bu1 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no bu1 id" }
-$bu2 = gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Beta\" }) { id } }"}'
+$bu2 = gqlq 'mutation { createDoogat(input: { title: "BatchUp Beta" }) { id } }'
 $BU2_ID = if ($bu2 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no bu2 id" }
-$bu3 = gql '{"query":"mutation { createDoogat(input: { title: \"BatchUp Gamma\" }) { id } }"}'
+$bu3 = gqlq 'mutation { createDoogat(input: { title: "BatchUp Gamma" }) { id } }'
 $BU3_ID = if ($bu3 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no bu3 id" }
 
-$result = gql "{`"query`":`"mutation { batchUpdate(updates: [{id: \`"$BU1_ID\`", title: \`"Updated Alpha\`"}, {id: \`"$BU2_ID\`", title: \`"Updated Beta\`"}, {id: \`"$BU3_ID\`", title: \`"Updated Gamma\`"}]) { id title } }`"}"
+$result = gqlq "mutation { batchUpdate(updates: [{id: `"$BU1_ID`", title: `"Updated Alpha`"}, {id: `"$BU2_ID`", title: `"Updated Beta`"}, {id: `"$BU3_ID`", title: `"Updated Gamma`"}]) { id title } }"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.batchUpdate.Count -ne 3) { throw "batchUpdate expected 3 items, got $($parsed.data.batchUpdate.Count)" }
 pass "serve: batchUpdate returns 3 items"
@@ -795,12 +801,12 @@ if ($item2.title -ne "Updated Beta") { throw "batchUpdate item2 title: $($item2.
 if ($item3.title -ne "Updated Gamma") { throw "batchUpdate item3 title: $($item3.title)" }
 pass "serve: batchUpdate correct titles"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU1_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU2_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU3_ID\`") }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$BU1_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$BU2_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$BU3_ID`") }" | Out-Null
 
 # 38h. createMany mutation
-$result = gql '{"query":"mutation { createMany(inputs: [{title: \"Bulk A\"}, {title: \"Bulk B\"}, {title: \"Bulk C\"}]) { id title } }"}'
+$result = gqlq 'mutation { createMany(inputs: [{title: "Bulk A"}, {title: "Bulk B"}, {title: "Bulk C"}]) { id title } }'
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.createMany.Count -ne 3) { throw "createMany expected 3, got $($parsed.data.createMany.Count)" }
 if ($parsed.data.createMany[0].title -ne "Bulk A") { throw "createMany[0] title: $($parsed.data.createMany[0].title)" }
@@ -809,12 +815,12 @@ if ($parsed.data.createMany[2].title -ne "Bulk C") { throw "createMany[2] title:
 pass "serve: createMany returns 3 items in order"
 
 $CM_ID0 = $parsed.data.createMany[0].id
-$verify = gql "{`"query`":`"{ doogat(id: \`"$CM_ID0\`") { title } }`"}"
+$verify = gqlq "{ doogat(id: `"$CM_ID0`") { title } }"
 $vp = $verify | ConvertFrom-Json
 if ($vp.data.doogat.title -ne "Bulk A") { throw "createMany persistence check failed" }
 pass "serve: createMany persists records"
 
-$emptyResult = gql '{"query":"mutation { createMany(inputs: []) { id } }"}'
+$emptyResult = gqlq 'mutation { createMany(inputs: []) { id } }'
 $ep = $emptyResult | ConvertFrom-Json
 if ($ep.data.createMany.Count -ne 0) { throw "createMany empty expected 0, got $($ep.data.createMany.Count)" }
 pass "serve: createMany empty input"
@@ -822,46 +828,46 @@ pass "serve: createMany empty input"
 # cleanup
 $CM_ID1 = $parsed.data.createMany[1].id
 $CM_ID2 = $parsed.data.createMany[2].id
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID0\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID1\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$CM_ID2\`") }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$CM_ID0`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$CM_ID1`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$CM_ID2`") }" | Out-Null
 
 # 38i. typed field updates via GraphQL (updateDoogat fields/unsetFields, deleteDoogat cleanup)
-$output = gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tfubookmark (url VARCHAR(200))\") { message } }"}'
+$output = gqlq 'mutation { executeSql(sql: "CREATE TABLE tfubookmark (url VARCHAR(200))") { message } }'
 if ($output -notmatch "table tfubookmark created") { throw "create tfubookmark failed: $output" }
 Start-Sleep -Seconds 1
-$output = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tfubookmark (title, url) VALUES (\\\"TFU Test\\\", \\\"https://old.com\\\")\") { message } }"}'
+$output = gqlq 'mutation { executeSql(sql: "INSERT INTO tfubookmark (title, url) VALUES (\"TFU Test\", \"https://old.com\")") { message } }'
 $TFU_ID = if ($output -match '"message":"(\d{14})"') { $Matches[1] } else { throw "insert tfubookmark bad id: $output" }
 # Verify initial materialized row
-$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+$output = gqlq "mutation { executeSql(sql: `"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'`", format: `"objects`") { rows } }"
 if ($output -notmatch "https://old.com") { throw "initial url not found: $output" }
 # updateDoogat with fields to change url
-$output = gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$TFU_ID\`", fields: \`"{\\\`"url\\\`":\\\`"https://updated.com\\\`"}\`" }) { id } }`"}"
+$output = gqlq "mutation { updateDoogat(input: { id: `"$TFU_ID`", fields: `"{\`"url\`":\`"https://updated.com\`"}`" }) { id } }"
 if ($output -notmatch $TFU_ID) { throw "updateDoogat fields failed: $output" }
 # Verify via SQL SELECT that materialized row has updated url
-$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+$output = gqlq "mutation { executeSql(sql: `"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'`", format: `"objects`") { rows } }"
 if ($output -notmatch "https://updated.com") { throw "url not updated: $output" }
 pass "serve: typed field update via GraphQL updateDoogat"
 # updateDoogat with unsetFields to remove url
-$output = gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$TFU_ID\`", unsetFields: [\`"url\`"] }) { id } }`"}"
+$output = gqlq "mutation { updateDoogat(input: { id: `"$TFU_ID`", unsetFields: [`"url`"] }) { id } }"
 if ($output -notmatch $TFU_ID) { throw "updateDoogat unsetFields failed: $output" }
 # Verify url is gone (NULL)
-$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'\`", format: \`"objects\`") { rows } }`"}"
+$output = gqlq "mutation { executeSql(sql: `"SELECT url FROM tfubookmark WHERE id = '$TFU_ID'`", format: `"objects`") { rows } }"
 if ($output -match "https://") { throw "url should be unset after unsetFields: $output" }
 pass "serve: typed field unset via GraphQL updateDoogat"
 # Delete the doogat and verify materialized row is gone
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$TFU_ID\`") }`"}" | Out-Null
-$output = gql "{`"query`":`"mutation { executeSql(sql: \`"SELECT COUNT(*) FROM tfubookmark WHERE id = '$TFU_ID'\`") { rows } }`"}"
+gqlq "mutation { deleteDoogat(id: `"$TFU_ID`") }" | Out-Null
+$output = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM tfubookmark WHERE id = '$TFU_ID'`") { rows } }"
 if ($output -notmatch '\[\\"0\\"\]') { throw "materialized row not cleaned after delete: $output" }
 pass "serve: deleteDoogat cleans materialized type table row"
 # Clean up typedef
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tfubookmark CASCADE\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE tfubookmark CASCADE") { message } }' | Out-Null
 
 # Hyphenated type names in GraphQL
-gql "{`"query`":`"mutation { executeSql(sql: \`"CREATE TABLE \\\`"test-widget\\\`" (status TEXT, priority INTEGER)\`") { message } }`"}" | Out-Null
+gqlq "mutation { executeSql(sql: `"CREATE TABLE \`"test-widget\`" (status TEXT, priority INTEGER)`") { message } }" | Out-Null
 Start-Sleep -Seconds 1
-gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO \\\`"test-widget\\\`" (status, priority) VALUES ('active', 1)\`") { message } }`"}" | Out-Null
-$result = gql "{`"query`":`"{ testWidgets { items { id status priority } totalCount } }`"}"
+gqlq "mutation { executeSql(sql: `"INSERT INTO \`"test-widget\`" (status, priority) VALUES ('active', 1)`") { message } }" | Out-Null
+$result = gqlq "{ testWidgets { items { id status priority } totalCount } }"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 1) { throw "testWidgets expected 1 item, got $($parsed.data.testWidgets.totalCount)" }
 if ($parsed.data.testWidgets.items[0].status -ne "active") { throw "status expected active, got $($parsed.data.testWidgets.items[0].status)" }
@@ -869,55 +875,55 @@ if ($parsed.data.testWidgets.items[0].priority -ne 1) { throw "priority expected
 pass "serve: hyphenated type typed query"
 
 # 42. base field filters on typed queries (id, title)
-gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO \\\`"test-widget\\\`" (title, status, priority) VALUES ('FilterTarget', 'pending', 5)\`") { message } }`"}" | Out-Null
+gqlq "mutation { executeSql(sql: `"INSERT INTO \`"test-widget\`" (title, status, priority) VALUES ('FilterTarget', 'pending', 5)`") { message } }" | Out-Null
 Start-Sleep -Seconds 1
 
-$result = gql "{`"query`":`"{ testWidgets(where: { title: { eq: \`"FilterTarget\`" } }) { items { id title } totalCount } }`"}"
+$result = gqlq "{ testWidgets(where: { title: { eq: `"FilterTarget`" } }) { items { id title } totalCount } }"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 1) { throw "title eq filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
 $BF_ID = $parsed.data.testWidgets.items[0].id
 pass "serve: base field title eq filter"
 
-$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \`"$BF_ID\`" } }) { items { id title } totalCount } }`"}"
+$result = gqlq "{ testWidgets(where: { id: { eq: `"$BF_ID`" } }) { items { id title } totalCount } }"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 1) { throw "id eq filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
 if ($parsed.data.testWidgets.items[0].id -ne $BF_ID) { throw "id mismatch" }
 pass "serve: base field id eq filter"
 
-$result = gql "{`"query`":`"{ testWidgets(where: { title: { contains: \`"Target\`" } }) { items { id } totalCount } }`"}"
+$result = gqlq "{ testWidgets(where: { title: { contains: `"Target`" } }) { items { id } totalCount } }"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 1) { throw "title contains filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
 pass "serve: base field title contains filter"
 
-$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \`"99999999999999\`" } }) { items { id } totalCount } }`"}"
+$result = gqlq "{ testWidgets(where: { id: { eq: `"99999999999999`" } }) { items { id } totalCount } }"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 0) { throw "nonexistent id expected 0, got $($parsed.data.testWidgets.totalCount)" }
 pass "serve: base field id nonexistent returns empty"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BF_ID\`") }`"}" | Out-Null
-gql "{`"query`":`"mutation { executeSql(sql: \`"DROP TABLE \\\`"test-widget\\\`"\`") { message } }`"}" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$BF_ID`") }" | Out-Null
+gqlq "mutation { executeSql(sql: `"DROP TABLE \`"test-widget\`"`") { message } }" | Out-Null
 
 # 43. SQL INSERT via executeSql defaults date, created_at non-null
-gql "{`"query`":`"mutation{executeSql(sql:\`"CREATE TABLE datecheck (name TEXT)\`"){message}}`"}" | Out-Null
-$dcResult = gql "{`"query`":`"mutation{executeSql(sql:\`"INSERT INTO datecheck (name) VALUES (\\\`"DateTest\\\`")\`"){message}}`"}"
+gqlq "mutation{executeSql(sql:`"CREATE TABLE datecheck (name TEXT)`"){message}}" | Out-Null
+$dcResult = gqlq "mutation{executeSql(sql:`"INSERT INTO datecheck (name) VALUES (\`"DateTest\`")`"){message}}"
 $dcId = ($dcResult | ConvertFrom-Json).data.executeSql.message
 $dcExpected = "$($dcId.Substring(0,4))-$($dcId.Substring(4,2))-$($dcId.Substring(6,2))"
-$dcQuery = gql "{`"query`":`"{ datechecks { items { id created_at } } }`"}"
+$dcQuery = gqlq "{ datechecks { items { id created_at } } }"
 $dcCreated = ($dcQuery | ConvertFrom-Json).data.datechecks.items[0].created_at
 if ($dcCreated -ne $dcExpected) { throw "created_at '$dcCreated' != expected '$dcExpected'" }
 pass "serve: SQL INSERT defaults date, created_at matches ID"
 
 # executeBatch also defaults date
-$ebResult = gql "{`"query`":`"mutation{executeBatch(statements:[\`"INSERT INTO datecheck (name) VALUES (\\\`"BatchTest\\\`")\`"]){message}}`"}"
+$ebResult = gqlq "mutation{executeBatch(statements:[`"INSERT INTO datecheck (name) VALUES (\`"BatchTest\`")`"]){message}}"
 $ebId = ($ebResult | ConvertFrom-Json).data.executeBatch[0].message
 $ebExpected = "$($ebId.Substring(0,4))-$($ebId.Substring(4,2))-$($ebId.Substring(6,2))"
-$ebQuery = gql "{`"query`":`"{ doogat(id: \`"$ebId\`") { created_at } }`"}"
+$ebQuery = gqlq "{ doogat(id: `"$ebId`") { created_at } }"
 $ebCreated = ($ebQuery | ConvertFrom-Json).data.doogat.created_at
 if ($ebCreated -ne $ebExpected) { throw "executeBatch created_at '$ebCreated' != expected '$ebExpected'" }
 pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 
 # 44. DDL response consistency (no spurious errors)
-$result = gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ddltest (name VARCHAR(100))\") { columns rows message } }"}'
+$result = gqlq 'mutation { executeSql(sql: "CREATE TABLE ddltest (name VARCHAR(100))") { columns rows message } }'
 if ($result -match '"errors"') { throw "CREATE TABLE has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "CREATE TABLE columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "CREATE TABLE rows not empty: $result" }
@@ -925,36 +931,36 @@ if ($result -notmatch '"message"') { throw "CREATE TABLE missing message: $resul
 pass "serve: CREATE TABLE response has no errors"
 
 Start-Sleep -Seconds 1
-$result = gql '{"query":"mutation { executeSql(sql: \"ALTER TABLE ddltest ADD COLUMN age INTEGER\") { columns rows message } }"}'
+$result = gqlq 'mutation { executeSql(sql: "ALTER TABLE ddltest ADD COLUMN age INTEGER") { columns rows message } }'
 if ($result -match '"errors"') { throw "ALTER TABLE has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "ALTER TABLE columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "ALTER TABLE rows not empty: $result" }
 pass "serve: ALTER TABLE response has no errors"
 
 Start-Sleep -Seconds 1
-$result = gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddltest\") { columns rows message } }"}'
+$result = gqlq 'mutation { executeSql(sql: "DROP TABLE ddltest") { columns rows message } }'
 if ($result -match '"errors"') { throw "DROP TABLE has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "DROP TABLE columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "DROP TABLE rows not empty: $result" }
 pass "serve: DROP TABLE response has no errors"
 
-$result = gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE ddlbatch1 (name VARCHAR)\", \"CREATE TABLE ddlbatch2 (val INTEGER)\"]) { columns rows message } }"}'
+$result = gqlq 'mutation { executeBatch(statements: ["CREATE TABLE ddlbatch1 (name VARCHAR)", "CREATE TABLE ddlbatch2 (val INTEGER)"]) { columns rows message } }'
 if ($result -match '"errors"') { throw "executeBatch DDL has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "executeBatch DDL columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "executeBatch DDL rows not empty: $result" }
 pass "serve: executeBatch DDL responses have no errors"
 
 Start-Sleep -Seconds 1
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch1 CASCADE\") { message } }"}' | Out-Null
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch2 CASCADE\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE ddlbatch1 CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE ddlbatch2 CASCADE") { message } }' | Out-Null
 
-$dmlResult = gql '{"query":"mutation { executeSql(sql: \"INSERT INTO datecheck (name) VALUES (\\\"DmlRegression\\\")\") { affected message } }"}'
+$dmlResult = gqlq 'mutation { executeSql(sql: "INSERT INTO datecheck (name) VALUES (\"DmlRegression\")") { affected message } }'
 if ($dmlResult -match '"errors"') { throw "DML INSERT has errors: $dmlResult" }
 if ($dmlResult -notmatch '"message"') { throw "DML INSERT missing message: $dmlResult" }
 pass "serve: DML INSERT response unchanged"
 
 # 45. createMany onConflict: IGNORE (upsert via GraphQL)
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE upsertgql (code TEXT, label TEXT)\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE upsertgql (code TEXT, label TEXT)") { message } }' | Out-Null
 Start-Sleep -Seconds 1
 Push-Location $TMPDIR
 $utFile = Get-ChildItem -Path ddb/_typedef -Filter *.md | Where-Object {
@@ -966,15 +972,15 @@ Set-Content -Path $utFile.FullName -Value $utContent -NoNewline
 git add -A | Out-Null
 git commit -m "add unique_together to upsertgql" --quiet | Out-Null
 ddb reindex | Out-Null
-$cm1 = gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"first\\\"}\"}]) { id title } }"}'
+$cm1 = gqlq 'mutation { createMany(inputs: [{title: "UpsertA", type: "upsertgql", fields: "{\"code\":\"X1\",\"label\":\"first\"}"}]) { id title } }'
 $cm1Id = ($cm1 | ConvertFrom-Json).data.createMany[0].id
 if (-not $cm1Id) { throw "upsert seed failed: $cm1" }
-$cm2 = gql '{"query":"mutation { createMany(inputs: [{title: \"UpsertA Dup\", type: \"upsertgql\", fields: \"{\\\"code\\\":\\\"X1\\\",\\\"label\\\":\\\"second\\\"}\"}], onConflict: IGNORE) { id title } }"}'
+$cm2 = gqlq 'mutation { createMany(inputs: [{title: "UpsertA Dup", type: "upsertgql", fields: "{\"code\":\"X1\",\"label\":\"second\"}"}], onConflict: IGNORE) { id title } }'
 $cm2Obj = ($cm2 | ConvertFrom-Json).data.createMany[0]
 if ($cm2Obj.id -ne $cm1Id) { throw "upsert IGNORE should return existing ID: got $($cm2Obj.id) expected $cm1Id" }
 if ($cm2Obj.title -ne "UpsertA") { throw "upsert IGNORE should return original title: got $($cm2Obj.title)" }
 pass "serve: createMany onConflict IGNORE returns existing"
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE upsertgql CASCADE\") { message } }"}' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE upsertgql CASCADE") { message } }' | Out-Null
 Pop-Location
 
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
@@ -1342,7 +1348,7 @@ pass "stale node resync after compaction"
 Push-Location $TMPDIR
 ddb query "CREATE TABLE multirow (name TEXT, val INTEGER)" | Out-Null
 $MULTI_IDS = ddb query "INSERT INTO multirow (name, val) VALUES ('a', 1), ('b', 2), ('c', 3)"
-if ($MULTI_IDS -notmatch "^\d{14},\d{14},\d{14}$") { throw "multi-row insert did not return 3 IDs: $MULTI_IDS" }
+if ($MULTI_IDS -notmatch "(?m)^\d{14},\d{14},\d{14}$") { throw "multi-row insert did not return 3 IDs: $MULTI_IDS" }
 $count = ddb query "SELECT COUNT(*) FROM multirow"
 if ($count -notmatch "3") { throw "expected 3 rows, got: $count" }
 pass "multi-row insert"
