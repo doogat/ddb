@@ -800,7 +800,7 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU2_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BU3_ID\`") }`"}" | Out-Null
 
 # 38h. createMany mutation
-$result = gql '{\"query\":\"mutation { createMany(inputs: [{title: \\\"Bulk A\\\"}, {title: \\\"Bulk B\\\"}, {title: \\\"Bulk C\\\"}]) { id title } }\"}'
+$result = gql '{"query":"mutation { createMany(inputs: [{title: \"Bulk A\"}, {title: \"Bulk B\"}, {title: \"Bulk C\"}]) { id title } }"}'
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.createMany.Count -ne 3) { throw "createMany expected 3, got $($parsed.data.createMany.Count)" }
 if ($parsed.data.createMany[0].title -ne "Bulk A") { throw "createMany[0] title: $($parsed.data.createMany[0].title)" }
