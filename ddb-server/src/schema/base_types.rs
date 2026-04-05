@@ -790,7 +790,7 @@ pub(crate) fn build_typed_object(
                 },
             ));
         } else if !BASE_DOOGAT_FIELDS.contains(&gql_col_name.as_str()) {
-            // Non-REFERENCES scalar field (skip if name collides with base doogat fields)
+            // Non-REFERENCES scalar field
             let gql_type = column_to_gql_type(col);
             let col_name = col.name.clone();
             obj = obj.field(Field::new(&gql_col_name, gql_type, move |ctx| {
@@ -800,6 +800,17 @@ pub(crate) fn build_typed_object(
                     Ok(obj_field(obj, &col_name))
                 })
             }));
+        } else {
+            // Column name collides with a base doogat field (id, title, date, type,
+            // tags, body, path, fields, links, attachments, updated_at, created_at).
+            // Drop it from the typed GraphQL object to avoid duplicate field registration,
+            // but warn so the user can rename it.
+            tracing::warn!(
+                typedef = %type_name,
+                column = %col.name,
+                gql_name = %gql_col_name,
+                "typedef column name collides with a base doogat field and was dropped from the typed GraphQL object; rename the column to expose it"
+            );
         }
     }
 
