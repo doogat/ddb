@@ -493,6 +493,17 @@ impl Index {
             .ok()
     }
 
+    /// Store the current HEAD oid in `_ddb_meta`. Callers should invoke this
+    /// after committing changes + indexing them to keep `is_stale()` accurate
+    /// and avoid spurious incremental_reindex calls on the next operation.
+    pub fn store_head(&self, head: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO _ddb_meta (key, value) VALUES ('head', ?1)",
+            params![head],
+        )?;
+        Ok(())
+    }
+
     /// Incremental reindex: only re-index doogats changed between old_head and current HEAD.
     /// Falls back to full rebuild if diff fails (e.g. old HEAD unreachable after gc).
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
