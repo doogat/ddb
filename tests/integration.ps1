@@ -872,29 +872,29 @@ pass "serve: hyphenated type typed query"
 gql "{`"query`":`"mutation { executeSql(sql: \`"INSERT INTO \\\`"test-widget\\\`" (title, status, priority) VALUES ('FilterTarget', 'pending', 5)\`") { message } }`"}" | Out-Null
 Start-Sleep -Seconds 1
 
-$result = gql "{`"query`":`"{ testWidgets(where: { title: { eq: \\\`"FilterTarget\\\`" } }) { items { id title } totalCount } }`"}"
+$result = gql "{`"query`":`"{ testWidgets(where: { title: { eq: \`"FilterTarget\`" } }) { items { id title } totalCount } }`"}"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 1) { throw "title eq filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
 $BF_ID = $parsed.data.testWidgets.items[0].id
 pass "serve: base field title eq filter"
 
-$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \\\`"$BF_ID\\\`" } }) { items { id title } totalCount } }`"}"
+$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \`"$BF_ID\`" } }) { items { id title } totalCount } }`"}"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 1) { throw "id eq filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
 if ($parsed.data.testWidgets.items[0].id -ne $BF_ID) { throw "id mismatch" }
 pass "serve: base field id eq filter"
 
-$result = gql "{`"query`":`"{ testWidgets(where: { title: { contains: \\\`"Target\\\`" } }) { items { id } totalCount } }`"}"
+$result = gql "{`"query`":`"{ testWidgets(where: { title: { contains: \`"Target\`" } }) { items { id } totalCount } }`"}"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 1) { throw "title contains filter expected 1, got $($parsed.data.testWidgets.totalCount)" }
 pass "serve: base field title contains filter"
 
-$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \\\`"99999999999999\\\`" } }) { items { id } totalCount } }`"}"
+$result = gql "{`"query`":`"{ testWidgets(where: { id: { eq: \`"99999999999999\`" } }) { items { id } totalCount } }`"}"
 $parsed = $result | ConvertFrom-Json
 if ($parsed.data.testWidgets.totalCount -ne 0) { throw "nonexistent id expected 0, got $($parsed.data.testWidgets.totalCount)" }
 pass "serve: base field id nonexistent returns empty"
 
-gql "{`"query`":`"mutation { deleteDoogat(id: \\\`"$BF_ID\\\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$BF_ID\`") }`"}" | Out-Null
 gql "{`"query`":`"mutation { executeSql(sql: \`"DROP TABLE \\\`"test-widget\\\`"\`") { message } }`"}" | Out-Null
 
 # 43. SQL INSERT via executeSql defaults date, created_at non-null
@@ -911,7 +911,7 @@ pass "serve: SQL INSERT defaults date, created_at matches ID"
 $ebResult = gql "{`"query`":`"mutation{executeBatch(statements:[\`"INSERT INTO datecheck (name) VALUES (\\\`"BatchTest\\\`")\`"]){message}}`"}"
 $ebId = ($ebResult | ConvertFrom-Json).data.executeBatch[0].message
 $ebExpected = "$($ebId.Substring(0,4))-$($ebId.Substring(4,2))-$($ebId.Substring(6,2))"
-$ebQuery = gql "{`"query`":`"{ doogat(id: \\\`"$ebId\\\`") { created_at } }`"}"
+$ebQuery = gql "{`"query`":`"{ doogat(id: \`"$ebId\`") { created_at } }`"}"
 $ebCreated = ($ebQuery | ConvertFrom-Json).data.doogat.created_at
 if ($ebCreated -ne $ebExpected) { throw "executeBatch created_at '$ebCreated' != expected '$ebExpected'" }
 pass "serve: executeBatch INSERT defaults date, created_at matches ID"
