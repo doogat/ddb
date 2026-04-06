@@ -80,7 +80,7 @@ traits (depends: error, types — defines DoogatSource, DoogatStore,
 | `hlc` | Hybrid Logical Clock for causal ordering | — (std only) |
 | `bundle` | Air-gapped sync via tar archive export/import | tar, sha2, flate2 |
 | `nosql` | redb-based key-value index for fast lookups (feature-gated) | redb |
-| `service` | Unified orchestration layer (DoogatService) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write | all core modules |
+| `service` | Unified orchestration layer (DoogatService) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write (directory module: `mod.rs` struct/constructors/state, `crud.rs` create/read/update/delete/batch ops, `search.rs` search/filtered queries, `sql.rs` SQL pass-through/transactions, `ops.rs` sync/compact/maintenance/bundles, `discovery.rs` unlinked mentions/sequences/backlinks, `utility.rs` schema queries/attachments/NoSQL reads) | all core modules |
 | `ffi` | UniFFI facade (DoogatDriver) wrapping `Mutex<DoogatService>` for Swift/Kotlin | service, uniffi |
 | **CLI** | Command-line interface delegating to DoogatService | service, clap |
 | **updater** (CLI) | Self-update from GitHub releases | reqwest, semver, self_replace, sha2, flate2, tar |

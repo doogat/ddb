@@ -12,6 +12,8 @@ mod search;
 mod sql;
 mod utility;
 
+pub use search::SORTABLE_COLUMNS;
+
 /// Extra frontmatter fields to set or remove during an update.
 pub struct ExtraFieldUpdates<'a> {
     pub set: &'a std::collections::BTreeMap<String, crate::types::Value>,

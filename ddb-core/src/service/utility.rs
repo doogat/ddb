@@ -1,4 +1,4 @@
-use crate::error::{DoogatError, Result};
+use crate::error::Result;
 use crate::git_ops;
 use crate::parser;
 use crate::types::{
@@ -9,6 +9,11 @@ use super::DoogatService;
 
 impl DoogatService {
     // ── Utility ─────────────────────────────────────────────────────────
+
+    /// Verify index is reachable.
+    pub fn health_check(&self) -> Result<bool> {
+        Ok(self.index.query_raw("SELECT 1").is_ok())
+    }
 
     pub fn list_doogats(&self) -> Result<Vec<String>> {
         self.repo.list_doogats()

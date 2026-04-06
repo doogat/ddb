@@ -1,5 +1,7 @@
 
 use super::*;
+use crate::sql_engine::SqlResult;
+use crate::types::BatchUpdateInput;
 use tempfile::TempDir;
 
 fn fresh_svc() -> (TempDir, DoogatService) {
