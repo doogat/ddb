@@ -73,6 +73,7 @@ const GROWTH_THRESHOLD_BYTES_50K: u64 = 200 * 1024 * 1024; // 200MB (spec NFR-02
 fn nfr02_repo_growth_under_200mb_per_year_at_50k() {
     let dir = TempDir::new().unwrap();
     let repo = GitRepo::init(dir.path()).unwrap();
+    repo.set_skip_commit_graph(true);
 
     let files: Vec<(String, String)> = (0..INITIAL_DOOGATS_50K)
         .map(|i| (doogat_path(i), doogat_content(i)))
@@ -83,6 +84,15 @@ fn nfr02_repo_growth_under_200mb_per_year_at_50k() {
         .collect();
     repo.commit_files(&refs, "seed").unwrap();
 
+    // Pack seed objects so size_before reflects packed baseline.
+    assert!(
+        std::process::Command::new("git")
+            .args(["gc"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap()
+            .success()
+    );
     let size_before = dir_size(dir.path());
 
     for day in 0..DAYS {
@@ -103,6 +113,18 @@ fn nfr02_repo_growth_under_200mb_per_year_at_50k() {
             .collect();
         repo.commit_files(&refs, &format!("day {day}")).unwrap();
     }
+
+    // Repack before measuring. In production, maintenance runs from multiple
+    // triggers (write-threshold, startup, ddb compact). Without packing,
+    // loose 50K-entry tree objects dominate disk usage.
+    assert!(
+        std::process::Command::new("git")
+            .args(["gc"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap()
+            .success()
+    );
 
     let size_after = dir_size(dir.path());
     let growth = size_after - size_before;
