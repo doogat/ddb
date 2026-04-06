@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
 use crate::types::{
