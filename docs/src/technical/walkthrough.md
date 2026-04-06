@@ -609,7 +609,7 @@ brokenSequences: [BrokenSequence!]!
 
 ## 13. Zone Inference
 
-When `CREATE TABLE` defines columns, each column's SQL data type determines its default zone placement. This inference runs in `sql_engine/mod.rs:extract_columns()` during typedef creation.
+When `CREATE TABLE` defines columns, each column's SQL data type determines its default zone placement. This inference runs in `sql_engine/ddl.rs:extract_columns()` during typedef creation.
 
 ### Inference rules (applied in order)
 
@@ -655,7 +655,7 @@ This approach keeps the parser dependency clean while supporting Doogat DB-speci
 
 Multi-valued `REFERENCES` columns use auto-created junction tables for many-to-many relationships.
 
-### Auto-creation (sql_engine/mod.rs)
+### Auto-creation (sql_engine/ddl.rs)
 
 When `CREATE TABLE` includes a column with `REFERENCES`, `handle_create_table()` calls `junction_table_ddl(table_name, col_name)` to generate:
 

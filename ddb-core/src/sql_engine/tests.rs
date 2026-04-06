@@ -1,7 +1,11 @@
 
+use super::helpers::{data_type_to_string, eval_expr, is_literal_expr, value_to_sql};
 use super::*;
 use crate::git_ops::GitRepo;
 use crate::indexer::Index;
+use crate::types::{DoogatMeta, ParsedDoogat, Value, Zone};
+use sqlparser::ast::{Expr, SetExpr};
+use std::collections::BTreeMap;
 use tempfile::TempDir;
 
 // Test helpers
@@ -1663,7 +1667,7 @@ fn data_type_to_string_preserves_sizes() {
     ];
 
     for (dt, expected) in cases {
-        assert_eq!(super::data_type_to_string(&dt), expected, "for {dt:?}");
+        assert_eq!(data_type_to_string(&dt), expected, "for {dt:?}");
     }
 }
 

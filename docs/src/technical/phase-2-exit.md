@@ -18,7 +18,7 @@ Phase 1 scope: Core Driver + Primary Interfaces.
 | 6 | Separate frontmatter CRDT tracking | Done | `crdt_resolver.rs` - `merge_frontmatter()` with dedicated CRDT bytes (`fm_crdt_bytes`) |
 | 7 | Commit-graph integration | Done | `git_ops/mod.rs` - `write_commit_graph()` called after commits. Read via libgit2, write via git CLI. |
 | 8 | Index-as-read-cache (SQLite) with `_ddb_` prefixed tables | Done | `indexer/mod.rs` - `_ddb_tags`, `_ddb_fields`, `_ddb_links`, `_ddb_aliases`, `_ddb_meta`, `_ddb_attachments` |
-| 9 | SQL engine: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT | Done | `sql_engine/mod.rs` - DDL/DML with git write-through, SELECT from materialized tables |
+| 9 | SQL engine: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT | Done | `sql_engine/` - DDL/DML with git write-through, SELECT from materialized tables |
 | 10 | Type definition system with implicit inference | Done | `indexer/` - `_typedef` doogats + inference from frontmatter keys, body headings, reference fields. Merged schema. |
 | 11 | 2 bundled type definitions (project, contact) | Done | `bundled_types.rs` - PROJECT_TYPEDEF, CONTACT_TYPEDEF, installed via `ddb type install` |
 | 12 | 3 CRDT presets (default, append-log, LWW) | Done | `crdt_resolver.rs` - `preset:default`, `preset:append-log`, `preset:last-writer-wins` |
