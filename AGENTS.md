@@ -18,28 +18,48 @@ ddb-core/src/       Library crate
   parser/            Three-zone Markdown parsing (frontmatter/body/references)
   search_query.rs   Search query parsing and normalization to canonical form
   git_ops/          Git repository CRUD, merge, remote sync
+    merge.rs          Merge/conflict resolution
+    remote.rs         Push/pull/fetch operations
+    read.rs           File reads, diffs, revision queries
+    rename.rs         Rename with backlink rewrite
   crdt_resolver.rs  Automerge CRDT conflict resolution
   indexer/          SQLite FTS5 index, type inference, materialization
+    search.rs         FTS5 search, tag queries, filter building
+    rebuild.rs        Rebuild, reindex, staleness checks
   service/          Unified orchestration layer (DoogatService) for CLI/FFI/server
   sql_engine/       SQL DDL/DML translation (tables as doogat types)
   bundled_types.rs  Built-in type templates (project, contact)
   sync_manager/     Multi-device sync orchestration
   compaction/       CRDT temp cleanup and git gc
+  consistency/      Detect/apply/migrate auto-fixes
+    migrations.rs     Versioned data migrations
+    zone_migrate.rs   Cross-zone field migration
   hlc.rs            Hybrid Logical Clock for causal ordering
   traits.rs         Core trait abstractions (DoogatSource, DoogatStore, etc.)
   ffi.rs            UniFFI DoogatDriver facade for Swift/Kotlin bindings
-  types.rs          Shared data structures (DoogatId, ParsedDoogat, DoogatMeta)
+  types/            Shared data structures (directory module)
+    value.rs          Value enum, path utilities
+    doogat.rs         Domain model types (DoogatId, ParsedDoogat, etc.)
+    schema.rs         Schema/consistency types (TableSchema, ColumnDef, Fix)
   error.rs          Error types and Result alias
   ddb.udl           UniFFI interface definition (documentation reference)
 ddb-core/benches/   Criterion benchmarks
   crud.rs           CRUD operations at 1K doogats
   search.rs         FTS5 search, SQL SELECT, reindex at 1K doogats
 ddb-uniffi-bindgen/ UniFFI bindgen binary (isolated from ddb-core)
-ddb-cli/src/        Binary crate (single main.rs)
+ddb-cli/src/        Binary crate
+  main.rs           CLI struct definitions, dispatch, utilities
+  commands/         Subcommand handlers (crud, query, sync, maintenance, discover)
 ddb-server/src/     GraphQL server crate
   lib.rs            Server entrypoint (axum router, actor spawn)
-  actor.rs          Thread-safe core bridge (mpsc + oneshot)
-  schema.rs         Dynamic GraphQL schema from _typedef doogats
+  actor/            Thread-safe core bridge (mpsc + oneshot)
+    handlers.rs       Command dispatch logic
+  schema/           Dynamic GraphQL schema from _typedef doogats
+    type_defs.rs      GraphQL type/input/enum definitions
+    queries.rs        Query field resolvers
+    mutations.rs      Mutation field resolvers
+    subscriptions.rs  Subscription field resolvers
+    discovery_queries.rs  Discovery query resolvers (orphans, sequences, etc.)
   auth.rs           Bearer token generation + middleware
   config.rs         Server config (~/.config/ddb/)
   error.rs          DoogatError → GraphQL error mapping
