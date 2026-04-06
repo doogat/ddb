@@ -15,16 +15,16 @@ Hybrid Git-CRDT decentralized database. Git is source of truth; SQLite index is 
 
 ```text
 ddb-core/src/       Library crate
-  parser.rs         Three-zone Markdown parsing (frontmatter/body/references)
+  parser/            Three-zone Markdown parsing (frontmatter/body/references)
   search_query.rs   Search query parsing and normalization to canonical form
-  git_ops.rs        Git repository CRUD, merge, remote sync
+  git_ops/          Git repository CRUD, merge, remote sync
   crdt_resolver.rs  Automerge CRDT conflict resolution
-  indexer.rs        SQLite FTS5 index, type inference, materialization
-  service.rs        Unified orchestration layer (DoogatService) for CLI/FFI/server
-  sql_engine.rs     SQL DDL/DML translation (tables as doogat types)
+  indexer/          SQLite FTS5 index, type inference, materialization
+  service/          Unified orchestration layer (DoogatService) for CLI/FFI/server
+  sql_engine/       SQL DDL/DML translation (tables as doogat types)
   bundled_types.rs  Built-in type templates (project, contact)
-  sync_manager.rs   Multi-device sync orchestration
-  compaction.rs     CRDT temp cleanup and git gc
+  sync_manager/     Multi-device sync orchestration
+  compaction/       CRDT temp cleanup and git gc
   hlc.rs            Hybrid Logical Clock for causal ordering
   traits.rs         Core trait abstractions (DoogatSource, DoogatStore, etc.)
   ffi.rs            UniFFI DoogatDriver facade for Swift/Kotlin bindings

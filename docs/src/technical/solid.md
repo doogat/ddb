@@ -6,7 +6,7 @@ SOLID originated in OOP, but the principles translate well to Rust — often enf
 
 Each module owns one concern. The natural unit in Rust is the module and its public API, not a class.
 
-Doogat DB modules follow this: `parser.rs` parses, `git_ops.rs` handles git, `indexer.rs` handles SQLite. Each module exposes a focused public API and hides implementation details.
+Doogat DB modules follow this: `parser/` parses, `git_ops/` handles git, `indexer/` handles SQLite. Each module exposes a focused public API and hides implementation details.
 
 ## Open/Closed (O)
 

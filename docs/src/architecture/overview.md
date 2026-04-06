@@ -131,14 +131,14 @@ ddb/
 │   │   ├── types.rs            # Shared data structures
 │   │   ├── traits.rs           # Core trait abstractions
 │   │   ├── hlc.rs              # Hybrid Logical Clock
-│   │   ├── parser.rs           # Markdown parsing/serialization
-│   │   ├── git_ops.rs          # Git repository operations
+│   │   ├── parser/             # Markdown parsing/serialization
+│   │   ├── git_ops/            # Git repository operations
 │   │   ├── crdt_resolver.rs    # Automerge conflict resolution
-│   │   ├── indexer.rs          # SQLite FTS5 index + type inference
-│   │   ├── sql_engine.rs       # SQL DDL/DML translation
+│   │   ├── indexer/            # SQLite FTS5 index + type inference
+│   │   ├── sql_engine/         # SQL DDL/DML translation
 │   │   ├── bundled_types.rs    # Built-in type definitions
-│   │   ├── sync_manager.rs     # Multi-device sync
-│   │   ├── compaction.rs       # CRDT cleanup + git gc
+│   │   ├── sync_manager/       # Multi-device sync
+│   │   ├── compaction/         # CRDT cleanup + git gc
 │   │   ├── ffi.rs              # UniFFI DoogatDriver facade
 │   │   └── ddb.udl             # UniFFI interface definition (docs)
 │   └── benches/

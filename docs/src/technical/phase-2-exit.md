@@ -11,27 +11,27 @@ Phase 1 scope: Core Driver + Primary Interfaces.
 | # | Deliverable | Status | Evidence |
 |---|---|---|---|
 | 1 | Rust project with libgit2 + automerge-rs | Done | `git2` 0.19 and `automerge` 0.7 in ddb-core/Cargo.toml |
-| 2 | GitBackend trait abstraction | Not implemented | Spec called for a trait to enable gitoxide swap. Git ops use `git2` directly via `git_ops.rs`. See deviation log. |
-| 3 | Generic three-zone parser | Done | `parser.rs` - frontmatter (YAML), body (Markdown + inline fields), reference section |
+| 2 | GitBackend trait abstraction | Not implemented | Spec called for a trait to enable gitoxide swap. Git ops use `git2` directly via `git_ops/mod.rs`. See deviation log. |
+| 3 | Generic three-zone parser | Done | `parser/mod.rs` - frontmatter (YAML), body (Markdown + inline fields), reference section |
 | 4 | Structured Automerge document schema (Map + Text + List) | Done | `crdt_resolver.rs` - frontmatter as Map, body as Text, reference as key-value set |
 | 5 | HLC implementation | Done | `hlc.rs` - wall_ms + counter + node_id, monotonic per-node, commit trailer embedding |
 | 6 | Separate frontmatter CRDT tracking | Done | `crdt_resolver.rs` - `merge_frontmatter()` with dedicated CRDT bytes (`fm_crdt_bytes`) |
-| 7 | Commit-graph integration | Done | `git_ops.rs` - `write_commit_graph()` called after commits. Read via libgit2, write via git CLI. |
+| 7 | Commit-graph integration | Done | `git_ops/mod.rs` - `write_commit_graph()` called after commits. Read via libgit2, write via git CLI. |
 | 8 | Index-as-read-cache (SQLite) with `_ddb_` prefixed tables | Done | `indexer/mod.rs` - `_ddb_tags`, `_ddb_fields`, `_ddb_links`, `_ddb_aliases`, `_ddb_meta`, `_ddb_attachments` |
-| 9 | SQL engine: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT | Done | `sql_engine.rs` - DDL/DML with git write-through, SELECT from materialized tables |
+| 9 | SQL engine: CREATE TABLE, INSERT, UPDATE, DELETE, SELECT | Done | `sql_engine/mod.rs` - DDL/DML with git write-through, SELECT from materialized tables |
 | 10 | Type definition system with implicit inference | Done | `indexer/` - `_typedef` doogats + inference from frontmatter keys, body headings, reference fields. Merged schema. |
 | 11 | 2 bundled type definitions (project, contact) | Done | `bundled_types.rs` - PROJECT_TYPEDEF, CONTACT_TYPEDEF, installed via `ddb type install` |
 | 12 | 3 CRDT presets (default, append-log, LWW) | Done | `crdt_resolver.rs` - `preset:default`, `preset:append-log`, `preset:last-writer-wins` |
-| 13 | Node registration | Done | `sync_manager.rs` - `.nodes/{uuid}.toml`, auto-registration, known_heads, HLC state |
+| 13 | Node registration | Done | `sync_manager/mod.rs` - `.nodes/{uuid}.toml`, auto-registration, known_heads, HLC state |
 | 14 | GraphQL interface | Done | `ddb-server/src/schema/` - async-graphql dynamic schema from type definitions |
 | 15 | SQL/pgwire interface | Done | `ddb-server/src/pgwire.rs` - PostgreSQL wire protocol, simple query mode, MD5 auth |
 | 16 | Token auth | Done | `ddb-server/src/auth.rs` - UUID token, 0600 permissions, Bearer header |
 | 17 | `ddb serve` command | Done | `ddb-cli/src/main.rs` - HTTP + pgwire ports, bind address config |
-| 18 | Core API with full CRUD + error types | Done | `service.rs` (DoogatService), `error.rs` (DoogatError enum) |
+| 18 | Core API with full CRUD + error types | Done | `service/mod.rs` (DoogatService), `error.rs` (DoogatError enum) |
 | 19 | Configuration system | Done | `.ddb.toml` (repo-wide), `~/.config/ddb/config.toml` (node-local) |
 | 20 | UniFFI bindings for Swift + Kotlin | Done | `ffi.rs`, `ddb.udl`, `tests/swift/`, `tests/kotlin/`, `dev/bin/build-xcframework`, `dev/bin/build-android` |
 | 21 | Unit tests | Done | `#[cfg(test)]` modules in crdt_resolver, sync_manager, consistency, parser, sql_engine, and others |
-| 22 | Cross-device ID collision detection | Done | `sync_manager.rs` - `resolve_add_add_collision()`, CollisionLoser tracking, ID reassignment |
+| 22 | Cross-device ID collision detection | Done | `sync_manager/mod.rs` - `resolve_add_add_collision()`, CollisionLoser tracking, ID reassignment |
 
 21 of 22 deliverables complete. See deviation log for the GitBackend trait.
 
@@ -41,7 +41,7 @@ Phase 2 scope: Scalability + Storage + Remaining Interfaces.
 
 | # | Deliverable | Spec Refs | Status | Evidence |
 |---|---|---|---|---|
-| 1 | Selective compaction (incl. frontmatter CRDT) | FR-60 to FR-65, AC-05, AC-21 | Done | `compaction.rs` - shared-head boundary, frontmatter CRDT cleanup, pre-compaction backup, dry-run, git gc |
+| 1 | Selective compaction (incl. frontmatter CRDT) | FR-60 to FR-65, AC-05, AC-21 | Done | `compaction/mod.rs` - shared-head boundary, frontmatter CRDT cleanup, pre-compaction backup, dry-run, git gc |
 | 2 | Bundle export/import (incl. full export for bootstrapping) | FR-30 to FR-34, AC-03 | Done | `bundle.rs` - delta and full export, SHA-256 checksum, node-targeted bundles |
 | 3 | Background maintenance | Scalability strategy table | Done | `maintenance.rs` (core + server) - auto/manual modes, write-threshold triggers |
 | 4 | Git gc | FR-64 | Done | Integrated into compaction path (not --aggressive by default) |
@@ -60,7 +60,7 @@ All 10 deliverables complete.
 
 | Item | Original Plan | Actual Outcome | Rationale |
 |---|---|---|---|
-| GitBackend trait | Trait abstraction over libgit2 to enable per-feature gitoxide swap (DD-17) | No trait. `git_ops.rs` uses git2 directly. | Trait was speculative - gitoxide was not mature enough to swap any feature during Phase 1. Direct git2 usage is simpler. **Blocks Phase 3.** PRD 00099 created to address before mobile work begins. |
+| GitBackend trait | Trait abstraction over libgit2 to enable per-feature gitoxide swap (DD-17) | No trait. `git_ops/mod.rs` uses git2 directly. | Trait was speculative - gitoxide was not mature enough to swap any feature during Phase 1. Direct git2 usage is simpler. **Blocks Phase 3.** PRD 00099 created to address before mobile work begins. |
 
 ### Phase 2 deviations
 

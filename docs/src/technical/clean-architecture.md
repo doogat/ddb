@@ -8,7 +8,7 @@ Clean Architecture's core idea: **dependencies point inward**. Outer layers know
 |---|---|---|
 | Domain | `types.rs`, `error.rs` — pure data structures, no I/O | Nothing |
 | Use cases | Business logic — parsing rules, type inference, conflict resolution | Domain only |
-| Adapters | `git_ops.rs`, `indexer.rs`, `crdt_resolver.rs` — external system integration | Domain + traits |
+| Adapters | `git_ops/mod.rs`, `indexer.rs`, `crdt_resolver.rs` — external system integration | Domain + traits |
 | Entry point | `ddb-cli` — wires everything together | All layers |
 
 ## Domain layer
@@ -44,7 +44,7 @@ Implements trait abstractions using external systems. Each adapter translates be
 
 | Adapter | External dependency | Domain interface |
 |---|---|---|
-| `git_ops.rs` | `git2` | Doogat storage/retrieval |
+| `git_ops/mod.rs` | `git2` | Doogat storage/retrieval |
 | `indexer.rs` | `rusqlite` | Search and query |
 | `crdt_resolver.rs` | `automerge` | Conflict resolution state |
 

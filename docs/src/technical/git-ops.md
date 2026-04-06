@@ -1,6 +1,6 @@
 # Git Operations
 
-**Source**: `ddb-core/src/git_ops.rs`
+**Source**: `ddb-core/src/git_ops/mod.rs`
 
 Wraps libgit2 (`git2` crate) for all Git repository interactions. `GitRepo` is the concrete implementation behind the `GitBackend` trait.
 

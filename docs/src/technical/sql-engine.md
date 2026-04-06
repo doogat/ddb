@@ -1,6 +1,6 @@
 # SQL Engine
 
-**Source**: `ddb-core/src/sql_engine.rs` (~3,400 lines)
+**Source**: `ddb-core/src/sql_engine/mod.rs`
 
 Translates SQL DDL/DML statements into doogat CRUD operations. Tables map to doogat types — `CREATE TABLE` produces a `_typedef` doogat, `INSERT` produces a typed data doogat, etc.
 

@@ -1,6 +1,6 @@
 # Parser
 
-**Source**: `ddb-core/src/parser.rs` (726 lines)
+**Source**: `ddb-core/src/parser/mod.rs`
 
 The parser handles splitting Markdown into three zones, extracting metadata, and serializing back to Markdown. It's the largest module because the doogat format has several edge cases.
 

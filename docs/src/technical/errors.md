@@ -8,12 +8,12 @@ A unified error enum using `thiserror` for all fallible operations. All variants
 
 ```rust
 pub enum DoogatError {
-    Git(String),           // Git operations (from git2::Error in git_ops.rs)
-    Yaml(String),          // YAML parsing (from serde_yaml::Error in parser.rs)
+    Git(String),           // Git operations (from git2::Error in git_ops/mod.rs)
+    Yaml(String),          // YAML parsing (from serde_yaml::Error in parser/mod.rs)
     Sql(String),           // SQLite queries (from rusqlite::Error in indexer.rs)
     Automerge(String),     // CRDT operations (from AutomergeError in crdt_resolver.rs)
     Io(std::io::Error),    // File I/O
-    Toml(String),          // TOML parsing (from toml::de::Error in sync_manager.rs)
+    Toml(String),          // TOML parsing (from toml::de::Error in sync_manager/mod.rs)
     Parse(String),         // Generic parse failures
     NotFound(String),      // File/ref not found
     Validation(String),    // Cross-zone duplicate fields, invalid data
@@ -32,11 +32,11 @@ All public functions in `ddb-core` return `Result<T>`.
 ## Conversion
 
 External error types convert via `From` impls in their respective adapter modules (not in error.rs):
-- `git2::Error` → `DoogatError::Git` (in `git_ops.rs`)
-- `serde_yaml::Error` → `DoogatError::Yaml` (in `parser.rs`)
+- `git2::Error` → `DoogatError::Git` (in `git_ops/mod.rs`)
+- `serde_yaml::Error` → `DoogatError::Yaml` (in `parser/mod.rs`)
 - `rusqlite::Error` → `DoogatError::Sql` (in `indexer.rs`)
 - `automerge::AutomergeError` → `DoogatError::Automerge` (in `crdt_resolver.rs`)
-- `toml::de::Error` → `DoogatError::Toml` (in `sync_manager.rs`)
+- `toml::de::Error` → `DoogatError::Toml` (in `sync_manager/mod.rs`)
 - `std::io::Error` → `DoogatError::Io` (via `#[from]` in error.rs)
 
 This keeps `error.rs` free of adapter crate imports — it depends only on `thiserror` and `std::io`.

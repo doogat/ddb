@@ -353,7 +353,7 @@ The maintenance module (see `maintenance.rs`) wraps `git maintenance run` for re
 
 ### Compaction
 
-The compaction module (see `compaction.rs`) cleans up CRDT temporary files in `.crdt/temp/` and runs Git garbage collection. It computes a shared-head across all active nodes' known heads to determine which CRDT documents are safe to prune. A pre-compaction backup bundle can be created automatically. The `compact()` function reports bytes reclaimed, files removed, and CRDT documents compacted.
+The compaction module (see `compaction/mod.rs`) cleans up CRDT temporary files in `.crdt/temp/` and runs Git garbage collection. It computes a shared-head across all active nodes' known heads to determine which CRDT documents are safe to prune. A pre-compaction backup bundle can be created automatically. The `compact()` function reports bytes reclaimed, files removed, and CRDT documents compacted.
 
 
 ## 7. Testing Strategy
@@ -390,7 +390,7 @@ Criterion benchmarks in `ddb-core/benches/` measure CRUD operations and search p
 
 ## 8. Consistency Auto-Fix
 
-The `consistency` module (`consistency.rs`) provides a detect-then-apply pipeline for normalizing doogats. The `ddb fix` command scans all doogats and corrects common data quality issues in a single atomic commit.
+The `consistency` module (`consistency/mod.rs`) provides a detect-then-apply pipeline for normalizing doogats. The `ddb fix` command scans all doogats and corrects common data quality issues in a single atomic commit.
 
 ### Detection
 
@@ -609,7 +609,7 @@ brokenSequences: [BrokenSequence!]!
 
 ## 13. Zone Inference
 
-When `CREATE TABLE` defines columns, each column's SQL data type determines its default zone placement. This inference runs in `sql_engine.rs:extract_columns()` during typedef creation.
+When `CREATE TABLE` defines columns, each column's SQL data type determines its default zone placement. This inference runs in `sql_engine/mod.rs:extract_columns()` during typedef creation.
 
 ### Inference rules (applied in order)
 
@@ -655,7 +655,7 @@ This approach keeps the parser dependency clean while supporting Doogat DB-speci
 
 Multi-valued `REFERENCES` columns use auto-created junction tables for many-to-many relationships.
 
-### Auto-creation (sql_engine.rs)
+### Auto-creation (sql_engine/mod.rs)
 
 When `CREATE TABLE` includes a column with `REFERENCES`, `handle_create_table()` calls `junction_table_ddl(table_name, col_name)` to generate:
 

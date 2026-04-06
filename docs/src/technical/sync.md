@@ -2,7 +2,7 @@
 
 ## Sync Manager
 
-**Source**: `ddb-core/src/sync_manager.rs` (198 lines)
+**Source**: `ddb-core/src/sync_manager/mod.rs`
 
 Orchestrates multi-device synchronization.
 
@@ -144,7 +144,7 @@ pub struct Hlc {
 
 ## Compaction
 
-**Source**: `ddb-core/src/compaction.rs`
+**Source**: `ddb-core/src/compaction/mod.rs`
 
 Cleans up temporary CRDT files, merges per-doogat CRDT docs, and runs Git garbage collection. Reports before/after storage measurements.
 
@@ -210,7 +210,7 @@ pub struct CompactionReport {
 
 ## Conflict Resolution Cascade
 
-When a sync detects conflicting changes, resolution follows a three-step cascade (see `cascade_resolve` in `sync_manager.rs`):
+When a sync detects conflicting changes, resolution follows a three-step cascade (see `cascade_resolve` in `sync_manager/mod.rs`):
 
 ```
 Step 1: Git three-way merge (libgit2)
