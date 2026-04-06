@@ -63,26 +63,26 @@ traits (depends: error, types — defines DoogatSource, DoogatStore,
 | Module | Purpose | Key Dependencies |
 |--------|---------|-----------------|
 | `error` | `DoogatError` enum + `Result<T>` alias | thiserror only |
-| `types` | Domain types (CommitHash, Value, ParsedDoogat, TableSchema) | no adapter crates |
+| `types` | Domain types (directory module: `mod.rs` config types, `value.rs` Value enum/path utilities, `doogat.rs` domain model types, `schema.rs` schema/consistency types) | no adapter crates |
 | `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, ConflictResolver, GitBackend) | error, types |
 | `parser` | Parse/serialize three-zone Markdown | regex, chrono, serde_yaml |
 | `search_query` | Search query parsing and normalization to canonical form | — (std only) |
-| `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store/GitBackend | git2 |
+| `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store/GitBackend (directory module: `mod.rs` struct/init/CRUD/traits, `read.rs` file reads/diffs/revision queries, `merge.rs` merge/conflict resolution, `remote.rs` push/pull/fetch, `rename.rs` rename with backlink rewrite) | git2 |
 | `crdt_resolver` | Automerge conflict resolution; implements ConflictResolver | automerge, similar |
-| `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/search, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements DoogatIndex | rusqlite |
+| `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/schema, `search.rs` FTS5 search/tag queries/filters, `rebuild.rs` rebuild/reindex/staleness, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements DoogatIndex | rusqlite |
 | `sql_engine` | SQL DDL/DML → doogat CRUD, _typedef management (directory module: `mod.rs` dispatch, `ddl.rs` CREATE/ALTER/DROP, `dml.rs` INSERT/UPDATE/DELETE, `junction.rs` junction tables, `builders.rs` doogat/schema building, `helpers.rs` SQL parsing utilities, `transaction.rs` BEGIN/COMMIT/ROLLBACK) | sqlparser, rusqlite |
 | `bundled_types` | Built-in _typedef templates (project, contact) | — |
 | `sync_manager` | Multi-device sync orchestration | uuid, toml, chrono |
 | `compaction` | CRDT cleanup + git gc | — |
 | `maintenance` | Git maintenance runner, auto-trigger | — |
-| `consistency` | Detect/apply/migrate auto-fixes (tags, titles, keys, types) | — |
+| `consistency` | Detect/apply/migrate auto-fixes (directory module: `mod.rs` detection/fix application, `migrations.rs` versioned data migrations, `zone_migrate.rs` cross-zone field migration) | — |
 | `attachments` | File attachment CRUD (attach, detach, list) on `reference/{id}/` | — |
 | `hlc` | Hybrid Logical Clock for causal ordering | — (std only) |
 | `bundle` | Air-gapped sync via tar archive export/import | tar, sha2, flate2 |
 | `nosql` | redb-based key-value index for fast lookups (feature-gated) | redb |
 | `service` | Unified orchestration layer (DoogatService) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write (directory module: `mod.rs` struct/constructors/state, `crud.rs` create/read/update/delete/batch ops, `search.rs` search/filtered queries, `sql.rs` SQL pass-through/transactions, `ops.rs` sync/compact/maintenance/bundles, `discovery.rs` unlinked mentions/sequences/backlinks, `utility.rs` schema queries/attachments/NoSQL reads) | all core modules |
 | `ffi` | UniFFI facade (DoogatDriver) wrapping `Mutex<DoogatService>` for Swift/Kotlin | service, uniffi |
-| **CLI** | Command-line interface delegating to DoogatService | service, clap |
+| **CLI** | Command-line interface (main.rs CLI structs/dispatch, `commands/` submodules: crud, query, sync, maintenance, discover) | service, clap |
 | **updater** (CLI) | Self-update from GitHub releases | reqwest, semver, self_replace, sha2, flate2, tar |
 
 ## External Dependencies

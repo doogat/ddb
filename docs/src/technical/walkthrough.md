@@ -13,7 +13,7 @@ All domain logic lives here: parsing, Git storage, CRDT conflict resolution, SQL
 
 ### ddb-cli
 
-A thin clap-derived binary (`ddb`) in a single `main.rs`. It opens a `DoogatService` and delegates to it for all operations. Subcommands cover the full lifecycle: `init`, `create`, `read`, `update`, `delete`, `search`, `query`, `sync`, `reindex`, `compact`, `rename`, `serve`, `type`, `node`, `bundle`, `attach`, `detach`, `attachments`, `get`, `scan`, `backlinks`, `maintenance`, `discover`, `sequence`, and `update-bin`. An embedded `updater` module handles self-update from GitHub releases.
+A clap-derived binary (`ddb`). `main.rs` defines CLI structs and dispatches to `commands/` submodules (`crud.rs`, `query.rs`, `sync.rs`, `maintenance.rs`, `discover.rs`). Each submodule opens a `DoogatService` and delegates to it. Subcommands cover the full lifecycle: `init`, `create`, `read`, `update`, `delete`, `search`, `query`, `sync`, `reindex`, `compact`, `rename`, `serve`, `type`, `node`, `bundle`, `attach`, `detach`, `attachments`, `get`, `scan`, `backlinks`, `maintenance`, `discover`, `sequence`, and `update-bin`. An embedded `updater` module handles self-update from GitHub releases.
 
 ### ddb-server
 
@@ -40,11 +40,11 @@ Additional test surfaces include `tests/smoke.sh` and `tests/smoke.ps1` for CLI 
 
 ## 2. Core Data Model
 
-All domain types are defined in `types.rs`. The data model is intentionally flat: every doogat is a Markdown file with structured frontmatter, and the system derives all relational structure from that content.
+All domain types are defined in the `types/` directory module (`value.rs`, `doogat.rs`, `schema.rs`). The data model is intentionally flat: every doogat is a Markdown file with structured frontmatter, and the system derives all relational structure from that content.
 
 ### DoogatId
 
-A 14-digit timestamp string in the format `YYYYMMDDHHmmss`, for example `"20260226120000"`. It is a newtype wrapper around String (see `types.rs:DoogatId`). A custom `Deserialize` implementation accepts both YAML integer and string representations for backward compatibility with older doogats whose IDs were serialized as bare numbers.
+A 14-digit timestamp string in the format `YYYYMMDDHHmmss`, for example `"20260226120000"`. It is a newtype wrapper around String (see `types/doogat.rs:DoogatId`). A custom `Deserialize` implementation accepts both YAML integer and string representations for backward compatibility with older doogats whose IDs were serialized as bare numbers.
 
 ### Three-zone Markdown
 
@@ -58,7 +58,7 @@ The parser splits these zones via `parser::split_zones()`, which returns a `Doog
 
 ### ParsedDoogat
 
-The fully parsed representation after extracting metadata from all three zones (see `types.rs:ParsedDoogat`). It holds:
+The fully parsed representation after extracting metadata from all three zones (see `types/doogat.rs:ParsedDoogat`). It holds:
 
 - `meta` -- a `DoogatMeta` with id, title, date, type, tags, and extra fields.
 - `body` -- the raw body text.
@@ -146,7 +146,7 @@ Six primary paths move data through the system. Each path touches a specific sub
 
 ### Search
 
-1. `indexer::Index::ensure_fresh()` compares the stored HEAD OID in `_ddb_meta` against the actual Git HEAD. If they differ, a targeted incremental reindex runs for changed paths only (see `indexer/mod.rs:incremental_reindex()`).
+1. `indexer::Index::ensure_fresh()` compares the stored HEAD OID in `_ddb_meta` against the actual Git HEAD. If they differ, a targeted incremental reindex runs for changed paths only (see `indexer/rebuild.rs:incremental_reindex()`).
 2. The FTS5 virtual table `_ddb_fts` is queried with `MATCH` using porter stemming and unicode61 tokenization.
 3. Results are ranked by BM25 score and returned with highlighted snippets.
 4. `search_paginated()` adds limit/offset support and a total count.
@@ -216,13 +216,13 @@ The SQL engine translates relational operations into doogat file operations. DDL
 
 ### Server actor bridge
 
-The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `DoogatService` instance, delegating all operations to it. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
+The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor/mod.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `DoogatService` instance, delegating all operations to it via `actor/handlers.rs:handle_command()`. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
 
 For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent read-only access. Each read acquires a semaphore permit and runs on `spawn_blocking` with a fresh `DoogatService` instance, bypassing the single-writer actor entirely. The pool size is configurable via server config.
 
 ### Indexer rebuild pipeline
 
-Full rebuilds (see `indexer/mod.rs:rebuild()`) use a parallel pipeline powered by rayon:
+Full rebuilds (see `indexer/rebuild.rs:rebuild()`) use a parallel pipeline powered by rayon:
 
 1. `DoogatSource::list_doogats()` collects all doogat paths.
 2. `DoogatSource::read_files_batch()` reads file contents (the default implementation is sequential; `GitRepo` can batch).
@@ -231,7 +231,7 @@ Full rebuilds (see `indexer/mod.rs:rebuild()`) use a parallel pipeline powered b
 5. Type definitions are collected and used to materialize typed tables.
 6. `RebuildReport` tallies indexed count, materialized tables, inferred types, and any consistency warnings.
 
-Incremental reindex (see `indexer/mod.rs:incremental_reindex()`) uses `DoogatSource::diff_paths()` to find changed files since the last known HEAD, then parses and upserts only those files.
+Incremental reindex (see `indexer/rebuild.rs:incremental_reindex()`) uses `DoogatSource::diff_paths()` to find changed files since the last known HEAD, then parses and upserts only those files.
 
 ### Event bus and subscriptions
 
@@ -246,42 +246,42 @@ When a typedef doogat is created, updated, or deleted, the actor triggers a sche
 
 ### Foundation types
 
-- **DoogatId** -- 14-digit timestamp string newtype. See `types.rs:DoogatId`.
-- **CommitHash** -- Git commit OID string newtype. Access the inner string via `.0`. See `types.rs:CommitHash`.
-- **Value** -- Domain-level value enum (String, Number, Bool, List, Map), decoupled from serde_yaml. See `types.rs:Value`.
-- **Zone** -- Enum identifying which part of the doogat data came from: Frontmatter, Body, or Reference. See `types.rs:Zone`.
+- **DoogatId** -- 14-digit timestamp string newtype. See `types/doogat.rs:DoogatId`.
+- **CommitHash** -- Git commit OID string newtype. Access the inner string via `.0`. See `types/doogat.rs:CommitHash`.
+- **Value** -- Domain-level value enum (String, Number, Bool, List, Map), decoupled from serde_yaml. See `types/value.rs:Value`.
+- **Zone** -- Enum identifying which part of the doogat data came from: Frontmatter, Body, or Reference. See `types/doogat.rs:Zone`.
 
 ### Doogat types
 
-- **Doogat** -- Raw three-zone split before metadata extraction: `raw_frontmatter`, `body`, `reference_section`. See `types.rs:Doogat`.
-- **DoogatMeta** -- Core metadata from YAML frontmatter with an `extra` BTreeMap for arbitrary fields. See `types.rs:DoogatMeta`.
-- **ParsedDoogat** -- Full parsed representation with all extracted metadata, links, inline fields, sections, checkboxes, and body tags. See `types.rs:ParsedDoogat`.
-- **InlineField** -- A Dataview-style `key:: value` pair with its source zone. See `types.rs:InlineField`.
-- **Link** -- An extracted reference with target, display text, section anchor, kind, and zone. See `types.rs:Link`.
-- **LinkKind** -- Discriminant for link syntax: WikiLink, MarkdownLink, Embed, BareUrl. See `types.rs:LinkKind`.
-- **Section** -- A heading/content pair parsed from the body. See `types.rs:Section`.
-- **CheckboxItem** -- A task item with state, content, dates, line number, and indent level. See `types.rs:CheckboxItem`.
+- **Doogat** -- Raw three-zone split before metadata extraction: `raw_frontmatter`, `body`, `reference_section`. See `types/doogat.rs:Doogat`.
+- **DoogatMeta** -- Core metadata from YAML frontmatter with an `extra` BTreeMap for arbitrary fields. See `types/doogat.rs:DoogatMeta`.
+- **ParsedDoogat** -- Full parsed representation with all extracted metadata, links, inline fields, sections, checkboxes, and body tags. See `types/doogat.rs:ParsedDoogat`.
+- **InlineField** -- A Dataview-style `key:: value` pair with its source zone. See `types/doogat.rs:InlineField`.
+- **Link** -- An extracted reference with target, display text, section anchor, kind, and zone. See `types/doogat.rs:Link`.
+- **LinkKind** -- Discriminant for link syntax: WikiLink, MarkdownLink, Embed, BareUrl. See `types/doogat.rs:LinkKind`.
+- **Section** -- A heading/content pair parsed from the body. See `types/doogat.rs:Section`.
+- **CheckboxItem** -- A task item with state, content, dates, line number, and indent level. See `types/doogat.rs:CheckboxItem`.
 
 ### Sync and merge types
 
-- **NodeConfig** -- Per-device registration stored in `.nodes/`. Tracks UUID, name, known heads, last sync time, HLC, and lifecycle status (Active/Stale/Retired). See `types.rs:NodeConfig`.
-- **MergeResult** -- Outcome of `git_ops::merge_remote()`: AlreadyUpToDate, FastForward, Clean, or Conflicts. See `types.rs:MergeResult`.
-- **ConflictFile** -- All three versions of a conflicted file plus optional HLC timestamps. See `types.rs:ConflictFile`.
-- **ResolvedFile** -- Merged content after CRDT resolution, with optional serialized CRDT bytes. See `types.rs:ResolvedFile`.
-- **SyncReport** -- Summary of a sync operation: direction, commits transferred, conflicts resolved, resurrected files, and collisions reassigned. See `types.rs:SyncReport`.
+- **NodeConfig** -- Per-device registration stored in `.nodes/`. Tracks UUID, name, known heads, last sync time, HLC, and lifecycle status (Active/Stale/Retired). See `types/doogat.rs:NodeConfig`.
+- **MergeResult** -- Outcome of `git_ops::merge_remote()`: AlreadyUpToDate, FastForward, Clean, or Conflicts. See `types/doogat.rs:MergeResult`.
+- **ConflictFile** -- All three versions of a conflicted file plus optional HLC timestamps. See `types/doogat.rs:ConflictFile`.
+- **ResolvedFile** -- Merged content after CRDT resolution, with optional serialized CRDT bytes. See `types/doogat.rs:ResolvedFile`.
+- **SyncReport** -- Summary of a sync operation: direction, commits transferred, conflicts resolved, resurrected files, and collisions reassigned. See `types/doogat.rs:SyncReport`.
 
 ### Schema types
 
-- **TableSchema** -- Schema for a materialized SQLite table: name, columns, CRDT strategy, template sections, and folder flag. See `types.rs:TableSchema`.
-- **ColumnDef** -- A column definition with name, data type, optional FK reference, zone mapping, required flag, search boost, allowed values, and default. See `types.rs:ColumnDef`.
+- **TableSchema** -- Schema for a materialized SQLite table: name, columns, CRDT strategy, template sections, and folder flag. See `types/schema.rs:TableSchema`.
+- **ColumnDef** -- A column definition with name, data type, optional FK reference, zone mapping, required flag, search boost, allowed values, and default. See `types/schema.rs:ColumnDef`.
 
 ### Report types
 
-- **RebuildReport** -- Rebuild statistics: indexed count, tables materialized, types inferred, and consistency warnings. See `types.rs:RebuildReport`.
-- **CompactionReport** -- Compaction statistics: files removed, CRDT docs compacted, gc success, size metrics, and backup path. See `types.rs:CompactionReport`.
-- **MaintenanceReport** -- Git maintenance results: tasks run, success flag, duration, and fallback indicator. See `types.rs:MaintenanceReport`.
-- **RenameReport** -- Rename results: updated file list and unresolvable references. See `types.rs:RenameReport`.
-- **SearchResult** and **PaginatedSearchResult** -- Search hits with id, title, path, snippet, rank, and pagination metadata. See `types.rs:SearchResult`.
+- **RebuildReport** -- Rebuild statistics: indexed count, tables materialized, types inferred, and consistency warnings. See `types/schema.rs:RebuildReport`.
+- **CompactionReport** -- Compaction statistics: files removed, CRDT docs compacted, gc success, size metrics, and backup path. See `types/doogat.rs:CompactionReport`.
+- **MaintenanceReport** -- Git maintenance results: tasks run, success flag, duration, and fallback indicator. See `types/doogat.rs:MaintenanceReport`.
+- **RenameReport** -- Rename results: updated file list and unresolvable references. See `types/doogat.rs:RenameReport`.
+- **SearchResult** and **PaginatedSearchResult** -- Search hits with id, title, path, snippet, rank, and pagination metadata. See `types/doogat.rs:SearchResult`.
 
 ### Error handling
 
