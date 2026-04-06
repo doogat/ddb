@@ -1,4 +1,4 @@
-use crate::error::{DoogatError, Result};
+use crate::error::Result;
 use crate::git_ops;
 use crate::parser;
 use crate::types::{
@@ -153,7 +153,7 @@ impl DoogatService {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_get(&self, _id: &str) -> Result<Option<ParsedDoogat>> {
-        Err(DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
     }
 
     /// Scan by type in the NoSQL index.
@@ -164,7 +164,7 @@ impl DoogatService {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_scan_type(&self, _type_name: &str) -> Result<Vec<String>> {
-        Err(DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
     }
 
     /// Scan by tag in the NoSQL index.
@@ -175,7 +175,7 @@ impl DoogatService {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_scan_tag(&self, _tag: &str) -> Result<Vec<String>> {
-        Err(DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
     }
 
     /// Get backlinks from the NoSQL index.
@@ -186,7 +186,7 @@ impl DoogatService {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_backlinks(&self, _id: &str) -> Result<Vec<String>> {
-        Err(DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
     }
 
     /// Rebuild the NoSQL index from git.
@@ -198,6 +198,6 @@ impl DoogatService {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_rebuild(&self) -> Result<usize> {
-        Err(DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
     }
 }
