@@ -74,3 +74,28 @@ jobs:
         env:
           DDB_BIN: ${{ github.workspace }}/target/debug/ddb
         run: cargo test -p ddb-e2e --test e2e multi_device::stale_node_returns -- --exact
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@ddb.dev"
+          git config --global user.name "Doogat DB CI"
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run coverage
+        run: cargo llvm-cov --workspace --fail-under-lines 70
