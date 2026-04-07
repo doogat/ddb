@@ -38,8 +38,7 @@ impl<'a> SqlEngine<'a> {
         }
 
         let schema = self.load_schema(&table_name)?;
-        let col_names: Vec<String> =
-            ins.columns.iter().map(|c| c.value.to_lowercase()).collect();
+        let col_names: Vec<String> = ins.columns.iter().map(|c| c.value.to_lowercase()).collect();
         let rows = self.extract_insert_rows(ins)?;
 
         let (rows, on_conflict_existing) = if on_conflict_ignore {
@@ -692,32 +691,44 @@ impl<'a> SqlEngine<'a> {
                 Some(ref d) => d,
                 None => continue,
             };
-            if default == "NEXT" {
-                let counter = next_counters.get_mut(&col_def.name).unwrap();
-                *counter += 1;
-                col_values.insert(col_def.name.clone(), counter.to_string());
-            } else if default.starts_with("NEXT(") && default.ends_with(')') {
-                let partition_col = &default[5..default.len() - 1];
-                let partition_val =
-                    col_values.get(partition_col).cloned().unwrap_or_default();
-                let max_val: i64 = self
-                    .index
-                    .conn
-                    .query_row(
-                        &format!(
-                            "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
-                            col_def.name, schema.table_name, partition_col
-                        ),
-                        params![partition_val],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or(0);
-                col_values.insert(col_def.name.clone(), (max_val + 1).to_string());
-            } else {
-                col_values.insert(col_def.name.clone(), default.clone());
-            }
+            let value = self.resolve_insert_default(default, col_def, schema, col_values, next_counters);
+            col_values.insert(col_def.name.clone(), value);
         }
         Ok(())
+    }
+
+    /// Resolve a single column default for an INSERT row.
+    fn resolve_insert_default(
+        &self,
+        default: &str,
+        col_def: &crate::types::ColumnDef,
+        schema: &TableSchema,
+        col_values: &BTreeMap<String, String>,
+        next_counters: &mut BTreeMap<String, i64>,
+    ) -> String {
+        if default == "NEXT" {
+            let counter = next_counters.get_mut(&col_def.name).unwrap();
+            *counter += 1;
+            return counter.to_string();
+        }
+        if default.starts_with("NEXT(") && default.ends_with(')') {
+            let partition_col = &default[5..default.len() - 1];
+            let partition_val = col_values.get(partition_col).cloned().unwrap_or_default();
+            let max_val: i64 = self
+                .index
+                .conn
+                .query_row(
+                    &format!(
+                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                        col_def.name, schema.table_name, partition_col
+                    ),
+                    params![partition_val],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            return (max_val + 1).to_string();
+        }
+        default.to_owned()
     }
 
     fn validate_insert_constraints(
@@ -787,46 +798,62 @@ impl<'a> SqlEngine<'a> {
         let mut existing: Vec<Option<String>> = vec![None; rows.len()];
         let mut filtered = Vec::with_capacity(rows.len());
 
-        'row: for (row_idx, row_values) in rows.into_iter().enumerate() {
-            for constraint_cols in constraints {
-                let where_clause: String = constraint_cols
-                    .iter()
-                    .map(|c| format!("\"{}\" = ?", c))
-                    .collect::<Vec<_>>()
-                    .join(" AND ");
-                let sql = format!(
-                    "SELECT id FROM \"{}\" WHERE {}",
-                    schema.table_name, where_clause
-                );
-                let bind_vals: Vec<String> = constraint_cols
-                    .iter()
-                    .filter_map(|col| {
-                        col_names
-                            .iter()
-                            .position(|n| n == col)
-                            .and_then(|pos| row_values.get(pos))
-                            .cloned()
-                    })
-                    .collect();
-                if bind_vals.len() != constraint_cols.len() {
-                    continue;
-                }
-                let existing_id: Option<String> = self
-                    .index
-                    .conn
-                    .query_row(&sql, rusqlite::params_from_iter(bind_vals), |row| {
-                        row.get(0)
-                    })
-                    .ok();
-                if let Some(id) = existing_id {
-                    existing[row_idx] = Some(id);
-                    continue 'row;
-                }
+        for (row_idx, row_values) in rows.into_iter().enumerate() {
+            if let Some(id) = self.find_conflict_match(schema, constraints, col_names, &row_values)
+            {
+                existing[row_idx] = Some(id);
+            } else {
+                filtered.push(row_values);
             }
-            filtered.push(row_values);
         }
 
         Ok((filtered, existing))
+    }
+
+    /// Check one row against all unique_together constraint groups, returning
+    /// the existing doogat ID if any group matches.
+    fn find_conflict_match(
+        &self,
+        schema: &TableSchema,
+        constraints: &[Vec<String>],
+        col_names: &[String],
+        row_values: &[String],
+    ) -> Option<String> {
+        for constraint_cols in constraints {
+            let where_clause: String = constraint_cols
+                .iter()
+                .map(|c| format!("\"{}\" = ?", c))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            let sql = format!(
+                "SELECT id FROM \"{}\" WHERE {}",
+                schema.table_name, where_clause
+            );
+            let bind_vals: Vec<String> = constraint_cols
+                .iter()
+                .filter_map(|col| {
+                    col_names
+                        .iter()
+                        .position(|n| n == col)
+                        .and_then(|pos| row_values.get(pos))
+                        .cloned()
+                })
+                .collect();
+            if bind_vals.len() != constraint_cols.len() {
+                continue;
+            }
+            let existing_id: Option<String> = self
+                .index
+                .conn
+                .query_row(&sql, rusqlite::params_from_iter(bind_vals), |row| {
+                    row.get(0)
+                })
+                .ok();
+            if existing_id.is_some() {
+                return existing_id;
+            }
+        }
+        None
     }
 
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {

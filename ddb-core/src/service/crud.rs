@@ -616,44 +616,70 @@ impl DoogatService {
         };
 
         for col in &schema.columns {
-            if let Some(ref allowed) = col.allowed_values {
-                if let Some(val) = extra.get(&col.name) {
-                    let val_str = Self::value_to_string(val);
-                    if !allowed.contains(&val_str) {
-                        return Err(DoogatError::Validation(format!(
-                            "field '{}' value '{}' not in allowed values: {:?}",
-                            col.name, val_str, allowed
-                        )));
-                    }
-                }
-            }
-
-            if let Some(ref ref_table) = col.references {
-                if let Some(val) = extra.get(&col.name) {
-                    let val_str = Self::value_to_string(val);
-                    let exists = self
-                        .index
-                        .query_raw_with_params(
-                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
-                            &[
-                                rusqlite::types::Value::Text(val_str.clone()),
-                                rusqlite::types::Value::Text(ref_table.clone()),
-                            ],
-                        )?
-                        .first()
-                        .and_then(|r| r.first())
-                        .map(|v| v == "1")
-                        .unwrap_or(false);
-                    if !exists {
-                        return Err(DoogatError::Validation(format!(
-                            "field '{}' references non-existent {} doogat '{}'",
-                            col.name, ref_table, val_str
-                        )));
-                    }
-                }
-            }
+            Self::validate_allowed_values(col, extra)?;
+            self.validate_fk_reference(col, extra)?;
         }
 
+        Ok(())
+    }
+
+    /// Validate a single column's allowed_values constraint against extra fields.
+    fn validate_allowed_values(
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let allowed = match col.allowed_values {
+            Some(ref a) => a,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = Self::value_to_string(val);
+        if !allowed.contains(&val_str) {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' value '{}' not in allowed values: {:?}",
+                col.name, val_str, allowed
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validate a single column's FK reference constraint against extra fields.
+    fn validate_fk_reference(
+        &self,
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let ref_table = match col.references {
+            Some(ref r) => r,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = Self::value_to_string(val);
+        let exists = self
+            .index
+            .query_raw_with_params(
+                "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
+                &[
+                    rusqlite::types::Value::Text(val_str.clone()),
+                    rusqlite::types::Value::Text(ref_table.clone()),
+                ],
+            )?
+            .first()
+            .and_then(|r| r.first())
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if !exists {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' references non-existent {} doogat '{}'",
+                col.name, ref_table, val_str
+            )));
+        }
         Ok(())
     }
 
@@ -852,49 +878,74 @@ impl DoogatService {
             None => return Ok(()), // no schema = no validation
         };
         for col in &schema.columns {
-            // Validate allowed_values
-            if let Some(ref allowed) = col.allowed_values {
-                if let Some(val) = extra.get(&col.name) {
-                    let val_str = match Self::value_to_comparable_string(val) {
-                        Some(s) => s,
-                        None => continue, // structured values can't match scalar allowed_values
-                    };
-                    if !allowed.contains(&val_str) {
-                        return Err(DoogatError::Validation(format!(
-                            "field '{}' value '{}' not in allowed values: {:?}",
-                            col.name, val_str, allowed
-                        )));
-                    }
-                }
-            }
-            // Validate FK references (both existence and target type match)
-            if let Some(ref ref_table) = col.references {
-                if let Some(val) = extra.get(&col.name) {
-                    let val_str = match Self::value_to_comparable_string(val) {
-                        Some(s) => s,
-                        None => continue, // structured values can't be FK IDs
-                    };
-                    let exists = self
-                        .index
-                        .query_raw_with_params(
-                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
-                            &[
-                                rusqlite::types::Value::Text(val_str.clone()),
-                                rusqlite::types::Value::Text(ref_table.clone()),
-                            ],
-                        )?
-                        .first()
-                        .and_then(|r| r.first())
-                        .map(|v| v == "1")
-                        .unwrap_or(false);
-                    if !exists {
-                        return Err(DoogatError::Validation(format!(
-                            "field '{}' references non-existent {} doogat '{}'",
-                            col.name, ref_table, val_str
-                        )));
-                    }
-                }
-            }
+            Self::validate_allowed_values_comparable(col, extra)?;
+            self.validate_fk_reference_comparable(col, extra)?;
+        }
+        Ok(())
+    }
+
+    /// Validate allowed_values using comparable (scalar-only) string conversion.
+    fn validate_allowed_values_comparable(
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let allowed = match col.allowed_values {
+            Some(ref a) => a,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = match Self::value_to_comparable_string(val) {
+            Some(s) => s,
+            None => return Ok(()), // structured values can't match scalar allowed_values
+        };
+        if !allowed.contains(&val_str) {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' value '{}' not in allowed values: {:?}",
+                col.name, val_str, allowed
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validate FK reference using comparable (scalar-only) string conversion.
+    fn validate_fk_reference_comparable(
+        &self,
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let ref_table = match col.references {
+            Some(ref r) => r,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = match Self::value_to_comparable_string(val) {
+            Some(s) => s,
+            None => return Ok(()), // structured values can't be FK IDs
+        };
+        let exists = self
+            .index
+            .query_raw_with_params(
+                "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
+                &[
+                    rusqlite::types::Value::Text(val_str.clone()),
+                    rusqlite::types::Value::Text(ref_table.clone()),
+                ],
+            )?
+            .first()
+            .and_then(|r| r.first())
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if !exists {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' references non-existent {} doogat '{}'",
+                col.name, ref_table, val_str
+            )));
         }
         Ok(())
     }

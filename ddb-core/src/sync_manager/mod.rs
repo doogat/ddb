@@ -323,7 +323,23 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         }
 
         self.resolve_binary_ref_conflicts(&binary_ref)?;
+        self.create_conflict_commit(&resolved, &binary_ref, theirs_oid)?;
 
+        report.collisions_reassigned =
+            self.reassign_collision_losers(collision_losers, theirs_oid)?;
+        report.conflicts_resolved = count;
+        report.commits_transferred = 1;
+
+        Ok(())
+    }
+
+    /// Tick HLC, commit resolved files, and write FM CRDT state.
+    fn create_conflict_commit(
+        &mut self,
+        resolved: &[crate::types::ResolvedFile],
+        binary_ref: &[ConflictFile],
+        theirs_oid: &CommitHash,
+    ) -> Result<()> {
         let hlc = self.tick_hlc();
         let merge_msg =
             crate::hlc::append_hlc_trailer("resolve merge conflicts via CRDT", &hlc);
@@ -337,13 +353,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             .commit_merge(&files, &binary_paths, &merge_msg, theirs_oid)?;
 
         let commit_oid = self.repo.head_oid()?;
-        write_fm_crdt_files(self.repo.repo_path(), &commit_oid, &resolved)?;
-
-        report.collisions_reassigned =
-            self.reassign_collision_losers(collision_losers, theirs_oid)?;
-        report.conflicts_resolved = count;
-        report.commits_transferred = 1;
-
+        write_fm_crdt_files(self.repo.repo_path(), &commit_oid, resolved)?;
         Ok(())
     }
 
