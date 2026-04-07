@@ -345,7 +345,7 @@ enum Command {
         #[command(subcommand)]
         action: BundleAction,
     },
-    /// [experimental] Start GraphQL API server
+    /// Start GraphQL API server
     Serve {
         #[arg(long, default_value = "2891")]
         port: u16,
