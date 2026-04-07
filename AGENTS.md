@@ -24,7 +24,8 @@ ddb-core/src/       Library crate
     rename.rs         Rename with backlink rewrite
   crdt_resolver.rs  Automerge CRDT conflict resolution
   indexer/          SQLite FTS5 index, type inference, materialization
-    search.rs         FTS5 search, tag queries, filter building
+    search.rs         FTS5 search, tag queries
+    filter.rs         Search filter/negation SQL building
     rebuild.rs        Rebuild, reindex, staleness checks
   service/          Unified orchestration layer (DoogatService) for CLI/FFI/server
   sql_engine/       SQL DDL/DML translation (tables as doogat types)

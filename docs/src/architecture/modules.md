@@ -69,7 +69,7 @@ traits (depends: error, types — defines DoogatSource, DoogatStore,
 | `search_query` | Search query parsing and normalization to canonical form | — (std only) |
 | `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store/GitBackend (directory module: `mod.rs` struct/init/CRUD/traits, `read.rs` file reads/diffs/revision queries, `merge.rs` merge/conflict resolution, `remote.rs` push/pull/fetch, `rename.rs` rename with backlink rewrite) | git2 |
 | `crdt_resolver` | Automerge conflict resolution; implements ConflictResolver | automerge, similar |
-| `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/schema, `search.rs` FTS5 search/tag queries/filters, `rebuild.rs` rebuild/reindex/staleness, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements DoogatIndex | rusqlite |
+| `indexer` | SQLite FTS5 index (directory module: `mod.rs` core CRUD/schema, `search.rs` FTS5 search/tag queries, `filter.rs` search filter/negation SQL building, `rebuild.rs` rebuild/reindex/staleness, `graph.rs` backlinks/discovery/sequences, `resolve.rs` path/alias/wikilink resolution, `materialize.rs` schema inference/table materialization); implements DoogatIndex | rusqlite |
 | `sql_engine` | SQL DDL/DML → doogat CRUD, _typedef management (directory module: `mod.rs` dispatch, `ddl.rs` CREATE/ALTER/DROP, `dml.rs` INSERT/UPDATE/DELETE, `junction.rs` junction tables, `builders.rs` doogat/schema building, `helpers.rs` SQL parsing utilities, `transaction.rs` BEGIN/COMMIT/ROLLBACK) | sqlparser, rusqlite |
 | `bundled_types` | Built-in _typedef templates (project, contact) | — |
 | `sync_manager` | Multi-device sync orchestration | uuid, toml, chrono |
