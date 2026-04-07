@@ -841,14 +841,20 @@ impl<'a> SqlEngine<'a> {
         let type_names: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(|e| DoogatError::SqlEngine(format!("cascade junction query: {e}")))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| {
+                r.map_err(|e| tracing::warn!(error = %e, "cascade junction: failed to read typedef row"))
+                    .ok()
+            })
             .collect();
         drop(stmt);
 
         for table_name in &type_names {
             let schema = match self.load_schema(table_name) {
                 Ok(s) => s,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(type_name = %table_name, error = %e, "cascade junction: failed to load schema");
+                    continue;
+                }
             };
             for col in &schema.columns {
                 if col.references.as_deref() == Some(target_type) {
