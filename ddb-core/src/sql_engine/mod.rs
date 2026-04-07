@@ -148,18 +148,34 @@ impl<'a> SqlEngine<'a> {
 
     fn try_custom_ddl(&mut self, sql: &str) -> Result<Option<SqlResult>> {
         if let Some(caps) = re_set_zone().captures(sql) {
-            let table = caps.get(1).or(caps.get(2)).unwrap().as_str();
-            let zone = caps.get(3).unwrap().as_str();
-            let column = caps.get(4).or(caps.get(5)).unwrap().as_str();
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            let zone = caps.get(3).expect("regex guarantees group 3").as_str();
+            let column = caps
+                .get(4)
+                .or(caps.get(5))
+                .expect("regex guarantees group 4 or 5")
+                .as_str();
             return Ok(Some(self.handle_set_zone(table, zone, column)?));
         }
         if let Some(caps) = re_set_title_template().captures(sql) {
-            let table = caps.get(1).or(caps.get(2)).unwrap().as_str();
-            let template = caps.get(3).unwrap().as_str();
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            let template = caps.get(3).expect("regex guarantees group 3").as_str();
             return Ok(Some(self.handle_title_template(table, Some(template))?));
         }
         if let Some(caps) = re_drop_title_template().captures(sql) {
-            let table = caps.get(1).or(caps.get(2)).unwrap().as_str();
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
             return Ok(Some(self.handle_title_template(table, None)?));
         }
         Ok(None)

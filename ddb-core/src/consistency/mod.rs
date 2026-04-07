@@ -58,7 +58,7 @@ pub fn to_kebab_case(s: &str) -> String {
                     .nth(1)
                     .is_some_and(|c| c.is_uppercase())
             {
-                let last = current.pop().unwrap();
+                let last = current.pop().expect("current has >= 2 chars per preceding check");
                 words.push(current.clone());
                 current.clear();
                 current.push(last);
@@ -91,7 +91,7 @@ fn is_kebab_case(s: &str) -> bool {
 
 fn re_unfilled_placeholder() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\{[^}]+\}").unwrap())
+    RE.get_or_init(|| Regex::new(r"\{[^}]+\}").expect("valid regex"))
 }
 
 /// Extract content under a `## heading` in the body, returning lines between that heading

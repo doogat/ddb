@@ -679,7 +679,8 @@ fn split_body_sections(body: &str) -> Vec<(Option<String>, String)> {
 
 /// Check if a section body is a log section (entries matching `- [x] YYYY-MM-DD` or `- [ ] YYYY-MM-DD`).
 fn is_log_section(body: &str) -> bool {
-    let log_pattern = regex::Regex::new(r"^- \[[ xi]\] \d{4}-\d{2}-\d{2}").unwrap();
+    let log_pattern =
+        regex::Regex::new(r"^- \[[ xi]\] \d{4}-\d{2}-\d{2}").expect("valid regex");
     body.lines()
         .filter(|l| !l.trim().is_empty())
         .any(|l| log_pattern.is_match(l))
