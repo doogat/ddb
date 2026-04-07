@@ -116,31 +116,32 @@ fn should_check() -> bool {
 
 fn target_triple() -> Option<&'static str> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        return Some("aarch64-apple-darwin");
-    }
+    return Some("aarch64-apple-darwin");
+
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        return Some("x86_64-apple-darwin");
-    }
+    return Some("x86_64-apple-darwin");
+
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        return Some("x86_64-unknown-linux-gnu");
-    }
+    return Some("x86_64-unknown-linux-gnu");
+
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    {
-        return Some("aarch64-unknown-linux-gnu");
-    }
+    return Some("aarch64-unknown-linux-gnu");
+
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        return Some("x86_64-pc-windows-msvc");
-    }
+    return Some("x86_64-pc-windows-msvc");
+
     #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
-    {
-        return Some("aarch64-pc-windows-msvc");
-    }
-    #[allow(unreachable_code)]
-    None
+    return Some("aarch64-pc-windows-msvc");
+
+    #[cfg(not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "aarch64"),
+    )))]
+    return None;
 }
 
 fn http_client() -> Result<reqwest::blocking::Client, String> {
