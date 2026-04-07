@@ -222,7 +222,8 @@ impl DoogatService {
         };
 
         // Validate fields against typedef schema if this is a typed doogat with field changes
-        if !extra.set.is_empty() || !extra.unset.is_empty() {
+        let has_field_changes = !extra.set.is_empty() || !extra.unset.is_empty();
+        if has_field_changes {
             if let (Some(ref type_name), Some(ref schemas)) = (&parsed.meta.doogat_type, &schemas) {
                 self.validate_fields_with_schemas(schemas, type_name, &parsed.meta.extra)?;
             }
@@ -231,20 +232,34 @@ impl DoogatService {
         let new_content = parser::serialize(&parsed);
         self.repo
             .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
-        // Re-parse to capture updated inline fields/wikilinks
-        let mut parsed = parser::parse(&new_content, &path)?;
+        let mut parsed = self.reindex_and_rematerialize(&new_content, &path, schemas.as_deref())?;
+        // Sync stored HEAD to avoid spurious incremental_reindex on next call
+        self.index.store_head(&self.repo.head_oid()?.0)?;
+        parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
+        Ok(parsed)
+    }
+
+    /// Re-parse content, index, dual-write, and rematerialize the type table row.
+    fn reindex_and_rematerialize(
+        &self,
+        content: &str,
+        path: &str,
+        schemas: Option<&[TableSchema]>,
+    ) -> Result<ParsedDoogat> {
+        let mut parsed = parser::parse(content, path)?;
         self.index.index_doogat(&parsed)?;
         self.nosql_index_doogat(&parsed);
-        // Rematerialize type table row if this is a typed doogat
-        if let (Some(ref type_name), Some(ref schemas)) = (&parsed.meta.doogat_type, &schemas) {
+        if let (Some(ref type_name), Some(schemas)) = (&parsed.meta.doogat_type, schemas) {
             if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
                 let id_str = parsed.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
                 self.index.materialize_single(schema, id_str, &parsed)?;
             }
         }
-        // Sync stored HEAD to avoid spurious incremental_reindex on next call
-        self.index.store_head(&self.repo.head_oid()?.0)?;
-        parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
+        parsed.updated_at = parsed
+            .meta
+            .id
+            .as_ref()
+            .and_then(|z| self.index.lookup_updated_at(&z.0).unwrap_or(None));
         Ok(parsed)
     }
 
@@ -257,63 +272,15 @@ impl DoogatService {
         if updates.is_empty() {
             return Ok(vec![]);
         }
-
-        // Reject duplicate IDs (later entries would silently overwrite earlier ones)
-        let mut seen = std::collections::HashSet::with_capacity(updates.len());
-        for u in updates {
-            if !seen.insert(&u.id) {
-                return Err(DoogatError::Validation(format!(
-                    "duplicate id in batch: {}",
-                    u.id
-                )));
-            }
-        }
-
+        self.reject_duplicate_update_ids(updates)?;
         self.ensure_fresh()?;
 
-        // Load schemas once for validation and rematerialization across all items
         let schemas = self.list_type_schemas()?;
 
         // Phase 1: prepare all writes (fail-fast, no side effects)
         let mut writes: Vec<(String, String)> = Vec::with_capacity(updates.len());
         for update in updates {
-            let path = self.index.resolve_path(&update.id)?;
-            let content = self.repo.read_file(&path)?;
-            let mut parsed = parser::parse(&content, &path)?;
-
-            if let Some(ref t) = update.title {
-                parsed.meta.title = Some(t.clone());
-            }
-            if let Some(ref t) = update.tags {
-                parsed.meta.tags = t.clone();
-            }
-            if let Some(ref t) = update.doogat_type {
-                parsed.meta.doogat_type = Some(t.clone());
-            }
-            if let Some(ref b) = update.body {
-                parsed.body = b.clone();
-            }
-            if let Some(ref unset) = update.unset_fields {
-                for key in unset {
-                    parsed.meta.extra.remove(key);
-                }
-            }
-            if let Some(ref set) = update.fields {
-                for (key, value) in set {
-                    parsed.meta.extra.insert(key.clone(), value.clone());
-                }
-            }
-
-            // Validate fields against typedef schema if fields were modified
-            let has_field_changes = update.fields.is_some() || update.unset_fields.is_some();
-            if has_field_changes {
-                if let Some(ref type_name) = parsed.meta.doogat_type {
-                    self.validate_fields_with_schemas(&schemas, type_name, &parsed.meta.extra)?;
-                }
-            }
-
-            let new_content = parser::serialize(&parsed);
-            writes.push((path, new_content));
+            writes.push(self.prepare_update(update, &schemas)?);
         }
 
         // Phase 2: atomic commit
@@ -329,19 +296,8 @@ impl DoogatService {
 
         // Phase 3: re-parse, index, rematerialize, return
         let mut results = Vec::with_capacity(updates.len());
-        for (i, (path, new_content)) in writes.iter().enumerate() {
-            let mut parsed = parser::parse(new_content, path)?;
-            self.index.index_doogat(&parsed)?;
-            self.nosql_index_doogat(&parsed);
-            // Rematerialize type table row if this is a typed doogat
-            if let Some(ref type_name) = parsed.meta.doogat_type {
-                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
-                    let id_str = parsed.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
-                    self.index.materialize_single(schema, id_str, &parsed)?;
-                }
-            }
-            let id = &updates[i].id;
-            parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
+        for (path, new_content) in &writes {
+            let parsed = self.reindex_and_rematerialize(new_content, path, Some(&schemas))?;
             results.push(parsed);
         }
 
@@ -349,6 +305,65 @@ impl DoogatService {
         self.index.store_head(&self.repo.head_oid()?.0)?;
 
         Ok(results)
+    }
+
+    /// Reject batch updates that contain the same doogat ID more than once.
+    fn reject_duplicate_update_ids(&self, updates: &[BatchUpdateInput]) -> Result<()> {
+        let mut seen = std::collections::HashSet::with_capacity(updates.len());
+        for u in updates {
+            if !seen.insert(&u.id) {
+                return Err(DoogatError::Validation(format!(
+                    "duplicate id in batch: {}",
+                    u.id
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Prepare a single update: read, merge fields, validate, serialize.
+    /// Returns `(path, new_content)` without side effects.
+    fn prepare_update(
+        &self,
+        update: &BatchUpdateInput,
+        schemas: &[TableSchema],
+    ) -> Result<(String, String)> {
+        let path = self.index.resolve_path(&update.id)?;
+        let content = self.repo.read_file(&path)?;
+        let mut parsed = parser::parse(&content, &path)?;
+
+        if let Some(ref t) = update.title {
+            parsed.meta.title = Some(t.clone());
+        }
+        if let Some(ref t) = update.tags {
+            parsed.meta.tags = t.clone();
+        }
+        if let Some(ref t) = update.doogat_type {
+            parsed.meta.doogat_type = Some(t.clone());
+        }
+        if let Some(ref b) = update.body {
+            parsed.body = b.clone();
+        }
+        if let Some(ref unset) = update.unset_fields {
+            for key in unset {
+                parsed.meta.extra.remove(key);
+            }
+        }
+        if let Some(ref set) = update.fields {
+            for (key, value) in set {
+                parsed.meta.extra.insert(key.clone(), value.clone());
+            }
+        }
+
+        let has_field_changes = update.fields.is_some() || update.unset_fields.is_some();
+        if has_field_changes {
+            if let Some(ref type_name) = parsed.meta.doogat_type {
+                self.validate_fields_with_schemas(schemas, type_name, &parsed.meta.extra)?;
+            }
+        }
+
+        let new_content = parser::serialize(&parsed);
+        Ok((path, new_content))
     }
 
     /// Batch-create multiple doogats in a single atomic commit.
@@ -362,109 +377,119 @@ impl DoogatService {
 
         self.ensure_fresh()?;
 
-        // Load type schemas once for default/validation resolution
         let schemas = self.list_type_schemas()?;
-
         let (mut next_counters, mut partitioned_counters) =
             self.precompute_next_counters(inputs, &schemas)?;
 
         // Phase 1: prepare all writes.
-        // Each result slot is either an existing doogat (conflict-Ignore) or
-        // None (pending creation).  Writes track the result-slot index so we
-        // can fill them in after the atomic commit.
         let mut results: Vec<Option<ParsedDoogat>> = Vec::with_capacity(inputs.len());
         let mut writes: Vec<(usize, String, String)> = Vec::with_capacity(inputs.len());
         for input in inputs {
-            // ── on_conflict pre-check against unique_together ──
             if let Some(existing) = self.check_unique_constraints(input, &schemas)? {
                 results.push(Some(existing));
                 continue;
             }
 
             let slot = results.len();
-            results.push(None); // placeholder for the new doogat
+            results.push(None);
 
-            let id = self.unique_id();
-            let id_str = id.to_string();
-
-            let folder = input
-                .doogat_type
-                .as_deref()
-                .map(|t| self.index.type_uses_folder(t, &self.repo))
-                .unwrap_or(false);
-            let path = git_ops::doogat_path(&id_str, input.doogat_type.as_deref(), folder);
-
-            let mut extra = input.fields.clone();
-            self.resolve_defaults_and_validate(
+            let (path, content) = self.prepare_create(
                 input,
                 &schemas,
-                &mut extra,
                 &mut next_counters,
                 &mut partitioned_counters,
             )?;
-
-            let meta = DoogatMeta {
-                id: Some(id),
-                title: Some(input.title.clone()),
-                date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
-                doogat_type: input.doogat_type.clone(),
-                tags: input.tags.clone(),
-                extra,
-            };
-
-            let parsed = ParsedDoogat {
-                meta,
-                body: input.body.clone().unwrap_or_default(),
-                sections: vec![],
-                reference_section: String::new(),
-                inline_fields: vec![],
-                links: vec![],
-                body_tags: vec![],
-                checkboxes: vec![],
-                path: path.clone(),
-                updated_at: None,
-            };
-
-            let content = parser::serialize(&parsed);
             writes.push((slot, path, content));
         }
 
-        // Phase 2: atomic commit (only if there are new writes)
-        if !writes.is_empty() {
-            let write_refs: Vec<(&str, &str)> = writes
-                .iter()
-                .map(|(_, p, c)| (p.as_str(), c.as_str()))
-                .collect();
-            self.repo.commit_batch(
-                &write_refs,
-                &[],
-                &format!("batch create {} doogats", writes.len()),
-            )?;
-        }
+        // Phase 2: atomic commit
+        self.commit_batch_creates(&writes)?;
 
         // Phase 3: index new writes and fill result slots
-        for (slot, path, content) in &writes {
-            let mut parsed = parser::parse(content, path)?;
-            self.index.index_doogat(&parsed)?;
-            self.nosql_index_doogat(&parsed);
-            let id_str = parsed
-                .meta
-                .id
-                .as_ref()
-                .map(|z| z.0.clone())
-                .unwrap_or_default();
-            parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
+        self.index_batch_creates(&writes, &mut results)?;
+
+        Ok(results.into_iter().flatten().collect())
+    }
+
+    /// Build a single doogat for batch_create: generate ID, resolve defaults, serialize.
+    fn prepare_create(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+        next_counters: &mut BareNextCounters,
+        partitioned_counters: &mut PartitionedNextCounters,
+    ) -> Result<(String, String)> {
+        let id = self.unique_id();
+        let id_str = id.to_string();
+
+        let folder = input
+            .doogat_type
+            .as_deref()
+            .map(|t| self.index.type_uses_folder(t, &self.repo))
+            .unwrap_or(false);
+        let path = git_ops::doogat_path(&id_str, input.doogat_type.as_deref(), folder);
+
+        let mut extra = input.fields.clone();
+        self.resolve_column_defaults(input, schemas, &mut extra, next_counters, partitioned_counters)?;
+        self.validate_column_constraints(input, schemas, &extra)?;
+
+        let meta = DoogatMeta {
+            id: Some(id),
+            title: Some(input.title.clone()),
+            date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
+            doogat_type: input.doogat_type.clone(),
+            tags: input.tags.clone(),
+            extra,
+        };
+
+        let parsed = ParsedDoogat {
+            meta,
+            body: input.body.clone().unwrap_or_default(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: path.clone(),
+            updated_at: None,
+        };
+
+        let content = parser::serialize(&parsed);
+        Ok((path, content))
+    }
+
+    /// Phase 2: atomic commit for batch creates (no-op when writes is empty).
+    fn commit_batch_creates(&self, writes: &[(usize, String, String)]) -> Result<()> {
+        if writes.is_empty() {
+            return Ok(());
+        }
+        let write_refs: Vec<(&str, &str)> = writes
+            .iter()
+            .map(|(_, p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        self.repo.commit_batch(
+            &write_refs,
+            &[],
+            &format!("batch create {} doogats", writes.len()),
+        )?;
+        Ok(())
+    }
+
+    /// Phase 3: index new writes, fill result slots, sync HEAD.
+    fn index_batch_creates(
+        &self,
+        writes: &[(usize, String, String)],
+        results: &mut [Option<ParsedDoogat>],
+    ) -> Result<()> {
+        for (slot, path, content) in writes {
+            let parsed = self.reindex_and_rematerialize(content, path, None)?;
             results[*slot] = Some(parsed);
         }
-
-        // Sync _ddb_meta.head with the new git HEAD so subsequent ensure_fresh()
-        // calls don't mistakenly think the index is stale and trigger
-        // unnecessary incremental_reindex work.
         if !writes.is_empty() {
             self.index.store_head(&self.repo.head_oid()?.0)?;
         }
-
-        Ok(results.into_iter().flatten().collect())
+        Ok(())
     }
 
     /// Update a doogat from raw content (for FFI consumers).
@@ -509,9 +534,8 @@ impl DoogatService {
         }
     }
 
-    /// Resolve typedef defaults (NEXT, NEXT(col), static) and validate
-    /// allowed_values and FK references for a single input's extra fields.
-    fn resolve_defaults_and_validate(
+    /// Fill missing extra fields with typedef column defaults (NEXT, NEXT(col), static).
+    fn resolve_column_defaults(
         &self,
         input: &BatchCreateInput,
         schemas: &[TableSchema],
@@ -529,30 +553,69 @@ impl DoogatService {
         };
 
         for col in &schema.columns {
-            if !extra.contains_key(&col.name) {
-                if let Some(ref dv) = col.default_value {
-                    let value = if dv == "NEXT" {
-                        let key = (type_name.clone(), col.name.clone());
-                        let counter = next_counters.get_mut(&key).unwrap();
-                        *counter += 1;
-                        crate::types::Value::String(counter.to_string())
-                    } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
-                        let partition_col = &dv[5..dv.len() - 1];
-                        let partition_val = extra
-                            .get(partition_col)
-                            .map(Self::value_to_string)
-                            .unwrap_or_default();
-                        let key = (type_name.clone(), col.name.clone(), partition_val);
-                        let counter = partitioned_counters.get_mut(&key).unwrap();
-                        *counter += 1;
-                        crate::types::Value::String(counter.to_string())
-                    } else {
-                        crate::types::Value::String(dv.clone())
-                    };
-                    extra.insert(col.name.clone(), value);
-                }
+            if extra.contains_key(&col.name) {
+                continue;
             }
+            let dv = match col.default_value {
+                Some(ref dv) => dv,
+                None => continue,
+            };
+            let value = self.resolve_single_default(
+                type_name, &col.name, dv, extra, next_counters, partitioned_counters,
+            );
+            extra.insert(col.name.clone(), value);
+        }
 
+        Ok(())
+    }
+
+    /// Resolve a single column default value (NEXT, NEXT(col), or static).
+    fn resolve_single_default(
+        &self,
+        type_name: &str,
+        col_name: &str,
+        dv: &str,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+        next_counters: &mut BareNextCounters,
+        partitioned_counters: &mut PartitionedNextCounters,
+    ) -> crate::types::Value {
+        if dv == "NEXT" {
+            let key = (type_name.to_owned(), col_name.to_owned());
+            let counter = next_counters.get_mut(&key).unwrap();
+            *counter += 1;
+            return crate::types::Value::String(counter.to_string());
+        }
+        if dv.starts_with("NEXT(") && dv.ends_with(')') {
+            let partition_col = &dv[5..dv.len() - 1];
+            let partition_val = extra
+                .get(partition_col)
+                .map(Self::value_to_string)
+                .unwrap_or_default();
+            let key = (type_name.to_owned(), col_name.to_owned(), partition_val);
+            let counter = partitioned_counters.get_mut(&key).unwrap();
+            *counter += 1;
+            return crate::types::Value::String(counter.to_string());
+        }
+        crate::types::Value::String(dv.to_owned())
+    }
+
+    /// Validate allowed_values and FK references for a single input's extra fields.
+    fn validate_column_constraints(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(()),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        for col in &schema.columns {
             if let Some(ref allowed) = col.allowed_values {
                 if let Some(val) = extra.get(&col.name) {
                     let val_str = Self::value_to_string(val);
@@ -565,14 +628,17 @@ impl DoogatService {
                 }
             }
 
-            if let Some(ref _ref_table) = col.references {
+            if let Some(ref ref_table) = col.references {
                 if let Some(val) = extra.get(&col.name) {
                     let val_str = Self::value_to_string(val);
                     let exists = self
                         .index
                         .query_raw_with_params(
-                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                            &[rusqlite::types::Value::Text(val_str.clone())],
+                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
+                            &[
+                                rusqlite::types::Value::Text(val_str.clone()),
+                                rusqlite::types::Value::Text(ref_table.clone()),
+                            ],
                         )?
                         .first()
                         .and_then(|r| r.first())
@@ -580,8 +646,8 @@ impl DoogatService {
                         .unwrap_or(false);
                     if !exists {
                         return Err(DoogatError::Validation(format!(
-                            "field '{}' references non-existent doogat '{}'",
-                            col.name, val_str
+                            "field '{}' references non-existent {} doogat '{}'",
+                            col.name, ref_table, val_str
                         )));
                     }
                 }
@@ -613,58 +679,65 @@ impl DoogatService {
         };
 
         for group in unique_groups {
-            let mut joins = Vec::with_capacity(group.len());
-            let mut param_vals: Vec<rusqlite::types::Value> =
-                Vec::with_capacity(group.len() * 2 + 1);
-            let mut all_present = true;
-            for (i, col_name) in group.iter().enumerate() {
-                let val = match input.fields.get(col_name) {
-                    Some(v) => v,
-                    None => {
-                        all_present = false;
-                        break;
-                    }
+            let (sql, param_vals) =
+                match Self::build_unique_check_sql(type_name, group, &input.fields) {
+                    Some(pair) => pair,
+                    None => continue,
                 };
-                let val_str = Self::value_to_string(val);
-                let alias = format!("f{}", i + 1);
-                let key_idx = param_vals.len() + 1;
-                param_vals.push(rusqlite::types::Value::Text(col_name.clone()));
-                let val_idx = param_vals.len() + 1;
-                param_vals.push(rusqlite::types::Value::Text(val_str));
-                joins.push(format!(
-                    "JOIN _ddb_fields {alias} ON \
-                     {alias}.doogat_id = d.id AND \
-                     {alias}.key = ?{key_idx} AND \
-                     {alias}.value = ?{val_idx}"
-                ));
-            }
-            if !all_present {
-                continue;
-            }
-            param_vals.push(rusqlite::types::Value::Text(type_name.clone()));
-            let sql = format!(
-                "SELECT d.id FROM doogats d {} WHERE d.type = ?{} LIMIT 1",
-                joins.join(" "),
-                param_vals.len()
-            );
             let rows = self.index.query_raw_with_params(&sql, &param_vals)?;
-            if let Some(existing_id) = rows.first().and_then(|r| r.first()) {
-                match input.on_conflict {
-                    crate::types::ConflictAction::Ignore => {
-                        return Ok(Some(self.get_doogat_parsed(existing_id)?));
-                    }
-                    crate::types::ConflictAction::Error => {
-                        return Err(DoogatError::Validation(format!(
-                            "duplicate unique constraint on \
-                             type '{}' for columns {:?}",
-                            type_name, group
-                        )));
-                    }
+            let existing_id = match rows.first().and_then(|r| r.first()) {
+                Some(id) => id,
+                None => continue,
+            };
+            match input.on_conflict {
+                crate::types::ConflictAction::Ignore => {
+                    return Ok(Some(self.get_doogat_parsed(existing_id)?));
+                }
+                crate::types::ConflictAction::Error => {
+                    return Err(DoogatError::Validation(format!(
+                        "duplicate unique constraint on type '{}' for columns {:?}",
+                        type_name, group
+                    )));
                 }
             }
         }
 
         Ok(None)
+    }
+
+    /// Build the SQL query + params for checking one unique_together group.
+    /// Returns `None` when not all group columns are present in the input fields.
+    fn build_unique_check_sql(
+        type_name: &str,
+        group: &[String],
+        fields: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Option<(String, Vec<rusqlite::types::Value>)> {
+        let mut joins = Vec::with_capacity(group.len());
+        let mut param_vals: Vec<rusqlite::types::Value> = Vec::with_capacity(group.len() * 2 + 1);
+
+        for (i, col_name) in group.iter().enumerate() {
+            let val = fields.get(col_name)?;
+            let val_str = Self::value_to_string(val);
+            let alias = format!("f{}", i + 1);
+            let key_idx = param_vals.len() + 1;
+            param_vals.push(rusqlite::types::Value::Text(col_name.clone()));
+            let val_idx = param_vals.len() + 1;
+            param_vals.push(rusqlite::types::Value::Text(val_str));
+            joins.push(format!(
+                "JOIN _ddb_fields {alias} ON \
+                 {alias}.doogat_id = d.id AND \
+                 {alias}.key = ?{key_idx} AND \
+                 {alias}.value = ?{val_idx}"
+            ));
+        }
+
+        param_vals.push(rusqlite::types::Value::Text(type_name.to_owned()));
+        let sql = format!(
+            "SELECT d.id FROM doogats d {} WHERE d.type = ?{} LIMIT 1",
+            joins.join(" "),
+            param_vals.len()
+        );
+        Some((sql, param_vals))
     }
 
     /// Pre-compute NEXT counters for columns with DEFAULT NEXT or NEXT(partition_col).
@@ -691,53 +764,79 @@ impl DoogatService {
                     None => continue,
                 };
                 if dv == "NEXT" {
-                    let key = (type_name.clone(), col.name.clone());
-                    if let std::collections::btree_map::Entry::Vacant(e) = bare.entry(key) {
-                        let sql = format!(
-                            "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
-                            col.name, schema.table_name
-                        );
-                        let max_val: i64 = self
-                            .index
-                            .query_raw(&sql)?
-                            .first()
-                            .and_then(|r| r.first())
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or(0);
-                        e.insert(max_val);
-                    }
+                    self.seed_bare_next_counter(&mut bare, type_name, col, schema)?;
                 } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
-                    let partition_col = &dv[5..dv.len() - 1];
-                    let partition_val = input
-                        .fields
-                        .get(partition_col)
-                        .map(Self::value_to_string)
-                        .unwrap_or_default();
-                    let key = (type_name.clone(), col.name.clone(), partition_val.clone());
-                    if let std::collections::btree_map::Entry::Vacant(e) =
-                        partitioned.entry(key)
-                    {
-                        let sql = format!(
-                            "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
-                            col.name, schema.table_name, partition_col
-                        );
-                        let max_val: i64 = self
-                            .index
-                            .query_raw_with_params(
-                                &sql,
-                                &[rusqlite::types::Value::Text(partition_val)],
-                            )?
-                            .first()
-                            .and_then(|r| r.first())
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or(0);
-                        e.insert(max_val);
-                    }
+                    self.seed_partitioned_next_counter(
+                        &mut partitioned, type_name, col, schema, dv, input,
+                    )?;
                 }
             }
         }
 
         Ok((bare, partitioned))
+    }
+
+    /// Seed a bare NEXT counter if not already present.
+    fn seed_bare_next_counter(
+        &self,
+        bare: &mut BareNextCounters,
+        type_name: &str,
+        col: &crate::types::ColumnDef,
+        schema: &TableSchema,
+    ) -> Result<()> {
+        let key = (type_name.to_owned(), col.name.clone());
+        if let std::collections::btree_map::Entry::Vacant(e) = bare.entry(key) {
+            let sql = format!(
+                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
+                col.name, schema.table_name
+            );
+            let max_val: i64 = self
+                .index
+                .query_raw(&sql)?
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            e.insert(max_val);
+        }
+        Ok(())
+    }
+
+    /// Seed a partitioned NEXT(col) counter if not already present.
+    fn seed_partitioned_next_counter(
+        &self,
+        partitioned: &mut PartitionedNextCounters,
+        type_name: &str,
+        col: &crate::types::ColumnDef,
+        schema: &TableSchema,
+        dv: &str,
+        input: &BatchCreateInput,
+    ) -> Result<()> {
+        let partition_col = &dv[5..dv.len() - 1];
+        let partition_val = input
+            .fields
+            .get(partition_col)
+            .map(Self::value_to_string)
+            .unwrap_or_default();
+        let key = (type_name.to_owned(), col.name.clone(), partition_val.clone());
+        if let std::collections::btree_map::Entry::Vacant(e) = partitioned.entry(key) {
+            let sql = format!(
+                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                col.name, schema.table_name, partition_col
+            );
+            let max_val: i64 = self
+                .index
+                .query_raw_with_params(
+                    &sql,
+                    &[rusqlite::types::Value::Text(partition_val)],
+                )?
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            e.insert(max_val);
+        }
+        Ok(())
     }
 
     /// Validate extra fields against a pre-loaded typedef schema list.
