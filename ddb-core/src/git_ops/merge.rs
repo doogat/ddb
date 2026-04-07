@@ -38,37 +38,16 @@ impl GitRepo {
             std::fs::write(&full_path, content)?;
         }
 
-        // Write non-conflicting files from theirs (Added or Modified on
-        // theirs while unchanged on ours). Without this, remote-only
-        // changes are missing from the merge commit tree.
+        // Include non-conflicting theirs-only changes in the merge commit
         let ours_tree = our_commit.tree()?;
         let theirs_tree = their_commit.tree()?;
-        let diff = self
-            .repo
-            .diff_tree_to_tree(Some(&ours_tree), Some(&theirs_tree), None)?;
         let resolved_set: std::collections::HashSet<&str> = files
             .iter()
             .map(|(p, _)| *p)
             .chain(binary_paths.iter().copied())
             .collect();
-        let mut theirs_only = Vec::new();
-        for delta in diff.deltas() {
-            let dominated = matches!(delta.status(), git2::Delta::Added | git2::Delta::Modified);
-            if dominated {
-                if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
-                    if !resolved_set.contains(path) {
-                        if let Ok(blob) = self.repo.find_blob(delta.new_file().id()) {
-                            let full = self.path.join(path);
-                            if let Some(parent) = full.parent() {
-                                std::fs::create_dir_all(parent)?;
-                            }
-                            std::fs::write(&full, blob.content())?;
-                            theirs_only.push(path.to_string());
-                        }
-                    }
-                }
-            }
-        }
+        let theirs_only =
+            self.collect_theirs_only_changes(&ours_tree, &theirs_tree, &resolved_set)?;
 
         let mut index = self.repo.index()?;
         for (rel_path, _) in files {
@@ -95,6 +74,45 @@ impl GitRepo {
         )?;
         self.write_commit_graph();
         Ok(CommitHash(oid.to_string()))
+    }
+
+    /// Collect files that were added or modified on theirs but not in our resolved set.
+    /// Writes them to disk and returns their paths for staging.
+    fn collect_theirs_only_changes(
+        &self,
+        ours_tree: &git2::Tree,
+        theirs_tree: &git2::Tree,
+        resolved_set: &std::collections::HashSet<&str>,
+    ) -> Result<Vec<String>> {
+        let diff = self
+            .repo
+            .diff_tree_to_tree(Some(ours_tree), Some(theirs_tree), None)?;
+        let mut paths = Vec::new();
+
+        for delta in diff.deltas() {
+            if !matches!(delta.status(), git2::Delta::Added | git2::Delta::Modified) {
+                continue;
+            }
+            let path = match delta.new_file().path().and_then(|p| p.to_str()) {
+                Some(p) => p,
+                None => continue,
+            };
+            if resolved_set.contains(path) {
+                continue;
+            }
+            let blob = match self.repo.find_blob(delta.new_file().id()) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let full = self.path.join(path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&full, blob.content())?;
+            paths.push(path.to_string());
+        }
+
+        Ok(paths)
     }
 
     /// Merge a fetched remote branch, returning the merge result.
