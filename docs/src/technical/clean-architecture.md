@@ -6,7 +6,7 @@ Clean Architecture's core idea: **dependencies point inward**. Outer layers know
 
 | Layer | Doogat DB equivalent | Depends on |
 |---|---|---|
-| Domain | `types.rs`, `error.rs` — pure data structures, no I/O | Nothing |
+| Domain | `types/`, `error.rs` — pure data structures, no I/O | Nothing |
 | Use cases | Business logic — parsing rules, type inference, conflict resolution | Domain only |
 | Adapters | `git_ops/mod.rs`, `indexer.rs`, `crdt_resolver.rs` — external system integration | Domain + traits |
 | Entry point | `ddb-cli` — wires everything together | All layers |
@@ -16,7 +16,7 @@ Clean Architecture's core idea: **dependencies point inward**. Outer layers know
 Pure data structures with no I/O dependencies. These types are the lingua franca of the codebase.
 
 ```rust
-// types.rs — no imports from git2, rusqlite, automerge
+// types/ — no imports from git2, rusqlite, automerge
 pub struct DoogatId(String);
 pub struct ParsedDoogat { /* ... */ }
 pub struct DoogatMeta { /* ... */ }
@@ -45,7 +45,7 @@ Implements trait abstractions using external systems. Each adapter translates be
 | Adapter | External dependency | Domain interface |
 |---|---|---|
 | `git_ops/mod.rs` | `git2` | Doogat storage/retrieval |
-| `indexer.rs` | `rusqlite` | Search and query |
+| `indexer/` | `rusqlite` | Search and query |
 | `crdt_resolver.rs` | `automerge` | Conflict resolution state |
 
 ## Entry point

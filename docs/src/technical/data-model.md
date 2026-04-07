@@ -1,6 +1,6 @@
 # Data Model
 
-All types are defined in `ddb-core/src/types.rs`.
+All types are defined in the `ddb-core/src/types/` directory (`mod.rs`, `value.rs`, `doogat.rs`, `schema.rs`).
 
 ## Repository Config
 
@@ -10,6 +10,16 @@ Repository-level settings stored in `.ddb.toml`:
 pub struct RepoConfig {
     pub compaction: CompactionConfig,  // stale_ttl_days: 90, threshold_mb: 1
     pub crdt: CrdtConfig,             // default_strategy: "preset:default"
+    pub maintenance: MaintenanceConfig,
+}
+```
+
+### MaintenanceConfig
+
+```rust
+pub struct MaintenanceConfig {
+    pub auto_enabled: bool,       // false
+    pub write_threshold: u32,     // 50
 }
 ```
 
@@ -162,6 +172,7 @@ pub struct ParsedDoogat {
     pub body_tags: Vec<String>,
     pub checkboxes: Vec<CheckboxItem>,
     pub path: String,
+    pub updated_at: Option<String>,   // last-indexed timestamp (RFC 3339)
 }
 ```
 
@@ -189,6 +200,19 @@ pub struct NodeConfig {
     pub name: String,
     pub known_heads: Vec<String>,  // Git commit OIDs this node has synced
     pub last_sync: Option<String>, // RFC3339 timestamp
+    pub hlc: Option<String>,       // last HLC timestamp (clock continuity)
+    pub status: NodeStatus,        // lifecycle status (default: Active)
+    pub created: Option<String>,   // ISO 8601 registration timestamp
+}
+```
+
+### NodeStatus
+
+```rust
+pub enum NodeStatus {
+    Active,   // default
+    Stale,
+    Retired,
 }
 ```
 
@@ -215,6 +239,10 @@ pub struct ConflictFile {
     pub ancestor: Option<String>,  // None if file is new
     pub ours: String,
     pub theirs: String,
+    pub ours_hlc: Option<Hlc>,         // HLC from "ours" commit
+    pub theirs_hlc: Option<Hlc>,       // HLC from "theirs" commit
+    pub ours_blob_oid: Option<String>, // blob OID for binary conflict
+    pub theirs_blob_oid: Option<String>,
 }
 ```
 
@@ -226,6 +254,7 @@ A conflict file after CRDT resolution:
 pub struct ResolvedFile {
     pub path: String,
     pub content: String,
+    pub fm_crdt_bytes: Option<Vec<u8>>, // serialized frontmatter CRDT state
 }
 ```
 
@@ -282,6 +311,7 @@ pub struct TableSchema {
     pub stale_after_days: Option<u32>,   // stale discovery threshold
     pub title_template: Option<String>,  // title pattern for new instances
     pub origin: Option<String>,          // tracking label (e.g. PRD that created this type)
+    pub unique_together: Option<Vec<Vec<String>>>, // composite unique constraints
 }
 ```
 
@@ -317,6 +347,8 @@ pub struct SyncReport {
     pub direction: String,          // "bidirectional", "up-to-date"
     pub commits_transferred: usize,
     pub conflicts_resolved: usize,
+    pub resurrected: usize,
+    pub collisions_reassigned: usize,
 }
 ```
 
@@ -325,7 +357,15 @@ pub struct SyncReport {
 ```rust
 pub struct CompactionReport {
     pub files_removed: usize,
+    pub crdt_docs_compacted: usize,
     pub gc_success: bool,
+    pub crdt_temp_bytes_before: u64,
+    pub crdt_temp_bytes_after: u64,
+    pub crdt_temp_files_before: usize,
+    pub crdt_temp_files_after: usize,
+    pub repo_bytes_before: u64,
+    pub repo_bytes_after: u64,
+    pub backup_path: Option<PathBuf>,
 }
 ```
 

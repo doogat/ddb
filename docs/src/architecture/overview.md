@@ -44,8 +44,8 @@ Features are classified as **stable** or **experimental**:
 
 | Tier | Scope |
 |------|-------|
-| Stable | CLI CRUD, search, query, sync, type management; Git storage format; FTS5; SQL DDL/DML; `ddb-core` public API |
-| Experimental | GraphQL server, REST, PgWire, WebSocket, NoSQL API, UniFFI bindings, bundles, attachments, auto-update |
+| Stable | CLI CRUD, search, query, sync, type management; Git storage format; FTS5; SQL DDL/DML; `ddb-core` public API; GraphQL server, REST, PgWire, WebSocket, ReadPool, background maintenance |
+| Experimental | NoSQL API, UniFFI bindings, bundles, attachments, auto-update |
 
 Stable APIs follow semver. Experimental APIs may change in any release.
 
@@ -128,7 +128,11 @@ ddb/
 │   ├── src/
 │   │   ├── lib.rs              # Public re-exports + UniFFI scaffolding
 │   │   ├── error.rs            # Error types
-│   │   ├── types.rs            # Shared data structures
+│   │   ├── types/              # Shared data structures
+│   │   │   ├── mod.rs          # Config types, re-exports
+│   │   │   ├── value.rs        # Value enum, path utilities
+│   │   │   ├── doogat.rs       # Domain model types
+│   │   │   └── schema.rs       # Schema/consistency types
 │   │   ├── traits.rs           # Core trait abstractions
 │   │   ├── hlc.rs              # Hybrid Logical Clock
 │   │   ├── parser/             # Markdown parsing/serialization
@@ -146,12 +150,29 @@ ddb/
 │       └── search.rs           # Search/reindex benchmarks
 ├── ddb-cli/                    # CLI binary
 │   └── src/
-│       └── main.rs             # clap command handlers
+│       ├── main.rs             # CLI struct definitions, dispatch
+│       ├── updater.rs          # Auto-update mechanism
+│       └── commands/           # Subcommand handlers
+│           ├── mod.rs
+│           ├── crud.rs         # create, read, update, delete, list
+│           ├── query.rs        # search, query, sql, type
+│           ├── sync.rs         # sync, compact, register
+│           ├── maintenance.rs  # reindex, fix, status, help
+│           └── discover.rs     # orphans, stale, recent, links
 ├── ddb-server/                 # GraphQL server library
 │   └── src/
 │       ├── lib.rs              # Server entrypoint (axum)
-│       ├── actor.rs            # Thread-safe core bridge
-│       ├── schema.rs           # Dynamic GraphQL schema
+│       ├── actor/              # Thread-safe core bridge
+│       │   ├── mod.rs          # RepoActor, event bus
+│       │   └── handlers.rs     # Command dispatch logic
+│       ├── schema/             # Dynamic GraphQL schema
+│       │   ├── mod.rs          # Schema builder
+│       │   ├── base_types.rs   # Value converters, type builders
+│       │   ├── queries.rs      # Query field resolvers
+│       │   ├── mutations.rs    # Mutation field resolvers
+│       │   ├── subscriptions.rs # Subscription field resolvers
+│       │   ├── type_defs.rs    # Type/input/enum definitions
+│       │   └── discovery_queries.rs # Discovery query resolvers
 │       ├── auth.rs             # Bearer token auth
 │       ├── config.rs           # Server config
 │       └── error.rs            # Error mapping

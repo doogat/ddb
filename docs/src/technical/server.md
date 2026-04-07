@@ -1,8 +1,6 @@
 # GraphQL Server
 
-> **Experimental**: The server and all its protocols (GraphQL, REST, PgWire, WebSocket, NoSQL) are experimental and may change in future releases.
-
-Doogat DB exposes a GraphQL API via `ddb serve`, enabling mobile, desktop, and web clients to interact with the ddb over HTTP. All responses include an `X-Experimental: true` header.
+Doogat DB exposes a GraphQL API via `ddb serve`, enabling mobile, desktop, and web clients to interact with the ddb over HTTP.
 
 ## Architecture
 
@@ -340,7 +338,7 @@ Example query:
 
 For a typed link doogat, `fields` returns `{"url":"https://example.com","description":"Example"}` as a native JSON object - no `JSON.parse()` needed.
 
-**Breaking change (experimental):** Clients previously calling `JSON.parse(hit.fields)` should now use `hit.fields` directly.
+**Breaking change:** Clients previously calling `JSON.parse(hit.fields)` should now use `hit.fields` directly.
 
 ### Tag entries
 
@@ -659,6 +657,9 @@ No server restart is needed. Clients can poll the `schemaVersion` query field to
 |---|---|
 | `NotFound` | `NOT_FOUND` |
 | `Validation` | `VALIDATION_ERROR` |
+| `InvalidPath` | `INVALID_PATH` |
+| `Conflict` | `CONFLICT` |
+| `BadRequest` | `BAD_REQUEST` |
 | `SqlEngine` | `SQL_ERROR` |
 | All others | `INTERNAL_ERROR` |
 
@@ -699,7 +700,6 @@ Queries against untyped tables (no typedef) return all columns as `VARCHAR`.
 - **Text encoding for untyped tables**: columns from tables without typedefs are returned as `VARCHAR`.
 - **Simple query protocol only**: no prepared statements or extended query protocol. Most clients default to simple mode for ad-hoc queries.
 - **No TLS**: bind to localhost or use an SSH tunnel for remote access.
-- **No catalog queries**: psql meta-commands (`\dt`, `\d`, `\l`) query PostgreSQL system catalogs which don't exist — they fail gracefully.
 
 ## Background Maintenance
 
@@ -747,9 +747,18 @@ In addition to GraphQL, the server exposes a REST API at `/rest/*`. Both interfa
 ```
 ddb-server/src/
 ├── lib.rs           # pub async fn run() entrypoint
-├── actor.rs         # RepoActor: thread-safe GitRepo+Index bridge, emits events
+├── actor/           # Thread-safe GitRepo+Index bridge
+│   ├── mod.rs       # RepoActor, event bus, command dispatch
+│   └── handlers.rs  # Command handler implementations
+├── schema/          # Dynamic GraphQL schema
+│   ├── mod.rs       # Schema builder (query, mutation, subscription)
+│   ├── base_types.rs # Value converters, type builders, helpers
+│   ├── queries.rs   # Query field resolvers
+│   ├── mutations.rs # Mutation field resolvers
+│   ├── subscriptions.rs # Subscription field resolvers
+│   ├── type_defs.rs # GraphQL type/input/enum definitions
+│   └── discovery_queries.rs # Discovery query resolvers
 ├── read_pool.rs     # Semaphore-gated concurrent read dispatch (spawn_blocking)
-├── schema.rs        # Dynamic GraphQL schema builder (query, mutation, subscription)
 ├── filter.rs        # Filter/sort/aggregate: input types, SQL builders, Connection wrapper
 ├── events.rs        # DoogatEvent, EventKind, EventBus (broadcast channel)
 ├── ws.rs            # WebSocket upgrade handler for graphql-ws subscriptions

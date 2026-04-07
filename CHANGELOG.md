@@ -136,19 +136,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md vulnerability reporting policy
 - CONTRIBUTING.md with dev setup and PR guidelines
 - mdBook documentation site (architecture, technical guides, API reference)
-- **Experimental:** GraphQL server with dynamic schema from `_typedef` doogats
-- **Experimental:** REST API with field-level filtering (`field.*` query params)
-- **Experimental:** PgWire protocol for SQL client access
-- **Experimental:** WebSocket subscriptions with dual-path auth (header + payload)
+- GraphQL server with dynamic schema from `_typedef` doogats
+- REST API with field-level filtering (`field.*` query params)
+- PgWire protocol for SQL client access
+- WebSocket subscriptions with dual-path auth (header + payload)
 - **Experimental:** NoSQL storage backend (redb)
 - **Experimental:** UniFFI bindings for Swift and Kotlin (DoogatDriver facade)
 - **Experimental:** Delta bundle export/import for offline sync
 - **Experimental:** Tar-based bundle export/import
 - **Experimental:** Attachment support
 - **Experimental:** Auto-update mechanism
-- **Experimental:** Concurrent read path via ReadPool with semaphore
-- **Experimental:** Background maintenance with auto-trigger on high-write sessions
-- **Experimental:** Stability tier markers (`X-Experimental` header, CLI `--help` annotations)
+- Concurrent read path via ReadPool with semaphore
+- Background maintenance with auto-trigger on high-write sessions
+- Stability tier markers (CLI `--help` annotations)
 
 ### Fixed
 
