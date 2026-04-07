@@ -115,3 +115,37 @@ fn config_dir() -> PathBuf {
         .unwrap_or_else(|_| ".".into());
     PathBuf::from(home).join(".config/ddb")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_file_missing_returns_default() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = ServerConfig::read_file(dir.path());
+        assert!(cfg.server.is_none());
+        assert!(cfg.maintenance.is_none());
+    }
+
+    #[test]
+    fn read_file_invalid_toml_returns_default() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("config.toml"), "not valid {{ toml").unwrap();
+        let cfg = ServerConfig::read_file(dir.path());
+        assert!(cfg.server.is_none());
+        assert!(cfg.maintenance.is_none());
+    }
+
+    #[test]
+    fn read_file_valid_toml_parses() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[server]\nport = 9999\n",
+        )
+        .unwrap();
+        let cfg = ServerConfig::read_file(dir.path());
+        assert_eq!(cfg.server.as_ref().and_then(|s| s.port), Some(9999));
+    }
+}

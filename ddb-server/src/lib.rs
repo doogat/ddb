@@ -20,7 +20,7 @@ use std::time::Instant;
 use arc_swap::ArcSwap;
 use async_graphql::dynamic::Schema;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
-use axum::http::header::HeaderName;
+use axum::http::header::{HeaderName, HeaderValue};
 use axum::{middleware, Extension, Router};
 
 use actor::ActorHandle;
@@ -154,7 +154,7 @@ pub async fn run(
             |mut res: axum::response::Response| async {
                 res.headers_mut().insert(
                     HeaderName::from_static("x-experimental"),
-                    "true".parse().unwrap(),
+                    HeaderValue::from_static("true"),
                 );
                 res
             },

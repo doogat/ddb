@@ -893,7 +893,7 @@ pub(crate) fn sanitize_field_name(s: &str) -> String {
     }
     if s.contains('-') {
         let mut parts = s.split('-');
-        let first = parts.next().unwrap().to_lowercase();
+        let first = parts.next().expect("split always yields at least one").to_lowercase();
         let rest: String = parts.map(capitalize).collect();
         format!("{first}{rest}")
     } else {
