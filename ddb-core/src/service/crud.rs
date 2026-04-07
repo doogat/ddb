@@ -9,6 +9,11 @@ use crate::types::{
 
 use super::{DoogatService, ExtraFieldUpdates};
 
+/// (table, column) -> current max value for bare DEFAULT NEXT columns.
+type BareNextCounters = std::collections::BTreeMap<(String, String), i64>;
+/// (table, column, partition_value) -> current max value for DEFAULT NEXT(col) columns.
+type PartitionedNextCounters = std::collections::BTreeMap<(String, String, String), i64>;
+
 impl DoogatService {
     // ── CRUD ────────────────────────────────────────────────────────────
 
@@ -360,81 +365,8 @@ impl DoogatService {
         // Load type schemas once for default/validation resolution
         let schemas = self.list_type_schemas()?;
 
-        // Pre-compute NEXT counters per (table, column) for bare NEXT
-        let mut next_counters: std::collections::BTreeMap<(String, String), i64> =
-            std::collections::BTreeMap::new();
-        // Track NEXT(partition) counters per (table, column, partition_value)
-        let mut partitioned_counters: std::collections::BTreeMap<(String, String, String), i64> =
-            std::collections::BTreeMap::new();
-        for input in inputs {
-            if let Some(ref type_name) = input.doogat_type {
-                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
-                    for col in &schema.columns {
-                        if let Some(ref dv) = col.default_value {
-                            if dv == "NEXT" {
-                                let key = (type_name.clone(), col.name.clone());
-                                if let std::collections::btree_map::Entry::Vacant(e) =
-                                    next_counters.entry(key)
-                                {
-                                    let sql = format!(
-                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
-                                        col.name, schema.table_name
-                                    );
-                                    let max_val: i64 = self
-                                        .index
-                                        .query_raw(&sql)?
-                                        .first()
-                                        .and_then(|r| r.first())
-                                        .and_then(|v| v.parse().ok())
-                                        .unwrap_or(0);
-                                    e.insert(max_val);
-                                }
-                            } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
-                                let partition_col = &dv[5..dv.len() - 1];
-                                let partition_val = input
-                                    .fields
-                                    .get(partition_col)
-                                    .map(|v| match v {
-                                        crate::types::Value::String(s) => s.clone(),
-                                        crate::types::Value::Number(n) => n.to_string(),
-                                        crate::types::Value::Bool(b) => {
-                                            if *b {
-                                                "1".to_string()
-                                            } else {
-                                                "0".to_string()
-                                            }
-                                        }
-                                        crate::types::Value::List(l) => format!("{l:?}"),
-                                        crate::types::Value::Map(m) => format!("{m:?}"),
-                                    })
-                                    .unwrap_or_default();
-                                let key =
-                                    (type_name.clone(), col.name.clone(), partition_val.clone());
-                                if let std::collections::btree_map::Entry::Vacant(e) =
-                                    partitioned_counters.entry(key)
-                                {
-                                    let sql = format!(
-                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
-                                        col.name, schema.table_name, partition_col
-                                    );
-                                    let max_val: i64 = self
-                                        .index
-                                        .query_raw_with_params(
-                                            &sql,
-                                            &[rusqlite::types::Value::Text(partition_val)],
-                                        )?
-                                        .first()
-                                        .and_then(|r| r.first())
-                                        .and_then(|v| v.parse().ok())
-                                        .unwrap_or(0);
-                                    e.insert(max_val);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let (mut next_counters, mut partitioned_counters) =
+            self.precompute_next_counters(inputs, &schemas)?;
 
         // Phase 1: prepare all writes.
         // Each result slot is either an existing doogat (conflict-Ignore) or
@@ -454,19 +386,7 @@ impl DoogatService {
                             let mut all_present = true;
                             for (i, col_name) in group.iter().enumerate() {
                                 if let Some(val) = input.fields.get(col_name) {
-                                    let val_str = match val {
-                                        crate::types::Value::String(s) => s.clone(),
-                                        crate::types::Value::Number(n) => n.to_string(),
-                                        crate::types::Value::Bool(b) => {
-                                            if *b {
-                                                "1".to_string()
-                                            } else {
-                                                "0".to_string()
-                                            }
-                                        }
-                                        crate::types::Value::List(l) => format!("{l:?}"),
-                                        crate::types::Value::Map(m) => format!("{m:?}"),
-                                    };
+                                    let val_str = Self::value_to_string(val);
                                     let alias = format!("f{}", i + 1);
                                     let key_idx = param_vals.len() + 1;
                                     param_vals.push(rusqlite::types::Value::Text(col_name.clone()));
@@ -546,19 +466,7 @@ impl DoogatService {
                                     let partition_col = &dv[5..dv.len() - 1];
                                     let partition_val = extra
                                         .get(partition_col)
-                                        .map(|v| match v {
-                                            crate::types::Value::String(s) => s.clone(),
-                                            crate::types::Value::Number(n) => n.to_string(),
-                                            crate::types::Value::Bool(b) => {
-                                                if *b {
-                                                    "1".to_string()
-                                                } else {
-                                                    "0".to_string()
-                                                }
-                                            }
-                                            crate::types::Value::List(l) => format!("{l:?}"),
-                                            crate::types::Value::Map(m) => format!("{m:?}"),
-                                        })
+                                        .map(Self::value_to_string)
                                         .unwrap_or_default();
                                     let key = (type_name.clone(), col.name.clone(), partition_val);
                                     let counter = partitioned_counters.get_mut(&key).unwrap();
@@ -579,10 +487,7 @@ impl DoogatService {
                         // Validate allowed_values
                         if let Some(ref allowed) = col.allowed_values {
                             if let Some(val) = extra.get(&col.name) {
-                                let val_str = match val {
-                                    crate::types::Value::String(s) => s.clone(),
-                                    other => format!("{other:?}"),
-                                };
+                                let val_str = Self::value_to_string(val);
                                 if !allowed.contains(&val_str) {
                                     return Err(DoogatError::Validation(format!(
                                         "field '{}' value '{}' not in allowed values: {:?}",
@@ -595,10 +500,7 @@ impl DoogatService {
                         // Validate FK references
                         if let Some(ref _ref_table) = col.references {
                             if let Some(val) = extra.get(&col.name) {
-                                let val_str = match val {
-                                    crate::types::Value::String(s) => s.clone(),
-                                    other => format!("{other:?}"),
-                                };
+                                let val_str = Self::value_to_string(val);
                                 let exists = self
                                     .index
                                     .query_raw_with_params(
@@ -707,6 +609,97 @@ impl DoogatService {
             }
             crate::types::Value::List(_) | crate::types::Value::Map(_) => None,
         }
+    }
+
+    /// Convert a `Value` to a string, always producing output.
+    /// Unlike `value_to_comparable_string`, List/Map use debug format.
+    fn value_to_string(val: &crate::types::Value) -> String {
+        match val {
+            crate::types::Value::String(s) => s.clone(),
+            crate::types::Value::Number(n) => n.to_string(),
+            crate::types::Value::Bool(b) => {
+                if *b {
+                    "1".to_string()
+                } else {
+                    "0".to_string()
+                }
+            }
+            crate::types::Value::List(l) => format!("{l:?}"),
+            crate::types::Value::Map(m) => format!("{m:?}"),
+        }
+    }
+
+    /// Pre-compute NEXT counters for columns with DEFAULT NEXT or NEXT(partition_col).
+    fn precompute_next_counters(
+        &self,
+        inputs: &[BatchCreateInput],
+        schemas: &[TableSchema],
+    ) -> Result<(BareNextCounters, PartitionedNextCounters)> {
+        let mut bare = BareNextCounters::new();
+        let mut partitioned = PartitionedNextCounters::new();
+
+        for input in inputs {
+            let type_name = match input.doogat_type {
+                Some(ref t) => t,
+                None => continue,
+            };
+            let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+                Some(s) => s,
+                None => continue,
+            };
+            for col in &schema.columns {
+                let dv = match col.default_value {
+                    Some(ref dv) => dv,
+                    None => continue,
+                };
+                if dv == "NEXT" {
+                    let key = (type_name.clone(), col.name.clone());
+                    if let std::collections::btree_map::Entry::Vacant(e) = bare.entry(key) {
+                        let sql = format!(
+                            "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
+                            col.name, schema.table_name
+                        );
+                        let max_val: i64 = self
+                            .index
+                            .query_raw(&sql)?
+                            .first()
+                            .and_then(|r| r.first())
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
+                        e.insert(max_val);
+                    }
+                } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                    let partition_col = &dv[5..dv.len() - 1];
+                    let partition_val = input
+                        .fields
+                        .get(partition_col)
+                        .map(Self::value_to_string)
+                        .unwrap_or_default();
+                    let key = (type_name.clone(), col.name.clone(), partition_val.clone());
+                    if let std::collections::btree_map::Entry::Vacant(e) =
+                        partitioned.entry(key)
+                    {
+                        let sql = format!(
+                            "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                            col.name, schema.table_name, partition_col
+                        );
+                        let max_val: i64 = self
+                            .index
+                            .query_raw_with_params(
+                                &sql,
+                                &[rusqlite::types::Value::Text(partition_val)],
+                            )?
+                            .first()
+                            .and_then(|r| r.first())
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
+                        e.insert(max_val);
+                    }
+                }
+            }
+        }
+
+        Ok((bare, partitioned))
     }
 
     /// Validate extra fields against a pre-loaded typedef schema list.
