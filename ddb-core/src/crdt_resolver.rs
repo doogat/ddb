@@ -679,8 +679,9 @@ fn split_body_sections(body: &str) -> Vec<(Option<String>, String)> {
 
 /// Check if a section body is a log section (entries matching `- [x] YYYY-MM-DD` or `- [ ] YYYY-MM-DD`).
 fn is_log_section(body: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let log_pattern =
-        regex::Regex::new(r"^- \[[ xi]\] \d{4}-\d{2}-\d{2}").expect("valid regex");
+        RE.get_or_init(|| regex::Regex::new(r"^- \[[ xi]\] \d{4}-\d{2}-\d{2}").expect("valid regex"));
     body.lines()
         .filter(|l| !l.trim().is_empty())
         .any(|l| log_pattern.is_match(l))

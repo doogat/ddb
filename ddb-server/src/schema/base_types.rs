@@ -937,6 +937,39 @@ pub(crate) fn event_stream(
 const MAX_LIMIT: i64 = 10_000;
 const VALID_FORMATS: &[&str] = &["array", "objects"];
 
+/// Validate that a limit value is non-negative and within bounds.
+fn check_limit(n: i64) -> async_graphql::Result<i64> {
+    if n < 0 {
+        return Err(async_graphql::Error::new("limit must be non-negative"));
+    }
+    if n > MAX_LIMIT {
+        return Err(async_graphql::Error::new(format!(
+            "limit must not exceed {MAX_LIMIT}"
+        )));
+    }
+    Ok(n)
+}
+
+/// Validate that an offset value is non-negative.
+fn check_offset(n: i64) -> async_graphql::Result<i64> {
+    if n < 0 {
+        return Err(async_graphql::Error::new("offset must be non-negative"));
+    }
+    Ok(n)
+}
+
+/// Validate that a format string is in the known set.
+fn check_format(s: &str) -> async_graphql::Result<()> {
+    if !VALID_FORMATS.contains(&s) {
+        return Err(async_graphql::Error::new(format!(
+            "invalid format '{}'; allowed: {}",
+            s,
+            VALID_FORMATS.join(", ")
+        )));
+    }
+    Ok(())
+}
+
 /// Extract and validate an optional non-negative `limit` argument.
 pub(crate) fn validate_limit(
     ctx: &async_graphql::dynamic::ResolverContext,
@@ -944,14 +977,7 @@ pub(crate) fn validate_limit(
     match ctx.args.get("limit") {
         Some(v) => {
             let n = v.i64().map_err(|_| async_graphql::Error::new("limit must be an integer"))?;
-            if n < 0 {
-                return Err(async_graphql::Error::new("limit must be non-negative"));
-            }
-            if n > MAX_LIMIT {
-                return Err(async_graphql::Error::new(format!(
-                    "limit must not exceed {MAX_LIMIT}"
-                )));
-            }
+            check_limit(n)?;
             Ok(Some(n))
         }
         None => Ok(None),
@@ -965,9 +991,7 @@ pub(crate) fn validate_offset(
     match ctx.args.get("offset") {
         Some(v) => {
             let n = v.i64().map_err(|_| async_graphql::Error::new("offset must be an integer"))?;
-            if n < 0 {
-                return Err(async_graphql::Error::new("offset must be non-negative"));
-            }
+            check_offset(n)?;
             Ok(Some(n))
         }
         None => Ok(None),
@@ -983,13 +1007,7 @@ pub(crate) fn validate_format<'a>(
             let s = v.string().map_err(|_| {
                 async_graphql::Error::new("format must be a string")
             })?;
-            if !VALID_FORMATS.contains(&s) {
-                return Err(async_graphql::Error::new(format!(
-                    "invalid format '{}'; allowed: {}",
-                    s,
-                    VALID_FORMATS.join(", ")
-                )));
-            }
+            check_format(s)?;
             Ok(s)
         }
         None => Ok("array"),
@@ -1490,4 +1508,47 @@ mod tests {
         assert_eq!(strip_id_suffix("valid"), "valid");
     }
 
+    #[test]
+    fn check_limit_valid() {
+        assert_eq!(check_limit(0).unwrap(), 0);
+        assert_eq!(check_limit(100).unwrap(), 100);
+        assert_eq!(check_limit(10_000).unwrap(), 10_000);
+    }
+
+    #[test]
+    fn check_limit_negative() {
+        let err = check_limit(-1).unwrap_err();
+        assert!(err.message.contains("non-negative"));
+    }
+
+    #[test]
+    fn check_limit_exceeds_max() {
+        let err = check_limit(10_001).unwrap_err();
+        assert!(err.message.contains("exceed"));
+    }
+
+    #[test]
+    fn check_offset_valid() {
+        assert_eq!(check_offset(0).unwrap(), 0);
+        assert_eq!(check_offset(500).unwrap(), 500);
+    }
+
+    #[test]
+    fn check_offset_negative() {
+        let err = check_offset(-1).unwrap_err();
+        assert!(err.message.contains("non-negative"));
+    }
+
+    #[test]
+    fn check_format_valid() {
+        assert!(check_format("array").is_ok());
+        assert!(check_format("objects").is_ok());
+    }
+
+    #[test]
+    fn check_format_invalid() {
+        let err = check_format("csv").unwrap_err();
+        assert!(err.message.contains("invalid format"));
+        assert!(err.message.contains("csv"));
+    }
 }

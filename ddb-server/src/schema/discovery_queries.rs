@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use crate::error::to_server_error;
 use crate::read_pool::ReadPool;
 
-use super::base_types::simple_field;
+use super::base_types::{simple_field, validate_limit};
 
 /// Types produced by discovery query registration that must be registered on
 /// the schema alongside the Query object.
@@ -59,11 +59,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     FieldFuture::new(async move {
                         let pool = ctx.data::<ReadPool>()?;
                         let id = ctx.args.try_get("id")?.string()?.to_string();
-                        let limit = ctx
-                            .args
-                            .get("limit")
-                            .and_then(|v| v.i64().ok())
-                            .unwrap_or(10) as usize;
+                        let limit = validate_limit(&ctx)?.unwrap_or(10) as usize;
                         let suggestions = pool
                             .suggest_links(id, limit)
                             .await

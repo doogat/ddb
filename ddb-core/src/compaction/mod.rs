@@ -159,7 +159,7 @@ fn compact_crdt_group(
                         .map_err(|e| DoogatError::Automerge(e.to_string()))?;
                 }
                 Err(e) => {
-                    tracing::debug!("skipping corrupt CRDT file {}: {e}", file.display());
+                    tracing::warn!("skipping corrupt CRDT file {}: {e}", file.display());
                 }
             },
             Err(e) => {
@@ -232,7 +232,7 @@ pub fn compact_doogat(repo: &impl GitBackend, doogat_id: &str) -> Result<usize> 
                         .map_err(|e| DoogatError::Automerge(e.to_string()))?;
                 }
                 Err(e) => {
-                    tracing::debug!("skipping corrupt CRDT file {}: {e}", file.display());
+                    tracing::warn!("skipping corrupt CRDT file {}: {e}", file.display());
                 }
             },
             Err(e) => {
