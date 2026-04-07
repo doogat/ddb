@@ -216,7 +216,7 @@ The SQL engine translates relational operations into doogat file operations. DDL
 
 ### Server actor bridge
 
-The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor/mod.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `DoogatService` instance (concrete `DefaultService`), delegating all operations to it via `actor/handlers.rs:handle_command()`. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
+The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor/mod.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `DoogatService` instance, delegating all operations to it via `actor/handlers.rs:handle_command()`. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
 
 For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent read-only access. Each read acquires a semaphore permit and runs on `spawn_blocking` with a fresh `DoogatService` instance, bypassing the single-writer actor entirely. The pool size is configurable via server config.
 
@@ -305,7 +305,7 @@ Eleven traits define the module boundaries (see `traits.rs`):
 - **DoogatIndex** -- Query and mutation operations on the search index: `index_doogat()`, `remove_doogat()`, `search()`, `search_paginated()`, `resolve_path()`, `query_raw()`, `find_typedef_path()`, and `execute_sql()`. Implemented by `Index`.
 - **ConflictResolver** -- CRDT-based conflict resolution: `resolve_conflicts()` takes a list of `ConflictFile` structs and an optional strategy string, returning `ResolvedFile` results. The free function `crdt_resolver::resolve_conflicts()` implements this logic.
 
-`DoogatService<G: GitBackend = GitRepo>` is generic over the git backend. The default type parameter means existing code using bare `DoogatService` resolves to `DoogatService<GitRepo>` without changes. A `DefaultService` type alias is available for explicit use. A `MockSource` in `traits::mock` provides an in-memory `DoogatSource` for unit tests.
+`DoogatService<G: GitBackend = GitRepo>` is generic over the git backend. The default type parameter means existing code using bare `DoogatService` resolves to `DoogatService<GitRepo>` without changes. A `MockSource` in `traits::mock` provides an in-memory `DoogatSource` for unit tests.
 
 ### Hybrid Logical Clock
 

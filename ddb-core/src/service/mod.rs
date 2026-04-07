@@ -15,10 +15,6 @@ mod utility;
 
 pub use search::SORTABLE_COLUMNS;
 
-/// Concrete service type using libgit2 backend. This is the default for
-/// CLI, FFI, and server consumers.
-pub type DefaultService = DoogatService<GitRepo>;
-
 /// Extra frontmatter fields to set or remove during an update.
 pub struct ExtraFieldUpdates<'a> {
     pub set: &'a std::collections::BTreeMap<String, crate::types::Value>,
