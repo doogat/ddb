@@ -213,8 +213,9 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         let mut nodes = Vec::new();
         for (path, content) in &entries {
             if path.ends_with(".toml") {
-                if let Ok(node) = toml::from_str::<NodeConfig>(content) {
-                    nodes.push(node);
+                match toml::from_str::<NodeConfig>(content) {
+                    Ok(node) => nodes.push(node),
+                    Err(e) => tracing::warn!("failed to parse node config {path}: {e}"),
                 }
             }
         }
@@ -759,11 +760,19 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                 continue;
             }
             if let Some(ref last_sync) = node.last_sync {
-                if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(last_sync) {
-                    if now.signed_duration_since(ts) > ttl
-                        && node.status != crate::types::NodeStatus::Stale
-                    {
-                        stale_uuids.push(node.uuid.clone());
+                match chrono::DateTime::parse_from_rfc3339(last_sync) {
+                    Ok(ts) => {
+                        if now.signed_duration_since(ts) > ttl
+                            && node.status != crate::types::NodeStatus::Stale
+                        {
+                            stale_uuids.push(node.uuid.clone());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            "node {} has malformed last_sync '{}': {e}",
+                            node.uuid, last_sync
+                        );
                     }
                 }
             }

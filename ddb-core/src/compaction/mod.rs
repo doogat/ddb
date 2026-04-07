@@ -152,10 +152,18 @@ fn compact_crdt_group(
 ) -> Result<()> {
     let mut doc = automerge::AutoCommit::new();
     for file in files {
-        if let Ok(data) = std::fs::read(file) {
-            if let Ok(other) = automerge::AutoCommit::load(&data) {
-                doc.merge(&mut other.clone())
-                    .map_err(|e| DoogatError::Automerge(e.to_string()))?;
+        match std::fs::read(file) {
+            Ok(data) => match automerge::AutoCommit::load(&data) {
+                Ok(other) => {
+                    doc.merge(&mut other.clone())
+                        .map_err(|e| DoogatError::Automerge(e.to_string()))?;
+                }
+                Err(e) => {
+                    tracing::debug!("skipping corrupt CRDT file {}: {e}", file.display());
+                }
+            },
+            Err(e) => {
+                tracing::debug!("failed to read CRDT file {}: {e}", file.display());
             }
         }
     }
@@ -217,10 +225,18 @@ pub fn compact_doogat(repo: &impl GitBackend, doogat_id: &str) -> Result<usize> 
 
     let mut doc = automerge::AutoCommit::new();
     for file in &files {
-        if let Ok(data) = std::fs::read(file) {
-            if let Ok(other) = automerge::AutoCommit::load(&data) {
-                doc.merge(&mut other.clone())
-                    .map_err(|e| DoogatError::Automerge(e.to_string()))?;
+        match std::fs::read(file) {
+            Ok(data) => match automerge::AutoCommit::load(&data) {
+                Ok(other) => {
+                    doc.merge(&mut other.clone())
+                        .map_err(|e| DoogatError::Automerge(e.to_string()))?;
+                }
+                Err(e) => {
+                    tracing::debug!("skipping corrupt CRDT file {}: {e}", file.display());
+                }
+            },
+            Err(e) => {
+                tracing::debug!("failed to read CRDT file {}: {e}", file.display());
             }
         }
     }
