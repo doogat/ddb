@@ -372,7 +372,7 @@ pub struct CompactionReport {
 
 ## SQLite Schema
 
-The search index (`indexer.rs`) uses these core tables:
+The search index (`indexer/`) uses these core tables:
 
 ```sql
 -- Core doogat data
