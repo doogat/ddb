@@ -216,7 +216,7 @@ The SQL engine translates relational operations into doogat file operations. DDL
 
 ### Server actor bridge
 
-The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor/mod.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `DoogatService` instance, delegating all operations to it via `actor/handlers.rs:handle_command()`. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
+The server uses an actor pattern to bridge async axum handlers with the synchronous core library (see `actor/mod.rs:ActorHandle`). An `mpsc` channel carries `ActorCommand` variants to a background thread. Each command includes a `oneshot` sender for the response. The actor thread owns a `DoogatService` instance (concrete `DefaultService`), delegating all operations to it via `actor/handlers.rs:handle_command()`. This ensures consistent behavior (NoSQL dual-writes, index freshness) across CLI, FFI, and server entry points.
 
 For read-heavy workloads, a `ReadPool` (see `read_pool.rs`) provides concurrent read-only access. Each read acquires a semaphore permit and runs on `spawn_blocking` with a fresh `DoogatService` instance, bypassing the single-writer actor entirely. The pool size is configurable via server config.
 
@@ -291,15 +291,21 @@ The crate defines a `Result<T>` alias as `std::result::Result<T, DoogatError>`. 
 
 ### Core traits
 
-Five traits define the module boundaries (see `traits.rs`):
+Eleven traits define the module boundaries (see `traits.rs`):
 
 - **DoogatSource** -- Read-only access to doogat storage: `list_doogats()`, `read_file()`, `head_oid()`, `diff_paths()`, and `read_files_batch()`. Implemented by `GitRepo`. The batch read has a default sequential implementation that concrete types can override.
 - **DoogatStore** -- Read-write access extending DoogatSource: `commit_file()`, `commit_files()`, `delete_file()`, `delete_files()`, and `commit_batch()`. Implemented by `GitRepo`.
-- **GitBackend** -- Full git backend abstraction extending DoogatSource + DoogatStore with remote ops, merge ops, binary file ops, commit introspection, and history queries. All OIDs are passed as `&str` hex strings (no `git2` types in the trait). Desktop-only hooks (commit-graph write, session counters) have default no-op implementations. Implemented by `GitRepo`. Enables swapping libgit2 for gitoxide per-feature.
+- **GitRemote** -- Remote operations: `add_remote()`, `fetch()`, `push()`.
+- **GitMerge** -- Merge operations: `merge_remote()`, `commit_merge()`.
+- **GitHistory** -- Commit introspection, tree walking, history queries: `merge_base()`, `commit_parent_count()`, `commit_parent_oid()`, `read_file_at()`, `walk_tree_files()`, `find_hlc_for_path()`, `revision_date()`.
+- **GitBinary** -- Binary file operations: `commit_binary_file()`, `commit_binary_and_text()`, `read_blob()`.
+- **GitRename** -- File rename: `rename_file()`.
+- **GitDesktopHooks** -- Desktop-only hooks with default no-ops: `set_skip_commit_graph()`, `write_commit_graph()`, `increment_session_commits()`, `reset_session_commits()`.
+- **GitBackend** -- Supertrait composing DoogatSource + DoogatStore + GitRemote + GitMerge + GitHistory + GitBinary + GitRename + GitDesktopHooks. Adds `repo_path()` and `load_config()`. Implemented by `GitRepo`. Enables swapping libgit2 for gitoxide per-feature. All OIDs are passed as `&str` hex strings (no `git2` types in any trait).
 - **DoogatIndex** -- Query and mutation operations on the search index: `index_doogat()`, `remove_doogat()`, `search()`, `search_paginated()`, `resolve_path()`, `query_raw()`, `find_typedef_path()`, and `execute_sql()`. Implemented by `Index`.
 - **ConflictResolver** -- CRDT-based conflict resolution: `resolve_conflicts()` takes a list of `ConflictFile` structs and an optional strategy string, returning `ResolvedFile` results. The free function `crdt_resolver::resolve_conflicts()` implements this logic.
 
-A `MockSource` in `traits::mock` provides an in-memory `DoogatSource` for unit tests.
+`DoogatService<G: GitBackend = GitRepo>` is generic over the git backend. The `DefaultService` type alias pins it to `GitRepo` for CLI, FFI, and server consumers. A `MockSource` in `traits::mock` provides an in-memory `DoogatSource` for unit tests.
 
 ### Hybrid Logical Clock
 
