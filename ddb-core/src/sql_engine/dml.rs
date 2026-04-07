@@ -101,27 +101,7 @@ impl<'a> SqlEngine<'a> {
         let mut created_ids = Vec::with_capacity(rows.len());
         let mut files: Vec<(String, String)> = Vec::with_capacity(rows.len());
 
-        // Pre-compute NEXT counters for auto-increment columns
-        let mut next_counters: BTreeMap<String, i64> = BTreeMap::new();
-        for col_def in &schema.columns {
-            if let Some(ref dv) = col_def.default_value {
-                if dv == "NEXT" {
-                    let max_val: i64 = self
-                        .index
-                        .conn
-                        .query_row(
-                            &format!(
-                                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
-                                col_def.name, schema.table_name
-                            ),
-                            [],
-                            |row| row.get(0),
-                        )
-                        .unwrap_or(0);
-                    next_counters.insert(col_def.name.clone(), max_val);
-                }
-            }
-        }
+        let mut next_counters = self.precompute_insert_next_counters(&schema);
 
         for (row_values, id) in rows.iter().zip(ids.into_iter()) {
             if col_names.len() != row_values.len() {
@@ -130,82 +110,13 @@ impl<'a> SqlEngine<'a> {
                 ));
             }
 
-            // Build column->value map
-            let mut col_values: BTreeMap<String, String> = BTreeMap::new();
-            for (name, val) in col_names.iter().zip(row_values.iter()) {
-                col_values.insert(name.clone(), val.clone());
-            }
+            let mut col_values: BTreeMap<String, String> = col_names
+                .iter()
+                .zip(row_values.iter())
+                .map(|(n, v)| (n.clone(), v.clone()))
+                .collect();
 
-            // Fill default values for omitted columns
-            for col_def in &schema.columns {
-                if !col_values.contains_key(&col_def.name) {
-                    if let Some(ref default) = col_def.default_value {
-                        if default == "NEXT" {
-                            let counter = next_counters.get_mut(&col_def.name).unwrap();
-                            *counter += 1;
-                            col_values.insert(col_def.name.clone(), counter.to_string());
-                        } else if default.starts_with("NEXT(") && default.ends_with(')') {
-                            let partition_col = &default[5..default.len() - 1];
-                            let partition_val =
-                                col_values.get(partition_col).cloned().unwrap_or_default();
-                            let max_val: i64 = self
-                                .index
-                                .conn
-                                .query_row(
-                                    &format!(
-                                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
-                                        col_def.name, schema.table_name, partition_col
-                                    ),
-                                    params![partition_val],
-                                    |row| row.get(0),
-                                )
-                                .unwrap_or(0);
-                            col_values.insert(col_def.name.clone(), (max_val + 1).to_string());
-                        } else {
-                            col_values.insert(col_def.name.clone(), default.clone());
-                        }
-                    }
-                }
-            }
-
-            // Validate allowed_values constraints
-            for col_def in &schema.columns {
-                if let Some(ref allowed) = col_def.allowed_values {
-                    if let Some(val) = col_values.get(&col_def.name) {
-                        if !val.is_empty() && !allowed.contains(val) {
-                            return Err(DoogatError::Validation(format!(
-                                "column '{}': value '{}' not in allowed values {:?}",
-                                col_def.name, val, allowed
-                            )));
-                        }
-                    }
-                }
-            }
-
-            // Validate FK references
-            for col_def in &schema.columns {
-                if let Some(ref _ref_table) = col_def.references {
-                    if let Some(ref_id) = col_values.get(&col_def.name) {
-                        if !ref_id.is_empty() {
-                            let exists: bool = self
-                                .index
-                                .conn
-                                .query_row(
-                                    "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                                    params![ref_id],
-                                    |row| row.get(0),
-                                )
-                                .unwrap_or(false);
-                            if !exists {
-                                return Err(DoogatError::SqlEngine(format!(
-                                    "referenced doogat not found: {}",
-                                    ref_id
-                                )));
-                            }
-                        }
-                    }
-                }
-            }
+            self.fill_defaults_and_validate(&schema, &mut col_values, &mut next_counters)?;
 
             // Build doogat
             let doogat = build_data_doogat(&id, &schema, &col_values, &ref_folder_types);
@@ -598,6 +509,123 @@ impl<'a> SqlEngine<'a> {
             }
         }
         (rows, Some(col_types))
+    }
+
+    /// Pre-compute bare NEXT counters for auto-increment columns.
+    fn precompute_insert_next_counters(
+        &self,
+        schema: &TableSchema,
+    ) -> BTreeMap<String, i64> {
+        let mut counters = BTreeMap::new();
+        for col_def in &schema.columns {
+            let dv = match col_def.default_value {
+                Some(ref dv) if dv == "NEXT" => dv,
+                _ => continue,
+            };
+            let _ = dv; // used only to match
+            let max_val: i64 = self
+                .index
+                .conn
+                .query_row(
+                    &format!(
+                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
+                        col_def.name, schema.table_name
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            counters.insert(col_def.name.clone(), max_val);
+        }
+        counters
+    }
+
+    /// Fill default values and validate constraints for a single INSERT row.
+    fn fill_defaults_and_validate(
+        &self,
+        schema: &TableSchema,
+        col_values: &mut BTreeMap<String, String>,
+        next_counters: &mut BTreeMap<String, i64>,
+    ) -> Result<()> {
+        for col_def in &schema.columns {
+            if col_values.contains_key(&col_def.name) {
+                continue;
+            }
+            let default = match col_def.default_value {
+                Some(ref d) => d,
+                None => continue,
+            };
+            if default == "NEXT" {
+                let counter = next_counters.get_mut(&col_def.name).unwrap();
+                *counter += 1;
+                col_values.insert(col_def.name.clone(), counter.to_string());
+            } else if default.starts_with("NEXT(") && default.ends_with(')') {
+                let partition_col = &default[5..default.len() - 1];
+                let partition_val =
+                    col_values.get(partition_col).cloned().unwrap_or_default();
+                let max_val: i64 = self
+                    .index
+                    .conn
+                    .query_row(
+                        &format!(
+                            "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                            col_def.name, schema.table_name, partition_col
+                        ),
+                        params![partition_val],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                col_values.insert(col_def.name.clone(), (max_val + 1).to_string());
+            } else {
+                col_values.insert(col_def.name.clone(), default.clone());
+            }
+        }
+
+        // Validate allowed_values constraints
+        for col_def in &schema.columns {
+            let allowed = match col_def.allowed_values {
+                Some(ref a) => a,
+                None => continue,
+            };
+            let val = match col_values.get(&col_def.name) {
+                Some(v) if !v.is_empty() => v,
+                _ => continue,
+            };
+            if !allowed.contains(val) {
+                return Err(DoogatError::Validation(format!(
+                    "column '{}': value '{}' not in allowed values {:?}",
+                    col_def.name, val, allowed
+                )));
+            }
+        }
+
+        // Validate FK references
+        for col_def in &schema.columns {
+            if col_def.references.is_none() {
+                continue;
+            }
+            let ref_id = match col_values.get(&col_def.name) {
+                Some(v) if !v.is_empty() => v,
+                _ => continue,
+            };
+            let exists: bool = self
+                .index
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
+                    params![ref_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+            if !exists {
+                return Err(DoogatError::SqlEngine(format!(
+                    "referenced doogat not found: {}",
+                    ref_id
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// Filter out rows that match existing unique_together constraints when
