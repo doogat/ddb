@@ -140,9 +140,16 @@ ddb/
 │   │   ├── crdt_resolver.rs    # Automerge conflict resolution
 │   │   ├── indexer/            # SQLite FTS5 index + type inference
 │   │   ├── sql_engine/         # SQL DDL/DML translation
+│   │   ├── search_query.rs     # Search query parsing/normalization
 │   │   ├── bundled_types.rs    # Built-in type definitions
+│   │   ├── service/            # Unified orchestration (DoogatService)
+│   │   ├── consistency/        # Schema auto-fixes + versioned migrations
 │   │   ├── sync_manager/       # Multi-device sync
 │   │   ├── compaction/         # CRDT cleanup + git gc
+│   │   ├── attachments.rs      # File attachment operations
+│   │   ├── bundle.rs           # Air-gapped bundle export/import
+│   │   ├── maintenance.rs      # Maintenance task orchestration
+│   │   ├── nosql.rs            # NoSQL index (O(1) lookups, scans)
 │   │   ├── ffi.rs              # UniFFI DoogatDriver facade
 │   │   └── ddb.udl             # UniFFI interface definition (docs)
 │   └── benches/
@@ -179,7 +186,16 @@ ddb/
 │       │   └── discovery_queries.rs # Discovery query resolvers
 │       ├── auth.rs             # Bearer token auth
 │       ├── config.rs           # Server config
-│       └── error.rs            # Error mapping
+│       ├── error.rs            # Error mapping
+│       ├── read_pool.rs        # Concurrent read pool (spawn_blocking)
+│       ├── rest.rs             # REST API endpoints
+│       ├── pgwire.rs           # PostgreSQL wire protocol
+│       ├── ws.rs               # WebSocket transport
+│       ├── events.rs           # Event bus for subscriptions
+│       ├── filter.rs           # GraphQL filter implementation
+│       ├── reload.rs           # Hot schema reload
+│       ├── maintenance.rs      # Server maintenance routes
+│       └── nosql_api.rs        # NoSQL API endpoints
 └── docs/                       # This documentation
 ```
 
