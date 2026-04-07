@@ -412,7 +412,6 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
         let agg_desc = format!("Aggregate {} doogats. Returns count with optional groupBy breakdown.", type_name);
         {
             let schema_clone = schema_clone.clone();
-            let type_name_clone = type_name.clone();
             let table_name = table_name.clone();
             query = query.field(
                 Field::new(
@@ -420,7 +419,6 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                     TypeRef::named_nn(&connection_type_name),
                     move |ctx| {
                         let schema_clone = schema_clone.clone();
-                        let _type_name = type_name_clone.clone();
                         let table_name = table_name.clone();
                         FieldFuture::new(async move {
                             let pool = ctx.data::<ReadPool>()?;
