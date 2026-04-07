@@ -1,3 +1,4 @@
+mod filter;
 mod graph;
 pub(crate) mod materialize;
 mod rebuild;
