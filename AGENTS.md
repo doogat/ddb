@@ -207,6 +207,11 @@ cargo doc --no-deps --document-private-items   Generate rustdoc
 cd docs && mdbook build               Build documentation
 cd docs && mdbook serve               Serve documentation locally
 
+# Coverage (requires: rustup component add llvm-tools-preview, cargo install cargo-llvm-cov)
+cargo llvm-cov --workspace              Run coverage report (baseline: 70%, target: 80%)
+cargo llvm-cov --workspace --html       Generate HTML coverage report in target/llvm-cov/html/
+cargo llvm-cov --workspace --fail-under-lines 70   Fail if below CI threshold
+
 # Performance thresholds (require --release, local only — not run in CI)
 cargo test --release -p ddb-core --test query_thresholds nfr01_
 cargo test --release -p ddb-core --test growth_thresholds nfr02_
