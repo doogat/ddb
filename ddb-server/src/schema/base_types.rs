@@ -932,6 +932,70 @@ pub(crate) fn event_stream(
     })
 }
 
+// -- Argument validation helpers --
+
+const MAX_LIMIT: i64 = 10_000;
+const VALID_FORMATS: &[&str] = &["array", "objects"];
+
+/// Extract and validate an optional non-negative `limit` argument.
+pub(crate) fn validate_limit(
+    ctx: &async_graphql::dynamic::ResolverContext,
+) -> async_graphql::Result<Option<i64>> {
+    match ctx.args.get("limit") {
+        Some(v) => {
+            let n = v.i64().map_err(|_| async_graphql::Error::new("limit must be an integer"))?;
+            if n < 0 {
+                return Err(async_graphql::Error::new("limit must be non-negative"));
+            }
+            if n > MAX_LIMIT {
+                return Err(async_graphql::Error::new(format!(
+                    "limit must not exceed {MAX_LIMIT}"
+                )));
+            }
+            Ok(Some(n))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Extract and validate an optional non-negative `offset` argument.
+pub(crate) fn validate_offset(
+    ctx: &async_graphql::dynamic::ResolverContext,
+) -> async_graphql::Result<Option<i64>> {
+    match ctx.args.get("offset") {
+        Some(v) => {
+            let n = v.i64().map_err(|_| async_graphql::Error::new("offset must be an integer"))?;
+            if n < 0 {
+                return Err(async_graphql::Error::new("offset must be non-negative"));
+            }
+            Ok(Some(n))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Extract and validate an optional `format` argument against the known set.
+pub(crate) fn validate_format<'a>(
+    ctx: &'a async_graphql::dynamic::ResolverContext,
+) -> async_graphql::Result<&'a str> {
+    match ctx.args.get("format") {
+        Some(v) => {
+            let s = v.string().map_err(|_| {
+                async_graphql::Error::new("format must be a string")
+            })?;
+            if !VALID_FORMATS.contains(&s) {
+                return Err(async_graphql::Error::new(format!(
+                    "invalid format '{}'; allowed: {}",
+                    s,
+                    VALID_FORMATS.join(", ")
+                )));
+            }
+            Ok(s)
+        }
+        None => Ok("array"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

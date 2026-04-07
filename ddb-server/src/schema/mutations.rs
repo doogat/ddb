@@ -392,7 +392,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                 FieldFuture::new(async move {
                     let a = ctx.data::<ActorHandle>()?;
                     let sql = ctx.args.try_get("sql")?.string()?.to_string();
-                    let fmt = ctx.args.get("format").and_then(|v| v.string().ok()).unwrap_or("array");
+                    let fmt = validate_format(&ctx)?;
                     let result = a.execute_sql(sql.clone()).await.map_err(to_server_error)?;
 
                     // Await schema reload if this was a typedef-mutating statement
@@ -425,7 +425,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                     FieldFuture::new(async move {
                         let a = ctx.data::<ActorHandle>()?;
                         let stmts_val = ctx.args.try_get("statements")?.list()?;
-                        let fmt = ctx.args.get("format").and_then(|v| v.string().ok()).unwrap_or("array");
+                        let fmt = validate_format(&ctx)?;
                         let statements: Vec<String> = stmts_val
                             .iter()
                             .map(|v| v.string().unwrap_or_default().to_string())

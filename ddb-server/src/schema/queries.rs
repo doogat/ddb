@@ -66,8 +66,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                         .get("backlinksOf")
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
-                    let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
-                    let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
+                    let limit = validate_limit(&ctx)?;
+                    let offset = validate_offset(&ctx)?;
                     let doogats = pool
                         .list_doogats(ListFilter {
                             doogat_type,
@@ -102,16 +102,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
                     let q = ctx.args.try_get("query")?.string()?.to_string();
-                    let limit = ctx
-                        .args
-                        .get("limit")
-                        .and_then(|v| v.i64().ok())
-                        .unwrap_or(20) as usize;
-                    let offset = ctx
-                        .args
-                        .get("offset")
-                        .and_then(|v| v.i64().ok())
-                        .unwrap_or(0) as usize;
+                    let limit = validate_limit(&ctx)?.unwrap_or(20) as usize;
+                    let offset = validate_offset(&ctx)?.unwrap_or(0) as usize;
 
                     let types = ctx
                         .args
@@ -253,7 +245,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
             Field::new("sql", TypeRef::named_nn("SqlResult"), |ctx| {
                 FieldFuture::new(async move {
                     let q = ctx.args.try_get("query")?.string()?.to_string();
-                    let fmt = ctx.args.get("format").and_then(|v| v.string().ok()).unwrap_or("array");
+                    let fmt = validate_format(&ctx)?;
                     let result = if crate::pgwire::is_select_only(&q) {
                         let pool = ctx.data::<ReadPool>()?;
                         pool.execute_select(q).await.map_err(to_server_error)?
@@ -305,8 +297,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                             .get("doogatId")
                             .and_then(|v| v.string().ok())
                             .map(|s| s.to_string());
-                        let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
-                        let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
+                        let limit = validate_limit(&ctx)?;
+                        let offset = validate_offset(&ctx)?;
                         let rows = pool
                             .query_checkboxes(state, doogat_id, limit, offset)
                             .await
@@ -334,7 +326,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 |ctx| {
                     FieldFuture::new(async move {
                         let pool = ctx.data::<ReadPool>()?;
-                        let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
+                        let limit = validate_limit(&ctx)?;
                         let rows = pool
                             .query_checkboxes(Some("open".to_string()), None, limit, None)
                             .await
@@ -427,8 +419,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                                 .get("tag")
                                 .and_then(|v| v.string().ok())
                                 .map(|s| s.to_string());
-                            let limit = ctx.args.get("limit").and_then(|v| v.i64().ok());
-                            let offset = ctx.args.get("offset").and_then(|v| v.i64().ok());
+                            let limit = validate_limit(&ctx)?;
+                            let offset = validate_offset(&ctx)?;
                             let distinct = ctx
                                 .args
                                 .get("distinct")
