@@ -620,15 +620,7 @@ impl crate::traits::DoogatStore for GitRepo {
     }
 }
 
-impl crate::traits::GitBackend for GitRepo {
-    fn repo_path(&self) -> &Path {
-        &self.path
-    }
-
-    fn load_config(&self) -> Result<RepoConfig> {
-        self.load_config()
-    }
-
+impl crate::traits::GitRemote for GitRepo {
     fn add_remote(&self, name: &str, url: &str) -> Result<()> {
         self.add_remote(name, url)
     }
@@ -640,7 +632,9 @@ impl crate::traits::GitBackend for GitRepo {
     fn push(&self, remote: &str, branch: &str) -> Result<()> {
         self.push(remote, branch)
     }
+}
 
+impl crate::traits::GitMerge for GitRepo {
     fn merge_remote(&self, remote: &str, branch: &str) -> Result<MergeResult> {
         self.merge_remote(remote, branch)
     }
@@ -654,34 +648,9 @@ impl crate::traits::GitBackend for GitRepo {
     ) -> Result<CommitHash> {
         self.commit_merge(files, binary_paths, message, theirs)
     }
+}
 
-    fn commit_binary_file(
-        &self,
-        rel_path: &str,
-        bytes: &[u8],
-        message: &str,
-    ) -> Result<CommitHash> {
-        self.commit_binary_file(rel_path, bytes, message)
-    }
-
-    fn commit_binary_and_text(
-        &self,
-        binary_path: &str,
-        bytes: &[u8],
-        text_files: &[(&str, &str)],
-        message: &str,
-    ) -> Result<CommitHash> {
-        self.commit_binary_and_text(binary_path, bytes, text_files, message)
-    }
-
-    fn read_blob(&self, oid_str: &str) -> Result<Vec<u8>> {
-        self.read_blob(oid_str)
-    }
-
-    fn rename_file(&self, old_path: &str, new_path: &str, message: &str) -> Result<CommitHash> {
-        self.rename_file(old_path, new_path, message)
-    }
-
+impl crate::traits::GitHistory for GitRepo {
     fn merge_base(&self, a: &str, b: &str) -> Result<String> {
         let oid_a = Oid::from_str(a)?;
         let oid_b = Oid::from_str(b)?;
@@ -746,7 +715,40 @@ impl crate::traits::GitBackend for GitRepo {
     fn revision_date(&self, rel_path: &str) -> Result<Option<String>> {
         self.revision_date(rel_path)
     }
+}
 
+impl crate::traits::GitBinary for GitRepo {
+    fn commit_binary_file(
+        &self,
+        rel_path: &str,
+        bytes: &[u8],
+        message: &str,
+    ) -> Result<CommitHash> {
+        self.commit_binary_file(rel_path, bytes, message)
+    }
+
+    fn commit_binary_and_text(
+        &self,
+        binary_path: &str,
+        bytes: &[u8],
+        text_files: &[(&str, &str)],
+        message: &str,
+    ) -> Result<CommitHash> {
+        self.commit_binary_and_text(binary_path, bytes, text_files, message)
+    }
+
+    fn read_blob(&self, oid_str: &str) -> Result<Vec<u8>> {
+        self.read_blob(oid_str)
+    }
+}
+
+impl crate::traits::GitRename for GitRepo {
+    fn rename_file(&self, old_path: &str, new_path: &str, message: &str) -> Result<CommitHash> {
+        self.rename_file(old_path, new_path, message)
+    }
+}
+
+impl crate::traits::GitDesktopHooks for GitRepo {
     fn set_skip_commit_graph(&self, skip: bool) {
         self.set_skip_commit_graph(skip);
     }
@@ -761,6 +763,16 @@ impl crate::traits::GitBackend for GitRepo {
 
     fn reset_session_commits(&self) {
         self.reset_session_commits();
+    }
+}
+
+impl crate::traits::GitBackend for GitRepo {
+    fn repo_path(&self) -> &Path {
+        &self.path
+    }
+
+    fn load_config(&self) -> Result<RepoConfig> {
+        self.load_config()
     }
 }
 
