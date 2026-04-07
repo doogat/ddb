@@ -14,6 +14,9 @@ use super::helpers::{
 };
 use super::{PendingDelete, PendingWrite, SqlEngine, SqlResult};
 
+/// Filtered rows paired with a parallel vec of existing IDs for conflict-skipped slots.
+type ConflictFilterResult = (Vec<Vec<String>>, Vec<Option<String>>);
+
 impl<'a> SqlEngine<'a> {
     pub(super) fn handle_insert(
         &mut self,
@@ -82,58 +85,11 @@ impl<'a> SqlEngine<'a> {
             None => return Err(DoogatError::SqlEngine("missing VALUES clause".into())),
         };
 
-        // When ON CONFLICT DO NOTHING, filter out rows that match an existing unique_together
-        // constraint and capture the existing row IDs so we can return them alongside new IDs.
-        let mut on_conflict_existing: Vec<Option<String>> = Vec::new();
-        let rows: Vec<Vec<String>> = if on_conflict_ignore {
-            if let Some(ref constraints) = schema.unique_together {
-                on_conflict_existing = vec![None; rows.len()];
-                let mut filtered = Vec::with_capacity(rows.len());
-                'row: for (row_idx, row_values) in rows.into_iter().enumerate() {
-                    for constraint_cols in constraints {
-                        // Build WHERE clause for this constraint group
-                        let where_clause: String = constraint_cols
-                            .iter()
-                            .map(|c| format!("\"{}\" = ?", c))
-                            .collect::<Vec<_>>()
-                            .join(" AND ");
-                        let sql = format!(
-                            "SELECT id FROM \"{}\" WHERE {}",
-                            schema.table_name, where_clause
-                        );
-                        // Collect bind values for this constraint
-                        let bind_vals: Vec<String> = constraint_cols
-                            .iter()
-                            .filter_map(|col| {
-                                col_names
-                                    .iter()
-                                    .position(|n| n == col)
-                                    .and_then(|pos| row_values.get(pos))
-                                    .cloned()
-                            })
-                            .collect();
-                        if bind_vals.len() == constraint_cols.len() {
-                            let existing_id: Option<String> = self
-                                .index
-                                .conn
-                                .query_row(&sql, rusqlite::params_from_iter(bind_vals), |row| {
-                                    row.get(0)
-                                })
-                                .ok();
-                            if let Some(id) = existing_id {
-                                on_conflict_existing[row_idx] = Some(id);
-                                continue 'row;
-                            }
-                        }
-                    }
-                    filtered.push(row_values);
-                }
-                filtered
-            } else {
-                rows
-            }
+        // When ON CONFLICT DO NOTHING, filter out rows matching unique_together constraints
+        let (rows, on_conflict_existing) = if on_conflict_ignore {
+            self.filter_conflict_rows(rows, &schema, &col_names)?
         } else {
-            rows
+            (rows, vec![])
         };
 
         // Generate all IDs upfront
@@ -642,6 +598,65 @@ impl<'a> SqlEngine<'a> {
             }
         }
         (rows, Some(col_types))
+    }
+
+    /// Filter out rows that match existing unique_together constraints when
+    /// ON CONFLICT DO NOTHING is active. Returns filtered rows and a parallel
+    /// vec mapping original row indices to existing IDs (Some) or new rows (None).
+    fn filter_conflict_rows(
+        &self,
+        rows: Vec<Vec<String>>,
+        schema: &TableSchema,
+        col_names: &[String],
+    ) -> Result<ConflictFilterResult> {
+        let constraints = match schema.unique_together {
+            Some(ref c) => c,
+            None => return Ok((rows, vec![])),
+        };
+
+        let mut existing: Vec<Option<String>> = vec![None; rows.len()];
+        let mut filtered = Vec::with_capacity(rows.len());
+
+        'row: for (row_idx, row_values) in rows.into_iter().enumerate() {
+            for constraint_cols in constraints {
+                let where_clause: String = constraint_cols
+                    .iter()
+                    .map(|c| format!("\"{}\" = ?", c))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                let sql = format!(
+                    "SELECT id FROM \"{}\" WHERE {}",
+                    schema.table_name, where_clause
+                );
+                let bind_vals: Vec<String> = constraint_cols
+                    .iter()
+                    .filter_map(|col| {
+                        col_names
+                            .iter()
+                            .position(|n| n == col)
+                            .and_then(|pos| row_values.get(pos))
+                            .cloned()
+                    })
+                    .collect();
+                if bind_vals.len() != constraint_cols.len() {
+                    continue;
+                }
+                let existing_id: Option<String> = self
+                    .index
+                    .conn
+                    .query_row(&sql, rusqlite::params_from_iter(bind_vals), |row| {
+                        row.get(0)
+                    })
+                    .ok();
+                if let Some(id) = existing_id {
+                    existing[row_idx] = Some(id);
+                    continue 'row;
+                }
+            }
+            filtered.push(row_values);
+        }
+
+        Ok((filtered, existing))
     }
 
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
