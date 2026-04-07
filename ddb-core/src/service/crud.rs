@@ -583,7 +583,9 @@ impl<G: GitBackend> DoogatService<G> {
     ) -> crate::types::Value {
         if dv == "NEXT" {
             let key = (type_name.to_owned(), col_name.to_owned());
-            let counter = next_counters.get_mut(&key).unwrap();
+            let counter = next_counters
+                .get_mut(&key)
+                .expect("key pre-populated above");
             *counter += 1;
             return crate::types::Value::String(counter.to_string());
         }
@@ -594,7 +596,9 @@ impl<G: GitBackend> DoogatService<G> {
                 .map(Self::value_to_string)
                 .unwrap_or_default();
             let key = (type_name.to_owned(), col_name.to_owned(), partition_val);
-            let counter = partitioned_counters.get_mut(&key).unwrap();
+            let counter = partitioned_counters
+                .get_mut(&key)
+                .expect("key pre-populated above");
             *counter += 1;
             return crate::types::Value::String(counter.to_string());
         }

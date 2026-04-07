@@ -248,7 +248,7 @@ impl GitRepo {
 pub(super) fn format_git_time(commit: &git2::Commit) -> String {
     let time = commit.time();
     let offset = chrono::FixedOffset::east_opt(time.offset_minutes() * 60)
-        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).expect("UTC offset zero is always valid"));
     chrono::DateTime::from_timestamp(time.seconds(), 0)
         .unwrap_or_default()
         .with_timezone(&offset)

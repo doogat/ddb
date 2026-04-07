@@ -682,7 +682,9 @@ impl<'a> SqlEngine<'a> {
         next_counters: &mut BTreeMap<String, i64>,
     ) -> String {
         if default == "NEXT" {
-            let counter = next_counters.get_mut(&col_def.name).unwrap();
+            let counter = next_counters
+                .get_mut(&col_def.name)
+                .expect("key pre-populated above");
             *counter += 1;
             return counter.to_string();
         }
