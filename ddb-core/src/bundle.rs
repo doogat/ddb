@@ -15,10 +15,15 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::error::{Result, DoogatError};
+use crate::error::{DoogatError, Result};
 use crate::sync_manager::SyncManager;
 use crate::traits::GitBackend;
 use crate::types::{BundleManifest, SyncReport};
+
+fn path_to_str(path: &Path) -> Result<&str> {
+    path.to_str()
+        .ok_or_else(|| DoogatError::InvalidPath(path.display().to_string()))
+}
 
 /// Export a delta bundle targeting a specific node.
 /// Includes only commits the target hasn't seen (based on known_heads).
@@ -74,7 +79,7 @@ fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()
     }
 
     let output = std::process::Command::new("git")
-        .args(["bundle", "unbundle", git_bundle_path.to_str().unwrap()])
+        .args(["bundle", "unbundle", path_to_str(&git_bundle_path)?])
         .current_dir(repo.repo_path())
         .output()?;
     if !output.status.success() {
@@ -87,7 +92,7 @@ fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()
     let output = std::process::Command::new("git")
         .args([
             "fetch",
-            git_bundle_path.to_str().unwrap(),
+            path_to_str(&git_bundle_path)?,
             "refs/heads/*:refs/remotes/bundle/*",
         ])
         .current_dir(repo.repo_path())
@@ -247,7 +252,7 @@ fn build_tar_bundle(
     let mut args = vec![
         "bundle".to_string(),
         "create".to_string(),
-        bundle_path.to_str().unwrap().to_string(),
+        path_to_str(&bundle_path)?.to_string(),
     ];
     if basis_args.is_empty() {
         args.push("--all".to_string());
