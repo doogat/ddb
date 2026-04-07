@@ -188,6 +188,38 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
+    /// Validate a DEFAULT NEXT or NEXT(col) value on a column definition.
+    fn validate_next_default(
+        &self,
+        default_value: Option<&str>,
+        data_type: &str,
+        col_name: &str,
+        schema: &TableSchema,
+    ) -> Result<()> {
+        let dv = match default_value {
+            Some(dv) => dv,
+            None => return Ok(()),
+        };
+        if (dv == "NEXT" || dv.starts_with("NEXT("))
+            && !data_type.eq_ignore_ascii_case("integer")
+        {
+            return Err(DoogatError::SqlEngine(format!(
+                "DEFAULT NEXT is only valid on INTEGER columns, not {data_type}"
+            )));
+        }
+        if dv.starts_with("NEXT(") && dv.ends_with(')') {
+            let partition_col = &dv[5..dv.len() - 1];
+            let col_exists = schema.columns.iter().any(|c| c.name == partition_col)
+                || partition_col == col_name;
+            if !col_exists {
+                return Err(DoogatError::SqlEngine(format!(
+                    "DEFAULT NEXT({partition_col}): column '{partition_col}' not found in table"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn handle_alter_table(
         &mut self,
         name: &sqlparser::ast::ObjectName,
@@ -209,26 +241,12 @@ impl<'a> SqlEngine<'a> {
                     let dt = data_type_to_string(&column_def.data_type);
                     let refs = extract_references(&column_def.options);
                     let default_value = extract_default(&column_def.options)?;
-                    // Validate NEXT defaults on ALTER TABLE ADD COLUMN
-                    if let Some(ref dv) = default_value {
-                        if (dv == "NEXT" || dv.starts_with("NEXT("))
-                            && !dt.eq_ignore_ascii_case("integer")
-                        {
-                            return Err(DoogatError::SqlEngine(format!(
-                                "DEFAULT NEXT is only valid on INTEGER columns, not {dt}"
-                            )));
-                        }
-                        if dv.starts_with("NEXT(") && dv.ends_with(')') {
-                            let partition_col = &dv[5..dv.len() - 1];
-                            let all_cols: Vec<&str> =
-                                schema.columns.iter().map(|c| c.name.as_str()).collect();
-                            if !all_cols.contains(&partition_col) && partition_col != col_name {
-                                return Err(DoogatError::SqlEngine(format!(
-                                    "DEFAULT NEXT({partition_col}): column '{partition_col}' not found in table"
-                                )));
-                            }
-                        }
-                    }
+                    self.validate_next_default(
+                        default_value.as_deref(),
+                        &dt,
+                        &col_name,
+                        &schema,
+                    )?;
                     let zone = if refs.is_some() {
                         Some(Zone::Reference)
                     } else if is_numeric_type(&dt) || is_short_string_type(&column_def.data_type) {

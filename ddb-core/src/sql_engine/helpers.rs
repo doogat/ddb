@@ -367,6 +367,20 @@ pub(super) fn extract_where_id(selection: &Option<Expr>) -> Result<String> {
     }
 }
 
+/// Try to parse an expression as `column = 'value'`, returning (column_name, value).
+fn extract_eq_pair(expr: &Expr) -> Option<(String, String)> {
+    let Expr::BinaryOp { left, op, right } = expr else {
+        return None;
+    };
+    if format!("{op}") != "=" {
+        return None;
+    }
+    let Expr::Identifier(ident) = left.as_ref() else {
+        return None;
+    };
+    Some((ident.value.to_lowercase(), expr_to_string(right).ok()?))
+}
+
 /// Extract two column values from a WHERE clause like
 /// `{col1} = 'val1' AND {col2} = 'val2'`.
 pub(super) fn extract_junction_where(
@@ -374,39 +388,34 @@ pub(super) fn extract_junction_where(
     col1_name: &str,
     col2_name: &str,
 ) -> Result<(String, String)> {
-    match selection {
-        Some(Expr::BinaryOp { left, op, right }) if format!("{op}") == "AND" => {
-            let mut val1 = None;
-            let mut val2 = None;
-            for side in [left.as_ref(), right.as_ref()] {
-                if let Expr::BinaryOp {
-                    left: inner_left,
-                    op: inner_op,
-                    right: inner_right,
-                } = side
-                {
-                    if format!("{inner_op}") == "=" {
-                        if let Expr::Identifier(ident) = inner_left.as_ref() {
-                            let col = ident.value.to_lowercase();
-                            if col == col1_name {
-                                val1 = Some(expr_to_string(inner_right)?);
-                            } else if col == col2_name {
-                                val2 = Some(expr_to_string(inner_right)?);
-                            }
-                        }
-                    }
-                }
-            }
-            match (val1, val2) {
-                (Some(v1), Some(v2)) => Ok((v1, v2)),
-                _ => Err(DoogatError::SqlEngine(format!(
-                    "junction DELETE requires WHERE {col1_name} = '...' AND {col2_name} = '...'"
-                ))),
+    let err = || {
+        DoogatError::SqlEngine(format!(
+            "junction DELETE requires WHERE {col1_name} = '...' AND {col2_name} = '...'"
+        ))
+    };
+
+    let Some(Expr::BinaryOp { left, op, right }) = selection else {
+        return Err(err());
+    };
+    if format!("{op}") != "AND" {
+        return Err(err());
+    }
+
+    let mut val1 = None;
+    let mut val2 = None;
+    for side in [left.as_ref(), right.as_ref()] {
+        if let Some((col, val)) = extract_eq_pair(side) {
+            if col == col1_name {
+                val1 = Some(val);
+            } else if col == col2_name {
+                val2 = Some(val);
             }
         }
-        _ => Err(DoogatError::SqlEngine(format!(
-            "junction DELETE requires WHERE {col1_name} = '...' AND {col2_name} = '...'"
-        ))),
+    }
+
+    match (val1, val2) {
+        (Some(v1), Some(v2)) => Ok((v1, v2)),
+        _ => Err(err()),
     }
 }
 
