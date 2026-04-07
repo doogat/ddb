@@ -585,6 +585,41 @@ impl Index {
     }
 }
 
+impl crate::traits::SqlBackend for Index {
+    fn sql_conn(&self) -> &rusqlite::Connection {
+        &self.conn
+    }
+
+    fn query_raw_with_columns(&self, sql: &str) -> Result<(Vec<String>, Vec<Vec<String>>)> {
+        self.query_raw_with_columns(sql)
+    }
+
+    fn rematerialize_type(&self, type_name: &str, source: &dyn crate::traits::DoogatSource) -> Result<()> {
+        self.rematerialize_type(type_name, source)
+    }
+
+    fn materialize_single(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        parsed: &crate::types::ParsedDoogat,
+    ) -> Result<()> {
+        self.materialize_single(schema, id, parsed)
+    }
+
+    fn type_uses_folder(&self, type_name: &str, source: &dyn crate::traits::DoogatSource) -> bool {
+        self.type_uses_folder(type_name, source)
+    }
+
+    fn backlinks_by_target(
+        &self,
+        target_id: &str,
+        target_path: &str,
+    ) -> Result<Vec<(String, String)>> {
+        self.backlinks_by_target(target_id, target_path)
+    }
+}
+
 impl crate::traits::DoogatIndex for Index {
     fn index_doogat(&self, doogat: &ParsedDoogat) -> Result<()> {
         self.index_doogat(doogat)

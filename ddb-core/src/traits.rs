@@ -1,9 +1,11 @@
 use std::path::Path;
 
+use rusqlite::Connection;
+
 use crate::error::Result;
 use crate::types::{
     CommitHash, ConflictFile, DiffKind, MergeResult, PaginatedSearchResult, ParsedDoogat,
-    RepoConfig, ResolvedFile, SearchResult,
+    RepoConfig, ResolvedFile, SearchResult, TableSchema,
 };
 
 /// Read-only access to doogat storage.
@@ -54,6 +56,42 @@ pub trait DoogatIndex {
     fn query_raw(&self, sql: &str) -> Result<Vec<Vec<String>>>;
     fn find_typedef_path(&self, type_name: &str) -> Result<Option<String>>;
     fn execute_sql(&self, sql: &str, params: &[&str]) -> Result<usize>;
+}
+
+/// Extended index operations for the SQL engine layer.
+///
+/// Separates sql_engine from the concrete `Index` type. Combines
+/// `DoogatIndex` query/mutation methods with SQLite connection access
+/// and materialization helpers that sql_engine needs for DDL, DML,
+/// and transaction management.
+pub trait SqlBackend: DoogatIndex {
+    /// Raw SQLite connection for DDL execution, prepared statements, and
+    /// transaction savepoints.
+    fn sql_conn(&self) -> &Connection;
+
+    /// Execute a SQL query returning column names and rows.
+    fn query_raw_with_columns(&self, sql: &str) -> Result<(Vec<String>, Vec<Vec<String>>)>;
+
+    /// Rebuild a single type's materialized SQLite table from index + source data.
+    fn rematerialize_type(&self, type_name: &str, source: &dyn DoogatSource) -> Result<()>;
+
+    /// Upsert a single doogat's row in its materialized type table.
+    fn materialize_single(
+        &self,
+        schema: &TableSchema,
+        id: &str,
+        parsed: &ParsedDoogat,
+    ) -> Result<()>;
+
+    /// Check whether a type uses folder-based storage.
+    fn type_uses_folder(&self, type_name: &str, source: &dyn DoogatSource) -> bool;
+
+    /// Find all doogats that link to the given target (by ID or path).
+    fn backlinks_by_target(
+        &self,
+        target_id: &str,
+        target_path: &str,
+    ) -> Result<Vec<(String, String)>>;
 }
 
 /// CRDT-based conflict resolution strategy.
