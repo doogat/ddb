@@ -1,6 +1,6 @@
 # Search Index
 
-**Source**: `ddb-core/src/indexer.rs` (~1,366 lines)
+**Source**: `ddb-core/src/indexer/` (directory module: mod.rs, filter.rs, graph.rs, materialize.rs, rebuild.rs, resolve.rs, search.rs)
 
 SQLite-based search index with FTS5 full-text search, type inference, schema merging, and table materialization. The index is a derived cache — always rebuildable from the Git repository. No schema migration framework is needed: on full rebuild, all tables are dropped and recreated from the current schema definitions.
 

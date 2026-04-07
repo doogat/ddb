@@ -520,7 +520,7 @@ The `Value` enum supports nested structures (`Map`, `List`), and path navigation
 - `a[0].b.c[2]` -- mixed map/list paths
 - `a\.b` -- escaped dot (literal dot in key name)
 
-### Core API (types.rs)
+### Core API (types/)
 
 ```rust
 // Navigate

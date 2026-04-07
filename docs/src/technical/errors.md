@@ -10,14 +10,21 @@ A unified error enum using `thiserror` for all fallible operations. All variants
 pub enum DoogatError {
     Git(String),           // Git operations (from git2::Error in git_ops/mod.rs)
     Yaml(String),          // YAML parsing (from serde_yaml::Error in parser/mod.rs)
-    Sql(String),           // SQLite queries (from rusqlite::Error in indexer.rs)
+    Sql(String),           // SQLite queries (from rusqlite::Error in indexer/mod.rs)
     Automerge(String),     // CRDT operations (from AutomergeError in crdt_resolver.rs)
     Io(std::io::Error),    // File I/O
     Toml(String),          // TOML parsing (from toml::de::Error in sync_manager/mod.rs)
     Parse(String),         // Generic parse failures
     NotFound(String),      // File/ref not found
     Validation(String),    // Cross-zone duplicate fields, invalid data
+    InvalidPath(String),   // Non-UTF-8 or invalid file paths (from bundle.rs path handling)
     SqlEngine(String),     // SQL engine translation errors
+    Conflict(String),      // Merge conflicts requiring manual resolution
+    Sync(String),          // Multi-device sync failures
+    Index(String),         // Index corruption or rebuild failures
+    BadRequest(String),    // Invalid API request parameters
+    VersionMismatch { repo: u32, driver: u32 },  // Repo format ahead of driver version
+    Redb(String),          // NoSQL index errors (feature-gated: nosql)
 }
 ```
 
@@ -34,7 +41,7 @@ All public functions in `ddb-core` return `Result<T>`.
 External error types convert via `From` impls in their respective adapter modules (not in error.rs):
 - `git2::Error` → `DoogatError::Git` (in `git_ops/mod.rs`)
 - `serde_yaml::Error` → `DoogatError::Yaml` (in `parser/mod.rs`)
-- `rusqlite::Error` → `DoogatError::Sql` (in `indexer.rs`)
+- `rusqlite::Error` → `DoogatError::Sql` (in `indexer/mod.rs`)
 - `automerge::AutomergeError` → `DoogatError::Automerge` (in `crdt_resolver.rs`)
 - `toml::de::Error` → `DoogatError::Toml` (in `sync_manager/mod.rs`)
 - `std::io::Error` → `DoogatError::Io` (via `#[from]` in error.rs)
@@ -45,7 +52,13 @@ Application-level errors use:
 - `DoogatError::Parse(msg)` for parsing failures
 - `DoogatError::NotFound(path)` for missing files or references
 - `DoogatError::Validation(msg)` for data integrity issues (e.g., cross-zone duplicate inline fields)
+- `DoogatError::InvalidPath(msg)` for non-UTF-8 or invalid file paths
 - `DoogatError::SqlEngine(msg)` for SQL translation errors
+- `DoogatError::Conflict(msg)` for merge conflicts requiring manual resolution
+- `DoogatError::Sync(msg)` for multi-device sync failures
+- `DoogatError::Index(msg)` for index corruption or rebuild failures
+- `DoogatError::BadRequest(msg)` for invalid API request parameters
+- `DoogatError::VersionMismatch { repo, driver }` for repo format version ahead of driver
 
 ## CLI Error Handling
 
