@@ -117,41 +117,32 @@ pub fn build_typedef_doogat(id: &DoogatId, schema: &TableSchema) -> ParsedDoogat
     }
 }
 
-/// Build a data doogat from column values according to the schema's zone mapping.
-pub(super) fn build_data_doogat(
-    id: &DoogatId,
+/// Accumulated output from processing schema columns into their respective zones.
+struct ColumnZoneOutput {
+    extra: BTreeMap<String, Value>,
+    body_sections: Vec<String>,
+    ref_lines: Vec<String>,
+    links: Vec<Link>,
+    inline_fields: Vec<InlineField>,
+    first_fm_string: Option<String>,
+    first_body_title: Option<String>,
+}
+
+/// Process schema columns into frontmatter, body, and reference zones.
+fn process_column_zones(
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,
     ref_folder_types: &std::collections::HashSet<String>,
-) -> ParsedDoogat {
-    let mut extra = BTreeMap::new();
-    let mut body_sections: Vec<String> = Vec::new();
-    let mut ref_lines: Vec<String> = Vec::new();
-    let mut links: Vec<Link> = Vec::new();
-    let mut inline_fields: Vec<InlineField> = Vec::new();
-
-    // Priority 1: explicit title from INSERT column list
-    let mut title_value: Option<String> = col_values.get("title").cloned();
-
-    // Priority 2: title_template interpolation
-    if title_value.is_none() {
-        if let Some(ref tmpl) = schema.title_template {
-            let mut rendered = tmpl.clone();
-            for (key, val) in col_values {
-                rendered = rendered.replace(&format!("{{{key}}}"), val);
-            }
-            let rendered = re_unfilled_placeholder()
-                .replace_all(&rendered, "")
-                .trim()
-                .to_string();
-            if !rendered.is_empty() {
-                title_value = Some(rendered);
-            }
-        }
-    }
-
-    // Track first frontmatter string column for Priority 4 fallback
-    let mut first_fm_string: Option<String> = None;
+) -> ColumnZoneOutput {
+    let mut out = ColumnZoneOutput {
+        extra: BTreeMap::new(),
+        body_sections: Vec::new(),
+        ref_lines: Vec::new(),
+        links: Vec::new(),
+        inline_fields: Vec::new(),
+        first_fm_string: None,
+        first_body_title: None,
+    };
 
     for col in &schema.columns {
         let val = match col_values.get(&col.name) {
@@ -170,61 +161,110 @@ pub(super) fn build_data_doogat(
                 } else {
                     val.clone()
                 };
-                ref_lines.push(format!("- {}:: [[{}]]", col.name, link_target));
-                links.push(Link {
+                out.ref_lines
+                    .push(format!("- {}:: [[{}]]", col.name, link_target));
+                out.links.push(Link {
                     target: link_target.clone(),
                     display: None,
                     section: None,
                     kind: crate::types::LinkKind::WikiLink,
                     zone: Zone::Reference,
                 });
-                inline_fields.push(InlineField {
+                out.inline_fields.push(InlineField {
                     key: col.name.clone(),
-                    value: link_target.clone(),
+                    value: link_target,
                     zone: Zone::Reference,
                 });
             }
             Zone::Frontmatter => {
-                // Priority 4: track first frontmatter string column
-                if first_fm_string.is_none() && !is_numeric_type(&col.data_type) {
-                    first_fm_string = Some(val.clone());
+                if out.first_fm_string.is_none() && !is_numeric_type(&col.data_type) {
+                    out.first_fm_string = Some(val.clone());
                 }
-                extra.insert(col.name.clone(), to_yaml_value(&val, &col.data_type));
+                out.extra
+                    .insert(col.name.clone(), to_yaml_value(&val, &col.data_type));
             }
             Zone::Body => {
-                // Priority 3: first body column value
-                if title_value.is_none() {
-                    title_value = Some(val.clone());
+                if out.first_body_title.is_none() {
+                    out.first_body_title = Some(val.clone());
                 }
-                body_sections.push(format!("## {}\n\n{}", col.name, val));
+                out.body_sections
+                    .push(format!("## {}\n\n{}", col.name, val));
             }
         }
     }
 
+    out
+}
+
+/// Resolve the title for a data doogat using the 5-level priority chain.
+fn resolve_insert_title(
+    id: &DoogatId,
+    schema: &TableSchema,
+    col_values: &BTreeMap<String, String>,
+    first_body_title: Option<&str>,
+    first_fm_string: Option<&str>,
+) -> String {
+    // Priority 1: explicit title column
+    if let Some(t) = col_values.get("title") {
+        return t.clone();
+    }
+    // Priority 2: title_template interpolation
+    if let Some(ref tmpl) = schema.title_template {
+        let mut rendered = tmpl.clone();
+        for (key, val) in col_values {
+            rendered = rendered.replace(&format!("{{{key}}}"), val);
+        }
+        let rendered = re_unfilled_placeholder()
+            .replace_all(&rendered, "")
+            .trim()
+            .to_string();
+        if !rendered.is_empty() {
+            return rendered;
+        }
+    }
+    // Priority 3: first body column value
+    if let Some(t) = first_body_title {
+        return t.to_string();
+    }
     // Priority 4: first frontmatter string column
-    if title_value.is_none() {
-        title_value = first_fm_string;
+    if let Some(t) = first_fm_string {
+        return t.to_string();
     }
-
     // Priority 5: "{type} {id}" fallback
-    if title_value.is_none() {
-        title_value = Some(format!("{} {}", schema.table_name, id.0));
-    }
+    format!("{} {}", schema.table_name, id.0)
+}
 
-    let body = if body_sections.is_empty() {
+/// Build a data doogat from column values according to the schema's zone mapping.
+pub(super) fn build_data_doogat(
+    id: &DoogatId,
+    schema: &TableSchema,
+    col_values: &BTreeMap<String, String>,
+    ref_folder_types: &std::collections::HashSet<String>,
+) -> ParsedDoogat {
+    let mut zones = process_column_zones(schema, col_values, ref_folder_types);
+
+    let title = resolve_insert_title(
+        id,
+        schema,
+        col_values,
+        zones.first_body_title.as_deref(),
+        zones.first_fm_string.as_deref(),
+    );
+
+    let body = if zones.body_sections.is_empty() {
         String::new()
     } else {
-        format!("\n{}\n", body_sections.join("\n\n"))
+        format!("\n{}\n", zones.body_sections.join("\n\n"))
     };
 
-    let reference_section = if ref_lines.is_empty() {
+    let reference_section = if zones.ref_lines.is_empty() {
         String::new()
     } else {
-        format!("{}\n", ref_lines.join("\n"))
+        format!("{}\n", zones.ref_lines.join("\n"))
     };
 
-    // Derive date: schema column "date" in extra > ad-hoc INSERT "date" column > ID-derived
-    let date = extra
+    let date = zones
+        .extra
         .remove("date")
         .and_then(|v| match v {
             Value::String(s) => Some(s),
@@ -236,17 +276,17 @@ pub(super) fn build_data_doogat(
     ParsedDoogat {
         meta: DoogatMeta {
             id: Some(id.clone()),
-            title: title_value,
+            title: Some(title),
             date,
             doogat_type: Some(schema.table_name.clone()),
             tags: vec![],
-            extra,
+            extra: zones.extra,
         },
         body,
         sections: vec![],
         reference_section,
-        inline_fields,
-        links,
+        inline_fields: zones.inline_fields,
+        links: zones.links,
         body_tags: vec![],
         checkboxes: vec![],
         path: format!("ddb/{}.md", id.0),
@@ -254,25 +294,8 @@ pub(super) fn build_data_doogat(
     }
 }
 
-/// Extract a TableSchema from a parsed _typedef doogat.
-pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
-    let table_name = doogat
-        .meta
-        .title
-        .as_deref()
-        .ok_or_else(|| DoogatError::SqlEngine("typedef doogat missing title".into()))?
-        .to_string();
-
-    let columns_val = doogat
-        .meta
-        .extra
-        .get("columns")
-        .ok_or_else(|| DoogatError::SqlEngine("typedef doogat missing columns".into()))?;
-
-    let columns_seq = columns_val
-        .as_sequence()
-        .ok_or_else(|| DoogatError::SqlEngine("columns must be a sequence".into()))?;
-
+/// Parse column definitions from the typedef's `columns` YAML sequence.
+fn parse_column_definitions(columns_seq: &[Value]) -> Result<Vec<ColumnDef>> {
     let mut columns = Vec::new();
     for item in columns_seq {
         let map = item
@@ -326,6 +349,66 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
             default_value,
         });
     }
+    Ok(columns)
+}
+
+/// Parse the unique_together constraint from a typedef's YAML value.
+/// Supports both flat (`["a", "b"]`) and nested (`[["a", "b"], ["c"]]`) forms.
+fn parse_unique_together(val: &Value) -> Option<Vec<Vec<String>>> {
+    let outer = val.as_sequence()?;
+    if outer.is_empty() {
+        return None;
+    }
+    let is_flat = outer.iter().all(|item| item.as_str().is_some());
+    let constraints = if is_flat {
+        let cols: Vec<String> = outer
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        if cols.is_empty() {
+            return None;
+        }
+        vec![cols]
+    } else {
+        outer
+            .iter()
+            .filter_map(|item| item.as_sequence())
+            .map(|inner| {
+                inner
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|cols| !cols.is_empty())
+            .collect::<Vec<_>>()
+    };
+    if constraints.is_empty() {
+        None
+    } else {
+        Some(constraints)
+    }
+}
+
+/// Extract a TableSchema from a parsed _typedef doogat.
+pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
+    let table_name = doogat
+        .meta
+        .title
+        .as_deref()
+        .ok_or_else(|| DoogatError::SqlEngine("typedef doogat missing title".into()))?
+        .to_string();
+
+    let columns_val = doogat
+        .meta
+        .extra
+        .get("columns")
+        .ok_or_else(|| DoogatError::SqlEngine("typedef doogat missing columns".into()))?;
+
+    let columns_seq = columns_val
+        .as_sequence()
+        .ok_or_else(|| DoogatError::SqlEngine("columns must be a sequence".into()))?;
+
+    let columns = parse_column_definitions(columns_seq)?;
 
     let crdt_strategy = doogat
         .meta
@@ -378,40 +461,7 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         .meta
         .extra
         .get("unique_together")
-        .and_then(|v| v.as_sequence())
-        .and_then(|outer| {
-            if outer.is_empty() {
-                return None;
-            }
-            let is_flat = outer.iter().all(|item| item.as_str().is_some());
-            let constraints = if is_flat {
-                let cols: Vec<String> = outer
-                    .iter()
-                    .filter_map(|v| v.as_str().map(str::to_string))
-                    .collect();
-                if cols.is_empty() {
-                    return None;
-                }
-                vec![cols]
-            } else {
-                outer
-                    .iter()
-                    .filter_map(|item| item.as_sequence())
-                    .map(|inner| {
-                        inner
-                            .iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect::<Vec<_>>()
-                    })
-                    .filter(|cols| !cols.is_empty())
-                    .collect::<Vec<_>>()
-            };
-            if constraints.is_empty() {
-                None
-            } else {
-                Some(constraints)
-            }
-        });
+        .and_then(parse_unique_together);
 
     Ok(TableSchema {
         table_name,
