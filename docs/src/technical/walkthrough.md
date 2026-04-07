@@ -305,7 +305,7 @@ Eleven traits define the module boundaries (see `traits.rs`):
 - **DoogatIndex** -- Query and mutation operations on the search index: `index_doogat()`, `remove_doogat()`, `search()`, `search_paginated()`, `resolve_path()`, `query_raw()`, `find_typedef_path()`, and `execute_sql()`. Implemented by `Index`.
 - **ConflictResolver** -- CRDT-based conflict resolution: `resolve_conflicts()` takes a list of `ConflictFile` structs and an optional strategy string, returning `ResolvedFile` results. The free function `crdt_resolver::resolve_conflicts()` implements this logic.
 
-`DoogatService<G: GitBackend = GitRepo>` is generic over the git backend. The `DefaultService` type alias pins it to `GitRepo` for CLI, FFI, and server consumers. A `MockSource` in `traits::mock` provides an in-memory `DoogatSource` for unit tests.
+`DoogatService<G: GitBackend = GitRepo>` is generic over the git backend. The default type parameter means existing code using bare `DoogatService` resolves to `DoogatService<GitRepo>` without changes. A `DefaultService` type alias is available for explicit use. A `MockSource` in `traits::mock` provides an in-memory `DoogatSource` for unit tests.
 
 ### Hybrid Logical Clock
 

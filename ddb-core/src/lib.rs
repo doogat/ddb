@@ -21,7 +21,9 @@
 //! - [`service`] — Unified orchestration layer (DoogatService) for CLI, FFI, and server
 //! - [`sql_engine`] — SQL DDL/DML translation (tables as doogat types)
 //! - [`sync_manager`] — Multi-device sync orchestration
-//! - [`traits`] — Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex)
+//! - [`traits`] — Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex,
+//!   GitBackend supertrait + sub-traits: GitRemote, GitMerge, GitHistory,
+//!   GitBinary, GitRename, GitDesktopHooks)
 //! - [`types`] — Shared data structures
 //!
 //! Feature-gated:

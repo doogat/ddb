@@ -36,7 +36,9 @@ ddb-core/src/       Library crate
     migrations.rs     Versioned data migrations
     zone_migrate.rs   Cross-zone field migration
   hlc.rs            Hybrid Logical Clock for causal ordering
-  traits.rs         Core trait abstractions (DoogatSource, DoogatStore, etc.)
+  traits.rs         Core trait abstractions (DoogatSource, DoogatStore, GitBackend
+                      supertrait + GitRemote, GitMerge, GitHistory, GitBinary,
+                      GitRename, GitDesktopHooks, DoogatIndex, ConflictResolver)
   ffi.rs            UniFFI DoogatDriver facade for Swift/Kotlin bindings
   types/            Shared data structures (directory module)
     value.rs          Value enum, path utilities
