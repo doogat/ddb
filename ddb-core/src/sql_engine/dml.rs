@@ -201,76 +201,18 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
-        let validate_allowed_values =
-            |schema: &TableSchema, updates: &BTreeMap<String, String>| -> Result<()> {
-                for col_def in &schema.columns {
-                    if let Some(ref allowed) = col_def.allowed_values {
-                        if let Some(val) = updates.get(&col_def.name) {
-                            if !val.is_empty() && !allowed.contains(val) {
-                                return Err(DoogatError::Validation(format!(
-                                    "column '{}': value '{}' not in allowed values {:?}",
-                                    col_def.name, val, allowed
-                                )));
-                            }
-                        }
-                    }
-                }
-                Ok(())
-            };
-
         // Validate literal assignments early (fail fast before touching rows)
-        validate_allowed_values(&schema, &updates)?;
-
-        let eval_deferred = |conn: &rusqlite::Connection,
-                             deferred: &[(String, String)],
-                             table_name: &str,
-                             doogat_id: &str,
-                             updates: &mut BTreeMap<String, String>|
-         -> Result<()> {
-            for (col, sql) in deferred {
-                let eval_sql = format!("SELECT {sql} FROM \"{table_name}\" WHERE id = ?1");
-                let result: rusqlite::types::Value = conn
-                    .query_row(&eval_sql, rusqlite::params![doogat_id], |row| row.get(0))
-                    .map_err(|e| DoogatError::SqlEngine(format!("expression eval failed: {e}")))?;
-                updates.insert(col.clone(), sqlite_value_to_string(result)?);
-            }
-            Ok(())
-        };
+        Self::validate_update_allowed_values(&schema, &updates)?;
 
         // Fast path: single-row WHERE id = '...'
         if let Ok(doogat_id) = extract_where_id(selection) {
-            if !deferred.is_empty() {
-                eval_deferred(
-                    &self.index.conn,
-                    &deferred,
-                    &table_name,
-                    &doogat_id,
-                    &mut updates,
-                )?;
-                // Re-validate after deferred expressions are resolved
-                validate_allowed_values(&schema, &updates)?;
-            }
-            let path = self.index.resolve_path(&doogat_id)?;
-            let content = self.read_content(&path)?;
-            let mut parsed = parser::parse(&content, &path)?;
-            apply_updates_to_doogat(&mut parsed, &schema, &updates);
-            let new_content = parser::serialize(&parsed);
-            if let Some(ref mut buf) = self.txn {
-                buf.writes.push(PendingWrite {
-                    path: path.clone(),
-                    content: new_content.clone(),
-                });
-            } else {
-                self.repo.commit_file(
-                    &path,
-                    &new_content,
-                    &format!("update {table_name} {doogat_id}"),
-                )?;
-            }
-            let reparsed = parser::parse(&new_content, &path)?;
-            self.index.index_doogat(&reparsed)?;
-            self.update_materialized_row(&schema, &doogat_id, &updates)?;
-            return Ok(SqlResult::Affected(1));
+            return self.apply_single_row_update(
+                &table_name,
+                &schema,
+                &doogat_id,
+                &deferred,
+                &mut updates,
+            );
         }
 
         // Bulk path: resolve matching rows via SQLite
@@ -284,14 +226,14 @@ impl<'a> SqlEngine<'a> {
         for (id, path) in &matches {
             let mut row_updates = updates.clone();
             if !deferred.is_empty() {
-                eval_deferred(
+                Self::eval_deferred_expressions(
                     &self.index.conn,
                     &deferred,
                     &table_name,
                     id,
                     &mut row_updates,
                 )?;
-                validate_allowed_values(&schema, &row_updates)?;
+                Self::validate_update_allowed_values(&schema, &row_updates)?;
             }
             let content = self.read_content(path)?;
             let mut parsed = parser::parse(&content, path)?;
@@ -509,6 +451,90 @@ impl<'a> SqlEngine<'a> {
             }
         }
         (rows, Some(col_types))
+    }
+
+    /// Validate allowed_values constraints for UPDATE assignments.
+    fn validate_update_allowed_values(
+        schema: &TableSchema,
+        updates: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        for col_def in &schema.columns {
+            let allowed = match col_def.allowed_values {
+                Some(ref a) => a,
+                None => continue,
+            };
+            let val = match updates.get(&col_def.name) {
+                Some(v) if !v.is_empty() => v,
+                _ => continue,
+            };
+            if !allowed.contains(val) {
+                return Err(DoogatError::Validation(format!(
+                    "column '{}': value '{}' not in allowed values {:?}",
+                    col_def.name, val, allowed
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Evaluate deferred SQL expressions (COALESCE, IFNULL, etc.) for a specific row.
+    fn eval_deferred_expressions(
+        conn: &rusqlite::Connection,
+        deferred: &[(String, String)],
+        table_name: &str,
+        doogat_id: &str,
+        updates: &mut BTreeMap<String, String>,
+    ) -> Result<()> {
+        for (col, sql) in deferred {
+            let eval_sql = format!("SELECT {sql} FROM \"{table_name}\" WHERE id = ?1");
+            let result: rusqlite::types::Value = conn
+                .query_row(&eval_sql, rusqlite::params![doogat_id], |row| row.get(0))
+                .map_err(|e| DoogatError::SqlEngine(format!("expression eval failed: {e}")))?;
+            updates.insert(col.clone(), sqlite_value_to_string(result)?);
+        }
+        Ok(())
+    }
+
+    /// Apply an UPDATE to a single row (fast path when WHERE id = '...').
+    fn apply_single_row_update(
+        &mut self,
+        table_name: &str,
+        schema: &TableSchema,
+        doogat_id: &str,
+        deferred: &[(String, String)],
+        updates: &mut BTreeMap<String, String>,
+    ) -> Result<SqlResult> {
+        if !deferred.is_empty() {
+            Self::eval_deferred_expressions(
+                &self.index.conn,
+                deferred,
+                table_name,
+                doogat_id,
+                updates,
+            )?;
+            Self::validate_update_allowed_values(schema, updates)?;
+        }
+        let path = self.index.resolve_path(doogat_id)?;
+        let content = self.read_content(&path)?;
+        let mut parsed = parser::parse(&content, &path)?;
+        apply_updates_to_doogat(&mut parsed, schema, updates);
+        let new_content = parser::serialize(&parsed);
+        if let Some(ref mut buf) = self.txn {
+            buf.writes.push(PendingWrite {
+                path: path.clone(),
+                content: new_content.clone(),
+            });
+        } else {
+            self.repo.commit_file(
+                &path,
+                &new_content,
+                &format!("update {table_name} {doogat_id}"),
+            )?;
+        }
+        let reparsed = parser::parse(&new_content, &path)?;
+        self.index.index_doogat(&reparsed)?;
+        self.update_materialized_row(schema, doogat_id, updates)?;
+        Ok(SqlResult::Affected(1))
     }
 
     /// Pre-compute bare NEXT counters for auto-increment columns.
