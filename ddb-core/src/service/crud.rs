@@ -395,81 +395,13 @@ impl DoogatService {
             let path = git_ops::doogat_path(&id_str, input.doogat_type.as_deref(), folder);
 
             let mut extra = input.fields.clone();
-
-            // Resolve typedef defaults and validate
-            if let Some(ref type_name) = input.doogat_type {
-                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
-                    for col in &schema.columns {
-                        if !extra.contains_key(&col.name) {
-                            if let Some(ref dv) = col.default_value {
-                                if dv == "NEXT" {
-                                    let key = (type_name.clone(), col.name.clone());
-                                    let counter = next_counters.get_mut(&key).unwrap();
-                                    *counter += 1;
-                                    extra.insert(
-                                        col.name.clone(),
-                                        crate::types::Value::String(counter.to_string()),
-                                    );
-                                } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
-                                    let partition_col = &dv[5..dv.len() - 1];
-                                    let partition_val = extra
-                                        .get(partition_col)
-                                        .map(Self::value_to_string)
-                                        .unwrap_or_default();
-                                    let key = (type_name.clone(), col.name.clone(), partition_val);
-                                    let counter = partitioned_counters.get_mut(&key).unwrap();
-                                    *counter += 1;
-                                    extra.insert(
-                                        col.name.clone(),
-                                        crate::types::Value::String(counter.to_string()),
-                                    );
-                                } else {
-                                    extra.insert(
-                                        col.name.clone(),
-                                        crate::types::Value::String(dv.clone()),
-                                    );
-                                }
-                            }
-                        }
-
-                        // Validate allowed_values
-                        if let Some(ref allowed) = col.allowed_values {
-                            if let Some(val) = extra.get(&col.name) {
-                                let val_str = Self::value_to_string(val);
-                                if !allowed.contains(&val_str) {
-                                    return Err(DoogatError::Validation(format!(
-                                        "field '{}' value '{}' not in allowed values: {:?}",
-                                        col.name, val_str, allowed
-                                    )));
-                                }
-                            }
-                        }
-
-                        // Validate FK references
-                        if let Some(ref _ref_table) = col.references {
-                            if let Some(val) = extra.get(&col.name) {
-                                let val_str = Self::value_to_string(val);
-                                let exists = self
-                                    .index
-                                    .query_raw_with_params(
-                                        "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                                        &[rusqlite::types::Value::Text(val_str.clone())],
-                                    )?
-                                    .first()
-                                    .and_then(|r| r.first())
-                                    .map(|v| v == "1")
-                                    .unwrap_or(false);
-                                if !exists {
-                                    return Err(DoogatError::Validation(format!(
-                                        "field '{}' references non-existent doogat '{}'",
-                                        col.name, val_str
-                                    )));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            self.resolve_defaults_and_validate(
+                input,
+                &schemas,
+                &mut extra,
+                &mut next_counters,
+                &mut partitioned_counters,
+            )?;
 
             let meta = DoogatMeta {
                 id: Some(id),
@@ -575,6 +507,88 @@ impl DoogatService {
             crate::types::Value::List(l) => format!("{l:?}"),
             crate::types::Value::Map(m) => format!("{m:?}"),
         }
+    }
+
+    /// Resolve typedef defaults (NEXT, NEXT(col), static) and validate
+    /// allowed_values and FK references for a single input's extra fields.
+    fn resolve_defaults_and_validate(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+        extra: &mut std::collections::BTreeMap<String, crate::types::Value>,
+        next_counters: &mut BareNextCounters,
+        partitioned_counters: &mut PartitionedNextCounters,
+    ) -> Result<()> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(()),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        for col in &schema.columns {
+            if !extra.contains_key(&col.name) {
+                if let Some(ref dv) = col.default_value {
+                    let value = if dv == "NEXT" {
+                        let key = (type_name.clone(), col.name.clone());
+                        let counter = next_counters.get_mut(&key).unwrap();
+                        *counter += 1;
+                        crate::types::Value::String(counter.to_string())
+                    } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                        let partition_col = &dv[5..dv.len() - 1];
+                        let partition_val = extra
+                            .get(partition_col)
+                            .map(Self::value_to_string)
+                            .unwrap_or_default();
+                        let key = (type_name.clone(), col.name.clone(), partition_val);
+                        let counter = partitioned_counters.get_mut(&key).unwrap();
+                        *counter += 1;
+                        crate::types::Value::String(counter.to_string())
+                    } else {
+                        crate::types::Value::String(dv.clone())
+                    };
+                    extra.insert(col.name.clone(), value);
+                }
+            }
+
+            if let Some(ref allowed) = col.allowed_values {
+                if let Some(val) = extra.get(&col.name) {
+                    let val_str = Self::value_to_string(val);
+                    if !allowed.contains(&val_str) {
+                        return Err(DoogatError::Validation(format!(
+                            "field '{}' value '{}' not in allowed values: {:?}",
+                            col.name, val_str, allowed
+                        )));
+                    }
+                }
+            }
+
+            if let Some(ref _ref_table) = col.references {
+                if let Some(val) = extra.get(&col.name) {
+                    let val_str = Self::value_to_string(val);
+                    let exists = self
+                        .index
+                        .query_raw_with_params(
+                            "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
+                            &[rusqlite::types::Value::Text(val_str.clone())],
+                        )?
+                        .first()
+                        .and_then(|r| r.first())
+                        .map(|v| v == "1")
+                        .unwrap_or(false);
+                    if !exists {
+                        return Err(DoogatError::Validation(format!(
+                            "field '{}' references non-existent doogat '{}'",
+                            col.name, val_str
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Check unique_together constraints for a single input.
