@@ -122,17 +122,12 @@ pub fn cleanup_crdt_temp(repo: &impl GitBackend, shared_head: Option<&str>) -> R
     Ok(removed)
 }
 
-/// Compact CRDT temp files by grouping per doogat and merging Automerge changes.
-/// Returns the number of doogats whose CRDT docs were compacted.
-pub fn compact_crdt_docs(repo: &impl GitBackend) -> Result<usize> {
-    let temp_dir = repo.repo_path().join(".crdt/temp");
-    if !temp_dir.exists() {
-        return Ok(0);
-    }
-
-    // Group files by (doogat_id, is_frontmatter) so fm and body compact independently
+/// Group CRDT temp files by (doogat_id, is_frontmatter).
+fn group_crdt_temp_files(
+    temp_dir: &Path,
+) -> Result<HashMap<(String, bool), Vec<std::path::PathBuf>>> {
     let mut by_key: HashMap<(String, bool), Vec<std::path::PathBuf>> = HashMap::new();
-    for entry in std::fs::read_dir(&temp_dir)? {
+    for entry in std::fs::read_dir(temp_dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
         if name == ".gitkeep" {
@@ -145,35 +140,53 @@ pub fn compact_crdt_docs(repo: &impl GitBackend) -> Result<usize> {
                 .push(entry.path());
         }
     }
+    Ok(by_key)
+}
+
+/// Merge multiple CRDT files into a single compacted doc and replace originals.
+fn compact_crdt_group(
+    temp_dir: &Path,
+    doogat_id: &str,
+    is_fm: bool,
+    files: &[std::path::PathBuf],
+) -> Result<()> {
+    let mut doc = automerge::AutoCommit::new();
+    for file in files {
+        if let Ok(data) = std::fs::read(file) {
+            if let Ok(other) = automerge::AutoCommit::load(&data) {
+                doc.merge(&mut other.clone())
+                    .map_err(|e| DoogatError::Automerge(e.to_string()))?;
+            }
+        }
+    }
+
+    let compacted_data = doc.save();
+    let fm_suffix = if is_fm { "_fm" } else { "" };
+    let compacted_name = format!("compacted_{doogat_id}{fm_suffix}.crdt");
+    std::fs::write(temp_dir.join(&compacted_name), compacted_data)?;
+
+    for file in files {
+        let _ = std::fs::remove_file(file);
+    }
+    Ok(())
+}
+
+/// Compact CRDT temp files by grouping per doogat and merging Automerge changes.
+/// Returns the number of doogats whose CRDT docs were compacted.
+pub fn compact_crdt_docs(repo: &impl GitBackend) -> Result<usize> {
+    let temp_dir = repo.repo_path().join(".crdt/temp");
+    if !temp_dir.exists() {
+        return Ok(0);
+    }
+
+    let by_key = group_crdt_temp_files(&temp_dir)?;
 
     let mut compacted = 0;
     for ((doogat_id, is_fm), files) in &by_key {
         if files.len() < 2 {
-            continue; // nothing to compact
+            continue;
         }
-
-        // Load all Automerge changes and merge into a single doc
-        let mut doc = automerge::AutoCommit::new();
-        for file in files {
-            if let Ok(data) = std::fs::read(file) {
-                if let Ok(other) = automerge::AutoCommit::load(&data) {
-                    doc.merge(&mut other.clone())
-                        .map_err(|e| DoogatError::Automerge(e.to_string()))?;
-                }
-            }
-        }
-
-        // Save compacted doc with appropriate suffix
-        let compacted_data = doc.save();
-        let fm_suffix = if *is_fm { "_fm" } else { "" };
-        let compacted_name = format!("compacted_{doogat_id}{fm_suffix}.crdt");
-        std::fs::write(temp_dir.join(&compacted_name), compacted_data)?;
-
-        // Remove original files
-        for file in files {
-            let _ = std::fs::remove_file(file);
-        }
-
+        compact_crdt_group(&temp_dir, doogat_id, *is_fm, files)?;
         compacted += 1;
     }
 
@@ -314,28 +327,11 @@ fn check_threshold(repo: &impl GitBackend) -> Result<Option<CompactionReport>> {
     }))
 }
 
-/// Full compaction pipeline: threshold check → backup → shared head → cleanup → crdt doc compact → gc.
-#[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
-pub fn compact(
+/// Run CRDT cleanup, doc compaction, and git GC. Returns a report with `backup_path: None`.
+fn run_compaction_steps(
     repo: &impl GitBackend,
     sync_mgr: &SyncManager<impl GitBackend>,
-    opts: &CompactOptions,
 ) -> Result<CompactionReport> {
-    if !opts.force {
-        if let Some(skip_report) = check_threshold(repo)? {
-            return Ok(skip_report);
-        }
-    }
-
-    // Pre-compaction backup
-    let backup_path = if !opts.skip_backup {
-        let bp = backup_before_compact(repo, sync_mgr, opts.backup_path.as_deref())?;
-        tracing::info!(backup_path = %bp.display(), "pre_compaction_backup");
-        Some(bp)
-    } else {
-        None
-    };
-
     let (crdt_temp_bytes_before, crdt_temp_files_before) = crdt_temp_stats(repo);
     let repo_bytes_before = dir_size(&repo.repo_path().join(".git"));
 
@@ -353,7 +349,6 @@ pub fn compact(
     }
 
     let (crdt_temp_bytes_after, crdt_temp_files_after) = crdt_temp_stats(repo);
-
     let gc_success = run_gc(repo.repo_path())?;
     let repo_bytes_after = dir_size(&repo.repo_path().join(".git"));
 
@@ -366,8 +361,6 @@ pub fn compact(
         "compaction_result"
     );
 
-    crate::maintenance::maybe_auto_run(repo);
-
     Ok(CompactionReport {
         files_removed,
         crdt_docs_compacted,
@@ -378,8 +371,37 @@ pub fn compact(
         crdt_temp_files_after,
         repo_bytes_before,
         repo_bytes_after,
-        backup_path,
+        backup_path: None,
     })
+}
+
+/// Full compaction pipeline: threshold check → backup → shared head → cleanup → crdt doc compact → gc.
+#[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
+pub fn compact(
+    repo: &impl GitBackend,
+    sync_mgr: &SyncManager<impl GitBackend>,
+    opts: &CompactOptions,
+) -> Result<CompactionReport> {
+    if !opts.force {
+        if let Some(skip_report) = check_threshold(repo)? {
+            return Ok(skip_report);
+        }
+    }
+
+    let backup_path = if !opts.skip_backup {
+        let bp = backup_before_compact(repo, sync_mgr, opts.backup_path.as_deref())?;
+        tracing::info!(backup_path = %bp.display(), "pre_compaction_backup");
+        Some(bp)
+    } else {
+        None
+    };
+
+    let mut report = run_compaction_steps(repo, sync_mgr)?;
+    report.backup_path = backup_path;
+
+    crate::maintenance::maybe_auto_run(repo);
+
+    Ok(report)
 }
 
 #[cfg(test)]
