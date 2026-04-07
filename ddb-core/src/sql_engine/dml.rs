@@ -125,7 +125,7 @@ impl<'a> SqlEngine<'a> {
             SetExpr::Values(v) => {
                 let mut rows = Vec::with_capacity(v.rows.len());
                 for row in &v.rows {
-                    rows.push(eval_values(&self.index.conn, row)?);
+                    rows.push(eval_values(self.index.sql_conn(), row)?);
                 }
                 Ok(rows)
             }
@@ -299,7 +299,7 @@ impl<'a> SqlEngine<'a> {
             let mut row_updates = updates.clone();
             if !deferred.is_empty() {
                 Self::eval_deferred_expressions(
-                    &self.index.conn, deferred, table_name, id, &mut row_updates,
+                    self.index.sql_conn(), deferred, table_name, id, &mut row_updates,
                 )?;
                 Self::validate_update_allowed_values(schema, &row_updates)?;
             }
@@ -370,7 +370,7 @@ impl<'a> SqlEngine<'a> {
     ) -> Result<SqlResult> {
         let path = self.index.resolve_path(doogat_id)?;
         self.index.remove_doogat(doogat_id)?;
-        self.index.conn.execute(
+        self.index.sql_conn().execute(
             &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
             params![doogat_id],
         )?;
@@ -409,7 +409,7 @@ impl<'a> SqlEngine<'a> {
         let mut all_ref_edits: Vec<PendingWrite> = Vec::new();
         for (id, path) in &matches {
             self.index.remove_doogat(id)?;
-            self.index.conn.execute(
+            self.index.sql_conn().execute(
                 &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
                 params![id],
             )?;
@@ -459,7 +459,7 @@ impl<'a> SqlEngine<'a> {
             None => (format!("SELECT id FROM \"{table_name}\""), None),
         };
 
-        let mut stmt = self.index.conn.prepare(&sql).map_err(|e| {
+        let mut stmt = self.index.sql_conn().prepare(&sql).map_err(|e| {
             DoogatError::SqlEngine(format!(
                 "invalid WHERE clause{}: {e}",
                 where_clause
@@ -583,7 +583,7 @@ impl<'a> SqlEngine<'a> {
     ) -> Result<SqlResult> {
         if !deferred.is_empty() {
             Self::eval_deferred_expressions(
-                &self.index.conn,
+                self.index.sql_conn(),
                 deferred,
                 table_name,
                 doogat_id,
@@ -626,7 +626,7 @@ impl<'a> SqlEngine<'a> {
             }
             let max_val: i64 = self
                 .index
-                .conn
+                .sql_conn()
                 .query_row(
                     &format!(
                         "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
@@ -693,7 +693,7 @@ impl<'a> SqlEngine<'a> {
             let partition_val = col_values.get(partition_col).cloned().unwrap_or_default();
             let max_val: i64 = self
                 .index
-                .conn
+                .sql_conn()
                 .query_row(
                     &format!(
                         "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
@@ -740,7 +740,7 @@ impl<'a> SqlEngine<'a> {
             };
             let exists: bool = self
                 .index
-                .conn
+                .sql_conn()
                 .query_row(
                     "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
                     params![ref_id],
@@ -821,7 +821,7 @@ impl<'a> SqlEngine<'a> {
             }
             let existing_id: Option<String> = self
                 .index
-                .conn
+                .sql_conn()
                 .query_row(&sql, rusqlite::params_from_iter(bind_vals), |row| {
                     row.get(0)
                 })
@@ -834,8 +834,34 @@ impl<'a> SqlEngine<'a> {
     }
 
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
-        self.index
-            .cascade_junction_cleanup(self.repo, target_type, deleted_id)
+        let conn = self.index.sql_conn();
+        let mut stmt = conn
+            .prepare("SELECT title FROM doogats WHERE type = '_typedef'")
+            .map_err(|e| DoogatError::SqlEngine(format!("cascade junction query: {e}")))?;
+        let type_names: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| DoogatError::SqlEngine(format!("cascade junction query: {e}")))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        for table_name in &type_names {
+            let schema = match self.load_schema(table_name) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            for col in &schema.columns {
+                if col.references.as_deref() == Some(target_type) {
+                    let jt = format!("{table_name}_{}", col.name);
+                    let col_id = format!("{}_id", col.name);
+                    self.index.sql_conn().execute(
+                        &format!("DELETE FROM \"{jt}\" WHERE \"{col_id}\" = ?1"),
+                        params![deleted_id],
+                    )?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Remove wikilinks to `deleted_id` from the reference sections of all
@@ -912,7 +938,7 @@ impl<'a> SqlEngine<'a> {
     ) -> Result<()> {
         let (title, date, updated_at): (Option<String>, Option<String>, Option<String>) = self
             .index
-            .conn
+            .sql_conn()
             .query_row(
                 "SELECT title, date, updated_at FROM doogats WHERE id = ?1",
                 params![id],
@@ -935,7 +961,7 @@ impl<'a> SqlEngine<'a> {
             .iter()
             .map(|v| v as &dyn rusqlite::types::ToSql)
             .collect();
-        self.index.conn.execute(&sql, params.as_slice())?;
+        self.index.sql_conn().execute(&sql, params.as_slice())?;
         Ok(())
     }
 
@@ -966,7 +992,7 @@ impl<'a> SqlEngine<'a> {
             .iter()
             .map(|v| v as &dyn rusqlite::types::ToSql)
             .collect();
-        self.index.conn.execute(&sql, params.as_slice())?;
+        self.index.sql_conn().execute(&sql, params.as_slice())?;
         Ok(())
     }
 
@@ -976,7 +1002,7 @@ impl<'a> SqlEngine<'a> {
         set_clauses: &mut Vec<String>,
         vals: &mut Vec<String>,
     ) {
-        let row = self.index.conn.query_row(
+        let row = self.index.sql_conn().query_row(
             "SELECT title, date, updated_at FROM doogats WHERE id = ?1",
             params![id],
             |row| {

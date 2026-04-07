@@ -29,7 +29,7 @@ impl<'a> SqlEngine<'a> {
         // Check if typedef already exists
         let existing: Option<String> = self
             .index
-            .conn
+            .sql_conn()
             .query_row(
                 "SELECT id FROM doogats WHERE type = '_typedef' AND title = ?1",
                 params![table_name],
@@ -174,13 +174,13 @@ impl<'a> SqlEngine<'a> {
             schema.table_name,
             col_defs.join(", ")
         );
-        self.index.conn.execute(&sql, [])?;
+        self.index.sql_conn().execute(&sql, [])?;
 
         // Create junction tables for REFERENCES columns
         for col in &schema.columns {
             if col.references.is_some() {
                 self.index
-                    .conn
+                    .sql_conn()
                     .execute(&junction_table_ddl(&schema.table_name, &col.name), [])?;
             }
         }
@@ -475,7 +475,7 @@ impl<'a> SqlEngine<'a> {
         let data_doogats: Vec<(String, String)> = {
             let mut stmt = self
                 .index
-                .conn
+                .sql_conn()
                 .prepare("SELECT id, path FROM doogats WHERE type = ?1")?;
             let rows: Vec<(String, String)> = stmt
                 .query_map(params![table_name], |row| {
@@ -534,7 +534,7 @@ impl<'a> SqlEngine<'a> {
         if let Some(ref schema) = schema {
             for col in &schema.columns {
                 if col.references.is_some() {
-                    self.index.conn.execute(
+                    self.index.sql_conn().execute(
                         &format!(
                             "DROP TABLE IF EXISTS \"{table_name}_{col_name}\"",
                             col_name = col.name
@@ -547,7 +547,7 @@ impl<'a> SqlEngine<'a> {
 
         // Drop materialized SQLite table
         self.index
-            .conn
+            .sql_conn()
             .execute(&format!("DROP TABLE IF EXISTS \"{table_name}\""), [])?;
 
         Ok(())
@@ -558,7 +558,7 @@ impl<'a> SqlEngine<'a> {
         table_name: &str,
     ) -> Result<(String, String)> {
         self.index
-            .conn
+            .sql_conn()
             .query_row(
                 "SELECT id, path FROM doogats WHERE type = '_typedef' AND title = ?1",
                 params![table_name],

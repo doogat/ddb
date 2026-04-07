@@ -69,7 +69,7 @@ impl<'a> SqlEngine<'a> {
                 SetExpr::Values(v) => {
                     let mut rows = Vec::with_capacity(v.rows.len());
                     for row in &v.rows {
-                        rows.push(eval_values(&self.index.conn, row)?);
+                        rows.push(eval_values(self.index.sql_conn(), row)?);
                     }
                     rows
                 }

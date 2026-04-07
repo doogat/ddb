@@ -5,10 +5,10 @@ use super::{SqlEngine, SqlResult, TransactionBuffer};
 impl Drop for SqlEngine<'_> {
     fn drop(&mut self) {
         if self.txn.take().is_some() {
-            if let Err(e) = self.index.conn.execute("ROLLBACK TO ddb_txn", []) {
+            if let Err(e) = self.index.sql_conn().execute("ROLLBACK TO ddb_txn", []) {
                 tracing::warn!(error = %e, "sql_engine drop: rollback failed");
             }
-            if let Err(e) = self.index.conn.execute("RELEASE ddb_txn", []) {
+            if let Err(e) = self.index.sql_conn().execute("RELEASE ddb_txn", []) {
                 tracing::warn!(error = %e, "sql_engine drop: release failed");
             }
         }
@@ -21,7 +21,7 @@ impl SqlEngine<'_> {
             return Err(DoogatError::SqlEngine("transaction already active".into()));
         }
         self.index
-            .conn
+            .sql_conn()
             .execute("SAVEPOINT ddb_txn", [])
             .map_err(|e| DoogatError::SqlEngine(format!("savepoint: {e}")))?;
         self.txn = Some(TransactionBuffer::default());
@@ -59,7 +59,7 @@ impl SqlEngine<'_> {
         }
 
         self.index
-            .conn
+            .sql_conn()
             .execute("RELEASE ddb_txn", [])
             .map_err(|e| DoogatError::SqlEngine(format!("release: {e}")))?;
         // Clear txn only after both git commit and RELEASE succeed
@@ -72,11 +72,11 @@ impl SqlEngine<'_> {
             return Err(DoogatError::SqlEngine("no active transaction".into()));
         }
         self.index
-            .conn
+            .sql_conn()
             .execute("ROLLBACK TO ddb_txn", [])
             .map_err(|e| DoogatError::SqlEngine(format!("rollback: {e}")))?;
         self.index
-            .conn
+            .sql_conn()
             .execute("RELEASE ddb_txn", [])
             .map_err(|e| DoogatError::SqlEngine(format!("release: {e}")))?;
         // Only clear txn after SQLite ops succeed — Drop still cleans up on failure

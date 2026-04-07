@@ -11,7 +11,7 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use crate::error::{DoogatError, Result};
-use crate::indexer::Index;
+use crate::traits::SqlBackend;
 use crate::parser;
 use crate::traits::DoogatStore;
 use crate::types::DoogatId;
@@ -50,13 +50,13 @@ pub struct TransactionBuffer {
 }
 
 pub struct SqlEngine<'a> {
-    pub(super) index: &'a Index,
+    pub(super) index: &'a dyn SqlBackend,
     pub(super) repo: &'a dyn DoogatStore,
     pub(super) txn: Option<TransactionBuffer>,
 }
 
 impl<'a> SqlEngine<'a> {
-    pub fn new(index: &'a Index, repo: &'a dyn DoogatStore) -> Self {
+    pub fn new(index: &'a dyn SqlBackend, repo: &'a dyn DoogatStore) -> Self {
         Self {
             index,
             repo,
@@ -66,7 +66,7 @@ impl<'a> SqlEngine<'a> {
 
     /// Restore a previously extracted transaction buffer.
     /// The caller is responsible for ensuring the SAVEPOINT is still active
-    /// on `index.conn` (i.e. the same connection that created it).
+    /// on `index.sql_conn()` (i.e. the same connection that created it).
     pub fn resume_transaction(&mut self, buf: TransactionBuffer) {
         self.txn = Some(buf);
     }
@@ -93,7 +93,7 @@ impl<'a> SqlEngine<'a> {
         let mut ids = Vec::with_capacity(count);
         let first = parser::generate_unique_id(|candidate| {
             self.index
-                .conn
+                .sql_conn()
                 .query_row(
                     "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
                     params![candidate],
@@ -113,7 +113,7 @@ impl<'a> SqlEngine<'a> {
                 let candidate = ts.format("%Y%m%d%H%M%S").to_string();
                 let exists: bool = self
                     .index
-                    .conn
+                    .sql_conn()
                     .query_row(
                         "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
                         params![&candidate],
