@@ -7,56 +7,53 @@ use crate::types::{
 
 use super::helpers::{is_numeric_type, re_unfilled_placeholder, to_yaml_value};
 
-/// Build a _typedef doogat from a TableSchema.
-pub fn build_typedef_doogat(id: &DoogatId, schema: &TableSchema) -> ParsedDoogat {
-    let mut extra = BTreeMap::new();
+/// Convert a single `ColumnDef` into a YAML-style `Value::Map`.
+fn build_column_yaml(col: &ColumnDef) -> Value {
+    let mut map = BTreeMap::new();
+    map.insert("name".to_string(), Value::String(col.name.clone()));
+    map.insert(
+        "data_type".to_string(),
+        Value::String(col.data_type.clone()),
+    );
+    if let Some(ref zone) = col.zone {
+        let zone_str = match zone {
+            Zone::Frontmatter => "frontmatter",
+            Zone::Body => "body",
+            Zone::Reference => "reference",
+        };
+        map.insert("zone".to_string(), Value::String(zone_str.into()));
+    }
+    if col.required {
+        map.insert("required".to_string(), Value::Bool(true));
+    }
+    if let Some(boost) = col.search_boost {
+        map.insert("search_boost".to_string(), Value::Number(boost));
+    }
+    if let Some(ref r) = col.references {
+        map.insert("references".to_string(), Value::String(r.clone()));
+    }
+    if let Some(ref vals) = col.allowed_values {
+        map.insert(
+            "allowed_values".to_string(),
+            Value::List(vals.iter().map(|v| Value::String(v.clone())).collect()),
+        );
+    }
+    if let Some(ref default) = col.default_value {
+        map.insert("default_value".to_string(), Value::String(default.clone()));
+    }
+    Value::Map(map)
+}
 
-    let columns_yaml: Vec<Value> = schema
-        .columns
-        .iter()
-        .map(|col| {
-            let mut map = BTreeMap::new();
-            map.insert("name".to_string(), Value::String(col.name.clone()));
-            map.insert(
-                "data_type".to_string(),
-                Value::String(col.data_type.clone()),
-            );
-            if let Some(ref zone) = col.zone {
-                let zone_str = match zone {
-                    Zone::Frontmatter => "frontmatter",
-                    Zone::Body => "body",
-                    Zone::Reference => "reference",
-                };
-                map.insert("zone".to_string(), Value::String(zone_str.into()));
-            }
-            if col.required {
-                map.insert("required".to_string(), Value::Bool(true));
-            }
-            if let Some(boost) = col.search_boost {
-                map.insert("search_boost".to_string(), Value::Number(boost));
-            }
-            if let Some(ref r) = col.references {
-                map.insert("references".to_string(), Value::String(r.clone()));
-            }
-            if let Some(ref vals) = col.allowed_values {
-                map.insert(
-                    "allowed_values".to_string(),
-                    Value::List(vals.iter().map(|v| Value::String(v.clone())).collect()),
-                );
-            }
-            if let Some(ref default) = col.default_value {
-                map.insert("default_value".to_string(), Value::String(default.clone()));
-            }
-            Value::Map(map)
-        })
-        .collect();
+/// Build the `columns` YAML list from a schema's column definitions.
+fn build_columns_yaml(schema: &TableSchema) -> Value {
+    Value::List(schema.columns.iter().map(build_column_yaml).collect())
+}
 
-    extra.insert("columns".to_string(), Value::List(columns_yaml));
-
+/// Insert optional typedef extra fields (crdt_strategy, template_sections, etc.) into `extra`.
+fn build_typedef_extra_fields(schema: &TableSchema, extra: &mut BTreeMap<String, Value>) {
     if let Some(ref strategy) = schema.crdt_strategy {
         extra.insert("crdt_strategy".to_string(), Value::String(strategy.clone()));
     }
-
     if !schema.template_sections.is_empty() {
         extra.insert(
             "template_sections".to_string(),
@@ -69,19 +66,15 @@ pub fn build_typedef_doogat(id: &DoogatId, schema: &TableSchema) -> ParsedDoogat
             ),
         );
     }
-
     if schema.folder {
         extra.insert("folder".to_string(), Value::Bool(true));
     }
-
     if let Some(ref tt) = schema.title_template {
         extra.insert("title_template".to_string(), Value::String(tt.clone()));
     }
-
     if let Some(ref o) = schema.origin {
         extra.insert("origin".to_string(), Value::String(o.clone()));
     }
-
     if let Some(ref constraints) = schema.unique_together {
         if !constraints.is_empty() {
             let outer = Value::List(
@@ -95,6 +88,13 @@ pub fn build_typedef_doogat(id: &DoogatId, schema: &TableSchema) -> ParsedDoogat
             extra.insert("unique_together".to_string(), outer);
         }
     }
+}
+
+/// Build a _typedef doogat from a TableSchema.
+pub fn build_typedef_doogat(id: &DoogatId, schema: &TableSchema) -> ParsedDoogat {
+    let mut extra = BTreeMap::new();
+    extra.insert("columns".to_string(), build_columns_yaml(schema));
+    build_typedef_extra_fields(schema, &mut extra);
 
     ParsedDoogat {
         meta: DoogatMeta {
@@ -128,6 +128,35 @@ struct ColumnZoneOutput {
     first_body_title: Option<String>,
 }
 
+/// Process a single reference-zone column, appending to the output accumulators.
+fn process_reference_column(
+    col: &ColumnDef,
+    val: &str,
+    ref_folder_types: &std::collections::HashSet<String>,
+    out: &mut ColumnZoneOutput,
+) {
+    let link_target = match col.references {
+        Some(ref ref_table) if ref_folder_types.contains(ref_table) => {
+            format!("ddb/{ref_table}/{val}.md")
+        }
+        _ => val.to_string(),
+    };
+    out.ref_lines
+        .push(format!("- {}:: [[{}]]", col.name, link_target));
+    out.links.push(Link {
+        target: link_target.clone(),
+        display: None,
+        section: None,
+        kind: crate::types::LinkKind::WikiLink,
+        zone: Zone::Reference,
+    });
+    out.inline_fields.push(InlineField {
+        key: col.name.clone(),
+        value: link_target,
+        zone: Zone::Reference,
+    });
+}
+
 /// Process schema columns into frontmatter, body, and reference zones.
 fn process_column_zones(
     schema: &TableSchema,
@@ -152,29 +181,7 @@ fn process_column_zones(
 
         match col.effective_zone() {
             Zone::Reference => {
-                let link_target = if let Some(ref ref_table) = col.references {
-                    if ref_folder_types.contains(ref_table) {
-                        format!("ddb/{ref_table}/{val}.md")
-                    } else {
-                        val.clone()
-                    }
-                } else {
-                    val.clone()
-                };
-                out.ref_lines
-                    .push(format!("- {}:: [[{}]]", col.name, link_target));
-                out.links.push(Link {
-                    target: link_target.clone(),
-                    display: None,
-                    section: None,
-                    kind: crate::types::LinkKind::WikiLink,
-                    zone: Zone::Reference,
-                });
-                out.inline_fields.push(InlineField {
-                    key: col.name.clone(),
-                    value: link_target,
-                    zone: Zone::Reference,
-                });
+                process_reference_column(col, &val, ref_folder_types, &mut out);
             }
             Zone::Frontmatter => {
                 if out.first_fm_string.is_none() && !is_numeric_type(&col.data_type) {
@@ -234,6 +241,31 @@ fn resolve_insert_title(
     format!("{} {}", schema.table_name, id.0)
 }
 
+/// Derive the date for a data doogat: prefer explicit `date` from extra/col_values, fall back to id.
+fn derive_date(
+    id: &DoogatId,
+    extra: &mut BTreeMap<String, Value>,
+    col_values: &BTreeMap<String, String>,
+) -> Option<String> {
+    extra
+        .remove("date")
+        .and_then(|v| match v {
+            Value::String(s) => Some(s),
+            _ => None,
+        })
+        .or_else(|| col_values.get("date").cloned())
+        .or_else(|| Some(format!("{}-{}-{}", &id.0[0..4], &id.0[4..6], &id.0[6..8])))
+}
+
+/// Join body sections or reference lines into their final string form.
+fn join_sections(sections: &[String], prefix: &str, suffix: &str, sep: &str) -> String {
+    if sections.is_empty() {
+        String::new()
+    } else {
+        format!("{}{}{}", prefix, sections.join(sep), suffix)
+    }
+}
+
 /// Build a data doogat from column values according to the schema's zone mapping.
 pub(super) fn build_data_doogat(
     id: &DoogatId,
@@ -251,27 +283,9 @@ pub(super) fn build_data_doogat(
         zones.first_fm_string.as_deref(),
     );
 
-    let body = if zones.body_sections.is_empty() {
-        String::new()
-    } else {
-        format!("\n{}\n", zones.body_sections.join("\n\n"))
-    };
-
-    let reference_section = if zones.ref_lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", zones.ref_lines.join("\n"))
-    };
-
-    let date = zones
-        .extra
-        .remove("date")
-        .and_then(|v| match v {
-            Value::String(s) => Some(s),
-            _ => None,
-        })
-        .or_else(|| col_values.get("date").cloned())
-        .or_else(|| Some(format!("{}-{}-{}", &id.0[0..4], &id.0[4..6], &id.0[6..8])));
+    let body = join_sections(&zones.body_sections, "\n", "\n", "\n\n");
+    let reference_section = join_sections(&zones.ref_lines, "", "\n", "\n");
+    let date = derive_date(id, &mut zones.extra, col_values);
 
     ParsedDoogat {
         meta: DoogatMeta {
@@ -294,62 +308,63 @@ pub(super) fn build_data_doogat(
     }
 }
 
+/// Parse a single column definition from a YAML mapping value.
+fn parse_single_column(item: &Value) -> Result<ColumnDef> {
+    let map = item
+        .as_mapping()
+        .ok_or_else(|| DoogatError::SqlEngine("column must be a mapping".into()))?;
+    let name = map
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| DoogatError::SqlEngine("column missing name".into()))?
+        .to_string();
+    let data_type = map
+        .get("data_type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| DoogatError::SqlEngine("column missing data_type".into()))?
+        .to_string();
+    let references = map
+        .get("references")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let zone = map.get("zone").and_then(|v| v.as_str()).map(|s| match s {
+        "frontmatter" => Zone::Frontmatter,
+        "body" => Zone::Body,
+        "reference" => Zone::Reference,
+        _ => Zone::Body,
+    });
+    let required = map
+        .get("required")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let search_boost = map.get("search_boost").and_then(|v| v.as_f64());
+    let allowed_values = map
+        .get("allowed_values")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        });
+    let default_value = map
+        .get("default_value")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    Ok(ColumnDef {
+        name,
+        data_type,
+        references,
+        zone,
+        required,
+        search_boost,
+        allowed_values,
+        default_value,
+    })
+}
+
 /// Parse column definitions from the typedef's `columns` YAML sequence.
 fn parse_column_definitions(columns_seq: &[Value]) -> Result<Vec<ColumnDef>> {
-    let mut columns = Vec::new();
-    for item in columns_seq {
-        let map = item
-            .as_mapping()
-            .ok_or_else(|| DoogatError::SqlEngine("column must be a mapping".into()))?;
-        let name = map
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| DoogatError::SqlEngine("column missing name".into()))?
-            .to_string();
-        let data_type = map
-            .get("data_type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| DoogatError::SqlEngine("column missing data_type".into()))?
-            .to_string();
-        let references = map
-            .get("references")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let zone = map.get("zone").and_then(|v| v.as_str()).map(|s| match s {
-            "frontmatter" => Zone::Frontmatter,
-            "body" => Zone::Body,
-            "reference" => Zone::Reference,
-            _ => Zone::Body,
-        });
-        let required = map
-            .get("required")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let search_boost = map.get("search_boost").and_then(|v| v.as_f64());
-        let allowed_values = map
-            .get("allowed_values")
-            .and_then(|v| v.as_sequence())
-            .map(|seq| {
-                seq.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            });
-        let default_value = map
-            .get("default_value")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        columns.push(ColumnDef {
-            name,
-            data_type,
-            references,
-            zone,
-            required,
-            search_boost,
-            allowed_values,
-            default_value,
-        });
-    }
-    Ok(columns)
+    columns_seq.iter().map(parse_single_column).collect()
 }
 
 /// Parse the unique_together constraint from a typedef's YAML value.
@@ -389,6 +404,69 @@ fn parse_unique_together(val: &Value) -> Option<Vec<Vec<String>>> {
     }
 }
 
+/// Extract optional schema fields from a typedef doogat's extra metadata.
+fn extract_optional_schema_fields(extra: &BTreeMap<String, Value>) -> OptionalSchemaFields {
+    let crdt_strategy = extra
+        .get("crdt_strategy")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let template_sections = extra
+        .get("template_sections")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let folder = extra
+        .get("folder")
+        .map(|v| matches!(v, Value::Bool(true)) || v.as_str() == Some("true"))
+        .unwrap_or(false);
+
+    let stale_after_days = extra
+        .get("stale_after_days")
+        .and_then(|v| v.as_f64())
+        .map(|n| n as u32);
+
+    let title_template = extra
+        .get("title_template")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let origin = extra
+        .get("origin")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let unique_together = extra
+        .get("unique_together")
+        .and_then(parse_unique_together);
+
+    OptionalSchemaFields {
+        crdt_strategy,
+        template_sections,
+        folder,
+        stale_after_days,
+        title_template,
+        origin,
+        unique_together,
+    }
+}
+
+/// Bag of optional fields parsed from a typedef doogat.
+struct OptionalSchemaFields {
+    crdt_strategy: Option<String>,
+    template_sections: Vec<String>,
+    folder: bool,
+    stale_after_days: Option<u32>,
+    title_template: Option<String>,
+    origin: Option<String>,
+    unique_together: Option<Vec<Vec<String>>>,
+}
+
 /// Extract a TableSchema from a parsed _typedef doogat.
 pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
     let table_name = doogat
@@ -409,70 +487,18 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         .ok_or_else(|| DoogatError::SqlEngine("columns must be a sequence".into()))?;
 
     let columns = parse_column_definitions(columns_seq)?;
-
-    let crdt_strategy = doogat
-        .meta
-        .extra
-        .get("crdt_strategy")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    let template_sections = doogat
-        .meta
-        .extra
-        .get("template_sections")
-        .and_then(|v| v.as_sequence())
-        .map(|seq| {
-            seq.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let folder = doogat
-        .meta
-        .extra
-        .get("folder")
-        .map(|v| matches!(v, crate::types::Value::Bool(true)) || v.as_str() == Some("true"))
-        .unwrap_or(false);
-
-    let stale_after_days = doogat
-        .meta
-        .extra
-        .get("stale_after_days")
-        .and_then(|v| v.as_f64())
-        .map(|n| n as u32);
-
-    let title_template = doogat
-        .meta
-        .extra
-        .get("title_template")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
-    let origin = doogat
-        .meta
-        .extra
-        .get("origin")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
-    let unique_together = doogat
-        .meta
-        .extra
-        .get("unique_together")
-        .and_then(parse_unique_together);
+    let opt = extract_optional_schema_fields(&doogat.meta.extra);
 
     Ok(TableSchema {
         table_name,
         columns,
-        crdt_strategy,
-        template_sections,
-        folder,
-        stale_after_days,
-        title_template,
-        origin,
-        unique_together,
+        crdt_strategy: opt.crdt_strategy,
+        template_sections: opt.template_sections,
+        folder: opt.folder,
+        stale_after_days: opt.stale_after_days,
+        title_template: opt.title_template,
+        origin: opt.origin,
+        unique_together: opt.unique_together,
     })
 }
 
