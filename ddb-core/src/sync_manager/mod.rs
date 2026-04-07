@@ -257,33 +257,9 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                     }
                 }
 
-                let mut resolved = Vec::new();
+                let mut resolved = Self::resolve_delete_edit_conflicts(&delete_edit);
                 let mut collision_losers: Vec<CollisionLoser> = Vec::new();
 
-                // Delete-vs-edit: edit wins, add resurrected marker
-                for conflict in &delete_edit {
-                    let surviving = if conflict.ours.is_empty() {
-                        &conflict.theirs
-                    } else {
-                        &conflict.ours
-                    };
-                    let deleted_by = if conflict.ours.is_empty() {
-                        "local"
-                    } else {
-                        "remote"
-                    };
-                    tracing::warn!(
-                        doogat_path = %conflict.path,
-                        deleted_by,
-                        "delete-vs-edit conflict resolved: doogat resurrected"
-                    );
-                    let content = add_resurrected_marker(surviving);
-                    resolved.push(crate::types::ResolvedFile {
-                        path: conflict.path.clone(),
-                        content,
-                        fm_crdt_bytes: None,
-                    });
-                }
                 report.resurrected = delete_edit.len();
                 if report.resurrected > 0 {
                     tracing::info!(count = report.resurrected, "delete_edit_resolved");
@@ -302,33 +278,8 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                     resolved.extend(self.cascade_resolve(normal, strategy.as_deref()));
                 }
 
-                // Binary reference conflicts: LWW via HLC (raw bytes, no string conversion)
-                for conflict in &binary_ref {
-                    let theirs_wins = match (&conflict.ours_hlc, &conflict.theirs_hlc) {
-                        (Some(ours_hlc), Some(theirs_hlc)) => theirs_hlc >= ours_hlc,
-                        _ => true,
-                    };
-                    let winner = if theirs_wins { "theirs" } else { "ours" };
-                    let winner_oid = if theirs_wins {
-                        &conflict.theirs_blob_oid
-                    } else {
-                        &conflict.ours_blob_oid
-                    };
-
-                    let oid = winner_oid.as_deref().ok_or_else(|| {
-                        crate::error::DoogatError::Conflict(format!(
-                            "binary conflict at {} missing blob OID for winner ({})",
-                            conflict.path, winner
-                        ))
-                    })?;
-                    let bytes = self.repo.read_blob(oid)?;
-                    let full_path = self.repo.repo_path().join(&conflict.path);
-                    if let Some(parent) = full_path.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::write(&full_path, &bytes)?;
-                    tracing::info!(path = %conflict.path, winner, "binary_lww_resolved");
-                }
+                // Binary reference conflicts: LWW via HLC
+                self.resolve_binary_ref_conflicts(&binary_ref)?;
 
                 // Tick HLC for merge commit
                 let hlc = self.tick_hlc();
@@ -399,6 +350,68 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         tracing::info!(total_ms = sync_start.elapsed().as_millis(), "sync_complete");
 
         Ok(report)
+    }
+
+    /// Resolve delete-vs-edit conflicts: the edit wins, a "resurrected" marker is added.
+    fn resolve_delete_edit_conflicts(
+        conflicts: &[ConflictFile],
+    ) -> Vec<crate::types::ResolvedFile> {
+        conflicts
+            .iter()
+            .map(|conflict| {
+                let surviving = if conflict.ours.is_empty() {
+                    &conflict.theirs
+                } else {
+                    &conflict.ours
+                };
+                let deleted_by = if conflict.ours.is_empty() {
+                    "local"
+                } else {
+                    "remote"
+                };
+                tracing::warn!(
+                    doogat_path = %conflict.path,
+                    deleted_by,
+                    "delete-vs-edit conflict resolved: doogat resurrected"
+                );
+                crate::types::ResolvedFile {
+                    path: conflict.path.clone(),
+                    content: add_resurrected_marker(surviving),
+                    fm_crdt_bytes: None,
+                }
+            })
+            .collect()
+    }
+
+    /// Resolve binary reference conflicts via HLC last-write-wins.
+    fn resolve_binary_ref_conflicts(&self, conflicts: &[ConflictFile]) -> Result<()> {
+        for conflict in conflicts {
+            let theirs_wins = match (&conflict.ours_hlc, &conflict.theirs_hlc) {
+                (Some(ours_hlc), Some(theirs_hlc)) => theirs_hlc >= ours_hlc,
+                _ => true,
+            };
+            let winner = if theirs_wins { "theirs" } else { "ours" };
+            let winner_oid = if theirs_wins {
+                &conflict.theirs_blob_oid
+            } else {
+                &conflict.ours_blob_oid
+            };
+
+            let oid = winner_oid.as_deref().ok_or_else(|| {
+                DoogatError::Conflict(format!(
+                    "binary conflict at {} missing blob OID for winner ({})",
+                    conflict.path, winner
+                ))
+            })?;
+            let bytes = self.repo.read_blob(oid)?;
+            let full_path = self.repo.repo_path().join(&conflict.path);
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&full_path, &bytes)?;
+            tracing::info!(path = %conflict.path, winner, "binary_lww_resolved");
+        }
+        Ok(())
     }
 
     /// Three-step merge cascade:
