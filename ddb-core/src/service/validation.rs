@@ -1,0 +1,464 @@
+use crate::error::{DoogatError, Result};
+use crate::traits::GitBackend;
+use crate::types::{BatchCreateInput, ParsedDoogat, TableSchema};
+
+use super::DoogatService;
+
+/// (table, column) -> current max value for bare DEFAULT NEXT columns.
+pub(super) type BareNextCounters = std::collections::BTreeMap<(String, String), i64>;
+/// (table, column, partition_value) -> current max value for DEFAULT NEXT(col) columns.
+pub(super) type PartitionedNextCounters = std::collections::BTreeMap<(String, String, String), i64>;
+
+impl<G: GitBackend> DoogatService<G> {
+    /// Convert a `Value` to its canonical string representation for comparison
+    /// against allowed_values and FK IDs. List/Map variants return None because
+    /// they are not comparable to scalar constraints.
+    pub(super) fn value_to_comparable_string(val: &crate::types::Value) -> Option<String> {
+        match val {
+            crate::types::Value::String(s) => Some(s.clone()),
+            crate::types::Value::Number(n) => Some(n.to_string()),
+            crate::types::Value::Bool(b) => {
+                Some(if *b { "1".to_string() } else { "0".to_string() })
+            }
+            crate::types::Value::List(_) | crate::types::Value::Map(_) => None,
+        }
+    }
+
+    /// Convert a `Value` to a string, always producing output.
+    /// Unlike `value_to_comparable_string`, List/Map use debug format.
+    pub(super) fn value_to_string(val: &crate::types::Value) -> String {
+        match val {
+            crate::types::Value::String(s) => s.clone(),
+            crate::types::Value::Number(n) => n.to_string(),
+            crate::types::Value::Bool(b) => {
+                if *b {
+                    "1".to_string()
+                } else {
+                    "0".to_string()
+                }
+            }
+            crate::types::Value::List(l) => format!("{l:?}"),
+            crate::types::Value::Map(m) => format!("{m:?}"),
+        }
+    }
+
+    /// Fill missing extra fields with typedef column defaults (NEXT, NEXT(col), static).
+    pub(super) fn resolve_column_defaults(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+        extra: &mut std::collections::BTreeMap<String, crate::types::Value>,
+        next_counters: &mut BareNextCounters,
+        partitioned_counters: &mut PartitionedNextCounters,
+    ) -> Result<()> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(()),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        for col in &schema.columns {
+            if extra.contains_key(&col.name) {
+                continue;
+            }
+            let dv = match col.default_value {
+                Some(ref dv) => dv,
+                None => continue,
+            };
+            let value = self.resolve_single_default(
+                type_name, &col.name, dv, extra, next_counters, partitioned_counters,
+            );
+            extra.insert(col.name.clone(), value);
+        }
+
+        Ok(())
+    }
+
+    /// Resolve a single column default value (NEXT, NEXT(col), or static).
+    fn resolve_single_default(
+        &self,
+        type_name: &str,
+        col_name: &str,
+        dv: &str,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+        next_counters: &mut BareNextCounters,
+        partitioned_counters: &mut PartitionedNextCounters,
+    ) -> crate::types::Value {
+        if dv == "NEXT" {
+            let key = (type_name.to_owned(), col_name.to_owned());
+            let counter = next_counters
+                .get_mut(&key)
+                .expect("key pre-populated above");
+            *counter += 1;
+            return crate::types::Value::String(counter.to_string());
+        }
+        if dv.starts_with("NEXT(") && dv.ends_with(')') {
+            let partition_col = &dv[5..dv.len() - 1];
+            let partition_val = extra
+                .get(partition_col)
+                .map(Self::value_to_string)
+                .unwrap_or_default();
+            let key = (type_name.to_owned(), col_name.to_owned(), partition_val);
+            let counter = partitioned_counters
+                .get_mut(&key)
+                .expect("key pre-populated above");
+            *counter += 1;
+            return crate::types::Value::String(counter.to_string());
+        }
+        crate::types::Value::String(dv.to_owned())
+    }
+
+    /// Validate allowed_values and FK references for a single input's extra fields.
+    pub(super) fn validate_column_constraints(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(()),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        for col in &schema.columns {
+            Self::validate_allowed_values(col, extra)?;
+            self.validate_fk_reference(col, extra)?;
+        }
+
+        Ok(())
+    }
+
+    /// Validate a single column's allowed_values constraint against extra fields.
+    fn validate_allowed_values(
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let allowed = match col.allowed_values {
+            Some(ref a) => a,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = Self::value_to_string(val);
+        if !allowed.contains(&val_str) {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' value '{}' not in allowed values: {:?}",
+                col.name, val_str, allowed
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validate a single column's FK reference constraint against extra fields.
+    fn validate_fk_reference(
+        &self,
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let ref_table = match col.references {
+            Some(ref r) => r,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = Self::value_to_string(val);
+        let exists = self
+            .index
+            .query_raw_with_params(
+                "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
+                &[
+                    rusqlite::types::Value::Text(val_str.clone()),
+                    rusqlite::types::Value::Text(ref_table.clone()),
+                ],
+            )?
+            .first()
+            .and_then(|r| r.first())
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if !exists {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' references non-existent {} doogat '{}'",
+                col.name, ref_table, val_str
+            )));
+        }
+        Ok(())
+    }
+
+    /// Check unique_together constraints for a single input.
+    /// Returns `Ok(Some(parsed))` if a conflict was found and on_conflict is Ignore,
+    /// `Ok(None)` if no conflict, or `Err` if on_conflict is Error.
+    pub(super) fn check_unique_constraints(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+    ) -> Result<Option<ParsedDoogat>> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(None),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let unique_groups = match schema.unique_together {
+            Some(ref groups) => groups,
+            None => return Ok(None),
+        };
+
+        for group in unique_groups {
+            let (sql, param_vals) =
+                match Self::build_unique_check_sql(type_name, group, &input.fields) {
+                    Some(pair) => pair,
+                    None => continue,
+                };
+            let rows = self.index.query_raw_with_params(&sql, &param_vals)?;
+            let existing_id = match rows.first().and_then(|r| r.first()) {
+                Some(id) => id,
+                None => continue,
+            };
+            match input.on_conflict {
+                crate::types::ConflictAction::Ignore => {
+                    return Ok(Some(self.get_doogat_parsed(existing_id)?));
+                }
+                crate::types::ConflictAction::Error => {
+                    return Err(DoogatError::Validation(format!(
+                        "duplicate unique constraint on type '{}' for columns {:?}",
+                        type_name, group
+                    )));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Build the SQL query + params for checking one unique_together group.
+    /// Returns `None` when not all group columns are present in the input fields.
+    fn build_unique_check_sql(
+        type_name: &str,
+        group: &[String],
+        fields: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Option<(String, Vec<rusqlite::types::Value>)> {
+        let mut joins = Vec::with_capacity(group.len());
+        let mut param_vals: Vec<rusqlite::types::Value> = Vec::with_capacity(group.len() * 2 + 1);
+
+        for (i, col_name) in group.iter().enumerate() {
+            let val = fields.get(col_name)?;
+            let val_str = Self::value_to_string(val);
+            let alias = format!("f{}", i + 1);
+            let key_idx = param_vals.len() + 1;
+            param_vals.push(rusqlite::types::Value::Text(col_name.clone()));
+            let val_idx = param_vals.len() + 1;
+            param_vals.push(rusqlite::types::Value::Text(val_str));
+            joins.push(format!(
+                "JOIN _ddb_fields {alias} ON \
+                 {alias}.doogat_id = d.id AND \
+                 {alias}.key = ?{key_idx} AND \
+                 {alias}.value = ?{val_idx}"
+            ));
+        }
+
+        param_vals.push(rusqlite::types::Value::Text(type_name.to_owned()));
+        let sql = format!(
+            "SELECT d.id FROM doogats d {} WHERE d.type = ?{} LIMIT 1",
+            joins.join(" "),
+            param_vals.len()
+        );
+        Some((sql, param_vals))
+    }
+
+    /// Pre-compute NEXT counters for columns with DEFAULT NEXT or NEXT(partition_col).
+    pub(super) fn precompute_next_counters(
+        &self,
+        inputs: &[BatchCreateInput],
+        schemas: &[TableSchema],
+    ) -> Result<(BareNextCounters, PartitionedNextCounters)> {
+        let mut bare = BareNextCounters::new();
+        let mut partitioned = PartitionedNextCounters::new();
+
+        for input in inputs {
+            let type_name = match input.doogat_type {
+                Some(ref t) => t,
+                None => continue,
+            };
+            let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+                Some(s) => s,
+                None => continue,
+            };
+            for col in &schema.columns {
+                let dv = match col.default_value {
+                    Some(ref dv) => dv,
+                    None => continue,
+                };
+                if dv == "NEXT" {
+                    self.seed_bare_next_counter(&mut bare, type_name, col, schema)?;
+                } else if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                    self.seed_partitioned_next_counter(
+                        &mut partitioned, type_name, col, schema, dv, input,
+                    )?;
+                }
+            }
+        }
+
+        Ok((bare, partitioned))
+    }
+
+    /// Seed a bare NEXT counter if not already present.
+    fn seed_bare_next_counter(
+        &self,
+        bare: &mut BareNextCounters,
+        type_name: &str,
+        col: &crate::types::ColumnDef,
+        schema: &TableSchema,
+    ) -> Result<()> {
+        let key = (type_name.to_owned(), col.name.clone());
+        if let std::collections::btree_map::Entry::Vacant(e) = bare.entry(key) {
+            let sql = format!(
+                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
+                col.name, schema.table_name
+            );
+            let max_val: i64 = self
+                .index
+                .query_raw(&sql)?
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            e.insert(max_val);
+        }
+        Ok(())
+    }
+
+    /// Seed a partitioned NEXT(col) counter if not already present.
+    fn seed_partitioned_next_counter(
+        &self,
+        partitioned: &mut PartitionedNextCounters,
+        type_name: &str,
+        col: &crate::types::ColumnDef,
+        schema: &TableSchema,
+        dv: &str,
+        input: &BatchCreateInput,
+    ) -> Result<()> {
+        let partition_col = &dv[5..dv.len() - 1];
+        let partition_val = input
+            .fields
+            .get(partition_col)
+            .map(Self::value_to_string)
+            .unwrap_or_default();
+        let key = (type_name.to_owned(), col.name.clone(), partition_val.clone());
+        if let std::collections::btree_map::Entry::Vacant(e) = partitioned.entry(key) {
+            let sql = format!(
+                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                col.name, schema.table_name, partition_col
+            );
+            let max_val: i64 = self
+                .index
+                .query_raw_with_params(
+                    &sql,
+                    &[rusqlite::types::Value::Text(partition_val)],
+                )?
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            e.insert(max_val);
+        }
+        Ok(())
+    }
+
+    /// Validate extra fields against a pre-loaded typedef schema list.
+    /// Callers load schemas once per operation to avoid redundant queries.
+    pub(super) fn validate_fields_with_schemas(
+        &self,
+        schemas: &[TableSchema],
+        type_name: &str,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let schema = match schemas.iter().find(|s| s.table_name == type_name) {
+            Some(s) => s,
+            None => return Ok(()), // no schema = no validation
+        };
+        for col in &schema.columns {
+            Self::validate_allowed_values_comparable(col, extra)?;
+            self.validate_fk_reference_comparable(col, extra)?;
+        }
+        Ok(())
+    }
+
+    /// Validate allowed_values using comparable (scalar-only) string conversion.
+    fn validate_allowed_values_comparable(
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let allowed = match col.allowed_values {
+            Some(ref a) => a,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = match Self::value_to_comparable_string(val) {
+            Some(s) => s,
+            None => return Ok(()), // structured values can't match scalar allowed_values
+        };
+        if !allowed.contains(&val_str) {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' value '{}' not in allowed values: {:?}",
+                col.name, val_str, allowed
+            )));
+        }
+        Ok(())
+    }
+
+    /// Validate FK reference using comparable (scalar-only) string conversion.
+    fn validate_fk_reference_comparable(
+        &self,
+        col: &crate::types::ColumnDef,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let ref_table = match col.references {
+            Some(ref r) => r,
+            None => return Ok(()),
+        };
+        let val = match extra.get(&col.name) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let val_str = match Self::value_to_comparable_string(val) {
+            Some(s) => s,
+            None => return Ok(()), // structured values can't be FK IDs
+        };
+        let exists = self
+            .index
+            .query_raw_with_params(
+                "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1 AND type = ?2",
+                &[
+                    rusqlite::types::Value::Text(val_str.clone()),
+                    rusqlite::types::Value::Text(ref_table.clone()),
+                ],
+            )?
+            .first()
+            .and_then(|r| r.first())
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if !exists {
+            return Err(DoogatError::Validation(format!(
+                "field '{}' references non-existent {} doogat '{}'",
+                col.name, ref_table, val_str
+            )));
+        }
+        Ok(())
+    }
+}

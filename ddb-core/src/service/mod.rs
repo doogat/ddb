@@ -12,6 +12,7 @@ mod ops;
 mod search;
 mod sql;
 mod utility;
+mod validation;
 
 pub use search::SORTABLE_COLUMNS;
 
