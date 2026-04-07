@@ -98,6 +98,34 @@ struct CollisionLoser {
     type_name: Option<String>,
 }
 
+/// Partition conflicts into four buckets: binary references, delete-vs-edit,
+/// add-add collisions, and normal (content) conflicts.
+fn partition_conflicts(
+    conflicts: Vec<ConflictFile>,
+) -> (
+    Vec<ConflictFile>,
+    Vec<ConflictFile>,
+    Vec<ConflictFile>,
+    Vec<ConflictFile>,
+) {
+    let mut binary_ref = Vec::new();
+    let mut delete_edit = Vec::new();
+    let mut add_add = Vec::new();
+    let mut normal = Vec::new();
+    for c in conflicts {
+        if c.ours.is_empty() || c.theirs.is_empty() {
+            delete_edit.push(c);
+        } else if c.path.starts_with("reference/") {
+            binary_ref.push(c);
+        } else if c.ancestor.is_none() {
+            add_add.push(c);
+        } else {
+            normal.push(c);
+        }
+    }
+    (binary_ref, delete_edit, add_add, normal)
+}
+
 /// Pick winner from an add-add collision. Later HLC wins; theirs on tie/missing.
 fn resolve_add_add_collision(
     conflict: &ConflictFile,
@@ -215,7 +243,25 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         // Merge
         let phase_start = std::time::Instant::now();
         let merge_result = self.repo.merge_remote(remote, branch)?;
+        let report = self.apply_merge_result(merge_result, index)?;
+        tracing::info!(
+            phase = "merge",
+            elapsed_ms = phase_start.elapsed().as_millis(),
+            "sync_phase"
+        );
 
+        self.finalize_sync(remote, branch, index)?;
+
+        tracing::info!(total_ms = sync_start.elapsed().as_millis(), "sync_complete");
+        Ok(report)
+    }
+
+    /// Dispatch on merge result, resolving conflicts if needed.
+    fn apply_merge_result(
+        &mut self,
+        merge_result: MergeResult,
+        index: &Index,
+    ) -> Result<SyncReport> {
         let mut report = SyncReport {
             direction: "bidirectional".into(),
             commits_transferred: 0,
@@ -237,84 +283,77 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                 report.conflicts_resolved = self.validate_clean_merge_or_fallback(oid, index)?;
             }
             MergeResult::Conflicts(conflicts, theirs_oid) => {
-                let count = conflicts.len();
-                tracing::info!(count, "merge_result: conflicts");
-
-                // Four-bucket partition
-                let mut binary_ref = Vec::new();
-                let mut delete_edit = Vec::new();
-                let mut add_add = Vec::new();
-                let mut normal = Vec::new();
-                for c in conflicts {
-                    if c.ours.is_empty() || c.theirs.is_empty() {
-                        delete_edit.push(c);
-                    } else if c.path.starts_with("reference/") {
-                        binary_ref.push(c);
-                    } else if c.ancestor.is_none() {
-                        add_add.push(c);
-                    } else {
-                        normal.push(c);
-                    }
-                }
-
-                let mut resolved = Self::resolve_delete_edit_conflicts(&delete_edit);
-                let mut collision_losers: Vec<CollisionLoser> = Vec::new();
-
-                report.resurrected = delete_edit.len();
-                if report.resurrected > 0 {
-                    tracing::info!(count = report.resurrected, "delete_edit_resolved");
-                }
-
-                // Add-add collisions: winner keeps ID, loser stashed for reassignment
-                for conflict in &add_add {
-                    let (winner, loser) = resolve_add_add_collision(conflict);
-                    resolved.push(winner);
-                    collision_losers.push(loser);
-                }
-
-                // Normal conflicts: cascade resolve (CRDT → LWW fallback)
-                if !normal.is_empty() {
-                    let strategy = self.lookup_crdt_strategy_for_conflicts(&normal, index);
-                    resolved.extend(self.cascade_resolve(normal, strategy.as_deref()));
-                }
-
-                // Binary reference conflicts: LWW via HLC
-                self.resolve_binary_ref_conflicts(&binary_ref)?;
-
-                // Tick HLC for merge commit
-                let hlc = self.tick_hlc();
-                let merge_msg =
-                    crate::hlc::append_hlc_trailer("resolve merge conflicts via CRDT", &hlc);
-
-                // Write resolved files and create merge commit with both parents
-                let files: Vec<(&str, &str)> = resolved
-                    .iter()
-                    .map(|r| (r.path.as_str(), r.content.as_str()))
-                    .collect();
-                let binary_paths: Vec<&str> = binary_ref.iter().map(|c| c.path.as_str()).collect();
-                self.repo
-                    .commit_merge(&files, &binary_paths, &merge_msg, &theirs_oid)?;
-
-                // Persist frontmatter CRDT state for compaction
-                let commit_oid = self.repo.head_oid()?;
-                write_fm_crdt_files(self.repo.repo_path(), &commit_oid, &resolved)?;
-
-                // Post-merge: reassign collision losers
-                report.collisions_reassigned =
-                    self.reassign_collision_losers(collision_losers, &theirs_oid)?;
-
-                report.conflicts_resolved = count;
-                report.commits_transferred = 1;
+                self.resolve_merge_conflicts(conflicts, &theirs_oid, index, &mut report)?;
             }
         }
 
-        tracing::info!(
-            phase = "merge",
-            elapsed_ms = phase_start.elapsed().as_millis(),
-            "sync_phase"
-        );
+        Ok(report)
+    }
 
-        // Update sync state (before push so node registry travels with content)
+    /// Resolve all conflicts from a merge with conflict markers.
+    fn resolve_merge_conflicts(
+        &mut self,
+        conflicts: Vec<ConflictFile>,
+        theirs_oid: &CommitHash,
+        index: &Index,
+        report: &mut SyncReport,
+    ) -> Result<()> {
+        let count = conflicts.len();
+        tracing::info!(count, "merge_result: conflicts");
+
+        let (binary_ref, delete_edit, add_add, normal) = partition_conflicts(conflicts);
+
+        let mut resolved = Self::resolve_delete_edit_conflicts(&delete_edit);
+        let mut collision_losers: Vec<CollisionLoser> = Vec::new();
+
+        report.resurrected = delete_edit.len();
+        if report.resurrected > 0 {
+            tracing::info!(count = report.resurrected, "delete_edit_resolved");
+        }
+
+        for conflict in &add_add {
+            let (winner, loser) = resolve_add_add_collision(conflict);
+            resolved.push(winner);
+            collision_losers.push(loser);
+        }
+
+        if !normal.is_empty() {
+            let strategy = self.lookup_crdt_strategy_for_conflicts(&normal, index);
+            resolved.extend(self.cascade_resolve(normal, strategy.as_deref()));
+        }
+
+        self.resolve_binary_ref_conflicts(&binary_ref)?;
+
+        let hlc = self.tick_hlc();
+        let merge_msg =
+            crate::hlc::append_hlc_trailer("resolve merge conflicts via CRDT", &hlc);
+
+        let files: Vec<(&str, &str)> = resolved
+            .iter()
+            .map(|r| (r.path.as_str(), r.content.as_str()))
+            .collect();
+        let binary_paths: Vec<&str> = binary_ref.iter().map(|c| c.path.as_str()).collect();
+        self.repo
+            .commit_merge(&files, &binary_paths, &merge_msg, theirs_oid)?;
+
+        let commit_oid = self.repo.head_oid()?;
+        write_fm_crdt_files(self.repo.repo_path(), &commit_oid, &resolved)?;
+
+        report.collisions_reassigned =
+            self.reassign_collision_losers(collision_losers, theirs_oid)?;
+        report.conflicts_resolved = count;
+        report.commits_transferred = 1;
+
+        Ok(())
+    }
+
+    /// Post-merge: update sync state, push, commit-graph, reindex.
+    fn finalize_sync(
+        &mut self,
+        remote: &str,
+        branch: &str,
+        index: &Index,
+    ) -> Result<()> {
         let phase_start = std::time::Instant::now();
         self.update_sync_state()?;
         tracing::info!(
@@ -323,7 +362,6 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             "sync_phase"
         );
 
-        // Push (single push carries both merge result and node state)
         let phase_start = std::time::Instant::now();
         self.repo.push(remote, branch)?;
         tracing::info!(
@@ -332,11 +370,9 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             "sync_phase"
         );
 
-        // Write commit-graph once (covers all commits made during sync)
         self.repo.set_skip_commit_graph(false);
         self.repo.write_commit_graph();
 
-        // Reindex
         let phase_start = std::time::Instant::now();
         index.rebuild_if_stale(self.repo)?;
         tracing::info!(
@@ -346,10 +382,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         );
 
         crate::maintenance::maybe_auto_run(self.repo);
-
-        tracing::info!(total_ms = sync_start.elapsed().as_millis(), "sync_complete");
-
-        Ok(report)
+        Ok(())
     }
 
     /// Resolve delete-vs-edit conflicts: the edit wins, a "resurrected" marker is added.
@@ -475,7 +508,6 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
 
         let ours_oid = self.repo.commit_parent_oid(merge_oid_str, 0)?;
         let theirs_oid = self.repo.commit_parent_oid(merge_oid_str, 1)?;
-        let ancestor_oid = self.repo.merge_base(&ours_oid, &theirs_oid).ok();
 
         let affected = self.affected_markdown_files(&ours_oid, &theirs_oid, merge_oid_str)?;
         if affected.is_empty() {
@@ -491,6 +523,19 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             return Ok(0);
         }
 
+        let ancestor_oid = self.repo.merge_base(&ours_oid, &theirs_oid).ok();
+        self.crdt_fallback_for_affected(&affected, &ours_oid, &theirs_oid, &ancestor_oid, index)
+    }
+
+    /// Re-resolve affected files via CRDT cascade and commit the result.
+    fn crdt_fallback_for_affected(
+        &self,
+        affected: &[String],
+        ours_oid: &str,
+        theirs_oid: &str,
+        ancestor_oid: &Option<String>,
+        index: &Index,
+    ) -> Result<usize> {
         let conflicts: Vec<ConflictFile> = affected
             .iter()
             .map(|path| ConflictFile {
@@ -498,14 +543,10 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                 ancestor: ancestor_oid
                     .as_ref()
                     .and_then(|oid| self.read_file_from_commit(oid, path)),
-                ours: self
-                    .read_file_from_commit(&ours_oid, path)
-                    .unwrap_or_default(),
-                theirs: self
-                    .read_file_from_commit(&theirs_oid, path)
-                    .unwrap_or_default(),
-                ours_hlc: self.repo.find_hlc_for_path(&ours_oid, path),
-                theirs_hlc: self.repo.find_hlc_for_path(&theirs_oid, path),
+                ours: self.read_file_from_commit(ours_oid, path).unwrap_or_default(),
+                theirs: self.read_file_from_commit(theirs_oid, path).unwrap_or_default(),
+                ours_hlc: self.repo.find_hlc_for_path(ours_oid, path),
+                theirs_hlc: self.repo.find_hlc_for_path(theirs_oid, path),
                 ours_blob_oid: None,
                 theirs_blob_oid: None,
             })
@@ -520,7 +561,6 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         self.repo
             .commit_files(&files, "validate clean merge fallback via CRDT")?;
 
-        // Persist frontmatter CRDT state for compaction
         let commit_oid = self.repo.head_oid()?;
         write_fm_crdt_files(self.repo.repo_path(), &commit_oid, &resolved)?;
 
@@ -583,69 +623,79 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     ) -> Result<usize> {
         let mut count = 0;
         for loser in &losers {
-            let winner_id = loser.old_id.clone();
-            let loser_type = loser.type_name.as_deref();
-            let loser_folder = loser.folder;
-            let new_id = parser::generate_unique_id(|candidate| {
-                if candidate == winner_id {
-                    return true;
-                }
-                let flat = crate::git_ops::doogat_path(candidate, None, false);
-                if self.repo.read_file(&flat).is_ok() {
-                    return true;
-                }
-                if loser_folder {
-                    let typed = crate::git_ops::doogat_path(candidate, loser_type, true);
-                    if self.repo.read_file(&typed).is_ok() {
-                        return true;
-                    }
-                }
-                false
-            });
-
-            let updated_content = update_frontmatter_id(&loser.content, &new_id.0)?;
-            let new_path =
-                crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
-
-            // Scan HEAD tree for files referencing the old ID and rewrite links.
-            // Skip files where theirs' version already contains the old ID -
-            // those references are to the winner (which keeps the ID).
-            let old_path_no_ext = loser.old_path.trim_end_matches(".md");
-            let new_path_no_ext = new_path.trim_end_matches(".md");
-            let rewrites = self.scan_and_rewrite_links(
-                &loser.old_id,
-                old_path_no_ext,
-                &new_id.0,
-                new_path_no_ext,
-                &theirs_oid.0,
-            )?;
-
-            let mut files: Vec<(String, String)> = vec![(new_path.clone(), updated_content)];
-            files.extend(rewrites);
-
-            let file_refs: Vec<(&str, &str)> = files
-                .iter()
-                .map(|(p, c)| (p.as_str(), c.as_str()))
-                .collect();
-            self.repo.commit_files(
-                &file_refs,
-                &format!(
-                    "fix: reassign collided doogat ID {} -> {}",
-                    loser.old_id, new_id.0
-                ),
-            )?;
-
-            tracing::warn!(
-                old_id = %loser.old_id,
-                new_id = %new_id.0,
-                old_path = %loser.old_path,
-                new_path = %new_path,
-                "collision resolved: doogat ID reassigned"
-            );
-
+            self.reassign_single_loser(loser, theirs_oid)?;
             count += 1;
         }
         Ok(count)
+    }
+
+    /// Generate a new ID for one collision loser, rewrite links, and commit.
+    fn reassign_single_loser(
+        &self,
+        loser: &CollisionLoser,
+        theirs_oid: &CommitHash,
+    ) -> Result<()> {
+        let winner_id = loser.old_id.clone();
+        let loser_type = loser.type_name.as_deref();
+        let loser_folder = loser.folder;
+        let new_id = parser::generate_unique_id(|candidate| {
+            self.id_exists_in_repo(candidate, &winner_id, loser_type, loser_folder)
+        });
+
+        let updated_content = update_frontmatter_id(&loser.content, &new_id.0)?;
+        let new_path =
+            crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
+
+        let old_path_no_ext = loser.old_path.trim_end_matches(".md");
+        let new_path_no_ext = new_path.trim_end_matches(".md");
+        let rewrites = self.scan_and_rewrite_links(
+            &loser.old_id,
+            old_path_no_ext,
+            &new_id.0,
+            new_path_no_ext,
+            &theirs_oid.0,
+        )?;
+
+        let mut files: Vec<(String, String)> = vec![(new_path.clone(), updated_content)];
+        files.extend(rewrites);
+
+        let file_refs: Vec<(&str, &str)> =
+            files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+        self.repo.commit_files(
+            &file_refs,
+            &format!("fix: reassign collided doogat ID {} -> {}", loser.old_id, new_id.0),
+        )?;
+
+        tracing::warn!(
+            old_id = %loser.old_id,
+            new_id = %new_id.0,
+            old_path = %loser.old_path,
+            new_path = %new_path,
+            "collision resolved: doogat ID reassigned"
+        );
+        Ok(())
+    }
+
+    /// Check whether a candidate ID already exists in the repo (winner ID or on-disk).
+    fn id_exists_in_repo(
+        &self,
+        candidate: &str,
+        winner_id: &str,
+        loser_type: Option<&str>,
+        loser_folder: bool,
+    ) -> bool {
+        if candidate == winner_id {
+            return true;
+        }
+        let flat = crate::git_ops::doogat_path(candidate, None, false);
+        if self.repo.read_file(&flat).is_ok() {
+            return true;
+        }
+        if loser_folder {
+            let typed = crate::git_ops::doogat_path(candidate, loser_type, true);
+            return self.repo.read_file(&typed).is_ok();
+        }
+        false
     }
 
     /// Walk the HEAD tree and rewrite wikilinks from old ID/path to new ID/path.
