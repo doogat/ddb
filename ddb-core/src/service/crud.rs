@@ -374,63 +374,11 @@ impl DoogatService {
         // can fill them in after the atomic commit.
         let mut results: Vec<Option<ParsedDoogat>> = Vec::with_capacity(inputs.len());
         let mut writes: Vec<(usize, String, String)> = Vec::with_capacity(inputs.len());
-        'inputs: for input in inputs {
+        for input in inputs {
             // ── on_conflict pre-check against unique_together ──
-            if let Some(ref type_name) = input.doogat_type {
-                if let Some(schema) = schemas.iter().find(|s| s.table_name == *type_name) {
-                    if let Some(ref unique_groups) = schema.unique_together {
-                        for group in unique_groups {
-                            let mut joins = Vec::with_capacity(group.len());
-                            let mut param_vals: Vec<rusqlite::types::Value> =
-                                Vec::with_capacity(group.len() * 2 + 1);
-                            let mut all_present = true;
-                            for (i, col_name) in group.iter().enumerate() {
-                                if let Some(val) = input.fields.get(col_name) {
-                                    let val_str = Self::value_to_string(val);
-                                    let alias = format!("f{}", i + 1);
-                                    let key_idx = param_vals.len() + 1;
-                                    param_vals.push(rusqlite::types::Value::Text(col_name.clone()));
-                                    let val_idx = param_vals.len() + 1;
-                                    param_vals.push(rusqlite::types::Value::Text(val_str));
-                                    joins.push(format!(
-                                        "JOIN _ddb_fields {alias} ON \
-                                         {alias}.doogat_id = d.id AND \
-                                         {alias}.key = ?{key_idx} AND \
-                                         {alias}.value = ?{val_idx}"
-                                    ));
-                                } else {
-                                    all_present = false;
-                                    break;
-                                }
-                            }
-                            if !all_present {
-                                continue;
-                            }
-                            param_vals.push(rusqlite::types::Value::Text(type_name.clone()));
-                            let sql = format!(
-                                "SELECT d.id FROM doogats d {} WHERE d.type = ?{} LIMIT 1",
-                                joins.join(" "),
-                                param_vals.len()
-                            );
-                            let rows = self.index.query_raw_with_params(&sql, &param_vals)?;
-                            if let Some(existing_id) = rows.first().and_then(|r| r.first()) {
-                                match input.on_conflict {
-                                    crate::types::ConflictAction::Ignore => {
-                                        results.push(Some(self.get_doogat_parsed(existing_id)?));
-                                        continue 'inputs;
-                                    }
-                                    crate::types::ConflictAction::Error => {
-                                        return Err(DoogatError::Validation(format!(
-                                            "duplicate unique constraint on \
-                                             type '{}' for columns {:?}",
-                                            type_name, group
-                                        )));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            if let Some(existing) = self.check_unique_constraints(input, &schemas)? {
+                results.push(Some(existing));
+                continue;
             }
 
             let slot = results.len();
@@ -627,6 +575,82 @@ impl DoogatService {
             crate::types::Value::List(l) => format!("{l:?}"),
             crate::types::Value::Map(m) => format!("{m:?}"),
         }
+    }
+
+    /// Check unique_together constraints for a single input.
+    /// Returns `Ok(Some(parsed))` if a conflict was found and on_conflict is Ignore,
+    /// `Ok(None)` if no conflict, or `Err` if on_conflict is Error.
+    fn check_unique_constraints(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+    ) -> Result<Option<ParsedDoogat>> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(None),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let unique_groups = match schema.unique_together {
+            Some(ref groups) => groups,
+            None => return Ok(None),
+        };
+
+        for group in unique_groups {
+            let mut joins = Vec::with_capacity(group.len());
+            let mut param_vals: Vec<rusqlite::types::Value> =
+                Vec::with_capacity(group.len() * 2 + 1);
+            let mut all_present = true;
+            for (i, col_name) in group.iter().enumerate() {
+                let val = match input.fields.get(col_name) {
+                    Some(v) => v,
+                    None => {
+                        all_present = false;
+                        break;
+                    }
+                };
+                let val_str = Self::value_to_string(val);
+                let alias = format!("f{}", i + 1);
+                let key_idx = param_vals.len() + 1;
+                param_vals.push(rusqlite::types::Value::Text(col_name.clone()));
+                let val_idx = param_vals.len() + 1;
+                param_vals.push(rusqlite::types::Value::Text(val_str));
+                joins.push(format!(
+                    "JOIN _ddb_fields {alias} ON \
+                     {alias}.doogat_id = d.id AND \
+                     {alias}.key = ?{key_idx} AND \
+                     {alias}.value = ?{val_idx}"
+                ));
+            }
+            if !all_present {
+                continue;
+            }
+            param_vals.push(rusqlite::types::Value::Text(type_name.clone()));
+            let sql = format!(
+                "SELECT d.id FROM doogats d {} WHERE d.type = ?{} LIMIT 1",
+                joins.join(" "),
+                param_vals.len()
+            );
+            let rows = self.index.query_raw_with_params(&sql, &param_vals)?;
+            if let Some(existing_id) = rows.first().and_then(|r| r.first()) {
+                match input.on_conflict {
+                    crate::types::ConflictAction::Ignore => {
+                        return Ok(Some(self.get_doogat_parsed(existing_id)?));
+                    }
+                    crate::types::ConflictAction::Error => {
+                        return Err(DoogatError::Validation(format!(
+                            "duplicate unique constraint on \
+                             type '{}' for columns {:?}",
+                            type_name, group
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// Pre-compute NEXT counters for columns with DEFAULT NEXT or NEXT(partition_col).
