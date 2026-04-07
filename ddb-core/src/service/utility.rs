@@ -1,13 +1,14 @@
 use crate::error::Result;
 use crate::git_ops;
 use crate::parser;
+use crate::traits::GitBackend;
 use crate::types::{
     AttachmentInfo, CommitHash, DoogatId, FixReport, ParsedDoogat, RenameReport, TableSchema,
 };
 
 use super::DoogatService;
 
-impl DoogatService {
+impl<G: GitBackend> DoogatService<G> {
     // ── Utility ─────────────────────────────────────────────────────────
 
     /// Verify index is reachable.

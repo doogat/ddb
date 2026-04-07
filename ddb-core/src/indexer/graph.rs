@@ -439,7 +439,7 @@ impl Index {
     /// Find doogats past their type's staleness threshold.
     pub fn stale_doogats(
         &self,
-        repo: &crate::git_ops::GitRepo,
+        repo: &(impl crate::traits::DoogatSource + crate::traits::GitHistory),
         type_filter: Option<&str>,
     ) -> Result<Vec<crate::types::StaleDoogat>> {
         use crate::types::{DateSource, StaleDoogat};

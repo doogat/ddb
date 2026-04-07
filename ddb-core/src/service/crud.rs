@@ -7,6 +7,8 @@ use crate::types::{
     BatchCreateInput, BatchUpdateInput, DoogatId, DoogatMeta, ParsedDoogat, TableSchema,
 };
 
+use crate::traits::GitBackend;
+
 use super::{DoogatService, ExtraFieldUpdates};
 
 /// (table, column) -> current max value for bare DEFAULT NEXT columns.
@@ -14,7 +16,7 @@ type BareNextCounters = std::collections::BTreeMap<(String, String), i64>;
 /// (table, column, partition_value) -> current max value for DEFAULT NEXT(col) columns.
 type PartitionedNextCounters = std::collections::BTreeMap<(String, String, String), i64>;
 
-impl DoogatService {
+impl<G: GitBackend> DoogatService<G> {
     // ── CRUD ────────────────────────────────────────────────────────────
 
     /// Create a new doogat from individual fields.

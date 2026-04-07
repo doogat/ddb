@@ -9,7 +9,7 @@ use crate::types::{
 
 use super::DoogatService;
 
-impl DoogatService {
+impl<G: GitBackend> DoogatService<G> {
     // ── Sync / Compact / Maintenance ────────────────────────────────────
 
     pub fn sync(&self, remote: &str, branch: &str) -> Result<SyncReport> {

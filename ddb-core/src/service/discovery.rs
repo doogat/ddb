@@ -5,9 +5,11 @@ use crate::types::{
     StaleDoogat, Suggestion, UnlinkedMention,
 };
 
+use crate::traits::GitBackend;
+
 use super::DoogatService;
 
-impl DoogatService {
+impl<G: GitBackend> DoogatService<G> {
     // ── Discovery / Sequences ───────────────────────────────────────────
 
     pub fn unlinked_mentions(&self, id: &str) -> Result<Vec<UnlinkedMention>> {
