@@ -66,61 +66,48 @@ pub fn export_full_bundle(
 }
 
 /// Import a bundle into the repository, triggering the merge protocol.
-pub fn import_bundle(
+/// Unbundle git objects and fetch refs from the extracted bundle.
+fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()> {
+    let git_bundle_path = work_dir.path().join("objects.bundle");
+    if !git_bundle_path.exists() {
+        return Ok(());
+    }
+
+    let output = std::process::Command::new("git")
+        .args(["bundle", "unbundle", git_bundle_path.to_str().unwrap()])
+        .current_dir(repo.repo_path())
+        .output()?;
+    if !output.status.success() {
+        return Err(DoogatError::Sync(format!(
+            "git bundle unbundle failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    let output = std::process::Command::new("git")
+        .args([
+            "fetch",
+            git_bundle_path.to_str().unwrap(),
+            "refs/heads/*:refs/remotes/bundle/*",
+        ])
+        .current_dir(repo.repo_path())
+        .output()?;
+    if !output.status.success() {
+        return Err(DoogatError::Sync(format!(
+            "git fetch from bundle failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(())
+}
+
+/// Merge bundle/master into local master, resolving conflicts if needed.
+fn merge_bundle_and_resolve(
     repo: &impl GitBackend,
     sync_mgr: &mut SyncManager<impl GitBackend>,
     index: &crate::indexer::Index,
-    bundle_path: &Path,
-) -> Result<SyncReport> {
-    let work_dir = make_temp_dir()?;
-
-    // Extract tar
-    let file = std::fs::File::open(bundle_path)?;
-    let mut archive = tar::Archive::new(file);
-    archive.unpack(work_dir.path())?;
-
-    // Verify checksum
-    verify_extracted_checksum(work_dir.path())?;
-
-    // Read manifest
-    let manifest_str = std::fs::read_to_string(work_dir.path().join("manifest.toml"))?;
-    let _manifest: BundleManifest =
-        toml::from_str(&manifest_str).map_err(|e| DoogatError::Toml(e.to_string()))?;
-
-    // Unbundle git objects
-    let git_bundle_path = work_dir.path().join("objects.bundle");
-    if git_bundle_path.exists() {
-        let output = std::process::Command::new("git")
-            .args(["bundle", "unbundle", git_bundle_path.to_str().unwrap()])
-            .current_dir(repo.repo_path())
-            .output()?;
-        if !output.status.success() {
-            return Err(DoogatError::Sync(format!(
-                "git bundle unbundle failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-
-        // Fetch the bundled refs
-        let output = std::process::Command::new("git")
-            .args([
-                "fetch",
-                git_bundle_path.to_str().unwrap(),
-                "refs/heads/*:refs/remotes/bundle/*",
-            ])
-            .current_dir(repo.repo_path())
-            .output()?;
-        if !output.status.success() {
-            return Err(DoogatError::Sync(format!(
-                "git fetch from bundle failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-    }
-
-    // Merge bundle/master into local master
-    // --allow-unrelated-histories: needed when importing into a freshly init'd repo
-    // whose initial commit has a different root than the bundle's history.
+) -> Result<usize> {
     let merge_output = std::process::Command::new("git")
         .args([
             "merge",
@@ -131,45 +118,69 @@ pub fn import_bundle(
         .current_dir(repo.repo_path())
         .output()?;
 
-    let conflicts_resolved = if !merge_output.status.success() {
-        let stderr = String::from_utf8_lossy(&merge_output.stderr);
-        if stderr.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
-            // Use sync_mgr's conflict resolution
-            sync_mgr.resolve_post_merge_conflicts(index)?
-        } else {
-            return Err(DoogatError::Sync(format!("git merge failed: {stderr}")));
-        }
-    } else {
-        0
-    };
-
-    // Import node registrations (after merge to avoid working tree conflicts)
-    let nodes_dir = work_dir.path().join("nodes");
-    if nodes_dir.exists() {
-        for entry in std::fs::read_dir(&nodes_dir)? {
-            let entry = entry?;
-            if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
-                let content = std::fs::read_to_string(entry.path())?;
-                let dest = repo.repo_path().join(".nodes").join(entry.file_name());
-                if !dest.exists() {
-                    std::fs::write(&dest, &content)?;
-                }
-            }
-        }
+    if merge_output.status.success() {
+        return Ok(0);
     }
 
-    // Clean up bundle remote refs
+    let stderr = String::from_utf8_lossy(&merge_output.stderr);
+    if stderr.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
+        sync_mgr.resolve_post_merge_conflicts(index)
+    } else {
+        Err(DoogatError::Sync(format!("git merge failed: {stderr}")))
+    }
+}
+
+/// Import node registration files from the bundle into the repo.
+fn import_node_registrations(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()> {
+    let nodes_dir = work_dir.path().join("nodes");
+    if !nodes_dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(&nodes_dir)? {
+        let entry = entry?;
+        if entry.path().extension().and_then(|s| s.to_str()) != Some("toml") {
+            continue;
+        }
+        let content = std::fs::read_to_string(entry.path())?;
+        let dest = repo.repo_path().join(".nodes").join(entry.file_name());
+        if !dest.exists() {
+            std::fs::write(&dest, &content)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn import_bundle(
+    repo: &impl GitBackend,
+    sync_mgr: &mut SyncManager<impl GitBackend>,
+    index: &crate::indexer::Index,
+    bundle_path: &Path,
+) -> Result<SyncReport> {
+    let work_dir = make_temp_dir()?;
+
+    let file = std::fs::File::open(bundle_path)?;
+    let mut archive = tar::Archive::new(file);
+    archive.unpack(work_dir.path())?;
+    verify_extracted_checksum(work_dir.path())?;
+
+    let manifest_str = std::fs::read_to_string(work_dir.path().join("manifest.toml"))?;
+    let _manifest: BundleManifest =
+        toml::from_str(&manifest_str).map_err(|e| DoogatError::Toml(e.to_string()))?;
+
+    unbundle_git_objects(repo, &work_dir)?;
+    let conflicts_resolved = merge_bundle_and_resolve(repo, sync_mgr, index)?;
+    import_node_registrations(repo, &work_dir)?;
+
     let _ = std::process::Command::new("git")
         .args(["update-ref", "-d", "refs/remotes/bundle/master"])
         .current_dir(repo.repo_path())
         .output();
 
-    // Reindex
     index.rebuild(repo)?;
 
     Ok(SyncReport {
         direction: "bundle-import".to_string(),
-        commits_transferred: 0, // can't easily count from unbundle
+        commits_transferred: 0,
         conflicts_resolved,
         resurrected: 0,
         collisions_reassigned: 0,
