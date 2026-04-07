@@ -54,15 +54,19 @@ impl<'a> SqlEngine<'a> {
         let mut next_counters = self.precompute_insert_next_counters(&schema);
 
         for (row_values, id) in rows.iter().zip(ids.into_iter()) {
-            let (path, content) = self.process_insert_row(
-                &schema,
-                &table_name,
-                &col_names,
-                row_values,
-                &id,
-                &ref_folder_types,
-                &mut next_counters,
-            )?;
+            if col_names.len() != row_values.len() {
+                return Err(DoogatError::SqlEngine(
+                    "column count doesn't match value count".into(),
+                ));
+            }
+            let mut col_values: BTreeMap<String, String> = col_names
+                .iter()
+                .zip(row_values.iter())
+                .map(|(n, v)| (n.clone(), v.clone()))
+                .collect();
+            self.fill_defaults_and_validate(&schema, &mut col_values, &mut next_counters)?;
+            let (path, content) =
+                self.build_and_index_row(&schema, &table_name, &id, &col_values, &ref_folder_types)?;
             self.buffer_or_collect_write(path, content, &mut files);
             created_ids.push(id.0.clone());
         }
@@ -129,35 +133,6 @@ impl<'a> SqlEngine<'a> {
                 "only VALUES clause supported".into(),
             )),
         }
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    fn process_insert_row(
-        &mut self,
-        schema: &TableSchema,
-        table_name: &str,
-        col_names: &[String],
-        row_values: &[String],
-        id: &DoogatId,
-        ref_folder_types: &std::collections::HashSet<String>,
-        next_counters: &mut BTreeMap<String, i64>,
-    ) -> Result<(String, String)> {
-        if col_names.len() != row_values.len() {
-            return Err(DoogatError::SqlEngine(
-                "column count doesn't match value count".into(),
-            ));
-        }
-        let mut col_values: BTreeMap<String, String> = col_names
-            .iter()
-            .zip(row_values.iter())
-            .map(|(n, v)| (n.clone(), v.clone()))
-            .collect();
-
-        self.fill_defaults_and_validate(schema, &mut col_values, next_counters)?;
-
-        let (path, content) =
-            self.build_and_index_row(schema, table_name, id, &col_values, ref_folder_types)?;
-        Ok((path, content))
     }
 
     fn build_and_index_row(

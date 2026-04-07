@@ -103,6 +103,8 @@ fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()
 }
 
 /// Merge bundle/master into local master, resolving conflicts if needed.
+/// Uses `--allow-unrelated-histories` because a freshly init'd repo may have
+/// a different root commit than the bundle's history.
 fn merge_bundle_and_resolve(
     repo: &impl GitBackend,
     sync_mgr: &mut SyncManager<impl GitBackend>,
@@ -180,7 +182,7 @@ pub fn import_bundle(
 
     Ok(SyncReport {
         direction: "bundle-import".to_string(),
-        commits_transferred: 0,
+        commits_transferred: 0, // unbundle doesn't expose a count
         conflicts_resolved,
         resurrected: 0,
         collisions_reassigned: 0,
