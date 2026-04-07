@@ -20,7 +20,6 @@ use std::time::Instant;
 use arc_swap::ArcSwap;
 use async_graphql::dynamic::Schema;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
-use axum::http::header::{HeaderName, HeaderValue};
 use axum::{middleware, Extension, Router};
 
 use actor::ActorHandle;
@@ -149,16 +148,7 @@ pub async fn run(
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
                 .on_failure(tower_http::trace::DefaultOnFailure::new().level(tracing::Level::WARN)),
-        )
-        .layer(axum::middleware::map_response(
-            |mut res: axum::response::Response| async {
-                res.headers_mut().insert(
-                    HeaderName::from_static("x-experimental"),
-                    HeaderValue::from_static("true"),
-                );
-                res
-            },
-        ));
+        );
 
     let addr = format!("{}:{}", cfg.bind, cfg.port);
     tracing::info!(%addr, "listening");
