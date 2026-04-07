@@ -91,10 +91,21 @@ impl ServerConfig {
 
     fn read_file(config_dir: &std::path::Path) -> FileConfig {
         let path = config_dir.join("config.toml");
-        std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| toml::from_str(&s).ok())
-            .unwrap_or_default()
+        let content = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileConfig::default(),
+            Err(e) => {
+                tracing::warn!("failed to read config {}: {e}", path.display());
+                return FileConfig::default();
+            }
+        };
+        match toml::from_str(&content) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                tracing::warn!("failed to parse config {}: {e}", path.display());
+                FileConfig::default()
+            }
+        }
     }
 }
 
