@@ -65,21 +65,8 @@ pub trait ConflictResolver {
     ) -> Result<Vec<ResolvedFile>>;
 }
 
-/// Trait abstracting the git storage backend. Allows swapping libgit2 for
-/// gitoxide (or other backends) per-feature without changing callers.
-///
-/// Extends DoogatSource + DoogatStore with remote, merge, binary, and
-/// commit-introspection operations. Desktop-only hooks (commit-graph,
-/// session counters) have default no-op implementations.
-pub trait GitBackend: DoogatSource + DoogatStore {
-    /// Repository root path on the filesystem.
-    fn repo_path(&self) -> &Path;
-
-    /// Load repository config from `.ddb.toml`.
-    fn load_config(&self) -> Result<RepoConfig>;
-
-    // -- Remote operations --
-
+/// Remote repository operations (add, fetch, push).
+pub trait GitRemote {
     /// Register a named remote.
     fn add_remote(&self, name: &str, url: &str) -> Result<()>;
 
@@ -88,9 +75,10 @@ pub trait GitBackend: DoogatSource + DoogatStore {
 
     /// Push to a remote branch.
     fn push(&self, remote: &str, branch: &str) -> Result<()>;
+}
 
-    // -- Merge operations --
-
+/// Merge operations (merge remote branches, create merge commits).
+pub trait GitMerge {
     /// Merge a fetched remote branch, returning the merge result.
     fn merge_remote(&self, remote: &str, branch: &str) -> Result<MergeResult>;
 
@@ -102,41 +90,10 @@ pub trait GitBackend: DoogatSource + DoogatStore {
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash>;
+}
 
-    // -- Binary file operations --
-
-    /// Write binary content to a file, stage it, and commit.
-    fn commit_binary_file(
-        &self,
-        rel_path: &str,
-        bytes: &[u8],
-        message: &str,
-    ) -> Result<CommitHash>;
-
-    /// Write a binary file and one or more text files in a single atomic commit.
-    fn commit_binary_and_text(
-        &self,
-        binary_path: &str,
-        bytes: &[u8],
-        text_files: &[(&str, &str)],
-        message: &str,
-    ) -> Result<CommitHash>;
-
-    /// Read raw blob bytes by OID string.
-    fn read_blob(&self, oid: &str) -> Result<Vec<u8>>;
-
-    // -- File operations --
-
-    /// Rename (move) a file in git.
-    fn rename_file(
-        &self,
-        old_path: &str,
-        new_path: &str,
-        message: &str,
-    ) -> Result<CommitHash>;
-
-    // -- Commit introspection --
-
+/// Commit introspection, tree walking, and history queries.
+pub trait GitHistory {
     /// Compute merge-base of two commit OIDs (as hex strings).
     fn merge_base(&self, a: &str, b: &str) -> Result<String>;
 
@@ -157,8 +114,6 @@ pub trait GitBackend: DoogatSource + DoogatStore {
         prefix: &str,
     ) -> Result<Vec<(String, String)>>;
 
-    // -- History queries --
-
     /// Find the HLC timestamp from the most recent commit that touched `path`,
     /// starting from the given commit OID.
     fn find_hlc_for_path(
@@ -169,9 +124,45 @@ pub trait GitBackend: DoogatSource + DoogatStore {
 
     /// Return the ISO 8601 date of the most recent commit that touched `rel_path`.
     fn revision_date(&self, rel_path: &str) -> Result<Option<String>>;
+}
 
-    // -- Desktop-only hooks (default no-ops) --
+/// Binary file operations (commit binary blobs, read raw blobs).
+pub trait GitBinary {
+    /// Write binary content to a file, stage it, and commit.
+    fn commit_binary_file(
+        &self,
+        rel_path: &str,
+        bytes: &[u8],
+        message: &str,
+    ) -> Result<CommitHash>;
 
+    /// Write a binary file and one or more text files in a single atomic commit.
+    fn commit_binary_and_text(
+        &self,
+        binary_path: &str,
+        bytes: &[u8],
+        text_files: &[(&str, &str)],
+        message: &str,
+    ) -> Result<CommitHash>;
+
+    /// Read raw blob bytes by OID string.
+    fn read_blob(&self, oid: &str) -> Result<Vec<u8>>;
+}
+
+/// File rename operations.
+pub trait GitRename {
+    /// Rename (move) a file in git.
+    fn rename_file(
+        &self,
+        old_path: &str,
+        new_path: &str,
+        message: &str,
+    ) -> Result<CommitHash>;
+}
+
+/// Desktop-only hooks with default no-op implementations (commit-graph,
+/// session counters). Backends that support these override the defaults.
+pub trait GitDesktopHooks {
     /// Suppress per-commit commit-graph writes (for batch operations).
     fn set_skip_commit_graph(&self, _skip: bool) {}
 
@@ -183,6 +174,28 @@ pub trait GitBackend: DoogatSource + DoogatStore {
 
     /// Reset session commit counter to zero.
     fn reset_session_commits(&self) {}
+}
+
+/// Unified git storage backend trait. Composes all focused sub-traits
+/// into a single bound for code that needs the full git backend.
+///
+/// Allows swapping libgit2 for gitoxide (or other backends) per-feature
+/// without changing callers.
+pub trait GitBackend:
+    DoogatSource
+    + DoogatStore
+    + GitRemote
+    + GitMerge
+    + GitHistory
+    + GitBinary
+    + GitRename
+    + GitDesktopHooks
+{
+    /// Repository root path on the filesystem.
+    fn repo_path(&self) -> &Path;
+
+    /// Load repository config from `.ddb.toml`.
+    fn load_config(&self) -> Result<RepoConfig>;
 }
 
 #[cfg(test)]
