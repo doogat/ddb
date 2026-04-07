@@ -212,7 +212,7 @@ Three CRDT strategy presets are supported (see `crdt_resolver.rs:resolve_conflic
 
 ### sql_engine to git_ops
 
-The SQL engine translates relational operations into doogat file operations. DDL (CREATE TABLE, ALTER TABLE, DROP TABLE) creates, modifies, or deletes `_typedef` doogats in `ddb/_typedef/`. DML (INSERT, UPDATE, DELETE) becomes `git_ops::GitRepo::commit_file()` or `commit_batch()` calls. SELECT goes directly to the SQLite index. The engine holds references to both `&Index` and `&dyn DoogatStore`, the latter satisfied by `GitRepo` which implements both `DoogatSource` and `DoogatStore`.
+The SQL engine translates relational operations into doogat file operations. DDL (CREATE TABLE, ALTER TABLE, DROP TABLE) creates, modifies, or deletes `_typedef` doogats in `ddb/_typedef/`. DML (INSERT, UPDATE, DELETE) becomes `git_ops::GitRepo::commit_file()` or `commit_batch()` calls. SELECT goes directly to the SQLite index. The engine holds references to `&dyn SqlBackend` (for index queries, materialization, and raw SQLite access) and `&dyn DoogatStore` (for git operations). `SqlBackend` extends `DoogatIndex` with SQLite connection access and materialization helpers, decoupling `sql_engine` from the concrete `Index` type.
 
 ### Server actor bridge
 
@@ -321,7 +321,7 @@ HLC values are totally ordered and used by the last-writer-wins CRDT strategy to
 
 ### UniFFI facade
 
-The FFI module (see `ffi.rs`) exposes a `DoogatDriver` struct that wraps `GitRepo`, `Index`, and `SqlEngine` behind a `Mutex`. It provides a UniFFI-friendly API with FFI-safe error types (`DdbError`) and value types (`SearchResult`, etc.) that mirror the core types but use only UniFFI-compatible primitives. Swift and Kotlin bindings are generated from the proc-macro annotations via the isolated `ddb-uniffi-bindgen` crate.
+The FFI module (see `ffi.rs`) exposes a `DoogatDriver` struct that wraps `GitRepo` and `Index` behind a `Mutex`, creating `SqlEngine` instances on demand. It provides a UniFFI-friendly API with FFI-safe error types (`DdbError`) and value types (`SearchResult`, etc.) that mirror the core types but use only UniFFI-compatible primitives. Swift and Kotlin bindings are generated from the proc-macro annotations via the isolated `ddb-uniffi-bindgen` crate.
 
 ### Bundled types
 

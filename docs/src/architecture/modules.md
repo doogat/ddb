@@ -10,8 +10,8 @@ types (depends: error — no adapter crate imports)
   │
   v
 traits (depends: error, types — defines DoogatSource, DoogatStore,
-  │                               DoogatIndex, ConflictResolver, GitBackend
-  │                               + sub-traits: GitRemote, GitMerge,
+  │                               DoogatIndex, SqlBackend, ConflictResolver,
+  │                               GitBackend + sub-traits: GitRemote, GitMerge,
   │                               GitHistory, GitBinary, GitRename, GitDesktopHooks)
   │
   ├──> parser (depends: error, types)
@@ -23,8 +23,9 @@ traits (depends: error, types — defines DoogatSource, DoogatStore,
   │      ├──> indexer (depends: error, types, traits, parser, sql_engine
   │      │             — accepts &impl DoogatSource, implements DoogatIndex)
   │      │
-  │      ├──> sql_engine (depends: error, types, parser, indexer
-  │      │                — accepts &dyn DoogatStore)
+  │      ├──> sql_engine (depends: error, types, parser, traits
+  │      │                — accepts &dyn SqlBackend + &dyn DoogatStore;
+  │      │                  uses indexer::materialize utilities)
   │      │
   │      ├──> sync_manager (depends: error, types, git_ops,
   │      │                           crdt_resolver, indexer)
@@ -66,7 +67,7 @@ traits (depends: error, types — defines DoogatSource, DoogatStore,
 |--------|---------|-----------------|
 | `error` | `DoogatError` enum + `Result<T>` alias | thiserror only |
 | `types` | Domain types (directory module: `mod.rs` config types, `value.rs` Value enum/path utilities, `doogat.rs` domain model types, `schema.rs` schema/consistency types) | no adapter crates |
-| `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, ConflictResolver, GitBackend supertrait + sub-traits: GitRemote, GitMerge, GitHistory, GitBinary, GitRename, GitDesktopHooks) | error, types |
+| `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, SqlBackend, ConflictResolver, GitBackend supertrait + sub-traits: GitRemote, GitMerge, GitHistory, GitBinary, GitRename, GitDesktopHooks) | error, types |
 | `parser` | Parse/serialize three-zone Markdown | regex, chrono, serde_yaml |
 | `search_query` | Search query parsing and normalization to canonical form | — (std only) |
 | `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store/GitBackend (directory module: `mod.rs` struct/init/CRUD/traits, `read.rs` file reads/diffs/revision queries, `merge.rs` merge/conflict resolution, `remote.rs` push/pull/fetch, `rename.rs` rename with backlink rewrite) | git2 |

@@ -38,7 +38,8 @@ ddb-core/src/       Library crate
   hlc.rs            Hybrid Logical Clock for causal ordering
   traits.rs         Core trait abstractions (DoogatSource, DoogatStore, GitBackend
                       supertrait + GitRemote, GitMerge, GitHistory, GitBinary,
-                      GitRename, GitDesktopHooks, DoogatIndex, ConflictResolver)
+                      GitRename, GitDesktopHooks, DoogatIndex, SqlBackend,
+                      ConflictResolver)
   ffi.rs            UniFFI DoogatDriver facade for Swift/Kotlin bindings
   types/            Shared data structures (directory module)
     value.rs          Value enum, path utilities

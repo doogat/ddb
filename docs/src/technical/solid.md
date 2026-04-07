@@ -85,6 +85,23 @@ fn rebuild_index(repo_path: &Path, db: &Connection) -> Result<()> {
 
 This enables testing the indexer without a real git repo — pass a mock `DoogatSource` instead.
 
+### Actual usage: SqlBackend trait
+
+The `sql_engine` module uses the `SqlBackend` trait (which extends `DoogatIndex`) instead of depending on the concrete `indexer::Index` type. `SqlBackend` adds the SQLite connection access and materialization methods that `sql_engine` needs beyond basic index queries:
+
+```rust
+pub trait SqlBackend: DoogatIndex {
+    fn sql_conn(&self) -> &Connection;
+    fn query_raw_with_columns(&self, sql: &str) -> Result<(Vec<String>, Vec<Vec<String>>)>;
+    fn rematerialize_type(&self, type_name: &str, source: &dyn DoogatSource) -> Result<()>;
+    fn materialize_single(&self, schema: &TableSchema, id: &str, parsed: &ParsedDoogat) -> Result<()>;
+    fn type_uses_folder(&self, type_name: &str, source: &dyn DoogatSource) -> bool;
+    fn backlinks_by_target(&self, target_id: &str, target_path: &str) -> Result<Vec<(String, String)>>;
+}
+```
+
+`SqlEngine` takes `&dyn SqlBackend` rather than `&Index`, inverting the dependency direction. `Index` implements `SqlBackend`, but `sql_engine` doesn't know that.
+
 ## What the Rust compiler already enforces
 
 | SOLID concern | Rust mechanism |
