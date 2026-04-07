@@ -147,7 +147,11 @@ ddb/
 │   │   └── ddb.udl             # UniFFI interface definition (docs)
 │   └── benches/
 │       ├── crud.rs             # CRUD benchmarks (1K doogats)
-│       └── search.rs           # Search/reindex benchmarks
+│       ├── search.rs           # Search/reindex benchmarks
+│       ├── growth.rs           # Growth simulation benchmarks
+│       ├── sync.rs             # Sync benchmarks
+│       ├── large_scale.rs      # Large-scale benchmarks (50K)
+│       └── helpers.rs          # Shared benchmark utilities
 ├── ddb-cli/                    # CLI binary
 │   └── src/
 │       ├── main.rs             # CLI struct definitions, dispatch

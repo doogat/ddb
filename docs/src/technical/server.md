@@ -226,6 +226,7 @@ type SyncResult {
   commitsTransferred: Int!
   conflictsResolved: Int!
   resurrected: Int!
+  collisionsReassigned: Int!
 }
 
 type CompactResult {

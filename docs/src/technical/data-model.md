@@ -48,7 +48,7 @@ pub struct DoogatMeta {
     pub date: Option<String>,
     pub doogat_type: Option<String>,  // serialized as "type"
     pub tags: Vec<String>,
-    pub extra: BTreeMap<String, serde_yaml::Value>,  // arbitrary additional fields
+    pub extra: BTreeMap<String, Value>,  // arbitrary additional fields
 }
 ```
 
@@ -75,6 +75,7 @@ pub struct AttachmentInfo {
     pub name: String,
     pub mime: String,
     pub size: u64,
+    pub path: String,  // relative path from repo root, e.g. "reference/20260301130000/photo.jpg"
 }
 ```
 
@@ -223,9 +224,9 @@ Outcome of `git_ops::merge_remote()`:
 ```rust
 pub enum MergeResult {
     AlreadyUpToDate,
-    FastForward(Oid),
-    Clean(Oid),
-    Conflicts(Vec<ConflictFile>, Oid),  // conflicts + theirs OID
+    FastForward(CommitHash),
+    Clean(CommitHash),
+    Conflicts(Vec<ConflictFile>, CommitHash),  // conflicts + theirs commit
 }
 ```
 
