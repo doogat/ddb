@@ -201,15 +201,23 @@ async fn list_doogats(
         }
         None => (None, None),
     };
-    let page: i64 = raw_params
-        .get("page")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1)
-        .max(1);
-    let per_page: i64 = raw_params
-        .get("per_page")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(50);
+    let page: i64 = match raw_params.get("page") {
+        Some(v) => v.parse().map_err(|_| {
+            rest_error(DoogatError::Validation(format!(
+                "invalid page value '{v}'; must be a positive integer"
+            )))
+        })?,
+        None => 1,
+    }
+    .max(1);
+    let per_page: i64 = match raw_params.get("per_page") {
+        Some(v) => v.parse().map_err(|_| {
+            rest_error(DoogatError::Validation(format!(
+                "invalid per_page value '{v}'; must be an integer 1-200"
+            )))
+        })?,
+        None => 50,
+    };
     let per_page = per_page.clamp(1, 200);
 
     // Extract field.* params
