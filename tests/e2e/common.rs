@@ -33,6 +33,17 @@ pub(crate) fn ddb_bin() -> PathBuf {
 
 static SERVER_PORT_COUNTER: AtomicU16 = AtomicU16::new(19100);
 
+/// Claim the next port from the atomic counter, skipping any that are
+/// already bound by another process.
+fn next_available_port() -> u16 {
+    loop {
+        let candidate = SERVER_PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
+        if std::net::TcpListener::bind(("127.0.0.1", candidate)).is_ok() {
+            return candidate;
+        }
+    }
+}
+
 /// RAII guard that starts a `ddb serve` process and kills it on drop.
 pub struct ServerGuard {
     child: Child,
@@ -43,8 +54,8 @@ pub struct ServerGuard {
 
 impl ServerGuard {
     pub fn start(repo: &DdbTestRepo) -> Self {
-        let port = SERVER_PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let pg_port = SERVER_PORT_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let port = next_available_port();
+        let pg_port = next_available_port();
         let log_dir = repo.path().join("dev/local/test-logs");
 
         let mut child = std::process::Command::new(ddb_bin())
