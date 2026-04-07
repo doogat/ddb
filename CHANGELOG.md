@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **server**: remove `X-Experimental: true` header from all HTTP responses
+- **cli**: `ddb serve` no longer marked as experimental in `--help` output
 - `SearchHit.fields` is now a `JSON` scalar (object) instead of a JSON string - access `hit.fields.url` directly instead of parsing `JSON.parse(hit.fields)` (breaking change for GraphQL search clients)
 
 ### Added
