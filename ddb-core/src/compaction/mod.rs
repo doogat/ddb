@@ -285,6 +285,35 @@ pub fn run_gc(repo_path: &Path) -> Result<bool> {
     Ok(output.status.success())
 }
 
+/// Check if compaction should be skipped (under threshold). Returns a no-op
+/// report if skipping, or None if compaction should proceed.
+fn check_threshold(repo: &impl GitBackend) -> Result<Option<CompactionReport>> {
+    let config = repo.load_config()?;
+    let (crdt_bytes, crdt_files) = crdt_temp_stats(repo);
+    let size_mb = crdt_bytes as f64 / (1024.0 * 1024.0);
+    if size_mb >= config.compaction.threshold_mb as f64 {
+        return Ok(None);
+    }
+    let repo_bytes = dir_size(&repo.repo_path().join(".git"));
+    tracing::debug!(
+        size_mb,
+        threshold_mb = config.compaction.threshold_mb,
+        "below_threshold_skip"
+    );
+    Ok(Some(CompactionReport {
+        files_removed: 0,
+        crdt_docs_compacted: 0,
+        gc_success: true,
+        crdt_temp_bytes_before: crdt_bytes,
+        crdt_temp_bytes_after: crdt_bytes,
+        crdt_temp_files_before: crdt_files,
+        crdt_temp_files_after: crdt_files,
+        repo_bytes_before: repo_bytes,
+        repo_bytes_after: repo_bytes,
+        backup_path: None,
+    }))
+}
+
 /// Full compaction pipeline: threshold check → backup → shared head → cleanup → crdt doc compact → gc.
 #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
 pub fn compact(
@@ -292,30 +321,9 @@ pub fn compact(
     sync_mgr: &SyncManager<impl GitBackend>,
     opts: &CompactOptions,
 ) -> Result<CompactionReport> {
-    // Threshold check: skip if under threshold (unless forced)
     if !opts.force {
-        let config = repo.load_config()?;
-        let (crdt_bytes, crdt_files) = crdt_temp_stats(repo);
-        let size_mb = crdt_bytes as f64 / (1024.0 * 1024.0);
-        if size_mb < config.compaction.threshold_mb as f64 {
-            let repo_bytes = dir_size(&repo.repo_path().join(".git"));
-            tracing::debug!(
-                size_mb,
-                threshold_mb = config.compaction.threshold_mb,
-                "below_threshold_skip"
-            );
-            return Ok(CompactionReport {
-                files_removed: 0,
-                crdt_docs_compacted: 0,
-                gc_success: true,
-                crdt_temp_bytes_before: crdt_bytes,
-                crdt_temp_bytes_after: crdt_bytes,
-                crdt_temp_files_before: crdt_files,
-                crdt_temp_files_after: crdt_files,
-                repo_bytes_before: repo_bytes,
-                repo_bytes_after: repo_bytes,
-                backup_path: None,
-            });
+        if let Some(skip_report) = check_threshold(repo)? {
+            return Ok(skip_report);
         }
     }
 
