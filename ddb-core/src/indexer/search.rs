@@ -412,12 +412,28 @@ impl Index {
         type_name: &str,
         col_names: &[String],
     ) {
+        let field_map = match self.fetch_materialized_fields(hits, hit_indices, type_name, col_names)
+        {
+            Some(m) => m,
+            None => return,
+        };
+        apply_fields_to_hits(hits, hit_indices, field_map);
+    }
+
+    /// Query a materialized table and return a map of id -> fields.
+    fn fetch_materialized_fields(
+        &self,
+        hits: &[SearchResult],
+        hit_indices: &[usize],
+        type_name: &str,
+        col_names: &[String],
+    ) -> Option<std::collections::HashMap<String, std::collections::BTreeMap<String, String>>> {
         let safe_name = escape_sql_ident(type_name);
         let type_ids: Vec<&str> = hit_indices
             .iter()
             .map(|&i| hits[i].id.as_str())
             .collect();
-        let type_placeholders: String = (1..=type_ids.len())
+        let placeholders: String = (1..=type_ids.len())
             .map(|i| format!("?{i}"))
             .collect::<Vec<_>>()
             .join(", ");
@@ -428,44 +444,32 @@ impl Index {
             .join(", ");
         let sql = format!(
             "SELECT id, {} FROM \"{}\" WHERE id IN ({})",
-            col_select, safe_name, type_placeholders
+            col_select, safe_name, placeholders
         );
 
-        let Ok(mut stmt) = self.conn.prepare(&sql) else {
-            return;
-        };
+        let mut stmt = self.conn.prepare(&sql).ok()?;
         let params: Vec<&dyn rusqlite::types::ToSql> =
             type_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
-        let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
-            let id: String = row.get(0)?;
-            let mut fields = std::collections::BTreeMap::new();
-            for (col_idx, col_name) in col_names.iter().enumerate() {
-                if let Ok(Some(val)) = row.get::<_, Option<String>>(col_idx + 1) {
-                    fields.insert(col_name.clone(), val);
+        let rows = stmt
+            .query_map(params.as_slice(), |row| {
+                let id: String = row.get(0)?;
+                let mut fields = std::collections::BTreeMap::new();
+                for (col_idx, col_name) in col_names.iter().enumerate() {
+                    if let Ok(Some(val)) = row.get::<_, Option<String>>(col_idx + 1) {
+                        fields.insert(col_name.clone(), val);
+                    }
                 }
-            }
-            Ok((id, fields))
-        }) else {
-            return;
-        };
+                Ok((id, fields))
+            })
+            .ok()?;
 
-        let mut field_map: std::collections::HashMap<
-            String,
-            std::collections::BTreeMap<String, String>,
-        > = std::collections::HashMap::new();
+        let mut field_map = std::collections::HashMap::new();
         for row in rows.flatten() {
             if !row.1.is_empty() {
                 field_map.insert(row.0, row.1);
             }
         }
-        for &i in hit_indices {
-            if let Some(new_fields) = field_map.remove(&hits[i].id) {
-                match hits[i].fields.as_mut() {
-                    Some(existing) => existing.extend(new_fields),
-                    None => hits[i].fields = Some(new_fields),
-                }
-            }
-        }
+        Some(field_map)
     }
 
     /// Return all tags with their usage counts, ordered by count descending then name ascending.
@@ -563,5 +567,21 @@ impl Index {
             out.push(row?);
         }
         Ok(out)
+    }
+}
+
+/// Merge fetched materialized fields into the corresponding search hits.
+fn apply_fields_to_hits(
+    hits: &mut [SearchResult],
+    hit_indices: &[usize],
+    mut field_map: std::collections::HashMap<String, std::collections::BTreeMap<String, String>>,
+) {
+    for &i in hit_indices {
+        if let Some(new_fields) = field_map.remove(&hits[i].id) {
+            match hits[i].fields.as_mut() {
+                Some(existing) => existing.extend(new_fields),
+                None => hits[i].fields = Some(new_fields),
+            }
+        }
     }
 }
