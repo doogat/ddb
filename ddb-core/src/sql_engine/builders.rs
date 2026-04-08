@@ -308,7 +308,15 @@ pub(super) fn build_data_doogat(
     }
 }
 
-/// Parse a single column definition from a YAML mapping value.
+struct OptionalColumnFields {
+    references: Option<String>,
+    zone: Option<Zone>,
+    required: bool,
+    search_boost: Option<f64>,
+    allowed_values: Option<Vec<String>>,
+    default_value: Option<String>,
+}
+
 fn parse_optional_column_fields(map: &BTreeMap<String, Value>) -> OptionalColumnFields {
     let references = map
         .get("references")
@@ -347,15 +355,6 @@ fn parse_optional_column_fields(map: &BTreeMap<String, Value>) -> OptionalColumn
     }
 }
 
-struct OptionalColumnFields {
-    references: Option<String>,
-    zone: Option<Zone>,
-    required: bool,
-    search_boost: Option<f64>,
-    allowed_values: Option<Vec<String>>,
-    default_value: Option<String>,
-}
-
 fn parse_single_column(item: &Value) -> Result<ColumnDef> {
     let map = item
         .as_mapping()
@@ -370,16 +369,23 @@ fn parse_single_column(item: &Value) -> Result<ColumnDef> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| DoogatError::SqlEngine("column missing data_type".into()))?
         .to_string();
-    let opt = parse_optional_column_fields(map);
+    let OptionalColumnFields {
+        references,
+        zone,
+        required,
+        search_boost,
+        allowed_values,
+        default_value,
+    } = parse_optional_column_fields(map);
     Ok(ColumnDef {
         name,
         data_type,
-        references: opt.references,
-        zone: opt.zone,
-        required: opt.required,
-        search_boost: opt.search_boost,
-        allowed_values: opt.allowed_values,
-        default_value: opt.default_value,
+        references,
+        zone,
+        required,
+        search_boost,
+        allowed_values,
+        default_value,
     })
 }
 
