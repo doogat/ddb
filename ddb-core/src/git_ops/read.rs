@@ -90,14 +90,22 @@ impl GitRepo {
                 tracing::warn!(path, depth, "HLC revwalk hit depth limit");
                 return None;
             }
-            if let Some(hlc) = self.check_commit_for_hlc(oid, path) {
-                return Some(hlc);
+            if let Some(maybe_hlc) = self.check_commit_for_hlc(oid, path) {
+                return maybe_hlc;
             }
         }
         None
     }
 
-    fn check_commit_for_hlc(&self, oid: git2::Oid, path: &str) -> Option<crate::hlc::Hlc> {
+    /// Check whether `oid` touched `path`. Returns `Some(Some(hlc))` if it
+    /// touched the path and carried an HLC trailer, `Some(None)` if it touched
+    /// the path but had no trailer (caller should stop walking), or `None` if
+    /// the commit didn't touch the path at all (caller should keep walking).
+    fn check_commit_for_hlc(
+        &self,
+        oid: git2::Oid,
+        path: &str,
+    ) -> Option<Option<crate::hlc::Hlc>> {
         let c = match self.repo.find_commit(oid) {
             Ok(c) => c,
             Err(e) => {
@@ -135,7 +143,7 @@ impl GitRepo {
         });
 
         if touches_path {
-            crate::hlc::extract_hlc(c.message().unwrap_or(""))
+            Some(crate::hlc::extract_hlc(c.message().unwrap_or("")))
         } else {
             None
         }
