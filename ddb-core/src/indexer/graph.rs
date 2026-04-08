@@ -8,6 +8,9 @@ use crate::types::{
 
 use super::Index;
 
+/// (id, title, type, date, path, updated_at)
+type StalenessRow = (String, String, String, Option<String>, String, Option<String>);
+
 impl Index {
     /// Find all doogats linking to a given target.
     pub fn backlinks(&self, target_path: &str) -> Result<Vec<String>> {
@@ -554,10 +557,11 @@ impl Index {
     }
 
     /// Query candidate doogats for staleness checking.
+    /// Returns (id, title, type, date, path, updated_at) tuples.
     fn query_stale_candidates(
         &self,
         type_filter: Option<&str>,
-    ) -> Result<Vec<(String, String, String, Option<String>, String, Option<String>)>> {
+    ) -> Result<Vec<StalenessRow>> {
         let (sql, filter_val) = if let Some(t) = type_filter {
             (
                 "SELECT id, title, type, date, path, updated_at FROM doogats \

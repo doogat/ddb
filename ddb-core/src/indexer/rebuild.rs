@@ -77,8 +77,11 @@ impl Index {
             self.remove_doogat(id)?;
         }
 
-        let mut report = crate::types::RebuildReport::default();
-        report.indexed = self.batch_index_changes(repo, &to_index_paths)?;
+        let indexed = self.batch_index_changes(repo, &to_index_paths)?;
+        let mut report = crate::types::RebuildReport {
+            indexed,
+            ..Default::default()
+        };
 
         if typedef_changed {
             self.rematerialize_if_typedef_changed(repo, &mut report)?;
