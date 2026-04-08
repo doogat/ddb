@@ -176,14 +176,19 @@ impl Index {
         let source_title = self.fetch_title(source_id);
         let candidate_tags = self.find_tag_candidates(source_id)?;
         let linked_ids = self.collect_linked_ids(source_id)?;
+        let mut alias_stmt = self
+            .conn
+            .prepare("SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1")?;
 
         let mut scored =
-            self.compute_tag_scores(source_id, &source_tags, &candidate_tags, &linked_ids)?;
+            self.compute_tag_scores(&source_tags, &candidate_tags, &linked_ids, &mut alias_stmt)?;
+        let content_map = self.query_content_scores(source_id, &source_title)?;
         self.merge_content_scores(
             source_id,
-            &source_title,
+            &content_map,
             &candidate_tags,
             &linked_ids,
+            &mut alias_stmt,
             &mut scored,
         )?;
         self.build_suggestions(&mut scored, limit)
@@ -259,37 +264,28 @@ impl Index {
         &self,
         candidate_id: &str,
         linked_ids: &std::collections::HashSet<String>,
-    ) -> bool {
+        alias_stmt: &mut rusqlite::Statement<'_>,
+    ) -> Result<bool> {
         if linked_ids.contains(candidate_id) {
-            return true;
+            return Ok(true);
         }
         if linked_ids.contains(&self.resolve_path(candidate_id).unwrap_or_default()) {
-            return true;
+            return Ok(true);
         }
-        let mut alias_stmt = match self
-            .conn
-            .prepare("SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1")
-        {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
         let has_alias_link = alias_stmt
-            .query_map(params![candidate_id], |row| row.get::<_, String>(0))
-            .ok()
-            .into_iter()
-            .flatten()
+            .query_map(params![candidate_id], |row| row.get::<_, String>(0))?
             .flatten()
             .any(|alias| linked_ids.contains(&alias));
-        has_alias_link
+        Ok(has_alias_link)
     }
 
     /// Score candidates by Jaccard tag similarity, skipping already-linked ones.
     fn compute_tag_scores(
         &self,
-        source_id: &str,
         source_tags: &std::collections::HashSet<String>,
         candidate_tags: &std::collections::HashMap<String, std::collections::HashSet<String>>,
         linked_ids: &std::collections::HashSet<String>,
+        alias_stmt: &mut rusqlite::Statement<'_>,
     ) -> Result<Vec<(String, f64, Vec<String>)>> {
         let mut all_tags_stmt = self
             .conn
@@ -297,10 +293,7 @@ impl Index {
 
         let mut scored: Vec<(String, f64, Vec<String>)> = Vec::new();
         for (candidate_id, shared) in candidate_tags {
-            if candidate_id == source_id {
-                continue;
-            }
-            if self.is_candidate_linked(candidate_id, linked_ids) {
+            if self.is_candidate_linked(candidate_id, linked_ids, alias_stmt)? {
                 continue;
             }
 
@@ -323,19 +316,16 @@ impl Index {
         Ok(scored)
     }
 
-    /// Query FTS5 BM25 content scores, normalize, and merge into the scored list.
-    fn merge_content_scores(
+    /// Query FTS5 BM25 content scores and normalize to 0..1.
+    fn query_content_scores(
         &self,
         source_id: &str,
         source_title: &str,
-        candidate_tags: &std::collections::HashMap<String, std::collections::HashSet<String>>,
-        linked_ids: &std::collections::HashSet<String>,
-        scored: &mut Vec<(String, f64, Vec<String>)>,
-    ) -> Result<()> {
+    ) -> Result<std::collections::HashMap<String, f64>> {
         use std::collections::HashMap;
 
         if source_title.is_empty() {
-            return Ok(());
+            return Ok(HashMap::new());
         }
 
         let phrase = format!("\"{}\"", source_title.replace('"', "\"\""));
@@ -349,36 +339,40 @@ impl Index {
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
         })?;
 
-        let mut content_scores: Vec<(String, f64)> = Vec::new();
+        let mut raw: Vec<(String, f64)> = Vec::new();
         for r in fts_rows {
             let (id, rank) = r?;
-            content_scores.push((id, -rank));
+            raw.push((id, -rank));
         }
-        let max_score = content_scores
-            .iter()
-            .map(|(_, s)| *s)
-            .fold(0.0_f64, f64::max);
-
+        let max_score = raw.iter().map(|(_, s)| *s).fold(0.0_f64, f64::max);
         if max_score <= 0.0 {
-            return Ok(());
+            return Ok(HashMap::new());
         }
 
-        let content_map: HashMap<String, f64> = content_scores
-            .into_iter()
-            .map(|(id, s)| (id, s / max_score))
-            .collect();
+        Ok(raw.into_iter().map(|(id, s)| (id, s / max_score)).collect())
+    }
 
+    /// Merge content scores into existing tag-scored candidates and add content-only candidates.
+    fn merge_content_scores(
+        &self,
+        source_id: &str,
+        content_map: &std::collections::HashMap<String, f64>,
+        candidate_tags: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+        linked_ids: &std::collections::HashSet<String>,
+        alias_stmt: &mut rusqlite::Statement<'_>,
+        scored: &mut Vec<(String, f64, Vec<String>)>,
+    ) -> Result<()> {
         for (id, score, _) in scored.iter_mut() {
             if let Some(&content_score) = content_map.get(id) {
                 *score += content_score * 0.4;
             }
         }
 
-        for (id, norm_score) in &content_map {
+        for (id, norm_score) in content_map {
             if candidate_tags.contains_key(id) || id == source_id {
                 continue;
             }
-            if self.is_candidate_linked(id, linked_ids) {
+            if self.is_candidate_linked(id, linked_ids, alias_stmt)? {
                 continue;
             }
             scored.push((id.clone(), norm_score * 0.4, vec![]));
@@ -423,21 +417,30 @@ impl Index {
         source_id: &str,
         limit: usize,
     ) -> Result<Vec<Suggestion>> {
-        let source_title: String = self
-            .conn
-            .query_row(
-                "SELECT title FROM doogats WHERE id = ?1",
-                params![source_id],
-                |row| row.get(0),
-            )
-            .unwrap_or_default();
-
+        let source_title = self.fetch_title(source_id);
         if source_title.is_empty() {
             return Ok(vec![]);
         }
 
         let linked_ids = self.collect_linked_ids(source_id)?;
+        let mut alias_stmt = self
+            .conn
+            .prepare("SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1")?;
 
+        let results =
+            self.query_content_suggestions(source_id, &source_title, limit, &linked_ids, &mut alias_stmt)?;
+        Ok(normalize_suggestion_scores(results))
+    }
+
+    /// Query FTS5 for content-similar doogats, filtering already-linked ones.
+    fn query_content_suggestions(
+        &self,
+        source_id: &str,
+        source_title: &str,
+        limit: usize,
+        linked_ids: &std::collections::HashSet<String>,
+        alias_stmt: &mut rusqlite::Statement<'_>,
+    ) -> Result<Vec<Suggestion>> {
         let phrase = format!("\"{}\"", source_title.replace('"', "\"\""));
         let mut stmt = self.conn.prepare(
             "SELECT z.id, z.title, rank FROM _ddb_fts \
@@ -456,7 +459,7 @@ impl Index {
         let mut results = Vec::new();
         for r in rows {
             let (id, title, rank) = r?;
-            if self.is_candidate_linked(&id, &linked_ids) {
+            if self.is_candidate_linked(&id, linked_ids, alias_stmt)? {
                 continue;
             }
             results.push(Suggestion {
@@ -469,15 +472,6 @@ impl Index {
                 break;
             }
         }
-
-        // Normalize scores
-        let max = results.iter().map(|s| s.score).fold(0.0_f64, f64::max);
-        if max > 0.0 {
-            for s in &mut results {
-                s.score /= max;
-            }
-        }
-
         Ok(results)
     }
 
@@ -580,8 +574,7 @@ impl Index {
 
         let mut stmt = self.conn.prepare(&sql)?;
 
-        type Row = (String, String, String, Option<String>, String, Option<String>);
-        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<StalenessRow> {
             Ok((
                 row.get(0)?,
                 row.get(1)?,
@@ -592,7 +585,7 @@ impl Index {
             ))
         };
 
-        let collected: Vec<Row> = if let Some(ref t) = filter_val {
+        let collected: Vec<StalenessRow> = if let Some(ref t) = filter_val {
             stmt.query_map(params![t], map_row)?
                 .filter_map(|r| r.ok())
                 .collect()
@@ -1017,4 +1010,15 @@ fn count_links(
         outbound_links: outbound,
         density_score: inbound + outbound,
     }
+}
+
+/// Normalize suggestion scores to 0..1 range.
+fn normalize_suggestion_scores(mut results: Vec<Suggestion>) -> Vec<Suggestion> {
+    let max = results.iter().map(|s| s.score).fold(0.0_f64, f64::max);
+    if max > 0.0 {
+        for s in &mut results {
+            s.score /= max;
+        }
+    }
+    results
 }
