@@ -142,16 +142,12 @@ impl<G: GitBackend> DoogatService<G> {
         let updated_map = self.index.lookup_updated_at_batch(&ids).unwrap_or_default();
         let mut doogats = Vec::new();
         for row in rows {
-            if let Some(id) = row.first() {
-                if let Ok(path) = self.index.resolve_path(id) {
-                    if let Ok(content) = self.repo.read_file(&path) {
-                        if let Ok(mut parsed) = parser::parse(&content, &path) {
-                            parsed.updated_at = updated_map.get(id.as_str()).cloned();
-                            doogats.push(parsed);
-                        }
-                    }
-                }
-            }
+            let Some(id) = row.first() else { continue };
+            let Ok(path) = self.index.resolve_path(id) else { continue };
+            let Ok(content) = self.repo.read_file(&path) else { continue };
+            let Ok(mut parsed) = parser::parse(&content, &path) else { continue };
+            parsed.updated_at = updated_map.get(id.as_str()).cloned();
+            doogats.push(parsed);
         }
         Ok(doogats)
     }
@@ -171,11 +167,7 @@ fn build_typed_list_sql(query: &TypedListQuery) -> String {
             t.replace('\'', "''")
         ));
     }
-    let where_clause = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", conditions.join(" AND "))
-    };
+    let where_clause = build_where_clause(&conditions);
     let order = query.order_sql.as_deref().unwrap_or("id DESC");
     let limit_clause = build_limit_clause(query.limit, query.offset);
     let group_by = match &query.distinct {
@@ -247,13 +239,17 @@ fn build_order_clause(filter: &ListFilter) -> String {
     }
 }
 
-fn build_filtered_sql(filter: &ListFilter) -> String {
-    let conditions = build_filter_conditions(filter);
-    let where_clause = if conditions.is_empty() {
+fn build_where_clause(conditions: &[String]) -> String {
+    if conditions.is_empty() {
         String::new()
     } else {
         format!(" WHERE {}", conditions.join(" AND "))
-    };
+    }
+}
+
+fn build_filtered_sql(filter: &ListFilter) -> String {
+    let conditions = build_filter_conditions(filter);
+    let where_clause = build_where_clause(&conditions);
     let order_clause = build_order_clause(filter);
     let limit_clause = build_limit_clause(filter.limit, filter.offset);
     format!("SELECT z.id, z.path, z.updated_at FROM doogats z{where_clause}{order_clause}{limit_clause}")
