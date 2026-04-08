@@ -444,29 +444,14 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
         match field {
             "_and" | "_or" => {
                 let combinator = if field == "_and" { "AND" } else { "OR" };
-                if let GqlValue::List(items) = value {
-                    if let Some(cond) =
-                        build_logical_combinator(items, schema, combinator, &mut params)
-                    {
-                        conditions.push(cond);
-                    }
+                let GqlValue::List(items) = value else { continue };
+                if let Some(cond) =
+                    build_logical_combinator(items, schema, combinator, &mut params)
+                {
+                    conditions.push(cond);
                 }
             }
-            _ => {
-                let col_name = resolve_column(&schema.columns, field)
-                    .or_else(|| BASE_FILTER_FIELDS.iter().find(|&&f| f == field).copied());
-                if let Some(col_name) = col_name {
-                    if let GqlValue::Object(filter_obj) = value {
-                        for (op, val) in filter_obj {
-                            if let Some(cond) =
-                                build_operator_condition(col_name, op.as_str(), val, &mut params)
-                            {
-                                conditions.push(cond);
-                            }
-                        }
-                    }
-                }
-            }
+            _ => build_column_conditions(field, value, schema, &mut conditions, &mut params),
         }
     }
 
@@ -476,6 +461,25 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
         WhereClause {
             sql: conditions.join(" AND "),
             params,
+        }
+    }
+}
+
+/// Resolve a column name and apply its operator conditions.
+fn build_column_conditions(
+    field: &str,
+    value: &GqlValue,
+    schema: &TableSchema,
+    conditions: &mut Vec<String>,
+    params: &mut Vec<SqlValue>,
+) {
+    let col_name = resolve_column(&schema.columns, field)
+        .or_else(|| BASE_FILTER_FIELDS.iter().find(|&&f| f == field).copied());
+    let Some(col_name) = col_name else { return };
+    let GqlValue::Object(filter_obj) = value else { return };
+    for (op, val) in filter_obj {
+        if let Some(cond) = build_operator_condition(col_name, op.as_str(), val, params) {
+            conditions.push(cond);
         }
     }
 }
