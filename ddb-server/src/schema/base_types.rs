@@ -93,7 +93,6 @@ fn build_links_list(z: &ParsedDoogat) -> Vec<GqlValue> {
 }
 
 fn build_attachments_list(z: &ParsedDoogat) -> Vec<GqlValue> {
-    use ddb_core::types::Value;
     let Some(Value::List(items)) = z.meta.extra.get("attachments") else {
         return Vec::new();
     };
@@ -570,6 +569,16 @@ fn extract_sort_key(val: &GqlValue, field: &str) -> String {
     }
 }
 
+fn extract_singular_id(parent: &GqlValue, col_name: &str) -> Option<String> {
+    let GqlValue::Object(map) = parent else {
+        return None;
+    };
+    match map.get(col_name) {
+        Some(GqlValue::String(s)) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    }
+}
+
 fn build_singular_ref_field(
     col: &ColumnDef,
     field_name: &str,
@@ -583,12 +592,8 @@ fn build_singular_ref_field(
         let target_ref_name = target_ref_name.clone();
         FieldFuture::new(async move {
             let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-            let id = match parent {
-                GqlValue::Object(map) => match map.get(col_name.as_str()) {
-                    Some(GqlValue::String(s)) if !s.is_empty() => s.to_string(),
-                    _ => return Ok(None),
-                },
-                _ => return Ok(None),
+            let Some(id) = extract_singular_id(parent, &col_name) else {
+                return Ok(None);
             };
             let pool = ctx.data::<crate::read_pool::ReadPool>()?;
             let schemas = ctx.data::<TypeSchemaMap>()?;
