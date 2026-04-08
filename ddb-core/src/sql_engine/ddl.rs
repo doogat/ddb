@@ -118,20 +118,7 @@ impl<'a> SqlEngine<'a> {
             });
         }
 
-        // Validate NEXT(col) partition columns exist in the table
-        let col_names: Vec<&str> = out.iter().map(|c| c.name.as_str()).collect();
-        for col in &out {
-            if let Some(ref dv) = col.default_value {
-                if dv.starts_with("NEXT(") && dv.ends_with(')') {
-                    let partition_col = &dv[5..dv.len() - 1];
-                    if !col_names.contains(&partition_col) {
-                        return Err(DoogatError::SqlEngine(format!(
-                            "DEFAULT NEXT({partition_col}): column '{partition_col}' not found in table"
-                        )));
-                    }
-                }
-            }
-        }
+        validate_next_partition_refs(&out)?;
 
         Ok(out)
     }
@@ -399,15 +386,12 @@ impl<'a> SqlEngine<'a> {
         let typedef_content = parser::serialize(&schema_doogat);
 
         let data_doogats = self.resolve_matching_ids(table_name, &None)?;
-        let mut files: Vec<(String, String)> = Vec::with_capacity(data_doogats.len() + 1);
-        files.push((typedef_path.to_string(), typedef_content.clone()));
+        let data_writes =
+            self.rewrite_data_doogats_for_rename(&data_doogats, old_name, new_name, &zone)?;
 
-        for (_, path) in &data_doogats {
-            let content = self.repo.read_file(path)?;
-            let mut parsed = parser::parse(&content, path)?;
-            rename_key_in_doogat(&mut parsed, old_name, new_name, &zone);
-            files.push((path.clone(), parser::serialize(&parsed)));
-        }
+        let mut files: Vec<(String, String)> = Vec::with_capacity(data_writes.len() + 1);
+        files.push((typedef_path.to_string(), typedef_content.clone()));
+        files.extend(data_writes);
 
         let file_refs: Vec<(&str, &str)> = files
             .iter()
@@ -418,18 +402,46 @@ impl<'a> SqlEngine<'a> {
             &format!("alter table {table_name} rename {old_name} to {new_name}"),
         )?;
 
-        let parsed_typedef = parser::parse(&typedef_content, typedef_path)?;
+        self.reindex_after_rename(&typedef_content, typedef_path, &data_doogats, table_name)?;
+
+        Ok(SqlResult::Ok(format!(
+            "renamed {old_name} to {new_name} in {table_name}"
+        )))
+    }
+
+    fn rewrite_data_doogats_for_rename(
+        &self,
+        data_doogats: &[(String, String)],
+        old_name: &str,
+        new_name: &str,
+        zone: &Zone,
+    ) -> Result<Vec<(String, String)>> {
+        let mut writes = Vec::with_capacity(data_doogats.len());
+        for (_, path) in data_doogats {
+            let content = self.repo.read_file(path)?;
+            let mut parsed = parser::parse(&content, path)?;
+            rename_key_in_doogat(&mut parsed, old_name, new_name, zone);
+            writes.push((path.clone(), parser::serialize(&parsed)));
+        }
+        Ok(writes)
+    }
+
+    fn reindex_after_rename(
+        &mut self,
+        typedef_content: &str,
+        typedef_path: &str,
+        data_doogats: &[(String, String)],
+        table_name: &str,
+    ) -> Result<()> {
+        let parsed_typedef = parser::parse(typedef_content, typedef_path)?;
         self.index.index_doogat(&parsed_typedef)?;
-        for (_, path) in &data_doogats {
+        for (_, path) in data_doogats {
             let content = self.repo.read_file(path)?;
             let parsed = parser::parse(&content, path)?;
             self.index.index_doogat(&parsed)?;
         }
         self.index.rematerialize_type(table_name, self.repo)?;
-
-        Ok(SqlResult::Ok(format!(
-            "renamed {old_name} to {new_name} in {table_name}"
-        )))
+        Ok(())
     }
 
     pub(super) fn handle_drop(
@@ -460,7 +472,6 @@ impl<'a> SqlEngine<'a> {
         if_exists: bool,
         cascade: bool,
     ) -> Result<()> {
-        // Locate typedef
         let typedef_loc = match self.load_typedef_location(table_name) {
             Ok(loc) => loc,
             Err(_) if if_exists => return Ok(()),
@@ -468,70 +479,105 @@ impl<'a> SqlEngine<'a> {
         };
         let (typedef_id, typedef_path) = typedef_loc;
 
-        // Load schema before git deletes (needed for junction table cleanup)
         let schema = self.load_schema(table_name).ok();
-
-        // Find all data doogats of this type
-        let data_doogats: Vec<(String, String)> = {
-            let mut stmt = self
-                .index
-                .sql_conn()
-                .prepare("SELECT id, path FROM doogats WHERE type = ?1")?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map(params![table_name], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            rows
-        };
+        let data_doogats = self.find_type_data_doogats(table_name)?;
 
         if cascade {
-            // Delete typedef + all data doogats
-            let mut paths: Vec<&str> = vec![&typedef_path];
-            for (_, path) in &data_doogats {
-                paths.push(path);
-            }
-            self.repo
-                .delete_files(&paths, &format!("drop table {table_name} cascade"))?;
-
-            // Remove from index
-            self.index.remove_doogat(&typedef_id)?;
-            for (id, _) in &data_doogats {
-                self.index.remove_doogat(id)?;
-            }
-        } else {
-            // Rewrite data doogats to remove type field, then delete typedef
-            let mut writes: Vec<(String, String)> = Vec::new();
-            for (_, path) in &data_doogats {
-                let content = self.repo.read_file(path)?;
-                let mut parsed = parser::parse(&content, path)?;
-                parsed.meta.doogat_type = None;
-                writes.push((path.clone(), parser::serialize(&parsed)));
-            }
-
-            let write_refs: Vec<(&str, &str)> = writes
-                .iter()
-                .map(|(p, c)| (p.as_str(), c.as_str()))
-                .collect();
-            self.repo.commit_batch(
-                &write_refs,
-                &[&typedef_path],
-                &format!("drop table {table_name}"),
+            self.cascade_delete_doogats(
+                &typedef_path,
+                &typedef_id,
+                &data_doogats,
+                table_name,
             )?;
-
-            // Re-index modified data doogats
-            for (_, path) in &data_doogats {
-                let content = self.repo.read_file(path)?;
-                let parsed = parser::parse(&content, path)?;
-                self.index.index_doogat(&parsed)?;
-            }
-            // Remove typedef from index
-            self.index.remove_doogat(&typedef_id)?;
+        } else {
+            self.soft_drop_doogats(
+                &typedef_id,
+                &typedef_path,
+                &data_doogats,
+                table_name,
+            )?;
         }
 
-        // Drop junction tables for REFERENCES columns
-        if let Some(ref schema) = schema {
+        self.cleanup_materialized_tables(table_name, schema.as_ref())?;
+
+        Ok(())
+    }
+
+    fn find_type_data_doogats(&self, table_name: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .index
+            .sql_conn()
+            .prepare("SELECT id, path FROM doogats WHERE type = ?1")?;
+        let rows = stmt
+            .query_map(params![table_name], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn cascade_delete_doogats(
+        &mut self,
+        typedef_path: &str,
+        typedef_id: &str,
+        data_doogats: &[(String, String)],
+        table_name: &str,
+    ) -> Result<()> {
+        let mut paths: Vec<&str> = vec![typedef_path];
+        for (_, path) in data_doogats {
+            paths.push(path);
+        }
+        self.repo
+            .delete_files(&paths, &format!("drop table {table_name} cascade"))?;
+
+        self.index.remove_doogat(typedef_id)?;
+        for (id, _) in data_doogats {
+            self.index.remove_doogat(id)?;
+        }
+        Ok(())
+    }
+
+    fn soft_drop_doogats(
+        &mut self,
+        typedef_id: &str,
+        typedef_path: &str,
+        data_doogats: &[(String, String)],
+        table_name: &str,
+    ) -> Result<()> {
+        let mut writes: Vec<(String, String)> = Vec::new();
+        for (_, path) in data_doogats {
+            let content = self.repo.read_file(path)?;
+            let mut parsed = parser::parse(&content, path)?;
+            parsed.meta.doogat_type = None;
+            writes.push((path.clone(), parser::serialize(&parsed)));
+        }
+
+        let write_refs: Vec<(&str, &str)> = writes
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        self.repo.commit_batch(
+            &write_refs,
+            &[typedef_path],
+            &format!("drop table {table_name}"),
+        )?;
+
+        for (_, path) in data_doogats {
+            let content = self.repo.read_file(path)?;
+            let parsed = parser::parse(&content, path)?;
+            self.index.index_doogat(&parsed)?;
+        }
+        self.index.remove_doogat(typedef_id)?;
+        Ok(())
+    }
+
+    fn cleanup_materialized_tables(
+        &self,
+        table_name: &str,
+        schema: Option<&TableSchema>,
+    ) -> Result<()> {
+        if let Some(schema) = schema {
             for col in &schema.columns {
                 if col.references.is_some() {
                     self.index.sql_conn().execute(
@@ -545,7 +591,6 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
-        // Drop materialized SQLite table
         self.index
             .sql_conn()
             .execute(&format!("DROP TABLE IF EXISTS \"{table_name}\""), [])?;
@@ -573,4 +618,21 @@ impl<'a> SqlEngine<'a> {
         let parsed = parser::parse(&content, &path)?;
         schema_from_parsed(&parsed)
     }
+}
+
+fn validate_next_partition_refs(columns: &[ColumnDef]) -> Result<()> {
+    let col_names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
+    for col in columns {
+        if let Some(ref dv) = col.default_value {
+            if dv.starts_with("NEXT(") && dv.ends_with(')') {
+                let partition_col = &dv[5..dv.len() - 1];
+                if !col_names.contains(&partition_col) {
+                    return Err(DoogatError::SqlEngine(format!(
+                        "DEFAULT NEXT({partition_col}): column '{partition_col}' not found in table"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
