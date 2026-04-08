@@ -41,30 +41,21 @@ pub async fn run(
     let start_time = Instant::now();
     let cfg = ServerConfig::load(port, pg_port, bind);
 
-    // Auth
     let token = auth::load_or_create_token(&cfg.token_file)?;
     tracing::info!(path = %cfg.token_file.display(), "auth token");
-    // Readiness signal for process orchestration (e2e tests, scripts)
     eprintln!("auth token: {}", cfg.token_file.display());
 
-    // Attachment file serving
     let attachment_root = repo_path.join("reference");
-
-    // Actor
     let event_bus = EventBus::new();
     let actor = ActorHandle::spawn(repo_path.clone(), event_bus)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
-
-    // Read pool for concurrent read-only queries
     let read_pool = read_pool::ReadPool::new(repo_path, cfg.read_pool_size)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     tracing::info!(slots = cfg.read_pool_size, "read pool");
 
-    // Fetch type schemas for dynamic schema generation
     let type_schemas = actor.get_type_schemas().await.unwrap_or_default();
     let type_count = type_schemas.len();
 
-    // Build GraphQL schema with hot-reload support (two-phase init)
     let rest_actor = actor.clone();
     let (reloader, shared_schema) = reload::SchemaReloader::new(actor.clone(), read_pool.clone());
     let gql_schema = match schema::build_schema(
@@ -81,7 +72,42 @@ pub async fn run(
     };
     reloader.store_initial(gql_schema);
 
-    // Auth-gated routes
+    let app = build_app(
+        rest_actor.clone(),
+        read_pool.clone(),
+        shared_schema,
+        token.clone(),
+        attachment_root,
+        playground,
+        start_time,
+    );
+    spawn_maintenance(&cfg, rest_actor.clone());
+
+    let addr = format!("{}:{}", cfg.bind, cfg.port);
+    tracing::info!(%addr, "listening");
+    tracing::info!(count = type_count, "type schemas loaded");
+    eprintln!("listening on {addr}");
+
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let pg = pgwire::start(rest_actor, read_pool, token, reloader, &cfg.bind, cfg.pg_port);
+
+    tokio::select! {
+        r = axum::serve(listener, app) => r?,
+        r = pg => r?,
+    };
+    Ok(())
+}
+
+/// Build the combined axum router with auth, WebSocket, and health routes.
+fn build_app(
+    actor: ActorHandle,
+    read_pool: read_pool::ReadPool,
+    shared_schema: Arc<ArcSwap<Schema>>,
+    token: String,
+    attachment_root: PathBuf,
+    playground: bool,
+    start_time: Instant,
+) -> Router {
     let mut auth_routes = Router::new()
         .route("/graphql", axum::routing::post(graphql_handler))
         .route(
@@ -109,68 +135,36 @@ pub async fn run(
     }
 
     let auth_routes = auth_routes.layer(middleware::from_fn(auth::require_auth));
-
-    // WebSocket route — auth handled in ws_handler via header or connection_init payload
     let ws_routes = Router::new().route("/ws", axum::routing::get(ws::ws_handler));
-
-    // Health routes — unauthenticated
-    let health_actor = rest_actor.clone();
     let health_routes = Router::new()
         .route("/health", axum::routing::get(health_ready))
         .route("/health/ready", axum::routing::get(health_ready))
         .route("/health/live", axum::routing::get(health_live))
-        .layer(Extension(health_actor))
+        .layer(Extension(actor.clone()))
         .layer(Extension(StartTime(start_time)));
 
-    // Background maintenance
-    if cfg.maintenance_enabled {
-        let maint_actor = rest_actor.clone();
-        let interval = cfg.maintenance_interval_secs;
-        tokio::spawn(async move {
-            maintenance::maintenance_loop(maint_actor, interval).await;
-        });
-        tracing::info!(interval_secs = cfg.maintenance_interval_secs, "maintenance enabled");
-    }
-
-    let pg_actor = rest_actor.clone();
-    let pg_token = token.clone();
-    let pg_reloader = reloader.clone();
-    let pg_read_pool = read_pool.clone();
-
-    // Merge routers — shared extensions available to all routes
-    let app = auth_routes
+    auth_routes
         .merge(ws_routes)
         .merge(health_routes)
         .layer(Extension(AuthToken(token)))
-        .layer(Extension(rest_actor))
+        .layer(Extension(actor))
         .layer(Extension(read_pool))
         .layer(Extension(shared_schema))
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
                 .on_failure(tower_http::trace::DefaultOnFailure::new().level(tracing::Level::WARN)),
-        );
+        )
+}
 
-    let addr = format!("{}:{}", cfg.bind, cfg.port);
-    tracing::info!(%addr, "listening");
-    tracing::info!(count = type_count, "type schemas loaded");
-    eprintln!("listening on {addr}");
-
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-
-    let pg = pgwire::start(
-        pg_actor,
-        pg_read_pool,
-        pg_token,
-        pg_reloader,
-        &cfg.bind,
-        cfg.pg_port,
-    );
-
-    tokio::select! {
-        r = axum::serve(listener, app) => r?,
-        r = pg => r?,
-    };
-    Ok(())
+/// Spawn the background maintenance task if enabled in config.
+fn spawn_maintenance(cfg: &ServerConfig, actor: ActorHandle) {
+    if cfg.maintenance_enabled {
+        let interval = cfg.maintenance_interval_secs;
+        tokio::spawn(async move {
+            maintenance::maintenance_loop(actor, interval).await;
+        });
+        tracing::info!(interval_secs = cfg.maintenance_interval_secs, "maintenance enabled");
+    }
 }
 
 async fn graphql_handler(
