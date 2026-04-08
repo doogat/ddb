@@ -165,88 +165,143 @@ impl Index {
         source_id: &str,
         limit: usize,
     ) -> Result<Vec<Suggestion>> {
-        use std::collections::{HashMap, HashSet};
-
-        // Get source doogat's tags
-        let mut tag_stmt = self
-            .conn
-            .prepare("SELECT tag FROM _ddb_tags WHERE doogat_id = ?1")?;
-        let source_tags: HashSet<String> = tag_stmt
-            .query_map(params![source_id], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-
+        let source_tags = self.fetch_tags(source_id)?;
         if source_tags.is_empty() {
-            // Fall back to content-only similarity
             return self.suggest_by_content(source_id, limit);
         }
 
-        // Get source title for content similarity
-        let source_title: String = self
+        let source_title = self.fetch_title(source_id);
+        let candidate_tags = self.find_tag_candidates(source_id)?;
+        let linked_ids = self.collect_linked_ids(source_id)?;
+
+        let mut scored =
+            self.compute_tag_scores(source_id, &source_tags, &candidate_tags, &linked_ids)?;
+        self.merge_content_scores(
+            source_id,
+            &source_title,
+            &candidate_tags,
+            &linked_ids,
+            &mut scored,
+        )?;
+        self.build_suggestions(&mut scored, limit)
+    }
+
+    /// Fetch all tags for a doogat.
+    fn fetch_tags(
+        &self,
+        doogat_id: &str,
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self
             .conn
+            .prepare("SELECT tag FROM _ddb_tags WHERE doogat_id = ?1")?;
+        let tags: std::collections::HashSet<String> = stmt
+            .query_map(params![doogat_id], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(tags)
+    }
+
+    /// Fetch the title for a doogat, returning empty string if missing.
+    fn fetch_title(&self, doogat_id: &str) -> String {
+        self.conn
             .query_row(
                 "SELECT title FROM doogats WHERE id = ?1",
-                params![source_id],
+                params![doogat_id],
                 |row| row.get(0),
             )
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
 
-        // Find candidates with at least one shared tag
+    /// Find candidates sharing at least one tag with `source_id`.
+    fn find_tag_candidates(
+        &self,
+        source_id: &str,
+    ) -> Result<std::collections::HashMap<String, std::collections::HashSet<String>>> {
+        use std::collections::{HashMap, HashSet};
+
         let mut candidate_tags: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut shared_stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare(
             "SELECT DISTINCT t2.doogat_id, t2.tag \
              FROM _ddb_tags t1 \
              JOIN _ddb_tags t2 ON t1.tag = t2.tag \
              WHERE t1.doogat_id = ?1 AND t2.doogat_id != ?1",
         )?;
-        let rows = shared_stmt.query_map(params![source_id], |row| {
+        let rows = stmt.query_map(params![source_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         for r in rows {
             let (id, tag) = r?;
             candidate_tags.entry(id).or_default().insert(tag);
         }
+        Ok(candidate_tags)
+    }
 
-        // Get all tags for each candidate to compute Jaccard
+    /// Collect target IDs already linked from `source_id`.
+    fn collect_linked_ids(&self, source_id: &str) -> Result<std::collections::HashSet<String>> {
+        use std::collections::HashSet;
+
+        let mut stmt = self
+            .conn
+            .prepare("SELECT target_path FROM _ddb_links WHERE source_id = ?1")?;
+        let rows = stmt.query_map(params![source_id], |row| row.get(0))?;
+        let mut set = HashSet::new();
+        for id in rows.flatten() {
+            set.insert(id);
+        }
+        Ok(set)
+    }
+
+    /// Check whether `candidate_id` is already linked (by ID, resolved path, or alias).
+    fn is_candidate_linked(
+        &self,
+        candidate_id: &str,
+        linked_ids: &std::collections::HashSet<String>,
+    ) -> bool {
+        if linked_ids.contains(candidate_id) {
+            return true;
+        }
+        if linked_ids.contains(&self.resolve_path(candidate_id).unwrap_or_default()) {
+            return true;
+        }
+        let mut alias_stmt = match self
+            .conn
+            .prepare("SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1")
+        {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let has_alias_link = alias_stmt
+            .query_map(params![candidate_id], |row| row.get::<_, String>(0))
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|alias| linked_ids.contains(&alias));
+        has_alias_link
+    }
+
+    /// Score candidates by Jaccard tag similarity, skipping already-linked ones.
+    fn compute_tag_scores(
+        &self,
+        source_id: &str,
+        source_tags: &std::collections::HashSet<String>,
+        candidate_tags: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+        linked_ids: &std::collections::HashSet<String>,
+    ) -> Result<Vec<(String, f64, Vec<String>)>> {
         let mut all_tags_stmt = self
             .conn
             .prepare("SELECT tag FROM _ddb_tags WHERE doogat_id = ?1")?;
 
-        // Collect already-linked IDs
-        let linked_ids: HashSet<String> = {
-            let mut stmt = self
-                .conn
-                .prepare("SELECT target_path FROM _ddb_links WHERE source_id = ?1")?;
-            let rows = stmt.query_map(params![source_id], |row| row.get(0))?;
-            let mut set = HashSet::new();
-            for id in rows.flatten() {
-                set.insert(id);
-            }
-            set
-        };
-
-        // Prepare alias lookup for linked-check
-        let mut alias_stmt = self
-            .conn
-            .prepare("SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1")?;
-
         let mut scored: Vec<(String, f64, Vec<String>)> = Vec::new();
-        for (candidate_id, shared) in &candidate_tags {
-            // Skip already-linked (by ID, path, or alias)
-            if linked_ids.contains(candidate_id)
-                || linked_ids.contains(&self.resolve_path(candidate_id).unwrap_or_default())
-                || alias_stmt
-                    .query_map(params![candidate_id], |row| row.get::<_, String>(0))
-                    .ok()
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .any(|alias| linked_ids.contains(&alias))
-            {
+        for (candidate_id, shared) in candidate_tags {
+            if candidate_id == source_id {
+                continue;
+            }
+            if self.is_candidate_linked(candidate_id, linked_ids) {
                 continue;
             }
 
-            let all_candidate_tags: HashSet<String> = all_tags_stmt
+            let all_candidate_tags: std::collections::HashSet<String> = all_tags_stmt
                 .query_map(params![candidate_id], |row| row.get(0))?
                 .filter_map(|r| r.ok())
                 .collect();
@@ -260,86 +315,98 @@ impl Index {
 
             let mut shared_list: Vec<String> = shared.iter().cloned().collect();
             shared_list.sort();
-
             scored.push((candidate_id.clone(), jaccard * 0.6, shared_list));
         }
+        Ok(scored)
+    }
 
-        // Add content similarity via FTS5 BM25 if we have a title
-        if !source_title.is_empty() {
-            let phrase = format!("\"{}\"", source_title.replace('"', "\"\""));
-            let mut fts_stmt = self.conn.prepare(
-                "SELECT z.id, rank FROM _ddb_fts \
-                 JOIN doogats z ON z.rowid = _ddb_fts.rowid \
-                 WHERE _ddb_fts MATCH ?1 AND z.id != ?2 \
-                 ORDER BY rank LIMIT 50",
-            )?;
-            let fts_rows = fts_stmt.query_map(params![phrase, source_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
-            })?;
+    /// Query FTS5 BM25 content scores, normalize, and merge into the scored list.
+    fn merge_content_scores(
+        &self,
+        source_id: &str,
+        source_title: &str,
+        candidate_tags: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+        linked_ids: &std::collections::HashSet<String>,
+        scored: &mut Vec<(String, f64, Vec<String>)>,
+    ) -> Result<()> {
+        use std::collections::HashMap;
 
-            // BM25 rank is negative (lower = better). Normalize to 0..1
-            let mut content_scores: Vec<(String, f64)> = Vec::new();
-            for r in fts_rows {
-                let (id, rank) = r?;
-                content_scores.push((id, -rank)); // flip sign so higher = better
-            }
-            let max_score = content_scores
-                .iter()
-                .map(|(_, s)| *s)
-                .fold(0.0_f64, f64::max);
+        if source_title.is_empty() {
+            return Ok(());
+        }
 
-            if max_score > 0.0 {
-                let content_map: HashMap<String, f64> = content_scores
-                    .into_iter()
-                    .map(|(id, s)| (id, s / max_score))
-                    .collect();
+        let phrase = format!("\"{}\"", source_title.replace('"', "\"\""));
+        let mut fts_stmt = self.conn.prepare(
+            "SELECT z.id, rank FROM _ddb_fts \
+             JOIN doogats z ON z.rowid = _ddb_fts.rowid \
+             WHERE _ddb_fts MATCH ?1 AND z.id != ?2 \
+             ORDER BY rank LIMIT 50",
+        )?;
+        let fts_rows = fts_stmt.query_map(params![phrase, source_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        })?;
 
-                // Merge content scores into existing candidates
-                for (id, score, _) in &mut scored {
-                    if let Some(&content_score) = content_map.get(id) {
-                        *score += content_score * 0.4;
-                    }
-                }
+        let mut content_scores: Vec<(String, f64)> = Vec::new();
+        for r in fts_rows {
+            let (id, rank) = r?;
+            content_scores.push((id, -rank));
+        }
+        let max_score = content_scores
+            .iter()
+            .map(|(_, s)| *s)
+            .fold(0.0_f64, f64::max);
 
-                // Add content-only candidates not already in the list
-                for (id, norm_score) in &content_map {
-                    if !candidate_tags.contains_key(id)
-                        && id != source_id
-                        && !linked_ids.contains(id)
-                        && !linked_ids.contains(&self.resolve_path(id).unwrap_or_default())
-                        && !alias_stmt
-                            .query_map(params![id.as_str()], |row| row.get::<_, String>(0))
-                            .ok()
-                            .into_iter()
-                            .flatten()
-                            .flatten()
-                            .any(|alias| linked_ids.contains(&alias))
-                    {
-                        scored.push((id.clone(), norm_score * 0.4, vec![]));
-                    }
-                }
+        if max_score <= 0.0 {
+            return Ok(());
+        }
+
+        let content_map: HashMap<String, f64> = content_scores
+            .into_iter()
+            .map(|(id, s)| (id, s / max_score))
+            .collect();
+
+        for (id, score, _) in scored.iter_mut() {
+            if let Some(&content_score) = content_map.get(id) {
+                *score += content_score * 0.4;
             }
         }
 
-        // Sort by score descending, take top N
+        for (id, norm_score) in &content_map {
+            if candidate_tags.contains_key(id) || id == source_id {
+                continue;
+            }
+            if self.is_candidate_linked(id, linked_ids) {
+                continue;
+            }
+            scored.push((id.clone(), norm_score * 0.4, vec![]));
+        }
+
+        Ok(())
+    }
+
+    /// Sort scored candidates, truncate to limit, and look up titles.
+    fn build_suggestions(
+        &self,
+        scored: &mut Vec<(String, f64, Vec<String>)>,
+        limit: usize,
+    ) -> Result<Vec<Suggestion>> {
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored.truncate(limit);
 
-        // Look up titles
         let mut title_stmt = self
             .conn
             .prepare("SELECT title FROM doogats WHERE id = ?1")?;
-        let results: Vec<Suggestion> = scored
-            .into_iter()
+        let results = scored
+            .iter()
             .map(|(id, score, shared_tags)| {
                 let title: String = title_stmt
                     .query_row(params![id], |row| row.get(0))
                     .unwrap_or_default();
                 Suggestion {
-                    id,
+                    id: id.clone(),
                     title,
-                    score,
-                    shared_tags,
+                    score: *score,
+                    shared_tags: shared_tags.clone(),
                 }
             })
             .collect();
@@ -353,8 +420,6 @@ impl Index {
         source_id: &str,
         limit: usize,
     ) -> Result<Vec<Suggestion>> {
-        use std::collections::HashSet;
-
         let source_title: String = self
             .conn
             .query_row(
@@ -368,21 +433,7 @@ impl Index {
             return Ok(vec![]);
         }
 
-        let linked_ids: HashSet<String> = {
-            let mut stmt = self
-                .conn
-                .prepare("SELECT target_path FROM _ddb_links WHERE source_id = ?1")?;
-            let rows = stmt.query_map(params![source_id], |row| row.get(0))?;
-            let mut set = HashSet::new();
-            for id in rows.flatten() {
-                set.insert(id);
-            }
-            set
-        };
-
-        let mut alias_stmt = self
-            .conn
-            .prepare("SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1")?;
+        let linked_ids = self.collect_linked_ids(source_id)?;
 
         let phrase = format!("\"{}\"", source_title.replace('"', "\"\""));
         let mut stmt = self.conn.prepare(
@@ -402,22 +453,13 @@ impl Index {
         let mut results = Vec::new();
         for r in rows {
             let (id, title, rank) = r?;
-            if linked_ids.contains(&id)
-                || linked_ids.contains(&self.resolve_path(&id).unwrap_or_default())
-                || alias_stmt
-                    .query_map(params![&id], |row| row.get::<_, String>(0))
-                    .ok()
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .any(|alias| linked_ids.contains(&alias))
-            {
+            if self.is_candidate_linked(&id, &linked_ids) {
                 continue;
             }
             results.push(Suggestion {
                 id,
                 title,
-                score: -rank, // flip sign
+                score: -rank,
                 shared_tags: vec![],
             });
             if results.len() >= limit {
