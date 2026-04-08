@@ -660,6 +660,20 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
     }
 }
 
+/// Build a DoogatEvent from a parsed doogat.
+fn doogat_event(
+    kind: &EventKind,
+    z: &ParsedDoogat,
+    timestamp: chrono::DateTime<Utc>,
+) -> DoogatEvent {
+    DoogatEvent {
+        kind: kind.clone(),
+        doogat_id: z.meta.id.as_ref().map(ToString::to_string).unwrap_or_default(),
+        doogat_type: z.meta.doogat_type.clone(),
+        timestamp,
+    }
+}
+
 /// Emit events for successful singular and batch mutations.
 fn emit_mutation_events(
     event_bus: &EventBus,
@@ -674,17 +688,7 @@ fn emit_mutation_events(
         match (kind, reply) {
             (EventKind::Created | EventKind::Updated, ActorReply::Doogat(r)) => {
                 if let Ok(z) = r.as_ref() {
-                    event_bus.send(DoogatEvent {
-                        kind: kind.clone(),
-                        doogat_id: z
-                            .meta
-                            .id
-                            .as_ref()
-                            .map(ToString::to_string)
-                            .unwrap_or_default(),
-                        doogat_type: z.meta.doogat_type.clone(),
-                        timestamp: Utc::now(),
-                    });
+                    event_bus.send(doogat_event(kind, z, Utc::now()));
                 }
             }
             (EventKind::Deleted, ActorReply::Deleted(Ok(()))) => {
@@ -701,24 +705,10 @@ fn emit_mutation_events(
 
     if is_batch_update || is_create_many {
         if let ActorReply::DoogatList(Ok(ref doogats)) = reply {
-            let kind = if is_create_many {
-                EventKind::Created
-            } else {
-                EventKind::Updated
-            };
+            let kind = if is_create_many { EventKind::Created } else { EventKind::Updated };
             let now = Utc::now();
             for z in doogats {
-                event_bus.send(DoogatEvent {
-                    kind: kind.clone(),
-                    doogat_id: z
-                        .meta
-                        .id
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_default(),
-                    doogat_type: z.meta.doogat_type.clone(),
-                    timestamp: now,
-                });
+                event_bus.send(doogat_event(&kind, z, now));
             }
         }
     }
