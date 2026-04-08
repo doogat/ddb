@@ -570,6 +570,52 @@ fn extract_sort_key(val: &GqlValue, field: &str) -> String {
     }
 }
 
+fn build_singular_ref_field(
+    col: &ColumnDef,
+    field_name: &str,
+    known_types: &HashMap<String, String>,
+) -> Field {
+    let target_type = ref_target_gql_type(col, known_types);
+    let target_ref_name = col.references.clone().unwrap_or_default();
+    let col_name = col.name.clone();
+    Field::new(field_name, TypeRef::named(&target_type), move |ctx| {
+        let col_name = col_name.clone();
+        let target_ref_name = target_ref_name.clone();
+        FieldFuture::new(async move {
+            let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+            let id = match parent {
+                GqlValue::Object(map) => match map.get(col_name.as_str()) {
+                    Some(GqlValue::String(s)) if !s.is_empty() => s.to_string(),
+                    _ => return Ok(None),
+                },
+                _ => return Ok(None),
+            };
+            let pool = ctx.data::<crate::read_pool::ReadPool>()?;
+            let schemas = ctx.data::<TypeSchemaMap>()?;
+            let doogat = match pool.get_doogat(id).await {
+                Ok(z) => z,
+                Err(_) => return Ok(None),
+            };
+            let val = match schemas.0.get(&target_ref_name) {
+                Some(ts) => typed_doogat_to_value(&doogat, ts),
+                None => doogat_to_value(&doogat),
+            };
+            Ok(Some(FieldValue::owned_any(val)))
+        })
+    })
+}
+
+fn build_raw_ref_field(col_name: &str, field_name: &str) -> Field {
+    let col_name = col_name.to_string();
+    Field::new(field_name, TypeRef::named(TypeRef::STRING), move |ctx| {
+        let col_name = col_name.clone();
+        FieldFuture::new(async move {
+            let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+            Ok(obj_field(obj, &col_name))
+        })
+    })
+}
+
 /// Build a dynamic GraphQL object type for a _typedef schema.
 pub(crate) fn build_typed_object(
     type_name: &str,
@@ -600,44 +646,9 @@ pub(crate) fn build_typed_object(
                 sanitize_field_name(&format!("{}_id", col.name))
             };
 
-            // Singular: resolves as the referenced typed object (nullable)
-            // Skip if the computed object field name collides with a base doogat field
-            if BASE_DOOGAT_FIELDS.contains(&obj_field_name.as_str()) {
-                // Still add the raw scalar (below) but skip the object resolver
-            } else {
-            let target_type = ref_target_gql_type(col, known_types);
-            let target_ref_name = col.references.clone().unwrap_or_default();
-            let col_name = col.name.clone();
-            obj = obj.field(Field::new(
-                &obj_field_name,
-                TypeRef::named(&target_type),
-                move |ctx| {
-                    let col_name = col_name.clone();
-                    let target_ref_name = target_ref_name.clone();
-                    FieldFuture::new(async move {
-                        let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-                        let id = match parent {
-                            GqlValue::Object(map) => match map.get(col_name.as_str()) {
-                                Some(GqlValue::String(s)) if !s.is_empty() => s.to_string(),
-                                _ => return Ok(None),
-                            },
-                            _ => return Ok(None),
-                        };
-                        let pool = ctx.data::<crate::read_pool::ReadPool>()?;
-                        let schemas = ctx.data::<TypeSchemaMap>()?;
-                        let doogat = match pool.get_doogat(id).await {
-                            Ok(z) => z,
-                            Err(_) => return Ok(None),
-                        };
-                        let val = match schemas.0.get(&target_ref_name) {
-                            Some(ts) => typed_doogat_to_value(&doogat, ts),
-                            None => doogat_to_value(&doogat),
-                        };
-                        Ok(Some(FieldValue::owned_any(val)))
-                    })
-                },
-            ));
-            } // end BASE_DOOGAT_FIELDS guard for singular
+            if !BASE_DOOGAT_FIELDS.contains(&obj_field_name.as_str()) {
+                obj = obj.field(build_singular_ref_field(col, &obj_field_name, known_types));
+            }
 
             // Plural: resolves as list of referenced typed objects
             // Skip if the computed plural name collides with a base doogat field
@@ -765,19 +776,7 @@ pub(crate) fn build_typed_object(
                 );
             }
 
-            // Raw scalar field: exposes the raw reference ID as a String
-            let col_name = col.name.clone();
-            obj = obj.field(Field::new(
-                &raw_field_name,
-                TypeRef::named(TypeRef::STRING),
-                move |ctx| {
-                    let col_name = col_name.clone();
-                    FieldFuture::new(async move {
-                        let obj = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
-                        Ok(obj_field(obj, &col_name))
-                    })
-                },
-            ));
+            obj = obj.field(build_raw_ref_field(&col.name, &raw_field_name));
         } else if !BASE_DOOGAT_FIELDS.contains(&gql_col_name.as_str()) {
             // Non-REFERENCES scalar field
             let gql_type = column_to_gql_type(col);
