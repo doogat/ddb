@@ -58,21 +58,29 @@ pub async fn ws_handler(
             .on_upgrade(move |stream| {
                 GraphQLWebSocket::new(stream, schema, protocol)
                     .on_connection_init(move |payload| async move {
-                        let token = payload
-                            .get("Authorization")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        if validate_bearer(token, &expected) {
-                            Ok(async_graphql::Data::default())
-                        } else if token.is_empty() {
-                            Err(async_graphql::Error::new("Missing authentication"))
-                        } else {
-                            Err(async_graphql::Error::new("Invalid authentication"))
-                        }
+                        validate_ws_payload(&payload, &expected)
                     })
                     .keepalive_timeout(Duration::from_secs(30))
                     .serve()
             })
             .into_response()
+    }
+}
+
+/// Validate the Authorization token from a WebSocket connection_init payload.
+fn validate_ws_payload(
+    payload: &serde_json::Value,
+    expected: &str,
+) -> Result<async_graphql::Data, async_graphql::Error> {
+    let token = payload
+        .get("Authorization")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if validate_bearer(token, expected) {
+        Ok(async_graphql::Data::default())
+    } else if token.is_empty() {
+        Err(async_graphql::Error::new("Missing authentication"))
+    } else {
+        Err(async_graphql::Error::new("Invalid authentication"))
     }
 }
