@@ -1,7 +1,6 @@
 use axum::{
     extract::{Path, Query},
     http::StatusCode,
-    response::IntoResponse,
     routing, Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -175,21 +174,27 @@ pub fn router() -> Router {
 
 // ── Handlers ─────────────────────────────────────────────────────
 
-async fn list_doogats(
-    Extension(read_pool): Extension<ReadPool>,
-    Query(raw_params): Query<std::collections::HashMap<String, String>>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ErrorBody>)> {
-    // Extract standard params from the raw map
-    let doogat_type = raw_params.get("type").cloned();
-    let tag = raw_params.get("tag").cloned();
-    let q = raw_params.get("q").cloned();
-    let backlinks = raw_params.get("backlinks").cloned();
-    let (sort_field, sort_desc) = match raw_params.get("sort").map(|s| s.as_str()) {
-        Some(raw) => {
-            let (desc, field) = if let Some(f) = raw.strip_prefix('-') {
+struct ListParams {
+    doogat_type: Option<String>,
+    tag: Option<String>,
+    q: Option<String>,
+    backlinks: Option<String>,
+    sort_field: Option<String>,
+    sort_desc: Option<bool>,
+    page: i64,
+    per_page: i64,
+    field_filters: Vec<(String, String)>,
+}
+
+fn parse_list_params(
+    raw: &std::collections::HashMap<String, String>,
+) -> Result<ListParams, (StatusCode, Json<ErrorBody>)> {
+    let (sort_field, sort_desc) = match raw.get("sort").map(|s| s.as_str()) {
+        Some(raw_sort) => {
+            let (desc, field) = if let Some(f) = raw_sort.strip_prefix('-') {
                 (Some(true), f)
             } else {
-                (None, raw)
+                (None, raw_sort)
             };
             if !SORTABLE_COLUMNS.contains(&field) {
                 return Err(rest_error(DoogatError::Validation(format!(
@@ -201,7 +206,7 @@ async fn list_doogats(
         }
         None => (None, None),
     };
-    let page: i64 = match raw_params.get("page") {
+    let page: i64 = match raw.get("page") {
         Some(v) => v.parse().map_err(|_| {
             rest_error(DoogatError::Validation(format!(
                 "invalid page value '{v}'; must be a positive integer"
@@ -210,7 +215,7 @@ async fn list_doogats(
         None => 1,
     }
     .max(1);
-    let per_page: i64 = match raw_params.get("per_page") {
+    let per_page: i64 = match raw.get("per_page") {
         Some(v) => v.parse().map_err(|_| {
             rest_error(DoogatError::Validation(format!(
                 "invalid per_page value '{v}'; must be an integer 1-200"
@@ -218,10 +223,7 @@ async fn list_doogats(
         })?,
         None => 50,
     };
-    let per_page = per_page.clamp(1, 200);
-
-    // Extract field.* params
-    let field_filters: Vec<(String, String)> = raw_params
+    let field_filters = raw
         .iter()
         .filter_map(|(k, v)| {
             k.strip_prefix("field.")
@@ -230,42 +232,75 @@ async fn list_doogats(
         })
         .collect();
 
-    // Full-text search shortcut
-    if let Some(q) = q {
-        let limit = per_page as usize;
-        let page_usize = page as usize;
-        let offset = (page_usize - 1) * limit;
-        let result = read_pool
-            .search(q, limit, offset, SearchFilters::default())
-            .await
-            .map_err(rest_error)?;
-        let hits: Vec<SearchHit> = result
-            .hits
-            .into_iter()
-            .map(|r| SearchHit {
-                id: r.id,
-                title: r.title,
-                snippet: r.snippet,
-                rank: r.rank,
-            })
-            .collect();
-        return Ok(Json(
-            serde_json::to_value(SearchResponse {
-                data: hits,
-                total_count: result.total_count,
-            })
-            .unwrap(),
-        ));
+    Ok(ListParams {
+        doogat_type: raw.get("type").cloned(),
+        tag: raw.get("tag").cloned(),
+        q: raw.get("q").cloned(),
+        backlinks: raw.get("backlinks").cloned(),
+        sort_field,
+        sort_desc,
+        page,
+        per_page: per_page.clamp(1, 200),
+        field_filters,
+    })
+}
+
+async fn list_doogats(
+    Extension(read_pool): Extension<ReadPool>,
+    Query(raw_params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
+    let params = parse_list_params(&raw_params)?;
+
+    if let Some(q) = params.q {
+        return handle_search(read_pool, q, params.page, params.per_page).await;
     }
 
-    let offset = (page - 1) * per_page;
+    fetch_paginated_list(read_pool, params).await
+}
+
+async fn handle_search(
+    read_pool: ReadPool,
+    q: String,
+    page: i64,
+    per_page: i64,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
+    let limit = per_page as usize;
+    let offset = (page as usize - 1) * limit;
+    let result = read_pool
+        .search(q, limit, offset, SearchFilters::default())
+        .await
+        .map_err(rest_error)?;
+    let hits: Vec<SearchHit> = result
+        .hits
+        .into_iter()
+        .map(|r| SearchHit {
+            id: r.id,
+            title: r.title,
+            snippet: r.snippet,
+            rank: r.rank,
+        })
+        .collect();
+    Ok(Json(
+        serde_json::to_value(SearchResponse {
+            data: hits,
+            total_count: result.total_count,
+        })
+        .unwrap(),
+    ))
+}
+
+async fn fetch_paginated_list(
+    read_pool: ReadPool,
+    params: ListParams,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
+    let offset = (params.page - 1) * params.per_page;
 
     let total = read_pool
         .count_doogats(
-            doogat_type.clone(),
-            tag.clone(),
-            backlinks.clone(),
-            field_filters.clone(),
+            params.doogat_type.clone(),
+            params.tag.clone(),
+            params.backlinks.clone(),
+            params.field_filters.clone(),
         )
         .await
         .map_err(rest_error)?;
@@ -273,19 +308,19 @@ async fn list_doogats(
     let total_pages = if total == 0 {
         1
     } else {
-        (total + per_page - 1) / per_page
+        (total + params.per_page - 1) / params.per_page
     };
 
     let doogats = read_pool
         .list_doogats(ListFilter {
-            doogat_type,
-            tag,
-            backlinks_of: backlinks,
-            field_filters,
-            limit: Some(per_page),
+            doogat_type: params.doogat_type,
+            tag: params.tag,
+            backlinks_of: params.backlinks,
+            field_filters: params.field_filters,
+            limit: Some(params.per_page),
             offset: Some(offset),
-            sort_field,
-            sort_desc,
+            sort_field: params.sort_field,
+            sort_desc: params.sort_desc,
         })
         .await
         .map_err(rest_error)?;
@@ -296,8 +331,8 @@ async fn list_doogats(
         serde_json::to_value(ListResponse {
             data,
             pagination: Pagination {
-                page,
-                per_page,
+                page: params.page,
+                per_page: params.per_page,
                 total,
                 total_pages,
             },
