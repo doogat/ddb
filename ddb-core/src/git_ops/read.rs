@@ -90,47 +90,55 @@ impl GitRepo {
                 tracing::warn!(path, depth, "HLC revwalk hit depth limit");
                 return None;
             }
-            let c = match self.repo.find_commit(oid) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(oid = %oid, error = %e, "skipping bad commit in HLC revwalk");
-                    continue;
-                }
-            };
-            let c_tree = match c.tree() {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!(oid = %oid, error = %e, "skipping commit with bad tree in HLC revwalk");
-                    continue;
-                }
-            };
-
-            let parent_tree = c.parent(0).ok().and_then(|p| p.tree().ok());
-            let diff = match self
-                .repo
-                .diff_tree_to_tree(parent_tree.as_ref(), Some(&c_tree), None)
-            {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(oid = %oid, error = %e, "skipping undiffable commit in HLC revwalk");
-                    continue;
-                }
-            };
-
-            let touches_path = diff.deltas().any(|delta| {
-                delta
-                    .new_file()
-                    .path()
-                    .or_else(|| delta.old_file().path())
-                    .and_then(|p| p.to_str())
-                    .is_some_and(|p| p == path)
-            });
-
-            if touches_path {
-                return crate::hlc::extract_hlc(c.message().unwrap_or(""));
+            if let Some(hlc) = self.check_commit_for_hlc(oid, path) {
+                return Some(hlc);
             }
         }
         None
+    }
+
+    fn check_commit_for_hlc(&self, oid: git2::Oid, path: &str) -> Option<crate::hlc::Hlc> {
+        let c = match self.repo.find_commit(oid) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(oid = %oid, error = %e, "skipping bad commit in HLC revwalk");
+                return None;
+            }
+        };
+        let c_tree = match c.tree() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(oid = %oid, error = %e, "skipping commit with bad tree in HLC revwalk");
+                return None;
+            }
+        };
+
+        let parent_tree = c.parent(0).ok().and_then(|p| p.tree().ok());
+        let diff = match self
+            .repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&c_tree), None)
+        {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(oid = %oid, error = %e, "skipping undiffable commit in HLC revwalk");
+                return None;
+            }
+        };
+
+        let touches_path = diff.deltas().any(|delta| {
+            delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .and_then(|p| p.to_str())
+                .is_some_and(|p| p == path)
+        });
+
+        if touches_path {
+            crate::hlc::extract_hlc(c.message().unwrap_or(""))
+        } else {
+            None
+        }
     }
 
     /// Diff two commit OIDs, returning changed doogat paths with their change kind.
@@ -139,16 +147,7 @@ impl GitRepo {
         old_oid: &str,
         new_oid: &str,
     ) -> Result<Vec<(crate::types::DiffKind, String)>> {
-        use crate::types::DiffKind;
-
-        let old_commit = self
-            .repo
-            .find_commit(git2::Oid::from_str(old_oid).map_err(|e| DoogatError::Git(e.to_string()))?)
-            .map_err(|e| DoogatError::Git(e.to_string()))?;
-        let new_commit = self
-            .repo
-            .find_commit(git2::Oid::from_str(new_oid).map_err(|e| DoogatError::Git(e.to_string()))?)
-            .map_err(|e| DoogatError::Git(e.to_string()))?;
+        let (old_commit, new_commit) = self.resolve_commit_pair(old_oid, new_oid)?;
 
         let old_tree = old_commit.tree()?;
         let new_tree = new_commit.tree()?;
@@ -169,14 +168,7 @@ impl GitRepo {
 
                 if let Some(path) = path {
                     if path.starts_with("ddb/") && path.ends_with(".md") {
-                        let kind = match delta.status() {
-                            git2::Delta::Added => Some(DiffKind::Added),
-                            git2::Delta::Modified => Some(DiffKind::Modified),
-                            git2::Delta::Deleted => Some(DiffKind::Deleted),
-                            git2::Delta::Renamed => Some(DiffKind::Modified),
-                            _ => None,
-                        };
-                        if let Some(kind) = kind {
+                        if let Some(kind) = Self::classify_delta(delta.status()) {
                             changes.push((kind, path));
                         }
                     }
@@ -190,6 +182,33 @@ impl GitRepo {
         .map_err(|e| DoogatError::Git(e.to_string()))?;
 
         Ok(changes)
+    }
+
+    fn resolve_commit_pair(
+        &self,
+        old_oid: &str,
+        new_oid: &str,
+    ) -> Result<(git2::Commit<'_>, git2::Commit<'_>)> {
+        let old_commit = self
+            .repo
+            .find_commit(git2::Oid::from_str(old_oid).map_err(|e| DoogatError::Git(e.to_string()))?)
+            .map_err(|e| DoogatError::Git(e.to_string()))?;
+        let new_commit = self
+            .repo
+            .find_commit(git2::Oid::from_str(new_oid).map_err(|e| DoogatError::Git(e.to_string()))?)
+            .map_err(|e| DoogatError::Git(e.to_string()))?;
+        Ok((old_commit, new_commit))
+    }
+
+    fn classify_delta(status: git2::Delta) -> Option<crate::types::DiffKind> {
+        use crate::types::DiffKind;
+        match status {
+            git2::Delta::Added => Some(DiffKind::Added),
+            git2::Delta::Modified => Some(DiffKind::Modified),
+            git2::Delta::Deleted => Some(DiffKind::Deleted),
+            git2::Delta::Renamed => Some(DiffKind::Modified),
+            _ => None,
+        }
     }
 
     /// Return the ISO 8601 commit date of the most recent commit that touched `rel_path`.
