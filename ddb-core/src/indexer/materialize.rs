@@ -20,6 +20,43 @@ pub(crate) fn normalize_bool_str(val: &str) -> String {
     }
 }
 
+/// Build SQL column definitions from schema columns, including core columns.
+fn build_column_definitions(columns: &[crate::types::ColumnDef]) -> Vec<String> {
+    let mut col_defs = vec![
+        "id TEXT PRIMARY KEY".to_string(),
+        "title TEXT".to_string(),
+        "date TEXT".to_string(),
+        "updated_at TEXT".to_string(),
+    ];
+    for col in columns {
+        if is_core_column(&col.name) {
+            continue;
+        }
+        let sql_type = match col.data_type.to_uppercase().as_str() {
+            "INTEGER" => "INTEGER",
+            "REAL" => "REAL",
+            "BOOLEAN" => "INTEGER",
+            _ => "TEXT",
+        };
+        let check = if let Some(ref vals) = col.allowed_values {
+            let quoted: Vec<String> = vals
+                .iter()
+                .map(|v| format!("'{}'", v.replace('\'', "''")))
+                .collect();
+            format!(
+                " CHECK(\"{}\" IS NULL OR \"{}\" IN ({}))",
+                col.name,
+                col.name,
+                quoted.join(", ")
+            )
+        } else {
+            String::new()
+        };
+        col_defs.push(format!("\"{}\" {}{}", col.name, sql_type, check));
+    }
+    col_defs
+}
+
 /// DDL for creating a junction table for a REFERENCES column.
 pub fn junction_table_ddl(table_name: &str, col_name: &str) -> String {
     format!(
@@ -50,38 +87,7 @@ impl Index {
             [],
         )?;
 
-        let mut col_defs = vec![
-            "id TEXT PRIMARY KEY".to_string(),
-            "title TEXT".to_string(),
-            "date TEXT".to_string(),
-            "updated_at TEXT".to_string(),
-        ];
-        for col in &schema.columns {
-            if is_core_column(&col.name) {
-                continue;
-            }
-            let sql_type = match col.data_type.to_uppercase().as_str() {
-                "INTEGER" => "INTEGER",
-                "REAL" => "REAL",
-                "BOOLEAN" => "INTEGER",
-                _ => "TEXT",
-            };
-            let check = if let Some(ref vals) = col.allowed_values {
-                let quoted: Vec<String> = vals
-                    .iter()
-                    .map(|v| format!("'{}'", v.replace('\'', "''")))
-                    .collect();
-                format!(
-                    " CHECK(\"{}\" IS NULL OR \"{}\" IN ({}))",
-                    col.name,
-                    col.name,
-                    quoted.join(", ")
-                )
-            } else {
-                String::new()
-            };
-            col_defs.push(format!("\"{}\" {}{}", col.name, sql_type, check));
-        }
+        let col_defs = build_column_definitions(&schema.columns);
         self.conn.execute(
             &format!(
                 "CREATE TABLE \"{}\" ({})",
@@ -91,40 +97,47 @@ impl Index {
             [],
         )?;
 
-        // Create junction tables for REFERENCES columns
+        self.create_junction_tables(schema)?;
+        self.create_unique_indexes(schema)?;
+
+        Ok(())
+    }
+
+    /// Create junction tables for REFERENCES columns.
+    fn create_junction_tables(&self, schema: &crate::types::TableSchema) -> Result<()> {
         for col in &schema.columns {
             if col.references.is_some() {
                 self.conn
                     .execute(&junction_table_ddl(&schema.table_name, &col.name), [])?;
             }
         }
+        Ok(())
+    }
 
-        // Create unique indexes for unique_together constraints
-        if let Some(ref constraints) = schema.unique_together {
-            for cols in constraints {
-                if cols.is_empty() {
-                    continue;
-                }
-                let col_list = cols
-                    .iter()
-                    .map(|c| format!("\"{}\"", c))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let index_name = format!(
-                    "{}_unique_{}",
-                    schema.table_name,
-                    cols.join("_")
-                );
-                self.conn.execute(
-                    &format!(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS \"{}\" ON \"{}\" ({})",
-                        index_name, schema.table_name, col_list
-                    ),
-                    [],
-                )?;
+    /// Create unique indexes from unique_together constraints.
+    fn create_unique_indexes(&self, schema: &crate::types::TableSchema) -> Result<()> {
+        let constraints = match schema.unique_together {
+            Some(ref c) => c,
+            None => return Ok(()),
+        };
+        for cols in constraints {
+            if cols.is_empty() {
+                continue;
             }
+            let col_list = cols
+                .iter()
+                .map(|c| format!("\"{}\"", c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let index_name = format!("{}_unique_{}", schema.table_name, cols.join("_"));
+            self.conn.execute(
+                &format!(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS \"{}\" ON \"{}\" ({})",
+                    index_name, schema.table_name, col_list
+                ),
+                [],
+            )?;
         }
-
         Ok(())
     }
 
@@ -242,72 +255,18 @@ impl Index {
         type_name: &str,
         doogats: &[ParsedDoogat],
     ) -> crate::types::TableSchema {
-        use crate::types::{ColumnDef, TableSchema, Zone};
         use std::collections::HashMap;
 
-        let mut columns: HashMap<String, (Zone, Vec<String>)> = HashMap::new();
+        let mut columns: HashMap<String, (crate::types::Zone, Vec<String>)> = HashMap::new();
 
         for parsed in doogats
             .iter()
             .filter(|z| z.meta.doogat_type.as_deref() == Some(type_name))
         {
-            for (key, value) in &parsed.meta.extra {
-                let inferred_type = infer_yaml_type(value);
-                columns
-                    .entry(key.to_lowercase())
-                    .or_insert_with(|| (Zone::Frontmatter, Vec::new()))
-                    .1
-                    .push(inferred_type);
-            }
-
-            for section in &parsed.sections {
-                if section.level > 0 {
-                    columns
-                        .entry(section.heading.to_lowercase())
-                        .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
-                }
-            }
-
-            for field in &parsed.inline_fields {
-                if field.zone == Zone::Reference {
-                    let entry = columns
-                        .entry(field.key.to_lowercase())
-                        .or_insert_with(|| (Zone::Reference, Vec::new()));
-                    entry.1.push("TEXT".to_string());
-                }
-            }
+            collect_zone_columns(parsed, &mut columns);
         }
 
-        let mut cols: Vec<ColumnDef> = columns
-            .into_iter()
-            .map(|(name, (zone, types))| {
-                let data_type = widen_types(&types);
-                ColumnDef {
-                    name,
-                    data_type,
-                    references: None,
-                    zone: Some(zone),
-                    required: false,
-                    search_boost: None,
-                    allowed_values: None,
-                    default_value: None,
-                }
-            })
-            .collect();
-
-        cols.sort_by(|a, b| a.name.cmp(&b.name));
-
-        TableSchema {
-            table_name: type_name.to_string(),
-            columns: cols,
-            crdt_strategy: None,
-            template_sections: vec![],
-            folder: false,
-            stale_after_days: None,
-            title_template: None,
-            origin: None,
-            unique_together: None,
-        }
+        finalize_schema_columns(type_name, columns)
     }
 
     /// Populate a materialized table from pre-parsed doogats (no git reads).
@@ -386,10 +345,8 @@ impl Index {
         type_name: &str,
         repo: &(impl DoogatSource + ?Sized),
     ) -> Result<crate::types::TableSchema> {
-        use crate::types::{ColumnDef, TableSchema, Zone};
         use std::collections::HashMap;
 
-        // Query all doogats of this type
         let mut stmt = self
             .conn
             .prepare("SELECT path FROM doogats WHERE type = ?1")?;
@@ -398,76 +355,15 @@ impl Index {
             .filter_map(|r| r.ok())
             .collect();
 
-        // Track columns: name -> (zone, data_types_seen)
-        let mut columns: HashMap<String, (Zone, Vec<String>)> = HashMap::new();
+        let mut columns: HashMap<String, (crate::types::Zone, Vec<String>)> = HashMap::new();
 
         for path in &paths {
             let content = repo.read_file(path)?;
             let parsed = crate::parser::parse(&content, path)?;
-
-            // Frontmatter extra keys → frontmatter columns
-            // Normalize to lowercase — SQLite column names are case-insensitive
-            for (key, value) in &parsed.meta.extra {
-                let inferred_type = infer_yaml_type(value);
-                columns
-                    .entry(key.to_lowercase())
-                    .or_insert_with(|| (Zone::Frontmatter, Vec::new()))
-                    .1
-                    .push(inferred_type);
-            }
-
-            // Body headings → body TEXT columns (from parsed sections)
-            for section in &parsed.sections {
-                if section.level > 0 {
-                    columns
-                        .entry(section.heading.to_lowercase())
-                        .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
-                }
-            }
-
-            // Reference fields → reference columns
-            for field in &parsed.inline_fields {
-                if field.zone == Zone::Reference {
-                    let entry = columns
-                        .entry(field.key.to_lowercase())
-                        .or_insert_with(|| (Zone::Reference, Vec::new()));
-                    entry.1.push("TEXT".to_string());
-                }
-            }
+            collect_zone_columns(&parsed, &mut columns);
         }
 
-        // Build final columns with type widening
-        let mut cols: Vec<ColumnDef> = columns
-            .into_iter()
-            .map(|(name, (zone, types))| {
-                let data_type = widen_types(&types);
-                ColumnDef {
-                    name,
-                    data_type,
-                    references: None,
-                    zone: Some(zone),
-                    required: false,
-                    search_boost: None,
-                    allowed_values: None,
-                    default_value: None,
-                }
-            })
-            .collect();
-
-        // Sort columns for deterministic output
-        cols.sort_by(|a, b| a.name.cmp(&b.name));
-
-        Ok(TableSchema {
-            table_name: type_name.to_string(),
-            columns: cols,
-            crdt_strategy: None,
-            template_sections: vec![],
-            folder: false,
-            stale_after_days: None,
-            title_template: None,
-            origin: None,
-            unique_together: None,
-        })
+        Ok(finalize_schema_columns(type_name, columns))
     }
 
     /// Merge an explicit typedef schema with an inferred schema.
@@ -758,6 +654,79 @@ impl Index {
         }
 
         Ok(())
+    }
+}
+
+/// Collect frontmatter, body, and reference columns from a parsed doogat into the accumulator.
+fn collect_zone_columns(
+    parsed: &crate::types::ParsedDoogat,
+    columns: &mut std::collections::HashMap<String, (crate::types::Zone, Vec<String>)>,
+) {
+    use crate::types::Zone;
+
+    for (key, value) in &parsed.meta.extra {
+        let inferred_type = infer_yaml_type(value);
+        columns
+            .entry(key.to_lowercase())
+            .or_insert_with(|| (Zone::Frontmatter, Vec::new()))
+            .1
+            .push(inferred_type);
+    }
+
+    for section in &parsed.sections {
+        if section.level > 0 {
+            columns
+                .entry(section.heading.to_lowercase())
+                .or_insert_with(|| (Zone::Body, vec!["TEXT".to_string()]));
+        }
+    }
+
+    for field in &parsed.inline_fields {
+        if field.zone == Zone::Reference {
+            let entry = columns
+                .entry(field.key.to_lowercase())
+                .or_insert_with(|| (Zone::Reference, Vec::new()));
+            entry.1.push("TEXT".to_string());
+        }
+    }
+}
+
+/// Build final sorted ColumnDef list and TableSchema from collected column data.
+fn finalize_schema_columns(
+    type_name: &str,
+    columns: std::collections::HashMap<String, (crate::types::Zone, Vec<String>)>,
+) -> crate::types::TableSchema {
+    use crate::types::{ColumnDef, TableSchema};
+
+    let mut cols: Vec<ColumnDef> = columns
+        .into_iter()
+        .map(|(name, (zone, types))| {
+            let data_type = widen_types(&types);
+            ColumnDef {
+                name,
+                data_type,
+                references: None,
+                zone: Some(zone),
+                required: false,
+                search_boost: None,
+                allowed_values: None,
+                default_value: None,
+            }
+        })
+        .collect();
+
+    cols.sort_by(|a, b| a.name.cmp(&b.name));
+
+    TableSchema {
+        table_name: type_name.to_string(),
+        columns: cols,
+        crdt_strategy: None,
+        template_sections: vec![],
+        folder: false,
+        stale_after_days: None,
+        title_template: None,
+        origin: None,
+        unique_together: None,
     }
 }
 
