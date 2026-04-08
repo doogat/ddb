@@ -118,6 +118,7 @@ fn handle_dot(
     path: &str,
 ) -> std::result::Result<(), PathError> {
     if current_key.is_empty() {
+        // Allow dot after bracket (e.g. "a[0].b") - just a separator
         if !matches!(segments.last(), Some(PathSegment::Index(_))) {
             return Err(PathError::InvalidPath {
                 path: path.to_string(),

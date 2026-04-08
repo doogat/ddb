@@ -212,6 +212,7 @@ impl<G: GitBackend> DoogatService<G> {
         self.repo
             .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
         let mut parsed = self.reindex_and_rematerialize(&new_content, &path, schemas.as_deref())?;
+        // Sync stored HEAD to avoid spurious incremental_reindex on next call
         self.index.store_head(&self.repo.head_oid()?.0)?;
         parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
         Ok(parsed)

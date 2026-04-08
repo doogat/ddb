@@ -479,6 +479,7 @@ impl<'a> SqlEngine<'a> {
         };
         let (typedef_id, typedef_path) = typedef_loc;
 
+        // Load schema before git deletes (needed for junction table cleanup)
         let schema = self.load_schema(table_name).ok();
         let data_doogats = self.find_type_data_doogats(table_name)?;
 
