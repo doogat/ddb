@@ -280,20 +280,45 @@ impl Index {
             params![id],
         )?;
 
+        self.insert_tags(id, doogat)?;
+        self.insert_checkboxes(id, doogat)?;
+        self.insert_inline_fields(id, doogat)?;
+        self.insert_links(id, doogat)?;
+        self.insert_aliases(id, doogat)?;
+        self.insert_attachments(id, doogat)?;
+
+        // Collect frontmatter extra values for FTS fields column.
+        // Skip internal keys that have dedicated tables.
+        let fields_str = collect_fts_fields(&doogat.meta.extra);
+
+        // Insert FTS entry
+        self.conn.execute(
+            "INSERT INTO _ddb_fts (rowid, title, body, tags, fields) VALUES (
+                (SELECT rowid FROM doogats WHERE id = ?1), ?2, ?3, ?4, ?5
+            )",
+            params![id, title, doogat.body, tags_str, fields_str],
+        )?;
+
+        Ok(())
+    }
+
+    fn insert_tags(&self, id: &str, doogat: &ParsedDoogat) -> Result<()> {
         for tag in &doogat.meta.tags {
             self.conn.execute(
                 "INSERT INTO _ddb_tags (doogat_id, tag, source) VALUES (?1, ?2, 'frontmatter')",
                 params![id, tag],
             )?;
         }
-
         for tag in &doogat.body_tags {
             self.conn.execute(
                 "INSERT INTO _ddb_tags (doogat_id, tag, source) VALUES (?1, ?2, 'body')",
                 params![id, tag],
             )?;
         }
+        Ok(())
+    }
 
+    fn insert_checkboxes(&self, id: &str, doogat: &ParsedDoogat) -> Result<()> {
         for cb in &doogat.checkboxes {
             let state = match cb.state {
                 crate::types::CheckboxState::Open => "open",
@@ -305,7 +330,10 @@ impl Index {
                 params![id, state, cb.content, cb.date, cb.due_date, cb.line_number as i64, cb.indent_level as i64],
             )?;
         }
+        Ok(())
+    }
 
+    fn insert_inline_fields(&self, id: &str, doogat: &ParsedDoogat) -> Result<()> {
         for field in &doogat.inline_fields {
             let zone = format!("{:?}", field.zone);
             self.conn.execute(
@@ -313,7 +341,6 @@ impl Index {
                 params![id, field.key, field.value, zone],
             )?;
         }
-
         // Insert frontmatter extras, flattening nested maps/lists into dot-notation keys
         for (key, value) in &doogat.meta.extra {
             let escaped = key
@@ -322,7 +349,10 @@ impl Index {
                 .replace('[', "\\[");
             flatten_value_into_fields(&self.conn, id, &escaped, value)?;
         }
+        Ok(())
+    }
 
+    fn insert_links(&self, id: &str, doogat: &ParsedDoogat) -> Result<()> {
         for link in &doogat.links {
             let zone = format!("{:?}", link.zone);
             let kind = link.kind.as_str();
@@ -331,8 +361,10 @@ impl Index {
                 params![id, link.target, link.display, zone, kind],
             )?;
         }
+        Ok(())
+    }
 
-        // Insert aliases
+    fn insert_aliases(&self, id: &str, doogat: &ParsedDoogat) -> Result<()> {
         if let Some(crate::types::Value::List(aliases)) = doogat.meta.extra.get("aliases") {
             for alias in aliases {
                 if let crate::types::Value::String(a) = alias {
@@ -343,8 +375,10 @@ impl Index {
                 }
             }
         }
+        Ok(())
+    }
 
-        // Insert attachments
+    fn insert_attachments(&self, id: &str, doogat: &ParsedDoogat) -> Result<()> {
         self.conn.execute(
             "DELETE FROM _ddb_attachments WHERE doogat_id = ?1",
             params![id],
@@ -363,19 +397,6 @@ impl Index {
                 }
             }
         }
-
-        // Collect frontmatter extra values for FTS fields column.
-        // Skip internal keys that have dedicated tables.
-        let fields_str = collect_fts_fields(&doogat.meta.extra);
-
-        // Insert FTS entry
-        self.conn.execute(
-            "INSERT INTO _ddb_fts (rowid, title, body, tags, fields) VALUES (
-                (SELECT rowid FROM doogats WHERE id = ?1), ?2, ?3, ?4, ?5
-            )",
-            params![id, title, doogat.body, tags_str, fields_str],
-        )?;
-
         Ok(())
     }
 
