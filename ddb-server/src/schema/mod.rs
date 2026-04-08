@@ -25,34 +25,8 @@ pub fn build_schema(
     type_schemas: Vec<TableSchema>,
     reloader: Option<Arc<SchemaReloader>>,
 ) -> Result<Schema, String> {
-    // -- Shared type definitions --
-    let type_defs::TypeDefs {
-        inline_field_type,
-        link_type,
-        search_hit_type,
-        search_connection_type,
-        column_info_type,
-        typedef_type,
-        sql_result_type,
-        attachment_type,
-        checkbox_item_type,
-        tag_info_type,
-        tag_entry_type,
-        tag_entries_connection_type,
-        tag_entries_where_input,
-        unlinked_mention_type,
-        suggestion_type,
-        stale_doogat_type,
-        orphan_doogat_type,
-        doogat_type,
-        create_input,
-        create_many_item_input,
-        conflict_action_enum,
-        update_input,
-        search_field_filter_input,
-    } = type_defs::build_type_defs();
+    let type_defs = type_defs::build_type_defs();
 
-    // -- Query fields (including dynamic per-type queries) --
     let queries::QueryOutput {
         query,
         known_types,
@@ -63,7 +37,6 @@ pub fn build_schema(
         broken_sequence_type,
     } = queries::build_query_fields(&type_schemas);
 
-    // -- Mutation fields --
     let mutations::MutationOutput {
         mutation,
         sync_result_type,
@@ -73,67 +46,36 @@ pub fn build_schema(
     } = mutations::build_mutation_fields();
     dynamic_inputs.push(attach_input);
 
-    // -- Subscription fields --
     let subscriptions::SubscriptionOutput {
         subscription,
         change_event_type,
     } = subscriptions::build_subscription_fields(&known_types, &type_schemas);
 
-    // -- Build schema --
     let mut builder = Schema::build(
         query.type_name(),
         Some(mutation.type_name()),
         Some(subscription.type_name()),
-    )
-    .register(Scalar::new("JSON"))
-    .register(doogat_type)
-    .register(inline_field_type)
-    .register(link_type)
-    .register(search_hit_type)
-    .register(search_connection_type)
-    .register(column_info_type)
-    .register(typedef_type)
-    .register(sql_result_type)
-    .register(create_input)
-    .register(create_many_item_input)
-    .register(update_input)
-    .register(search_field_filter_input)
-    .register(conflict_action_enum)
-    .register(attachment_type)
-    .register(checkbox_item_type)
-    .register(unlinked_mention_type)
-    .register(suggestion_type)
-    .register(stale_doogat_type)
-    .register(orphan_doogat_type)
-    .register(tag_info_type)
-    .register(tag_entry_type)
-    .register(tag_entries_connection_type)
-    .register(tag_entries_where_input)
-    .register(sequence_node_type)
-    .register(sequence_info_type)
-    .register(broken_sequence_type)
-    .register(change_event_type)
-    .register(sync_result_type)
-    .register(compact_result_type)
-    .register(git_maintenance_result_type)
-    // Shared filter/sort types
-    .register(crate::filter::string_filter())
-    .register(crate::filter::int_filter())
-    .register(crate::filter::float_filter())
-    .register(crate::filter::bool_filter())
-    .register(crate::filter::id_filter())
-    .register(crate::filter::sort_order_enum())
-    .register(query)
-    .register(mutation)
-    .register(subscription)
-    .data(actor)
-    .data(read_pool)
-    .data(TypeSchemaMap(Arc::new(
-        type_schemas
-            .iter()
-            .map(|s| (s.table_name.clone(), s.clone()))
-            .collect::<HashMap<_, _>>(),
-    )));
+    );
+
+    builder = register_shared_types(builder, type_defs)
+        .register(sequence_node_type)
+        .register(sequence_info_type)
+        .register(broken_sequence_type)
+        .register(change_event_type)
+        .register(sync_result_type)
+        .register(compact_result_type)
+        .register(git_maintenance_result_type)
+        .register(query)
+        .register(mutation)
+        .register(subscription)
+        .data(actor)
+        .data(read_pool)
+        .data(TypeSchemaMap(Arc::new(
+            type_schemas
+                .iter()
+                .map(|s| (s.table_name.clone(), s.clone()))
+                .collect::<HashMap<_, _>>(),
+        )));
 
     for typed_obj in dynamic_types {
         builder = builder.register(typed_obj);
@@ -147,6 +89,44 @@ pub fn build_schema(
     }
 
     builder.finish().map_err(|e| e.to_string())
+}
+
+/// Register core type definitions and shared filter types onto the schema builder.
+fn register_shared_types(
+    builder: SchemaBuilder,
+    td: type_defs::TypeDefs,
+) -> SchemaBuilder {
+    builder
+        .register(Scalar::new("JSON"))
+        .register(td.doogat_type)
+        .register(td.inline_field_type)
+        .register(td.link_type)
+        .register(td.search_hit_type)
+        .register(td.search_connection_type)
+        .register(td.column_info_type)
+        .register(td.typedef_type)
+        .register(td.sql_result_type)
+        .register(td.create_input)
+        .register(td.create_many_item_input)
+        .register(td.update_input)
+        .register(td.search_field_filter_input)
+        .register(td.conflict_action_enum)
+        .register(td.attachment_type)
+        .register(td.checkbox_item_type)
+        .register(td.unlinked_mention_type)
+        .register(td.suggestion_type)
+        .register(td.stale_doogat_type)
+        .register(td.orphan_doogat_type)
+        .register(td.tag_info_type)
+        .register(td.tag_entry_type)
+        .register(td.tag_entries_connection_type)
+        .register(td.tag_entries_where_input)
+        .register(crate::filter::string_filter())
+        .register(crate::filter::int_filter())
+        .register(crate::filter::float_filter())
+        .register(crate::filter::bool_filter())
+        .register(crate::filter::id_filter())
+        .register(crate::filter::sort_order_enum())
 }
 
 #[cfg(test)]
