@@ -29,51 +29,46 @@ pub(crate) fn parse_fields_json(
 
 // -- Value converters --
 
-pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
-    let id = z.meta.id.as_ref().map(|i| i.0.as_str()).unwrap_or("");
-    let title = z.meta.title.as_deref().unwrap_or("");
-    let date = z.meta.date.as_deref().unwrap_or("");
-    let ztype = z.meta.doogat_type.as_deref().unwrap_or("");
+fn zone_str(zone: &Zone) -> &'static str {
+    match zone {
+        Zone::Frontmatter => "frontmatter",
+        Zone::Body => "body",
+        Zone::Reference => "reference",
+    }
+}
+
+fn build_tags_list(z: &ParsedDoogat) -> Vec<GqlValue> {
     let mut seen = std::collections::HashSet::new();
-    let tags: Vec<GqlValue> = z
-        .meta
+    z.meta
         .tags
         .iter()
         .chain(z.body_tags.iter())
         .filter(|t| seen.insert(t.as_str()))
         .map(|t| GqlValue::from(t.as_str()))
-        .collect();
+        .collect()
+}
 
-    let fields: Vec<GqlValue> = z
-        .inline_fields
+fn build_inline_fields_list(z: &ParsedDoogat) -> Vec<GqlValue> {
+    z.inline_fields
         .iter()
         .map(|f| {
-            let zone = match f.zone {
-                Zone::Frontmatter => "frontmatter",
-                Zone::Body => "body",
-                Zone::Reference => "reference",
-            };
             GqlValue::Object(
                 [
                     (Name::new("key"), GqlValue::from(f.key.as_str())),
                     (Name::new("value"), GqlValue::from(f.value.as_str())),
-                    (Name::new("zone"), GqlValue::from(zone)),
+                    (Name::new("zone"), GqlValue::from(zone_str(&f.zone))),
                 ]
                 .into_iter()
                 .collect(),
             )
         })
-        .collect();
+        .collect()
+}
 
-    let links: Vec<GqlValue> = z
-        .links
+fn build_links_list(z: &ParsedDoogat) -> Vec<GqlValue> {
+    z.links
         .iter()
         .map(|l| {
-            let zone = match l.zone {
-                Zone::Frontmatter => "frontmatter",
-                Zone::Body => "body",
-                Zone::Reference => "reference",
-            };
             let mut obj = IndexMap::new();
             obj.insert(Name::new("target"), GqlValue::from(l.target.as_str()));
             obj.insert(
@@ -83,9 +78,8 @@ pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
                     .map(GqlValue::from)
                     .unwrap_or(GqlValue::Null),
             );
-            obj.insert(Name::new("zone"), GqlValue::from(zone));
-            let kind = l.kind.as_str();
-            obj.insert(Name::new("kind"), GqlValue::from(kind));
+            obj.insert(Name::new("zone"), GqlValue::from(zone_str(&l.zone)));
+            obj.insert(Name::new("kind"), GqlValue::from(l.kind.as_str()));
             obj.insert(
                 Name::new("section"),
                 l.section
@@ -95,49 +89,53 @@ pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
             );
             GqlValue::Object(obj)
         })
-        .collect();
+        .collect()
+}
+
+fn build_attachments_list(z: &ParsedDoogat) -> Vec<GqlValue> {
+    use ddb_core::types::Value;
+    let Some(Value::List(items)) = z.meta.extra.get("attachments") else {
+        return Vec::new();
+    };
+    let zid = z.meta.id.as_ref().map(|i| i.0.as_str()).unwrap_or("");
+    items
+        .iter()
+        .filter_map(|item| {
+            let Value::Map(map) = item else { return None };
+            let name = map.get("name")?.as_str()?;
+            let mime = map
+                .get("mime")
+                .and_then(|v| v.as_str())
+                .unwrap_or("application/octet-stream");
+            let size = map.get("size").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
+            let url = format!("/attachments/{zid}/{name}");
+            let mut a = IndexMap::new();
+            a.insert(Name::new("name"), GqlValue::from(name));
+            a.insert(Name::new("mime"), GqlValue::from(mime));
+            a.insert(Name::new("size"), GqlValue::from(size));
+            a.insert(Name::new("url"), GqlValue::from(url.as_str()));
+            Some(GqlValue::Object(a))
+        })
+        .collect()
+}
+
+pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
+    let id = z.meta.id.as_ref().map(|i| i.0.as_str()).unwrap_or("");
+    let title = z.meta.title.as_deref().unwrap_or("");
+    let date = z.meta.date.as_deref().unwrap_or("");
+    let ztype = z.meta.doogat_type.as_deref().unwrap_or("");
 
     let mut obj = IndexMap::new();
     obj.insert(Name::new("id"), GqlValue::from(id));
     obj.insert(Name::new("title"), GqlValue::from(title));
     obj.insert(Name::new("date"), GqlValue::from(date));
     obj.insert(Name::new("type"), GqlValue::from(ztype));
-    obj.insert(Name::new("tags"), GqlValue::List(tags));
+    obj.insert(Name::new("tags"), GqlValue::List(build_tags_list(z)));
     obj.insert(Name::new("body"), GqlValue::from(z.body.as_str()));
     obj.insert(Name::new("path"), GqlValue::from(z.path.as_str()));
-    obj.insert(Name::new("fields"), GqlValue::List(fields));
-    obj.insert(Name::new("links"), GqlValue::List(links));
-
-    // Attachments from frontmatter extra
-    let attachments: Vec<GqlValue> = {
-        use ddb_core::types::Value;
-        match z.meta.extra.get("attachments") {
-            Some(Value::List(items)) => items
-                .iter()
-                .filter_map(|item| {
-                    let Value::Map(map) = item else { return None };
-                    let name = map.get("name")?.as_str()?;
-                    let mime = map
-                        .get("mime")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("application/octet-stream");
-                    let size = map.get("size").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
-                    let zid = z.meta.id.as_ref().map(|i| i.0.as_str()).unwrap_or("");
-                    let url = format!("/attachments/{}/{}", zid, name);
-                    let mut a = IndexMap::new();
-                    a.insert(Name::new("name"), GqlValue::from(name));
-                    a.insert(Name::new("mime"), GqlValue::from(mime));
-                    a.insert(Name::new("size"), GqlValue::from(size));
-                    a.insert(Name::new("url"), GqlValue::from(url.as_str()));
-                    Some(GqlValue::Object(a))
-                })
-                .collect(),
-            _ => Vec::new(),
-        }
-    };
-    obj.insert(Name::new("attachments"), GqlValue::List(attachments));
-
-    // Timestamps
+    obj.insert(Name::new("fields"), GqlValue::List(build_inline_fields_list(z)));
+    obj.insert(Name::new("links"), GqlValue::List(build_links_list(z)));
+    obj.insert(Name::new("attachments"), GqlValue::List(build_attachments_list(z)));
     obj.insert(
         Name::new("updated_at"),
         z.updated_at
