@@ -10,7 +10,6 @@ use base_types::TypeSchemaMap;
 use async_graphql::dynamic::*;
 use ddb_core::types::TableSchema;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::actor::ActorHandle;
@@ -26,64 +25,42 @@ pub fn build_schema(
     reloader: Option<Arc<SchemaReloader>>,
 ) -> Result<Schema, String> {
     let type_defs = type_defs::build_type_defs();
+    let q = queries::build_query_fields(&type_schemas);
+    let m = mutations::build_mutation_fields();
+    let s = subscriptions::build_subscription_fields(&q.known_types, &type_schemas);
 
-    let queries::QueryOutput {
-        query,
-        known_types,
-        dynamic_types,
-        mut dynamic_inputs,
-        sequence_node_type,
-        sequence_info_type,
-        broken_sequence_type,
-    } = queries::build_query_fields(&type_schemas);
-
-    let mutations::MutationOutput {
-        mutation,
-        sync_result_type,
-        compact_result_type,
-        git_maintenance_result_type,
-        attach_input,
-    } = mutations::build_mutation_fields();
-    dynamic_inputs.push(attach_input);
-
-    let subscriptions::SubscriptionOutput {
-        subscription,
-        change_event_type,
-    } = subscriptions::build_subscription_fields(&known_types, &type_schemas);
+    let mut dynamic_inputs = q.dynamic_inputs;
+    dynamic_inputs.push(m.attach_input);
 
     let mut builder = Schema::build(
-        query.type_name(),
-        Some(mutation.type_name()),
-        Some(subscription.type_name()),
+        q.query.type_name(),
+        Some(m.mutation.type_name()),
+        Some(s.subscription.type_name()),
     );
 
     builder = register_shared_types(builder, type_defs)
-        .register(sequence_node_type)
-        .register(sequence_info_type)
-        .register(broken_sequence_type)
-        .register(change_event_type)
-        .register(sync_result_type)
-        .register(compact_result_type)
-        .register(git_maintenance_result_type)
-        .register(query)
-        .register(mutation)
-        .register(subscription)
+        .register(q.sequence_node_type)
+        .register(q.sequence_info_type)
+        .register(q.broken_sequence_type)
+        .register(s.change_event_type)
+        .register(m.sync_result_type)
+        .register(m.compact_result_type)
+        .register(m.git_maintenance_result_type)
+        .register(q.query)
+        .register(m.mutation)
+        .register(s.subscription)
         .data(actor)
         .data(read_pool)
         .data(TypeSchemaMap(Arc::new(
-            type_schemas
-                .iter()
-                .map(|s| (s.table_name.clone(), s.clone()))
-                .collect::<HashMap<_, _>>(),
+            type_schemas.iter().map(|ts| (ts.table_name.clone(), ts.clone())).collect(),
         )));
 
-    for typed_obj in dynamic_types {
+    for typed_obj in q.dynamic_types {
         builder = builder.register(typed_obj);
     }
     for input in dynamic_inputs {
         builder = builder.register(input);
     }
-
     if let Some(reloader) = reloader {
         builder = builder.data(reloader);
     }
