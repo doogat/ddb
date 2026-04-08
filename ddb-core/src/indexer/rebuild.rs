@@ -53,8 +53,6 @@ impl Index {
         repo: &impl DoogatSource,
         old_head: &str,
     ) -> Result<crate::types::RebuildReport> {
-        use crate::types::DiffKind;
-
         let new_head = repo.head_oid()?.to_string();
 
         // Try to diff — if it fails, fall back to full rebuild
@@ -67,23 +65,47 @@ impl Index {
         };
 
         if changes.is_empty() {
-            // HEAD changed but no doogat files changed (e.g. config-only commit)
-            self.conn.execute(
-                "INSERT OR REPLACE INTO _ddb_meta (key, value) VALUES ('head', ?1)",
-                params![new_head],
-            )?;
+            self.store_head(&new_head)?;
             return Ok(crate::types::RebuildReport::default());
         }
 
         tracing::info!(changed = changes.len(), "incremental_reindex_triggered");
-        let mut report = crate::types::RebuildReport::default();
-        let mut typedef_changed = false;
 
-        // Partition changes by kind
+        let (to_index_paths, to_delete, typedef_changed) = Self::partition_changes(&changes);
+
+        for id in &to_delete {
+            self.remove_doogat(id)?;
+        }
+
+        let mut report = crate::types::RebuildReport::default();
+        report.indexed = self.batch_index_changes(repo, &to_index_paths)?;
+
+        if typedef_changed {
+            self.rematerialize_if_typedef_changed(repo, &mut report)?;
+        }
+
+        self.store_head(&new_head)?;
+
+        tracing::info!(
+            indexed = report.indexed,
+            tables = report.tables_materialized,
+            "incremental_reindex_complete"
+        );
+        Ok(report)
+    }
+
+    /// Separate diff entries into paths to index (added/modified) and IDs to
+    /// delete, and flag whether any typedef was touched.
+    fn partition_changes(
+        changes: &[(crate::types::DiffKind, String)],
+    ) -> (Vec<String>, Vec<String>, bool) {
+        use crate::types::DiffKind;
+
         let mut to_index_paths = Vec::new();
         let mut to_delete = Vec::new();
+        let mut typedef_changed = false;
 
-        for (kind, path) in &changes {
+        for (kind, path) in changes {
             if path.contains("_typedef/") {
                 typedef_changed = true;
             }
@@ -99,47 +121,45 @@ impl Index {
             }
         }
 
-        // Handle deletes individually (cheap operations)
-        for id in &to_delete {
-            self.remove_doogat(id)?;
-        }
+        (to_index_paths, to_delete, typedef_changed)
+    }
 
-        // Batch-index additions/modifications
-        if to_index_paths.len() > 1 {
-            let contents = repo.read_files_batch(&to_index_paths)?;
+    /// Read changed files from the repo, parse them, and index. Returns the
+    /// number of doogats indexed.
+    fn batch_index_changes(
+        &self,
+        repo: &impl DoogatSource,
+        paths: &[String],
+    ) -> Result<usize> {
+        if paths.len() > 1 {
+            let contents = repo.read_files_batch(paths)?;
             let mut parsed = Vec::with_capacity(contents.len());
             for (path, content_result) in contents {
                 let content = content_result?;
                 parsed.push(crate::parser::parse(&content, &path)?);
             }
-            report.indexed = self.batch_index(&parsed)?;
-        } else if let Some(path) = to_index_paths.first() {
+            self.batch_index(&parsed)
+        } else if let Some(path) = paths.first() {
             let content = repo.read_file(path)?;
             let parsed = crate::parser::parse(&content, path)?;
             self.index_doogat(&parsed)?;
-            report.indexed = 1;
+            Ok(1)
+        } else {
+            Ok(0)
         }
+    }
 
-        // If any typedef changed, full rematerialization is needed
-        if typedef_changed {
-            tracing::info!("typedef changed, rematerializing all types");
-            let mat = self.materialize_all_types(repo)?;
-            report.tables_materialized = mat.0;
-            report.types_inferred = mat.1;
-        }
-
-        // Update stored HEAD
-        self.conn.execute(
-            "INSERT OR REPLACE INTO _ddb_meta (key, value) VALUES ('head', ?1)",
-            params![new_head],
-        )?;
-
-        tracing::info!(
-            indexed = report.indexed,
-            tables = report.tables_materialized,
-            "incremental_reindex_complete"
-        );
-        Ok(report)
+    /// Run full type rematerialization and record results in the report.
+    fn rematerialize_if_typedef_changed(
+        &self,
+        repo: &impl DoogatSource,
+        report: &mut crate::types::RebuildReport,
+    ) -> Result<()> {
+        tracing::info!("typedef changed, rematerializing all types");
+        let mat = self.materialize_all_types(repo)?;
+        report.tables_materialized = mat.0;
+        report.types_inferred = mat.1;
+        Ok(())
     }
 
     /// Read files sequentially from git, then parse in parallel with rayon.
