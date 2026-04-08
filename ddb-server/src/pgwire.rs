@@ -97,68 +97,8 @@ impl SimpleQueryHandler for DdbBackend {
         C::Error: Debug,
         PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
     {
-        // Intercept pg_catalog queries (psql \dt, tab-completion) before the SQL engine
         if is_pg_catalog_query(query) {
-            return if is_table_listing_query(query) {
-                // Query user-visible tables from sqlite_master
-                let table_result = self
-                    .read_pool
-                    .execute_select(
-                        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-                            .to_string(),
-                    )
-                    .await
-                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
-
-                let schema = Arc::new(vec![
-                    FieldInfo::new("Schema".into(), None, None, Type::VARCHAR, FieldFormat::Text),
-                    FieldInfo::new("Name".into(), None, None, Type::VARCHAR, FieldFormat::Text),
-                    FieldInfo::new("Type".into(), None, None, Type::VARCHAR, FieldFormat::Text),
-                    FieldInfo::new("Owner".into(), None, None, Type::VARCHAR, FieldFormat::Text),
-                ]);
-
-                let data_rows: Vec<PgWireResult<_>> = match table_result {
-                    SqlResult::Rows { rows, .. } => rows
-                        .iter()
-                        .filter(|row| !row.is_empty() && !is_internal_table(&row[0]))
-                        .map(|row| {
-                            let mut encoder = DataRowEncoder::new(schema.clone());
-                            encoder
-                                .encode_field(&Some("public"))
-                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
-                            encoder
-                                .encode_field(&Some(row[0].as_str()))
-                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
-                            encoder
-                                .encode_field(&Some("table"))
-                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
-                            encoder
-                                .encode_field(&Some("ddb"))
-                                .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
-                            encoder.finish()
-                        })
-                        .collect(),
-                    _ => Vec::new(),
-                };
-
-                Ok(vec![Response::Query(QueryResponse::new(
-                    schema,
-                    stream::iter(data_rows),
-                ))])
-            } else {
-                // Other pg_catalog queries (pg_type, pg_namespace, etc.) - return empty result
-                let schema = Arc::new(vec![FieldInfo::new(
-                    "name".into(),
-                    None,
-                    None,
-                    Type::VARCHAR,
-                    FieldFormat::Text,
-                )]);
-                Ok(vec![Response::Query(QueryResponse::new(
-                    schema,
-                    stream::iter(Vec::new()),
-                ))])
-            };
+            return handle_pg_catalog_query(&self.read_pool, query).await;
         }
 
         let (result, upper) = if is_select_only(query) {
@@ -186,60 +126,11 @@ impl SimpleQueryHandler for DdbBackend {
         };
 
         let response = match result {
-            SqlResult::Rows { columns, rows, column_types } => {
-                let col_types = column_types.as_deref();
-                let schema = Arc::new(
-                    columns
-                        .iter()
-                        .enumerate()
-                        .map(|(i, name)| {
-                            let pg_type = match col_types.and_then(|ct| ct.get(i)).map(|s| s.as_str()) {
-                                Some(t) if t.eq_ignore_ascii_case("BOOLEAN") => Type::BOOL,
-                                Some(t) if t.eq_ignore_ascii_case("INTEGER") => Type::INT8,
-                                Some(t) if t.eq_ignore_ascii_case("REAL") => Type::FLOAT8,
-                                _ => Type::VARCHAR,
-                            };
-                            FieldInfo::new(
-                                name.clone(),
-                                None,
-                                None,
-                                pg_type,
-                                FieldFormat::Text,
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                );
-
-                let data_rows: Vec<PgWireResult<_>> = rows
-                    .iter()
-                    .map(|row| {
-                        let mut encoder = DataRowEncoder::new(schema.clone());
-                        for (i, val) in row.iter().enumerate() {
-                            let is_bool = col_types
-                                .and_then(|ct| ct.get(i))
-                                .is_some_and(|t| t.eq_ignore_ascii_case("BOOLEAN"));
-                            if is_bool {
-                                let b = match val.as_str() {
-                                    "true" => Some(true),
-                                    "false" => Some(false),
-                                    _ => None,
-                                };
-                                encoder
-                                    .encode_field(&b)
-                                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
-                            } else {
-                                let v: &str = val;
-                                encoder
-                                    .encode_field(&Some(v))
-                                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
-                            }
-                        }
-                        encoder.finish()
-                    })
-                    .collect();
-
-                Response::Query(QueryResponse::new(schema, stream::iter(data_rows)))
-            }
+            SqlResult::Rows {
+                columns,
+                rows,
+                column_types,
+            } => build_rows_response(columns, rows, column_types.as_deref()),
             SqlResult::Affected(n) => {
                 let tag = command_tag_for_query(&upper);
                 Response::Execution(Tag::new(tag).with_rows(n))
@@ -252,6 +143,122 @@ impl SimpleQueryHandler for DdbBackend {
 
         Ok(vec![response])
     }
+}
+
+/// Intercept pg_catalog queries (psql \dt, tab-completion) before the SQL engine.
+async fn handle_pg_catalog_query(
+    read_pool: &ReadPool,
+    query: &str,
+) -> PgWireResult<Vec<Response<'static>>> {
+    if !is_table_listing_query(query) {
+        let schema = Arc::new(vec![FieldInfo::new(
+            "name".into(),
+            None,
+            None,
+            Type::VARCHAR,
+            FieldFormat::Text,
+        )]);
+        return Ok(vec![Response::Query(QueryResponse::new(
+            schema,
+            stream::iter(Vec::new()),
+        ))]);
+    }
+
+    let table_result = read_pool
+        .execute_select(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name".to_string(),
+        )
+        .await
+        .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+
+    let schema = Arc::new(vec![
+        FieldInfo::new("Schema".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+        FieldInfo::new("Name".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+        FieldInfo::new("Type".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+        FieldInfo::new("Owner".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+    ]);
+
+    let data_rows: Vec<PgWireResult<_>> = match table_result {
+        SqlResult::Rows { rows, .. } => rows
+            .iter()
+            .filter(|row| !row.is_empty() && !is_internal_table(&row[0]))
+            .map(|row| {
+                let mut encoder = DataRowEncoder::new(schema.clone());
+                encoder
+                    .encode_field(&Some("public"))
+                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                encoder
+                    .encode_field(&Some(row[0].as_str()))
+                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                encoder
+                    .encode_field(&Some("table"))
+                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                encoder
+                    .encode_field(&Some("ddb"))
+                    .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                encoder.finish()
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Ok(vec![Response::Query(QueryResponse::new(
+        schema,
+        stream::iter(data_rows),
+    ))])
+}
+
+/// Encode SqlResult::Rows into a PG wire protocol response.
+fn build_rows_response(
+    columns: Vec<String>,
+    rows: Vec<Vec<String>>,
+    col_types: Option<&[String]>,
+) -> Response<'static> {
+    let schema = Arc::new(
+        columns
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let pg_type = match col_types.and_then(|ct| ct.get(i)).map(|s| s.as_str()) {
+                    Some(t) if t.eq_ignore_ascii_case("BOOLEAN") => Type::BOOL,
+                    Some(t) if t.eq_ignore_ascii_case("INTEGER") => Type::INT8,
+                    Some(t) if t.eq_ignore_ascii_case("REAL") => Type::FLOAT8,
+                    _ => Type::VARCHAR,
+                };
+                FieldInfo::new(name.clone(), None, None, pg_type, FieldFormat::Text)
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    let data_rows: Vec<PgWireResult<_>> = rows
+        .iter()
+        .map(|row| {
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            for (i, val) in row.iter().enumerate() {
+                let is_bool = col_types
+                    .and_then(|ct| ct.get(i))
+                    .is_some_and(|t| t.eq_ignore_ascii_case("BOOLEAN"));
+                if is_bool {
+                    let b = match val.as_str() {
+                        "true" => Some(true),
+                        "false" => Some(false),
+                        _ => None,
+                    };
+                    encoder
+                        .encode_field(&b)
+                        .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                } else {
+                    let v: &str = val;
+                    encoder
+                        .encode_field(&Some(v))
+                        .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
+                }
+            }
+            encoder.finish()
+        })
+        .collect();
+
+    Response::Query(QueryResponse::new(schema, stream::iter(data_rows)))
 }
 
 /// Derive PG command tag from the SQL query for `SqlResult::Affected`.
