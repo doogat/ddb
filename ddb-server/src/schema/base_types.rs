@@ -303,55 +303,46 @@ pub(crate) fn sql_result_to_value(r: &SqlResult, format: &str) -> GqlValue {
     GqlValue::Object(obj)
 }
 
-pub(crate) fn typedef_to_value(s: &TableSchema) -> GqlValue {
-    let columns: Vec<GqlValue> = s
-        .columns
-        .iter()
-        .map(|c| {
-            let mut obj = IndexMap::new();
-            obj.insert(Name::new("name"), GqlValue::from(c.name.as_str()));
-            obj.insert(Name::new("dataType"), GqlValue::from(c.data_type.as_str()));
-            obj.insert(
-                Name::new("zone"),
-                c.zone
-                    .as_ref()
-                    .map(|z| {
-                        GqlValue::from(match z {
-                            Zone::Frontmatter => "frontmatter",
-                            Zone::Body => "body",
-                            Zone::Reference => "reference",
-                        })
-                    })
-                    .unwrap_or(GqlValue::Null),
-            );
-            obj.insert(Name::new("required"), GqlValue::from(c.required));
-            obj.insert(
-                Name::new("references"),
-                c.references
-                    .as_deref()
-                    .map(GqlValue::from)
-                    .unwrap_or(GqlValue::Null),
-            );
-            obj.insert(
-                Name::new("allowedValues"),
-                c.allowed_values
-                    .as_ref()
-                    .map(|vals| {
-                        GqlValue::List(vals.iter().map(|v| GqlValue::from(v.as_str())).collect())
-                    })
-                    .unwrap_or(GqlValue::Null),
-            );
-            obj.insert(
-                Name::new("defaultValue"),
-                c.default_value
-                    .as_deref()
-                    .map(GqlValue::from)
-                    .unwrap_or(GqlValue::Null),
-            );
-            GqlValue::Object(obj)
-        })
-        .collect();
+fn column_def_to_value(c: &ColumnDef) -> GqlValue {
+    let mut obj = IndexMap::new();
+    obj.insert(Name::new("name"), GqlValue::from(c.name.as_str()));
+    obj.insert(Name::new("dataType"), GqlValue::from(c.data_type.as_str()));
+    obj.insert(
+        Name::new("zone"),
+        c.zone
+            .as_ref()
+            .map(|z| GqlValue::from(zone_str(z)))
+            .unwrap_or(GqlValue::Null),
+    );
+    obj.insert(Name::new("required"), GqlValue::from(c.required));
+    obj.insert(
+        Name::new("references"),
+        c.references
+            .as_deref()
+            .map(GqlValue::from)
+            .unwrap_or(GqlValue::Null),
+    );
+    obj.insert(
+        Name::new("allowedValues"),
+        c.allowed_values
+            .as_ref()
+            .map(|vals| {
+                GqlValue::List(vals.iter().map(|v| GqlValue::from(v.as_str())).collect())
+            })
+            .unwrap_or(GqlValue::Null),
+    );
+    obj.insert(
+        Name::new("defaultValue"),
+        c.default_value
+            .as_deref()
+            .map(GqlValue::from)
+            .unwrap_or(GqlValue::Null),
+    );
+    GqlValue::Object(obj)
+}
 
+pub(crate) fn typedef_to_value(s: &TableSchema) -> GqlValue {
+    let columns: Vec<GqlValue> = s.columns.iter().map(column_def_to_value).collect();
     let sections: Vec<GqlValue> = s
         .template_sections
         .iter()
