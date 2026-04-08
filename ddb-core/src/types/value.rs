@@ -82,6 +82,42 @@ impl std::error::Error for PathError {}
 /// - `[N]` indexes into lists (0-based)
 /// - `\.` is a literal dot within a key name
 /// - Empty segments are rejected
+fn parse_bracket_index(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    path: &str,
+) -> std::result::Result<PathSegment, PathError> {
+    let mut index_str = String::new();
+    loop {
+        match chars.next() {
+            Some(']') => break,
+            Some(d) if d.is_ascii_digit() => index_str.push(d),
+            Some(other) => {
+                return Err(PathError::InvalidPath {
+                    path: path.to_string(),
+                    reason: format!("unexpected '{other}' in index"),
+                });
+            }
+            None => {
+                return Err(PathError::InvalidPath {
+                    path: path.to_string(),
+                    reason: "unclosed bracket".to_string(),
+                });
+            }
+        }
+    }
+    if index_str.is_empty() {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "empty index".to_string(),
+        });
+    }
+    let idx: usize = index_str.parse().map_err(|_| PathError::InvalidPath {
+        path: path.to_string(),
+        reason: format!("invalid index: {index_str}"),
+    })?;
+    Ok(PathSegment::Index(idx))
+}
+
 pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError> {
     if path.is_empty() {
         return Err(PathError::InvalidPath {
@@ -120,41 +156,10 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
                 }
             }
             '[' => {
-                // Flush any pending key
                 if !current_key.is_empty() {
                     segments.push(PathSegment::Key(std::mem::take(&mut current_key)));
                 }
-                // Parse index number
-                let mut index_str = String::new();
-                loop {
-                    match chars.next() {
-                        Some(']') => break,
-                        Some(d) if d.is_ascii_digit() => index_str.push(d),
-                        Some(other) => {
-                            return Err(PathError::InvalidPath {
-                                path: path.to_string(),
-                                reason: format!("unexpected '{other}' in index"),
-                            });
-                        }
-                        None => {
-                            return Err(PathError::InvalidPath {
-                                path: path.to_string(),
-                                reason: "unclosed bracket".to_string(),
-                            });
-                        }
-                    }
-                }
-                if index_str.is_empty() {
-                    return Err(PathError::InvalidPath {
-                        path: path.to_string(),
-                        reason: "empty index".to_string(),
-                    });
-                }
-                let idx: usize = index_str.parse().map_err(|_| PathError::InvalidPath {
-                    path: path.to_string(),
-                    reason: format!("invalid index: {index_str}"),
-                })?;
-                segments.push(PathSegment::Index(idx));
+                segments.push(parse_bracket_index(&mut chars, path)?);
             }
             _ => {
                 current_key.push(ch);
@@ -185,35 +190,13 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
     Ok(segments)
 }
 
-/// Navigate a dot/bracket path starting from a `BTreeMap`, without wrapping in `Value::Map`.
-/// Useful when you have `&BTreeMap<String, Value>` (e.g., `extra` fields) and want to avoid cloning.
-pub fn get_path_in_map<'a>(
-    map: &'a BTreeMap<String, Value>,
+fn traverse_segments<'a>(
+    current: &'a Value,
+    segments: &[PathSegment],
     path: &str,
 ) -> std::result::Result<&'a Value, PathError> {
-    let segments = parse_path(path)?;
-    if segments.is_empty() {
-        return Err(PathError::InvalidPath {
-            path: path.to_string(),
-            reason: "no segments".to_string(),
-        });
-    }
-
-    // First segment must be a Key into the map
-    let first = &segments[0];
-    let PathSegment::Key(key) = first else {
-        return Err(PathError::TypeMismatch {
-            path: path.to_string(),
-            expected: "map",
-            actual: "map (index on root)",
-        });
-    };
-    let mut current = map.get(key).ok_or_else(|| PathError::KeyNotFound {
-        path: path.to_string(),
-        segment: key.clone(),
-    })?;
-
-    for seg in &segments[1..] {
+    let mut current = current;
+    for seg in segments {
         match seg {
             PathSegment::Key(k) => match current {
                 Value::Map(m) => {
@@ -250,6 +233,199 @@ pub fn get_path_in_map<'a>(
         }
     }
     Ok(current)
+}
+
+/// Navigate a dot/bracket path starting from a `BTreeMap`, without wrapping in `Value::Map`.
+/// Useful when you have `&BTreeMap<String, Value>` (e.g., `extra` fields) and want to avoid cloning.
+pub fn get_path_in_map<'a>(
+    map: &'a BTreeMap<String, Value>,
+    path: &str,
+) -> std::result::Result<&'a Value, PathError> {
+    let segments = parse_path(path)?;
+    if segments.is_empty() {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "no segments".to_string(),
+        });
+    }
+
+    let first = &segments[0];
+    let PathSegment::Key(key) = first else {
+        return Err(PathError::TypeMismatch {
+            path: path.to_string(),
+            expected: "map",
+            actual: "map (index on root)",
+        });
+    };
+    let first_value = map.get(key).ok_or_else(|| PathError::KeyNotFound {
+        path: path.to_string(),
+        segment: key.clone(),
+    })?;
+
+    traverse_segments(first_value, &segments[1..], path)
+}
+
+fn assign_at_leaf(
+    current: &mut Value,
+    seg: &PathSegment,
+    value: Value,
+    path: &str,
+) -> std::result::Result<(), PathError> {
+    match seg {
+        PathSegment::Key(key) => match current {
+            Value::Map(map) => {
+                map.insert(key.clone(), value);
+                Ok(())
+            }
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "map",
+                actual: other.type_name(),
+            }),
+        },
+        PathSegment::Index(idx) => match current {
+            Value::List(list) => {
+                while list.len() <= *idx {
+                    list.push(Value::String(String::new()));
+                }
+                list[*idx] = value;
+                Ok(())
+            }
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "list",
+                actual: other.type_name(),
+            }),
+        },
+    }
+}
+
+fn navigate_or_create<'a>(
+    current: &'a mut Value,
+    seg: &PathSegment,
+    next_is_index: bool,
+    path: &str,
+) -> std::result::Result<&'a mut Value, PathError> {
+    match seg {
+        PathSegment::Key(key) => match current {
+            Value::Map(map) => {
+                Ok(map.entry(key.clone()).or_insert_with(|| {
+                    if next_is_index {
+                        Value::List(Vec::new())
+                    } else {
+                        Value::Map(BTreeMap::new())
+                    }
+                }))
+            }
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "map",
+                actual: other.type_name(),
+            }),
+        },
+        PathSegment::Index(idx) => match current {
+            Value::List(list) => {
+                while list.len() <= *idx {
+                    list.push(if next_is_index {
+                        Value::List(Vec::new())
+                    } else {
+                        Value::Map(BTreeMap::new())
+                    });
+                }
+                Ok(&mut list[*idx])
+            }
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "list",
+                actual: other.type_name(),
+            }),
+        },
+    }
+}
+
+fn navigate_to_parent_mut<'a>(
+    current: &'a mut Value,
+    segments: &[PathSegment],
+    path: &str,
+) -> std::result::Result<&'a mut Value, PathError> {
+    let mut current = current;
+    for seg in segments {
+        match seg {
+            PathSegment::Key(key) => match current {
+                Value::Map(map) => {
+                    current = map.get_mut(key).ok_or_else(|| PathError::KeyNotFound {
+                        path: path.to_string(),
+                        segment: key.clone(),
+                    })?;
+                }
+                other => {
+                    return Err(PathError::TypeMismatch {
+                        path: path.to_string(),
+                        expected: "map",
+                        actual: other.type_name(),
+                    });
+                }
+            },
+            PathSegment::Index(idx) => match current {
+                Value::List(list) => {
+                    let len = list.len();
+                    current =
+                        list.get_mut(*idx)
+                            .ok_or_else(|| PathError::IndexOutOfBounds {
+                                path: path.to_string(),
+                                index: *idx,
+                                length: len,
+                            })?;
+                }
+                other => {
+                    return Err(PathError::TypeMismatch {
+                        path: path.to_string(),
+                        expected: "list",
+                        actual: other.type_name(),
+                    });
+                }
+            },
+        }
+    }
+    Ok(current)
+}
+
+fn remove_from_container(
+    container: &mut Value,
+    seg: &PathSegment,
+    path: &str,
+) -> std::result::Result<Value, PathError> {
+    match seg {
+        PathSegment::Key(key) => match container {
+            Value::Map(map) => map.remove(key).ok_or_else(|| PathError::KeyNotFound {
+                path: path.to_string(),
+                segment: key.clone(),
+            }),
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "map",
+                actual: other.type_name(),
+            }),
+        },
+        PathSegment::Index(idx) => match container {
+            Value::List(list) => {
+                if *idx >= list.len() {
+                    Err(PathError::IndexOutOfBounds {
+                        path: path.to_string(),
+                        index: *idx,
+                        length: list.len(),
+                    })
+                } else {
+                    Ok(list.remove(*idx))
+                }
+            }
+            other => Err(PathError::TypeMismatch {
+                path: path.to_string(),
+                expected: "list",
+                actual: other.type_name(),
+            }),
+        },
+    }
 }
 
 impl Value {
@@ -309,43 +485,7 @@ impl Value {
     /// Navigate a nested `Value` tree using dot/bracket path notation.
     pub fn get_path(&self, path: &str) -> std::result::Result<&Value, PathError> {
         let segments = parse_path(path)?;
-        let mut current = self;
-        for seg in &segments {
-            match seg {
-                PathSegment::Key(key) => match current {
-                    Value::Map(map) => {
-                        current = map.get(key).ok_or_else(|| PathError::KeyNotFound {
-                            path: path.to_string(),
-                            segment: key.clone(),
-                        })?;
-                    }
-                    other => {
-                        return Err(PathError::TypeMismatch {
-                            path: path.to_string(),
-                            expected: "map",
-                            actual: other.type_name(),
-                        });
-                    }
-                },
-                PathSegment::Index(idx) => match current {
-                    Value::List(list) => {
-                        current = list.get(*idx).ok_or_else(|| PathError::IndexOutOfBounds {
-                            path: path.to_string(),
-                            index: *idx,
-                            length: list.len(),
-                        })?;
-                    }
-                    other => {
-                        return Err(PathError::TypeMismatch {
-                            path: path.to_string(),
-                            expected: "list",
-                            actual: other.type_name(),
-                        });
-                    }
-                },
-            }
-        }
-        Ok(current)
+        traverse_segments(self, &segments, path)
     }
 
     /// Set a value at a dot/bracket path, creating intermediate containers as needed.
@@ -354,83 +494,11 @@ impl Value {
         let mut current = self;
 
         for (i, seg) in segments.iter().enumerate() {
-            let is_last = i == segments.len() - 1;
-
-            if is_last {
-                match seg {
-                    PathSegment::Key(key) => match current {
-                        Value::Map(map) => {
-                            map.insert(key.clone(), value);
-                            return Ok(());
-                        }
-                        other => {
-                            return Err(PathError::TypeMismatch {
-                                path: path.to_string(),
-                                expected: "map",
-                                actual: other.type_name(),
-                            });
-                        }
-                    },
-                    PathSegment::Index(idx) => match current {
-                        Value::List(list) => {
-                            while list.len() <= *idx {
-                                list.push(Value::String(String::new()));
-                            }
-                            list[*idx] = value;
-                            return Ok(());
-                        }
-                        other => {
-                            return Err(PathError::TypeMismatch {
-                                path: path.to_string(),
-                                expected: "list",
-                                actual: other.type_name(),
-                            });
-                        }
-                    },
-                }
+            if i == segments.len() - 1 {
+                return assign_at_leaf(current, seg, value, path);
             }
-
-            // Navigate intermediate, creating containers if needed
             let next_is_index = matches!(segments.get(i + 1), Some(PathSegment::Index(_)));
-            match seg {
-                PathSegment::Key(key) => match current {
-                    Value::Map(map) => {
-                        current = map.entry(key.clone()).or_insert_with(|| {
-                            if next_is_index {
-                                Value::List(Vec::new())
-                            } else {
-                                Value::Map(BTreeMap::new())
-                            }
-                        });
-                    }
-                    other => {
-                        return Err(PathError::TypeMismatch {
-                            path: path.to_string(),
-                            expected: "map",
-                            actual: other.type_name(),
-                        });
-                    }
-                },
-                PathSegment::Index(idx) => match current {
-                    Value::List(list) => {
-                        while list.len() <= *idx {
-                            list.push(if next_is_index {
-                                Value::List(Vec::new())
-                            } else {
-                                Value::Map(BTreeMap::new())
-                            });
-                        }
-                        current = &mut list[*idx];
-                    }
-                    other => {
-                        return Err(PathError::TypeMismatch {
-                            path: path.to_string(),
-                            expected: "list",
-                            actual: other.type_name(),
-                        });
-                    }
-                },
-            }
+            current = navigate_or_create(current, seg, next_is_index, path)?;
         }
 
         Ok(())
@@ -441,116 +509,12 @@ impl Value {
         let segments = parse_path(path)?;
 
         if segments.len() == 1 {
-            // Single segment: operate directly on self
-            return match &segments[0] {
-                PathSegment::Key(key) => match self {
-                    Value::Map(map) => map.remove(key).ok_or_else(|| PathError::KeyNotFound {
-                        path: path.to_string(),
-                        segment: key.clone(),
-                    }),
-                    other => Err(PathError::TypeMismatch {
-                        path: path.to_string(),
-                        expected: "map",
-                        actual: other.type_name(),
-                    }),
-                },
-                PathSegment::Index(idx) => match self {
-                    Value::List(list) => {
-                        if *idx >= list.len() {
-                            Err(PathError::IndexOutOfBounds {
-                                path: path.to_string(),
-                                index: *idx,
-                                length: list.len(),
-                            })
-                        } else {
-                            Ok(list.remove(*idx))
-                        }
-                    }
-                    other => Err(PathError::TypeMismatch {
-                        path: path.to_string(),
-                        expected: "list",
-                        actual: other.type_name(),
-                    }),
-                },
-            };
+            return remove_from_container(self, &segments[0], path);
         }
 
-        // Navigate to parent
-        let parent_segments = &segments[..segments.len() - 1];
         let last = &segments[segments.len() - 1];
-        let mut current = self;
-
-        for seg in parent_segments {
-            match seg {
-                PathSegment::Key(key) => match current {
-                    Value::Map(map) => {
-                        current = map.get_mut(key).ok_or_else(|| PathError::KeyNotFound {
-                            path: path.to_string(),
-                            segment: key.clone(),
-                        })?;
-                    }
-                    other => {
-                        return Err(PathError::TypeMismatch {
-                            path: path.to_string(),
-                            expected: "map",
-                            actual: other.type_name(),
-                        });
-                    }
-                },
-                PathSegment::Index(idx) => match current {
-                    Value::List(list) => {
-                        let len = list.len();
-                        current =
-                            list.get_mut(*idx)
-                                .ok_or_else(|| PathError::IndexOutOfBounds {
-                                    path: path.to_string(),
-                                    index: *idx,
-                                    length: len,
-                                })?;
-                    }
-                    other => {
-                        return Err(PathError::TypeMismatch {
-                            path: path.to_string(),
-                            expected: "list",
-                            actual: other.type_name(),
-                        });
-                    }
-                },
-            }
-        }
-
-        // Remove from parent
-        match last {
-            PathSegment::Key(key) => match current {
-                Value::Map(map) => map.remove(key).ok_or_else(|| PathError::KeyNotFound {
-                    path: path.to_string(),
-                    segment: key.clone(),
-                }),
-                other => Err(PathError::TypeMismatch {
-                    path: path.to_string(),
-                    expected: "map",
-                    actual: other.type_name(),
-                }),
-            },
-            PathSegment::Index(idx) => match current {
-                Value::List(list) => {
-                    if *idx >= list.len() {
-                        Err(PathError::IndexOutOfBounds {
-                            path: path.to_string(),
-                            index: *idx,
-                            length: list.len(),
-                        })
-                    } else {
-                        Ok(list.remove(*idx))
-                    }
-                }
-                other => Err(PathError::TypeMismatch {
-                    path: path.to_string(),
-                    expected: "list",
-                    actual: other.type_name(),
-                }),
-            },
-        }
+        let parent = navigate_to_parent_mut(self, &segments[..segments.len() - 1], path)?;
+        remove_from_container(parent, last, path)
     }
 
     // ── Type-safe path accessors ────────────────────────────────────
