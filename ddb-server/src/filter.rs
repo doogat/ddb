@@ -326,35 +326,7 @@ pub fn build_aggregate_sql_grouped(
     where_clause: &WhereClause,
     group_by: Option<&str>,
 ) -> (String, Vec<String>) {
-    let mut selects = Vec::new();
-    let mut names = Vec::new();
-
-    if let Some(col) = group_by {
-        let escaped = col.replace('"', "\"\"");
-        selects.push(format!("\"{escaped}\" AS \"key\""));
-        names.push("key".to_string());
-    }
-
-    selects.push("COUNT(*) AS count".to_string());
-    names.push("count".to_string());
-
-    for col in &schema.columns {
-        if !is_numeric(&col.data_type) {
-            continue;
-        }
-        let cap = sanitize_type_name(&col.name);
-        let c = &col.name;
-        for (func, prefix) in [
-            ("MIN", "min"),
-            ("MAX", "max"),
-            ("SUM", "sum"),
-            ("AVG", "avg"),
-        ] {
-            let alias = format!("{prefix}{cap}");
-            selects.push(format!("{func}(\"{c}\") AS \"{alias}\""));
-            names.push(alias);
-        }
-    }
+    let (selects, names) = build_aggregate_selects(schema, group_by);
 
     let where_part = if where_clause.is_empty() {
         String::new()
@@ -376,6 +348,39 @@ pub fn build_aggregate_sql_grouped(
     );
 
     (sql, names)
+}
+
+/// Build SELECT columns for an aggregate query (COUNT, MIN, MAX, SUM, AVG).
+fn build_aggregate_selects(
+    schema: &TableSchema,
+    group_by: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
+    let mut selects = Vec::new();
+    let mut names = Vec::new();
+
+    if let Some(col) = group_by {
+        let escaped = col.replace('"', "\"\"");
+        selects.push(format!("\"{escaped}\" AS \"key\""));
+        names.push("key".to_string());
+    }
+
+    selects.push("COUNT(*) AS count".to_string());
+    names.push("count".to_string());
+
+    for col in &schema.columns {
+        if !is_numeric(&col.data_type) {
+            continue;
+        }
+        let cap = sanitize_type_name(&col.name);
+        let c = &col.name;
+        for (func, prefix) in [("MIN", "min"), ("MAX", "max"), ("SUM", "sum"), ("AVG", "avg")] {
+            let alias = format!("{prefix}{cap}");
+            selects.push(format!("{func}(\"{c}\") AS \"{alias}\""));
+            names.push(alias);
+        }
+    }
+
+    (selects, names)
 }
 
 /// Convert an aggregate query row into a GqlValue object.
@@ -437,41 +442,13 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
     for (name, value) in obj {
         let field = name.as_str();
         match field {
-            "_and" => {
+            "_and" | "_or" => {
+                let combinator = if field == "_and" { "AND" } else { "OR" };
                 if let GqlValue::List(items) = value {
-                    let sub: Vec<String> = items
-                        .iter()
-                        .filter_map(|item| {
-                            let wc = build_where_sql(item, schema);
-                            if wc.is_empty() {
-                                None
-                            } else {
-                                params.extend(wc.params);
-                                Some(format!("({})", wc.sql))
-                            }
-                        })
-                        .collect();
-                    if !sub.is_empty() {
-                        conditions.push(format!("({})", sub.join(" AND ")));
-                    }
-                }
-            }
-            "_or" => {
-                if let GqlValue::List(items) = value {
-                    let sub: Vec<String> = items
-                        .iter()
-                        .filter_map(|item| {
-                            let wc = build_where_sql(item, schema);
-                            if wc.is_empty() {
-                                None
-                            } else {
-                                params.extend(wc.params);
-                                Some(format!("({})", wc.sql))
-                            }
-                        })
-                        .collect();
-                    if !sub.is_empty() {
-                        conditions.push(format!("({})", sub.join(" OR ")));
+                    if let Some(cond) =
+                        build_logical_combinator(items, schema, combinator, &mut params)
+                    {
+                        conditions.push(cond);
                     }
                 }
             }
@@ -500,6 +477,32 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
             sql: conditions.join(" AND "),
             params,
         }
+    }
+}
+
+/// Recursively build a compound AND/OR clause from a list of filter items.
+fn build_logical_combinator(
+    items: &[GqlValue],
+    schema: &TableSchema,
+    combinator: &str,
+    params: &mut Vec<SqlValue>,
+) -> Option<String> {
+    let sub: Vec<String> = items
+        .iter()
+        .filter_map(|item| {
+            let wc = build_where_sql(item, schema);
+            if wc.is_empty() {
+                None
+            } else {
+                params.extend(wc.params);
+                Some(format!("({})", wc.sql))
+            }
+        })
+        .collect();
+    if sub.is_empty() {
+        None
+    } else {
+        Some(format!("({})", sub.join(&format!(" {combinator} "))))
     }
 }
 
@@ -543,25 +546,32 @@ fn build_operator_condition(
             params.push(gql_to_sql(value));
             Some(format!("\"{column}\" LIKE ? || '%' COLLATE NOCASE"))
         }
-        "in" => {
-            if let GqlValue::List(items) = value {
-                if items.is_empty() {
-                    return Some("0".to_string()); // IN () is invalid; always-false
-                }
-                let placeholders: Vec<&str> = items
-                    .iter()
-                    .map(|v| {
-                        params.push(gql_to_sql(v));
-                        "?"
-                    })
-                    .collect();
-                Some(format!("\"{}\" IN ({})", column, placeholders.join(", ")))
-            } else {
-                None
-            }
-        }
-        _ => None, // unknown operator — skip
+        "in" => build_in_condition(column, value, params),
+        _ => None,
     }
+}
+
+/// Build an IN (...) condition from a GraphQL list value.
+fn build_in_condition(
+    column: &str,
+    value: &GqlValue,
+    params: &mut Vec<SqlValue>,
+) -> Option<String> {
+    let items = match value {
+        GqlValue::List(items) => items,
+        _ => return None,
+    };
+    if items.is_empty() {
+        return Some("0".to_string()); // IN () is invalid; always-false
+    }
+    let placeholders: Vec<&str> = items
+        .iter()
+        .map(|v| {
+            params.push(gql_to_sql(v));
+            "?"
+        })
+        .collect();
+    Some(format!("\"{}\" IN ({})", column, placeholders.join(", ")))
 }
 
 /// Convert a GraphQL value to a rusqlite parameter value.
