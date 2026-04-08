@@ -103,7 +103,6 @@ impl Index {
         Ok(())
     }
 
-    /// Create junction tables for REFERENCES columns.
     fn create_junction_tables(&self, schema: &crate::types::TableSchema) -> Result<()> {
         for col in &schema.columns {
             if col.references.is_some() {
@@ -114,7 +113,6 @@ impl Index {
         Ok(())
     }
 
-    /// Create unique indexes from unique_together constraints.
     fn create_unique_indexes(&self, schema: &crate::types::TableSchema) -> Result<()> {
         let constraints = match schema.unique_together {
             Some(ref c) => c,

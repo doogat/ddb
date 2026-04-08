@@ -152,7 +152,6 @@ impl Index {
         }
     }
 
-    /// Run full type rematerialization and record results in the report.
     fn rematerialize_if_typedef_changed(
         &self,
         repo: &impl DoogatSource,

@@ -404,7 +404,6 @@ impl Index {
         }
     }
 
-    /// Query a materialized type table and merge its columns into the hits' fields.
     fn merge_materialized_columns(
         &self,
         hits: &mut [SearchResult],
@@ -420,7 +419,6 @@ impl Index {
         apply_fields_to_hits(hits, hit_indices, field_map);
     }
 
-    /// Query a materialized table and return a map of id -> fields.
     fn fetch_materialized_fields(
         &self,
         hits: &[SearchResult],
@@ -570,7 +568,6 @@ impl Index {
     }
 }
 
-/// Merge fetched materialized fields into the corresponding search hits.
 fn apply_fields_to_hits(
     hits: &mut [SearchResult],
     hit_indices: &[usize],

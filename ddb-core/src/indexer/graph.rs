@@ -194,7 +194,6 @@ impl Index {
         self.build_suggestions(&mut scored, limit)
     }
 
-    /// Fetch all tags for a doogat.
     fn fetch_tags(
         &self,
         doogat_id: &str,
@@ -550,8 +549,6 @@ impl Index {
         Ok(stale)
     }
 
-    /// Query candidate doogats for staleness checking.
-    /// Returns (id, title, type, date, path, updated_at) tuples.
     fn query_stale_candidates(
         &self,
         type_filter: Option<&str>,
@@ -985,7 +982,6 @@ fn compute_staleness(
     })
 }
 
-/// Compute inbound and outbound link counts for a single doogat.
 fn count_links(
     id: &str,
     title: &str,
@@ -1012,7 +1008,6 @@ fn count_links(
     }
 }
 
-/// Normalize suggestion scores to 0..1 range.
 fn normalize_suggestion_scores(mut results: Vec<Suggestion>) -> Vec<Suggestion> {
     let max = results.iter().map(|s| s.score).fold(0.0_f64, f64::max);
     if max > 0.0 {

@@ -292,7 +292,6 @@ impl Index {
         Ok(())
     }
 
-    /// Insert the FTS entry for a doogat.
     fn insert_fts_entry(&self, id: &str, title: &str, doogat: &ParsedDoogat) -> Result<()> {
         let tags_str = doogat.meta.tags.join(", ");
         let fields_str = collect_fts_fields(&doogat.meta.extra);
