@@ -87,7 +87,6 @@ pub async fn run(
     Ok(())
 }
 
-/// Build and validate the initial GraphQL schema.
 fn build_initial_schema(
     actor: ActorHandle,
     read_pool: read_pool::ReadPool,
@@ -158,7 +157,6 @@ fn build_app(
         )
 }
 
-/// Spawn the background maintenance task if enabled in config.
 fn spawn_maintenance(cfg: &ServerConfig, actor: ActorHandle) {
     if cfg.maintenance_enabled {
         let interval = cfg.maintenance_interval_secs;

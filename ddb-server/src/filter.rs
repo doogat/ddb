@@ -555,7 +555,6 @@ fn build_operator_condition(
     }
 }
 
-/// Build an IN (...) condition from a GraphQL list value.
 fn build_in_condition(
     column: &str,
     value: &GqlValue,

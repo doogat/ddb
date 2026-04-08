@@ -67,7 +67,6 @@ pub async fn ws_handler(
     }
 }
 
-/// Validate the Authorization token from a WebSocket connection_init payload.
 fn validate_ws_payload(
     payload: &serde_json::Value,
     expected: &str,

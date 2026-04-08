@@ -660,7 +660,6 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
     }
 }
 
-/// Build a DoogatEvent from a parsed doogat.
 fn doogat_event(
     kind: &EventKind,
     z: &ParsedDoogat,
