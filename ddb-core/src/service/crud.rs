@@ -193,33 +193,14 @@ impl<G: GitBackend> DoogatService<G> {
         let content = self.repo.read_file(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
 
-        if let Some(t) = title {
-            parsed.meta.title = Some(t.to_owned());
-        }
-        if let Some(t) = tags {
-            parsed.meta.tags = t.to_vec();
-        }
-        if let Some(t) = doogat_type {
-            parsed.meta.doogat_type = Some(t.to_owned());
-        }
-        if let Some(b) = body {
-            parsed.body = b.to_owned();
-        }
-        for key in extra.unset {
-            parsed.meta.extra.remove(key);
-        }
-        for (key, value) in extra.set {
-            parsed.meta.extra.insert(key.clone(), value.clone());
-        }
+        apply_field_updates(&mut parsed, title, tags, doogat_type, body, extra);
 
-        // Load schemas once if we'll need them for validation or rematerialization
         let schemas = if parsed.meta.doogat_type.is_some() {
             Some(self.list_type_schemas()?)
         } else {
             None
         };
 
-        // Validate fields against typedef schema if this is a typed doogat with field changes
         let has_field_changes = !extra.set.is_empty() || !extra.unset.is_empty();
         if has_field_changes {
             if let (Some(ref type_name), Some(ref schemas)) = (&parsed.meta.doogat_type, &schemas) {
@@ -231,7 +212,6 @@ impl<G: GitBackend> DoogatService<G> {
         self.repo
             .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
         let mut parsed = self.reindex_and_rematerialize(&new_content, &path, schemas.as_deref())?;
-        // Sync stored HEAD to avoid spurious incremental_reindex on next call
         self.index.store_head(&self.repo.head_oid()?.0)?;
         parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
         Ok(parsed)
@@ -638,4 +618,32 @@ impl<G: GitBackend> DoogatService<G> {
 
     #[cfg(not(feature = "nosql"))]
     fn nosql_remove_doogat(&self, _id: &str) {}
+}
+
+fn apply_field_updates(
+    parsed: &mut ParsedDoogat,
+    title: Option<&str>,
+    tags: Option<&[String]>,
+    doogat_type: Option<&str>,
+    body: Option<&str>,
+    extra: &ExtraFieldUpdates<'_>,
+) {
+    if let Some(t) = title {
+        parsed.meta.title = Some(t.to_owned());
+    }
+    if let Some(t) = tags {
+        parsed.meta.tags = t.to_vec();
+    }
+    if let Some(t) = doogat_type {
+        parsed.meta.doogat_type = Some(t.to_owned());
+    }
+    if let Some(b) = body {
+        parsed.body = b.to_owned();
+    }
+    for key in extra.unset {
+        parsed.meta.extra.remove(key);
+    }
+    for (key, value) in extra.set {
+        parsed.meta.extra.insert(key.clone(), value.clone());
+    }
 }

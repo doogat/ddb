@@ -133,41 +133,7 @@ impl<G: GitBackend> DoogatService<G> {
     /// Query a materialized type table with WHERE/ORDER/LIMIT, returning parsed doogats.
     pub fn typed_filtered_list(&self, query: &TypedListQuery) -> Result<Vec<ParsedDoogat>> {
         self.ensure_fresh()?;
-
-        let mut conditions = Vec::new();
-        if !query.where_sql.is_empty() {
-            conditions.push(query.where_sql.to_string());
-        }
-        if let Some(t) = &query.tag {
-            conditions.push(format!(
-                "id IN (SELECT doogat_id FROM _ddb_tags WHERE tag = '{}')",
-                t.replace('\'', "''")
-            ));
-        }
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!(" WHERE {}", conditions.join(" AND "))
-        };
-
-        let order = query.order_sql.as_deref().unwrap_or("id DESC");
-        let limit_clause = match (query.limit, query.offset) {
-            (Some(l), Some(o)) => format!(" LIMIT {l} OFFSET {o}"),
-            (Some(l), None) => format!(" LIMIT {l}"),
-            (None, Some(o)) => format!(" LIMIT -1 OFFSET {o}"),
-            (None, None) => String::new(),
-        };
-
-        let group_by = match &query.distinct {
-            Some(col) => format!(" GROUP BY \"{}\"", col.replace('"', "\"\"")),
-            None => String::new(),
-        };
-
-        let sql = format!(
-            "SELECT id FROM \"{}\"{where_clause}{group_by} ORDER BY {order}{limit_clause}",
-            query.table_name
-        );
-
+        let sql = build_typed_list_sql(query);
         let rows = self.index.query_raw_with_params(&sql, &query.params)?;
         let ids: Vec<&str> = rows
             .iter()
@@ -194,10 +160,45 @@ impl<G: GitBackend> DoogatService<G> {
 /// Sortable columns on the doogats table.
 pub const SORTABLE_COLUMNS: &[&str] = &["id", "title", "date", "type", "updated_at"];
 
-/// Build SQL query with filters for doogat listing.
-fn build_filtered_sql(filter: &ListFilter) -> String {
+fn build_typed_list_sql(query: &TypedListQuery) -> String {
     let mut conditions = Vec::new();
+    if !query.where_sql.is_empty() {
+        conditions.push(query.where_sql.to_string());
+    }
+    if let Some(t) = &query.tag {
+        conditions.push(format!(
+            "id IN (SELECT doogat_id FROM _ddb_tags WHERE tag = '{}')",
+            t.replace('\'', "''")
+        ));
+    }
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+    let order = query.order_sql.as_deref().unwrap_or("id DESC");
+    let limit_clause = build_limit_clause(query.limit, query.offset);
+    let group_by = match &query.distinct {
+        Some(col) => format!(" GROUP BY \"{}\"", col.replace('"', "\"\"")),
+        None => String::new(),
+    };
+    format!(
+        "SELECT id FROM \"{}\"{where_clause}{group_by} ORDER BY {order}{limit_clause}",
+        query.table_name
+    )
+}
 
+fn build_limit_clause(limit: Option<i64>, offset: Option<i64>) -> String {
+    match (limit, offset) {
+        (Some(l), Some(o)) => format!(" LIMIT {l} OFFSET {o}"),
+        (Some(l), None) => format!(" LIMIT {l}"),
+        (None, Some(o)) => format!(" LIMIT -1 OFFSET {o}"),
+        (None, None) => String::new(),
+    }
+}
+
+fn build_filter_conditions(filter: &ListFilter) -> Vec<String> {
+    let mut conditions = Vec::new();
     if let Some(t) = filter.doogat_type.as_deref() {
         conditions.push(format!("z.type = '{}'", t.replace('\'', "''")));
     }
@@ -220,21 +221,11 @@ fn build_filtered_sql(filter: &ListFilter) -> String {
             value.replace('\'', "''")
         ));
     }
+    conditions
+}
 
-    let where_clause = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!(" WHERE {}", conditions.join(" AND "))
-    };
-
-    let limit_clause = match (filter.limit, filter.offset) {
-        (Some(l), Some(o)) => format!(" LIMIT {l} OFFSET {o}"),
-        (Some(l), None) => format!(" LIMIT {l}"),
-        (None, Some(o)) => format!(" LIMIT -1 OFFSET {o}"),
-        (None, None) => String::new(),
-    };
-
-    let order_clause = match filter
+fn build_order_clause(filter: &ListFilter) -> String {
+    match filter
         .sort_field
         .as_deref()
         .filter(|f| SORTABLE_COLUMNS.contains(f))
@@ -253,7 +244,17 @@ fn build_filtered_sql(filter: &ListFilter) -> String {
             }
         }
         None => " ORDER BY z.date DESC, z.id DESC".to_string(),
-    };
+    }
+}
 
+fn build_filtered_sql(filter: &ListFilter) -> String {
+    let conditions = build_filter_conditions(filter);
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+    let order_clause = build_order_clause(filter);
+    let limit_clause = build_limit_clause(filter.limit, filter.offset);
     format!("SELECT z.id, z.path, z.updated_at FROM doogats z{where_clause}{order_clause}{limit_clause}")
 }
