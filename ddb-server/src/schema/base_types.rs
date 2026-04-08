@@ -704,6 +704,45 @@ fn build_raw_ref_field(col_name: &str, field_name: &str) -> Field {
     })
 }
 
+fn add_reference_fields(
+    obj: Object,
+    col: &ColumnDef,
+    known_types: &HashMap<String, String>,
+) -> Object {
+    let gql_col_name = sanitize_field_name(&col.name);
+    let stripped = strip_id_suffix(&col.name);
+    let has_id_suffix = stripped.len() < col.name.len();
+
+    let obj_field_name = if has_id_suffix {
+        sanitize_field_name(stripped)
+    } else {
+        gql_col_name
+    };
+    let raw_field_name = if has_id_suffix {
+        sanitize_field_name(&col.name)
+    } else {
+        sanitize_field_name(&format!("{}_id", col.name))
+    };
+
+    let mut obj = obj;
+    if !BASE_DOOGAT_FIELDS.contains(&obj_field_name.as_str()) {
+        obj = obj.field(build_singular_ref_field(col, &obj_field_name, known_types));
+    }
+
+    let plural_base = if has_id_suffix { stripped } else { &col.name };
+    let list_name = pluralize(plural_base);
+    let gql_list_name = if is_valid_graphql_name(&list_name) {
+        list_name
+    } else {
+        pluralize_preserving_case(&sanitize_field_name(plural_base))
+    };
+    if !BASE_DOOGAT_FIELDS.contains(&gql_list_name.as_str()) {
+        obj = obj.field(build_plural_ref_field(col, &gql_list_name, known_types));
+    }
+
+    obj.field(build_raw_ref_field(&col.name, &raw_field_name))
+}
+
 /// Build a dynamic GraphQL object type for a _typedef schema.
 pub(crate) fn build_typed_object(
     type_name: &str,
@@ -713,47 +752,12 @@ pub(crate) fn build_typed_object(
     let mut obj = doogat_object(type_name);
 
     for col in &schema.columns {
-        let gql_col_name = sanitize_field_name(&col.name);
-
         if col.references.is_some() {
-            // Determine field names based on whether column ends with `_id`
-            let stripped = strip_id_suffix(&col.name);
-            let has_id_suffix = stripped.len() < col.name.len();
-
-            // Object resolver field name: use stripped name for _id suffix columns
-            let obj_field_name = if has_id_suffix {
-                sanitize_field_name(stripped)
-            } else {
-                gql_col_name.clone()
-            };
-
-            // Raw scalar field name: always exposes the raw ID
-            let raw_field_name = if has_id_suffix {
-                sanitize_field_name(&col.name)
-            } else {
-                sanitize_field_name(&format!("{}_id", col.name))
-            };
-
-            if !BASE_DOOGAT_FIELDS.contains(&obj_field_name.as_str()) {
-                obj = obj.field(build_singular_ref_field(col, &obj_field_name, known_types));
-            }
-
-            // Plural: resolves as list of referenced typed objects
-            // Skip if the computed plural name collides with a base doogat field
-            let plural_base = if has_id_suffix { stripped } else { &col.name };
-            let list_name = pluralize(plural_base);
-            let gql_list_name = if is_valid_graphql_name(&list_name) {
-                list_name
-            } else {
-                pluralize_preserving_case(&sanitize_field_name(plural_base))
-            };
-            if !BASE_DOOGAT_FIELDS.contains(&gql_list_name.as_str()) {
-                obj = obj.field(build_plural_ref_field(col, &gql_list_name, known_types));
-            }
-
-            obj = obj.field(build_raw_ref_field(&col.name, &raw_field_name));
-        } else if !BASE_DOOGAT_FIELDS.contains(&gql_col_name.as_str()) {
-            // Non-REFERENCES scalar field
+            obj = add_reference_fields(obj, col, known_types);
+            continue;
+        }
+        let gql_col_name = sanitize_field_name(&col.name);
+        if !BASE_DOOGAT_FIELDS.contains(&gql_col_name.as_str()) {
             let gql_type = column_to_gql_type(col);
             let col_name = col.name.clone();
             obj = obj.field(Field::new(&gql_col_name, gql_type, move |ctx| {
@@ -764,10 +768,6 @@ pub(crate) fn build_typed_object(
                 })
             }));
         } else {
-            // Column name collides with a base doogat field (id, title, date, type,
-            // tags, body, path, fields, links, attachments, updated_at, created_at).
-            // Drop it from the typed GraphQL object to avoid duplicate field registration,
-            // but warn so the user can rename it.
             tracing::warn!(
                 typedef = %type_name,
                 column = %col.name,
