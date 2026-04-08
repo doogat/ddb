@@ -151,17 +151,7 @@ async fn handle_pg_catalog_query(
     query: &str,
 ) -> PgWireResult<Vec<Response<'static>>> {
     if !is_table_listing_query(query) {
-        let schema = Arc::new(vec![FieldInfo::new(
-            "name".into(),
-            None,
-            None,
-            Type::VARCHAR,
-            FieldFormat::Text,
-        )]);
-        return Ok(vec![Response::Query(QueryResponse::new(
-            schema,
-            stream::iter(Vec::new()),
-        ))]);
+        return Ok(empty_catalog_response());
     }
 
     let table_result = read_pool
@@ -206,6 +196,21 @@ async fn handle_pg_catalog_query(
         schema,
         stream::iter(data_rows),
     ))])
+}
+
+/// Empty result set for unrecognized pg_catalog queries (pg_type, pg_namespace, etc.).
+fn empty_catalog_response() -> Vec<Response<'static>> {
+    let schema = Arc::new(vec![FieldInfo::new(
+        "name".into(),
+        None,
+        None,
+        Type::VARCHAR,
+        FieldFormat::Text,
+    )]);
+    vec![Response::Query(QueryResponse::new(
+        schema,
+        stream::iter(Vec::new()),
+    ))]
 }
 
 /// Encode SqlResult::Rows into a PG wire protocol response.
