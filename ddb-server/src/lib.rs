@@ -58,18 +58,7 @@ pub async fn run(
 
     let rest_actor = actor.clone();
     let (reloader, shared_schema) = reload::SchemaReloader::new(actor.clone(), read_pool.clone());
-    let gql_schema = match schema::build_schema(
-        actor,
-        read_pool.clone(),
-        type_schemas,
-        Some(reloader.clone()),
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(%e, "failed to build initial GraphQL schema");
-            return Err(std::io::Error::other(e));
-        }
-    };
+    let gql_schema = build_initial_schema(actor, read_pool.clone(), type_schemas, reloader.clone())?;
     reloader.store_initial(gql_schema);
 
     let app = build_app(
@@ -96,6 +85,19 @@ pub async fn run(
         r = pg => r?,
     };
     Ok(())
+}
+
+/// Build and validate the initial GraphQL schema.
+fn build_initial_schema(
+    actor: ActorHandle,
+    read_pool: read_pool::ReadPool,
+    type_schemas: Vec<ddb_core::types::TableSchema>,
+    reloader: Arc<reload::SchemaReloader>,
+) -> std::io::Result<Schema> {
+    schema::build_schema(actor, read_pool, type_schemas, Some(reloader)).map_err(|e| {
+        tracing::error!(%e, "failed to build initial GraphQL schema");
+        std::io::Error::other(e)
+    })
 }
 
 /// Build the combined axum router with auth, WebSocket, and health routes.
