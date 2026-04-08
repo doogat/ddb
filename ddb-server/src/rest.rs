@@ -186,24 +186,28 @@ struct ListParams {
     field_filters: Vec<(String, String)>,
 }
 
+type RestResult<T> = Result<T, (StatusCode, Json<ErrorBody>)>;
+
+fn parse_sort_param(raw: &str) -> RestResult<(Option<String>, Option<bool>)> {
+    let (desc, field) = if let Some(f) = raw.strip_prefix('-') {
+        (Some(true), f)
+    } else {
+        (None, raw)
+    };
+    if !SORTABLE_COLUMNS.contains(&field) {
+        return Err(rest_error(DoogatError::Validation(format!(
+            "invalid sort field '{field}'; allowed: {}",
+            SORTABLE_COLUMNS.join(", ")
+        ))));
+    }
+    Ok((Some(field.to_string()), desc))
+}
+
 fn parse_list_params(
     raw: &std::collections::HashMap<String, String>,
 ) -> Result<ListParams, (StatusCode, Json<ErrorBody>)> {
-    let (sort_field, sort_desc) = match raw.get("sort").map(|s| s.as_str()) {
-        Some(raw_sort) => {
-            let (desc, field) = if let Some(f) = raw_sort.strip_prefix('-') {
-                (Some(true), f)
-            } else {
-                (None, raw_sort)
-            };
-            if !SORTABLE_COLUMNS.contains(&field) {
-                return Err(rest_error(DoogatError::Validation(format!(
-                    "invalid sort field '{field}'; allowed: {}",
-                    SORTABLE_COLUMNS.join(", ")
-                ))));
-            }
-            (Some(field.to_string()), desc)
-        }
+    let (sort_field, sort_desc) = match raw.get("sort") {
+        Some(s) => parse_sort_param(s)?,
         None => (None, None),
     };
     let page: i64 = match raw.get("page") {
