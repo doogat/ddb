@@ -478,27 +478,21 @@ impl Index {
         Ok(results)
     }
 
-    /// Find doogats past their type's staleness threshold.
-    pub fn stale_doogats(
+    /// Load `stale_after_days` thresholds from all `_typedef` doogats.
+    fn load_staleness_thresholds(
         &self,
         repo: &(impl crate::traits::DoogatSource + crate::traits::GitHistory),
-        type_filter: Option<&str>,
-    ) -> Result<Vec<crate::types::StaleDoogat>> {
-        use crate::types::{DateSource, StaleDoogat};
-
-        // Load typedef thresholds
-        let mut threshold_stmt = self
+    ) -> Result<std::collections::HashMap<String, u32>> {
+        let mut stmt = self
             .conn
             .prepare("SELECT z.title, z.path FROM doogats z WHERE z.type = '_typedef'")?;
-        let typedef_rows = threshold_stmt.query_map([], |row| {
+        let typedef_rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
-        let mut thresholds: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::new();
+        let mut thresholds = std::collections::HashMap::new();
         for r in typedef_rows {
             let (type_name, path) = r?;
-            // Read the typedef to get stale_after_days
             if let Ok(content) = repo.read_file(&path) {
                 if let Ok(parsed) = crate::parser::parse(&content, &path) {
                     if let Some(days) = parsed
@@ -512,16 +506,59 @@ impl Index {
                 }
             }
         }
+        Ok(thresholds)
+    }
 
+    /// Find doogats past their type's staleness threshold.
+    pub fn stale_doogats(
+        &self,
+        repo: &(impl crate::traits::DoogatSource + crate::traits::GitHistory),
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::StaleDoogat>> {
+        let thresholds = self.load_staleness_thresholds(repo)?;
         if thresholds.is_empty() {
             return Ok(vec![]);
         }
 
-        // Query candidate doogats
-        let (sql, filter_val) = if let Some(t) = type_filter {
+        if let Some(t) = type_filter {
             if !thresholds.contains_key(t) {
                 return Ok(vec![]);
             }
+        }
+
+        let candidates = self.query_stale_candidates(type_filter)?;
+        let today = chrono::Utc::now().date_naive();
+        let mut stale = Vec::new();
+
+        for (id, title, doogat_type, fm_date, path, updated_at) in candidates {
+            let threshold = match thresholds.get(&doogat_type) {
+                Some(&t) => t,
+                None => continue,
+            };
+
+            let Some((last_date, source)) =
+                resolve_last_date(repo, &path, fm_date.as_deref(), updated_at.as_deref())
+            else {
+                continue;
+            };
+
+            if let Some(entry) =
+                compute_staleness(&id, title, doogat_type, &last_date, source, threshold, today)
+            {
+                stale.push(entry);
+            }
+        }
+
+        stale.sort_by(|a, b| b.days_stale.cmp(&a.days_stale));
+        Ok(stale)
+    }
+
+    /// Query candidate doogats for staleness checking.
+    fn query_stale_candidates(
+        &self,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<(String, String, String, Option<String>, String, Option<String>)>> {
+        let (sql, filter_val) = if let Some(t) = type_filter {
             (
                 "SELECT id, title, type, date, path, updated_at FROM doogats \
                  WHERE type = ?1 AND path NOT LIKE 'ddb/_typedef/%'"
@@ -539,14 +576,7 @@ impl Index {
 
         let mut stmt = self.conn.prepare(&sql)?;
 
-        type Row = (
-            String,
-            String,
-            String,
-            Option<String>,
-            String,
-            Option<String>,
-        );
+        type Row = (String, String, String, Option<String>, String, Option<String>);
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
             Ok((
                 row.get(0)?,
@@ -559,57 +589,16 @@ impl Index {
         };
 
         let collected: Vec<Row> = if let Some(ref t) = filter_val {
-            let rows = stmt.query_map(params![t], map_row)?;
-            rows.filter_map(|r| r.ok()).collect()
+            stmt.query_map(params![t], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
         } else {
-            let rows = stmt.query_map([], map_row)?;
-            rows.filter_map(|r| r.ok()).collect()
+            stmt.query_map([], map_row)?
+                .filter_map(|r| r.ok())
+                .collect()
         };
 
-        let today = chrono::Utc::now().date_naive();
-        let mut stale = Vec::new();
-
-        for (id, title, doogat_type, fm_date, path, updated_at) in collected {
-            let threshold = match thresholds.get(&doogat_type) {
-                Some(&t) => t,
-                None => continue,
-            };
-
-            // Date priority chain: git revision → frontmatter date → updated_at
-            let (last_date, source) = if let Ok(Some(git_date)) = repo.revision_date(&path) {
-                (git_date, DateSource::GitRevision)
-            } else if let Some(ref d) = fm_date {
-                (d.clone(), DateSource::FrontmatterDate)
-            } else if let Some(ref u) = updated_at {
-                (u.clone(), DateSource::IndexerUpdatedAt)
-            } else {
-                continue;
-            };
-
-            // Parse date and compute days since
-            let parsed_date = parse_date_to_naive(&last_date);
-            let Some(naive) = parsed_date else { continue };
-            let days_since = (today - naive).num_days();
-            if days_since < 0 {
-                continue;
-            }
-            let days_since = days_since as u32;
-
-            if days_since > threshold {
-                stale.push(StaleDoogat {
-                    id,
-                    title,
-                    doogat_type,
-                    last_updated: last_date,
-                    date_source: source,
-                    days_stale: days_since - threshold,
-                    threshold_days: threshold,
-                });
-            }
-        }
-
-        stale.sort_by(|a, b| b.days_stale.cmp(&a.days_stale));
-        Ok(stale)
+        Ok(collected)
     }
 
     /// Find doogats with zero incoming backlinks.
@@ -657,20 +646,9 @@ impl Index {
         Ok(out)
     }
 
-    /// Find doogats modified within a recent time window.
-    pub fn recent_doogats(
-        &self,
-        days: u32,
-        type_filter: Option<&str>,
-    ) -> Result<Vec<RecentDoogat>> {
-        let today = chrono::Utc::now().date_naive();
-        let cutoff = today - chrono::Duration::days(i64::from(days));
-        let cutoff_str = cutoff.format("%Y-%m-%d").to_string();
-
-        // COALESCE(NULLIF(date,''), updated_at) picks the frontmatter date
-        // when present, otherwise falls back to indexer updated_at. The SQL
-        // WHERE filters by cutoff to avoid fetching the entire table.
-        let (sql, filter_val) = if let Some(t) = type_filter {
+    /// Build the SQL query and optional type filter value for `recent_doogats`.
+    fn build_recent_query(type_filter: Option<&str>) -> (String, Option<String>) {
+        if let Some(t) = type_filter {
             (
                 "SELECT id, title, type, COALESCE(NULLIF(date,''), updated_at) AS effective \
                  FROM doogats \
@@ -690,8 +668,20 @@ impl Index {
                     .to_string(),
                 None,
             )
-        };
+        }
+    }
 
+    /// Find doogats modified within a recent time window.
+    pub fn recent_doogats(
+        &self,
+        days: u32,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<RecentDoogat>> {
+        let today = chrono::Utc::now().date_naive();
+        let cutoff = today - chrono::Duration::days(i64::from(days));
+        let cutoff_str = cutoff.format("%Y-%m-%d").to_string();
+
+        let (sql, filter_val) = Self::build_recent_query(type_filter);
         let mut stmt = self.conn.prepare(&sql)?;
 
         type Row = (String, String, String, String);
@@ -710,8 +700,6 @@ impl Index {
         let recent: Vec<RecentDoogat> = collected
             .into_iter()
             .filter_map(|(id, title, doogat_type, effective_date)| {
-                // Double-check parse succeeds (handles edge cases like
-                // malformed dates that pass string comparison)
                 parse_date_to_naive(&effective_date)?;
                 Some(RecentDoogat {
                     id,
@@ -766,22 +754,7 @@ impl Index {
 
         let mut entries = Vec::with_capacity(doogats.len());
         for (id, title, doogat_type, path) in &doogats {
-            let outbound: usize = out_stmt
-                .query_row(params![id], |row| row.get::<_, i64>(0))
-                .unwrap_or(0) as usize;
-
-            let inbound: usize = in_stmt
-                .query_row(params![id, path], |row| row.get::<_, i64>(0))
-                .unwrap_or(0) as usize;
-
-            entries.push(LinkDensityEntry {
-                id: id.clone(),
-                title: title.clone(),
-                doogat_type: doogat_type.clone(),
-                inbound_links: inbound,
-                outbound_links: outbound,
-                density_score: inbound + outbound,
-            });
+            entries.push(count_links(id, title, doogat_type, path, &mut out_stmt, &mut in_stmt));
         }
 
         entries.sort_by(|a, b| b.density_score.cmp(&a.density_score));
@@ -964,4 +937,80 @@ fn parse_date_to_naive(s: &str) -> Option<chrono::NaiveDate> {
         return Some(dt.date_naive());
     }
     None
+}
+
+/// Resolve the most relevant date for a doogat using the priority chain:
+/// git revision date, then frontmatter date, then indexer updated_at.
+fn resolve_last_date(
+    repo: &(impl crate::traits::DoogatSource + crate::traits::GitHistory),
+    path: &str,
+    fm_date: Option<&str>,
+    updated_at: Option<&str>,
+) -> Option<(String, crate::types::DateSource)> {
+    use crate::types::DateSource;
+
+    if let Ok(Some(git_date)) = repo.revision_date(path) {
+        Some((git_date, DateSource::GitRevision))
+    } else if let Some(d) = fm_date {
+        Some((d.to_string(), DateSource::FrontmatterDate))
+    } else {
+        updated_at.map(|u| (u.to_string(), DateSource::IndexerUpdatedAt))
+    }
+}
+
+/// Parse a date, compute days since, and build a `StaleDoogat` if past threshold.
+fn compute_staleness(
+    id: &str,
+    title: String,
+    doogat_type: String,
+    last_date: &str,
+    source: crate::types::DateSource,
+    threshold: u32,
+    today: chrono::NaiveDate,
+) -> Option<crate::types::StaleDoogat> {
+    let naive = parse_date_to_naive(last_date)?;
+    let days_since = (today - naive).num_days();
+    if days_since < 0 {
+        return None;
+    }
+    let days_since = days_since as u32;
+    if days_since <= threshold {
+        return None;
+    }
+    Some(crate::types::StaleDoogat {
+        id: id.to_string(),
+        title,
+        doogat_type,
+        last_updated: last_date.to_string(),
+        date_source: source,
+        days_stale: days_since - threshold,
+        threshold_days: threshold,
+    })
+}
+
+/// Compute inbound and outbound link counts for a single doogat.
+fn count_links(
+    id: &str,
+    title: &str,
+    doogat_type: &str,
+    path: &str,
+    out_stmt: &mut rusqlite::Statement<'_>,
+    in_stmt: &mut rusqlite::Statement<'_>,
+) -> LinkDensityEntry {
+    let outbound: usize = out_stmt
+        .query_row(params![id], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
+
+    let inbound: usize = in_stmt
+        .query_row(params![id, path], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
+
+    LinkDensityEntry {
+        id: id.to_string(),
+        title: title.to_string(),
+        doogat_type: doogat_type.to_string(),
+        inbound_links: inbound,
+        outbound_links: outbound,
+        density_score: inbound + outbound,
+    }
 }
