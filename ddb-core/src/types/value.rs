@@ -76,12 +76,6 @@ impl fmt::Display for PathError {
 
 impl std::error::Error for PathError {}
 
-/// Parse a dot/bracket notation path into segments.
-///
-/// - `.` separates map keys
-/// - `[N]` indexes into lists (0-based)
-/// - `\.` is a literal dot within a key name
-/// - Empty segments are rejected
 fn parse_bracket_index(
     chars: &mut std::iter::Peekable<std::str::Chars>,
     path: &str,
@@ -118,6 +112,55 @@ fn parse_bracket_index(
     Ok(PathSegment::Index(idx))
 }
 
+fn handle_dot(
+    segments: &mut Vec<PathSegment>,
+    current_key: &mut String,
+    path: &str,
+) -> std::result::Result<(), PathError> {
+    if current_key.is_empty() {
+        if !matches!(segments.last(), Some(PathSegment::Index(_))) {
+            return Err(PathError::InvalidPath {
+                path: path.to_string(),
+                reason: "empty segment".to_string(),
+            });
+        }
+    } else {
+        segments.push(PathSegment::Key(std::mem::take(current_key)));
+    }
+    Ok(())
+}
+
+fn finalize_segments(
+    segments: Vec<PathSegment>,
+    last_was_dot: bool,
+    current_key: String,
+    path: &str,
+) -> std::result::Result<Vec<PathSegment>, PathError> {
+    if last_was_dot {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "trailing dot".to_string(),
+        });
+    }
+    let mut segments = segments;
+    if !current_key.is_empty() {
+        segments.push(PathSegment::Key(current_key));
+    }
+    if segments.is_empty() {
+        return Err(PathError::InvalidPath {
+            path: path.to_string(),
+            reason: "no segments".to_string(),
+        });
+    }
+    Ok(segments)
+}
+
+/// Parse a dot/bracket notation path into segments.
+///
+/// - `.` separates map keys
+/// - `[N]` indexes into lists (0-based)
+/// - `\.` is a literal dot within a key name
+/// - Empty segments are rejected
 pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError> {
     if path.is_empty() {
         return Err(PathError::InvalidPath {
@@ -134,26 +177,13 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
     while let Some(ch) = chars.next() {
         last_was_dot = false;
         match ch {
-            '\\' => {
-                // Escaped character — next char is literal
-                match chars.next() {
-                    Some(escaped) => current_key.push(escaped),
-                    None => current_key.push('\\'),
-                }
-            }
+            '\\' => match chars.next() {
+                Some(escaped) => current_key.push(escaped),
+                None => current_key.push('\\'),
+            },
             '.' => {
                 last_was_dot = true;
-                if current_key.is_empty() {
-                    // Allow dot after bracket (e.g. "a[0].b") — just a separator
-                    if !matches!(segments.last(), Some(PathSegment::Index(_))) {
-                        return Err(PathError::InvalidPath {
-                            path: path.to_string(),
-                            reason: "empty segment".to_string(),
-                        });
-                    }
-                } else {
-                    segments.push(PathSegment::Key(std::mem::take(&mut current_key)));
-                }
+                handle_dot(&mut segments, &mut current_key, path)?;
             }
             '[' => {
                 if !current_key.is_empty() {
@@ -161,33 +191,11 @@ pub fn parse_path(path: &str) -> std::result::Result<Vec<PathSegment>, PathError
                 }
                 segments.push(parse_bracket_index(&mut chars, path)?);
             }
-            _ => {
-                current_key.push(ch);
-            }
+            _ => current_key.push(ch),
         }
     }
 
-    // Reject trailing dot
-    if last_was_dot {
-        return Err(PathError::InvalidPath {
-            path: path.to_string(),
-            reason: "trailing dot".to_string(),
-        });
-    }
-
-    // Flush trailing key
-    if !current_key.is_empty() {
-        segments.push(PathSegment::Key(current_key));
-    }
-
-    if segments.is_empty() {
-        return Err(PathError::InvalidPath {
-            path: path.to_string(),
-            reason: "no segments".to_string(),
-        });
-    }
-
-    Ok(segments)
+    finalize_segments(segments, last_was_dot, current_key, path)
 }
 
 fn traverse_segments<'a>(
