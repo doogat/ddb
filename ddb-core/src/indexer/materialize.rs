@@ -412,58 +412,8 @@ impl Index {
 
             match crate::parser::parse(&content, path) {
                 Ok(parsed) => {
-                    // Check for cross-zone duplicate keys
-                    let mut seen_keys: std::collections::HashMap<String, &str> =
-                        std::collections::HashMap::new();
-
-                    for key in parsed.meta.extra.keys() {
-                        seen_keys.insert(key.clone(), "frontmatter");
-                    }
-
-                    for field in &parsed.inline_fields {
-                        if field.zone == crate::types::Zone::Reference {
-                            if let Some(&other_zone) = seen_keys.get(&field.key) {
-                                if other_zone != "reference" {
-                                    warnings.push(ConsistencyWarning::CrossZoneDuplicate {
-                                        path: path.clone(),
-                                        key: field.key.clone(),
-                                    });
-                                }
-                            }
-                        }
-                    }
-
-                    // Check missing required fields
-                    if let Some(type_name) = &parsed.meta.doogat_type {
-                        if let Some(schema) = typedef_schemas.get(type_name.as_str()) {
-                            for col in &schema.columns {
-                                if col.required {
-                                    let has_value = match col
-                                        .zone
-                                        .as_ref()
-                                        .unwrap_or(&crate::types::Zone::Frontmatter)
-                                    {
-                                        crate::types::Zone::Frontmatter => {
-                                            parsed.meta.extra.contains_key(&col.name)
-                                        }
-                                        crate::types::Zone::Reference => {
-                                            parsed.inline_fields.iter().any(|f| f.key == col.name)
-                                        }
-                                        crate::types::Zone::Body => {
-                                            parsed.body.contains(&format!("## {}", col.name))
-                                        }
-                                    };
-                                    if !has_value {
-                                        warnings.push(ConsistencyWarning::MissingRequired {
-                                            path: path.clone(),
-                                            type_name: type_name.clone(),
-                                            field: col.name.clone(),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    check_cross_zone_duplicates(&parsed, path, &mut warnings);
+                    check_required_fields(&parsed, path, &typedef_schemas, &mut warnings);
                 }
                 Err(e) => {
                     warnings.push(ConsistencyWarning::MalformedYaml {
@@ -586,15 +536,6 @@ impl Index {
         id: &str,
         doogat: &crate::types::ParsedDoogat,
     ) -> Result<()> {
-        let mut col_names = vec![
-            "id".to_string(),
-            "title".to_string(),
-            "date".to_string(),
-            "updated_at".to_string(),
-        ];
-        let mut placeholders = vec!["?1".to_string(), "?2".to_string(), "?3".to_string(), "?4".to_string()];
-
-        // Fetch updated_at from the doogats table
         let updated_at: Option<String> = self
             .conn
             .query_row(
@@ -604,24 +545,8 @@ impl Index {
             )
             .ok();
 
-        let mut vals: Vec<Option<String>> = vec![
-            Some(id.to_string()),
-            doogat.meta.title.clone(),
-            doogat.meta.date.clone(),
-            updated_at,
-        ];
-
-        let mut param_idx = 5;
-        for col in &schema.columns {
-            if is_core_column(&col.name) {
-                continue;
-            }
-            col_names.push(format!("\"{}\"", col.name));
-            placeholders.push(format!("?{}", param_idx));
-            param_idx += 1;
-            let val = extract_column_value(doogat, col);
-            vals.push(if val.is_empty() { None } else { Some(val) });
-        }
+        let (col_names, placeholders, vals) =
+            extract_column_values(schema, id, doogat, updated_at);
 
         let sql = format!(
             "INSERT OR REPLACE INTO \"{}\" ({}) VALUES ({})",
@@ -636,7 +561,18 @@ impl Index {
             .collect();
         self.conn.execute(&sql, params.as_slice())?;
 
-        // Populate junction tables for REFERENCES columns
+        self.populate_junction_tables(schema, id, doogat)?;
+
+        Ok(())
+    }
+
+    /// Insert junction table rows for REFERENCES columns.
+    fn populate_junction_tables(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        doogat: &crate::types::ParsedDoogat,
+    ) -> Result<()> {
         for col in &schema.columns {
             if col.references.is_some() {
                 let ref_values = extract_multi_reference_values(doogat, &col.name);
@@ -652,9 +588,121 @@ impl Index {
                 }
             }
         }
-
         Ok(())
     }
+}
+
+/// Check if a key appears in multiple zones across a doogat, emitting warnings for duplicates.
+fn check_cross_zone_duplicates(
+    parsed: &crate::types::ParsedDoogat,
+    path: &str,
+    warnings: &mut Vec<crate::types::ConsistencyWarning>,
+) {
+    use crate::types::ConsistencyWarning;
+
+    let mut seen_keys: std::collections::HashMap<String, &str> =
+        std::collections::HashMap::new();
+
+    for key in parsed.meta.extra.keys() {
+        seen_keys.insert(key.clone(), "frontmatter");
+    }
+
+    for field in &parsed.inline_fields {
+        if field.zone == crate::types::Zone::Reference {
+            if let Some(&other_zone) = seen_keys.get(&field.key) {
+                if other_zone != "reference" {
+                    warnings.push(ConsistencyWarning::CrossZoneDuplicate {
+                        path: path.to_string(),
+                        key: field.key.clone(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Check if required fields from a typedef are present, emitting warnings for missing ones.
+fn check_required_fields(
+    parsed: &crate::types::ParsedDoogat,
+    path: &str,
+    typedef_schemas: &std::collections::HashMap<String, crate::types::TableSchema>,
+    warnings: &mut Vec<crate::types::ConsistencyWarning>,
+) {
+    use crate::types::ConsistencyWarning;
+
+    let type_name = match &parsed.meta.doogat_type {
+        Some(t) => t,
+        None => return,
+    };
+    let schema = match typedef_schemas.get(type_name.as_str()) {
+        Some(s) => s,
+        None => return,
+    };
+
+    for col in &schema.columns {
+        if !col.required {
+            continue;
+        }
+        let has_value = match col
+            .zone
+            .as_ref()
+            .unwrap_or(&crate::types::Zone::Frontmatter)
+        {
+            crate::types::Zone::Frontmatter => parsed.meta.extra.contains_key(&col.name),
+            crate::types::Zone::Reference => {
+                parsed.inline_fields.iter().any(|f| f.key == col.name)
+            }
+            crate::types::Zone::Body => parsed.body.contains(&format!("## {}", col.name)),
+        };
+        if !has_value {
+            warnings.push(ConsistencyWarning::MissingRequired {
+                path: path.to_string(),
+                type_name: type_name.clone(),
+                field: col.name.clone(),
+            });
+        }
+    }
+}
+
+/// Build column names, placeholders, and values for an INSERT from a parsed doogat.
+fn extract_column_values(
+    schema: &crate::types::TableSchema,
+    id: &str,
+    doogat: &crate::types::ParsedDoogat,
+    updated_at: Option<String>,
+) -> (Vec<String>, Vec<String>, Vec<Option<String>>) {
+    let mut col_names = vec![
+        "id".to_string(),
+        "title".to_string(),
+        "date".to_string(),
+        "updated_at".to_string(),
+    ];
+    let mut placeholders = vec![
+        "?1".to_string(),
+        "?2".to_string(),
+        "?3".to_string(),
+        "?4".to_string(),
+    ];
+    let mut vals: Vec<Option<String>> = vec![
+        Some(id.to_string()),
+        doogat.meta.title.clone(),
+        doogat.meta.date.clone(),
+        updated_at,
+    ];
+
+    let mut param_idx = 5;
+    for col in &schema.columns {
+        if is_core_column(&col.name) {
+            continue;
+        }
+        col_names.push(format!("\"{}\"", col.name));
+        placeholders.push(format!("?{}", param_idx));
+        param_idx += 1;
+        let val = extract_column_value(doogat, col);
+        vals.push(if val.is_empty() { None } else { Some(val) });
+    }
+
+    (col_names, placeholders, vals)
 }
 
 /// Collect frontmatter, body, and reference columns from a parsed doogat into the accumulator.
