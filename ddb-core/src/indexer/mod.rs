@@ -251,22 +251,32 @@ impl Index {
         let date = doogat.meta.date.as_deref().unwrap_or("");
         let ztype = doogat.meta.doogat_type.as_deref().unwrap_or("");
         let now = chrono::Utc::now().to_rfc3339();
-        let tags_str = doogat.meta.tags.join(", ");
 
-        // Delete old FTS entry (no-op if doogat doesn't exist yet)
-        self.conn.execute(
-            "DELETE FROM _ddb_fts WHERE rowid = (SELECT rowid FROM doogats WHERE id = ?1)",
-            params![id],
-        )?;
+        self.clear_doogat_relations(id)?;
 
-        // Upsert doogat
         self.conn.execute(
             "INSERT OR REPLACE INTO doogats (id, title, date, type, path, body, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![id, title, date, ztype, doogat.path, doogat.body, now],
         )?;
 
-        // Delete and reinsert related data
+        self.insert_tags(id, doogat)?;
+        self.insert_checkboxes(id, doogat)?;
+        self.insert_inline_fields(id, doogat)?;
+        self.insert_links(id, doogat)?;
+        self.insert_aliases(id, doogat)?;
+        self.insert_attachments(id, doogat)?;
+        self.insert_fts_entry(id, title, doogat)?;
+
+        Ok(())
+    }
+
+    /// Delete all related data for a doogat before reinserting.
+    fn clear_doogat_relations(&self, id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM _ddb_fts WHERE rowid = (SELECT rowid FROM doogats WHERE id = ?1)",
+            params![id],
+        )?;
         self.conn
             .execute("DELETE FROM _ddb_tags WHERE doogat_id = ?1", params![id])?;
         self.conn
@@ -279,26 +289,19 @@ impl Index {
             "DELETE FROM _ddb_checkboxes WHERE doogat_id = ?1",
             params![id],
         )?;
+        Ok(())
+    }
 
-        self.insert_tags(id, doogat)?;
-        self.insert_checkboxes(id, doogat)?;
-        self.insert_inline_fields(id, doogat)?;
-        self.insert_links(id, doogat)?;
-        self.insert_aliases(id, doogat)?;
-        self.insert_attachments(id, doogat)?;
-
-        // Collect frontmatter extra values for FTS fields column.
-        // Skip internal keys that have dedicated tables.
+    /// Insert the FTS entry for a doogat.
+    fn insert_fts_entry(&self, id: &str, title: &str, doogat: &ParsedDoogat) -> Result<()> {
+        let tags_str = doogat.meta.tags.join(", ");
         let fields_str = collect_fts_fields(&doogat.meta.extra);
-
-        // Insert FTS entry
         self.conn.execute(
             "INSERT INTO _ddb_fts (rowid, title, body, tags, fields) VALUES (
                 (SELECT rowid FROM doogats WHERE id = ?1), ?2, ?3, ?4, ?5
             )",
             params![id, title, doogat.body, tags_str, fields_str],
         )?;
-
         Ok(())
     }
 
