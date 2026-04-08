@@ -623,13 +623,11 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
         }
     };
 
-    // Ensure index is up to date on startup (catches external changes)
     if let Err(e) = svc.rebuild_if_stale() {
         tracing::warn!(%e, "actor: index rebuild on startup failed");
     }
 
     while let Some(msg) = rx.blocking_recv() {
-        // Capture delete ID and type before cmd is moved (doogat won't exist after delete)
         let (delete_id, delete_type) = match &msg.cmd {
             ActorCommand::DeleteDoogat { id } => (
                 Some(id.clone()),
@@ -649,49 +647,35 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
         };
 
         let reply = handlers::handle_command(&mut svc, msg.cmd);
+        emit_mutation_events(
+            &event_bus,
+            &reply,
+            mutation_kind.as_ref(),
+            &delete_id,
+            &delete_type,
+            is_batch_update,
+            is_create_many,
+        );
+        let _ = msg.reply.send(reply);
+    }
+}
 
-        // Emit event for successful mutations
-        if let Some(ref kind) = mutation_kind {
-            match (&kind, &reply) {
-                (EventKind::Created | EventKind::Updated, ActorReply::Doogat(r)) => {
-                    if let Ok(z) = r.as_ref() {
-                        event_bus.send(DoogatEvent {
-                            kind: kind.clone(),
-                            doogat_id: z
-                                .meta
-                                .id
-                                .as_ref()
-                                .map(ToString::to_string)
-                                .unwrap_or_default(),
-                            doogat_type: z.meta.doogat_type.clone(),
-                            timestamp: Utc::now(),
-                        });
-                    }
-                }
-                (EventKind::Deleted, ActorReply::Deleted(Ok(()))) => {
+/// Emit events for successful singular and batch mutations.
+fn emit_mutation_events(
+    event_bus: &EventBus,
+    reply: &ActorReply,
+    mutation_kind: Option<&EventKind>,
+    delete_id: &Option<String>,
+    delete_type: &Option<String>,
+    is_batch_update: bool,
+    is_create_many: bool,
+) {
+    if let Some(kind) = mutation_kind {
+        match (kind, reply) {
+            (EventKind::Created | EventKind::Updated, ActorReply::Doogat(r)) => {
+                if let Ok(z) = r.as_ref() {
                     event_bus.send(DoogatEvent {
                         kind: kind.clone(),
-                        doogat_id: delete_id.clone().unwrap_or_default(),
-                        doogat_type: delete_type.clone(),
-                        timestamp: Utc::now(),
-                    });
-                }
-                _ => {} // mutation failed, no event
-            }
-        }
-
-        // Emit events for batch mutations (one per doogat)
-        if is_batch_update || is_create_many {
-            if let ActorReply::DoogatList(Ok(ref doogats)) = reply {
-                let event_kind = if is_create_many {
-                    EventKind::Created
-                } else {
-                    EventKind::Updated
-                };
-                let now = Utc::now();
-                for z in doogats {
-                    event_bus.send(DoogatEvent {
-                        kind: event_kind.clone(),
                         doogat_id: z
                             .meta
                             .id
@@ -699,12 +683,43 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
                             .map(ToString::to_string)
                             .unwrap_or_default(),
                         doogat_type: z.meta.doogat_type.clone(),
-                        timestamp: now,
+                        timestamp: Utc::now(),
                     });
                 }
             }
+            (EventKind::Deleted, ActorReply::Deleted(Ok(()))) => {
+                event_bus.send(DoogatEvent {
+                    kind: kind.clone(),
+                    doogat_id: delete_id.clone().unwrap_or_default(),
+                    doogat_type: delete_type.clone(),
+                    timestamp: Utc::now(),
+                });
+            }
+            _ => {}
         }
+    }
 
-        let _ = msg.reply.send(reply);
+    if is_batch_update || is_create_many {
+        if let ActorReply::DoogatList(Ok(ref doogats)) = reply {
+            let kind = if is_create_many {
+                EventKind::Created
+            } else {
+                EventKind::Updated
+            };
+            let now = Utc::now();
+            for z in doogats {
+                event_bus.send(DoogatEvent {
+                    kind: kind.clone(),
+                    doogat_id: z
+                        .meta
+                        .id
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_default(),
+                    doogat_type: z.meta.doogat_type.clone(),
+                    timestamp: now,
+                });
+            }
+        }
     }
 }
