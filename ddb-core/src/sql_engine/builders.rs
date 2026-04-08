@@ -309,20 +309,7 @@ pub(super) fn build_data_doogat(
 }
 
 /// Parse a single column definition from a YAML mapping value.
-fn parse_single_column(item: &Value) -> Result<ColumnDef> {
-    let map = item
-        .as_mapping()
-        .ok_or_else(|| DoogatError::SqlEngine("column must be a mapping".into()))?;
-    let name = map
-        .get("name")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| DoogatError::SqlEngine("column missing name".into()))?
-        .to_string();
-    let data_type = map
-        .get("data_type")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| DoogatError::SqlEngine("column missing data_type".into()))?
-        .to_string();
+fn parse_optional_column_fields(map: &BTreeMap<String, Value>) -> OptionalColumnFields {
     let references = map
         .get("references")
         .and_then(|v| v.as_str())
@@ -350,15 +337,49 @@ fn parse_single_column(item: &Value) -> Result<ColumnDef> {
         .get("default_value")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    Ok(ColumnDef {
-        name,
-        data_type,
+    OptionalColumnFields {
         references,
         zone,
         required,
         search_boost,
         allowed_values,
         default_value,
+    }
+}
+
+struct OptionalColumnFields {
+    references: Option<String>,
+    zone: Option<Zone>,
+    required: bool,
+    search_boost: Option<f64>,
+    allowed_values: Option<Vec<String>>,
+    default_value: Option<String>,
+}
+
+fn parse_single_column(item: &Value) -> Result<ColumnDef> {
+    let map = item
+        .as_mapping()
+        .ok_or_else(|| DoogatError::SqlEngine("column must be a mapping".into()))?;
+    let name = map
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| DoogatError::SqlEngine("column missing name".into()))?
+        .to_string();
+    let data_type = map
+        .get("data_type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| DoogatError::SqlEngine("column missing data_type".into()))?
+        .to_string();
+    let opt = parse_optional_column_fields(map);
+    Ok(ColumnDef {
+        name,
+        data_type,
+        references: opt.references,
+        zone: opt.zone,
+        required: opt.required,
+        search_boost: opt.search_boost,
+        allowed_values: opt.allowed_values,
+        default_value: opt.default_value,
     })
 }
 

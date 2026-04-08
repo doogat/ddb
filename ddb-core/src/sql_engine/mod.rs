@@ -230,6 +230,9 @@ impl<'a> SqlEngine<'a> {
     }
 
     fn execute_statement(&mut self, stmt: &Statement) -> Result<SqlResult> {
+        if let Some(err) = reject_unsupported_ddl(stmt) {
+            return Err(err);
+        }
         match stmt {
             Statement::CreateTable(ct) => self.handle_create_table(ct),
             Statement::Insert(ins) => self.handle_insert(ins),
@@ -258,36 +261,10 @@ impl<'a> SqlEngine<'a> {
             Statement::Drop { object_type, if_exists, names, cascade, .. } => {
                 self.handle_drop(object_type, *if_exists, names, *cascade)
             }
-            Statement::CreateIndex(_) => {
-                Err(DoogatError::SqlEngine(
-                    "CREATE INDEX not supported: indexes on the materialized cache are rebuilt from doogat data on reindex".into(),
-                ))
-            }
-            Statement::CreateView { .. } => {
-                Err(DoogatError::SqlEngine(
-                    "CREATE VIEW not supported: views are not stored as doogats and are lost on reindex".into(),
-                ))
-            }
-            Statement::CreateVirtualTable { .. } => {
-                Err(DoogatError::SqlEngine(
-                    "CREATE VIRTUAL TABLE not supported: virtual tables have no doogat representation".into(),
-                ))
-            }
-            Statement::CreateTrigger { .. } => {
-                Err(DoogatError::SqlEngine(
-                    "CREATE TRIGGER not supported: triggers fire on cache mutations, not git commits".into(),
-                ))
-            }
-            Statement::AlterIndex { .. } => {
-                Err(DoogatError::SqlEngine(
-                    "ALTER INDEX not supported: indexes are managed automatically and rebuilt on reindex".into(),
-                ))
-            }
             Statement::StartTransaction { .. } => self.handle_begin(),
             Statement::Commit { .. } => self.handle_commit(),
             Statement::Rollback { .. } => self.handle_rollback(),
             _ => {
-                // Pass through (SELECT and anything else) to raw query
                 let sql_str = stmt.to_string();
                 let (columns, rows) = self.index.query_raw_with_columns(&sql_str)?;
                 let (rows, column_types) = self.coerce_boolean_columns(stmt, &columns, rows);
@@ -316,6 +293,28 @@ impl<'a> SqlEngine<'a> {
         }
         self.repo.read_file(path)
     }
+}
+
+fn reject_unsupported_ddl(stmt: &Statement) -> Option<DoogatError> {
+    let msg = match stmt {
+        Statement::CreateIndex(_) => {
+            "CREATE INDEX not supported: indexes on the materialized cache are rebuilt from doogat data on reindex"
+        }
+        Statement::CreateView { .. } => {
+            "CREATE VIEW not supported: views are not stored as doogats and are lost on reindex"
+        }
+        Statement::CreateVirtualTable { .. } => {
+            "CREATE VIRTUAL TABLE not supported: virtual tables have no doogat representation"
+        }
+        Statement::CreateTrigger { .. } => {
+            "CREATE TRIGGER not supported: triggers fire on cache mutations, not git commits"
+        }
+        Statement::AlterIndex { .. } => {
+            "ALTER INDEX not supported: indexes are managed automatically and rebuilt on reindex"
+        }
+        _ => return None,
+    };
+    Some(DoogatError::SqlEngine(msg.into()))
 }
 
 #[cfg(test)]
