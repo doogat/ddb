@@ -56,24 +56,24 @@ ddb update-bin --rollback
 
 ## Stability
 
-### Stable (v0.1.0 API contract)
+### Stable (v0.2 API contract)
 
-- CLI: init, create, read, update, delete, search, query, rename, type, sync
+- CLI: init, create, read, update, delete, search, query, rename, type, sync, status, compact, reindex, fix, discover
 - Git storage format (doogat Markdown, frontmatter schema)
 - SQLite FTS5 search
-- SQL SELECT, CREATE TABLE, INSERT, UPDATE, DELETE
-- Multi-device sync (push, pull, merge)
+- SQL SELECT, CREATE TABLE, INSERT, UPDATE, DELETE (including bulk, transactions, upsert)
+- Multi-device sync (push, pull, merge, CRDT conflict resolution)
+- GraphQL server (`ddb serve`) with dynamic schema, subscriptions, and batch mutations
+- REST API and PgWire protocol
 - `ddb-core` public Rust API for the above
 
-### Experimental (may change in v0.2.0)
+### Experimental
 
-- GraphQL server (`ddb serve`)
-- REST API, PgWire protocol, WebSocket subscriptions
 - NoSQL API (`get`, `scan`, `backlinks`)
 - UniFFI bindings (Swift/Kotlin)
 - Bundle export/import
 - Attachments
-- Auto-update
+- Auto-update (`update-bin`)
 
 ## Development
 
@@ -114,10 +114,10 @@ If you installed `ddb` from a GitHub release binary (to `/usr/local/bin/`), use 
 
 ```bash
 dev/bin/release local      # cargo install from source
-ddb --version              # 0.1.0+dev.g<sha> confirms the local build
+ddb --version              # 0.2.0+dev.g<sha> confirms the local build
 ```
 
-The `+dev.g<sha>` suffix only appears in local builds. CI and tagged releases produce a clean version (`0.1.0`).
+The `+dev.g<sha>` suffix only appears in local builds. CI and tagged releases produce a clean version (e.g. `0.2.0`).
 
 ### Release
 

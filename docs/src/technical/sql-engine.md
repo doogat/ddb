@@ -37,6 +37,23 @@ Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTE
 
 `ENUM` and `SET` columns extract `allowed_values` into the typedef schema and store as `TEXT` in SQLite.
 
+### UNIQUE Constraints
+
+Table-level `UNIQUE` constraints are supported in `CREATE TABLE`:
+
+```sql
+CREATE TABLE membership (title TEXT, link_id VARCHAR(255), cat VARCHAR(255), UNIQUE(link_id, cat))
+CREATE TABLE items (title TEXT, code VARCHAR(255), UNIQUE(code))
+```
+
+- Parsed into the typedef's `unique_together` field (a list of column-name lists)
+- Enforced via `CREATE UNIQUE INDEX` on the materialized SQLite table
+- Survive rematerialization (indexes are recreated from the typedef on reindex)
+- Duplicate inserts fail with a UNIQUE constraint violation error
+- Used by `INSERT ... ON CONFLICT DO NOTHING` for upsert detection
+
+`CREATE INDEX` is not supported as a standalone statement (see [Not Supported](#not-supported)). Use `UNIQUE()` in `CREATE TABLE` instead.
+
 `BOOLEAN` columns are stored as `INTEGER` (1/0) in SQLite. SQL `SELECT` queries against materialized type tables automatically coerce these values to `"true"`/`"false"` in the response. This coercion applies only to tables with typedefs; queries against raw internal tables (`_ddb_*`, `doogats`) return uncoerced values.
 
 ### DEFAULT NEXT (auto-increment)

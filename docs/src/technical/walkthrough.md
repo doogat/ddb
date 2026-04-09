@@ -285,7 +285,7 @@ When a typedef doogat is created, updated, or deleted, the actor triggers a sche
 
 ### Error handling
 
-`DoogatError` is a single thiserror-derived enum covering all failure modes: Git, Yaml, Sql, Automerge, Io, Toml, Parse, NotFound, Validation, InvalidPath, SqlEngine, and VersionMismatch. An optional `Redb` variant exists behind the `nosql` feature gate. See `error.rs:DoogatError`.
+`DoogatError` is a single thiserror-derived enum covering all failure modes: Git, Yaml, Sql, Automerge, Io, Toml, Parse, NotFound, Validation, InvalidPath, SqlEngine, Conflict, Sync, Index, BadRequest, and VersionMismatch. An optional `Redb` variant exists behind the `nosql` feature gate. See `error.rs:DoogatError`.
 
 The crate defines a `Result<T>` alias as `std::result::Result<T, DoogatError>`. Every public function in the library returns this type. No panics in library code; all errors propagate via `?`.
 

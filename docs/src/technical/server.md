@@ -654,15 +654,15 @@ No server restart is needed. Clients can poll the `schemaVersion` query field to
 
 ## Error Mapping
 
-| DoogatError variant | GraphQL `code` extension |
-|---|---|
-| `NotFound` | `NOT_FOUND` |
-| `Validation` | `VALIDATION_ERROR` |
-| `InvalidPath` | `INVALID_PATH` |
-| `Conflict` | `CONFLICT` |
-| `BadRequest` | `BAD_REQUEST` |
-| `SqlEngine` | `SQL_ERROR` |
-| All others | `INTERNAL_ERROR` |
+| DoogatError variant | GraphQL `code` extension | Message |
+|---|---|---|
+| `NotFound` | `NOT_FOUND` | Original message |
+| `Validation` | `VALIDATION_ERROR` | Original message |
+| `InvalidPath` | `INVALID_PATH` | Original message |
+| `Conflict` | `CONFLICT` | Original message |
+| `BadRequest` | `BAD_REQUEST` | Original message |
+| `SqlEngine` | `SQL_ERROR` | Original message (user-actionable: syntax errors, unsupported DDL, constraint violations) |
+| All others | `INTERNAL_ERROR` | Redacted to `"internal error"` (details logged server-side) |
 
 ## PostgreSQL Wire Protocol
 
