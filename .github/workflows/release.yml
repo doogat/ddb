@@ -203,3 +203,4 @@ jobs:
           name: ${{ github.ref_name }}
           bodyFile: release-notes.md
           artifacts: "dist/*"
+          allowUpdates: true
