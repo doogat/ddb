@@ -176,18 +176,16 @@ jobs:
       - name: Generate release notes
         run: |
           TAG="${GITHUB_REF_NAME}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
+          VERSION="${TAG#v}"
+          # Extract the version's section from CHANGELOG.md (between its heading
+          # and the next ## heading), stripping the heading itself.
+          NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{/^## \[/!p;}" CHANGELOG.md | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba;}')
           {
-            if [ -n "$PREV_TAG" ]; then
-              echo "## Changes since ${PREV_TAG}"
-              echo ""
-              git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s" --no-merges
+            if [ -n "$NOTES" ]; then
+              echo "$NOTES"
             else
-              echo "## Initial release"
-              echo ""
-              git log --pretty=format:"- %s" --no-merges -20
+              echo "See [CHANGELOG.md](https://github.com/doogat/ddb/blob/${TAG}/CHANGELOG.md) for details."
             fi
-            echo ""
             echo ""
             echo "## Checksums"
             echo ""
