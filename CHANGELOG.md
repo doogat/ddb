@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **server**: `SqlEngine` error messages now surface to the client instead of being redacted to generic "query failed"
+- **sql**: `UNIQUE()` table constraints in `CREATE TABLE` are now parsed and enforced on the materialized SQLite table
+
 ## [0.2.0] - 2026-04-09
 
 ### Fixed

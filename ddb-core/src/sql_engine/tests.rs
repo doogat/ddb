@@ -3875,3 +3875,90 @@ fn plain_insert_duplicate_still_errors() {
         "plain INSERT with duplicate unique key should error, got: {result:?}"
     );
 }
+
+#[test]
+fn create_table_with_unique_constraint_enforced() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute(
+            "CREATE TABLE membership (title TEXT, link_id VARCHAR(255) NOT NULL, cat VARCHAR(255) NOT NULL, UNIQUE(link_id, cat))",
+        )
+        .unwrap();
+
+    // First insert succeeds
+    engine
+        .execute("INSERT INTO membership (title, link_id, cat) VALUES ('a', 'link1', 'cat1')")
+        .unwrap();
+
+    // Duplicate insert must fail due to UNIQUE constraint
+    let result =
+        engine.execute("INSERT INTO membership (title, link_id, cat) VALUES ('b', 'link1', 'cat1')");
+    assert!(
+        result.is_err(),
+        "duplicate insert should fail with UNIQUE constraint, got: {result:?}"
+    );
+}
+
+#[test]
+fn create_table_unique_constraint_persisted_in_typedef() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute(
+            "CREATE TABLE orders (title TEXT, customer VARCHAR(255), product VARCHAR(255), UNIQUE(customer, product))",
+        )
+        .unwrap();
+
+    // Verify the typedef stored the unique_together constraint
+    let schema = engine.load_schema("orders").unwrap();
+    let constraints = schema.unique_together.expect("unique_together should be set");
+    assert_eq!(constraints, vec![vec!["customer".to_string(), "product".to_string()]]);
+}
+
+#[test]
+fn create_table_multiple_unique_constraints() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute(
+            "CREATE TABLE multi (title TEXT, a VARCHAR(255), b VARCHAR(255), c VARCHAR(255), UNIQUE(a, b), UNIQUE(c))",
+        )
+        .unwrap();
+
+    let schema = engine.load_schema("multi").unwrap();
+    let constraints = schema.unique_together.expect("unique_together should be set");
+    assert_eq!(constraints.len(), 2);
+    assert_eq!(constraints[0], vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(constraints[1], vec!["c".to_string()]);
+}
+
+#[test]
+fn create_table_unique_survives_rematerialization() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute(
+            "CREATE TABLE remat (title TEXT, code VARCHAR(255), UNIQUE(code))",
+        )
+        .unwrap();
+
+    // Insert first row
+    engine
+        .execute("INSERT INTO remat (title, code) VALUES ('first', 'X')")
+        .unwrap();
+
+    // Rematerialize (simulates reindex)
+    index.rematerialize_type("remat", &repo).unwrap();
+
+    // Duplicate should still fail after rematerialization
+    let result = engine.execute("INSERT INTO remat (title, code) VALUES ('second', 'X')");
+    assert!(
+        result.is_err(),
+        "duplicate should fail after rematerialization, got: {result:?}"
+    );
+}

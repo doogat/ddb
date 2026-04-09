@@ -13,11 +13,8 @@ pub fn classify(e: &DoogatError) -> (&'static str, String) {
         DoogatError::InvalidPath(m) => ("INVALID_PATH", m.clone()),
         DoogatError::Conflict(m) => ("CONFLICT", m.clone()),
         DoogatError::BadRequest(m) => ("BAD_REQUEST", m.clone()),
-        // SQL errors — redact raw details
-        DoogatError::SqlEngine(_) => {
-            tracing::error!(%e, "internal error");
-            ("SQL_ERROR", "query failed".into())
-        }
+        // SQL engine errors are user-actionable (unsupported DDL, bad syntax, etc.)
+        DoogatError::SqlEngine(m) => ("SQL_ERROR", m.clone()),
         // All other variants are internal — redact completely.
         // Explicit matches so the compiler forces a decision on new variants.
         DoogatError::Git(_)
@@ -75,11 +72,11 @@ mod tests {
     }
 
     #[test]
-    fn sql_engine_redacted_to_query_failed() {
+    fn sql_engine_passes_through() {
         let (code, msg) =
             classify(&DoogatError::SqlEngine("near SELCT: syntax error".into()));
         assert_eq!(code, "SQL_ERROR");
-        assert_eq!(msg, "query failed");
+        assert_eq!(msg, "near SELCT: syntax error");
     }
 
     #[test]
@@ -163,13 +160,14 @@ mod tests {
     }
 
     #[test]
-    fn graphql_sql_error_sanitized() {
+    fn graphql_sql_engine_error_descriptive() {
         let err = to_server_error(DoogatError::SqlEngine(
-            "near \"SELCT\": syntax error at position 0".into(),
+            "CREATE INDEX not supported: indexes on the materialized cache are rebuilt from doogat data on reindex".into(),
         ));
-        assert_eq!(err.message, "query failed");
-        assert!(!err.message.contains("SELCT"));
-        assert!(!err.message.contains("syntax error"));
+        assert_eq!(
+            err.message,
+            "CREATE INDEX not supported: indexes on the materialized cache are rebuilt from doogat data on reindex"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use rusqlite::params;
-use sqlparser::ast::{AlterTableOperation, ObjectType};
+use sqlparser::ast::{AlterTableOperation, ObjectType, TableConstraint};
 
 use crate::error::{DoogatError, Result};
 use crate::indexer::materialize::{is_core_column, junction_table_ddl};
@@ -49,6 +49,7 @@ impl<'a> SqlEngine<'a> {
 
         // Extract columns
         let columns = self.extract_columns(&ct.columns)?;
+        let unique_together = extract_unique_constraints(&ct.constraints);
         let schema = TableSchema {
             table_name: table_name.clone(),
             columns,
@@ -58,7 +59,7 @@ impl<'a> SqlEngine<'a> {
             stale_after_days: None,
             title_template: None,
             origin: Some("ddl".into()),
-            unique_together: None,
+            unique_together,
         };
 
         // Build and commit typedef doogat
@@ -169,6 +170,29 @@ impl<'a> SqlEngine<'a> {
                 self.index
                     .sql_conn()
                     .execute(&junction_table_ddl(&schema.table_name, &col.name), [])?;
+            }
+        }
+
+        // Create unique indexes for UNIQUE constraints
+        if let Some(ref constraints) = schema.unique_together {
+            for cols in constraints {
+                if cols.is_empty() {
+                    continue;
+                }
+                let col_list = cols
+                    .iter()
+                    .map(|c| format!("\"{}\"", c))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let index_name =
+                    format!("{}_unique_{}", schema.table_name, cols.join("_"));
+                self.index.sql_conn().execute(
+                    &format!(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS \"{}\" ON \"{}\" ({})",
+                        index_name, schema.table_name, col_list
+                    ),
+                    [],
+                )?;
             }
         }
 
@@ -618,6 +642,32 @@ impl<'a> SqlEngine<'a> {
         let content = self.repo.read_file(&path)?;
         let parsed = parser::parse(&content, &path)?;
         schema_from_parsed(&parsed)
+    }
+}
+
+/// Extract UNIQUE table constraints into the `unique_together` format.
+fn extract_unique_constraints(
+    constraints: &[TableConstraint],
+) -> Option<Vec<Vec<String>>> {
+    let groups: Vec<Vec<String>> = constraints
+        .iter()
+        .filter_map(|c| match c {
+            TableConstraint::Unique { columns, .. } => {
+                let cols: Vec<String> =
+                    columns.iter().map(|id| id.value.to_lowercase()).collect();
+                if cols.is_empty() {
+                    None
+                } else {
+                    Some(cols)
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    if groups.is_empty() {
+        None
+    } else {
+        Some(groups)
     }
 }
 
