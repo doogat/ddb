@@ -212,30 +212,20 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                     FieldFuture::new(async move {
                         let q = ctx.args.try_get("query")?.string()?.to_string();
                         // PRD 00121 invariant: normalizeSearchQuery must agree
-                        // with search() on the set of valid inputs. Validate via
-                        // compile_search_plan and the same non-tag-NOT and
-                        // empty-query rules the search path enforces.
+                        // with search() on the set of valid inputs.
+                        // compile_search_plan rejects bare wildcards,
+                        // unparseable input, and non-tag negated field filters.
                         if q.trim().is_empty() {
                             return Err(to_server_error(DoogatError::BadRequest(
                                 format!("invalid search query: {q}"),
                             ))
                             .into());
                         }
-                        let plan = search_query::compile_search_plan(&q).map_err(|_| {
+                        search_query::compile_search_plan(&q).map_err(|_| {
                             to_server_error(DoogatError::BadRequest(format!(
                                 "invalid search query: {q}"
                             )))
                         })?;
-                        for (field, _) in &plan.extracted_negated_filters {
-                            if field != "tag" {
-                                return Err(to_server_error(DoogatError::BadRequest(
-                                    format!(
-                                        "invalid search query: {q}: NOT is only supported for tag filters"
-                                    ),
-                                ))
-                                .into());
-                            }
-                        }
                         let normalized = search_query::normalize(&q);
                         Ok(Some(FieldValue::from(GqlValue::from(normalized))))
                     })

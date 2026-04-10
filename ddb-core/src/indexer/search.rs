@@ -62,8 +62,7 @@ impl Index {
             effective_query,
             &compiled.negation_plan,
             Some((limit, offset)),
-            &filter_clauses,
-            filter_params.clone(),
+            (&filter_clauses, filter_params.clone()),
             boost_type,
         )?;
         self.enrich_search_hits(&mut hits);
@@ -90,10 +89,7 @@ impl Index {
                 let adjusted_filter_sql = Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
                 let neg_sql = self.resolve_negation_clauses(neg_clauses, neg_params, &mut params);
                 let conditions = format!("{adjusted_filter_sql}{neg_sql}");
-                let trimmed = conditions
-                    .strip_prefix(" AND ")
-                    .or_else(|| conditions.strip_prefix("AND "))
-                    .unwrap_or(&conditions);
+                let trimmed = strip_leading_and(&conditions);
                 let sql = if trimmed.is_empty() {
                     "SELECT COUNT(*) FROM doogats".to_string()
                 } else {
@@ -108,10 +104,7 @@ impl Index {
                     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
                     let adjusted_filter_sql =
                         Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
-                    let trimmed = adjusted_filter_sql
-                        .strip_prefix(" AND ")
-                        .or_else(|| adjusted_filter_sql.strip_prefix("AND "))
-                        .unwrap_or(&adjusted_filter_sql);
+                    let trimmed = strip_leading_and(&adjusted_filter_sql);
                     let sql = if trimmed.is_empty() {
                         "SELECT COUNT(*) FROM doogats".to_string()
                     } else {
@@ -165,8 +158,7 @@ impl Index {
             effective_query,
             &compiled.negation_plan,
             pagination,
-            &filter_clauses,
-            filter_params,
+            (&filter_clauses, filter_params),
             boost_type,
         )?;
         self.enrich_search_hits(&mut hits);
@@ -233,18 +225,10 @@ impl Index {
         let residual_for_negation = plan.fts_query.clone().unwrap_or_default();
         let mut negation_plan = self.build_negation_plan(&residual_for_negation);
 
-        // Fold extracted negated filters into the negation plan. Only `tag` is
-        // supported via the dedicated tags-table clause; non-tag negated field
-        // filters are rejected with `BadRequest` so `search` agrees with
-        // `normalizeSearchQuery` on the set of valid queries (PRD 00121).
+        // Fold extracted negated tag filters into the negation plan.
+        // Non-tag negated field filters are already rejected by
+        // `compile_search_plan`.
         if !plan.extracted_negated_filters.is_empty() {
-            for (field, _) in &plan.extracted_negated_filters {
-                if field != "tag" {
-                    return Err(DoogatError::BadRequest(format!(
-                        "invalid search query: {query}: NOT is only supported for tag filters"
-                    )));
-                }
-            }
             if negation_plan.is_none() {
                 negation_plan = Some((plan.fts_query.clone(), Vec::new(), Vec::new()));
             }
@@ -274,17 +258,16 @@ impl Index {
             .unwrap_or(1.0)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn search_hits_inner(
         &self,
         original_query: &str,
         effective_query: &str,
         negation: &Option<(Option<String>, Vec<String>, Vec<String>)>,
         pagination: Option<(usize, usize)>,
-        filter_clauses: &[String],
-        filter_params: Vec<String>,
+        filter: (&[String], Vec<String>),
         boost_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
+        let (filter_clauses, filter_params) = filter;
         let filter_sql = filter_clauses.join(" ");
 
         let (base, mut all_params) = match negation {
@@ -319,11 +302,7 @@ impl Index {
                     String::new()
                 } else {
                     let conditions = format!("{adjusted_filter_sql}{neg_sql}");
-                    // Strip leading "AND " or " AND " to form valid WHERE
-                    let trimmed = conditions
-                        .strip_prefix(" AND ")
-                        .or_else(|| conditions.strip_prefix("AND "))
-                        .unwrap_or(&conditions);
+                    let trimmed = strip_leading_and(&conditions);
                     format!("WHERE {trimmed}")
                 };
                 let sql = format!(
@@ -345,11 +324,7 @@ impl Index {
                     let where_clause = if adjusted_filter_sql.is_empty() {
                         String::new()
                     } else {
-                        let trimmed = adjusted_filter_sql
-                            .strip_prefix(" AND ")
-                            .or_else(|| adjusted_filter_sql.strip_prefix("AND "))
-                            .unwrap_or(&adjusted_filter_sql);
-                        format!("WHERE {trimmed}")
+                        format!("WHERE {}", strip_leading_and(&adjusted_filter_sql))
                     };
                     let sql = format!(
                         "SELECT z.id, z.title, z.path, \
@@ -758,6 +733,15 @@ impl Index {
         }
         Ok(out)
     }
+}
+
+/// Strip a leading ` AND ` or `AND ` prefix from a SQL condition fragment
+/// produced by `build_filter_clauses` / `resolve_negation_clauses`, so it
+/// can be placed directly after `WHERE`.
+fn strip_leading_and(s: &str) -> &str {
+    s.strip_prefix(" AND ")
+        .or_else(|| s.strip_prefix("AND "))
+        .unwrap_or(s)
 }
 
 fn apply_fields_to_hits(

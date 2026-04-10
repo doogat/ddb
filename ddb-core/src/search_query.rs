@@ -454,6 +454,7 @@ pub fn extract_negations(expr: SearchExpr) -> (Option<SearchExpr>, Vec<SearchExp
 /// Returns `Err` for:
 /// - unparseable input (`parse()` returned `None`)
 /// - bare wildcard-only queries (`*`, `**`, `.*`)
+/// - negated field filters on non-tag fields (`NOT url=example.com`)
 pub fn compile_search_plan(query: &str) -> Result<SearchPlan, String> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
@@ -508,6 +509,16 @@ pub fn compile_search_plan(query: &str) -> Result<SearchPlan, String> {
             }
         },
         other => remaining.push(other),
+    }
+
+    // Reject negated field filters on non-tag fields. Only `tag` negation
+    // is supported; other fields would silently drop the negation otherwise.
+    for (field, _) in &extracted_negated_filters {
+        if field != "tag" {
+            return Err(format!(
+                "NOT is only supported for tag filters, got field: {field}"
+            ));
+        }
     }
 
     let fts_query = match remaining.len() {
@@ -1281,6 +1292,16 @@ mod tests {
     }
 
     // Error path ────────────────────────────────────────────────────────
+
+    #[test]
+    fn compile_non_tag_negated_field_rejected() {
+        let err = compile_search_plan("NOT url=example.com")
+            .expect_err("NOT on non-tag field should be rejected");
+        assert!(
+            err.contains("NOT") && err.contains("tag"),
+            "error message should mention NOT/tag limitation, got: {err}"
+        );
+    }
 
     #[test]
     fn compile_bare_asterisk_rejected() {

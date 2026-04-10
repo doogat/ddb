@@ -40,11 +40,11 @@ fn safe_word() -> impl Strategy<Value = String> {
 /// Mixes bare words, explicit AND/OR/NOT, and field filters.
 fn arb_search_query_valid() -> impl Strategy<Value = String> {
     prop_oneof![
-        "[a-z]{2,8}".prop_map(|w| w),
+        "[a-z]{2,8}",
         ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(f, v)| format!("{f}={v}")),
         ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(a, b)| format!("{a} AND {b}")),
         ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(a, b)| format!("{a} OR {b}")),
-        ("tag", "[a-z]{2,6}").prop_map(|(f, v)| format!("NOT {f}={v}")),
+        "[a-z]{2,6}".prop_map(|v| format!("NOT tag={v}")),
     ]
 }
 
