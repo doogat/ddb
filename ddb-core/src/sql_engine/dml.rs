@@ -108,8 +108,8 @@ fn is_null_literal(expr: &Expr) -> bool {
 }
 
 /// Per-row null column sets, parallel to the row vector. Each entry lists
-/// the column names whose INSERT VALUES expression was a SQL `NULL` literal,
-/// captured before `eval_values` collapses NULL to "".
+/// the column names whose INSERT VALUES expression evaluated to SQL NULL,
+/// captured before the row builder collapses NULL to "".
 type NullColsPerRow = Vec<BTreeSet<String>>;
 
 /// Raw rows + parallel null-column sets returned by `extract_insert_rows`.
@@ -1087,7 +1087,7 @@ impl<'a> SqlEngine<'a> {
 
     /// Validate a row's column names and values against the table schema.
     ///
-    /// Runs five constraint classes that the SQL parser accepts but does not
+    /// Runs six constraint checks that the SQL parser accepts but does not
     /// enforce by default (issue #7):
     ///
     /// 1. **Unknown columns** — names not present in `schema.columns` and not
