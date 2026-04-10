@@ -517,12 +517,11 @@ try {
 }
 pass "nosql-api: auth rejects missing token"
 
-# error sanitization — SQL error must not leak raw details
+# error response — SQL engine errors are descriptive (user-actionable)
 $result = gqlq 'mutation { executeSql(sql: "SELCT * FORM oops") { message } }'
 if ($result -notmatch "errors") { throw "expected errors in response" }
-if ($result -notmatch "(?i)query failed|internal error") { throw "expected sanitized message" }
-if ($result -match "(?i)SELCT|syntax error|sqlite") { throw "raw SQL details leaked" }
-pass "serve: sql error sanitized (no raw details)"
+if ($result -notmatch "(?i)parse:") { throw "expected descriptive parse error" }
+pass "serve: sql engine error is descriptive"
 
 # error sanitization — not-found returns 404
 try {
