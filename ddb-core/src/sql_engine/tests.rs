@@ -4170,3 +4170,89 @@ fn update_with_valid_id_still_affects_one_row() {
         .unwrap();
     assert_eq!(rows[0][0], "7");
 }
+
+#[test]
+fn update_with_id_from_different_table_returns_affected_zero() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE projects (name TEXT, priority INTEGER)")
+        .unwrap();
+    engine.execute("CREATE TABLE contacts (email TEXT)").unwrap();
+
+    let _project_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO projects (name, priority) VALUES ('Alpha', 1)",
+    );
+    let contact_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO contacts (email) VALUES ('alice@example.com')",
+    );
+
+    // UPDATE against `projects` using a contact id must NOT mutate the
+    // contact — the fast path should fall through to Affected(0) because
+    // no row with that id exists in the `projects` table.
+    let result = engine
+        .execute(&format!(
+            "UPDATE projects SET priority = 99 WHERE id = '{contact_id}'"
+        ))
+        .expect("cross-table id should not error");
+    match result {
+        SqlResult::Affected(n) => assert_eq!(n, 0, "expected 0 rows affected"),
+        other => panic!("expected Affected(0), got {other:?}"),
+    }
+
+    // Contact row is untouched.
+    let rows = index
+        .query_raw(&format!(
+            "SELECT email FROM contacts WHERE id = '{contact_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        rows[0][0], "alice@example.com",
+        "contact row must not be mutated"
+    );
+}
+
+#[test]
+fn delete_with_id_from_different_table_returns_affected_zero() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE projects (name TEXT)").unwrap();
+    engine.execute("CREATE TABLE contacts (email TEXT)").unwrap();
+
+    let _project_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO projects (name) VALUES ('Alpha')",
+    );
+    let contact_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO contacts (email) VALUES ('alice@example.com')",
+    );
+
+    // DELETE against `projects` using a contact id must NOT delete the
+    // contact — the fast path should fall through to Affected(0).
+    let result = engine
+        .execute(&format!(
+            "DELETE FROM projects WHERE id = '{contact_id}'"
+        ))
+        .expect("cross-table id should not error");
+    match result {
+        SqlResult::Affected(n) => assert_eq!(n, 0, "expected 0 rows affected"),
+        other => panic!("expected Affected(0), got {other:?}"),
+    }
+
+    // Contact row is still present.
+    let rows = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM contacts WHERE id = '{contact_id}'"
+        ))
+        .unwrap();
+    assert_eq!(rows[0][0], "1", "contact row should still exist");
+}

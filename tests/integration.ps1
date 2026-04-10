@@ -1260,7 +1260,7 @@ $output = ddb query "DROP TABLE smokealt CASCADE"
 if ($output -notmatch "dropped") { throw "drop table failed" }
 pass "alter/drop table + bulk ops"
 
-# 30b. UPDATE/DELETE WHERE id no-match semantics (#5)
+# UPDATE/DELETE WHERE id no-match semantics (continuation of section 30, #5)
 $output = ddb query "CREATE TABLE smokenomatch (name TEXT, score INTEGER)"
 if ($output -notmatch "table smokenomatch created") { throw "create smokenomatch failed" }
 $nomatchId = ddb query "INSERT INTO smokenomatch (name, score) VALUES ('alpha', 1)"

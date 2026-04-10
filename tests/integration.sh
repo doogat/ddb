@@ -1218,7 +1218,7 @@ $DDB query "DELETE FROM smokealt WHERE name = 'b'" | grep -q "1 row(s) affected"
 $DDB query "DROP TABLE smokealt CASCADE" | grep -q "dropped"
 pass "alter/drop table + bulk ops"
 
-# 30b. UPDATE/DELETE WHERE id no-match semantics (#5)
+# UPDATE/DELETE WHERE id no-match semantics (continuation of section 30, #5)
 cd "$TMPDIR"
 $DDB query "CREATE TABLE smokenomatch (name TEXT, score INTEGER)" | grep -q "table smokenomatch created"
 NOMATCH_ID=$($DDB query "INSERT INTO smokenomatch (name, score) VALUES ('alpha', 1)")

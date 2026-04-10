@@ -259,13 +259,13 @@ impl<'a> SqlEngine<'a> {
         Self::validate_update_allowed_values(&schema, &updates)?;
 
         if let Ok(doogat_id) = extract_where_id(selection) {
-            // `WHERE id = 'X'` fast path: if the id doesn't exist, fall
-            // through to `Affected(0)` to match standard SQL no-match
-            // semantics (and the behavior of the compound/IN bulk path).
-            // Without this guard, `resolve_path` inside
-            // `apply_single_row_update` would return `NotFound` and the
-            // caller would see an error instead of 0 rows affected. See #5.
-            if !self.doogat_exists_in_index(&doogat_id)? {
+            // `WHERE id = 'X'` fast path: if no row with that id exists in
+            // the target table, fall through to `Affected(0)` to match
+            // standard SQL no-match semantics (and the behavior of the
+            // compound/IN bulk path). The check is scoped to the target
+            // table so an id that exists under a different type doesn't
+            // wrongly get mutated as this type. See #5.
+            if !self.row_exists_in_table(&table_name, &doogat_id)? {
                 return Ok(SqlResult::Affected(0));
             }
             return self.apply_single_row_update(
@@ -280,19 +280,19 @@ impl<'a> SqlEngine<'a> {
         self.update_bulk_rows(&table_name, &schema, selection, &updates, &deferred)
     }
 
-    /// Return whether a doogat with the given id exists in the global index.
+    /// Return whether a row with the given id exists in the materialized
+    /// type table named `table_name`.
     ///
     /// Used by the `WHERE id = 'X'` fast paths in `handle_update` and
-    /// `handle_delete` to distinguish "no such row" (return `Affected(0)`)
-    /// from "row exists, proceed with mutation". See #5.
-    fn doogat_exists_in_index(&self, doogat_id: &str) -> Result<bool> {
+    /// `handle_delete` to distinguish "no such row in this table" (return
+    /// `Affected(0)`) from "row exists, proceed with mutation". The caller
+    /// must have already validated that `table_name` resolves to a real
+    /// type table via `load_schema`. See #5.
+    fn row_exists_in_table(&self, table_name: &str, doogat_id: &str) -> Result<bool> {
+        let sql = format!("SELECT COUNT(*) > 0 FROM \"{table_name}\" WHERE id = ?1");
         self.index
             .sql_conn()
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                params![doogat_id],
-                |row| row.get::<_, bool>(0),
-            )
+            .query_row(&sql, params![doogat_id], |row| row.get::<_, bool>(0))
             .map_err(|e| DoogatError::SqlEngine(format!("existence check failed: {e}")))
     }
 
@@ -419,10 +419,11 @@ impl<'a> SqlEngine<'a> {
         let _schema = self.load_schema(&table_name)?;
 
         if let Ok(doogat_id) = extract_where_id(&del.selection) {
-            // `WHERE id = 'X'` fast path: if the id doesn't exist, fall
-            // through to `Affected(0)` to match standard SQL no-match
-            // semantics. See #5 and `handle_update` for rationale.
-            if !self.doogat_exists_in_index(&doogat_id)? {
+            // `WHERE id = 'X'` fast path: if no row with that id exists in
+            // the target table, fall through to `Affected(0)` to match
+            // standard SQL no-match semantics. See #5 and `handle_update`
+            // for rationale.
+            if !self.row_exists_in_table(&table_name, &doogat_id)? {
                 return Ok(SqlResult::Affected(0));
             }
             return self.delete_single_row(&table_name, &doogat_id);
