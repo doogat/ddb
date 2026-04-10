@@ -433,13 +433,27 @@ pub fn extract_negations(expr: SearchExpr) -> (Option<SearchExpr>, Vec<SearchExp
 
 /// Compile a search query string into a `SearchPlan`.
 ///
-/// Extracts top-level `field=value` filters (positive and negated) from
-/// the parsed AST and leaves the remainder as the FTS query.
+/// Parses the query into a `SearchExpr` AST and partitions it into three
+/// slots on the returned `SearchPlan`:
+///
+/// - `extracted_filters`: positive `FieldEquals` nodes at the top level (or
+///   as children of a top-level `And`) are pulled out and routed to the
+///   filter SQL layer.
+/// - `extracted_negated_filters`: top-level `Not(FieldEquals)` nodes are
+///   pulled out the same way, intended for negation clauses.
+/// - `fts_query`: everything else (bare `FullText`, `Or`, nested `And`,
+///   `Not` over non-field expressions) is serialized back via
+///   `to_fts_query` and passed to FTS5 as the residual MATCH query.
+///   `None` means the residual is empty and no FTS MATCH is needed.
+///
+/// Empty or whitespace-only input returns an empty plan (`fts_query =
+/// None`, no filters). The caller decides whether that is an error.
 ///
 /// # Errors
 ///
-/// Returns `Err` for unparseable input or bare wildcard-only queries
-/// (`*`, `**`, `.*`).
+/// Returns `Err` for:
+/// - unparseable input (`parse()` returned `None`)
+/// - bare wildcard-only queries (`*`, `**`, `.*`)
 pub fn compile_search_plan(query: &str) -> Result<SearchPlan, String> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
