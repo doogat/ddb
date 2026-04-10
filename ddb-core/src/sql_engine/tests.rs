@@ -751,6 +751,57 @@ fn alter_table_add_column_infers_zone_and_allowed_values() {
 }
 
 #[test]
+fn create_table_propagates_not_null_into_required() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute(
+            "CREATE TABLE notnull_create (a VARCHAR(255) NOT NULL, b INTEGER, c TEXT NOT NULL)",
+        )
+        .unwrap();
+
+    let schema = engine.load_schema("notnull_create").unwrap();
+    let a = schema.columns.iter().find(|c| c.name == "a").unwrap();
+    let b = schema.columns.iter().find(|c| c.name == "b").unwrap();
+    let c = schema.columns.iter().find(|c| c.name == "c").unwrap();
+
+    assert!(a.required, "column a should be required (NOT NULL)");
+    assert!(!b.required, "column b should be nullable");
+    assert!(c.required, "column c should be required (NOT NULL)");
+}
+
+#[test]
+fn alter_table_add_column_propagates_not_null_into_required() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE notnull_alter (name TEXT)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE notnull_alter ADD COLUMN code VARCHAR(50) NOT NULL")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE notnull_alter ADD COLUMN priority INTEGER")
+        .unwrap();
+
+    let schema = engine.load_schema("notnull_alter").unwrap();
+    let code = schema.columns.iter().find(|c| c.name == "code").unwrap();
+    let priority = schema
+        .columns
+        .iter()
+        .find(|c| c.name == "priority")
+        .unwrap();
+
+    assert!(code.required, "added NOT NULL column should be required");
+    assert!(
+        !priority.required,
+        "added nullable column should not be required"
+    );
+}
+
+#[test]
 fn alter_table_add_column_existing_data_gets_null() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
