@@ -3,9 +3,9 @@ use super::helpers::{data_type_to_string, eval_expr, is_literal_expr, value_to_s
 use super::*;
 use crate::git_ops::GitRepo;
 use crate::indexer::Index;
-use crate::types::{DoogatMeta, ParsedDoogat, Value, Zone};
+use crate::types::{ColumnDef, DoogatMeta, ParsedDoogat, TableSchema, Value, Zone};
 use sqlparser::ast::{Expr, SetExpr};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tempfile::TempDir;
 
 // Test helpers
@@ -4306,4 +4306,268 @@ fn delete_with_id_from_different_table_returns_affected_zero() {
         ))
         .unwrap();
     assert_eq!(rows[0][0], "1", "contact row should still exist");
+}
+
+// ── validate_row_against_schema unit tests ──────────────────────────
+
+fn col(name: &str, data_type: &str, required: bool) -> ColumnDef {
+    ColumnDef {
+        name: name.into(),
+        data_type: data_type.into(),
+        references: None,
+        zone: None,
+        required,
+        search_boost: None,
+        allowed_values: None,
+        default_value: None,
+    }
+}
+
+fn schema_with(cols: Vec<ColumnDef>) -> TableSchema {
+    TableSchema {
+        table_name: "t".into(),
+        columns: cols,
+        crdt_strategy: None,
+        template_sections: vec![],
+        folder: false,
+        stale_after_days: None,
+        title_template: None,
+        origin: None,
+        unique_together: None,
+    }
+}
+
+fn vals(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+}
+
+fn nulls(names: &[&str]) -> BTreeSet<String> {
+    names.iter().map(|s| s.to_string()).collect()
+}
+
+fn names(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn validate_rejects_unknown_column_on_insert() {
+    let schema = schema_with(vec![col("a", "TEXT", false)]);
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["a", "bogus"]),
+        &vals(&[("a", "x"), ("bogus", "y")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("unknown column: t.bogus"), "got: {msg}");
+}
+
+#[test]
+fn validate_accepts_reserved_columns() {
+    let schema = schema_with(vec![col("a", "TEXT", false)]);
+    SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["a", "title", "date", "id", "type", "created_at", "updated_at", "tags"]),
+        &vals(&[("a", "x")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap();
+}
+
+#[test]
+fn validate_rejects_not_null_absent_on_insert() {
+    let schema = schema_with(vec![col("a", "TEXT", true), col("b", "TEXT", false)]);
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["b"]),
+        &vals(&[("b", "x")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("NOT NULL constraint violated: t.a"));
+}
+
+#[test]
+fn validate_rejects_not_null_explicit_null_on_insert() {
+    let schema = schema_with(vec![col("a", "TEXT", true)]);
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["a"]),
+        &vals(&[("a", "")]),
+        &nulls(&["a"]),
+        true,
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("NOT NULL constraint violated: t.a"));
+}
+
+#[test]
+fn validate_accepts_not_null_with_default_already_filled() {
+    let schema = schema_with(vec![col("a", "TEXT", true)]);
+    // Caller filled default before this helper runs.
+    SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["a"]),
+        &vals(&[("a", "default-value")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap();
+}
+
+#[test]
+fn validate_update_only_rejects_explicit_null_on_required() {
+    let schema = schema_with(vec![col("a", "TEXT", true)]);
+    // UPDATE that doesn't touch column 'a' is fine.
+    SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&[]),
+        &vals(&[]),
+        &nulls(&[]),
+        false,
+    )
+    .unwrap();
+    // UPDATE SET a = NULL must fail.
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["a"]),
+        &vals(&[("a", "")]),
+        &nulls(&["a"]),
+        false,
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("NOT NULL constraint violated: t.a"));
+}
+
+#[test]
+fn validate_rejects_integer_with_string_value() {
+    let schema = schema_with(vec![col("count", "INTEGER", false)]);
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["count"]),
+        &vals(&[("count", "not_a_number")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap_err();
+    assert!(format!("{err}")
+        .contains("type mismatch for t.count: expected INTEGER, got 'not_a_number'"));
+}
+
+#[test]
+fn validate_accepts_integer_with_numeric_value() {
+    let schema = schema_with(vec![col("count", "INTEGER", false)]);
+    SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["count"]),
+        &vals(&[("count", "42")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap();
+}
+
+#[test]
+fn validate_rejects_real_with_garbage() {
+    let schema = schema_with(vec![col("ratio", "REAL", false)]);
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["ratio"]),
+        &vals(&[("ratio", "abc")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("type mismatch for t.ratio: expected REAL, got 'abc'"));
+}
+
+#[test]
+fn validate_rejects_boolean_with_garbage() {
+    let schema = schema_with(vec![col("flag", "BOOLEAN", false)]);
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["flag"]),
+        &vals(&[("flag", "maybe")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap_err();
+    assert!(format!("{err}").contains("type mismatch for t.flag: expected BOOLEAN, got 'maybe'"));
+}
+
+#[test]
+fn validate_accepts_boolean_variants() {
+    let schema = schema_with(vec![col("flag", "BOOLEAN", false)]);
+    for variant in ["0", "1", "true", "false", "TRUE", "FALSE"] {
+        SqlEngine::validate_row_against_schema(
+            &schema,
+            "t",
+            &names(&["flag"]),
+            &vals(&[("flag", variant)]),
+            &nulls(&[]),
+            true,
+        )
+        .unwrap_or_else(|e| panic!("variant {variant} should be accepted, got: {e}"));
+    }
+}
+
+#[test]
+fn validate_rejects_varchar_overflow() {
+    let schema = schema_with(vec![col("name", "VARCHAR(10)", false)]);
+    let long_value = "x".repeat(11);
+    let err = SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["name"]),
+        &vals(&[("name", &long_value)]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap_err();
+    assert!(format!("{err}")
+        .contains("value too long for t.name: 11 chars exceeds limit 10"));
+}
+
+#[test]
+fn validate_accepts_varchar_within_limit() {
+    let schema = schema_with(vec![col("name", "VARCHAR(10)", false)]);
+    SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["name"]),
+        &vals(&[("name", "0123456789")]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap();
+}
+
+#[test]
+fn validate_accepts_varchar_no_length() {
+    let schema = schema_with(vec![col("name", "VARCHAR", false)]);
+    let big = "z".repeat(10_000);
+    SqlEngine::validate_row_against_schema(
+        &schema,
+        "t",
+        &names(&["name"]),
+        &vals(&[("name", &big)]),
+        &nulls(&[]),
+        true,
+    )
+    .unwrap();
 }
