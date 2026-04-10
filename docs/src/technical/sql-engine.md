@@ -404,6 +404,12 @@ Before PRD 00122, declaring `title VARCHAR(255) NOT NULL` in `CREATE TABLE` was 
 
 `title` is now retained in `schema.columns` with all its declared constraints. The materialized-row writer and the GraphQL schema builder skip core columns explicitly (`is_core_column` in `ddb-core/src/indexer/materialize.rs`) so the field still lives only in `meta.title`, but the validator sees its `required` flag and length cap.
 
+### Reserved columns
+
+The reserved set (`id`, `title`, `type`, `date`, `created_at`, `updated_at`, `tags`) is owned by the doogat pipeline. The names are exempt from the unknown-column check so existing INSERTs/UPDATEs that pass them through don't break, but they are **not** type-checked by the validator unless they were explicitly declared in `CREATE TABLE`. A value passed for `created_at` is accepted as a raw string at the SQL boundary; the pipeline derives the actual stored value from the doogat's id timestamp, and the user-supplied value may not survive.
+
+To enforce constraints on a reserved column, declare it explicitly in `CREATE TABLE`. Only `title` is currently kept in `schema.columns` after declaration; the other reserved names are absorbed by the pipeline. If you need typed enforcement of `title`, write `title VARCHAR(255) NOT NULL` (or any other constraint combination) in the `CREATE TABLE` statement and the validator will check it on every INSERT/UPDATE.
+
 ### Removed: silent title fallback
 
 Prior versions of `resolve_insert_title` had a 5-level priority chain:
