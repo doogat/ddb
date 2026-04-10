@@ -386,6 +386,73 @@ if ($result -notmatch '"queryNormalized"') { throw "search queryNormalized missi
 if ($result -notmatch '"crdt and rust"') { throw "search queryNormalized value: unexpected $result" }
 pass "serve: search returns queryNormalized"
 
+# 18h. In-query field-filter alignment + error-class consistency (PRD 00121)
+$prd121a = gqlq 'mutation { createDoogat(input: { title: "PRD121 Alpha", tags: ["prd121-rust"] }) { id } }'
+$PRD121A_ID = if ($prd121a -match '"id":"([^"]+)"') { $Matches[1] }
+$prd121b = gqlq 'mutation { createDoogat(input: { title: "PRD121 Beta", tags: ["prd121-python"] }) { id } }'
+$PRD121B_ID = if ($prd121b -match '"id":"([^"]+)"') { $Matches[1] }
+$prd121g = gqlq 'mutation { createDoogat(input: { title: "PRD121 Gamma", tags: ["prd121-rust", "prd121-cli"] }) { id } }'
+$PRD121G_ID = if ($prd121g -match '"id":"([^"]+)"') { $Matches[1] }
+
+$result = gqlq '{ search(query: "tag=prd121-rust") { totalCount hits { id } } }'
+if ($result -notmatch '"totalCount":2') { throw "search in-query tag: expected 2, got $result" }
+pass "serve: search in-query tag filter returns matching set"
+
+$resultInq = gqlq '{ search(query: "tag=prd121-rust") { hits { id } } }'
+$resultWhere = gqlq '{ search(query: "", where: [{field: "tag", eq: "prd121-rust"}]) { hits { id } } }'
+$idsInq = [regex]::Matches($resultInq, '"id":"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object
+$idsWhere = [regex]::Matches($resultWhere, '"id":"([^"]+)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object
+if (($idsInq -join ',') -ne ($idsWhere -join ',')) {
+    throw "in-query vs where mismatch: inq=$($idsInq -join ',') where=$($idsWhere -join ',')"
+}
+pass "serve: in-query tag filter matches where-arg tag filter"
+
+$result = gqlq '{ search(query: "PRD121 tag=prd121-rust") { totalCount } }'
+if ($result -notmatch '"totalCount":2') { throw "search text AND tag: expected 2, got $result" }
+pass "serve: search text AND in-query tag filter"
+
+$result = gqlq '{ search(query: "tag=prd121-rust", where: [{field: "tag", eq: "prd121-python"}]) { totalCount } }'
+if ($result -notmatch '"totalCount":0') { throw "search intersect filters: expected 0, got $result" }
+pass "serve: search in-query + where tag filters intersect (AND)"
+
+$result = try { gqlq '{ search(query: "*") { totalCount } }' } catch { $_.Exception.Message }
+if ($result -notmatch 'invalid search query') { throw "bare asterisk: expected invalid search query, got $result" }
+if ($result -match 'internal error') { throw "bare asterisk: leaked internal error, got $result" }
+pass "serve: search bare asterisk returns bad request (not internal)"
+
+$result = try { gqlq '{ search(query: "**") { totalCount } }' } catch { $_.Exception.Message }
+if ($result -notmatch 'invalid search query') { throw "double asterisk: expected invalid search query, got $result" }
+if ($result -match 'internal error') { throw "double asterisk: leaked internal error, got $result" }
+pass "serve: search double asterisk returns bad request (not internal)"
+
+$result = try { gqlq '{ search(query: "(unbalanced") { totalCount } }' } catch { $_.Exception.Message }
+if ($result -notmatch 'invalid search query') { throw "unbalanced paren: expected invalid search query, got $result" }
+if ($result -match 'internal error') { throw "unbalanced paren: leaked internal error, got $result" }
+pass "serve: search unbalanced paren returns bad request (not internal)"
+
+$result = try { gqlq '{ search(query: "AND") { totalCount } }' } catch { $_.Exception.Message }
+if ($result -notmatch 'invalid search query') { throw "bare AND: expected invalid search query, got $result" }
+if ($result -match 'internal error') { throw "bare AND: leaked internal error, got $result" }
+pass "serve: search bare AND returns bad request (not internal)"
+
+$result = gqlq '{ normalizeSearchQuery(query: "tag=prd121-rust") }'
+if ($result -notmatch '"tag=prd121-rust"') { throw "normalizeSearchQuery in-query tag: unexpected $result" }
+pass "serve: normalizeSearchQuery preserves in-query tag filter"
+
+$normResult = gqlq '{ normalizeSearchQuery(query: "tag=prd121-rust AND category=work.dev") }'
+$normalized = if ($normResult -match '"normalizeSearchQuery":"([^"]+)"') { $Matches[1] }
+if ($normalized -ne 'category=work.dev and tag=prd121-rust') {
+    throw "normalizeSearchQuery round-trip: unexpected '$normalized'"
+}
+$result = gqlq "{ search(query: `"$normalized`") { totalCount } }"
+if ($result -match 'invalid search query') { throw "round-trip: invalid search query, got $result" }
+if ($result -match 'internal error') { throw "round-trip: leaked internal error, got $result" }
+pass "serve: search accepts normalized query round-trip"
+
+gqlq "mutation { deleteDoogat(id: `"$PRD121A_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$PRD121B_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$PRD121G_ID`") }" | Out-Null
+
 # 19. REST API CRUD
 try {
     Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `

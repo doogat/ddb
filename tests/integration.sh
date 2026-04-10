@@ -336,6 +336,71 @@ echo "$RESULT" | grep -q '"queryNormalized"'
 echo "$RESULT" | grep -q '"crdt and rust"'
 pass "serve: search returns queryNormalized"
 
+# 18h. In-query field-filter alignment + error-class consistency (PRD 00121)
+PRD121A=$(gql '{"query":"mutation { createDoogat(input: { title: \"PRD121 Alpha\", tags: [\"prd121-rust\"] }) { id } }"}')
+PRD121A_ID=$(echo "$PRD121A" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+PRD121B=$(gql '{"query":"mutation { createDoogat(input: { title: \"PRD121 Beta\", tags: [\"prd121-python\"] }) { id } }"}')
+PRD121B_ID=$(echo "$PRD121B" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+PRD121G=$(gql '{"query":"mutation { createDoogat(input: { title: \"PRD121 Gamma\", tags: [\"prd121-rust\", \"prd121-cli\"] }) { id } }"}')
+PRD121G_ID=$(echo "$PRD121G" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+RESULT=$(gql '{"query":"{ search(query: \"tag=prd121-rust\") { totalCount hits { id } } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "2" ]
+pass "serve: search in-query tag filter returns matching set"
+
+RESULT_INQ=$(gql '{"query":"{ search(query: \"tag=prd121-rust\") { hits { id } } }"}')
+RESULT_WHERE=$(gql '{"query":"{ search(query: \"\", where: [{field: \"tag\", eq: \"prd121-rust\"}]) { hits { id } } }"}')
+IDS_INQ=$(echo "$RESULT_INQ" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | sort)
+IDS_WHERE=$(echo "$RESULT_WHERE" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | sort)
+[ "$IDS_INQ" = "$IDS_WHERE" ]
+pass "serve: in-query tag filter matches where-arg tag filter"
+
+RESULT=$(gql '{"query":"{ search(query: \"PRD121 tag=prd121-rust\") { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "2" ]
+pass "serve: search text AND in-query tag filter"
+
+RESULT=$(gql '{"query":"{ search(query: \"tag=prd121-rust\", where: [{field: \"tag\", eq: \"prd121-python\"}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "0" ]
+pass "serve: search in-query + where tag filters intersect (AND)"
+
+RESULT=$(gql '{"query":"{ search(query: \"*\") { totalCount } }"}' || true)
+echo "$RESULT" | grep -q "invalid search query"
+! echo "$RESULT" | grep -q "internal error"
+pass "serve: search bare asterisk returns bad request (not internal)"
+
+RESULT=$(gql '{"query":"{ search(query: \"**\") { totalCount } }"}' || true)
+echo "$RESULT" | grep -q "invalid search query"
+! echo "$RESULT" | grep -q "internal error"
+pass "serve: search double asterisk returns bad request (not internal)"
+
+RESULT=$(gql '{"query":"{ search(query: \"(unbalanced\") { totalCount } }"}' || true)
+echo "$RESULT" | grep -q "invalid search query"
+! echo "$RESULT" | grep -q "internal error"
+pass "serve: search unbalanced paren returns bad request (not internal)"
+
+RESULT=$(gql '{"query":"{ search(query: \"AND\") { totalCount } }"}' || true)
+echo "$RESULT" | grep -q "invalid search query"
+! echo "$RESULT" | grep -q "internal error"
+pass "serve: search bare AND returns bad request (not internal)"
+
+RESULT=$(gql '{"query":"{ normalizeSearchQuery(query: \"tag=prd121-rust\") }"}')
+echo "$RESULT" | grep -q '"tag=prd121-rust"'
+pass "serve: normalizeSearchQuery preserves in-query tag filter"
+
+NORMALIZED=$(gql '{"query":"{ normalizeSearchQuery(query: \"tag=prd121-rust AND category=work.dev\") }"}' | sed -n 's/.*"normalizeSearchQuery":"\([^"]*\)".*/\1/p')
+[ "$NORMALIZED" = "category=work.dev and tag=prd121-rust" ]
+RESULT=$(gql "{\"query\":\"{ search(query: \\\"$NORMALIZED\\\") { totalCount } }\"}")
+! echo "$RESULT" | grep -q "invalid search query"
+! echo "$RESULT" | grep -q "internal error"
+pass "serve: search accepts normalized query round-trip"
+
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121A_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121B_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121G_ID\\\") }\"}" >/dev/null
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
