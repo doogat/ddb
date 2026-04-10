@@ -241,15 +241,37 @@ impl Index {
         Ok(hits)
     }
 
-    /// Reclassify FTS5 syntax errors as `BadRequest` so the server returns a
-    /// user-actionable error code instead of an opaque internal error.
+    /// Classify a `rusqlite::Error` raised from the search path.
+    ///
+    /// Default is `BadRequest` so that user-input failures (malformed FTS5
+    /// queries, unknown columns, etc.) surface as actionable client errors
+    /// instead of leaking as opaque `internal error` through the server.
+    /// Only genuine backend failures (corruption, disk full, I/O, etc.) and
+    /// non-`SqliteFailure` variants (which indicate schema/programmer bugs)
+    /// are returned as `DoogatError::Sql`.
     fn classify_search_error(e: rusqlite::Error, query: &str) -> DoogatError {
-        let msg = e.to_string();
-        if msg.contains("fts5: syntax error") || msg.contains("fts5: parse error") {
-            DoogatError::BadRequest(format!("invalid search query: {query}"))
-        } else {
-            DoogatError::Sql(msg)
+        use rusqlite::ffi::ErrorCode;
+        if let rusqlite::Error::SqliteFailure(err, _) = &e {
+            match err.code {
+                ErrorCode::DatabaseCorrupt
+                | ErrorCode::DiskFull
+                | ErrorCode::PermissionDenied
+                | ErrorCode::NotADatabase
+                | ErrorCode::OutOfMemory
+                | ErrorCode::CannotOpen
+                | ErrorCode::ReadOnly
+                | ErrorCode::SystemIoFailure => {
+                    tracing::error!(error = %e, query, "search: backend error");
+                    return DoogatError::Sql(e.to_string());
+                }
+                _ => {
+                    tracing::debug!(error = %e, query, "search: classified as bad request");
+                    return DoogatError::BadRequest(format!("invalid search query: {query}"));
+                }
+            }
         }
+        tracing::error!(error = %e, query, "search: non-SqliteFailure error");
+        DoogatError::Sql(e.to_string())
     }
 
     fn map_search_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {
