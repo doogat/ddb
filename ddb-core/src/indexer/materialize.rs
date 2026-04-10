@@ -11,6 +11,18 @@ use super::Index;
 /// Exposed at the crate root via `ddb_core::indexer::is_core_column` so
 /// downstream crates (the GraphQL server) can distinguish core columns from
 /// user-defined ones when iterating `TableSchema.columns` post-PRD 00122.
+///
+/// This is intentionally narrower than `RESERVED_COLUMNS` in
+/// `ddb-core/src/sql_engine/dml.rs`: this set drives whether a user-declared
+/// column gets a slot in the materialized typed table. `created_at` and
+/// `tags` are NOT in this set because pre-PRD 122 users could legally
+/// declare them as typed columns; the doogat pipeline itself doesn't write
+/// them into the materialized typed table (`created_at` lives in the
+/// internal `doogats` index, `tags` lives in `_ddb_tags`), so the
+/// declaration was harmless. The GraphQL server uses its own
+/// `BASE_DOOGAT_FIELDS` set to decide which typed-column fields would
+/// clobber a base doogat field — see `typed_doogat_to_value` in
+/// `ddb-server/src/schema/base_types.rs`.
 pub fn is_core_column(name: &str) -> bool {
     matches!(name, "id" | "title" | "type" | "date" | "updated_at")
 }

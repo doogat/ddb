@@ -371,15 +371,20 @@ pub(crate) fn typed_doogat_to_value(z: &ParsedDoogat, schema: &TableSchema) -> G
         _ => return base,
     };
 
-    // Add typed columns. Skip core columns (id, title, type, date,
-    // updated_at): they live in `meta.*` and were populated by the base
-    // resolver above. After PRD 00122, `title` (and other core columns) can
-    // appear in `schema.columns` so the SQL validator enforces declared
-    // constraints — but `extract_typed_field` looks in `meta.extra`, not in
-    // `meta.title`, and would clobber the base value with NULL if we let it
-    // run.
+    // Add typed columns. Skip any column whose name collides with a base
+    // doogat field (id, title, date, type, tags, body, path, fields, links,
+    // attachments, updated_at, created_at): those are populated by
+    // `doogat_to_value` above from `meta.*` / structural fields, and
+    // `extract_typed_field` would look them up in `meta.extra`, find
+    // nothing, and clobber the base value with NULL.
+    //
+    // After PRD 00122, `title` (and conceivably others) can appear in
+    // `schema.columns` so the SQL validator enforces declared constraints
+    // (e.g. `title VARCHAR(255) NOT NULL`). The base field still resolves
+    // via the parent value, so users can query `title` without losing the
+    // typed-column constraint enforcement on the write path.
     for col in &schema.columns {
-        if ddb_core::indexer::is_core_column(&col.name) {
+        if BASE_DOOGAT_FIELDS.contains(&col.name.as_str()) {
             continue;
         }
         let val = extract_typed_field(z, col);
