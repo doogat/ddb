@@ -371,8 +371,17 @@ pub(crate) fn typed_doogat_to_value(z: &ParsedDoogat, schema: &TableSchema) -> G
         _ => return base,
     };
 
-    // Add typed columns
+    // Add typed columns. Skip core columns (id, title, type, date,
+    // updated_at): they live in `meta.*` and were populated by the base
+    // resolver above. After PRD 00122, `title` (and other core columns) can
+    // appear in `schema.columns` so the SQL validator enforces declared
+    // constraints — but `extract_typed_field` looks in `meta.extra`, not in
+    // `meta.title`, and would clobber the base value with NULL if we let it
+    // run.
     for col in &schema.columns {
+        if ddb_core::indexer::is_core_column(&col.name) {
+            continue;
+        }
         let val = extract_typed_field(z, col);
         obj.insert(Name::new(&col.name), val);
 
