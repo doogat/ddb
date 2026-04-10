@@ -4011,3 +4011,162 @@ fn create_table_unique_survives_rematerialization() {
         "duplicate should fail after rematerialization, got: {result:?}"
     );
 }
+
+// Regression tests for issue #5: UPDATE/DELETE fast-path returning Affected(0)
+// instead of erroring when the WHERE id = 'X' target does not exist.
+
+#[test]
+fn update_with_missing_id_returns_affected_zero() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE projects (name TEXT, priority INTEGER)")
+        .unwrap();
+    let real_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO projects (name, priority) VALUES ('Alpha', 1)",
+    );
+
+    let result = engine
+        .execute("UPDATE projects SET priority = 5 WHERE id = 'nonexistent_id_99999999999999'")
+        .expect("missing id should not error");
+    match result {
+        SqlResult::Affected(n) => assert_eq!(n, 0, "expected 0 rows affected"),
+        other => panic!("expected Affected(0), got {other:?}"),
+    }
+
+    // Existing row must be unchanged.
+    let rows = index
+        .query_raw(&format!(
+            "SELECT priority FROM projects WHERE id = '{real_id}'"
+        ))
+        .unwrap();
+    assert_eq!(rows[0][0], "1", "existing row should not be touched");
+}
+
+#[test]
+fn delete_with_missing_id_returns_affected_zero() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE projects (name TEXT)").unwrap();
+    let real_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO projects (name) VALUES ('Alpha')",
+    );
+
+    let result = engine
+        .execute("DELETE FROM projects WHERE id = 'nonexistent_id_99999999999999'")
+        .expect("missing id should not error");
+    match result {
+        SqlResult::Affected(n) => assert_eq!(n, 0, "expected 0 rows affected"),
+        other => panic!("expected Affected(0), got {other:?}"),
+    }
+
+    // Existing row must still be present.
+    let rows = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM projects WHERE id = '{real_id}'"
+        ))
+        .unwrap();
+    assert_eq!(rows[0][0], "1", "existing row should still be present");
+}
+
+#[test]
+fn update_with_in_clause_mixing_missing_and_valid_returns_affected_one() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE projects (name TEXT, priority INTEGER)")
+        .unwrap();
+    let real_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO projects (name, priority) VALUES ('Alpha', 1)",
+    );
+
+    let result = engine
+        .execute(&format!(
+            "UPDATE projects SET priority = 9 WHERE id IN ('nonexistent', '{real_id}')"
+        ))
+        .expect("IN clause with mixed ids should not error");
+    match result {
+        SqlResult::Affected(n) => assert_eq!(n, 1, "expected 1 row affected"),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+
+    let rows = index
+        .query_raw(&format!(
+            "SELECT priority FROM projects WHERE id = '{real_id}'"
+        ))
+        .unwrap();
+    assert_eq!(rows[0][0], "9");
+}
+
+#[test]
+fn update_with_compound_where_nonmatching_predicate_returns_affected_zero() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE projects (name TEXT, priority INTEGER)")
+        .unwrap();
+    let real_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO projects (name, priority) VALUES ('Alpha', 1)",
+    );
+
+    let result = engine
+        .execute(&format!(
+            "UPDATE projects SET priority = 9 WHERE id = '{real_id}' AND name = 'wrongname'"
+        ))
+        .expect("compound predicate non-match should not error");
+    match result {
+        SqlResult::Affected(n) => assert_eq!(n, 0, "expected 0 rows affected"),
+        other => panic!("expected Affected(0), got {other:?}"),
+    }
+
+    let rows = index
+        .query_raw(&format!(
+            "SELECT priority FROM projects WHERE id = '{real_id}'"
+        ))
+        .unwrap();
+    assert_eq!(rows[0][0], "1", "existing row should not be touched");
+}
+
+#[test]
+fn update_with_valid_id_still_affects_one_row() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE projects (name TEXT, priority INTEGER)")
+        .unwrap();
+    let real_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO projects (name, priority) VALUES ('Alpha', 1)",
+    );
+
+    let result = engine
+        .execute(&format!(
+            "UPDATE projects SET priority = 7 WHERE id = '{real_id}'"
+        ))
+        .expect("valid id should succeed");
+    match result {
+        SqlResult::Affected(n) => assert_eq!(n, 1, "expected 1 row affected"),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+
+    let rows = index
+        .query_raw(&format!(
+            "SELECT priority FROM projects WHERE id = '{real_id}'"
+        ))
+        .unwrap();
+    assert_eq!(rows[0][0], "7");
+}

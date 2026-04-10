@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **sql**: materialized table constraint errors (UNIQUE violations, etc.) now surface to the client instead of being redacted to "internal error"
 - **sql**: failed INSERTs (e.g. UNIQUE constraint violations) no longer leave a ghost row in the internal `doogats` index table; the index write and the materialized typed-table write are now atomic via a SQLite savepoint, so a rejected row is fully rolled back and subsequent mutations are unaffected (#4)
+- **sql**: `UPDATE`/`DELETE FROM t WHERE id = 'X'` on a non-existent `X` now returns `0 rows affected` instead of throwing "doogat X" not-found, matching standard SQL semantics and the behavior of compound (`AND`) and `IN (...)` predicates (#5)
 
 ## [0.2.1] - 2026-04-09
 
