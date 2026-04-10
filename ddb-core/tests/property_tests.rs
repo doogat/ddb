@@ -36,6 +36,18 @@ fn safe_word() -> impl Strategy<Value = String> {
     "[a-zA-Z][a-zA-Z0-9]{0,15}".prop_map(|s| s)
 }
 
+/// Generate a well-formed search query that should parse successfully.
+/// Mixes bare words, explicit AND/OR/NOT, and field filters.
+fn arb_search_query_valid() -> impl Strategy<Value = String> {
+    prop_oneof![
+        "[a-z]{2,8}".prop_map(|w| w),
+        ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(f, v)| format!("{f}={v}")),
+        ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(a, b)| format!("{a} AND {b}")),
+        ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(a, b)| format!("{a} OR {b}")),
+        ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(f, v)| format!("NOT {f}={v}")),
+    ]
+}
+
 /// Safe sentence for body text (no `---` on its own line, no `::` to avoid inline fields).
 fn safe_sentence() -> impl Strategy<Value = String> {
     prop::collection::vec("[a-zA-Z0-9 ,\\.!?]{1,60}", 1..=3).prop_map(|parts| parts.join(" "))
@@ -2013,5 +2025,108 @@ proptest! {
             sorted_a, sorted_b,
             "nodes A and B should converge to same doogat set"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PRD 00121: search query parse/normalize/search alignment
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
+
+    /// Strong property: if a query parses cleanly, search() accepts both the
+    /// query and its normalized form. Locks in PRD 00121 alignment.
+    #[test]
+    fn search_accepts_parseable_queries(q in arb_search_query_valid()) {
+        prop_assume!(ddb_core::search_query::parse(&q).is_some());
+
+        let idx = Index::open_in_memory().unwrap();
+        let titles = [
+            "meeting notes rust",
+            "python experiments",
+            "crdt merge strategy",
+            "svelte bindings demo",
+            "ddb roadmap",
+        ];
+        for (i, title) in titles.iter().enumerate() {
+            let id = format!("2026040112{i:04}");
+            let doogat = ddb_core::types::ParsedDoogat {
+                meta: ddb_core::types::DoogatMeta {
+                    id: Some(ddb_core::types::DoogatId(id.clone())),
+                    title: Some((*title).to_string()),
+                    date: Some("2026-04-01".into()),
+                    doogat_type: Some("note".into()),
+                    tags: vec!["rust".into(), "python".into()],
+                    extra: Default::default(),
+                },
+                body: format!("Body of {title}"),
+                sections: vec![],
+                reference_section: String::new(),
+                inline_fields: vec![],
+                links: vec![],
+                body_tags: vec![],
+                checkboxes: vec![],
+                path: format!("ddb/{id}.md"),
+                updated_at: None,
+            };
+            idx.index_doogat(&doogat).unwrap();
+        }
+
+        let res_raw = idx.search(&q);
+        prop_assert!(
+            res_raw.is_ok(),
+            "search({q:?}) returned Err: {:?}",
+            res_raw.err()
+        );
+
+        let normalized = ddb_core::search_query::normalize(&q);
+        let res_norm = idx.search(&normalized);
+        prop_assert!(
+            res_norm.is_ok(),
+            "search(normalized={normalized:?}) returned Err: {:?} (original: {q:?})",
+            res_norm.err()
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
+
+    /// Weak property: for any input, search() never returns DoogatError::Sql
+    /// (which the server redacts to "internal error"). User input must always
+    /// be classified as BadRequest on failure.
+    #[test]
+    fn search_never_returns_sql_error_for_arbitrary_input(q in ".{0,60}") {
+        let idx = Index::open_in_memory().unwrap();
+        let doogat = ddb_core::types::ParsedDoogat {
+            meta: ddb_core::types::DoogatMeta {
+                id: Some(ddb_core::types::DoogatId("20260401120000".into())),
+                title: Some("probe".into()),
+                date: Some("2026-04-01".into()),
+                doogat_type: None,
+                tags: vec![],
+                extra: Default::default(),
+            },
+            body: "probe body".into(),
+            sections: vec![],
+            reference_section: String::new(),
+            inline_fields: vec![],
+            links: vec![],
+            body_tags: vec![],
+            checkboxes: vec![],
+            path: "ddb/20260401120000.md".into(),
+            updated_at: None,
+        };
+        idx.index_doogat(&doogat).unwrap();
+
+        match idx.search(&q) {
+            Ok(_) => {}
+            Err(ddb_core::error::DoogatError::BadRequest(_)) => {}
+            Err(other) => prop_assert!(
+                false,
+                "search({q:?}) returned unexpected error variant: {other:?}"
+            ),
+        }
     }
 }
