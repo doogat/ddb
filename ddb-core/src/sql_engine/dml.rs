@@ -374,6 +374,22 @@ impl<'a> SqlEngine<'a> {
         let (mut updates, deferred) = Self::partition_assignments(assignments)?;
         Self::validate_update_allowed_values(&schema, &updates)?;
 
+        // Pre-validate the literal SET assignments. Catches:
+        //   - unknown columns (in literal or deferred SET targets)
+        //   - explicit `SET col = NULL` on a NOT NULL column
+        //   - type/length mismatches on literal values
+        // Deferred-expression results are re-validated per row after eval in
+        // `apply_single_row_update` and `prepare_bulk_update_files`.
+        let (update_col_names, update_null_cols) = Self::collect_update_metadata(assignments);
+        Self::validate_row_against_schema(
+            &schema,
+            &table_name,
+            &update_col_names,
+            &updates,
+            &update_null_cols,
+            false,
+        )?;
+
         if let Ok(doogat_id) = extract_where_id(selection) {
             // `WHERE id = 'X'` fast path: if no row with that id exists in
             // the target table, fall through to `Affected(0)` to match
@@ -410,6 +426,36 @@ impl<'a> SqlEngine<'a> {
             .sql_conn()
             .query_row(&sql, params![doogat_id], |row| row.get::<_, bool>(0))
             .map_err(|e| DoogatError::SqlEngine(format!("existence check failed: {e}")))
+    }
+
+    /// Walk an UPDATE's raw assignments to extract:
+    /// - the ordered list of column names in the SET clause (for the
+    ///   unknown-column check), and
+    /// - the set of column names whose RHS is a SQL `NULL` literal (so the
+    ///   validator can flag `SET col = NULL` on a NOT NULL column).
+    ///
+    /// We do this from the raw AST because `partition_assignments` collapses
+    /// `Expr::Value(Null)` to "" via `expr_to_string`, losing the distinction.
+    fn collect_update_metadata(
+        assignments: &[sqlparser::ast::Assignment],
+    ) -> (Vec<String>, BTreeSet<String>) {
+        let mut col_names = Vec::with_capacity(assignments.len());
+        let mut nulls = BTreeSet::new();
+        for assignment in assignments {
+            let col_name = match &assignment.target {
+                AssignmentTarget::ColumnName(name) => name.to_string().to_lowercase(),
+                AssignmentTarget::Tuple(names) => names
+                    .iter()
+                    .map(|n| n.to_string().to_lowercase())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            };
+            if is_null_literal(&assignment.value) {
+                nulls.insert(col_name.clone());
+            }
+            col_names.push(col_name);
+        }
+        (col_names, nulls)
     }
 
     fn partition_assignments(
@@ -480,6 +526,16 @@ impl<'a> SqlEngine<'a> {
                     self.index.sql_conn(), deferred, table_name, id, &mut row_updates,
                 )?;
                 Self::validate_update_allowed_values(schema, &row_updates)?;
+                // Type/length re-check for deferred-expression results.
+                let merged_names: Vec<String> = row_updates.keys().cloned().collect();
+                Self::validate_row_against_schema(
+                    schema,
+                    table_name,
+                    &merged_names,
+                    &row_updates,
+                    &BTreeSet::new(),
+                    false,
+                )?;
             }
             let content = self.read_content(path)?;
             let mut parsed = parser::parse(&content, path)?;
@@ -775,6 +831,18 @@ impl<'a> SqlEngine<'a> {
                 updates,
             )?;
             Self::validate_update_allowed_values(schema, updates)?;
+            // Re-validate the merged updates so deferred-expression results
+            // get type/length checked. NULL tracking only applies to literal
+            // assignments (caught upfront in `handle_update`).
+            let merged_names: Vec<String> = updates.keys().cloned().collect();
+            Self::validate_row_against_schema(
+                schema,
+                table_name,
+                &merged_names,
+                updates,
+                &BTreeSet::new(),
+                false,
+            )?;
         }
         let path = self.index.resolve_path(doogat_id)?;
         let content = self.read_content(&path)?;
