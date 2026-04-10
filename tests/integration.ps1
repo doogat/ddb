@@ -988,6 +988,80 @@ $ebCreated = ($ebQuery | ConvertFrom-Json).data.doogat.created_at
 if ($ebCreated -ne $ebExpected) { throw "executeBatch created_at '$ebCreated' != expected '$ebExpected'" }
 pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 
+# 43.D SQL constraint enforcement on executeSql write path (PRD 00122 / issue #7)
+# Six checks (D1-D6) extending the existing INSERT-validation neighborhood.
+
+# Setup: NOT NULL link table for D1-D5 and a numeric table for D3.
+gqlq "mutation{executeSql(sql:`"CREATE TABLE link_d1 (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)`"){message}}" | Out-Null
+gqlq "mutation{executeSql(sql:`"CREATE TABLE numeric_d3 (title VARCHAR(255) NOT NULL, count INTEGER)`"){message}}" | Out-Null
+Start-Sleep -Seconds 1
+
+# D1. NOT NULL: INSERT with NULL title is rejected and no row is created.
+$d1Result = gqlq "mutation{executeSql(sql:`"INSERT INTO link_d1 (title, url) VALUES (NULL, \`"https://n.com\`")`"){message}}"
+if ($d1Result -notmatch 'NOT NULL constraint violated: link_d1.title') {
+    throw "D1: expected NOT NULL error, got: $d1Result"
+}
+$d1Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d1`"){rows}}"
+if ($d1Count -notmatch '\["0"\]') { throw "D1: expected zero rows, got: $d1Count" }
+pass "serve: D1 INSERT NULL on NOT NULL is rejected, no row created"
+
+# D2. VARCHAR(N) overflow: 300-char title against VARCHAR(255) is rejected.
+$long = 'x' * 300
+$d2Result = gqlq "mutation{executeSql(sql:`"INSERT INTO link_d1 (title, url) VALUES (\`"$long\`", \`"https://v.com\`")`"){message}}"
+if ($d2Result -notmatch 'value too long for link_d1.title') {
+    throw "D2: expected length error, got: $d2Result"
+}
+$d2Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d1`"){rows}}"
+if ($d2Count -notmatch '\["0"\]') { throw "D2: expected zero rows, got: $d2Count" }
+pass "serve: D2 VARCHAR(N) overflow is rejected, no row created"
+
+# D3. INTEGER type mismatch: non-numeric value into INTEGER column is rejected.
+$d3Result = gqlq "mutation{executeSql(sql:`"INSERT INTO numeric_d3 (title, count) VALUES (\`"a\`", \`"not_a_number\`")`"){message}}"
+if ($d3Result -notmatch 'type mismatch for numeric_d3.count: expected INTEGER') {
+    throw "D3: expected type-mismatch error, got: $d3Result"
+}
+$d3Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM numeric_d3`"){rows}}"
+if ($d3Count -notmatch '\["0"\]') { throw "D3: expected zero rows, got: $d3Count" }
+pass "serve: D3 INTEGER type mismatch is rejected, no row created"
+
+# D4. Unknown column on INSERT: column not in schema is rejected.
+$d4Result = gqlq "mutation{executeSql(sql:`"INSERT INTO link_d1 (title, url, unknown_col) VALUES (\`"t\`", \`"https://u.com\`", \`"dropped\`")`"){message}}"
+if ($d4Result -notmatch 'unknown column: link_d1.unknown_col') {
+    throw "D4: expected unknown-column error, got: $d4Result"
+}
+$d4Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d1`"){rows}}"
+if ($d4Count -notmatch '\["0"\]') { throw "D4: expected zero rows, got: $d4Count" }
+pass "serve: D4 unknown column on INSERT is rejected, no row created"
+
+# D5. Unknown column on UPDATE: insert one valid row, then UPDATE with bogus
+# column. The original row's title must be unchanged after the rejection.
+$d5Valid = gqlq "mutation{executeSql(sql:`"INSERT INTO link_d1 (title, url) VALUES (\`"keep\`", \`"https://k.com\`")`"){message}}"
+$d5Id = ($d5Valid | ConvertFrom-Json).data.executeSql.message
+$d5Result = gqlq "mutation{executeSql(sql:`"UPDATE link_d1 SET unknown_col = 'x' WHERE id = '$d5Id'`"){message}}"
+if ($d5Result -notmatch 'unknown column: link_d1.unknown_col') {
+    throw "D5: expected unknown-column error, got: $d5Result"
+}
+$d5Title = gqlq "mutation{executeSql(sql:`"SELECT title FROM link_d1 WHERE id = '$d5Id'`"){rows}}"
+if ($d5Title -notmatch 'keep') { throw "D5: row mutated unexpectedly, got: $d5Title" }
+pass "serve: D5 unknown column on UPDATE is rejected, row unchanged"
+
+# D6. Silent title fallback removed: title NOT NULL with no template, INSERT
+# omitting title now fails instead of coercing url/description into title.
+gqlq "mutation{executeSql(sql:`"CREATE TABLE link_d6 (title VARCHAR(255) NOT NULL, url VARCHAR(255), description TEXT)`"){message}}" | Out-Null
+Start-Sleep -Seconds 1
+$d6Result = gqlq "mutation{executeSql(sql:`"INSERT INTO link_d6 (url) VALUES (\`"https://notitle.com\`")`"){message}}"
+if ($d6Result -notmatch 'NOT NULL constraint violated: link_d6.title') {
+    throw "D6: expected NOT NULL error, got: $d6Result"
+}
+$d6Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d6`"){rows}}"
+if ($d6Count -notmatch '\["0"\]') { throw "D6: expected zero rows, got: $d6Count" }
+pass "serve: D6 silent title fallback removed, missing title rejected"
+
+# Cleanup D-tables
+gqlq "mutation{executeSql(sql:`"DROP TABLE link_d1 CASCADE`"){message}}" | Out-Null
+gqlq "mutation{executeSql(sql:`"DROP TABLE numeric_d3 CASCADE`"){message}}" | Out-Null
+gqlq "mutation{executeSql(sql:`"DROP TABLE link_d6 CASCADE`"){message}}" | Out-Null
+
 # 44. DDL response consistency (no spurious errors)
 $result = gqlq 'mutation { executeSql(sql: "CREATE TABLE ddltest (name VARCHAR(100))") { columns rows message } }'
 if ($result -match '"errors"') { throw "CREATE TABLE has errors: $result" }
