@@ -1906,6 +1906,218 @@ processed: true
         assert_eq!(result.total_count, unfiltered.total_count);
     }
 
+    // ── PRD 00121: in-query field filter alignment ─────────────────
+
+    #[test]
+    fn search_in_query_tag_matches_argument_tag_filter() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec!["prd121-rust"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "note", vec!["prd121-python"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(2, "note", vec!["prd121-rust", "prd121-cli"])).unwrap();
+
+        let in_query = idx
+            .search_paginated_filtered("tag=prd121-rust", 100, 0, &SearchFilters::default())
+            .unwrap();
+        let arg = idx
+            .search_paginated_filtered(
+                "",
+                100,
+                0,
+                &SearchFilters {
+                    tag: Some("prd121-rust".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let mut in_query_ids: Vec<String> = in_query.hits.iter().map(|h| h.id.clone()).collect();
+        let mut arg_ids: Vec<String> = arg.hits.iter().map(|h| h.id.clone()).collect();
+        in_query_ids.sort();
+        arg_ids.sort();
+        assert_eq!(in_query_ids, arg_ids);
+        assert_eq!(in_query.total_count, arg.total_count);
+    }
+
+    #[test]
+    fn search_in_query_field_filter_on_materialized_column() {
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        let z2 = make_typed_doogat(2, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (
+                    id TEXT PRIMARY KEY REFERENCES doogats(id),
+                    title TEXT,
+                    date TEXT,
+                    updated_at TEXT,
+                    url TEXT,
+                    description TEXT
+                );
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120000', 'Typed link 0', '2026-03-01', 'https://example.com');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120001', 'Typed link 1', '2026-03-01', 'https://other.org');
+                INSERT INTO link (id, title, date, url) VALUES ('20260301120002', 'Typed link 2', '2026-03-01', 'https://example.com');",
+            )
+            .unwrap();
+
+        let result = idx
+            .search_paginated_filtered("url=https://example.com", 100, 0, &SearchFilters::default())
+            .unwrap();
+        assert_eq!(result.hits.len(), 2);
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120002"]);
+    }
+
+    #[test]
+    fn search_in_query_filter_combined_with_text() {
+        let idx = in_memory_index();
+
+        let mut z0 = make_typed_doogat(0, "note", vec!["combined-rust"]);
+        z0.body = "searchable notebook content for rust".into();
+        let mut z1 = make_typed_doogat(1, "note", vec!["combined-python"]);
+        z1.body = "searchable notebook content for python".into();
+
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        let result = idx
+            .search_paginated_filtered("notebook tag=combined-rust", 100, 0, &SearchFilters::default())
+            .unwrap();
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_in_query_filter_intersects_with_argument_where_filter() {
+        let idx = in_memory_index();
+
+        let mut z0 = make_typed_doogat(0, "note", vec!["int-rust"]);
+        z0.meta.extra.insert("status".into(), Value::String("active".into()));
+        let mut z1 = make_typed_doogat(1, "note", vec!["int-rust"]);
+        z1.meta.extra.insert("status".into(), Value::String("archived".into()));
+        let mut z2 = make_typed_doogat(2, "note", vec!["int-rust"]);
+        z2.meta.extra.insert("status".into(), Value::String("active".into()));
+
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        let filters = SearchFilters {
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "status".into(),
+                op: SearchFieldOp::Eq("active".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("tag=int-rust", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(result.hits.len(), 2);
+        assert_eq!(result.total_count, 2);
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120002"]);
+    }
+
+    #[test]
+    fn search_bare_wildcard_returns_bad_request() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+
+        for q in &["*", "**", ".*"] {
+            let err = idx.search(q).unwrap_err();
+            assert!(
+                !matches!(err, crate::error::DoogatError::Sql(_)),
+                "query {q:?} should not return Sql error, got {err:?}"
+            );
+            match err {
+                crate::error::DoogatError::BadRequest(msg) => {
+                    assert!(
+                        msg.contains("invalid search query"),
+                        "query {q:?}: expected user-facing message, got: {msg}"
+                    );
+                }
+                other => panic!("query {q:?}: expected BadRequest, got: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn search_unbalanced_paren_returns_bad_request() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+
+        let err = idx.search("(unbalanced").unwrap_err();
+        match err {
+            crate::error::DoogatError::BadRequest(msg) => {
+                assert!(
+                    msg.contains("invalid search query"),
+                    "expected user-facing message, got: {msg}"
+                );
+            }
+            other => panic!("expected BadRequest, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_bare_operator_returns_bad_request() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+
+        for q in &["AND", "OR", "NOT"] {
+            let err = idx.search(q).unwrap_err();
+            match err {
+                crate::error::DoogatError::BadRequest(msg) => {
+                    assert!(
+                        msg.contains("invalid search query"),
+                        "query {q:?}: expected user-facing message, got: {msg}"
+                    );
+                }
+                other => panic!("query {q:?}: expected BadRequest, got: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn search_never_returns_sql_error_for_user_input() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+
+        let inputs = [
+            "*",
+            "**",
+            ".*",
+            "(unbalanced",
+            "AND",
+            "NOT",
+            ")",
+            "tag=",
+            "=",
+            ")))bad(((",
+            "",
+        ];
+        for q in &inputs {
+            match idx.search(q) {
+                Ok(_) => {}
+                Err(crate::error::DoogatError::BadRequest(_)) => {}
+                Err(crate::error::DoogatError::Sql(msg)) => {
+                    panic!("query {q:?} returned DoogatError::Sql({msg}); expected BadRequest or Ok");
+                }
+                Err(other) => panic!(
+                    "query {q:?} returned unexpected error variant: {other:?}"
+                ),
+            }
+        }
+    }
+
     // ── FTS5 schema + _ddb_boost table tests ───────────────────────────
 
     #[test]
