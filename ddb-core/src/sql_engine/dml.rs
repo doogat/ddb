@@ -125,6 +125,22 @@ type PartitionedAssignments = (BTreeMap<String, String>, Vec<(String, String)>);
 /// Prepared bulk-update output: file contents and per-row update maps.
 type BulkUpdateFiles = (Vec<(String, String)>, Vec<BTreeMap<String, String>>);
 
+/// In-memory NEXT counter state for the duration of a single multi-row INSERT.
+///
+/// Tracks both bare `DEFAULT NEXT` and `DEFAULT NEXT(partition_col)` so the
+/// pre-validation pass (PRD 00122 blind review C2) can compute correct
+/// monotonic values without requiring per-row writes to materialize. Without
+/// this, pass 1 would call SQLite's `MAX(...)` on a table that hasn't seen
+/// the previous rows yet and every row would get the same value.
+#[derive(Default)]
+struct InsertNextCounters {
+    /// Per-column counter for `DEFAULT NEXT` (no partition).
+    bare: BTreeMap<String, i64>,
+    /// Per-(column, partition_value) counter for `DEFAULT NEXT(partition)`.
+    /// Lazily seeded from SQLite on first use of each partition value.
+    partitioned: BTreeMap<(String, String), i64>,
+}
+
 impl<'a> SqlEngine<'a> {
     pub(super) fn handle_insert(
         &mut self,
@@ -155,11 +171,14 @@ impl<'a> SqlEngine<'a> {
         let mut files: Vec<(String, String)> = Vec::with_capacity(rows.len());
         let mut next_counters = self.precompute_insert_next_counters(&schema);
 
-        for ((row_values, null_cols), id) in rows
-            .iter()
-            .zip(null_cols_per_row.iter())
-            .zip(ids.into_iter())
-        {
+        // Pass 1: validate every row before any side effects. PRD 00122
+        // blind review C2 — without pre-validation, a multi-row INSERT
+        // whose nth row fails validation would have already committed rows
+        // 1..n-1 to the index and materialized table (per-row savepoints
+        // are released individually), leaving the store inconsistent
+        // because the git commit at the end is skipped.
+        let mut prepared_rows: Vec<BTreeMap<String, String>> = Vec::with_capacity(rows.len());
+        for (row_values, null_cols) in rows.iter().zip(null_cols_per_row.iter()) {
             if col_names.len() != row_values.len() {
                 return Err(DoogatError::SqlEngine(
                     "column count doesn't match value count".into(),
@@ -179,6 +198,14 @@ impl<'a> SqlEngine<'a> {
                 null_cols,
                 true,
             )?;
+            prepared_rows.push(col_values);
+        }
+
+        // Pass 2: write each pre-validated row. The per-row SAVEPOINT in
+        // `build_and_index_row` still handles UNIQUE collisions (those
+        // happen at write time, not pre-check time), so a single-row
+        // failure here still rolls back its own row cleanly.
+        for (col_values, id) in prepared_rows.into_iter().zip(ids.into_iter()) {
             let (path, content) =
                 self.build_and_index_row(&schema, &table_name, &id, &col_values, &ref_folder_types)?;
             self.buffer_or_collect_write(path, content, &mut files);
@@ -911,8 +938,8 @@ impl<'a> SqlEngine<'a> {
     fn precompute_insert_next_counters(
         &self,
         schema: &TableSchema,
-    ) -> BTreeMap<String, i64> {
-        let mut counters = BTreeMap::new();
+    ) -> InsertNextCounters {
+        let mut counters = InsertNextCounters::default();
         for col_def in &schema.columns {
             if col_def.default_value.as_deref() != Some("NEXT") {
                 continue;
@@ -929,7 +956,7 @@ impl<'a> SqlEngine<'a> {
                     |row| row.get(0),
                 )
                 .unwrap_or(0);
-            counters.insert(col_def.name.clone(), max_val);
+            counters.bare.insert(col_def.name.clone(), max_val);
         }
         counters
     }
@@ -939,7 +966,7 @@ impl<'a> SqlEngine<'a> {
         &self,
         schema: &TableSchema,
         col_values: &mut BTreeMap<String, String>,
-        next_counters: &mut BTreeMap<String, i64>,
+        next_counters: &mut InsertNextCounters,
     ) -> Result<()> {
         self.fill_column_defaults(schema, col_values, next_counters)?;
         self.validate_insert_constraints(schema, col_values)
@@ -949,7 +976,7 @@ impl<'a> SqlEngine<'a> {
         &self,
         schema: &TableSchema,
         col_values: &mut BTreeMap<String, String>,
-        next_counters: &mut BTreeMap<String, i64>,
+        next_counters: &mut InsertNextCounters,
     ) -> Result<()> {
         for col_def in &schema.columns {
             if col_values.contains_key(&col_def.name) {
@@ -972,10 +999,11 @@ impl<'a> SqlEngine<'a> {
         col_def: &crate::types::ColumnDef,
         schema: &TableSchema,
         col_values: &BTreeMap<String, String>,
-        next_counters: &mut BTreeMap<String, i64>,
+        next_counters: &mut InsertNextCounters,
     ) -> String {
         if default == "NEXT" {
             let counter = next_counters
+                .bare
                 .get_mut(&col_def.name)
                 .expect("key pre-populated above");
             *counter += 1;
@@ -984,19 +1012,25 @@ impl<'a> SqlEngine<'a> {
         if default.starts_with("NEXT(") && default.ends_with(')') {
             let partition_col = &default[5..default.len() - 1];
             let partition_val = col_values.get(partition_col).cloned().unwrap_or_default();
-            let max_val: i64 = self
-                .index
-                .sql_conn()
-                .query_row(
-                    &format!(
-                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
-                        col_def.name, schema.table_name, partition_col
-                    ),
-                    params![partition_val],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            return (max_val + 1).to_string();
+            let key = (col_def.name.clone(), partition_val.clone());
+            let counter = next_counters
+                .partitioned
+                .entry(key)
+                .or_insert_with(|| {
+                    self.index
+                        .sql_conn()
+                        .query_row(
+                            &format!(
+                                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
+                                col_def.name, schema.table_name, partition_col
+                            ),
+                            params![partition_val],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0)
+                });
+            *counter += 1;
+            return counter.to_string();
         }
         default.to_owned()
     }
