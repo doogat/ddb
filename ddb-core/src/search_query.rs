@@ -1016,4 +1016,228 @@ mod tests {
             }]
         );
     }
+
+    // ── compile_search_plan() tests ────────────────────────────────────
+
+    #[test]
+    fn compile_empty_returns_no_fts_no_filters() {
+        let plan = compile_search_plan("").expect("empty query should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert!(plan.extracted_filters.is_empty());
+        assert!(plan.extracted_negated_filters.is_empty());
+
+        let plan = compile_search_plan("   ").expect("whitespace-only query should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert!(plan.extracted_filters.is_empty());
+        assert!(plan.extracted_negated_filters.is_empty());
+    }
+
+    #[test]
+    fn compile_single_field_equals_no_fts() {
+        let plan = compile_search_plan("tag=rust").expect("valid field filter should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert_eq!(
+            plan.extracted_filters,
+            vec![("tag".to_string(), "rust".to_string())]
+        );
+        assert!(plan.extracted_negated_filters.is_empty());
+    }
+
+    #[test]
+    fn compile_colon_syntax_treated_same_as_equals() {
+        let plan = compile_search_plan("tag:rust").expect("colon syntax should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert_eq!(
+            plan.extracted_filters,
+            vec![("tag".to_string(), "rust".to_string())]
+        );
+        assert!(plan.extracted_negated_filters.is_empty());
+    }
+
+    #[test]
+    fn compile_dotted_value_preserved() {
+        let plan =
+            compile_search_plan("category=work.dev").expect("dotted value should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert_eq!(
+            plan.extracted_filters,
+            vec![("category".to_string(), "work.dev".to_string())]
+        );
+        assert!(plan.extracted_negated_filters.is_empty());
+    }
+
+    #[test]
+    fn compile_and_of_two_field_equals() {
+        // Explicit AND form.
+        let plan = compile_search_plan("tag=rust AND category=work")
+            .expect("AND of two field filters should be Ok");
+        assert_eq!(plan.fts_query, None);
+        // Assumption: extraction walks the AST AND children in order, preserving the
+        // parser's flattened-child order (which follows input order for explicit AND).
+        assert_eq!(
+            plan.extracted_filters,
+            vec![
+                ("tag".to_string(), "rust".to_string()),
+                ("category".to_string(), "work".to_string()),
+            ]
+        );
+        assert!(plan.extracted_negated_filters.is_empty());
+
+        // Implicit AND form should behave identically.
+        let plan = compile_search_plan("tag=rust category=work")
+            .expect("implicit AND of two field filters should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert_eq!(
+            plan.extracted_filters,
+            vec![
+                ("tag".to_string(), "rust".to_string()),
+                ("category".to_string(), "work".to_string()),
+            ]
+        );
+        assert!(plan.extracted_negated_filters.is_empty());
+    }
+
+    #[test]
+    fn compile_field_equals_and_text() {
+        let plan = compile_search_plan("tag=rust meeting")
+            .expect("field filter + text should be Ok");
+        assert_eq!(
+            plan.extracted_filters,
+            vec![("tag".to_string(), "rust".to_string())]
+        );
+        assert!(plan.extracted_negated_filters.is_empty());
+        assert_eq!(plan.fts_query, Some("meeting".to_string()));
+    }
+
+    #[test]
+    fn compile_field_equals_and_multiple_text() {
+        let plan = compile_search_plan("tag=rust meeting notes")
+            .expect("field filter + multiple text terms should be Ok");
+        assert_eq!(
+            plan.extracted_filters,
+            vec![("tag".to_string(), "rust".to_string())]
+        );
+        assert!(plan.extracted_negated_filters.is_empty());
+        // The remaining two text terms should be rewrapped in an And and serialized
+        // via to_fts_query, producing "meeting AND notes".
+        let expected = to_fts_query(&SearchExpr::And(vec![
+            SearchExpr::FullText("meeting".into()),
+            SearchExpr::FullText("notes".into()),
+        ]));
+        assert_eq!(plan.fts_query, Some(expected));
+    }
+
+    #[test]
+    fn compile_single_full_text_passes_through() {
+        let plan = compile_search_plan("hello").expect("single word should be Ok");
+        assert!(plan.extracted_filters.is_empty());
+        assert!(plan.extracted_negated_filters.is_empty());
+        assert_eq!(plan.fts_query, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn compile_not_field_equals_extracted_as_negated() {
+        let plan =
+            compile_search_plan("NOT tag=archive").expect("NOT field filter should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert!(plan.extracted_filters.is_empty());
+        assert_eq!(
+            plan.extracted_negated_filters,
+            vec![("tag".to_string(), "archive".to_string())]
+        );
+    }
+
+    #[test]
+    fn compile_mixed_positive_and_not_field_equals() {
+        let plan = compile_search_plan("tag=rust NOT tag=archive")
+            .expect("positive + NOT field filter should be Ok");
+        assert_eq!(plan.fts_query, None);
+        assert_eq!(
+            plan.extracted_filters,
+            vec![("tag".to_string(), "rust".to_string())]
+        );
+        assert_eq!(
+            plan.extracted_negated_filters,
+            vec![("tag".to_string(), "archive".to_string())]
+        );
+    }
+
+    #[test]
+    fn compile_or_of_field_equals_not_decomposed() {
+        let plan = compile_search_plan("tag=rust OR tag=svelte")
+            .expect("OR of field filters should be Ok");
+        // OR at the top level is NOT decomposed - filters flow through intact.
+        assert!(plan.extracted_filters.is_empty());
+        assert!(plan.extracted_negated_filters.is_empty());
+        // Expected fts_query is whatever to_fts_query produces for the parsed OR AST.
+        let parsed = parse("tag=rust OR tag=svelte").expect("parses");
+        let expected = to_fts_query(&parsed);
+        assert_eq!(plan.fts_query, Some(expected));
+    }
+
+    // Error path ────────────────────────────────────────────────────────
+
+    #[test]
+    fn compile_bare_asterisk_rejected() {
+        let err = compile_search_plan("*").expect_err("bare * should be rejected");
+        assert!(
+            err.contains("wildcard"),
+            "error message should mention 'wildcard', got: {err}"
+        );
+    }
+
+    #[test]
+    fn compile_bare_double_asterisk_rejected() {
+        let err = compile_search_plan("**").expect_err("bare ** should be rejected");
+        assert!(
+            err.contains("wildcard"),
+            "error message should mention 'wildcard', got: {err}"
+        );
+    }
+
+    #[test]
+    fn compile_bare_dot_asterisk_rejected() {
+        let err = compile_search_plan(".*").expect_err("bare .* should be rejected");
+        assert!(
+            err.contains("wildcard"),
+            "error message should mention 'wildcard', got: {err}"
+        );
+    }
+
+    #[test]
+    fn compile_unparseable_rejected() {
+        let err =
+            compile_search_plan(")))bad(((").expect_err("unparseable query should be rejected");
+        assert!(
+            err.contains("unparseable"),
+            "error message should mention 'unparseable', got: {err}"
+        );
+    }
+
+    #[test]
+    fn compile_bare_and_operator_rejected() {
+        let err = compile_search_plan("AND").expect_err("bare AND should be rejected");
+        assert!(
+            err.contains("unparseable"),
+            "error message should mention 'unparseable', got: {err}"
+        );
+    }
+
+    #[test]
+    fn compile_bare_or_operator_rejected() {
+        let err = compile_search_plan("OR").expect_err("bare OR should be rejected");
+        assert!(
+            err.contains("unparseable"),
+            "error message should mention 'unparseable', got: {err}"
+        );
+    }
+
+    #[test]
+    fn compile_bare_not_operator_rejected() {
+        let err = compile_search_plan("NOT").expect_err("bare NOT should be rejected");
+        assert!(
+            err.contains("unparseable"),
+            "error message should mention 'unparseable', got: {err}"
+        );
+    }
 }
