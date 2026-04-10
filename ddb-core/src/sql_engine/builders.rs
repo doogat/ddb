@@ -174,6 +174,13 @@ fn process_column_zones(
     };
 
     for col in &schema.columns {
+        // Core columns (id, title, type, date, updated_at) are written by the
+        // materialized-row writer and meta fields, not as typed zone fields.
+        // Including them here would double-write title into a frontmatter or
+        // body section in addition to `meta.title`.
+        if crate::indexer::materialize::is_core_column(&col.name) {
+            continue;
+        }
         let val = match col_values.get(&col.name) {
             Some(v) => v.clone(),
             None => continue,

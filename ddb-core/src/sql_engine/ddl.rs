@@ -84,9 +84,15 @@ impl<'a> SqlEngine<'a> {
         let mut out = Vec::new();
         for col in cols {
             let name = col.name.value.to_lowercase();
-            if name == "id" || name == "type" || name == "title" {
-                continue; // implicit columns, skip
+            if name == "id" || name == "type" {
+                continue; // implicit auto-managed columns, skip
             }
+            // `title` is special: stored in meta.title and on the materialized
+            // table as a top-level column, not as a typed-table column. We
+            // still keep it in `schema.columns` so its declared constraints
+            // (NOT NULL, VARCHAR(N)) flow into the row-validation pre-check.
+            // Downstream code that walks `schema.columns` skips core columns
+            // via `is_core_column`.
             let data_type = data_type_to_string(&col.data_type);
             let references = extract_references(&col.options);
             let zone = if references.is_some() {

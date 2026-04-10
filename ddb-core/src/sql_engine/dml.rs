@@ -1,6 +1,6 @@
 use rusqlite::params;
 use sqlparser::ast::{AssignmentTarget, Expr, FromTable, SetExpr, Statement};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DoogatError, Result};
 use crate::indexer::materialize::{is_core_column, normalize_bool_str};
@@ -14,8 +14,109 @@ use super::helpers::{
 };
 use super::{PendingDelete, PendingWrite, SqlEngine, SqlResult};
 
-/// Filtered rows paired with a parallel vec of existing IDs for conflict-skipped slots.
-type ConflictFilterResult = (Vec<Vec<String>>, Vec<Option<String>>);
+/// Column names that are not declared in `schema.columns` but are accepted by
+/// the SQL write path because the doogat pipeline owns them. Listed in
+/// `validate_row_against_schema`'s unknown-column check.
+const RESERVED_COLUMNS: &[&str] = &[
+    "id",
+    "title",
+    "type",
+    "date",
+    "created_at",
+    "updated_at",
+    "tags",
+];
+
+/// Type-check a single value against its declared `data_type`. Returns
+/// `DoogatError::Validation` on mismatch using the exact strings documented
+/// in `docs/src/technical/sql-engine.md`.
+fn type_check_value(
+    data_type: &str,
+    table_name: &str,
+    col_name: &str,
+    val: &str,
+) -> Result<()> {
+    let dt = data_type.to_uppercase();
+    if dt == "INTEGER" {
+        if val.parse::<i64>().is_err() {
+            return Err(DoogatError::Validation(format!(
+                "type mismatch for {table_name}.{col_name}: expected INTEGER, got '{val}'"
+            )));
+        }
+        return Ok(());
+    }
+    if matches!(dt.as_str(), "REAL" | "FLOAT" | "DOUBLE") {
+        if val.parse::<f64>().is_err() {
+            return Err(DoogatError::Validation(format!(
+                "type mismatch for {table_name}.{col_name}: expected REAL, got '{val}'"
+            )));
+        }
+        return Ok(());
+    }
+    if dt == "BOOLEAN" {
+        if !matches!(val, "0" | "1" | "true" | "false" | "TRUE" | "FALSE") {
+            return Err(DoogatError::Validation(format!(
+                "type mismatch for {table_name}.{col_name}: expected BOOLEAN, got '{val}'"
+            )));
+        }
+        return Ok(());
+    }
+    if let Some(limit) = parse_varchar_length(&dt) {
+        let chars = val.chars().count();
+        if chars > limit {
+            return Err(DoogatError::Validation(format!(
+                "value too long for {table_name}.{col_name}: {chars} chars exceeds limit {limit}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Extract the `N` from `VARCHAR(N)` or `CHAR(N)`. Returns `None` for bare
+/// `VARCHAR`/`CHAR` (no length cap) and for unparseable inputs.
+fn parse_varchar_length(upper_data_type: &str) -> Option<usize> {
+    let inner = upper_data_type
+        .strip_prefix("VARCHAR(")
+        .or_else(|| upper_data_type.strip_prefix("CHAR("))?
+        .strip_suffix(')')?;
+    inner.parse::<usize>().ok()
+}
+
+/// Inspect a raw INSERT VALUES row to find columns whose expression is a SQL
+/// `NULL` literal. Used so the validator can distinguish "explicit NULL" from
+/// "empty string", since `eval_values` collapses NULL to "" before validation.
+fn extract_null_cols_from_row(exprs: &[Expr], col_names: &[String]) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for (idx, expr) in exprs.iter().enumerate() {
+        if is_null_literal(expr) {
+            if let Some(name) = col_names.get(idx) {
+                out.insert(name.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Returns true when the expression is a bare SQL `NULL` literal. Wrapped
+/// expressions like `COALESCE(NULL, 0)` are deliberately not treated as NULL.
+fn is_null_literal(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Value(v) if matches!(v.value, sqlparser::ast::Value::Null)
+    )
+}
+
+/// Per-row null column sets, parallel to the row vector. Each entry lists
+/// the column names whose INSERT VALUES expression was a SQL `NULL` literal,
+/// captured before `eval_values` collapses NULL to "".
+type NullColsPerRow = Vec<BTreeSet<String>>;
+
+/// Raw rows + parallel null-column sets returned by `extract_insert_rows`.
+type ExtractedInsertRows = (Vec<Vec<String>>, NullColsPerRow);
+
+/// Filtered rows, parallel null-column sets, and a vec of existing IDs for
+/// conflict-skipped slots.
+type ConflictFilterResult = (Vec<Vec<String>>, NullColsPerRow, Vec<Option<String>>);
 
 /// Partitioned UPDATE assignments: literal values and deferred SQL expressions.
 type PartitionedAssignments = (BTreeMap<String, String>, Vec<(String, String)>);
@@ -39,12 +140,12 @@ impl<'a> SqlEngine<'a> {
 
         let schema = self.load_schema(&table_name)?;
         let col_names: Vec<String> = ins.columns.iter().map(|c| c.value.to_lowercase()).collect();
-        let rows = self.extract_insert_rows(ins)?;
+        let (rows, null_cols_per_row) = self.extract_insert_rows(ins, &col_names)?;
 
-        let (rows, on_conflict_existing) = if on_conflict_ignore {
-            self.filter_conflict_rows(rows, &schema, &col_names)?
+        let (rows, null_cols_per_row, on_conflict_existing) = if on_conflict_ignore {
+            self.filter_conflict_rows(rows, null_cols_per_row, &schema, &col_names)?
         } else {
-            (rows, vec![])
+            (rows, null_cols_per_row, vec![])
         };
 
         let ids = self.unique_ids(rows.len())?;
@@ -53,7 +154,11 @@ impl<'a> SqlEngine<'a> {
         let mut files: Vec<(String, String)> = Vec::with_capacity(rows.len());
         let mut next_counters = self.precompute_insert_next_counters(&schema);
 
-        for (row_values, id) in rows.iter().zip(ids.into_iter()) {
+        for ((row_values, null_cols), id) in rows
+            .iter()
+            .zip(null_cols_per_row.iter())
+            .zip(ids.into_iter())
+        {
             if col_names.len() != row_values.len() {
                 return Err(DoogatError::SqlEngine(
                     "column count doesn't match value count".into(),
@@ -65,6 +170,14 @@ impl<'a> SqlEngine<'a> {
                 .map(|(n, v)| (n.clone(), v.clone()))
                 .collect();
             self.fill_defaults_and_validate(&schema, &mut col_values, &mut next_counters)?;
+            Self::validate_row_against_schema(
+                &schema,
+                &table_name,
+                &col_names,
+                &col_values,
+                null_cols,
+                true,
+            )?;
             let (path, content) =
                 self.build_and_index_row(&schema, &table_name, &id, &col_values, &ref_folder_types)?;
             self.buffer_or_collect_write(path, content, &mut files);
@@ -117,17 +230,20 @@ impl<'a> SqlEngine<'a> {
     fn extract_insert_rows(
         &self,
         ins: &sqlparser::ast::Insert,
-    ) -> Result<Vec<Vec<String>>> {
+        col_names: &[String],
+    ) -> Result<ExtractedInsertRows> {
         let query = ins.source.as_ref().ok_or_else(|| {
             DoogatError::SqlEngine("missing VALUES clause".into())
         })?;
         match query.body.as_ref() {
             SetExpr::Values(v) => {
                 let mut rows = Vec::with_capacity(v.rows.len());
+                let mut null_cols_per_row = Vec::with_capacity(v.rows.len());
                 for row in &v.rows {
                     rows.push(eval_values(self.index.sql_conn(), row)?);
+                    null_cols_per_row.push(extract_null_cols_from_row(row, col_names));
                 }
-                Ok(rows)
+                Ok((rows, null_cols_per_row))
             }
             _ => Err(DoogatError::SqlEngine(
                 "only VALUES clause supported".into(),
@@ -827,33 +943,147 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
+    /// Validate a row's column names and values against the table schema.
+    ///
+    /// Runs five constraint classes that the SQL parser accepts but does not
+    /// enforce by default (issue #7):
+    ///
+    /// 1. **Unknown columns** — names not present in `schema.columns` and not
+    ///    in the reserved set are rejected. Reserved: `id`, `title`, `type`,
+    ///    `date`, `created_at`, `updated_at`, `tags`.
+    /// 2. **NOT NULL** — for INSERT, a `required` column missing from
+    ///    `col_values` (no default applied) or present in `null_cols` is
+    ///    rejected. For UPDATE, only an explicit `SET col = NULL` (column in
+    ///    `null_cols`) on a required column is rejected; UPDATEs that leave a
+    ///    column untouched are fine.
+    /// 3. **INTEGER** — values must parse as `i64`.
+    /// 4. **REAL/FLOAT/DOUBLE** — values must parse as `f64`.
+    /// 5. **BOOLEAN** — values must be one of `0`, `1`, `true`, `false`,
+    ///    `TRUE`, `FALSE`.
+    /// 6. **VARCHAR(N) / CHAR(N) length** — character count must not exceed
+    ///    the declared length. Bare `VARCHAR`/`CHAR` (no length) is unbounded.
+    ///
+    /// `allowed_values` (ENUM) and `REFERENCES` are validated separately by
+    /// `validate_insert_constraints`. This helper is additive.
+    ///
+    /// On failure returns `DoogatError::Validation` with one of the exact
+    /// error strings documented in `docs/src/technical/sql-engine.md`.
+    pub(super) fn validate_row_against_schema(
+        schema: &TableSchema,
+        table_name: &str,
+        col_names: &[String],
+        col_values: &BTreeMap<String, String>,
+        null_cols: &BTreeSet<String>,
+        is_insert: bool,
+    ) -> Result<()> {
+        Self::check_unknown_columns(schema, table_name, col_names)?;
+        Self::check_not_null(schema, table_name, col_values, null_cols, is_insert)?;
+        Self::check_column_types(schema, table_name, col_values, null_cols)?;
+        Ok(())
+    }
+
+    fn check_unknown_columns(
+        schema: &TableSchema,
+        table_name: &str,
+        col_names: &[String],
+    ) -> Result<()> {
+        let schema_cols: BTreeSet<&str> =
+            schema.columns.iter().map(|c| c.name.as_str()).collect();
+        for name in col_names {
+            if schema_cols.contains(name.as_str()) {
+                continue;
+            }
+            if RESERVED_COLUMNS.contains(&name.as_str()) {
+                continue;
+            }
+            return Err(DoogatError::Validation(format!(
+                "unknown column: {table_name}.{name}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn check_not_null(
+        schema: &TableSchema,
+        table_name: &str,
+        col_values: &BTreeMap<String, String>,
+        null_cols: &BTreeSet<String>,
+        is_insert: bool,
+    ) -> Result<()> {
+        for col in &schema.columns {
+            if !col.required {
+                continue;
+            }
+            if null_cols.contains(&col.name) {
+                return Err(DoogatError::Validation(format!(
+                    "NOT NULL constraint violated: {table_name}.{}",
+                    col.name
+                )));
+            }
+            if is_insert && !col_values.contains_key(&col.name) {
+                return Err(DoogatError::Validation(format!(
+                    "NOT NULL constraint violated: {table_name}.{}",
+                    col.name
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_column_types(
+        schema: &TableSchema,
+        table_name: &str,
+        col_values: &BTreeMap<String, String>,
+        null_cols: &BTreeSet<String>,
+    ) -> Result<()> {
+        for col in &schema.columns {
+            if null_cols.contains(&col.name) {
+                continue;
+            }
+            let val = match col_values.get(&col.name) {
+                Some(v) => v,
+                None => continue,
+            };
+            type_check_value(&col.data_type, table_name, &col.name, val)?;
+        }
+        Ok(())
+    }
+
     /// Filter out rows that match existing unique_together constraints when
-    /// ON CONFLICT DO NOTHING is active. Returns filtered rows and a parallel
-    /// vec mapping original row indices to existing IDs (Some) or new rows (None).
+    /// ON CONFLICT DO NOTHING is active. Filters `rows` and `null_cols_per_row`
+    /// in lockstep so the parallel-index invariant downstream stays intact,
+    /// and returns the existing IDs for skipped slots.
     fn filter_conflict_rows(
         &self,
         rows: Vec<Vec<String>>,
+        null_cols_per_row: NullColsPerRow,
         schema: &TableSchema,
         col_names: &[String],
     ) -> Result<ConflictFilterResult> {
         let constraints = match schema.unique_together {
             Some(ref c) => c,
-            None => return Ok((rows, vec![])),
+            None => return Ok((rows, null_cols_per_row, vec![])),
         };
 
         let mut existing: Vec<Option<String>> = vec![None; rows.len()];
         let mut filtered = Vec::with_capacity(rows.len());
+        let mut filtered_nulls = Vec::with_capacity(rows.len());
 
-        for (row_idx, row_values) in rows.into_iter().enumerate() {
+        for (row_idx, (row_values, nulls)) in rows
+            .into_iter()
+            .zip(null_cols_per_row.into_iter())
+            .enumerate()
+        {
             if let Some(id) = self.find_conflict_match(schema, constraints, col_names, &row_values)
             {
                 existing[row_idx] = Some(id);
             } else {
                 filtered.push(row_values);
+                filtered_nulls.push(nulls);
             }
         }
 
-        Ok((filtered, existing))
+        Ok((filtered, filtered_nulls, existing))
     }
 
     /// Check one row against all unique_together constraint groups, returning

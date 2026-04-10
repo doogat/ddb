@@ -4571,3 +4571,108 @@ fn validate_accepts_varchar_no_length() {
     )
     .unwrap();
 }
+
+// ── INSERT-path enforcement (issue #7 reproducers) ────────────────────
+
+fn count_rows(index: &Index, table: &str) -> i64 {
+    let rows = index
+        .query_raw(&format!("SELECT COUNT(*) FROM \"{table}\""))
+        .unwrap();
+    rows[0][0].parse().unwrap()
+}
+
+fn count_index_rows(index: &Index, doogat_type: &str) -> i64 {
+    let rows = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM doogats WHERE type = '{doogat_type}'"
+        ))
+        .unwrap();
+    rows[0][0].parse().unwrap()
+}
+
+#[test]
+fn executesql_insert_rejects_not_null_violation() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)")
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO link (title, url) VALUES (NULL, 'https://n.com')")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: link.title"),
+        "got: {err}"
+    );
+
+    assert_eq!(count_rows(&index, "link"), 0, "no row should be materialized");
+    assert_eq!(count_index_rows(&index, "link"), 0, "no ghost index row");
+}
+
+#[test]
+fn executesql_insert_rejects_unknown_column() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)")
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO link (title, url, unknown_col) VALUES ('t', 'https://u.com', 'dropped')")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("unknown column: link.unknown_col"),
+        "got: {err}"
+    );
+
+    assert_eq!(count_rows(&index, "link"), 0);
+    assert_eq!(count_index_rows(&index, "link"), 0);
+}
+
+#[test]
+fn executesql_insert_rejects_integer_type_mismatch() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE numeric (title VARCHAR(255) NOT NULL, count INTEGER)")
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO numeric (title, count) VALUES ('a', 'not_a_number')")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("type mismatch for numeric.count: expected INTEGER"),
+        "got: {err}"
+    );
+
+    assert_eq!(count_rows(&index, "numeric"), 0);
+    assert_eq!(count_index_rows(&index, "numeric"), 0);
+}
+
+#[test]
+fn executesql_insert_rejects_varchar_overflow() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE shortname (title VARCHAR(10) NOT NULL)")
+        .unwrap();
+
+    let long = "x".repeat(11);
+    let err = engine
+        .execute(&format!(
+            "INSERT INTO shortname (title) VALUES ('{long}')"
+        ))
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("value too long for shortname.title: 11 chars exceeds limit 10"),
+        "got: {err}"
+    );
+
+    assert_eq!(count_rows(&index, "shortname"), 0);
+    assert_eq!(count_index_rows(&index, "shortname"), 0);
+}

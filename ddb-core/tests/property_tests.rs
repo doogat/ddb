@@ -731,9 +731,16 @@ fn arb_create_table_sql() -> impl Strategy<Value = (String, String, Vec<(String,
         })
 }
 
-/// Safe string value for SQL INSERT/UPDATE (alphanumeric, no quotes).
-fn arb_sql_string_value() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9]{1,20}"
+/// Type-appropriate literal value for a generated column type. Used by SQL
+/// property tests so the value passed in INSERT/UPDATE matches the column
+/// declaration and doesn't trip the constraint validator from PRD 00122.
+fn safe_value_for(col_type: &str) -> &'static str {
+    match col_type.to_uppercase().as_str() {
+        "INTEGER" => "42",
+        "REAL" => "3.14",
+        "BOOLEAN" => "true",
+        _ => "val",
+    }
 }
 
 /// Injection strings with SQL-special characters.
@@ -793,7 +800,6 @@ proptest! {
     #[test]
     fn sql_insert_succeeds(
         (create_sql, tbl, cols) in arb_create_table_sql(),
-        values in prop::collection::vec(arb_sql_string_value(), 5),
     ) {
         let idx = open_test_index();
         let store = MockStore::new();
@@ -802,9 +808,10 @@ proptest! {
         engine.execute(&create_sql).unwrap();
 
         let col_names: Vec<&str> = cols.iter().map(|(n, _)| n.as_str()).collect();
-        let val_strs: Vec<String> = cols.iter().enumerate().map(|(i, _)| {
-            format!("'{}'", values.get(i).map(|s| s.as_str()).unwrap_or("val"))
-        }).collect();
+        let val_strs: Vec<String> = cols
+            .iter()
+            .map(|(_, t)| format!("'{}'", safe_value_for(t)))
+            .collect();
         let insert_sql = format!(
             "INSERT INTO {} ({}) VALUES ({})",
             tbl,
@@ -823,7 +830,6 @@ proptest! {
     #[test]
     fn sql_select_after_insert(
         (create_sql, tbl, cols) in arb_create_table_sql(),
-        values in prop::collection::vec(arb_sql_string_value(), 5),
     ) {
         let idx = open_test_index();
         let store = MockStore::new();
@@ -832,9 +838,10 @@ proptest! {
         engine.execute(&create_sql).unwrap();
 
         let col_names: Vec<&str> = cols.iter().map(|(n, _)| n.as_str()).collect();
-        let val_strs: Vec<String> = cols.iter().enumerate().map(|(i, _)| {
-            format!("'{}'", values.get(i).map(|s| s.as_str()).unwrap_or("val"))
-        }).collect();
+        let val_strs: Vec<String> = cols
+            .iter()
+            .map(|(_, t)| format!("'{}'", safe_value_for(t)))
+            .collect();
         let insert_sql = format!(
             "INSERT INTO {} ({}) VALUES ({})",
             tbl, col_names.join(", "), val_strs.join(", ")
@@ -853,8 +860,6 @@ proptest! {
     #[test]
     fn sql_update_modifies(
         (create_sql, tbl, cols) in arb_create_table_sql(),
-        values in prop::collection::vec(arb_sql_string_value(), 5),
-        new_val in arb_sql_string_value(),
     ) {
         let idx = open_test_index();
         let store = MockStore::new();
@@ -863,9 +868,10 @@ proptest! {
         engine.execute(&create_sql).unwrap();
 
         let col_names: Vec<&str> = cols.iter().map(|(n, _)| n.as_str()).collect();
-        let val_strs: Vec<String> = cols.iter().enumerate().map(|(i, _)| {
-            format!("'{}'", values.get(i).map(|s| s.as_str()).unwrap_or("val"))
-        }).collect();
+        let val_strs: Vec<String> = cols
+            .iter()
+            .map(|(_, t)| format!("'{}'", safe_value_for(t)))
+            .collect();
         let insert_sql = format!(
             "INSERT INTO {} ({}) VALUES ({})",
             tbl, col_names.join(", "), val_strs.join(", ")
@@ -873,6 +879,7 @@ proptest! {
         engine.execute(&insert_sql).unwrap();
 
         let first_col = &cols[0].0;
+        let new_val = safe_value_for(&cols[0].1);
         let update_sql = format!("UPDATE {} SET {} = '{}'", tbl, first_col, new_val);
         let result = engine.execute(&update_sql);
         prop_assert!(result.is_ok(), "UPDATE failed: {:?}\nsql: {}", result.err(), update_sql);
@@ -894,11 +901,11 @@ proptest! {
                 }
             };
             let col_type = cols[0].1.to_uppercase();
-            let matches = got.contains(&new_val)
+            let matches = got.contains(new_val)
                 || got.parse::<f64>().ok() == new_val.parse::<f64>().ok()
                 || (col_type == "BOOLEAN"
                     && as_bool(got).is_some()
-                    && as_bool(got) == as_bool(&new_val));
+                    && as_bool(got) == as_bool(new_val));
             prop_assert!(
                 matches,
                 "expected updated value '{}' in row, got '{}'",
@@ -911,7 +918,6 @@ proptest! {
     #[test]
     fn sql_delete_removes(
         (create_sql, tbl, cols) in arb_create_table_sql(),
-        values in prop::collection::vec(arb_sql_string_value(), 5),
     ) {
         let idx = open_test_index();
         let store = MockStore::new();
@@ -920,9 +926,10 @@ proptest! {
         engine.execute(&create_sql).unwrap();
 
         let col_names: Vec<&str> = cols.iter().map(|(n, _)| n.as_str()).collect();
-        let val_strs: Vec<String> = cols.iter().enumerate().map(|(i, _)| {
-            format!("'{}'", values.get(i).map(|s| s.as_str()).unwrap_or("val"))
-        }).collect();
+        let val_strs: Vec<String> = cols
+            .iter()
+            .map(|(_, t)| format!("'{}'", safe_value_for(t)))
+            .collect();
         let insert_sql = format!(
             "INSERT INTO {} ({}) VALUES ({})",
             tbl, col_names.join(", "), val_strs.join(", ")
