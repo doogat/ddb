@@ -193,18 +193,24 @@ impl Index {
             DoogatError::BadRequest(format!("invalid search query: {query}"))
         })?;
 
-        // PRD 00121 SC3: reject a truly empty search (no query text AND no filters).
-        // An empty query combined with any filter (tag, types, or where_filters) is
-        // still allowed so callers can use the "filter-only" pattern.
+        // PRD 00121 SC3: reject a truly empty search (no query text AND no
+        // meaningful filters). An empty query combined with any non-empty filter
+        // (tag, types, or where_filters) is still allowed so callers can use the
+        // "filter-only" pattern. `Some(vec![])` and `Some("")` are treated as
+        // no-op filters, matching how the downstream filter builder interprets
+        // them.
+        let has_types = filters.types.as_ref().is_some_and(|t| !t.is_empty());
+        let has_tag = filters.tag.as_deref().is_some_and(|t| !t.is_empty());
+        let has_where = filters
+            .where_filters
+            .as_ref()
+            .is_some_and(|w| !w.is_empty());
         if plan.fts_query.is_none()
             && plan.extracted_filters.is_empty()
             && plan.extracted_negated_filters.is_empty()
-            && filters.tag.is_none()
-            && filters.types.is_none()
-            && filters
-                .where_filters
-                .as_ref()
-                .is_none_or(|w| w.is_empty())
+            && !has_types
+            && !has_tag
+            && !has_where
         {
             return Err(DoogatError::BadRequest(format!(
                 "invalid search query: {query}"
