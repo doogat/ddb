@@ -4653,6 +4653,131 @@ fn executesql_insert_rejects_integer_type_mismatch() {
     assert_eq!(count_index_rows(&index, "numeric"), 0);
 }
 
+// ── UPDATE-path enforcement (issue #7 reproducers) ────────────────────
+
+fn fetch_first_id(index: &Index, table: &str) -> String {
+    let rows = index
+        .query_raw(&format!("SELECT id FROM \"{table}\" LIMIT 1"))
+        .unwrap();
+    rows[0][0].clone()
+}
+
+#[test]
+fn executesql_update_rejects_unknown_column() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO link (title, url) VALUES ('hello', 'https://x.com')")
+        .unwrap();
+    let id = fetch_first_id(&index, "link");
+
+    let err = engine
+        .execute(&format!(
+            "UPDATE link SET unknown_col = 'x' WHERE id = '{id}'"
+        ))
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("unknown column: link.unknown_col"),
+        "got: {err}"
+    );
+
+    // Original row untouched.
+    let rows = index
+        .query_raw(&format!("SELECT title FROM link WHERE id = '{id}'"))
+        .unwrap();
+    assert_eq!(rows[0][0], "hello");
+}
+
+#[test]
+fn executesql_update_rejects_integer_type_mismatch() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE numeric (title VARCHAR(255) NOT NULL, count INTEGER)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO numeric (title, count) VALUES ('a', 1)")
+        .unwrap();
+    let id = fetch_first_id(&index, "numeric");
+
+    let err = engine
+        .execute(&format!(
+            "UPDATE numeric SET count = 'not_a_number' WHERE id = '{id}'"
+        ))
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("type mismatch for numeric.count: expected INTEGER"),
+        "got: {err}"
+    );
+
+    let rows = index
+        .query_raw(&format!("SELECT count FROM numeric WHERE id = '{id}'"))
+        .unwrap();
+    assert_eq!(rows[0][0], "1", "count should be unchanged after rejection");
+}
+
+#[test]
+fn executesql_update_rejects_set_null_on_not_null() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO link (title, url) VALUES ('hello', 'https://x.com')")
+        .unwrap();
+    let id = fetch_first_id(&index, "link");
+
+    let err = engine
+        .execute(&format!("UPDATE link SET title = NULL WHERE id = '{id}'"))
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: link.title"),
+        "got: {err}"
+    );
+
+    let rows = index
+        .query_raw(&format!("SELECT title FROM link WHERE id = '{id}'"))
+        .unwrap();
+    assert_eq!(rows[0][0], "hello");
+}
+
+#[test]
+fn executesql_update_rejects_varchar_overflow() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE shortname (title VARCHAR(10) NOT NULL)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO shortname (title) VALUES ('hi')")
+        .unwrap();
+    let id = fetch_first_id(&index, "shortname");
+
+    let long = "x".repeat(11);
+    let err = engine
+        .execute(&format!(
+            "UPDATE shortname SET title = '{long}' WHERE id = '{id}'"
+        ))
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("value too long for shortname.title: 11 chars exceeds limit 10"),
+        "got: {err}"
+    );
+
+    let rows = index
+        .query_raw(&format!("SELECT title FROM shortname WHERE id = '{id}'"))
+        .unwrap();
+    assert_eq!(rows[0][0], "hi");
+}
+
 #[test]
 fn executesql_insert_rejects_varchar_overflow() {
     let (_dir, repo, index) = setup();
