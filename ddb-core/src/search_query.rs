@@ -8,6 +8,19 @@ pub enum SearchExpr {
     Not(Box<SearchExpr>),
 }
 
+/// Result of compiling a search query into an execution plan.
+///
+/// `extracted_filters` holds top-level `field=value` filters that can be
+/// applied directly against the index. `extracted_negated_filters` holds
+/// top-level `NOT field=value` filters. `fts_query` contains whatever
+/// remains after extraction, ready to hand to FTS5.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchPlan {
+    pub fts_query: Option<String>,
+    pub extracted_filters: Vec<(String, String)>,
+    pub extracted_negated_filters: Vec<(String, String)>,
+}
+
 // ── Tokenizer ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -416,6 +429,84 @@ pub fn extract_negations(expr: SearchExpr) -> (Option<SearchExpr>, Vec<SearchExp
         }
         other => (Some(other), Vec::new()),
     }
+}
+
+/// Compile a search query string into a `SearchPlan`.
+///
+/// Extracts top-level `field=value` filters (positive and negated) from
+/// the parsed AST and leaves the remainder as the FTS query.
+///
+/// # Errors
+///
+/// Returns `Err` for unparseable input or bare wildcard-only queries
+/// (`*`, `**`, `.*`).
+pub fn compile_search_plan(query: &str) -> Result<SearchPlan, String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(SearchPlan {
+            fts_query: None,
+            extracted_filters: Vec::new(),
+            extracted_negated_filters: Vec::new(),
+        });
+    }
+
+    let expr = parse(trimmed).ok_or_else(|| "invalid search query: unparseable".to_string())?;
+
+    if let SearchExpr::FullText(ref s) = expr {
+        let t = s.trim();
+        if t == "*" || t == "**" || t == ".*" {
+            return Err("invalid search query: bare wildcard not allowed".to_string());
+        }
+    }
+
+    let mut extracted_filters: Vec<(String, String)> = Vec::new();
+    let mut extracted_negated_filters: Vec<(String, String)> = Vec::new();
+    let mut remaining: Vec<SearchExpr> = Vec::new();
+
+    match expr {
+        SearchExpr::And(children) => {
+            for child in children {
+                match child {
+                    SearchExpr::FieldEquals { field, value } => {
+                        extracted_filters.push((field, value));
+                    }
+                    SearchExpr::Not(inner) => match *inner {
+                        SearchExpr::FieldEquals { field, value } => {
+                            extracted_negated_filters.push((field, value));
+                        }
+                        other => {
+                            remaining.push(SearchExpr::Not(Box::new(other)));
+                        }
+                    },
+                    other => remaining.push(other),
+                }
+            }
+        }
+        SearchExpr::FieldEquals { field, value } => {
+            extracted_filters.push((field, value));
+        }
+        SearchExpr::Not(inner) => match *inner {
+            SearchExpr::FieldEquals { field, value } => {
+                extracted_negated_filters.push((field, value));
+            }
+            other => {
+                remaining.push(SearchExpr::Not(Box::new(other)));
+            }
+        },
+        other => remaining.push(other),
+    }
+
+    let fts_query = match remaining.len() {
+        0 => None,
+        1 => Some(to_fts_query(&remaining.remove(0))),
+        _ => Some(to_fts_query(&SearchExpr::And(remaining))),
+    };
+
+    Ok(SearchPlan {
+        fts_query,
+        extracted_filters,
+        extracted_negated_filters,
+    })
 }
 
 /// Normalize a search query to canonical form.
