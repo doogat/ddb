@@ -1089,6 +1089,18 @@ impl<'a> SqlEngine<'a> {
                 )));
             }
             if is_insert && !col_values.contains_key(&col.name) {
+                // Title is special: when the typedef declares a
+                // `title_template`, `resolve_insert_title` (priority 2) will
+                // synthesize a title from the other columns at write time,
+                // so an absent `title` column is fine. Without this
+                // exemption, the validator would reject INSERTs that the PRD
+                // explicitly says must keep working — see PRD 00122 design
+                // section 5 ("title_template feature stays intact"). An
+                // explicit `INSERT INTO t (title, ...) VALUES (NULL, ...)`
+                // is still rejected via the `null_cols` branch above.
+                if col.name == "title" && schema.title_template.is_some() {
+                    continue;
+                }
                 return Err(DoogatError::Validation(format!(
                     "NOT NULL constraint violated: {table_name}.{}",
                     col.name

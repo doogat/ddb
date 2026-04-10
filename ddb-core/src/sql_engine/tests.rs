@@ -4635,6 +4635,48 @@ fn executesql_insert_rejects_missing_title_when_required() {
 }
 
 #[test]
+fn executesql_insert_uses_title_template_when_title_required() {
+    // PRD 00122 cycle 2 (D1): a table with `title NOT NULL` AND a declared
+    // `title_template` must accept INSERTs that omit the title — the
+    // template fills it. Without the C2-1 fix, the validator's NOT NULL
+    // check rejects before resolve_insert_title gets to run the template.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE person (title VARCHAR(255) NOT NULL, name VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE person SET TITLE TEMPLATE 'rendered-from-template'")
+        .unwrap();
+
+    let id = match engine
+        .execute("INSERT INTO person (name) VALUES ('Alice')")
+        .expect("INSERT should succeed when title_template supplies the title")
+    {
+        SqlResult::Ok(id) => id,
+        _ => panic!("expected Ok"),
+    };
+
+    let path = index.resolve_path(&id).unwrap();
+    let content = repo.read_file(&path).unwrap();
+    assert!(
+        content.contains("title: rendered-from-template"),
+        "template should have produced title: {content}"
+    );
+
+    // Sanity: an explicit `INSERT (title) VALUES (NULL)` is still rejected,
+    // even with a template — explicit NULL is a deliberate user choice.
+    let err = engine
+        .execute("INSERT INTO person (title, name) VALUES (NULL, 'Bob')")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: person.title"),
+        "explicit NULL should still be rejected: {err}"
+    );
+}
+
+#[test]
 fn executesql_insert_uses_explicit_title() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
