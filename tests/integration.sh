@@ -962,6 +962,68 @@ EB_CREATED=$(echo "$EB_QUERY" | sed -n 's/.*"created_at":"\([^"]*\)".*/\1/p')
 [ "$EB_CREATED" = "$EB_EXPECTED" ]
 pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 
+# 43.D SQL constraint enforcement on executeSql write path (PRD 00122 / issue #7)
+# Six checks (D1-D6) extending the existing INSERT-validation neighborhood.
+
+# Setup: a NOT NULL link table for D1-D5 and a numeric table for D3.
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE link_d1 (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)\"){message}}"}' >/dev/null
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE numeric_d3 (title VARCHAR(255) NOT NULL, count INTEGER)\"){message}}"}' >/dev/null
+sleep 1
+
+# D1. NOT NULL: INSERT with NULL title is rejected and no row is created.
+D1_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO link_d1 (title, url) VALUES (NULL, \\\"https://n.com\\\")\"){message}}"}')
+echo "$D1_RESULT" | grep -q "NOT NULL constraint violated: link_d1.title"
+D1_COUNT=$(gql '{"query":"mutation{executeSql(sql:\"SELECT COUNT(*) FROM link_d1\"){rows}}"}')
+echo "$D1_COUNT" | grep -qF '[\"0\"]'
+pass "serve: D1 INSERT NULL on NOT NULL is rejected, no row created"
+
+# D2. VARCHAR(N) overflow: 300-char title against VARCHAR(255) is rejected.
+LONG=$(printf 'x%.0s' {1..300})
+D2_RESULT=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO link_d1 (title, url) VALUES (\\\\\\\"$LONG\\\\\\\", \\\\\\\"https://v.com\\\\\\\")\\\"){message}}\"}")
+echo "$D2_RESULT" | grep -q "value too long for link_d1.title"
+D2_COUNT=$(gql '{"query":"mutation{executeSql(sql:\"SELECT COUNT(*) FROM link_d1\"){rows}}"}')
+echo "$D2_COUNT" | grep -qF '[\"0\"]'
+pass "serve: D2 VARCHAR(N) overflow is rejected, no row created"
+
+# D3. INTEGER type mismatch: non-numeric value into INTEGER column is rejected.
+D3_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO numeric_d3 (title, count) VALUES (\\\"a\\\", \\\"not_a_number\\\")\"){message}}"}')
+echo "$D3_RESULT" | grep -q "type mismatch for numeric_d3.count: expected INTEGER"
+D3_COUNT=$(gql '{"query":"mutation{executeSql(sql:\"SELECT COUNT(*) FROM numeric_d3\"){rows}}"}')
+echo "$D3_COUNT" | grep -qF '[\"0\"]'
+pass "serve: D3 INTEGER type mismatch is rejected, no row created"
+
+# D4. Unknown column on INSERT: column not in schema is rejected.
+D4_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO link_d1 (title, url, unknown_col) VALUES (\\\"t\\\", \\\"https://u.com\\\", \\\"dropped\\\")\"){message}}"}')
+echo "$D4_RESULT" | grep -q "unknown column: link_d1.unknown_col"
+D4_COUNT=$(gql '{"query":"mutation{executeSql(sql:\"SELECT COUNT(*) FROM link_d1\"){rows}}"}')
+echo "$D4_COUNT" | grep -qF '[\"0\"]'
+pass "serve: D4 unknown column on INSERT is rejected, no row created"
+
+# D5. Unknown column on UPDATE: insert one valid row, then UPDATE with bogus
+# column. The original row's title must be unchanged after the rejection.
+D5_VALID=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO link_d1 (title, url) VALUES (\\\"keep\\\", \\\"https://k.com\\\")\"){message}}"}')
+D5_ID=$(echo "$D5_VALID" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
+D5_RESULT=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"UPDATE link_d1 SET unknown_col = 'x' WHERE id = '$D5_ID'\\\"){message}}\"}")
+echo "$D5_RESULT" | grep -q "unknown column: link_d1.unknown_col"
+D5_TITLE=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"SELECT title FROM link_d1 WHERE id = '$D5_ID'\\\"){rows}}\"}")
+echo "$D5_TITLE" | grep -q 'keep'
+pass "serve: D5 unknown column on UPDATE is rejected, row unchanged"
+
+# D6. Silent title fallback removed: title NOT NULL with no template, INSERT
+# omitting title now fails instead of coercing url/description into title.
+gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE link_d6 (title VARCHAR(255) NOT NULL, url VARCHAR(255), description TEXT)\"){message}}"}' >/dev/null
+sleep 1
+D6_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO link_d6 (url) VALUES (\\\"https://notitle.com\\\")\"){message}}"}')
+echo "$D6_RESULT" | grep -q "NOT NULL constraint violated: link_d6.title"
+D6_COUNT=$(gql '{"query":"mutation{executeSql(sql:\"SELECT COUNT(*) FROM link_d6\"){rows}}"}')
+echo "$D6_COUNT" | grep -qF '[\"0\"]'
+pass "serve: D6 silent title fallback removed, missing title rejected"
+
+# Cleanup D-tables
+gql '{"query":"mutation{executeSql(sql:\"DROP TABLE link_d1 CASCADE\"){message}}"}' >/dev/null
+gql '{"query":"mutation{executeSql(sql:\"DROP TABLE numeric_d3 CASCADE\"){message}}"}' >/dev/null
+gql '{"query":"mutation{executeSql(sql:\"DROP TABLE link_d6 CASCADE\"){message}}"}' >/dev/null
+
 # 44. DDL response consistency (no spurious errors)
 RESULT=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ddltest (name VARCHAR(100))\") { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'

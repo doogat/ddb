@@ -7,7 +7,11 @@ use crate::types::ParsedDoogat;
 use super::Index;
 
 /// Column names reserved for core doogat fields in materialized tables.
-pub(crate) fn is_core_column(name: &str) -> bool {
+///
+/// Exposed at the crate root via `ddb_core::indexer::is_core_column` so
+/// downstream crates (the GraphQL server) can distinguish core columns from
+/// user-defined ones when iterating `TableSchema.columns` post-PRD 00122.
+pub fn is_core_column(name: &str) -> bool {
     matches!(name, "id" | "title" | "type" | "date" | "updated_at")
 }
 

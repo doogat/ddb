@@ -772,7 +772,15 @@ pub(crate) fn build_typed_object(
                     Ok(obj_field(obj, &col_name))
                 })
             }));
-        } else {
+        } else if !ddb_core::indexer::is_core_column(&col.name) {
+            // Core columns (id, title, type, date, updated_at) can now be
+            // declared with constraints (NOT NULL, VARCHAR(N)) so the SQL
+            // validator enforces them — see PRD 00122. They live in
+            // `schema.columns` but are exposed via the base doogat fields
+            // above, not as new typed-object fields. Silently skip; warn
+            // only for non-core base-field collisions like `body`, `tags`,
+            // `links`, etc., where the user almost certainly named the
+            // column by mistake.
             tracing::warn!(
                 typedef = %type_name,
                 column = %col.name,
