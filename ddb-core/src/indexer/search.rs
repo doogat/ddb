@@ -179,9 +179,10 @@ impl Index {
     /// Top-level positive `field=value` filters fold into `effective_filters.where_filters`.
     /// Top-level negated `tag=value` filters fold into the negation plan alongside any
     /// `NOT` terms lifted from the residual expression. Non-tag negated field filters
-    /// are currently dropped with a debug log; the positive path is the priority for
-    /// PRD 00121 and non-tag negation can be revisited separately without changing
-    /// the wire API.
+    /// (e.g. `NOT url=example.com`) are rejected with `BadRequest` so `search` and
+    /// `normalizeSearchQuery` agree on the set of valid queries (PRD 00121); the
+    /// positive path is the priority and non-tag negation can be revisited later
+    /// without changing the wire API.
     fn compile_search_inputs(
         &self,
         query: &str,
@@ -228,30 +229,23 @@ impl Index {
 
         // Fold extracted negated filters into the negation plan. Only `tag` is
         // supported via the dedicated tags-table clause; non-tag negated field
-        // filters are dropped with a debug log.
+        // filters are rejected with `BadRequest` so `search` agrees with
+        // `normalizeSearchQuery` on the set of valid queries (PRD 00121).
         if !plan.extracted_negated_filters.is_empty() {
+            for (field, _) in &plan.extracted_negated_filters {
+                if field != "tag" {
+                    return Err(DoogatError::BadRequest(format!(
+                        "invalid search query: {query}: NOT is only supported for tag filters"
+                    )));
+                }
+            }
             if negation_plan.is_none() {
                 negation_plan = Some((plan.fts_query.clone(), Vec::new(), Vec::new()));
             }
             if let Some((_, neg_clauses, neg_params)) = negation_plan.as_mut() {
-                for (field, value) in plan.extracted_negated_filters {
-                    if field == "tag" {
-                        neg_clauses.push("tag".to_string());
-                        neg_params.push(value);
-                    } else {
-                        tracing::debug!(
-                            field = %field,
-                            "search: dropping non-tag negated field filter (not yet supported)"
-                        );
-                    }
-                }
-            }
-            // If we created a plan just for extracted negations but ended up with no
-            // clauses after dropping non-tag entries, revert to None so the caller
-            // takes the no-negation path.
-            if let Some((_, clauses, _)) = &negation_plan {
-                if clauses.is_empty() {
-                    negation_plan = None;
+                for (_field, value) in plan.extracted_negated_filters {
+                    neg_clauses.push("tag".to_string());
+                    neg_params.push(value);
                 }
             }
         }

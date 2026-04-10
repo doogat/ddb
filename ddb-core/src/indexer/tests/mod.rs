@@ -2028,6 +2028,33 @@ processed: true
     }
 
     #[test]
+    fn search_non_tag_negated_field_filter_returns_bad_request() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+        let err = idx.search("NOT url=example.com").unwrap_err();
+        match err {
+            crate::error::DoogatError::BadRequest(msg) => {
+                assert!(
+                    msg.contains("NOT") || msg.contains("tag"),
+                    "expected message to mention NOT/tag limitation, got: {msg}"
+                );
+            }
+            other => panic!("expected BadRequest, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_tag_negation_still_works() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec!["rust", "archive"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "note", vec!["rust"])).unwrap();
+        // NOT tag=archive should still narrow the result set.
+        let result = idx.search("rust NOT tag=archive").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "20260301120001");
+    }
+
+    #[test]
     fn search_bare_wildcard_returns_bad_request() {
         let idx = in_memory_index();
         idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();

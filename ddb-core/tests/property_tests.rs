@@ -44,7 +44,7 @@ fn arb_search_query_valid() -> impl Strategy<Value = String> {
         ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(f, v)| format!("{f}={v}")),
         ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(a, b)| format!("{a} AND {b}")),
         ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(a, b)| format!("{a} OR {b}")),
-        ("[a-z]{2,6}", "[a-z]{2,6}").prop_map(|(f, v)| format!("NOT {f}={v}")),
+        ("tag", "[a-z]{2,6}").prop_map(|(f, v)| format!("NOT {f}={v}")),
     ]
 }
 
