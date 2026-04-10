@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sql**: enforce `VARCHAR(N)` and `CHAR(N)` length on `INSERT` and `UPDATE` — values exceeding the declared length are rejected with `value too long for <table>.<column>: <actual> chars exceeds limit <limit>` and no silent truncation (#7)
 - **sql**: enforce `INTEGER`, `REAL`/`FLOAT`/`DOUBLE`, and `BOOLEAN` types at write time — non-parseable values are rejected with `type mismatch for <table>.<column>: expected <TYPE>, got '<value>'`. `BOOLEAN` accepts `0`, `1`, `true`, `false`, `TRUE`, `FALSE` (#7)
 - **sql**: reject unknown columns in `INSERT` and `UPDATE` — previously silently dropped (`affected: 1` despite no column existing), now rejected with `unknown column: <table>.<column>`. The SQL path now matches the GraphQL `Where` input typing behavior (#7)
-- **sql**: remove silent title fallback — INSERT into a table whose `title` is `NOT NULL` and which has no `title_template` no longer coerces `url`, `description`, or any other body/frontmatter column into the title slot. **Behavioral change**: such INSERTs now fail with `NOT NULL constraint violated: <table>.title`. Clients that relied on the fallback should provide an explicit `title`, declare a `title_template` on the typedef, or make `title` nullable (#7)
+
+### Changed
+
+- **sql**: **breaking** — remove silent title fallback. INSERT into a table whose `title` is `NOT NULL` and which has no `title_template` no longer coerces `url`, `description`, or any other body/frontmatter column into the title slot. Such INSERTs now fail with `NOT NULL constraint violated: <table>.title`. Clients that relied on the fallback should provide an explicit `title`, declare a `title_template` on the typedef, or make `title` nullable (#7)
 
 ## [0.2.1] - 2026-04-09
 
