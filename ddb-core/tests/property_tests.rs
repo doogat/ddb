@@ -2033,7 +2033,7 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(ProptestConfig::with_cases(200))]
 
     /// Strong property: if a query parses cleanly, search() accepts both the
     /// query and its normalized form. Locks in PRD 00121 alignment.
@@ -2091,7 +2091,7 @@ proptest! {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50))]
+    #![proptest_config(ProptestConfig::with_cases(200))]
 
     /// Weak property: for any input, search() never returns DoogatError::Sql
     /// (which the server redacts to "internal error"). User input must always
