@@ -8,7 +8,7 @@ use crate::types::{ColumnDef, DoogatId, TableSchema, Zone};
 
 use super::builders::{build_typedef_doogat, rename_key_in_doogat, schema_from_parsed};
 use super::helpers::{
-    data_type_to_string, extract_allowed_values, extract_default, extract_references,
+    data_type_to_string, extract_allowed_values, extract_default, extract_references, is_not_null,
     is_numeric_type, is_reserved_table, is_short_string_type, unquote_identifier,
 };
 use super::{SqlEngine, SqlResult};
@@ -112,7 +112,7 @@ impl<'a> SqlEngine<'a> {
                 data_type,
                 references,
                 zone,
-                required: false,
+                required: is_not_null(&col.options),
                 search_boost: None,
                 allowed_values,
                 default_value,
@@ -269,7 +269,7 @@ impl<'a> SqlEngine<'a> {
                         name: col_name,
                         data_type: dt,
                         zone,
-                        required: false,
+                        required: is_not_null(&column_def.options),
                         search_boost: None,
                         references: refs,
                         allowed_values: extract_allowed_values(&column_def.data_type),

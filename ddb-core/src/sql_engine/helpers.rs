@@ -122,6 +122,13 @@ pub(super) fn extract_references(options: &[sqlparser::ast::ColumnOptionDef]) ->
     None
 }
 
+/// Returns true when the column declares `NOT NULL` in its DDL options.
+pub(super) fn is_not_null(options: &[sqlparser::ast::ColumnOptionDef]) -> bool {
+    options
+        .iter()
+        .any(|opt| matches!(opt.option, ColumnOption::NotNull))
+}
+
 pub(super) fn extract_allowed_values(dt: &DataType) -> Option<Vec<String>> {
     match dt {
         DataType::Enum(members, _) => {
