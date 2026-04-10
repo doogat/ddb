@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sql**: materialized table constraint errors (UNIQUE violations, etc.) now surface to the client instead of being redacted to "internal error"
+
 ## [0.2.1] - 2026-04-09
 
 ### Fixed

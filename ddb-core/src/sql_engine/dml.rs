@@ -967,7 +967,10 @@ impl<'a> SqlEngine<'a> {
             .iter()
             .map(|v| v as &dyn rusqlite::types::ToSql)
             .collect();
-        self.index.sql_conn().execute(&sql, params.as_slice())?;
+        self.index
+            .sql_conn()
+            .execute(&sql, params.as_slice())
+            .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
         Ok(())
     }
 
@@ -998,7 +1001,10 @@ impl<'a> SqlEngine<'a> {
             .iter()
             .map(|v| v as &dyn rusqlite::types::ToSql)
             .collect();
-        self.index.sql_conn().execute(&sql, params.as_slice())?;
+        self.index
+            .sql_conn()
+            .execute(&sql, params.as_slice())
+            .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
         Ok(())
     }
 
