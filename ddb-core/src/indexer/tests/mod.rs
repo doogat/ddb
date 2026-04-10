@@ -2118,6 +2118,38 @@ processed: true
         }
     }
 
+    #[test]
+    fn search_empty_query_with_no_filters_returns_bad_request() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec![])).unwrap();
+
+        let err = idx.search("").unwrap_err();
+        assert!(
+            matches!(err, crate::error::DoogatError::BadRequest(_)),
+            "expected BadRequest for empty query with no filters, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn search_empty_query_with_tag_filter_still_works() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec!["rust"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "note", vec!["python"])).unwrap();
+
+        let result = idx
+            .search_paginated_filtered(
+                "",
+                100,
+                0,
+                &SearchFilters {
+                    tag: Some("rust".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(result.hits.len(), 1);
+    }
+
     // ── FTS5 schema + _ddb_boost table tests ───────────────────────────
 
     #[test]

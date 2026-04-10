@@ -192,6 +192,24 @@ impl Index {
             DoogatError::BadRequest(format!("invalid search query: {query}"))
         })?;
 
+        // PRD 00121 SC3: reject a truly empty search (no query text AND no filters).
+        // An empty query combined with any filter (tag, types, or where_filters) is
+        // still allowed so callers can use the "filter-only" pattern.
+        if plan.fts_query.is_none()
+            && plan.extracted_filters.is_empty()
+            && plan.extracted_negated_filters.is_empty()
+            && filters.tag.is_none()
+            && filters.types.is_none()
+            && filters
+                .where_filters
+                .as_ref()
+                .is_none_or(|w| w.is_empty())
+        {
+            return Err(DoogatError::BadRequest(format!(
+                "invalid search query: {query}"
+            )));
+        }
+
         let mut effective_filters = filters.clone();
         if !plan.extracted_filters.is_empty() {
             let mut wf = effective_filters.where_filters.take().unwrap_or_default();
