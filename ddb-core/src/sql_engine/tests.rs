@@ -3877,6 +3877,55 @@ fn plain_insert_duplicate_still_errors() {
 }
 
 #[test]
+fn duplicate_insert_does_not_leave_ghost_doogats_row() {
+    // Regression for https://github.com/doogat/ddb/issues/4
+    // A failing typed-table INSERT (UNIQUE violation) must NOT leave a ghost
+    // row behind in the internal `doogats` index table. Otherwise every
+    // subsequent mutation that touches the index via the GraphQL write path
+    // fails on the dangling reference.
+    let (_dir, repo, index) = setup();
+    setup_unique_table(&repo, &index);
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // First insert succeeds
+    let first_id = match engine
+        .execute("INSERT INTO uqtest (code, label) VALUES ('DUP', 'original')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok(id), got {other:?}"),
+    };
+
+    let before = index
+        .query_raw("SELECT id FROM doogats WHERE type = 'uqtest'")
+        .unwrap();
+    assert_eq!(before.len(), 1, "baseline: one uqtest row in doogats index");
+
+    // Duplicate insert fails on UNIQUE constraint
+    let result = engine.execute("INSERT INTO uqtest (code, label) VALUES ('DUP', 'conflict')");
+    assert!(result.is_err(), "duplicate insert should fail, got: {result:?}");
+
+    // doogats index must still have exactly the original row — no ghost entry
+    let after = index
+        .query_raw("SELECT id FROM doogats WHERE type = 'uqtest'")
+        .unwrap();
+    assert_eq!(
+        after.len(),
+        1,
+        "failed INSERT left a ghost doogats index row; rows = {after:?}"
+    );
+    assert_eq!(
+        after[0][0], first_id,
+        "surviving row must be the first insert"
+    );
+
+    // The materialized typed table also has exactly the original row
+    let typed = index.query_raw("SELECT label FROM uqtest").unwrap();
+    assert_eq!(typed.len(), 1);
+    assert_eq!(typed[0][0], "original");
+}
+
+#[test]
 fn create_table_with_unique_constraint_enforced() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);

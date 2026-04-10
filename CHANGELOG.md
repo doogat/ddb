@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **sql**: materialized table constraint errors (UNIQUE violations, etc.) now surface to the client instead of being redacted to "internal error"
+- **sql**: failed INSERTs (e.g. UNIQUE constraint violations) no longer leave a ghost row in the internal `doogats` index table; the index write and the materialized typed-table write are now atomic via a SQLite savepoint, so a rejected row is fully rolled back and subsequent mutations are unaffected (#4)
 
 ## [0.2.1] - 2026-04-09
 

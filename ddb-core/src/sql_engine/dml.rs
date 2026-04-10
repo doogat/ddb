@@ -151,8 +151,45 @@ impl<'a> SqlEngine<'a> {
             crate::git_ops::doogat_path(&id.0, Some(table_name), schema.folder)
         };
         let parsed = parser::parse(&content, &path)?;
-        self.index.index_doogat(&parsed)?;
-        self.insert_materialized_row(schema, &id.0, col_values)?;
+
+        // Write the `doogats` index row and the materialized typed-table row
+        // atomically. If `insert_materialized_row` fails (e.g. UNIQUE
+        // constraint violation), rolling back the savepoint removes the index
+        // row so no ghost entry is left behind. Without this, a client that
+        // retries a failing INSERT would brick every subsequent mutation that
+        // touches the `doogats` index. See
+        // https://github.com/doogat/ddb/issues/4.
+        self.index
+            .sql_conn()
+            .execute("SAVEPOINT insert_row", [])
+            .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
+
+        let write_result = self
+            .index
+            .index_doogat(&parsed)
+            .and_then(|()| self.insert_materialized_row(schema, &id.0, col_values));
+
+        if let Err(e) = write_result {
+            // Best-effort rollback. If these fail the savepoint stack is
+            // already in trouble; propagate the original error either way.
+            if let Err(rb_err) = self
+                .index
+                .sql_conn()
+                .execute("ROLLBACK TO insert_row", [])
+            {
+                tracing::warn!(error = %rb_err, "failed to rollback insert_row savepoint");
+            }
+            if let Err(rl_err) = self.index.sql_conn().execute("RELEASE insert_row", []) {
+                tracing::warn!(error = %rl_err, "failed to release insert_row savepoint");
+            }
+            return Err(e);
+        }
+
+        self.index
+            .sql_conn()
+            .execute("RELEASE insert_row", [])
+            .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
+
         Ok((path, content))
     }
 
