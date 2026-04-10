@@ -365,6 +365,65 @@ Internal tables (`doogats`, `_ddb_tags`, `_ddb_fts`, `_ddb_links`, etc.) are hid
 - **GraphQL**: introspection exposes only user-defined typed queries. The `doogats` query field is an intentional user-facing query for listing all doogats.
 - **Direct access**: `SELECT * FROM _ddb_tags` still works for power users. Tables are hidden from catalog listings, not blocked from queries.
 
+## Constraint enforcement
+
+The SQL write path validates declared constraints before any side effects. Validation runs in `validate_row_against_schema` (see `ddb-core/src/sql_engine/dml.rs`) after `fill_defaults_and_validate` and before `build_and_index_row`, so a rejected write never produces a row in the materialized table or the `doogats` index.
+
+### Enforcement matrix
+
+| Constraint | INSERT | UPDATE | Notes |
+|---|---|---|---|
+| `NOT NULL` | enforced | enforced | INSERT: column absent (and no DEFAULT) or `VALUES (NULL, ...)`. UPDATE: only `SET col = NULL`; UPDATEs that leave the column untouched are fine. |
+| `VARCHAR(N)` length | enforced | enforced | Character count, not byte count. No silent truncation — overflow rejects the write. |
+| `CHAR(N)` length | enforced | enforced | Same rule as `VARCHAR(N)`. |
+| `INTEGER` type | enforced | enforced | Value must parse as `i64`. |
+| `REAL` / `FLOAT` / `DOUBLE` type | enforced | enforced | Value must parse as `f64`. |
+| `BOOLEAN` type | enforced | enforced | Accepts `0`, `1`, `true`, `false`, `TRUE`, `FALSE`. Stored as `0`/`1` in SQLite. |
+| `TEXT` / `BLOB` | accepted | accepted | Opaque, no shape check. |
+| `DATE` / `DATETIME` / `TIMESTAMP` | not enforced | not enforced | Out of scope for now. Tracked as a follow-up. |
+| Unknown columns | rejected | rejected | INSERT/UPDATE referencing a column not in `schema.columns` (and not in the reserved set `id`, `title`, `type`, `date`, `created_at`, `updated_at`, `tags`) is rejected. The SQL path now matches the GraphQL `Where` input typing behavior. |
+| `ENUM` / `SET` (`allowed_values`) | enforced | enforced | Existing behavior, unchanged. |
+| `REFERENCES` existence | enforced | (not re-checked) | Existing behavior, unchanged. |
+| `unique_together` | enforced | n/a | Backed by a SQLite `UNIQUE INDEX` on the materialized table. |
+| `CHECK` / `FOREIGN KEY` | not supported | not supported | Out of scope. |
+
+### Error message format
+
+All five constraint classes return `DoogatError::Validation` with one of these exact strings (clients can match on the prefix):
+
+- `NOT NULL constraint violated: <table>.<column>`
+- `value too long for <table>.<column>: <actual> chars exceeds limit <limit>`
+- `type mismatch for <table>.<column>: expected <TYPE>, got '<value>'` (where `<TYPE>` is `INTEGER`, `REAL`, or `BOOLEAN`)
+- `unknown column: <table>.<column>`
+
+Through the GraphQL surface, these surface as `errors[].message` with `extensions.code = "VALIDATION_ERROR"`. Through the pgwire surface, they surface as a `SqlEngine`-classified error.
+
+### Title is a real column
+
+Before PRD 00122, declaring `title VARCHAR(255) NOT NULL` in `CREATE TABLE` was silently dropped — `extract_columns` skipped it because `title` is also stored in `meta.title`. The constraints went nowhere.
+
+`title` is now retained in `schema.columns` with all its declared constraints. The materialized-row writer and the GraphQL schema builder skip core columns explicitly (`is_core_column` in `ddb-core/src/indexer/materialize.rs`) so the field still lives only in `meta.title`, but the validator sees its `required` flag and length cap.
+
+### Removed: silent title fallback
+
+Prior versions of `resolve_insert_title` had a 5-level priority chain:
+
+1. Explicit `title` column
+2. `title_template` interpolation
+3. **First body column value (removed)**
+4. **First frontmatter string column value (removed)**
+5. `"{type} {id}"` last-resort fallback
+
+Priorities 3 and 4 silently coerced unrelated fields like `url` or `description` into the title slot, masking what should have been a NOT NULL violation. They were removed in PRD 00122. The current chain is 1 → 2 → 5.
+
+**Behavioral change**: a table whose `title` is `NOT NULL` and which has no `title_template` now rejects INSERTs that omit the title with `NOT NULL constraint violated: <table>.title`. Clients that relied on the fallback should either provide an explicit `title`, declare a `title_template`, or make the title nullable.
+
+### Limitations
+
+- Pre-existing rows that violate a newly-added constraint are **not** validated retroactively at index rebuild time. The validator only runs on the SQL write path (INSERT and UPDATE). A `cargo test ... reindex` does not re-check stored data.
+- Deferred-expression results (`COALESCE`, `IFNULL`, `NULLIF`, etc.) that resolve to NULL are not flagged for NOT NULL violations on UPDATE — the validator's `null_cols` set tracks only literal `NULL` assignments, not eval-time NULLs. Type/length checks still run on the resolved value.
+- `INSERT INTO t (col) VALUES ('')` for an `INTEGER` column is accepted, not rejected as a type mismatch. The validator skips empty values to match SQLite's `NULL`-from-eval behavior, since `expr_to_string` collapses both NULL and `''` literals to the same intermediate.
+
 ## Test Coverage
 
-65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 8 rejection tests for unsupported SQL features, and 7 type-aware inference tests. 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns). 4 E2E tests for upsert/conflict handling in `tests/e2e/upsert.rs` (onConflict argument, IGNORE returns existing, ERROR on duplicate, mixed new/existing batch).
+65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 8 rejection tests for unsupported SQL features, and 7 type-aware inference tests. PRD 00122 added 14 unit tests for `validate_row_against_schema`, 4 e2e INSERT-rejection tests, 4 e2e UPDATE-rejection tests, and 6 integration-script checks (D1-D6 in section 43 of `tests/integration.sh` and `tests/integration.ps1`). 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns). 4 E2E tests for upsert/conflict handling in `tests/e2e/upsert.rs` (onConflict argument, IGNORE returns existing, ERROR on duplicate, mixed new/existing batch).
