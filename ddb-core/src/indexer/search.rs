@@ -1,12 +1,26 @@
 use rusqlite::params;
 
 use crate::error::{DoogatError, Result};
+use crate::search_query::compile_search_plan;
 use crate::types::{
-    PaginatedSearchResult, SearchFilters, SearchResult, TagEntry, TagQueryFilter,
+    PaginatedSearchResult, SearchFieldFilter, SearchFieldOp, SearchFilters, SearchResult, TagEntry,
+    TagQueryFilter,
 };
 
 use super::filter::escape_sql_ident;
 use super::Index;
+
+/// Resolved inputs after compiling an incoming search query against caller-supplied filters.
+///
+/// Callers of `search_paginated_filtered` and `search` may pass in-query field filter syntax
+/// (`tag=rust category=work`). The compile step extracts those into `effective_filters` so
+/// they ride the same SQL path as filters passed via the API, leaving only the residual
+/// full-text portion in `effective_query`.
+struct CompiledSearchInputs {
+    effective_filters: SearchFilters,
+    effective_query: Option<String>,
+    negation_plan: Option<(Option<String>, Vec<String>, Vec<String>)>,
+}
 
 impl Index {
     /// Full-text search with snippets and ranking.
@@ -35,18 +49,28 @@ impl Index {
         offset: usize,
         filters: &SearchFilters,
     ) -> Result<PaginatedSearchResult> {
-        let (filter_clauses, filter_params) = self.build_filter_clauses(filters);
-        let boost_type = filters
+        let compiled = self.compile_search_inputs(query, filters)?;
+        let (filter_clauses, filter_params) = self.build_filter_clauses(&compiled.effective_filters);
+        let boost_type = compiled
+            .effective_filters
             .types
             .as_ref()
             .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
-        let mut hits = self.search_hits_inner(query, Some((limit, offset)), &filter_clauses, filter_params.clone(), boost_type)?;
+        let effective_query = compiled.effective_query.as_deref().unwrap_or("");
+        let mut hits = self.search_hits_inner(
+            query,
+            effective_query,
+            &compiled.negation_plan,
+            Some((limit, offset)),
+            &filter_clauses,
+            filter_params.clone(),
+            boost_type,
+        )?;
         self.enrich_search_hits(&mut hits);
 
-        let negation = self.build_negation_plan(query);
         let filter_sql = filter_clauses.join(" ");
 
-        let (count_sql, all_params) = match &negation {
+        let (count_sql, all_params) = match &compiled.negation_plan {
             Some((Some(pos_query), neg_clauses, neg_params)) => {
                 let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
                     vec![Box::new(pos_query.clone())];
@@ -78,21 +102,39 @@ impl Index {
                 (sql, params)
             }
             None => {
-                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
-                    vec![Box::new(query.to_string())];
-                for p in filter_params {
-                    params.push(Box::new(p));
-                }
-                let sql = if filter_sql.is_empty() {
-                    "SELECT COUNT(*) FROM _ddb_fts WHERE _ddb_fts MATCH ?1".to_string()
+                if compiled.effective_query.is_none() {
+                    // Empty query with no negations: scan doogats with whatever
+                    // filters were produced (either from caller or extracted).
+                    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+                    let adjusted_filter_sql =
+                        Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
+                    let trimmed = adjusted_filter_sql
+                        .strip_prefix(" AND ")
+                        .or_else(|| adjusted_filter_sql.strip_prefix("AND "))
+                        .unwrap_or(&adjusted_filter_sql);
+                    let sql = if trimmed.is_empty() {
+                        "SELECT COUNT(*) FROM doogats".to_string()
+                    } else {
+                        format!("SELECT COUNT(*) FROM doogats z WHERE {trimmed}")
+                    };
+                    (sql, params)
                 } else {
-                    format!(
-                        "SELECT COUNT(*) FROM _ddb_fts \
-                         JOIN doogats z ON z.rowid = _ddb_fts.rowid \
-                         WHERE _ddb_fts MATCH ?1 {filter_sql}"
-                    )
-                };
-                (sql, params)
+                    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+                        vec![Box::new(effective_query.to_string())];
+                    for p in filter_params {
+                        params.push(Box::new(p));
+                    }
+                    let sql = if filter_sql.is_empty() {
+                        "SELECT COUNT(*) FROM _ddb_fts WHERE _ddb_fts MATCH ?1".to_string()
+                    } else {
+                        format!(
+                            "SELECT COUNT(*) FROM _ddb_fts \
+                             JOIN doogats z ON z.rowid = _ddb_fts.rowid \
+                             WHERE _ddb_fts MATCH ?1 {filter_sql}"
+                        )
+                    };
+                    (sql, params)
+                }
             }
         };
 
@@ -110,14 +152,97 @@ impl Index {
         pagination: Option<(usize, usize)>,
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
-        let (filter_clauses, filter_params) = self.build_filter_clauses(filters);
-        let boost_type = filters
+        let compiled = self.compile_search_inputs(query, filters)?;
+        let (filter_clauses, filter_params) = self.build_filter_clauses(&compiled.effective_filters);
+        let boost_type = compiled
+            .effective_filters
             .types
             .as_ref()
             .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
-        let mut hits = self.search_hits_inner(query, pagination, &filter_clauses, filter_params, boost_type)?;
+        let effective_query = compiled.effective_query.as_deref().unwrap_or("");
+        let mut hits = self.search_hits_inner(
+            query,
+            effective_query,
+            &compiled.negation_plan,
+            pagination,
+            &filter_clauses,
+            filter_params,
+            boost_type,
+        )?;
         self.enrich_search_hits(&mut hits);
         Ok(hits)
+    }
+
+    /// Compile an incoming search query + filters into the effective filters,
+    /// residual FTS query, and resolved negation plan.
+    ///
+    /// Top-level positive `field=value` filters fold into `effective_filters.where_filters`.
+    /// Top-level negated `tag=value` filters fold into the negation plan alongside any
+    /// `NOT` terms lifted from the residual expression. Non-tag negated field filters
+    /// are currently dropped with a debug log; the positive path is the priority for
+    /// PRD 00121 and non-tag negation can be revisited separately without changing
+    /// the wire API.
+    fn compile_search_inputs(
+        &self,
+        query: &str,
+        filters: &SearchFilters,
+    ) -> Result<CompiledSearchInputs> {
+        let plan = compile_search_plan(query).map_err(|reason| {
+            tracing::debug!(error = %reason, query, "search: compile_search_plan rejected query");
+            DoogatError::BadRequest(format!("invalid search query: {query}"))
+        })?;
+
+        let mut effective_filters = filters.clone();
+        if !plan.extracted_filters.is_empty() {
+            let mut wf = effective_filters.where_filters.take().unwrap_or_default();
+            for (field, value) in plan.extracted_filters {
+                wf.push(SearchFieldFilter {
+                    field,
+                    op: SearchFieldOp::Eq(value),
+                });
+            }
+            effective_filters.where_filters = Some(wf);
+        }
+
+        // Negation extraction runs against the residual (non-extracted) AST only.
+        let residual_for_negation = plan.fts_query.clone().unwrap_or_default();
+        let mut negation_plan = self.build_negation_plan(&residual_for_negation);
+
+        // Fold extracted negated filters into the negation plan. Only `tag` is
+        // supported via the dedicated tags-table clause; non-tag negated field
+        // filters are dropped with a debug log.
+        if !plan.extracted_negated_filters.is_empty() {
+            if negation_plan.is_none() {
+                negation_plan = Some((plan.fts_query.clone(), Vec::new(), Vec::new()));
+            }
+            if let Some((_, neg_clauses, neg_params)) = negation_plan.as_mut() {
+                for (field, value) in plan.extracted_negated_filters {
+                    if field == "tag" {
+                        neg_clauses.push("tag".to_string());
+                        neg_params.push(value);
+                    } else {
+                        tracing::debug!(
+                            field = %field,
+                            "search: dropping non-tag negated field filter (not yet supported)"
+                        );
+                    }
+                }
+            }
+            // If we created a plan just for extracted negations but ended up with no
+            // clauses after dropping non-tag entries, revert to None so the caller
+            // takes the no-negation path.
+            if let Some((_, clauses, _)) = &negation_plan {
+                if clauses.is_empty() {
+                    negation_plan = None;
+                }
+            }
+        }
+
+        Ok(CompiledSearchInputs {
+            effective_filters,
+            effective_query: plan.fts_query,
+            negation_plan,
+        })
     }
 
     /// Look up the max search_boost for a type from the `_ddb_boost` table.
@@ -131,18 +256,20 @@ impl Index {
             .unwrap_or(1.0)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn search_hits_inner(
         &self,
-        query: &str,
+        original_query: &str,
+        effective_query: &str,
+        negation: &Option<(Option<String>, Vec<String>, Vec<String>)>,
         pagination: Option<(usize, usize)>,
         filter_clauses: &[String],
         filter_params: Vec<String>,
         boost_type: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
-        let negation = self.build_negation_plan(query);
         let filter_sql = filter_clauses.join(" ");
 
-        let (base, mut all_params) = match &negation {
+        let (base, mut all_params) = match negation {
             Some((Some(pos_query), neg_clauses, neg_params)) => {
                 // Has positive + negative terms
                 let boost = boost_type.map_or(1.0, |t| self.lookup_boost(t));
@@ -192,24 +319,49 @@ impl Index {
                 (sql, params)
             }
             None => {
-                // No negation - original behavior
-                let boost = boost_type.map_or(1.0, |t| self.lookup_boost(t));
-                let order_clause = format!("ORDER BY bm25(_ddb_fts, 1.0, 1.0, 1.0, {boost})");
-                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
-                    vec![Box::new(query.to_string())];
-                for p in filter_params {
-                    params.push(Box::new(p));
+                if effective_query.is_empty() {
+                    // No residual FTS query and no negations: scan doogats directly.
+                    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+                    let adjusted_filter_sql =
+                        Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
+                    let where_clause = if adjusted_filter_sql.is_empty() {
+                        String::new()
+                    } else {
+                        let trimmed = adjusted_filter_sql
+                            .strip_prefix(" AND ")
+                            .or_else(|| adjusted_filter_sql.strip_prefix("AND "))
+                            .unwrap_or(&adjusted_filter_sql);
+                        format!("WHERE {trimmed}")
+                    };
+                    let sql = format!(
+                        "SELECT z.id, z.title, z.path, \
+                         '' AS snippet, 0.0 AS rank, z.updated_at, \
+                         z.type, z.date \
+                         FROM doogats z \
+                         {where_clause} \
+                         ORDER BY z.title"
+                    );
+                    (sql, params)
+                } else {
+                    // No negation - original behavior
+                    let boost = boost_type.map_or(1.0, |t| self.lookup_boost(t));
+                    let order_clause = format!("ORDER BY bm25(_ddb_fts, 1.0, 1.0, 1.0, {boost})");
+                    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+                        vec![Box::new(effective_query.to_string())];
+                    for p in filter_params {
+                        params.push(Box::new(p));
+                    }
+                    let sql = format!(
+                        "SELECT z.id, z.title, z.path, \
+                         snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank, z.updated_at, \
+                         z.type, z.date \
+                         FROM _ddb_fts \
+                         JOIN doogats z ON z.rowid = _ddb_fts.rowid \
+                         WHERE _ddb_fts MATCH ?1 {filter_sql} \
+                         {order_clause}"
+                    );
+                    (sql, params)
                 }
-                let sql = format!(
-                    "SELECT z.id, z.title, z.path, \
-                     snippet(_ddb_fts, 1, '<b>', '</b>', '...', 32), rank, z.updated_at, \
-                     z.type, z.date \
-                     FROM _ddb_fts \
-                     JOIN doogats z ON z.rowid = _ddb_fts.rowid \
-                     WHERE _ddb_fts MATCH ?1 {filter_sql} \
-                     {order_clause}"
-                );
-                (sql, params)
             }
         };
 
@@ -229,14 +381,14 @@ impl Index {
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
         let mut stmt = self.conn.prepare(&sql)
-            .map_err(|e| Self::classify_search_error(e, query))?;
+            .map_err(|e| Self::classify_search_error(e, original_query))?;
         let rows = stmt
             .query_map(param_refs.as_slice(), Self::map_search_row)
-            .map_err(|e| Self::classify_search_error(e, query))?;
+            .map_err(|e| Self::classify_search_error(e, original_query))?;
 
         let mut hits = Vec::new();
         for r in rows {
-            hits.push(r.map_err(|e| Self::classify_search_error(e, query))?);
+            hits.push(r.map_err(|e| Self::classify_search_error(e, original_query))?);
         }
         Ok(hits)
     }

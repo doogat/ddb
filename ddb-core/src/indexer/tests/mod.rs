@@ -1375,6 +1375,23 @@ processed: true
     }
 
     #[test]
+    fn search_in_query_tag_filter_routes_through_extracted_filters() {
+        let idx = in_memory_index();
+        idx.index_doogat(&make_typed_doogat(0, "note", vec!["rust"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(1, "note", vec!["python"])).unwrap();
+        idx.index_doogat(&make_typed_doogat(2, "note", vec!["rust", "cli"])).unwrap();
+
+        let result = idx
+            .search_paginated_filtered("tag=rust", 10, 0, &SearchFilters::default())
+            .unwrap();
+        assert_eq!(result.hits.len(), 2);
+        assert_eq!(result.total_count, 2);
+        for hit in &result.hits {
+            assert!(hit.tags.iter().any(|t| t == "rust"));
+        }
+    }
+
+    #[test]
     fn search_filter_by_field_eq() {
         let idx = in_memory_index();
         let mut z0 = make_typed_doogat(0, "note", vec![]);
