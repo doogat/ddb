@@ -1218,6 +1218,24 @@ $DDB query "DELETE FROM smokealt WHERE name = 'b'" | grep -q "1 row(s) affected"
 $DDB query "DROP TABLE smokealt CASCADE" | grep -q "dropped"
 pass "alter/drop table + bulk ops"
 
+# 30b. UPDATE/DELETE WHERE id no-match semantics (#5)
+cd "$TMPDIR"
+$DDB query "CREATE TABLE smokenomatch (name TEXT, score INTEGER)" | grep -q "table smokenomatch created"
+NOMATCH_ID=$($DDB query "INSERT INTO smokenomatch (name, score) VALUES ('alpha', 1)")
+# B1: UPDATE with nonexistent id returns 0 rows affected (not an error)
+$DDB query "UPDATE smokenomatch SET score = 1 WHERE id = 'nonexistent_id_00000000000000'" | grep -q "0 row(s) affected"
+# B2: DELETE with nonexistent id returns 0 rows affected (not an error)
+$DDB query "DELETE FROM smokenomatch WHERE id = 'nonexistent_id_00000000000000'" | grep -q "0 row(s) affected"
+# B3: IN clause mixing missing and valid ids still affects 1 row
+$DDB query "UPDATE smokenomatch SET score = 7 WHERE id IN ('nope', '$NOMATCH_ID')" | grep -q "1 row(s) affected"
+# B4: compound predicate with valid id + non-matching column returns 0 rows affected
+$DDB query "UPDATE smokenomatch SET score = 99 WHERE id = '$NOMATCH_ID' AND name = 'wrongname'" | grep -q "0 row(s) affected"
+# B5: valid id on the fast path still affects 1 row
+$DDB query "UPDATE smokenomatch SET score = 42 WHERE id = '$NOMATCH_ID'" | grep -q "1 row(s) affected"
+$DDB query "SELECT score FROM smokenomatch WHERE id = '$NOMATCH_ID'" | grep -q "42"
+$DDB query "DROP TABLE smokenomatch CASCADE" | grep -q "dropped"
+pass "update/delete WHERE id no-match semantics (#5)"
+
 # 31. file attachments
 cd "$TMPDIR"
 echo "hello attachment" > $TMPDIR/ddb-smoke-attach.txt

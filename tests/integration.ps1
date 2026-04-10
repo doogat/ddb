@@ -1260,6 +1260,31 @@ $output = ddb query "DROP TABLE smokealt CASCADE"
 if ($output -notmatch "dropped") { throw "drop table failed" }
 pass "alter/drop table + bulk ops"
 
+# 30b. UPDATE/DELETE WHERE id no-match semantics (#5)
+$output = ddb query "CREATE TABLE smokenomatch (name TEXT, score INTEGER)"
+if ($output -notmatch "table smokenomatch created") { throw "create smokenomatch failed" }
+$nomatchId = ddb query "INSERT INTO smokenomatch (name, score) VALUES ('alpha', 1)"
+# B1: UPDATE with nonexistent id returns 0 rows affected (not an error)
+$output = ddb query "UPDATE smokenomatch SET score = 1 WHERE id = 'nonexistent_id_00000000000000'"
+if ($output -notmatch "0 row\(s\) affected") { throw "B1 update missing id failed: $output" }
+# B2: DELETE with nonexistent id returns 0 rows affected (not an error)
+$output = ddb query "DELETE FROM smokenomatch WHERE id = 'nonexistent_id_00000000000000'"
+if ($output -notmatch "0 row\(s\) affected") { throw "B2 delete missing id failed: $output" }
+# B3: IN clause mixing missing and valid ids still affects 1 row
+$output = ddb query "UPDATE smokenomatch SET score = 7 WHERE id IN ('nope', '$nomatchId')"
+if ($output -notmatch "1 row\(s\) affected") { throw "B3 IN-clause mixed failed: $output" }
+# B4: compound predicate with valid id + non-matching column returns 0 rows affected
+$output = ddb query "UPDATE smokenomatch SET score = 99 WHERE id = '$nomatchId' AND name = 'wrongname'"
+if ($output -notmatch "0 row\(s\) affected") { throw "B4 compound non-match failed: $output" }
+# B5: valid id on the fast path still affects 1 row
+$output = ddb query "UPDATE smokenomatch SET score = 42 WHERE id = '$nomatchId'"
+if ($output -notmatch "1 row\(s\) affected") { throw "B5 valid fast-path failed: $output" }
+$output = ddb query "SELECT score FROM smokenomatch WHERE id = '$nomatchId'"
+if ($output -notmatch "42") { throw "B5 materialized score mismatch: $output" }
+$output = ddb query "DROP TABLE smokenomatch CASCADE"
+if ($output -notmatch "dropped") { throw "drop smokenomatch failed" }
+pass "update/delete WHERE id no-match semantics (#5)"
+
 # 31. file attachments
 $attachFile = Join-Path $TMPDIR "ddb-smoke-attach.txt"
 Set-Content $attachFile -Value "hello attachment"
