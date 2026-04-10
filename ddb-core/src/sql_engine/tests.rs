@@ -4695,6 +4695,48 @@ fn executesql_insert_uses_explicit_title() {
     assert_eq!(rows[0][0], "My Bookmark");
 }
 
+// ── Doubt-review: explicit empty string is rejected for strict types ──
+
+#[test]
+fn executesql_insert_rejects_empty_string_on_integer() {
+    // Doubt review D2: with the C1 fix, the blanket empty-string skip in
+    // check_column_types was tightened to numeric/bool types only. An
+    // explicit `''` literal in an INTEGER column should now be rejected as
+    // a type mismatch (it's not a valid i64). Empty strings on TEXT
+    // columns are still accepted.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE numeric (title VARCHAR(255) NOT NULL, count INTEGER)")
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO numeric (title, count) VALUES ('a', '')")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("type mismatch for numeric.count: expected INTEGER, got ''"),
+        "got: {err}"
+    );
+    assert_eq!(count_rows(&index, "numeric"), 0);
+    assert_eq!(count_index_rows(&index, "numeric"), 0);
+}
+
+#[test]
+fn executesql_insert_accepts_empty_string_on_text() {
+    // Sanity: TEXT columns still accept empty strings.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE note (title VARCHAR(255) NOT NULL, body TEXT)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO note (title, body) VALUES ('a', '')")
+        .expect("empty string on TEXT must succeed");
+    assert_eq!(count_rows(&index, "note"), 1);
+}
+
 // ── Multi-row INSERT atomicity (PRD 00122 blind review C2) ────────────
 
 #[test]

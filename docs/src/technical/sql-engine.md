@@ -434,4 +434,16 @@ Priorities 3 and 4 silently coerced unrelated fields like `url` or `description`
 
 ## Test Coverage
 
-65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 8 rejection tests for unsupported SQL features, and 7 type-aware inference tests. PRD 00122 added 14 unit tests for `validate_row_against_schema`, 4 INSERT-rejection unit tests, 4 UPDATE-rejection unit tests (all in `ddb-core/src/sql_engine/tests.rs`), and 6 integration-script checks (D1-D6 in section 43 of `tests/integration.sh` and `tests/integration.ps1`). 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns). 4 E2E tests for upsert/conflict handling in `tests/e2e/upsert.rs` (onConflict argument, IGNORE returns existing, ERROR on duplicate, mixed new/existing batch).
+65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 8 rejection tests for unsupported SQL features, and 7 type-aware inference tests.
+
+PRD 00122 added (all in `ddb-core/src/sql_engine/tests.rs`):
+
+- 14 unit tests for `validate_row_against_schema` covering all 5 error message formats with explicit null/absent distinction.
+- 4 INSERT-rejection unit tests + 4 UPDATE-rejection unit tests via `executeSql`, each asserting the row is absent from BOTH the materialized table AND the `doogats` index after rejection.
+- 1 positive test for `title NOT NULL` + `title_template` + INSERT-without-explicit-title (cycle 2 D1 fix).
+- 5 expression-synthesized NULL tests (`COALESCE(NULL, NULL)`, `IFNULL(NULL, NULL)`, etc.) for both INSERT and UPDATE paths (blind review C1 fix).
+- 3 multi-row INSERT atomicity tests proving that a validation failure on row N writes none of rows 1..N (blind review C2 fix).
+- 2 explicit empty-string tests pinning that `''` is rejected on INTEGER columns and accepted on TEXT.
+- 6 integration-script checks (D1-D6 in section 43 of `tests/integration.sh` and `tests/integration.ps1`).
+
+9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns). 4 E2E tests for upsert/conflict handling in `tests/e2e/upsert.rs` (onConflict argument, IGNORE returns existing, ERROR on duplicate, mixed new/existing batch).
