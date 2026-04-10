@@ -1,6 +1,7 @@
 use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
 use indexmap::IndexMap;
+use ddb_core::error::DoogatError;
 use ddb_core::search_query;
 use ddb_core::types::{ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 
@@ -210,13 +211,38 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 |ctx| {
                     FieldFuture::new(async move {
                         let q = ctx.args.try_get("query")?.string()?.to_string();
+                        // PRD 00121 invariant: normalizeSearchQuery must agree
+                        // with search() on the set of valid inputs. Validate via
+                        // compile_search_plan and the same non-tag-NOT and
+                        // empty-query rules the search path enforces.
+                        if q.trim().is_empty() {
+                            return Err(to_server_error(DoogatError::BadRequest(
+                                format!("invalid search query: {q}"),
+                            ))
+                            .into());
+                        }
+                        let plan = search_query::compile_search_plan(&q).map_err(|_| {
+                            to_server_error(DoogatError::BadRequest(format!(
+                                "invalid search query: {q}"
+                            )))
+                        })?;
+                        for (field, _) in &plan.extracted_negated_filters {
+                            if field != "tag" {
+                                return Err(to_server_error(DoogatError::BadRequest(
+                                    format!(
+                                        "invalid search query: {q}: NOT is only supported for tag filters"
+                                    ),
+                                ))
+                                .into());
+                            }
+                        }
                         let normalized = search_query::normalize(&q);
                         Ok(Some(FieldValue::from(GqlValue::from(normalized))))
                     })
                 },
             )
             .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)).description("The search query string to normalize."))
-            .description("Return the canonical form of a search query without executing it. Useful for deduplication and saved searches."),
+            .description("Return the canonical form of a search query without executing it. Useful for deduplication and saved searches. Rejects the same malformed inputs as search() so the two endpoints agree on validity."),
         );
     }
 

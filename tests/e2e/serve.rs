@@ -1655,6 +1655,64 @@ fn normalize_search_query_standalone() {
     );
 }
 
+#[test]
+fn normalize_search_query_rejects_bare_wildcard() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    for q in ["*", "**", ".*"] {
+        let body = format!("{{ normalizeSearchQuery(query: \"{q}\") }}");
+        let result = server.graphql(&body);
+        let errors = result.get("errors").cloned().unwrap_or(serde_json::json!([]));
+        let err_text = errors.to_string();
+        assert!(
+            err_text.contains("invalid search query"),
+            "normalizeSearchQuery({q:?}) expected error containing 'invalid search query', got: {result}"
+        );
+        assert!(
+            !err_text.contains("internal error"),
+            "normalizeSearchQuery({q:?}) leaked 'internal error': {result}"
+        );
+    }
+}
+
+#[test]
+fn normalize_search_query_rejects_non_tag_negation() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let result = server.graphql(
+        r#"{ normalizeSearchQuery(query: "NOT url=example.com") }"#,
+    );
+    let errors = result.get("errors").cloned().unwrap_or(serde_json::json!([]));
+    let err_text = errors.to_string();
+    assert!(
+        err_text.contains("invalid search query"),
+        "expected error for NOT url=, got: {result}"
+    );
+    assert!(
+        err_text.contains("NOT") || err_text.contains("tag"),
+        "expected message to mention NOT/tag limitation, got: {result}"
+    );
+}
+
+#[test]
+fn normalize_search_query_rejects_empty_and_bare_operators() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    for q in ["", "   ", "AND", "OR", "NOT", "(unbalanced"] {
+        let body = format!("{{ normalizeSearchQuery(query: \"{q}\") }}");
+        let result = server.graphql(&body);
+        let errors = result.get("errors").cloned().unwrap_or(serde_json::json!([]));
+        let err_text = errors.to_string();
+        assert!(
+            err_text.contains("invalid search query"),
+            "normalizeSearchQuery({q:?}) expected error, got: {result}"
+        );
+    }
+}
+
 // ── Search where filter tests ──────────────────────────────────
 
 #[test]
