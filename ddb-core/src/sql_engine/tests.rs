@@ -4695,6 +4695,115 @@ fn executesql_insert_uses_explicit_title() {
     assert_eq!(rows[0][0], "My Bookmark");
 }
 
+// ── Expression-synthesized NULL detection (PRD 00122 blind review C1) ─
+
+#[test]
+fn executesql_insert_rejects_coalesce_null_on_not_null() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)")
+        .unwrap();
+
+    let err = engine
+        .execute(
+            "INSERT INTO link (title, url) VALUES (COALESCE(NULL, NULL), 'https://x.com')",
+        )
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: link.title"),
+        "got: {err}"
+    );
+    assert_eq!(count_rows(&index, "link"), 0);
+    assert_eq!(count_index_rows(&index, "link"), 0);
+}
+
+#[test]
+fn executesql_insert_rejects_ifnull_null_on_not_null_integer() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE numeric (title VARCHAR(255) NOT NULL, count INTEGER NOT NULL)")
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO numeric (title, count) VALUES ('a', IFNULL(NULL, NULL))")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: numeric.count"),
+        "got: {err}"
+    );
+    assert_eq!(count_rows(&index, "numeric"), 0);
+    assert_eq!(count_index_rows(&index, "numeric"), 0);
+}
+
+#[test]
+fn executesql_insert_accepts_ifnull_with_value_on_nullable() {
+    // Sanity: IFNULL(NULL, 42) on a nullable INTEGER must still succeed.
+    // Regression guard against the C1 fix breaking the legitimate
+    // "default to a value" pattern that smoke section 23 also exercises.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE counter (title VARCHAR(255) NOT NULL, count INTEGER)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO counter (title, count) VALUES ('a', IFNULL(NULL, 42))")
+        .expect("non-NULL IFNULL result must succeed");
+
+    let rows = index
+        .query_raw("SELECT count FROM counter")
+        .unwrap();
+    assert_eq!(rows[0][0], "42");
+}
+
+#[test]
+fn executesql_insert_accepts_nullif_on_nullable_integer() {
+    // Smoke section 23 inserts NULLIF(0, 0) into a nullable INTEGER and
+    // expects success. Pin that behavior here too.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE exprtbl (title VARCHAR(255) NOT NULL, sort_order INTEGER)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO exprtbl (title, sort_order) VALUES ('a', NULLIF(0, 0))")
+        .expect("NULLIF on nullable column must succeed");
+}
+
+#[test]
+fn executesql_update_rejects_coalesce_null_on_not_null() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO link (title, url) VALUES ('keep', 'https://x.com')")
+        .unwrap();
+    let id = fetch_first_id(&index, "link");
+
+    let err = engine
+        .execute(&format!(
+            "UPDATE link SET title = COALESCE(NULL, NULL) WHERE id = '{id}'"
+        ))
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: link.title"),
+        "got: {err}"
+    );
+
+    let rows = index
+        .query_raw(&format!("SELECT title FROM link WHERE id = '{id}'"))
+        .unwrap();
+    assert_eq!(rows[0][0], "keep");
+}
+
 // ── UPDATE-path enforcement (issue #7 reproducers) ────────────────────
 
 fn fetch_first_id(index: &Index, table: &str) -> String {
