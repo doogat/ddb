@@ -4695,6 +4695,82 @@ fn executesql_insert_uses_explicit_title() {
     assert_eq!(rows[0][0], "My Bookmark");
 }
 
+// ── Multi-row INSERT atomicity (PRD 00122 blind review C2) ────────────
+
+#[test]
+fn executesql_multi_row_insert_validation_failure_writes_no_rows() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)")
+        .unwrap();
+
+    let err = engine
+        .execute(
+            "INSERT INTO link (title, url) VALUES \
+             ('first', 'https://1.com'), \
+             (NULL, 'https://2.com')",
+        )
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: link.title"),
+        "got: {err}"
+    );
+
+    // Neither row should have been committed.
+    assert_eq!(count_rows(&index, "link"), 0, "no row should be materialized");
+    assert_eq!(count_index_rows(&index, "link"), 0, "no doogats index entry");
+}
+
+#[test]
+fn executesql_multi_row_insert_validation_failure_on_third_row() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE numeric (title VARCHAR(255) NOT NULL, count INTEGER)")
+        .unwrap();
+
+    let err = engine
+        .execute(
+            "INSERT INTO numeric (title, count) VALUES \
+             ('a', 1), \
+             ('b', 2), \
+             ('c', 'not_a_number')",
+        )
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("type mismatch for numeric.count: expected INTEGER"),
+        "got: {err}"
+    );
+
+    assert_eq!(count_rows(&index, "numeric"), 0);
+    assert_eq!(count_index_rows(&index, "numeric"), 0);
+}
+
+#[test]
+fn executesql_multi_row_insert_all_valid_succeeds() {
+    // Sanity: the C2 fix must not break the happy path.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)")
+        .unwrap();
+    engine
+        .execute(
+            "INSERT INTO link (title, url) VALUES \
+             ('first', 'https://1.com'), \
+             ('second', 'https://2.com'), \
+             ('third', 'https://3.com')",
+        )
+        .unwrap();
+
+    assert_eq!(count_rows(&index, "link"), 3);
+    assert_eq!(count_index_rows(&index, "link"), 3);
+}
+
 // ── Expression-synthesized NULL detection (PRD 00122 blind review C1) ─
 
 #[test]
