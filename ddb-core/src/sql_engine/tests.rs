@@ -138,11 +138,13 @@ fn insert_creates_doogat_and_materialized_row() {
     let mut engine = SqlEngine::new(&index, &repo);
 
     engine
-        .execute("CREATE TABLE projects (name TEXT, status TEXT, priority INTEGER)")
+        .execute("CREATE TABLE projects (title TEXT, status TEXT, priority INTEGER)")
         .unwrap();
 
     let result = engine
-        .execute("INSERT INTO projects (name, status, priority) VALUES ('Alpha', 'active', 1)")
+        .execute(
+            "INSERT INTO projects (title, status, priority) VALUES ('Alpha', 'active', 1)",
+        )
         .unwrap();
 
     let doogat_id = match result {
@@ -152,7 +154,7 @@ fn insert_creates_doogat_and_materialized_row() {
 
     // Check materialized table
     let rows = index
-        .query_raw("SELECT name, status, priority FROM projects")
+        .query_raw("SELECT title, status, priority FROM projects")
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0][0], "Alpha");
@@ -165,7 +167,7 @@ fn insert_creates_doogat_and_materialized_row() {
             "SELECT title, type FROM doogats WHERE id = '{doogat_id}'"
         ))
         .unwrap();
-    assert_eq!(rows[0][0], "Alpha"); // title = first TEXT column value
+    assert_eq!(rows[0][0], "Alpha");
     assert_eq!(rows[0][1], "projects");
 
     // Check doogat file in Git (no folder: true → flat path)
@@ -174,8 +176,7 @@ fn insert_creates_doogat_and_materialized_row() {
     let content = repo.read_file(&path).unwrap();
     assert!(content.contains("type: projects"));
     assert!(content.contains("priority: 1"));
-    assert!(content.contains("## name"));
-    assert!(content.contains("Alpha"));
+    assert!(content.contains("title: Alpha"));
 }
 
 #[test]
@@ -425,11 +426,15 @@ fn insert_produces_correct_zone_mapping() {
     let mut engine = SqlEngine::new(&index, &repo);
 
     engine
-        .execute("CREATE TABLE projects (name TEXT, status TEXT, priority INTEGER)")
+        .execute(
+            "CREATE TABLE projects (title TEXT, name TEXT, status TEXT, priority INTEGER)",
+        )
         .unwrap();
 
     let id = match engine
-        .execute("INSERT INTO projects (name, status, priority) VALUES ('Alpha', 'active', 1)")
+        .execute(
+            "INSERT INTO projects (title, name, status, priority) VALUES ('Alpha', 'Alpha', 'active', 1)",
+        )
         .unwrap()
     {
         SqlResult::Ok(id) => id,
@@ -447,7 +452,7 @@ fn insert_produces_correct_zone_mapping() {
     assert!(content.contains("## status\n\nactive"));
     // type should be table name
     assert!(content.contains("type: projects"));
-    // title should be first TEXT column value
+    // explicit title set
     assert!(content.contains("title: Alpha"));
 }
 
@@ -1929,55 +1934,6 @@ fn insert_title_from_template() {
     assert!(
         content.contains("title: name-role"),
         "template title: {content}"
-    );
-}
-
-#[test]
-fn insert_title_body_fallback() {
-    let (_dir, repo, index) = setup();
-    let mut engine = SqlEngine::new(&index, &repo);
-
-    engine
-        .execute("CREATE TABLE article (description TEXT, priority INTEGER)")
-        .unwrap();
-    let id = match engine
-        .execute("INSERT INTO article (description, priority) VALUES ('My Article', 1)")
-        .unwrap()
-    {
-        SqlResult::Ok(id) => id,
-        _ => panic!("expected Ok"),
-    };
-
-    let path = index.resolve_path(&id).unwrap();
-    let content = repo.read_file(&path).unwrap();
-    assert!(
-        content.contains("title: My Article"),
-        "body fallback: {content}"
-    );
-}
-
-#[test]
-fn insert_title_frontmatter_fallback() {
-    let (_dir, repo, index) = setup();
-    let mut engine = SqlEngine::new(&index, &repo);
-
-    // Table with only frontmatter columns (no body columns)
-    engine
-        .execute("CREATE TABLE tag (label VARCHAR(50), priority INTEGER)")
-        .unwrap();
-    let id = match engine
-        .execute("INSERT INTO tag (label, priority) VALUES ('important', 1)")
-        .unwrap()
-    {
-        SqlResult::Ok(id) => id,
-        _ => panic!("expected Ok"),
-    };
-
-    let path = index.resolve_path(&id).unwrap();
-    let content = repo.read_file(&path).unwrap();
-    assert!(
-        content.contains("title: important"),
-        "frontmatter string fallback: {content}"
     );
 }
 
@@ -4651,6 +4607,50 @@ fn executesql_insert_rejects_integer_type_mismatch() {
 
     assert_eq!(count_rows(&index, "numeric"), 0);
     assert_eq!(count_index_rows(&index, "numeric"), 0);
+}
+
+// ── Silent title fallback removal (issue #7 sub-bullet 5) ─────────────
+
+#[test]
+fn executesql_insert_rejects_missing_title_when_required() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute(
+            "CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255), description TEXT)",
+        )
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO link (url) VALUES ('https://notitle.com')")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL constraint violated: link.title"),
+        "got: {err}"
+    );
+
+    assert_eq!(count_rows(&index, "link"), 0);
+    assert_eq!(count_index_rows(&index, "link"), 0);
+}
+
+#[test]
+fn executesql_insert_uses_explicit_title() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO link (title, url) VALUES ('My Bookmark', 'https://x.com')")
+        .unwrap();
+
+    let id = fetch_first_id(&index, "link");
+    let rows = index
+        .query_raw(&format!("SELECT title FROM link WHERE id = '{id}'"))
+        .unwrap();
+    assert_eq!(rows[0][0], "My Bookmark");
 }
 
 // ── UPDATE-path enforcement (issue #7 reproducers) ────────────────────

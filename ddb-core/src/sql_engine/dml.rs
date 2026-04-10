@@ -1112,6 +1112,16 @@ impl<'a> SqlEngine<'a> {
                 Some(v) => v,
                 None => continue,
             };
+            // Empty string here represents an effective NULL: the eval
+            // pipeline (`expr_to_string` / `sqlite_value_to_string`) collapses
+            // both SQL `NULL` and the result of `NULLIF`/`IFNULL`/`COALESCE`
+            // to "". Type-checking these would reject e.g. `INSERT INTO t
+            // (count) VALUES (NULLIF(0, 0))` against an INTEGER column even
+            // though SQLite stores it as NULL. NOT NULL enforcement happens
+            // in `check_not_null`, which uses the explicit `null_cols` set.
+            if val.is_empty() {
+                continue;
+            }
             type_check_value(&col.data_type, table_name, &col.name, val)?;
         }
         Ok(())

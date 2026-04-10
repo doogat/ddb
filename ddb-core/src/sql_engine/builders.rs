@@ -5,7 +5,7 @@ use crate::types::{
     ColumnDef, DoogatId, DoogatMeta, InlineField, Link, ParsedDoogat, TableSchema, Value, Zone,
 };
 
-use super::helpers::{is_numeric_type, re_unfilled_placeholder, to_yaml_value};
+use super::helpers::{re_unfilled_placeholder, to_yaml_value};
 
 /// Convert a single `ColumnDef` into a YAML-style `Value::Map`.
 fn build_column_yaml(col: &ColumnDef) -> Value {
@@ -124,8 +124,6 @@ struct ColumnZoneOutput {
     ref_lines: Vec<String>,
     links: Vec<Link>,
     inline_fields: Vec<InlineField>,
-    first_fm_string: Option<String>,
-    first_body_title: Option<String>,
 }
 
 /// Process a single reference-zone column, appending to the output accumulators.
@@ -169,8 +167,6 @@ fn process_column_zones(
         ref_lines: Vec::new(),
         links: Vec::new(),
         inline_fields: Vec::new(),
-        first_fm_string: None,
-        first_body_title: None,
     };
 
     for col in &schema.columns {
@@ -191,16 +187,10 @@ fn process_column_zones(
                 process_reference_column(col, &val, ref_folder_types, &mut out);
             }
             Zone::Frontmatter => {
-                if out.first_fm_string.is_none() && !is_numeric_type(&col.data_type) {
-                    out.first_fm_string = Some(val.clone());
-                }
                 out.extra
                     .insert(col.name.clone(), to_yaml_value(&val, &col.data_type));
             }
             Zone::Body => {
-                if out.first_body_title.is_none() {
-                    out.first_body_title = Some(val.clone());
-                }
                 out.body_sections
                     .push(format!("## {}\n\n{}", col.name, val));
             }
@@ -210,13 +200,24 @@ fn process_column_zones(
     out
 }
 
-/// Resolve the title for a data doogat using the 5-level priority chain.
+/// Resolve the title for a data doogat.
+///
+/// Priority chain:
+/// 1. Explicit `title` column value from the INSERT.
+/// 2. `title_template` interpolation declared on the typedef.
+/// 3. `"{type} {id}"` last-resort fallback (only fires for tables whose
+///    title is nullable and has no template).
+///
+/// The previous third and fourth priorities (first body column / first
+/// frontmatter string) silently coerced unrelated fields like `url` or
+/// `description` into the title slot, masking what should be a NOT NULL
+/// violation. Removed in PRD 00122 / issue #7. The pre-write
+/// `validate_row_against_schema` check is what now rejects an INSERT that
+/// omits a NOT NULL title with no template.
 fn resolve_insert_title(
     id: &DoogatId,
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,
-    first_body_title: Option<&str>,
-    first_fm_string: Option<&str>,
 ) -> String {
     // Priority 1: explicit title column
     if let Some(t) = col_values.get("title") {
@@ -236,15 +237,7 @@ fn resolve_insert_title(
             return rendered;
         }
     }
-    // Priority 3: first body column value
-    if let Some(t) = first_body_title {
-        return t.to_string();
-    }
-    // Priority 4: first frontmatter string column
-    if let Some(t) = first_fm_string {
-        return t.to_string();
-    }
-    // Priority 5: "{type} {id}" fallback
+    // Priority 3: "{type} {id}" fallback
     format!("{} {}", schema.table_name, id.0)
 }
 
@@ -282,13 +275,7 @@ pub(super) fn build_data_doogat(
 ) -> ParsedDoogat {
     let mut zones = process_column_zones(schema, col_values, ref_folder_types);
 
-    let title = resolve_insert_title(
-        id,
-        schema,
-        col_values,
-        zones.first_body_title.as_deref(),
-        zones.first_fm_string.as_deref(),
-    );
+    let title = resolve_insert_title(id, schema, col_values);
 
     let body = join_sections(&zones.body_sections, "\n", "\n", "\n\n");
     let reference_section = join_sections(&zones.ref_lines, "", "\n", "\n");
