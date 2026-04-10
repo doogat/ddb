@@ -421,8 +421,10 @@ Priorities 3 and 4 silently coerced unrelated fields like `url` or `description`
 ### Limitations
 
 - Pre-existing rows that violate a newly-added constraint are **not** validated retroactively at index rebuild time. The validator only runs on the SQL write path (INSERT and UPDATE). A `cargo test ... reindex` does not re-check stored data.
-- Deferred-expression results (`COALESCE`, `IFNULL`, `NULLIF`, etc.) that resolve to NULL are not flagged for NOT NULL violations on UPDATE — the validator's `null_cols` set tracks only literal `NULL` assignments, not eval-time NULLs. Type/length checks still run on the resolved value.
-- `INSERT INTO t (col) VALUES ('')` for an `INTEGER` column is accepted, not rejected as a type mismatch. The validator skips empty values to match SQLite's `NULL`-from-eval behavior, since `expr_to_string` collapses both NULL and `''` literals to the same intermediate.
+
+### Expression-synthesized NULL
+
+`COALESCE(NULL, NULL)`, `IFNULL(NULL, NULL)`, `NULLIF(x, x)`, subqueries returning NULL, and other expression forms that resolve to SQL NULL **are** treated as NULL by the validator. The eval pipeline (`eval_values_nullable` in helpers.rs) preserves NULL through the round-trip and the validator rejects them on `NOT NULL` columns the same way it rejects bare `NULL` literals. Legitimate uses like `IFNULL(NULL, 42)` or `COALESCE(NULL, 'fallback')` resolve to non-NULL and pass validation as expected.
 
 ## Test Coverage
 

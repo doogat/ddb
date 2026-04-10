@@ -291,21 +291,28 @@ pub(super) fn value_to_sql(expr: &Expr) -> Result<String> {
 }
 
 pub(super) fn expr_to_string(expr: &Expr) -> Result<String> {
+    Ok(expr_to_string_nullable(expr)?.unwrap_or_default())
+}
+
+/// Like `expr_to_string` but distinguishes a SQL `NULL` literal (returned as
+/// `Ok(None)`) from an empty string. The validator-side caller (PRD 00122)
+/// uses this to detect bare-NULL writes that would otherwise collapse to "".
+pub(super) fn expr_to_string_nullable(expr: &Expr) -> Result<Option<String>> {
     match expr {
         Expr::Value(v) => match &v.value {
-            SqlValue::SingleQuotedString(s) => Ok(s.clone()),
-            SqlValue::DoubleQuotedString(s) => Ok(s.clone()),
-            SqlValue::Number(n, _) => Ok(n.clone()),
-            SqlValue::Boolean(b) => Ok(b.to_string()),
-            SqlValue::Null => Ok(String::new()),
+            SqlValue::SingleQuotedString(s) => Ok(Some(s.clone())),
+            SqlValue::DoubleQuotedString(s) => Ok(Some(s.clone())),
+            SqlValue::Number(n, _) => Ok(Some(n.clone())),
+            SqlValue::Boolean(b) => Ok(Some(b.to_string())),
+            SqlValue::Null => Ok(None),
             _ => Err(DoogatError::SqlEngine(format!("unsupported value: {v}"))),
         },
         Expr::UnaryOp { op, expr } => {
-            let inner = expr_to_string(expr)?;
-            Ok(format!("{op}{inner}"))
+            let inner = expr_to_string_nullable(expr)?.unwrap_or_default();
+            Ok(Some(format!("{op}{inner}")))
         }
         Expr::Function(_) | Expr::Subquery(_) | Expr::BinaryOp { .. } | Expr::Nested(_) => {
-            value_to_sql(expr)
+            value_to_sql(expr).map(Some)
         }
         _ => Err(DoogatError::SqlEngine(format!(
             "unsupported expression: {expr}"
@@ -313,13 +320,18 @@ pub(super) fn expr_to_string(expr: &Expr) -> Result<String> {
     }
 }
 
-/// Convert a rusqlite Value to a String for use as a frontmatter field value.
-pub(super) fn sqlite_value_to_string(result: rusqlite::types::Value) -> Result<String> {
+/// Convert a rusqlite Value to an `Option<String>`. SQL NULL becomes
+/// `Ok(None)`, distinct from `Ok(Some(""))`. PRD 00122 uses this to flag
+/// synthesized NULL from `COALESCE`/`IFNULL`/subqueries against NOT NULL
+/// columns.
+pub(super) fn sqlite_value_to_string_nullable(
+    result: rusqlite::types::Value,
+) -> Result<Option<String>> {
     match result {
-        rusqlite::types::Value::Text(s) => Ok(s),
-        rusqlite::types::Value::Integer(n) => Ok(n.to_string()),
-        rusqlite::types::Value::Real(f) => Ok(f.to_string()),
-        rusqlite::types::Value::Null => Ok(String::new()),
+        rusqlite::types::Value::Text(s) => Ok(Some(s)),
+        rusqlite::types::Value::Integer(n) => Ok(Some(n.to_string())),
+        rusqlite::types::Value::Real(f) => Ok(Some(f.to_string())),
+        rusqlite::types::Value::Null => Ok(None),
         rusqlite::types::Value::Blob(_) => Err(DoogatError::SqlEngine(
             "BLOB result not supported in expression".into(),
         )),
@@ -329,18 +341,38 @@ pub(super) fn sqlite_value_to_string(result: rusqlite::types::Value) -> Result<S
 /// Evaluate a SQL expression, using SQLite for complex expressions.
 /// Simple literals are returned directly without a SQLite roundtrip.
 pub(super) fn eval_expr(conn: &rusqlite::Connection, expr: &Expr) -> Result<String> {
+    Ok(eval_expr_nullable(conn, expr)?.unwrap_or_default())
+}
+
+/// Like `eval_expr` but returns `Ok(None)` for SQL NULL results — including
+/// expression-synthesized NULL from `COALESCE(NULL, NULL)`, `IFNULL(NULL,
+/// NULL)`, `NULLIF(x, x)`, subqueries, etc. The PRD 00122 validator uses
+/// this to detect NULL writes against `NOT NULL` columns even when the user
+/// wraps NULL in an expression that round-trips through SQLite.
+pub(super) fn eval_expr_nullable(
+    conn: &rusqlite::Connection,
+    expr: &Expr,
+) -> Result<Option<String>> {
     if is_literal_expr(expr) {
-        return expr_to_string(expr);
+        return expr_to_string_nullable(expr);
     }
     let sql = value_to_sql(expr)?;
     let result: rusqlite::types::Value = conn
         .query_row(&format!("SELECT {sql}"), [], |row| row.get(0))
         .map_err(|e| DoogatError::SqlEngine(format!("expression eval failed: {e}")))?;
-    sqlite_value_to_string(result)
+    sqlite_value_to_string_nullable(result)
 }
 
 pub(super) fn eval_values(conn: &rusqlite::Connection, exprs: &[Expr]) -> Result<Vec<String>> {
     exprs.iter().map(|e| eval_expr(conn, e)).collect()
+}
+
+/// Like `eval_values` but returns `Ok(None)` for each NULL-producing expression.
+pub(super) fn eval_values_nullable(
+    conn: &rusqlite::Connection,
+    exprs: &[Expr],
+) -> Result<Vec<Option<String>>> {
+    exprs.iter().map(|e| eval_expr_nullable(conn, e)).collect()
 }
 
 // --- WHERE clause extraction ---

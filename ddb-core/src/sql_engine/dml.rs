@@ -9,8 +9,9 @@ use crate::types::{DoogatId, TableSchema};
 
 use super::builders::{apply_updates_to_doogat, build_data_doogat};
 use super::helpers::{
-    eval_values, expr_to_string, extract_from_table, extract_junction_where, extract_where_id,
-    is_literal_expr, sqlite_value_to_string, unquote_identifier, value_to_sql,
+    eval_values_nullable, expr_to_string, extract_from_table, extract_junction_where,
+    extract_where_id, is_literal_expr, sqlite_value_to_string_nullable, unquote_identifier,
+    value_to_sql,
 };
 use super::{PendingDelete, PendingWrite, SqlEngine, SqlResult};
 
@@ -82,23 +83,23 @@ fn parse_varchar_length(upper_data_type: &str) -> Option<usize> {
     inner.parse::<usize>().ok()
 }
 
-/// Inspect a raw INSERT VALUES row to find columns whose expression is a SQL
-/// `NULL` literal. Used so the validator can distinguish "explicit NULL" from
-/// "empty string", since `eval_values` collapses NULL to "" before validation.
-fn extract_null_cols_from_row(exprs: &[Expr], col_names: &[String]) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    for (idx, expr) in exprs.iter().enumerate() {
-        if is_null_literal(expr) {
-            if let Some(name) = col_names.get(idx) {
-                out.insert(name.clone());
-            }
-        }
-    }
-    out
+/// Returns true for column types where an empty string is never a legal
+/// value (numeric and boolean). For text-like types (`TEXT`, `VARCHAR`,
+/// `CHAR`, `BLOB`), empty strings are accepted because users may legitimately
+/// `INSERT (description) VALUES ('')`.
+fn is_strict_check_type(data_type: &str) -> bool {
+    let upper = data_type.to_uppercase();
+    matches!(
+        upper.as_str(),
+        "INTEGER" | "REAL" | "FLOAT" | "DOUBLE" | "BOOLEAN"
+    )
 }
 
-/// Returns true when the expression is a bare SQL `NULL` literal. Wrapped
-/// expressions like `COALESCE(NULL, 0)` are deliberately not treated as NULL.
+/// Returns true when the expression is a bare SQL `NULL` literal. Used by
+/// the UPDATE-side `collect_update_metadata` because it walks the raw AST
+/// and stringifies before SQLite would otherwise see the value. INSERT-side
+/// NULL detection is handled by `eval_values_nullable` which catches both
+/// literal and expression-synthesized NULL.
 fn is_null_literal(expr: &Expr) -> bool {
     matches!(
         expr,
@@ -240,8 +241,22 @@ impl<'a> SqlEngine<'a> {
                 let mut rows = Vec::with_capacity(v.rows.len());
                 let mut null_cols_per_row = Vec::with_capacity(v.rows.len());
                 for row in &v.rows {
-                    rows.push(eval_values(self.index.sql_conn(), row)?);
-                    null_cols_per_row.push(extract_null_cols_from_row(row, col_names));
+                    let values = eval_values_nullable(self.index.sql_conn(), row)?;
+                    let mut row_strings = Vec::with_capacity(values.len());
+                    let mut row_nulls = BTreeSet::new();
+                    for (idx, value) in values.into_iter().enumerate() {
+                        match value {
+                            Some(s) => row_strings.push(s),
+                            None => {
+                                if let Some(name) = col_names.get(idx) {
+                                    row_nulls.insert(name.clone());
+                                }
+                                row_strings.push(String::new());
+                            }
+                        }
+                    }
+                    rows.push(row_strings);
+                    null_cols_per_row.push(row_nulls);
                 }
                 Ok((rows, null_cols_per_row))
             }
@@ -522,18 +537,26 @@ impl<'a> SqlEngine<'a> {
         for (id, path) in matches {
             let mut row_updates = updates.clone();
             if !deferred.is_empty() {
+                let mut eval_nulls = BTreeSet::new();
                 Self::eval_deferred_expressions(
-                    self.index.sql_conn(), deferred, table_name, id, &mut row_updates,
+                    self.index.sql_conn(),
+                    deferred,
+                    table_name,
+                    id,
+                    &mut row_updates,
+                    &mut eval_nulls,
                 )?;
                 Self::validate_update_allowed_values(schema, &row_updates)?;
-                // Type/length re-check for deferred-expression results.
+                // Type/length + NOT NULL re-check for deferred-expression
+                // results. eval_nulls catches expression-synthesized NULL
+                // (PRD 00122 blind review C1).
                 let merged_names: Vec<String> = row_updates.keys().cloned().collect();
                 Self::validate_row_against_schema(
                     schema,
                     table_name,
                     &merged_names,
                     &row_updates,
-                    &BTreeSet::new(),
+                    &eval_nulls,
                     false,
                 )?;
             }
@@ -795,20 +818,34 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
-    /// Evaluate deferred SQL expressions (COALESCE, IFNULL, etc.) for a specific row.
+    /// Evaluate deferred SQL expressions (COALESCE, IFNULL, etc.) for a
+    /// specific row, populating `updates` with the resolved string values
+    /// and `eval_nulls` with the column names whose evaluation produced
+    /// SQL NULL. Callers re-run the row validator using `eval_nulls` so an
+    /// expression that synthesizes NULL on a NOT NULL column is rejected
+    /// (PRD 00122 blind review C1).
     fn eval_deferred_expressions(
         conn: &rusqlite::Connection,
         deferred: &[(String, String)],
         table_name: &str,
         doogat_id: &str,
         updates: &mut BTreeMap<String, String>,
+        eval_nulls: &mut BTreeSet<String>,
     ) -> Result<()> {
         for (col, sql) in deferred {
             let eval_sql = format!("SELECT {sql} FROM \"{table_name}\" WHERE id = ?1");
             let result: rusqlite::types::Value = conn
                 .query_row(&eval_sql, rusqlite::params![doogat_id], |row| row.get(0))
                 .map_err(|e| DoogatError::SqlEngine(format!("expression eval failed: {e}")))?;
-            updates.insert(col.clone(), sqlite_value_to_string(result)?);
+            match sqlite_value_to_string_nullable(result)? {
+                Some(s) => {
+                    updates.insert(col.clone(), s);
+                }
+                None => {
+                    eval_nulls.insert(col.clone());
+                    updates.insert(col.clone(), String::new());
+                }
+            }
         }
         Ok(())
     }
@@ -823,24 +860,27 @@ impl<'a> SqlEngine<'a> {
         updates: &mut BTreeMap<String, String>,
     ) -> Result<SqlResult> {
         if !deferred.is_empty() {
+            let mut eval_nulls = BTreeSet::new();
             Self::eval_deferred_expressions(
                 self.index.sql_conn(),
                 deferred,
                 table_name,
                 doogat_id,
                 updates,
+                &mut eval_nulls,
             )?;
             Self::validate_update_allowed_values(schema, updates)?;
-            // Re-validate the merged updates so deferred-expression results
-            // get type/length checked. NULL tracking only applies to literal
-            // assignments (caught upfront in `handle_update`).
+            // Re-validate so deferred-expression results get type/length
+            // checked AND so an expression that synthesized NULL (e.g.
+            // `SET title = COALESCE(NULL, NULL)`) is caught against a
+            // NOT NULL column.
             let merged_names: Vec<String> = updates.keys().cloned().collect();
             Self::validate_row_against_schema(
                 schema,
                 table_name,
                 &merged_names,
                 updates,
-                &BTreeSet::new(),
+                &eval_nulls,
                 false,
             )?;
         }
@@ -1124,14 +1164,13 @@ impl<'a> SqlEngine<'a> {
                 Some(v) => v,
                 None => continue,
             };
-            // Empty string here represents an effective NULL: the eval
-            // pipeline (`expr_to_string` / `sqlite_value_to_string`) collapses
-            // both SQL `NULL` and the result of `NULLIF`/`IFNULL`/`COALESCE`
-            // to "". Type-checking these would reject e.g. `INSERT INTO t
-            // (count) VALUES (NULLIF(0, 0))` against an INTEGER column even
-            // though SQLite stores it as NULL. NOT NULL enforcement happens
-            // in `check_not_null`, which uses the explicit `null_cols` set.
-            if val.is_empty() {
+            // Skip empty string for non-numeric/non-bool types so e.g.
+            // `INSERT (description) VALUES ('')` still passes for TEXT.
+            // Numeric and BOOLEAN types still validate empty strings: those
+            // would have come from the user typing `''` literally and are
+            // invalid. Expression-synthesized NULL is already handled via
+            // `null_cols` above (PRD 00122 blind review C1).
+            if val.is_empty() && !is_strict_check_type(&col.data_type) {
                 continue;
             }
             type_check_value(&col.data_type, table_name, &col.name, val)?;
