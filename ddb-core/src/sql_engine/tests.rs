@@ -3932,6 +3932,131 @@ fn duplicate_insert_does_not_leave_ghost_doogats_row() {
     assert_eq!(typed[0][0], "original");
 }
 
+// --- Issue #4 group A1: cross-mutation parity after a failed UNIQUE INSERT.
+//
+// `duplicate_insert_does_not_leave_ghost_doogats_row` above pins the index
+// invariant. Issue #4 explicitly named all three GraphQL write paths
+// (updateDoogat / createDoogat / deleteDoogat) as broken on the regression,
+// so each one needs its own pin at the SQL engine level. The integration
+// suite layers the GraphQL-surface checks on top in section 45.A1.
+
+#[test]
+fn update_after_unique_failure_succeeds_issue_4_a1() {
+    let (_dir, repo, index) = setup();
+    setup_unique_table(&repo, &index);
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Seed a valid row.
+    let valid_id = match engine
+        .execute("INSERT INTO uqtest (code, label) VALUES ('A1U', 'original')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok(id), got {other:?}"),
+    };
+
+    // Failing duplicate must produce an error and leave no ghost row.
+    let dup = engine.execute("INSERT INTO uqtest (code, label) VALUES ('A1U', 'dup')");
+    assert!(dup.is_err(), "duplicate insert should error, got: {dup:?}");
+
+    // updateDoogat analogue: update the existing row's label via SQL UPDATE.
+    let upd = engine
+        .execute(&format!("UPDATE uqtest SET label = 'updated' WHERE id = '{valid_id}'"))
+        .unwrap();
+    match upd {
+        SqlResult::Affected(n) => assert_eq!(n, 1, "UPDATE should affect 1 row, got {n}"),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+
+    // Index and materialized table must agree: one row with the new label.
+    let typed = index.query_raw("SELECT label FROM uqtest").unwrap();
+    assert_eq!(typed.len(), 1);
+    assert_eq!(typed[0][0], "updated");
+    let idx = index
+        .query_raw("SELECT id FROM doogats WHERE type = 'uqtest'")
+        .unwrap();
+    assert_eq!(idx.len(), 1);
+    assert_eq!(idx[0][0], valid_id);
+}
+
+#[test]
+fn insert_after_unique_failure_succeeds_issue_4_a1() {
+    let (_dir, repo, index) = setup();
+    setup_unique_table(&repo, &index);
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("INSERT INTO uqtest (code, label) VALUES ('A1I', 'original')")
+        .unwrap();
+
+    let dup = engine.execute("INSERT INTO uqtest (code, label) VALUES ('A1I', 'dup')");
+    assert!(dup.is_err(), "duplicate insert should error, got: {dup:?}");
+
+    // createDoogat analogue: a fresh INSERT with a different unique key must
+    // still succeed after the rollback.
+    let fresh = engine
+        .execute("INSERT INTO uqtest (code, label) VALUES ('A1I_NEW', 'fresh')")
+        .unwrap();
+    let fresh_id = match fresh {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok(id), got {other:?}"),
+    };
+
+    let typed = index
+        .query_raw("SELECT code, label FROM uqtest ORDER BY code")
+        .unwrap();
+    assert_eq!(typed.len(), 2);
+    assert_eq!(typed[0][0], "A1I");
+    assert_eq!(typed[1][0], "A1I_NEW");
+    let idx = index
+        .query_raw("SELECT id FROM doogats WHERE type = 'uqtest' ORDER BY id")
+        .unwrap();
+    assert_eq!(idx.len(), 2, "doogats index should have both rows");
+    assert!(
+        idx.iter().any(|row| row[0] == fresh_id),
+        "fresh insert id {fresh_id} should be in the doogats index"
+    );
+}
+
+#[test]
+fn delete_after_unique_failure_succeeds_issue_4_a1() {
+    let (_dir, repo, index) = setup();
+    setup_unique_table(&repo, &index);
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    let valid_id = match engine
+        .execute("INSERT INTO uqtest (code, label) VALUES ('A1D', 'original')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok(id), got {other:?}"),
+    };
+
+    let dup = engine.execute("INSERT INTO uqtest (code, label) VALUES ('A1D', 'dup')");
+    assert!(dup.is_err(), "duplicate insert should error, got: {dup:?}");
+
+    // deleteDoogat analogue: DELETE the row that DID commit. Must succeed
+    // and remove both the typed-table row and the doogats index row.
+    let del = engine
+        .execute(&format!("DELETE FROM uqtest WHERE id = '{valid_id}'"))
+        .unwrap();
+    match del {
+        SqlResult::Affected(n) => assert_eq!(n, 1, "DELETE should affect 1 row, got {n}"),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+
+    let typed = index.query_raw("SELECT label FROM uqtest").unwrap();
+    assert_eq!(typed.len(), 0, "typed table should be empty after delete");
+    let idx = index
+        .query_raw("SELECT id FROM doogats WHERE type = 'uqtest'")
+        .unwrap();
+    assert_eq!(
+        idx.len(),
+        0,
+        "doogats index should have no uqtest rows after delete"
+    );
+}
+
 #[test]
 fn create_table_with_unique_constraint_enforced() {
     let (_dir, repo, index) = setup();

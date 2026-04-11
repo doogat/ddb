@@ -1115,6 +1115,36 @@ CM2_TITLE=$(echo "$CM2" | jq -r '.data.createMany[0].title')
 pass "serve: createMany onConflict IGNORE returns existing"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE upsertgql CASCADE\") { message } }"}' >/dev/null
 
+# 45.A1 — Cross-mutation parity after a failed UNIQUE INSERT (issue #4 group A1).
+# duplicate_insert_does_not_leave_ghost_doogats_row pins the index invariant at
+# the unit level; this sub-block proves all THREE GraphQL write paths
+# (updateDoogat / createDoogat / deleteDoogat) still work after a UNIQUE
+# rollback. Issue #4 explicitly named all three as broken on the regression.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a1item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}' >/dev/null
+sleep 1
+A1_VALID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a1item (title, name) VALUES (\\\"a\\\", \\\"unique1\\\")\") { message } }"}')
+A1_VALID_ID=$(printf '%s' "$A1_VALID" | extract_id)
+[ -n "$A1_VALID_ID" ]
+A1_DUP=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a1item (title, name) VALUES (\\\"b\\\", \\\"unique1\\\")\") { message } }"}')
+assert_gql_errors "$A1_DUP"
+printf '%s' "$A1_DUP" | grep -q 'UNIQUE'
+# updateDoogat after the failure
+A1_UPD=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$A1_VALID_ID\\\", tags: [\\\"a1-recovered\\\"] }) { id tags } }\"}")
+assert_gql_ok "$A1_UPD"
+printf '%s' "$A1_UPD" | grep -q 'a1-recovered'
+# createDoogat after the failure (different unique key)
+A1_CREATE=$(gql '{"query":"mutation { createDoogat(input: { type: \"a1item\", title: \"created-after-rollback\", fields: \"{\\\"name\\\":\\\"unique2\\\"}\" }) { id title } }"}')
+assert_gql_ok "$A1_CREATE"
+A1_CREATE_ID=$(printf '%s' "$A1_CREATE" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+[ -n "$A1_CREATE_ID" ]
+# deleteDoogat after the failure (delete the row created above so we don't
+# disturb the surviving baseline row)
+A1_DEL=$(gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$A1_CREATE_ID\\\") }\"}")
+assert_gql_ok "$A1_DEL"
+printf '%s' "$A1_DEL" | grep -q 'true'
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a1item CASCADE\") { message } }"}' >/dev/null
+pass "issue-4-A1: failed UNIQUE INSERT does not break update/create/delete mutations"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
