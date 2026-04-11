@@ -857,6 +857,45 @@ assert_gql_ok "$J4_JC_SEL"
 printf '%s' "$J4_JC_SEL" | grep -q '\\"1.0.0\\"'
 pass "j4: SELECT frontend_version returns 1.0.0"
 
+# 18z10. Composite UNIQUE duplicate + compound-predicate DELETE jink port
+# (#9 jink full-sweep sections 6 + 13). Ported from validate-full-sweep.sh
+# lines 137-139 and 246-256. Also drops all jink tables at the end so no
+# jink-port state leaks into later sections.
+
+# Sweep section 6: composite UNIQUE duplicate must be rejected with a
+# descriptive error. (Complements the F1 CLI check in section 30.)
+J5_DUP=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO \\\\\\\"category-membership\\\\\\\" (title, link_id, category_fqn) VALUES ('dup', '$JINK_LINK_ID', 'work.dev')\\\") { message } }\"}")
+assert_gql_errors "$J5_DUP"
+printf '%s' "$J5_DUP" | grep -q 'UNIQUE'
+pass "j5: duplicate category-membership rejected with UNIQUE error"
+
+# Sweep section 13: executeBatch DELETE with compound predicates.
+J5_BATCH=$(gql "{\"query\":\"mutation { executeBatch(statements: [\\\"DELETE FROM \\\\\\\"category-membership\\\\\\\" WHERE link_id = '$JINK_LINK_ID' AND category_fqn = 'work.dev'\\\", \\\"DELETE FROM link WHERE id = '$JINK_LINK_ID' AND url = 'https://example.com'\\\"]) { message } }\"}")
+assert_gql_ok "$J5_BATCH"
+printf '%s' "$J5_BATCH" | grep -q '"executeBatch"'
+pass "j5: executeBatch DELETE category-membership + link (compound predicates)"
+
+J5_LINK_GONE=$(gql "{\"query\":\"{ links(where: {id: {eq: \\\"$JINK_LINK_ID\\\"}}) { items { id } } }\"}")
+assert_gql_ok "$J5_LINK_GONE"
+printf '%s' "$J5_LINK_GONE" | grep -qE '"items":\[\]'
+pass "j5: link is gone after batch delete"
+
+J5_Q_DEL=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM quote WHERE id = '$JINK_QUOTE_ID' AND title = 'First'\\\") { affected } }\"}")
+assert_gql_ok "$J5_Q_DEL"
+printf '%s' "$J5_Q_DEL" | grep -q '"affected":1'
+pass "j5: DELETE quote (compound predicate)"
+
+# Final cleanup: drop all jink tables from sub-block J1. Silenced so DROP
+# output doesn't pollute subsequent pass lines.
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE link CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE category CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"category-membership\\\" CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE quote CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"saved-search\\\" CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"pinned-result\\\" CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"jink-config\\\" CASCADE\") { message } }"}' >/dev/null
+pass "j5: jink port cleanup (all tables dropped)"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
