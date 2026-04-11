@@ -138,6 +138,30 @@ $DDB query "SELECT baz FROM foo WHERE id = '$FOO_ID'" | grep -q "99"
 $DDB query "DELETE FROM foo WHERE id = '$FOO_ID'" | grep -q "1 row(s) affected"
 pass "sql ddl/dml"
 
+# 11c. Ghost-row + cross-mutation recovery pin (PRD 00124 group A1, issue #4).
+# Smoke-sized version: fast UNIQUE violation + post-failure write succeeds.
+$DDB query "CREATE TABLE smokeghost (name TEXT, UNIQUE(name))" | grep -q "table smokeghost created"
+SG_ID=$($DDB query "INSERT INTO smokeghost (title, name) VALUES ('first', 'uq_a')")
+echo "$SG_ID" | grep -qE "^[0-9]{14}$"
+# Capture stderr of the failing INSERT. `|| true` keeps set -e happy; the grep
+# below asserts the expected UNIQUE error was actually produced.
+SG_DUP=$($DDB query "INSERT INTO smokeghost (title, name) VALUES ('dup', 'uq_a')" 2>&1 || true)
+echo "$SG_DUP" | grep -q "UNIQUE"
+$DDB query "UPDATE smokeghost SET title = 'recovered' WHERE id = '$SG_ID'" | grep -q "1 row(s) affected"
+$DDB query "SELECT title FROM smokeghost WHERE id = '$SG_ID'" | grep -q "recovered"
+$DDB query "DROP TABLE smokeghost CASCADE" | grep -q "dropped"
+pass "smoke-ghost: UNIQUE rollback + cross-mutation recovery (issue #4 A1)"
+
+# 11d. JOIN works smoke pin (PRD 00124 group E1, issue #8 obsolete).
+$DDB query "CREATE TABLE smokelink (url TEXT)" | grep -q "table smokelink created"
+$DDB query "CREATE TABLE smokenum (count INTEGER)" | grep -q "table smokenum created"
+$DDB query "INSERT INTO smokelink (title, url) VALUES ('a', 'https://a.com')" >/dev/null
+$DDB query "INSERT INTO smokenum (title, count) VALUES ('a', 1)" >/dev/null
+$DDB query "SELECT l.title, n.count FROM smokelink l JOIN smokenum n ON l.title = n.title" | grep -q "a | 1"
+$DDB query "DROP TABLE smokelink CASCADE" | grep -q "dropped"
+$DDB query "DROP TABLE smokenum CASCADE" | grep -q "dropped"
+pass "smoke-join: SELECT ... JOIN returns joined rows (issue #8 obsolete)"
+
 # 11a. ALTER TABLE SET ZONE and TITLE TEMPLATE
 $DDB query "ALTER TABLE foo SET ZONE frontmatter FOR bar" | grep -q "zone set to frontmatter"
 $DDB query "ALTER TABLE foo SET TITLE TEMPLATE 'my-template'" | grep -q "title template set"

@@ -196,6 +196,37 @@ $output = ddb query "DELETE FROM foo WHERE id = '$FOO_ID'"
 if ($output -notmatch "1 row\(s\) affected") { throw "delete failed" }
 pass "sql ddl/dml"
 
+# 11c. Ghost-row + cross-mutation recovery pin (PRD 00124 group A1, issue #4).
+$output = ddb query "CREATE TABLE smokeghost (name TEXT, UNIQUE(name))"
+if ($output -notmatch "table smokeghost created") { throw "smokeghost create failed" }
+$SG_ID = ddb query "INSERT INTO smokeghost (title, name) VALUES ('first', 'uq_a')"
+if ($SG_ID -is [array]) { $SG_ID = $SG_ID[-1] }
+if ($SG_ID -notmatch "^\d{14}$") { throw "smokeghost insert returned bad id: [$SG_ID]" }
+$dup = ddb query "INSERT INTO smokeghost (title, name) VALUES ('dup', 'uq_a')" 2>&1
+if ($dup -notmatch "UNIQUE") { throw "smokeghost duplicate should error with UNIQUE, got: $dup" }
+$output = ddb query "UPDATE smokeghost SET title = 'recovered' WHERE id = '$SG_ID'"
+if ($output -notmatch "1 row\(s\) affected") { throw "smokeghost post-failure UPDATE failed: $output" }
+$output = ddb query "SELECT title FROM smokeghost WHERE id = '$SG_ID'"
+if ($output -notmatch "recovered") { throw "smokeghost SELECT returned unexpected: $output" }
+$output = ddb query "DROP TABLE smokeghost CASCADE"
+if ($output -notmatch "dropped") { throw "smokeghost DROP failed" }
+pass "smoke-ghost: UNIQUE rollback + cross-mutation recovery (issue #4 A1)"
+
+# 11d. JOIN works smoke pin (PRD 00124 group E1, issue #8 obsolete).
+$output = ddb query "CREATE TABLE smokelink (url TEXT)"
+if ($output -notmatch "table smokelink created") { throw "smokelink create failed" }
+$output = ddb query "CREATE TABLE smokenum (count INTEGER)"
+if ($output -notmatch "table smokenum created") { throw "smokenum create failed" }
+ddb query "INSERT INTO smokelink (title, url) VALUES ('a', 'https://a.com')" | Out-Null
+ddb query "INSERT INTO smokenum (title, count) VALUES ('a', 1)" | Out-Null
+$output = ddb query "SELECT l.title, n.count FROM smokelink l JOIN smokenum n ON l.title = n.title"
+if ($output -notmatch "a \| 1") { throw "smoke-join: expected 'a | 1', got: $output" }
+$output = ddb query "DROP TABLE smokelink CASCADE"
+if ($output -notmatch "dropped") { throw "smokelink DROP failed" }
+$output = ddb query "DROP TABLE smokenum CASCADE"
+if ($output -notmatch "dropped") { throw "smokenum DROP failed" }
+pass "smoke-join: SELECT ... JOIN returns joined rows (issue #8 obsolete)"
+
 # 11a. ALTER TABLE SET ZONE and TITLE TEMPLATE
 $output = ddb query "ALTER TABLE foo SET ZONE frontmatter FOR bar"
 if ($output -notmatch "zone set to frontmatter") { throw "SET ZONE failed" }
