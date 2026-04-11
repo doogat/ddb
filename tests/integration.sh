@@ -752,6 +752,46 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE gqtestb CASCADE\") { mess
 pass "issue-9-G1: every typed table has plural and Aggregate query fields"
 pass "issue-9-G2: every Connection type has items and totalCount fields"
 
+# 18z8. Category + membership jink port (#9 jink full-sweep section 5).
+# Ported from validate-full-sweep.sh lines 102-132. Uses JINK_LINK_ID from
+# sub-block 17.J2. Includes the COALESCE+subquery INSERT pattern jink relies
+# on for sort_order computation.
+J3_CAT=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO category (title, fqn, space, sort_order) VALUES (\\\"Dev\\\", \\\"work.dev\\\", \\\"work\\\", 0)\") { message } }"}')
+assert_gql_ok "$J3_CAT"
+JINK_CAT_ID=$(printf '%s' "$J3_CAT" | extract_id)
+[ -n "$JINK_CAT_ID" ]
+pass "j3: INSERT category"
+
+J3_CAT_SPACE=$(gql '{"query":"{ categories(where: {space: {eq: \"work\"}}) { items { id fqn title space sort_order } } }"}')
+assert_gql_ok "$J3_CAT_SPACE"
+printf '%s' "$J3_CAT_SPACE" | grep -q '"work.dev"'
+pass "j3: categories GraphQL query by space"
+
+J3_CAT_IN=$(gql '{"query":"{ categories(where: {fqn: {in: [\"work.dev\"]}}) { items { fqn title space } } }"}')
+assert_gql_ok "$J3_CAT_IN"
+printf '%s' "$J3_CAT_IN" | grep -q '"work.dev"'
+pass "j3: categories GraphQL query by fqn IN list"
+
+J3_CM=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO \\\\\\\"category-membership\\\\\\\" (title, link_id, category_fqn, sort_order) VALUES ('Test in work.dev', '$JINK_LINK_ID', 'work.dev', COALESCE((SELECT MAX(sort_order) + 1 FROM \\\\\\\"category-membership\\\\\\\" WHERE category_fqn = 'work.dev'), 0))\\\") { message } }\"}")
+assert_gql_ok "$J3_CM"
+printf '%s' "$J3_CM" | grep -qE '"message":"[0-9]+"'
+pass "j3: INSERT category-membership with COALESCE+subquery sort_order"
+
+J3_CM_BOTH=$(gql "{\"query\":\"{ categoryMemberships(where: {link_id: {eq: \\\"$JINK_LINK_ID\\\"}, category_fqn: {eq: \\\"work.dev\\\"}}) { items { id link_id category_fqn pinned sort_order } } }\"}")
+assert_gql_ok "$J3_CM_BOTH"
+printf '%s' "$J3_CM_BOTH" | grep -q '"work.dev"'
+pass "j3: categoryMemberships by link_id + category_fqn"
+
+J3_CM_LINK=$(gql "{\"query\":\"{ categoryMemberships(where: {link_id: {eq: \\\"$JINK_LINK_ID\\\"}}) { items { category_fqn } } }\"}")
+assert_gql_ok "$J3_CM_LINK"
+printf '%s' "$J3_CM_LINK" | grep -q '"work.dev"'
+pass "j3: categoryMemberships by link_id only"
+
+J3_CM_CAT=$(gql '{"query":"{ categoryMemberships(where: {category_fqn: {eq: \"work.dev\"}}) { items { link_id pinned sort_order } } }"}')
+assert_gql_ok "$J3_CM_CAT"
+printf '%s' "$J3_CM_CAT" | grep -q "$JINK_LINK_ID"
+pass "j3: categoryMemberships by category_fqn only"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
