@@ -191,7 +191,7 @@ pass "j2: INSERT jink-config singleton"
 
 J2_JC_SEL=$(gql '{"query":"{ sql(query: \"SELECT quote_rotation_minutes FROM \\\"jink-config\\\" LIMIT 1\") { rows } }"}')
 assert_gql_ok "$J2_JC_SEL"
-printf '%s' "$J2_JC_SEL" | grep -q '\\"30\\"'
+printf '%s' "$J2_JC_SEL" | grep -qF '\"30\"'
 pass "j2: SELECT quote_rotation_minutes returns 30"
 
 # Link CRUD (3 checks from sweep section 4).
@@ -566,11 +566,13 @@ gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO membership_f4 (titl
 F4_BATCH=$(gql "{\"query\":\"mutation { executeBatch(statements: [\\\"UPDATE link_f4 SET title = 'batched' WHERE id = '$F4_LINK_ID' AND url = 'https://f4.com'\\\", \\\"INSERT INTO membership_f4 (title, link_id, category) VALUES ('dup', '$F4_LINK_ID', 'work')\\\"]) { message } }\"}")
 assert_gql_errors "$F4_BATCH"
 printf '%s' "$F4_BATCH" | grep -q 'UNIQUE'
-# Verify the UPDATE was rolled back: title must still be "initial".
+# Verify the UPDATE was rolled back: title must still be "initial". The SQL
+# response wraps row values in nested JSON-escaped strings ("rows":["[\"initial\"]"])
+# so grep for the bare token without surrounding quotes.
 F4_AFTER=$(gql "{\"query\":\"{ sql(query: \\\"SELECT title FROM link_f4 WHERE id = '$F4_LINK_ID'\\\") { rows } }\"}")
 assert_gql_ok "$F4_AFTER"
-printf '%s' "$F4_AFTER" | grep -q '"initial"'
-! printf '%s' "$F4_AFTER" | grep -q '"batched"'
+printf '%s' "$F4_AFTER" | grep -q 'initial'
+! printf '%s' "$F4_AFTER" | grep -q 'batched'
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE link_f4 CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE membership_f4 CASCADE\") { message } }"}' >/dev/null
 pass "issue-9-F4: executeBatch rolls back all statements when one fails"
@@ -626,37 +628,41 @@ gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label)
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label, maybe_null) VALUES (\\\"r3\\\", 3, \\\"b\\\", \\\"y\\\")\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label) VALUES (\\\"r4\\\", 4, \\\"b\\\")\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label, maybe_null) VALUES (\\\"r5\\\", 5, \\\"c\\\", \\\"z\\\")\") { message } }"}' >/dev/null
-# COUNT(*)
+# COUNT(*) — SQL responses wrap row values as nested JSON-escaped arrays, so
+# grep -qF '[\"<val>\"]' is the matching pattern (see existing 43.D pattern).
 F9_CNT=$(gql '{"query":"{ sql(query: \"SELECT COUNT(*) FROM feat\") { rows } }"}')
-printf '%s' "$F9_CNT" | grep -q '"5"'
-# GROUP BY label → three groups
+printf '%s' "$F9_CNT" | grep -qF '[\"5\"]'
+# GROUP BY label → three groups (a, b, c). `rows` is an array of stringified
+# arrays; format=array doesn't surface column names in the response, so only
+# check the values.
 F9_GRP=$(gql '{"query":"{ sql(query: \"SELECT label, COUNT(*) FROM feat GROUP BY label ORDER BY label\") { rows } }"}')
-printf '%s' "$F9_GRP" | grep -q '"a"'
-printf '%s' "$F9_GRP" | grep -q '"b"'
-printf '%s' "$F9_GRP" | grep -q '"c"'
+assert_gql_ok "$F9_GRP"
+printf '%s' "$F9_GRP" | grep -qF '\"a\"'
+printf '%s' "$F9_GRP" | grep -qF '\"b\"'
+printf '%s' "$F9_GRP" | grep -qF '\"c\"'
 # ORDER BY DESC LIMIT 2 → rows with val 5, 4 (labels c, b)
 F9_ORD=$(gql '{"query":"{ sql(query: \"SELECT label FROM feat ORDER BY val DESC LIMIT 2\") { rows } }"}')
-printf '%s' "$F9_ORD" | grep -q '"c"'
-printf '%s' "$F9_ORD" | grep -q '"b"'
-! printf '%s' "$F9_ORD" | grep -q '"a"'
+printf '%s' "$F9_ORD" | grep -qF '[\"c\"]'
+printf '%s' "$F9_ORD" | grep -qF '[\"b\"]'
+! printf '%s' "$F9_ORD" | grep -qF '[\"a\"]'
 # OFFSET skipping first 3 → rows with val 4, 5
 F9_OFF=$(gql '{"query":"{ sql(query: \"SELECT val FROM feat ORDER BY val ASC LIMIT 10 OFFSET 3\") { rows } }"}')
-printf '%s' "$F9_OFF" | grep -q '"4"'
-printf '%s' "$F9_OFF" | grep -q '"5"'
-! printf '%s' "$F9_OFF" | grep -q '"1"'
+printf '%s' "$F9_OFF" | grep -qF '[\"4\"]'
+printf '%s' "$F9_OFF" | grep -qF '[\"5\"]'
+! printf '%s' "$F9_OFF" | grep -qF '[\"1\"]'
 # IS NULL → two rows (val 2, val 4)
 F9_NUL=$(gql '{"query":"{ sql(query: \"SELECT COUNT(*) FROM feat WHERE maybe_null IS NULL\") { rows } }"}')
-printf '%s' "$F9_NUL" | grep -q '"2"'
+printf '%s' "$F9_NUL" | grep -qF '[\"2\"]'
 # LIKE → two rows (label a)
 F9_LIK=$(gql '{"query":"{ sql(query: \"SELECT COUNT(*) FROM feat WHERE label LIKE \\\"a%\\\"\") { rows } }"}')
-printf '%s' "$F9_LIK" | grep -q '"2"'
+printf '%s' "$F9_LIK" | grep -qF '[\"2\"]'
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE feat CASCADE\") { message } }"}' >/dev/null
 pass "issue-9-F9: SQL feature coverage (COUNT, GROUP BY, ORDER BY, LIMIT, OFFSET, IS NULL, LIKE)"
 
 # 18z5. search() limit boundary pins (#9 F10). Seed three distinguishing
-# doogats, then probe 0 / 10001 / -1 to capture whatever the GraphQL schema
-# enforces. This is a "pin existing behavior" check: if a boundary unexpectedly
-# errors, update the assertion here rather than in the caller.
+# doogats, then probe 0 / 10000 / 10001 / -1 to capture current behavior.
+# The server enforces a hard max of 10000 so 10001 is rejected with a clear
+# message, not an internal error. This is a pin-existing-behavior check.
 F10A=$(gql '{"query":"mutation { createDoogat(input: { title: \"F10boundary alpha\" }) { id } }"}')
 F10A_ID=$(printf '%s' "$F10A" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 F10B=$(gql '{"query":"mutation { createDoogat(input: { title: \"F10boundary beta\" }) { id } }"}')
@@ -664,15 +670,17 @@ F10B_ID=$(printf '%s' "$F10B" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 F10C=$(gql '{"query":"mutation { createDoogat(input: { title: \"F10boundary gamma\" }) { id } }"}')
 F10C_ID=$(printf '%s' "$F10C" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 sleep 1
-# limit: 0 — pin current behavior. Either: hits array is empty with the total
-# count still populated, OR the GraphQL layer rejects the value. Both cases
-# must NOT return an "internal error".
+# limit: 0 — pin current behavior. Must not surface as an "internal error".
 F10_ZERO=$(gql '{"query":"{ search(query: \"F10boundary\", limit: 0) { totalCount hits { id } } }"}' || true)
 ! printf '%s' "$F10_ZERO" | grep -q 'internal error'
-# limit: 10001 — must succeed without error and return the 3 seeded rows.
-F10_BIG=$(gql '{"query":"{ search(query: \"F10boundary\", limit: 10001) { totalCount hits { id } } }"}')
-assert_gql_ok "$F10_BIG"
-printf '%s' "$F10_BIG" | grep -q '"totalCount":3'
+# limit: 10000 — max allowed. Must succeed and return all seeded rows.
+F10_MAX=$(gql '{"query":"{ search(query: \"F10boundary\", limit: 10000) { totalCount hits { id } } }"}')
+assert_gql_ok "$F10_MAX"
+printf '%s' "$F10_MAX" | grep -q '"totalCount":3'
+# limit: 10001 — one above the max. Pin the clear-error rejection.
+F10_OVER=$(gql '{"query":"{ search(query: \"F10boundary\", limit: 10001) { totalCount } }"}' || true)
+printf '%s' "$F10_OVER" | grep -q 'limit must not exceed'
+! printf '%s' "$F10_OVER" | grep -q 'internal error'
 # limit: -1 — GraphQL Int type may accept or reject. Either way: never an
 # internal error.
 F10_NEG=$(gql '{"query":"{ search(query: \"F10boundary\", limit: -1) { totalCount } }"}' || true)
@@ -680,7 +688,7 @@ F10_NEG=$(gql '{"query":"{ search(query: \"F10boundary\", limit: -1) { totalCoun
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10A_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10B_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10C_ID\\\") }\"}" >/dev/null
-pass "issue-9-F10: search limit boundaries (0, 10001, -1) stay out of internal error"
+pass "issue-9-F10: search limit boundaries (0, 10000, 10001, -1)"
 
 # 18z6. ALTER TABLE ADD COLUMN surfaces in the typeDefs introspection query
 # (#9 F11). Jink relies on typeDefs to reflect the live schema so its client
@@ -854,7 +862,7 @@ pass "j4: UPDATE jink-config frontend_version (compound predicate)"
 
 J4_JC_SEL=$(gql '{"query":"{ sql(query: \"SELECT frontend_version FROM \\\"jink-config\\\" LIMIT 1\") { rows } }"}')
 assert_gql_ok "$J4_JC_SEL"
-printf '%s' "$J4_JC_SEL" | grep -q '\\"1.0.0\\"'
+printf '%s' "$J4_JC_SEL" | grep -qF '\"1.0.0\"'
 pass "j4: SELECT frontend_version returns 1.0.0"
 
 # 18z10. Composite UNIQUE duplicate + compound-predicate DELETE jink port
@@ -1529,8 +1537,10 @@ gql '{"query":"mutation { executeSql(sql: \"INSERT INTO e1_link (title, url) VAL
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO e1_num (title, count) VALUES (\\\"a\\\", 1)\") { message } }"}' >/dev/null
 E1_JOIN=$(gql '{"query":"{ sql(query: \"SELECT l.title, n.count FROM e1_link l JOIN e1_num n ON l.title = n.title\") { rows } }"}')
 assert_gql_ok "$E1_JOIN"
-printf '%s' "$E1_JOIN" | grep -q '"a"'
-printf '%s' "$E1_JOIN" | grep -q '"1"'
+# SQL row responses are nested JSON-escaped (["[\"a\",\"1\"]"]); grep -F for
+# the escaped form.
+printf '%s' "$E1_JOIN" | grep -qF '\"a\"'
+printf '%s' "$E1_JOIN" | grep -qF '\"1\"'
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE e1_link CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE e1_num CASCADE\") { message } }"}' >/dev/null
 pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obsolete)"
@@ -1970,10 +1980,9 @@ pass "update/delete WHERE id no-match semantics (#5)"
 cd "$TMPDIR"
 $DDB query 'CREATE TABLE f1mship (title VARCHAR(255), link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))' | grep -q "table f1mship created"
 $DDB query "INSERT INTO f1mship (title, link_id, category) VALUES ('a', 'link1', 'cat1')" >/dev/null
-! $DDB query "INSERT INTO f1mship (title, link_id, category) VALUES ('b', 'link1', 'cat1')" 2>&1 > /tmp/f1_out.txt
-grep -q "UNIQUE" /tmp/f1_out.txt
-grep -qE "f1mship|link_id|category" /tmp/f1_out.txt
-rm -f /tmp/f1_out.txt
+F1_DUP=$($DDB query "INSERT INTO f1mship (title, link_id, category) VALUES ('b', 'link1', 'cat1')" 2>&1 || true)
+echo "$F1_DUP" | grep -q "UNIQUE"
+echo "$F1_DUP" | grep -qE "f1mship|link_id|category"
 $DDB query "DROP TABLE f1mship CASCADE" | grep -q "dropped"
 pass "issue-9-F1: composite UNIQUE duplicate rejected with clear error"
 
