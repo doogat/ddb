@@ -572,6 +572,35 @@ printf '%s' "$F9_LIK" | grep -q '"2"'
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE feat CASCADE\") { message } }"}' >/dev/null
 pass "issue-9-F9: SQL feature coverage (COUNT, GROUP BY, ORDER BY, LIMIT, OFFSET, IS NULL, LIKE)"
 
+# 18z5. search() limit boundary pins (#9 F10). Seed three distinguishing
+# doogats, then probe 0 / 10001 / -1 to capture whatever the GraphQL schema
+# enforces. This is a "pin existing behavior" check: if a boundary unexpectedly
+# errors, update the assertion here rather than in the caller.
+F10A=$(gql '{"query":"mutation { createDoogat(input: { title: \"F10boundary alpha\" }) { id } }"}')
+F10A_ID=$(printf '%s' "$F10A" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+F10B=$(gql '{"query":"mutation { createDoogat(input: { title: \"F10boundary beta\" }) { id } }"}')
+F10B_ID=$(printf '%s' "$F10B" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+F10C=$(gql '{"query":"mutation { createDoogat(input: { title: \"F10boundary gamma\" }) { id } }"}')
+F10C_ID=$(printf '%s' "$F10C" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+sleep 1
+# limit: 0 — pin current behavior. Either: hits array is empty with the total
+# count still populated, OR the GraphQL layer rejects the value. Both cases
+# must NOT return an "internal error".
+F10_ZERO=$(gql '{"query":"{ search(query: \"F10boundary\", limit: 0) { totalCount hits { id } } }"}' || true)
+! printf '%s' "$F10_ZERO" | grep -q 'internal error'
+# limit: 10001 — must succeed without error and return the 3 seeded rows.
+F10_BIG=$(gql '{"query":"{ search(query: \"F10boundary\", limit: 10001) { totalCount hits { id } } }"}')
+assert_gql_ok "$F10_BIG"
+printf '%s' "$F10_BIG" | grep -q '"totalCount":3'
+# limit: -1 — GraphQL Int type may accept or reject. Either way: never an
+# internal error.
+F10_NEG=$(gql '{"query":"{ search(query: \"F10boundary\", limit: -1) { totalCount } }"}' || true)
+! printf '%s' "$F10_NEG" | grep -q 'internal error'
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10A_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10B_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10C_ID\\\") }\"}" >/dev/null
+pass "issue-9-F10: search limit boundaries (0, 10001, -1) stay out of internal error"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
