@@ -1092,6 +1092,22 @@ gql '{"query":"mutation{executeSql(sql:\"DROP TABLE link_d1 CASCADE\"){message}}
 gql '{"query":"mutation{executeSql(sql:\"DROP TABLE numeric_d3 CASCADE\"){message}}"}' >/dev/null
 gql '{"query":"mutation{executeSql(sql:\"DROP TABLE link_d6 CASCADE\"){message}}"}' >/dev/null
 
+# 44.E1 — Pin JOIN as working (issue #8 group E1). PRD 00123 was archived
+# because JOIN actually works; this check pins the behavior at the GraphQL
+# surface so a regression can't silently drop joined rows.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE e1_link (url VARCHAR(255))\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE e1_num (count INTEGER)\") { message } }"}' >/dev/null
+sleep 1
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO e1_link (title, url) VALUES (\\\"a\\\", \\\"https://a.com\\\")\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO e1_num (title, count) VALUES (\\\"a\\\", 1)\") { message } }"}' >/dev/null
+E1_JOIN=$(gql '{"query":"{ sql(query: \"SELECT l.title, n.count FROM e1_link l JOIN e1_num n ON l.title = n.title\") { rows } }"}')
+assert_gql_ok "$E1_JOIN"
+printf '%s' "$E1_JOIN" | grep -q '"a"'
+printf '%s' "$E1_JOIN" | grep -q '"1"'
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE e1_link CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE e1_num CASCADE\") { message } }"}' >/dev/null
+pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obsolete)"
+
 # 44. DDL response consistency (no spurious errors)
 RESULT=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ddltest (name VARCHAR(100))\") { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'

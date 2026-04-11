@@ -1462,6 +1462,161 @@ fn update_from_rejected() {
     assert!(msg.contains("UPDATE...FROM not supported"), "{msg}");
 }
 
+// Issue #8 group E: PRD 00123 was archived as obsolete on 2026-04-11 after
+// empirical verification that JOIN actually works in the current build. The
+// tests below pin JOIN's working behavior and audit the four adjacent SQL
+// features the PRD called out (CTE, subquery in FROM, UNION, window).
+
+#[test]
+fn select_join_returns_joined_rows_issue_8_e1() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link_e1 (url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE num_e1 (count INTEGER)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO link_e1 (title, url) VALUES ('a', 'https://a.com')")
+        .unwrap();
+    engine
+        .execute("INSERT INTO num_e1 (title, count) VALUES ('a', 1)")
+        .unwrap();
+
+    // JOIN over the title column must return the joined row.
+    let joined = index
+        .query_raw(
+            "SELECT l.title, n.count FROM link_e1 l JOIN num_e1 n ON l.title = n.title",
+        )
+        .unwrap();
+    assert_eq!(joined.len(), 1, "JOIN should return 1 row, got {joined:?}");
+    assert_eq!(joined[0][0], "a");
+    assert_eq!(joined[0][1], "1");
+
+    // JOIN with no matching rows must return 0 rows and NOT error.
+    engine
+        .execute("INSERT INTO link_e1 (title, url) VALUES ('b', 'https://b.com')")
+        .unwrap();
+    // num_e1 still has only 'a', so the join on title='x' (non-existent) yields 0.
+    let empty = index
+        .query_raw(
+            "SELECT l.title, n.count FROM link_e1 l JOIN num_e1 n ON l.title = 'nonexistent'",
+        )
+        .unwrap();
+    assert_eq!(empty.len(), 0, "JOIN with no matches should return 0 rows");
+}
+
+#[test]
+fn select_cte_current_behavior_issue_8() {
+    // Audit: pin whatever the engine does with a simple CTE. If this changes,
+    // the test needs updating and we need to decide whether the new behavior
+    // is desirable.
+    let (_dir, repo, _index) = setup();
+    // Simple CTE that references no real table so we don't depend on schema.
+    let mut engine = SqlEngine::new(&_index, &repo);
+    engine
+        .execute("CREATE TABLE cte_probe_t (label VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO cte_probe_t (title, label) VALUES ('row', 'x')")
+        .unwrap();
+    let result = _index
+        .query_raw("WITH w AS (SELECT label FROM cte_probe_t) SELECT label FROM w");
+    // Whatever the current behavior is, pin it. A regression that flips Ok to
+    // Err or changes the row count will fail this test.
+    match result {
+        Ok(rows) => {
+            assert_eq!(rows.len(), 1, "CTE current behavior: expected 1 row, got {rows:?}");
+            assert_eq!(rows[0][0], "x");
+        }
+        Err(e) => panic!(
+            "CTE previously worked (pinned by select_cte_current_behavior_issue_8); \
+             now errors: {e}. If CTEs were intentionally disabled, update this test \
+             to assert the rejection message."
+        ),
+    }
+}
+
+#[test]
+fn select_subquery_in_from_current_behavior_issue_8() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE subq_probe (label VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO subq_probe (title, label) VALUES ('row', 'y')")
+        .unwrap();
+    let result =
+        index.query_raw("SELECT t.label FROM (SELECT label FROM subq_probe) t");
+    match result {
+        Ok(rows) => {
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0][0], "y");
+        }
+        Err(e) => panic!(
+            "subquery-in-FROM previously worked; now errors: {e}. If intentionally \
+             disabled, update this test to assert the rejection message."
+        ),
+    }
+}
+
+#[test]
+fn select_union_current_behavior_issue_8() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE union_a (label VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE union_b (label VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO union_a (title, label) VALUES ('a', 'one')")
+        .unwrap();
+    engine
+        .execute("INSERT INTO union_b (title, label) VALUES ('b', 'two')")
+        .unwrap();
+    let result = index.query_raw("SELECT label FROM union_a UNION SELECT label FROM union_b");
+    match result {
+        Ok(rows) => {
+            assert_eq!(rows.len(), 2, "UNION should return 2 distinct rows, got {rows:?}");
+        }
+        Err(e) => panic!(
+            "UNION previously worked; now errors: {e}. If intentionally disabled, \
+             update this test to assert the rejection message."
+        ),
+    }
+}
+
+#[test]
+fn select_window_function_current_behavior_issue_8() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE win_probe (label VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO win_probe (title, label) VALUES ('one', 'a')")
+        .unwrap();
+    engine
+        .execute("INSERT INTO win_probe (title, label) VALUES ('two', 'b')")
+        .unwrap();
+    let result =
+        index.query_raw("SELECT label, ROW_NUMBER() OVER (ORDER BY label) FROM win_probe");
+    match result {
+        Ok(rows) => {
+            assert_eq!(rows.len(), 2, "window fn should return 2 rows, got {rows:?}");
+        }
+        Err(e) => panic!(
+            "window function previously worked; now errors: {e}. If intentionally \
+             disabled, update this test to assert the rejection message."
+        ),
+    }
+}
+
 #[test]
 fn delete_from_hyphenated_table() {
     let (_dir, repo, index) = setup();
