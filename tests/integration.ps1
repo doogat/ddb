@@ -193,6 +193,77 @@ if ($result -notmatch '"Smoke Server"') { throw "graphql create failed" }
 $GQL_ID = if ($result -match '"id":"([^"]+)"') { $Matches[1] } else { throw "no id in response" }
 pass "serve: graphql create"
 
+# 17.J1 - Jink schema CREATE TABLE definitions (#9 jink full-sweep section 1).
+# Tables persist across sub-blocks 17.J2, 18z8, 18z9, 18z10 below. Do NOT
+# drop these in any sub-block other than the final cleanup in 18z10.
+$j1Link = gqlq 'mutation { executeSql(sql: "CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL, subtitle VARCHAR(255), favicon_path VARCHAR(255), favicon_origin VARCHAR(255), bookmark_source VARCHAR(255), last_opened_at VARCHAR(255), description TEXT)") { message } }'
+assertGqlOk $j1Link "j1 link create"
+if ($j1Link -notmatch '"message":"table link') { throw "j1: link create did not return 'table link'" }
+pass "j1: created link table"
+
+$j1Cat = gqlq 'mutation { executeSql(sql: "CREATE TABLE category (title VARCHAR(255) NOT NULL, fqn VARCHAR(255) NOT NULL, space VARCHAR(255) NOT NULL, sort_order INTEGER DEFAULT 0)") { message } }'
+assertGqlOk $j1Cat "j1 category create"
+if ($j1Cat -notmatch '"message":"table category') { throw "j1: category create did not return 'table category'" }
+pass "j1: created category table"
+
+$j1Cm = gqlq 'mutation { executeSql(sql: "CREATE TABLE \"category-membership\" (title VARCHAR(255) NOT NULL, link_id VARCHAR(255) NOT NULL, category_fqn VARCHAR(255) NOT NULL, pinned BOOLEAN DEFAULT FALSE, sort_order INTEGER DEFAULT 0, UNIQUE(link_id, category_fqn))") { message } }'
+assertGqlOk $j1Cm "j1 category-membership create"
+if ($j1Cm -notmatch '"message":"table category-membership') { throw "j1: category-membership create did not return expected message" }
+pass "j1: created category-membership table with composite UNIQUE"
+
+$j1Q = gqlq 'mutation { executeSql(sql: "CREATE TABLE quote (title VARCHAR(255) NOT NULL, author VARCHAR(255), source VARCHAR(255), favorited BOOLEAN DEFAULT FALSE, text TEXT)") { message } }'
+assertGqlOk $j1Q "j1 quote create"
+if ($j1Q -notmatch '"message":"table quote') { throw "j1: quote create did not return expected message" }
+pass "j1: created quote table"
+
+$j1Ss = gqlq 'mutation { executeSql(sql: "CREATE TABLE \"saved-search\" (title VARCHAR(255) NOT NULL, query_raw VARCHAR(255) NOT NULL, query_normalized VARCHAR(255) NOT NULL)") { message } }'
+assertGqlOk $j1Ss "j1 saved-search create"
+if ($j1Ss -notmatch '"message":"table saved-search') { throw "j1: saved-search create did not return expected message" }
+pass "j1: created saved-search table"
+
+$j1Pr = gqlq 'mutation { executeSql(sql: "CREATE TABLE \"pinned-result\" (title VARCHAR(255) NOT NULL, query_normalized VARCHAR(255) NOT NULL, link_id VARCHAR(255) NOT NULL, sort_order INTEGER DEFAULT 0)") { message } }'
+assertGqlOk $j1Pr "j1 pinned-result create"
+if ($j1Pr -notmatch '"message":"table pinned-result') { throw "j1: pinned-result create did not return expected message" }
+pass "j1: created pinned-result table"
+
+$j1Jc = gqlq 'mutation { executeSql(sql: "CREATE TABLE \"jink-config\" (dashboard_title VARCHAR(255) DEFAULT ''Bobs Battlestation'', quote_rotation_minutes INTEGER DEFAULT 30, links_per_category INTEGER DEFAULT 8, frontend_version VARCHAR(255))") { message } }'
+assertGqlOk $j1Jc "j1 jink-config create"
+if ($j1Jc -notmatch '"message":"table jink-config') { throw "j1: jink-config create did not return expected message" }
+pass "j1: created jink-config table"
+
+Start-Sleep -Seconds 1
+
+# 17.J2 - jink-config singleton + Link CRUD (#9 jink full-sweep sections 3-4).
+$j2JcEmpty = gqlq '{ sql(query: "SELECT id FROM \"jink-config\" LIMIT 1") { rows } }'
+assertGqlOk $j2JcEmpty "j2 jink-config empty select"
+if ($j2JcEmpty -notmatch '"rows"') { throw "j2: empty select missing rows" }
+pass "j2: SELECT from empty jink-config"
+
+$j2JcIns = gqlq 'mutation { executeSql(sql: "INSERT INTO \"jink-config\" (title, dashboard_title, quote_rotation_minutes, links_per_category) VALUES (''jink-config'', ''Bobs Battlestation'', 30, 8)") { message } }'
+assertGqlOk $j2JcIns "j2 jink-config insert"
+if ($j2JcIns -notmatch '"message":"\d+"') { throw "j2: jink-config insert did not return id" }
+pass "j2: INSERT jink-config singleton"
+
+$j2JcSel = gqlq '{ sql(query: "SELECT quote_rotation_minutes FROM \"jink-config\" LIMIT 1") { rows } }'
+assertGqlOk $j2JcSel "j2 jink-config select"
+if ($j2JcSel -notmatch '\\"30\\"') { throw "j2: SELECT did not return 30, got: $j2JcSel" }
+pass "j2: SELECT quote_rotation_minutes returns 30"
+
+$j2LinkIns = gqlq 'mutation { executeSql(sql: "INSERT INTO link (title, url, description) VALUES (''Test Link'', ''https://example.com'', ''a test link'')") { message } }'
+assertGqlOk $j2LinkIns "j2 link insert"
+$JINK_LINK_ID = extractId $j2LinkIns
+if (-not $JINK_LINK_ID) { throw "j2: could not extract JINK_LINK_ID from: $j2LinkIns" }
+pass "j2: INSERT link returns id"
+
+$j2LinkGql = gqlq "{ links(where: {id: {eq: `"$JINK_LINK_ID`"}}) { items { id title url description tags } } }"
+assertGqlOk $j2LinkGql "j2 link graphql query"
+if ($j2LinkGql -notmatch '"Test Link"') { throw "j2: GraphQL links query missing 'Test Link'" }
+pass "j2: query links via GraphQL"
+
+$j2LinkUpd = gqlq "mutation { executeSql(sql: `"UPDATE link SET favicon_path = 'favicon/x.png', favicon_origin = 'fetched' WHERE id = '$JINK_LINK_ID' AND url = 'https://example.com'`") { message affected } }"
+assertGqlOk $j2LinkUpd "j2 link update"
+pass "j2: UPDATE link favicon via compound-predicate SQL"
+
 # 18. expanded GraphQL operations
 $result = gqlq "mutation { updateDoogat(input: { id: `"$GQL_ID`", title: `"Smoke Updated`" }) { id title } }"
 if ($result -notmatch '"Smoke Updated"') { throw "graphql update failed" }
@@ -479,6 +550,307 @@ pass "serve: search accepts normalized query round-trip"
 gqlq "mutation { deleteDoogat(id: `"$PRD121A_ID`") }" | Out-Null
 gqlq "mutation { deleteDoogat(id: `"$PRD121B_ID`") }" | Out-Null
 gqlq "mutation { deleteDoogat(id: `"$PRD121G_ID`") }" | Out-Null
+
+# 18z - UPDATE/DELETE WHERE id no-match GraphQL parity (#5 group B).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE link_b1 (url VARCHAR(255))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$b1Seed = gqlq 'mutation { executeSql(sql: "INSERT INTO link_b1 (title, url) VALUES (''A'', ''https://a.com'')") { message } }'
+$B1_SEED_ID = extractId $b1Seed
+if (-not $B1_SEED_ID) { throw "18z: failed to seed B1 row" }
+
+$b1 = gqlq 'mutation { executeSql(sql: "UPDATE link_b1 SET title = ''x'' WHERE id = ''does_not_exist_b1''") { affected message } }'
+assertGqlOk $b1 "B1"
+if ($b1 -notmatch '"affected":0') { throw "18z B1: expected affected=0, got: $b1" }
+
+$b2 = gqlq 'mutation { executeSql(sql: "DELETE FROM link_b1 WHERE id = ''does_not_exist_b2''") { affected message } }'
+assertGqlOk $b2 "B2"
+if ($b2 -notmatch '"affected":0') { throw "18z B2: expected affected=0, got: $b2" }
+
+$b3 = gqlq 'mutation { executeSql(sql: "UPDATE link_b1 SET title = ''x'' WHERE url = ''https://nope.com''") { affected message } }'
+assertGqlOk $b3 "B3"
+if ($b3 -notmatch '"affected":0') { throw "18z B3: expected affected=0, got: $b3" }
+
+$b4 = gqlq "mutation { executeSql(sql: `"UPDATE link_b1 SET title = 'x' WHERE id = '$B1_SEED_ID' AND url = 'https://wrong.com'`") { affected message } }"
+assertGqlOk $b4 "B4"
+if ($b4 -notmatch '"affected":0') { throw "18z B4: expected affected=0, got: $b4" }
+
+$b5 = gqlq "mutation { executeSql(sql: `"UPDATE link_b1 SET title = 'from_in_clause' WHERE id IN ('nope', '$B1_SEED_ID')`") { affected message } }"
+assertGqlOk $b5 "B5"
+if ($b5 -notmatch '"affected":1') { throw "18z B5: expected affected=1, got: $b5" }
+
+$b5Fast = gqlq "mutation { executeSql(sql: `"UPDATE link_b1 SET title = 'final' WHERE id = '$B1_SEED_ID'`") { affected message } }"
+assertGqlOk $b5Fast "B5 fast"
+if ($b5Fast -notmatch '"affected":1') { throw "18z B5 fast: expected affected=1, got: $b5Fast" }
+
+gqlq 'mutation { executeSql(sql: "DROP TABLE link_b1 CASCADE") { message } }' | Out-Null
+pass "issue-5-B1..B5: UPDATE/DELETE no-match GraphQL parity"
+
+# 18z2 - executeBatch atomicity (#9 F4).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE link_f4 (url VARCHAR(255))") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE membership_f4 (link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$f4Link = gqlq 'mutation { executeSql(sql: "INSERT INTO link_f4 (title, url) VALUES (''initial'', ''https://f4.com'')") { message } }'
+$F4_LINK_ID = extractId $f4Link
+if (-not $F4_LINK_ID) { throw "18z2: could not extract F4_LINK_ID" }
+
+gqlq "mutation { executeSql(sql: `"INSERT INTO membership_f4 (title, link_id, category) VALUES ('m', '$F4_LINK_ID', 'work')`") { message } }" | Out-Null
+
+$f4Batch = gqlq "mutation { executeBatch(statements: [`"UPDATE link_f4 SET title = 'batched' WHERE id = '$F4_LINK_ID' AND url = 'https://f4.com'`", `"INSERT INTO membership_f4 (title, link_id, category) VALUES ('dup', '$F4_LINK_ID', 'work')`"]) { message } }"
+assertGqlErrors $f4Batch "F4 batch"
+if ($f4Batch -notmatch 'UNIQUE') { throw "18z2: batch error missing UNIQUE marker, got: $f4Batch" }
+
+$f4After = gqlq "{ sql(query: `"SELECT title FROM link_f4 WHERE id = '$F4_LINK_ID'`") { rows } }"
+assertGqlOk $f4After "F4 after"
+if ($f4After -notmatch 'initial') { throw "18z2: batch was not rolled back, title changed, got: $f4After" }
+if ($f4After -match 'batched') { throw "18z2: batch rollback failed, found 'batched' in: $f4After" }
+
+gqlq 'mutation { executeSql(sql: "DROP TABLE link_f4 CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE membership_f4 CASCADE") { message } }' | Out-Null
+pass "issue-9-F4: executeBatch rolls back all statements when one fails"
+
+# 18z3 - updateDoogat tag semantics (#9 F5/F6/F7).
+$f5 = gqlq 'mutation { createDoogat(input: { title: "F5 tag clear", tags: ["a", "b", "c"] }) { id tags } }'
+$F5_ID = if ($f5 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "18z3 F5: no id" }
+if ($f5 -notmatch '"a"') { throw "18z3 F5: initial tags missing 'a'" }
+gqlq "mutation { updateDoogat(input: { id: `"$F5_ID`", tags: [] }) { id } }" | Out-Null
+$f5Check = gqlq "{ doogat(id: `"$F5_ID`") { id tags } }"
+if ($f5Check -notmatch '"tags":\[\]') { throw "18z3 F5: tags not cleared, got: $f5Check" }
+gqlq "mutation { deleteDoogat(id: `"$F5_ID`") }" | Out-Null
+pass "issue-9-F5: updateDoogat tags: [] clears all tags"
+
+$f6 = gqlq 'mutation { createDoogat(input: { title: "F6 dedupe" }) { id } }'
+$F6_ID = if ($f6 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "18z3 F6: no id" }
+gqlq "mutation { updateDoogat(input: { id: `"$F6_ID`", tags: [`"x`", `"y`", `"x`", `"y`", `"x`"] }) { id tags } }" | Out-Null
+$f6Check = gqlq "{ doogat(id: `"$F6_ID`") { id tags } }"
+$f6XCount = ([regex]::Matches($f6Check, '"x"')).Count
+$f6YCount = ([regex]::Matches($f6Check, '"y"')).Count
+if ($f6XCount -ne 1) { throw "18z3 F6: expected 1 'x', got $f6XCount in $f6Check" }
+if ($f6YCount -ne 1) { throw "18z3 F6: expected 1 'y', got $f6YCount in $f6Check" }
+gqlq "mutation { deleteDoogat(id: `"$F6_ID`") }" | Out-Null
+pass "issue-9-F6: updateDoogat dedupes input tags"
+
+$f7 = gqlq 'mutation { createDoogat(input: { title: "F7 unicode", tags: ["日本語", "café", "ñoño"] }) { id tags } }'
+$F7_ID = if ($f7 -match '"id":"([^"]+)"') { $Matches[1] } else { throw "18z3 F7: no id" }
+$f7Check = gqlq "{ doogat(id: `"$F7_ID`") { id tags } }"
+if ($f7Check -notmatch '日本語|\\u65e5\\u672c\\u8a9e') { throw "18z3 F7: missing 日本語 in $f7Check" }
+if ($f7Check -notmatch 'café|caf\\u00e9') { throw "18z3 F7: missing café in $f7Check" }
+if ($f7Check -notmatch 'ñoño|\\u00f1o\\u00f1o') { throw "18z3 F7: missing ñoño in $f7Check" }
+gqlq "mutation { deleteDoogat(id: `"$F7_ID`") }" | Out-Null
+pass "issue-9-F7: updateDoogat preserves unicode tags"
+
+# 18z4 - SQL feature coverage pins (#9 F9).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE feat (val INTEGER, label VARCHAR(255), maybe_null VARCHAR(255))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label, maybe_null) VALUES (''r1'', 1, ''a'', ''x'')") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label) VALUES (''r2'', 2, ''a'')") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label, maybe_null) VALUES (''r3'', 3, ''b'', ''y'')") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label) VALUES (''r4'', 4, ''b'')") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label, maybe_null) VALUES (''r5'', 5, ''c'', ''z'')") { message } }' | Out-Null
+
+$f9Cnt = gqlq '{ sql(query: "SELECT COUNT(*) FROM feat") { rows } }'
+if ($f9Cnt -notmatch '\[\\"5\\"\]') { throw "18z4 F9: COUNT(*) did not return 5: $f9Cnt" }
+$f9Grp = gqlq '{ sql(query: "SELECT label, COUNT(*) FROM feat GROUP BY label ORDER BY label") { rows } }'
+assertGqlOk $f9Grp "F9 GROUP BY"
+foreach ($g in @('\\"a\\"', '\\"b\\"', '\\"c\\"')) {
+    if ($f9Grp -notmatch $g) { throw "18z4 F9: GROUP BY missing $g in $f9Grp" }
+}
+$f9Ord = gqlq '{ sql(query: "SELECT label FROM feat ORDER BY val DESC LIMIT 2") { rows } }'
+if ($f9Ord -notmatch '\[\\"c\\"\]') { throw "18z4 F9 ORDER BY: missing [c]: $f9Ord" }
+if ($f9Ord -notmatch '\[\\"b\\"\]') { throw "18z4 F9 ORDER BY: missing [b]: $f9Ord" }
+if ($f9Ord -match '\[\\"a\\"\]') { throw "18z4 F9 ORDER BY: unexpected [a]: $f9Ord" }
+$f9Off = gqlq '{ sql(query: "SELECT val FROM feat ORDER BY val ASC LIMIT 10 OFFSET 3") { rows } }'
+if ($f9Off -notmatch '\[\\"4\\"\]') { throw "18z4 F9 OFFSET: missing [4]: $f9Off" }
+if ($f9Off -notmatch '\[\\"5\\"\]') { throw "18z4 F9 OFFSET: missing [5]: $f9Off" }
+if ($f9Off -match '\[\\"1\\"\]') { throw "18z4 F9 OFFSET: unexpected [1]: $f9Off" }
+$f9Nul = gqlq '{ sql(query: "SELECT COUNT(*) FROM feat WHERE maybe_null IS NULL") { rows } }'
+if ($f9Nul -notmatch '\[\\"2\\"\]') { throw "18z4 F9 IS NULL: expected 2: $f9Nul" }
+$f9Lik = gqlq '{ sql(query: "SELECT COUNT(*) FROM feat WHERE label LIKE \"a%\"") { rows } }'
+if ($f9Lik -notmatch '\[\\"2\\"\]') { throw "18z4 F9 LIKE: expected 2: $f9Lik" }
+gqlq 'mutation { executeSql(sql: "DROP TABLE feat CASCADE") { message } }' | Out-Null
+pass "issue-9-F9: SQL feature coverage (COUNT, GROUP BY, ORDER BY, LIMIT, OFFSET, IS NULL, LIKE)"
+
+# 18z5 - search() limit boundary pins (#9 F10).
+$f10a = gqlq 'mutation { createDoogat(input: { title: "F10boundary alpha" }) { id } }'
+$F10A_ID = if ($f10a -match '"id":"([^"]+)"') { $Matches[1] } else { throw "F10A no id" }
+$f10b = gqlq 'mutation { createDoogat(input: { title: "F10boundary beta" }) { id } }'
+$F10B_ID = if ($f10b -match '"id":"([^"]+)"') { $Matches[1] } else { throw "F10B no id" }
+$f10c = gqlq 'mutation { createDoogat(input: { title: "F10boundary gamma" }) { id } }'
+$F10C_ID = if ($f10c -match '"id":"([^"]+)"') { $Matches[1] } else { throw "F10C no id" }
+Start-Sleep -Seconds 1
+$f10Zero = gqlq '{ search(query: "F10boundary", limit: 0) { totalCount hits { id } } }'
+if ($f10Zero -match 'internal error') { throw "18z5 F10: limit 0 should not surface internal error: $f10Zero" }
+$f10Max = gqlq '{ search(query: "F10boundary", limit: 10000) { totalCount hits { id } } }'
+assertGqlOk $f10Max "F10 max"
+if ($f10Max -notmatch '"totalCount":3') { throw "18z5 F10: limit 10000 should return 3 rows: $f10Max" }
+$f10Over = gqlq '{ search(query: "F10boundary", limit: 10001) { totalCount } }'
+if ($f10Over -notmatch 'limit must not exceed') { throw "18z5 F10: limit 10001 should error with 'limit must not exceed': $f10Over" }
+if ($f10Over -match 'internal error') { throw "18z5 F10: limit 10001 should not surface internal error: $f10Over" }
+$f10Neg = gqlq '{ search(query: "F10boundary", limit: -1) { totalCount } }'
+if ($f10Neg -match 'internal error') { throw "18z5 F10: limit -1 should not surface internal error: $f10Neg" }
+gqlq "mutation { deleteDoogat(id: `"$F10A_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$F10B_ID`") }" | Out-Null
+gqlq "mutation { deleteDoogat(id: `"$F10C_ID`") }" | Out-Null
+pass "issue-9-F10: search limit boundaries (0, 10000, 10001, -1)"
+
+# 18z6 - ALTER TABLE ADD COLUMN appears in typeDefs introspection (#9 F11).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE altschema_f11 (a VARCHAR(255))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$f11Before = gqlq '{ typeDefs { name columns { name dataType } } }'
+assertGqlOk $f11Before "F11 before"
+if ($f11Before -notmatch '"altschema_f11"') { throw "18z6 F11: altschema_f11 missing from typeDefs" }
+if ($f11Before -notmatch '"a"') { throw "18z6 F11: column a missing before ALTER" }
+gqlq 'mutation { executeSql(sql: "ALTER TABLE altschema_f11 ADD COLUMN b INTEGER") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$f11After = gqlq '{ typeDefs { name columns { name dataType } } }'
+assertGqlOk $f11After "F11 after"
+if ($f11After -notmatch '"b"') { throw "18z6 F11: column b missing after ALTER, got: $f11After" }
+gqlq 'mutation { executeSql(sql: "DROP TABLE altschema_f11 CASCADE") { message } }' | Out-Null
+pass "issue-9-F11: ALTER TABLE ADD COLUMN appears in typeDefs introspection"
+
+# 18z7 - GraphQL schema introspection contract (#9 group G).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE gqtesta (label VARCHAR(255))") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE gqtestb (label VARCHAR(255))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$gIntro = gqlq '{ __schema { queryType { fields { name } } types { name fields { name } } } }'
+assertGqlOk $gIntro "G introspection"
+foreach ($fld in @('"name":"gqtestas"', '"name":"gqtestasAggregate"', '"name":"gqtestbs"', '"name":"gqtestbsAggregate"')) {
+    if ($gIntro -notmatch [regex]::Escape($fld)) { throw "18z7 G1: missing field $fld" }
+}
+foreach ($conn in @('GqtestaConnection', 'GqtestbConnection')) {
+    if ($gIntro -notmatch $conn) { throw "18z7 G2: missing $conn connection type" }
+}
+gqlq 'mutation { executeSql(sql: "DROP TABLE gqtesta CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE gqtestb CASCADE") { message } }' | Out-Null
+pass "issue-9-G1: every typed table has plural and Aggregate query fields"
+pass "issue-9-G2: every Connection type has items and totalCount fields"
+
+# 18z8 - Category + membership jink port (#9 jink full-sweep section 5).
+$j3Cat = gqlq 'mutation { executeSql(sql: "INSERT INTO category (title, fqn, space, sort_order) VALUES (''Dev'', ''work.dev'', ''work'', 0)") { message } }'
+assertGqlOk $j3Cat "j3 category insert"
+$JINK_CAT_ID = extractId $j3Cat
+if (-not $JINK_CAT_ID) { throw "18z8: could not extract JINK_CAT_ID" }
+pass "j3: INSERT category"
+
+$j3CatSpace = gqlq '{ categories(where: {space: {eq: "work"}}) { items { id fqn title space sort_order } } }'
+assertGqlOk $j3CatSpace "j3 category by space"
+if ($j3CatSpace -notmatch '"work.dev"') { throw "18z8 j3: missing work.dev in space query" }
+pass "j3: categories GraphQL query by space"
+
+$j3CatIn = gqlq '{ categories(where: {fqn: {in: ["work.dev"]}}) { items { fqn title space } } }'
+assertGqlOk $j3CatIn "j3 category by fqn IN"
+if ($j3CatIn -notmatch '"work.dev"') { throw "18z8 j3: missing work.dev in IN query" }
+pass "j3: categories GraphQL query by fqn IN list"
+
+$j3Cm = gqlq "mutation { executeSql(sql: `"INSERT INTO \`"category-membership\`" (title, link_id, category_fqn, sort_order) VALUES ('Test in work.dev', '$JINK_LINK_ID', 'work.dev', COALESCE((SELECT MAX(sort_order) + 1 FROM \`"category-membership\`" WHERE category_fqn = 'work.dev'), 0))`") { message } }"
+assertGqlOk $j3Cm "j3 category-membership insert"
+if ($j3Cm -notmatch '"message":"\d+"') { throw "18z8 j3: category-membership insert did not return id: $j3Cm" }
+pass "j3: INSERT category-membership with COALESCE+subquery sort_order"
+
+$j3CmBoth = gqlq "{ categoryMemberships(where: {link_id: {eq: `"$JINK_LINK_ID`"}, category_fqn: {eq: `"work.dev`"}}) { items { id link_id category_fqn pinned sort_order } } }"
+assertGqlOk $j3CmBoth "j3 categoryMemberships both"
+if ($j3CmBoth -notmatch '"work.dev"') { throw "18z8 j3: categoryMemberships by both missing work.dev" }
+pass "j3: categoryMemberships by link_id + category_fqn"
+
+$j3CmLink = gqlq "{ categoryMemberships(where: {link_id: {eq: `"$JINK_LINK_ID`"}}) { items { category_fqn } } }"
+assertGqlOk $j3CmLink "j3 categoryMemberships by link_id"
+if ($j3CmLink -notmatch '"work.dev"') { throw "18z8 j3: categoryMemberships by link_id missing work.dev" }
+pass "j3: categoryMemberships by link_id only"
+
+$j3CmCat = gqlq '{ categoryMemberships(where: {category_fqn: {eq: "work.dev"}}) { items { link_id pinned sort_order } } }'
+assertGqlOk $j3CmCat "j3 categoryMemberships by category"
+if ($j3CmCat -notmatch $JINK_LINK_ID) { throw "18z8 j3: categoryMemberships by category missing JINK_LINK_ID" }
+pass "j3: categoryMemberships by category_fqn only"
+
+# 18z9 - Jink quotes + saved-searches + pinned-results + jinkConfigs port
+# (#9 jink full-sweep sections 10-12).
+$j4Q = gqlq 'mutation { executeSql(sql: "INSERT INTO quote (title, author, text) VALUES (''First'', ''Anon'', ''Hello world'')") { message } }'
+assertGqlOk $j4Q "j4 quote insert"
+$JINK_QUOTE_ID = extractId $j4Q
+if (-not $JINK_QUOTE_ID) { throw "18z9: could not extract JINK_QUOTE_ID" }
+pass "j4: INSERT quote"
+
+$j4QId = gqlq "{ quotes(where: {id: {eq: `"$JINK_QUOTE_ID`"}}) { items { id title text author } } }"
+assertGqlOk $j4QId "j4 quotes by id"
+if ($j4QId -notmatch 'Hello world') { throw "18z9 j4: quote query missing 'Hello world'" }
+pass "j4: quotes query by id"
+
+$j4QAll = gqlq '{ quotes { items { id } } }'
+assertGqlOk $j4QAll "j4 quotes all"
+if ($j4QAll -notmatch '"quotes"') { throw "18z9 j4: quotes query missing quotes key" }
+pass "j4: quotes query all"
+
+$j4QUpd = gqlq "mutation { executeSql(sql: `"UPDATE quote SET favorited = 'true' WHERE id = '$JINK_QUOTE_ID' AND title = 'First'`") { affected } }"
+assertGqlOk $j4QUpd "j4 quote update"
+if ($j4QUpd -notmatch '"affected":1') { throw "18z9 j4: quote update did not affect 1 row: $j4QUpd" }
+pass "j4: UPDATE quote SET favorited (compound predicate)"
+
+$j4Ss = gqlq 'mutation { executeSql(sql: "INSERT INTO \"saved-search\" (title, query_raw, query_normalized) VALUES (''rust stuff'', ''Rust'', ''rust'')") { message } }'
+assertGqlOk $j4Ss "j4 saved-search insert"
+$JINK_SS_ID = extractId $j4Ss
+if (-not $JINK_SS_ID) { throw "18z9: could not extract JINK_SS_ID" }
+pass "j4: INSERT saved-search"
+
+$j4SsQ = gqlq "{ savedSearches(where: {id: {eq: `"$JINK_SS_ID`"}}) { items { id title query_raw query_normalized } } }"
+assertGqlOk $j4SsQ "j4 savedSearches query"
+if ($j4SsQ -notmatch '"rust"') { throw "18z9 j4: savedSearches query missing rust" }
+pass "j4: savedSearches query by id"
+
+$j4Pr = gqlq "mutation { executeSql(sql: `"INSERT INTO \`"pinned-result\`" (title, query_normalized, link_id, sort_order) VALUES ('pinned test', 'rust', '$JINK_LINK_ID', 0)`") { message } }"
+assertGqlOk $j4Pr "j4 pinned-result insert"
+if ($j4Pr -notmatch '"message":"\d+"') { throw "18z9 j4: pinned-result insert did not return id: $j4Pr" }
+pass "j4: INSERT pinned-result"
+
+$j4PrQ = gqlq '{ pinnedResults(where: {query_normalized: {eq: "rust"}}) { items { id query_normalized link_id sort_order } } }'
+assertGqlOk $j4PrQ "j4 pinnedResults query"
+if ($j4PrQ -notmatch $JINK_LINK_ID) { throw "18z9 j4: pinnedResults query missing JINK_LINK_ID" }
+pass "j4: pinnedResults query by query_normalized"
+
+$j4Jc = gqlq '{ jinkConfigs { items { id dashboard_title quote_rotation_minutes links_per_category frontend_version } } }'
+assertGqlOk $j4Jc "j4 jinkConfigs query"
+if ($j4Jc -notmatch 'dashboard_title') { throw "18z9 j4: jinkConfigs missing dashboard_title" }
+pass "j4: jinkConfigs query"
+
+$j4JcUpd = gqlq 'mutation { executeSql(sql: "UPDATE \"jink-config\" SET frontend_version = ''1.0.0'' WHERE title = ''jink-config''") { affected } }'
+assertGqlOk $j4JcUpd "j4 jink-config update"
+if ($j4JcUpd -notmatch '"affected":1') { throw "18z9 j4: jink-config update did not affect 1: $j4JcUpd" }
+pass "j4: UPDATE jink-config frontend_version (compound predicate)"
+
+$j4JcSel = gqlq '{ sql(query: "SELECT frontend_version FROM \"jink-config\" LIMIT 1") { rows } }'
+assertGqlOk $j4JcSel "j4 jink-config select"
+if ($j4JcSel -notmatch '\\"1.0.0\\"') { throw "18z9 j4: jink-config SELECT did not return 1.0.0: $j4JcSel" }
+pass "j4: SELECT frontend_version returns 1.0.0"
+
+# 18z10 - composite UNIQUE duplicate + compound-predicate DELETE jink port
+# (#9 jink full-sweep sections 6 + 13). Also drops all jink tables.
+$j5Dup = gqlq "mutation { executeSql(sql: `"INSERT INTO \`"category-membership\`" (title, link_id, category_fqn) VALUES ('dup', '$JINK_LINK_ID', 'work.dev')`") { message } }"
+assertGqlErrors $j5Dup "j5 duplicate"
+if ($j5Dup -notmatch 'UNIQUE') { throw "18z10 j5: duplicate should mention UNIQUE: $j5Dup" }
+pass "j5: duplicate category-membership rejected with UNIQUE error"
+
+$j5Batch = gqlq "mutation { executeBatch(statements: [`"DELETE FROM \`"category-membership\`" WHERE link_id = '$JINK_LINK_ID' AND category_fqn = 'work.dev'`", `"DELETE FROM link WHERE id = '$JINK_LINK_ID' AND url = 'https://example.com'`"]) { message } }"
+assertGqlOk $j5Batch "j5 batch delete"
+if ($j5Batch -notmatch '"executeBatch"') { throw "18z10 j5: batch delete missing executeBatch key: $j5Batch" }
+pass "j5: executeBatch DELETE category-membership + link (compound predicates)"
+
+$j5LinkGone = gqlq "{ links(where: {id: {eq: `"$JINK_LINK_ID`"}}) { items { id } } }"
+assertGqlOk $j5LinkGone "j5 link gone"
+if ($j5LinkGone -notmatch '"items":\[\]') { throw "18z10 j5: link not gone after batch delete: $j5LinkGone" }
+pass "j5: link is gone after batch delete"
+
+$j5QDel = gqlq "mutation { executeSql(sql: `"DELETE FROM quote WHERE id = '$JINK_QUOTE_ID' AND title = 'First'`") { affected } }"
+assertGqlOk $j5QDel "j5 quote delete"
+if ($j5QDel -notmatch '"affected":1') { throw "18z10 j5: quote delete did not affect 1: $j5QDel" }
+pass "j5: DELETE quote (compound predicate)"
+
+# Final cleanup: drop all jink tables from sub-block J1.
+gqlq 'mutation { executeSql(sql: "DROP TABLE link CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE category CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE \"category-membership\" CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE quote CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE \"saved-search\" CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE \"pinned-result\" CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE \"jink-config\" CASCADE") { message } }' | Out-Null
+pass "j5: jink port cleanup (all tables dropped)"
 
 # 19. REST API CRUD
 try {
@@ -1089,6 +1461,20 @@ gqlq "mutation{executeSql(sql:`"DROP TABLE link_d1 CASCADE`"){message}}" | Out-N
 gqlq "mutation{executeSql(sql:`"DROP TABLE numeric_d3 CASCADE`"){message}}" | Out-Null
 gqlq "mutation{executeSql(sql:`"DROP TABLE link_d6 CASCADE`"){message}}" | Out-Null
 
+# 44.E1 - Pin JOIN as working (#8 group E1, PRD 00123 archived as obsolete).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE e1_link (url VARCHAR(255))") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE e1_num (count INTEGER)") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+gqlq 'mutation { executeSql(sql: "INSERT INTO e1_link (title, url) VALUES (''a'', ''https://a.com'')") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "INSERT INTO e1_num (title, count) VALUES (''a'', 1)") { message } }' | Out-Null
+$e1Join = gqlq '{ sql(query: "SELECT l.title, n.count FROM e1_link l JOIN e1_num n ON l.title = n.title") { rows } }'
+assertGqlOk $e1Join "E1 JOIN"
+if ($e1Join -notmatch '\\"a\\"') { throw "44.E1: JOIN response missing a: $e1Join" }
+if ($e1Join -notmatch '\\"1\\"') { throw "44.E1: JOIN response missing 1: $e1Join" }
+gqlq 'mutation { executeSql(sql: "DROP TABLE e1_link CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE e1_num CASCADE") { message } }' | Out-Null
+pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obsolete)"
+
 # 44. DDL response consistency (no spurious errors)
 $result = gqlq 'mutation { executeSql(sql: "CREATE TABLE ddltest (name VARCHAR(100))") { columns rows message } }'
 if ($result -match '"errors"') { throw "CREATE TABLE has errors: $result" }
@@ -1149,6 +1535,76 @@ if ($cm2Obj.title -ne "UpsertA") { throw "upsert IGNORE should return original t
 pass "serve: createMany onConflict IGNORE returns existing"
 gqlq 'mutation { executeSql(sql: "DROP TABLE upsertgql CASCADE") { message } }' | Out-Null
 Pop-Location
+
+# 45.A1 - Cross-mutation parity after a failed UNIQUE INSERT (#4 group A1).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE a1item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$a1Valid = gqlq 'mutation { executeSql(sql: "INSERT INTO a1item (title, name) VALUES (''a'', ''unique1'')") { message } }'
+$A1_VALID_ID = extractId $a1Valid
+if (-not $A1_VALID_ID) { throw "45.A1: could not extract A1_VALID_ID" }
+$a1Dup = gqlq 'mutation { executeSql(sql: "INSERT INTO a1item (title, name) VALUES (''b'', ''unique1'')") { message } }'
+assertGqlErrors $a1Dup "A1 duplicate"
+if ($a1Dup -notmatch 'UNIQUE') { throw "45.A1: duplicate did not report UNIQUE: $a1Dup" }
+$a1Upd = gqlq "mutation { updateDoogat(input: { id: `"$A1_VALID_ID`", tags: [`"a1-recovered`"] }) { id tags } }"
+assertGqlOk $a1Upd "A1 updateDoogat recovery"
+if ($a1Upd -notmatch 'a1-recovered') { throw "45.A1: updateDoogat did not surface tag: $a1Upd" }
+$a1Create = gqlq 'mutation { createDoogat(input: { type: "a1item", title: "created-after-rollback", fields: "{\"name\":\"unique2\"}" }) { id title } }'
+assertGqlOk $a1Create "A1 createDoogat recovery"
+$A1_CREATE_ID = if ($a1Create -match '"id":"([^"]+)"') { $Matches[1] } else { throw "45.A1: no id from createDoogat" }
+$a1Del = gqlq "mutation { deleteDoogat(id: `"$A1_CREATE_ID`") }"
+assertGqlOk $a1Del "A1 deleteDoogat recovery"
+if ($a1Del -notmatch 'true') { throw "45.A1: deleteDoogat did not return true: $a1Del" }
+gqlq 'mutation { executeSql(sql: "DROP TABLE a1item CASCADE") { message } }' | Out-Null
+pass "issue-4-A1: failed UNIQUE INSERT does not break update/create/delete mutations"
+
+# 45.A3 - Cross-table isolation (#4 group A3).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE a3thing (title VARCHAR(255) NOT NULL)") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE a3item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$a3Thing = gqlq 'mutation { executeSql(sql: "INSERT INTO a3thing (title) VALUES (''t1'')") { message } }'
+$A3_THING_ID = extractId $a3Thing
+if (-not $A3_THING_ID) { throw "45.A3: could not extract A3_THING_ID" }
+gqlq 'mutation { executeSql(sql: "INSERT INTO a3item (title, name) VALUES (''a'', ''u1'')") { message } }' | Out-Null
+$a3Dup = gqlq 'mutation { executeSql(sql: "INSERT INTO a3item (title, name) VALUES (''b'', ''u1'')") { message } }'
+assertGqlErrors $a3Dup "A3 duplicate"
+if ($a3Dup -notmatch 'UNIQUE') { throw "45.A3: duplicate did not report UNIQUE: $a3Dup" }
+$a3Upd = gqlq "mutation { updateDoogat(input: { id: `"$A3_THING_ID`", tags: [`"a3-isolated`"] }) { id tags } }"
+assertGqlOk $a3Upd "A3 updateDoogat a3thing recovery"
+if ($a3Upd -notmatch 'a3-isolated') { throw "45.A3: a3thing update tag missing: $a3Upd" }
+gqlq 'mutation { executeSql(sql: "DROP TABLE a3thing CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE a3item CASCADE") { message } }' | Out-Null
+pass "issue-4-A3: failed INSERT on a3item does not corrupt a3thing"
+
+# 45.A2 - Ghost-row fix persists across server restart (#4 group A2).
+gqlq 'mutation { executeSql(sql: "CREATE TABLE a2persist (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }' | Out-Null
+Start-Sleep -Seconds 1
+$a2Valid = gqlq 'mutation { executeSql(sql: "INSERT INTO a2persist (title, name) VALUES (''seed'', ''uniq_a2'')") { message } }'
+$A2_VALID_ID = extractId $a2Valid
+if (-not $A2_VALID_ID) { throw "45.A2: could not extract A2_VALID_ID" }
+$a2Dup = gqlq 'mutation { executeSql(sql: "INSERT INTO a2persist (title, name) VALUES (''dup'', ''uniq_a2'')") { message } }'
+assertGqlErrors $a2Dup "A2 duplicate"
+
+# Kill + restart the server on the same $TMPDIR.
+Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+$serverProc = Start-Process -FilePath $DDB -ArgumentList @("serve", "--port", "$SERVER_PORT", "--pg-port", "$PG_PORT") -NoNewWindow -PassThru
+for ($i = 0; $i -lt 20; $i++) {
+    try {
+        $null = Invoke-WebRequest -Uri $GQL_URL -Method POST -ContentType "application/json" `
+            -Headers @{ Authorization = "Bearer $TOKEN" } -Body '{"query":"{ typeDefs { name } }"}' -ErrorAction Stop
+        break
+    } catch {
+        Start-Sleep -Milliseconds 200
+    }
+}
+
+$a2Upd = gqlq "mutation { updateDoogat(input: { id: `"$A2_VALID_ID`", tags: [`"restart-survived`"] }) { id tags } }"
+assertGqlOk $a2Upd "A2 updateDoogat after restart"
+if ($a2Upd -notmatch 'restart-survived') { throw "45.A2: tags missing after restart: $a2Upd" }
+$a2Fresh = gqlq 'mutation { executeSql(sql: "INSERT INTO a2persist (title, name) VALUES (''fresh'', ''uniq_a2_post'')") { message } }'
+assertGqlOk $a2Fresh "A2 fresh insert after restart"
+gqlq 'mutation { executeSql(sql: "DROP TABLE a2persist CASCADE") { message } }' | Out-Null
+pass "issue-4-A2: ghost-row fix persists across server restart"
 
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
@@ -1452,6 +1908,18 @@ if ($output -notmatch "42") { throw "B5 materialized score mismatch: $output" }
 $output = ddb query "DROP TABLE smokenomatch CASCADE"
 if ($output -notmatch "dropped") { throw "drop smokenomatch failed" }
 pass "update/delete WHERE id no-match semantics (#5)"
+
+# 30.F1 - composite UNIQUE duplicate rejection surfaces a clear error on the
+# CLI (#9 group F1).
+$output = ddb query 'CREATE TABLE f1mship (title VARCHAR(255), link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))'
+if ($output -notmatch "table f1mship created") { throw "f1mship create failed" }
+ddb query "INSERT INTO f1mship (title, link_id, category) VALUES ('a', 'link1', 'cat1')" | Out-Null
+$f1Dup = ddb query "INSERT INTO f1mship (title, link_id, category) VALUES ('b', 'link1', 'cat1')" 2>&1
+if ($f1Dup -notmatch "UNIQUE") { throw "30.F1: duplicate INSERT should mention UNIQUE: $f1Dup" }
+if ($f1Dup -notmatch "f1mship|link_id|category") { throw "30.F1: error should mention table/col: $f1Dup" }
+$output = ddb query "DROP TABLE f1mship CASCADE"
+if ($output -notmatch "dropped") { throw "f1mship drop failed" }
+pass "issue-9-F1: composite UNIQUE duplicate rejected with clear error"
 
 # 31. file attachments
 $attachFile = Join-Path $TMPDIR "ddb-smoke-attach.txt"
