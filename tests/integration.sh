@@ -601,6 +601,40 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10B_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F10C_ID\\\") }\"}" >/dev/null
 pass "issue-9-F10: search limit boundaries (0, 10001, -1) stay out of internal error"
 
+# 18z6. ALTER TABLE ADD COLUMN surfaces in the typeDefs introspection query
+# (#9 F11). Jink relies on typeDefs to reflect the live schema so its client
+# code can validate columns before writing.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE altschema_f11 (a VARCHAR(255))\") { message } }"}' >/dev/null
+sleep 1
+F11_BEFORE=$(gql '{"query":"{ typeDefs { name columns { name dataType } } }"}')
+assert_gql_ok "$F11_BEFORE"
+printf '%s' "$F11_BEFORE" | grep -q '"altschema_f11"'
+# Column "a" should already be there; "b" should not exist yet.
+printf '%s' "$F11_BEFORE" | python3 -c "
+import json, sys
+resp = json.loads(sys.stdin.read())
+schemas = {t['name']: t['columns'] for t in resp['data']['typeDefs']}
+assert 'altschema_f11' in schemas, 'altschema_f11 missing from typeDefs'
+col_names = [c['name'] for c in schemas['altschema_f11']]
+assert 'a' in col_names, f\"column a missing from altschema_f11, got: {col_names}\"
+assert 'b' not in col_names, f\"column b unexpectedly present before ALTER, got: {col_names}\"
+"
+gql '{"query":"mutation { executeSql(sql: \"ALTER TABLE altschema_f11 ADD COLUMN b INTEGER\") { message } }"}' >/dev/null
+sleep 1
+F11_AFTER=$(gql '{"query":"{ typeDefs { name columns { name dataType } } }"}')
+assert_gql_ok "$F11_AFTER"
+printf '%s' "$F11_AFTER" | python3 -c "
+import json, sys
+resp = json.loads(sys.stdin.read())
+schemas = {t['name']: t['columns'] for t in resp['data']['typeDefs']}
+assert 'altschema_f11' in schemas, 'altschema_f11 missing from typeDefs after ALTER'
+col_names = [c['name'] for c in schemas['altschema_f11']]
+assert 'a' in col_names, f\"column a missing after ALTER, got: {col_names}\"
+assert 'b' in col_names, f\"column b missing from typeDefs after ALTER, got: {col_names}\"
+"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE altschema_f11 CASCADE\") { message } }"}' >/dev/null
+pass "issue-9-F11: ALTER TABLE ADD COLUMN appears in typeDefs introspection"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
