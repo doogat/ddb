@@ -433,6 +433,42 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121A_ID\\\") }\"}" >/dev/n
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121B_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121G_ID\\\") }\"}" >/dev/null
 
+# 18z. UPDATE/DELETE WHERE id no-match GraphQL parity (issue #5 group B).
+# Rust unit tests and smoke CLI checks already cover B1-B5 at the lower layers;
+# this sub-block pins the same behavior at the GraphQL executeSql surface.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link_b1 (url VARCHAR(255))\") { message } }"}' >/dev/null
+sleep 1
+B1_SEED=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO link_b1 (title, url) VALUES (\\\"A\\\", \\\"https://a.com\\\")\") { message } }"}')
+B1_SEED_ID=$(printf '%s' "$B1_SEED" | extract_id)
+[ -n "$B1_SEED_ID" ]
+# B1: UPDATE WHERE id = nonexistent returns no errors and affected=0.
+B1_RESULT=$(gql '{"query":"mutation { executeSql(sql: \"UPDATE link_b1 SET title = \\\"x\\\" WHERE id = \\\"does_not_exist_b1\\\"\") { affected message } }"}')
+assert_gql_ok "$B1_RESULT"
+printf '%s' "$B1_RESULT" | grep -q '"affected":0'
+# B2: DELETE WHERE id = nonexistent returns no errors and affected=0.
+B2_RESULT=$(gql '{"query":"mutation { executeSql(sql: \"DELETE FROM link_b1 WHERE id = \\\"does_not_exist_b2\\\"\") { affected message } }"}')
+assert_gql_ok "$B2_RESULT"
+printf '%s' "$B2_RESULT" | grep -q '"affected":0'
+# B3: UPDATE WHERE non-id-column = nonexistent returns affected=0 (pin the
+# working fallthrough path so a regression can't silently remove it).
+B3_RESULT=$(gql '{"query":"mutation { executeSql(sql: \"UPDATE link_b1 SET title = \\\"x\\\" WHERE url = \\\"https://nope.com\\\"\") { affected message } }"}')
+assert_gql_ok "$B3_RESULT"
+printf '%s' "$B3_RESULT" | grep -q '"affected":0'
+# B4: UPDATE WHERE id = valid AND other = wrong returns affected=0.
+B4_RESULT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE link_b1 SET title = 'x' WHERE id = '$B1_SEED_ID' AND url = 'https://wrong.com'\\\") { affected message } }\"}")
+assert_gql_ok "$B4_RESULT"
+printf '%s' "$B4_RESULT" | grep -q '"affected":0'
+# B5: UPDATE WHERE id IN (nonexistent, valid) affects exactly the valid one.
+B5_RESULT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE link_b1 SET title = 'from_in_clause' WHERE id IN ('nope', '$B1_SEED_ID')\\\") { affected message } }\"}")
+assert_gql_ok "$B5_RESULT"
+printf '%s' "$B5_RESULT" | grep -q '"affected":1'
+# Pin the working fast path: valid id -> affected=1.
+B5_FAST=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE link_b1 SET title = 'final' WHERE id = '$B1_SEED_ID'\\\") { affected message } }\"}")
+assert_gql_ok "$B5_FAST"
+printf '%s' "$B5_FAST" | grep -q '"affected":1'
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE link_b1 CASCADE\") { message } }"}' >/dev/null
+pass "issue-5-B1..B5: UPDATE/DELETE no-match GraphQL parity"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
