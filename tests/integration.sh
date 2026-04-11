@@ -174,6 +174,44 @@ pass "j1: created jink-config table"
 
 sleep 1
 
+# 17.J2 — jink-config singleton + Link CRUD (#9 jink full-sweep sections 3-4).
+# Ported from validate-full-sweep.sh lines 70-100. Uses the jink tables from
+# J1; captures JINK_LINK_ID for use by later sub-blocks (18z8, 18z10).
+
+# jink-config singleton (3 checks from sweep section 3).
+J2_JC_EMPTY=$(gql '{"query":"{ sql(query: \"SELECT id FROM \\\"jink-config\\\" LIMIT 1\") { rows } }"}')
+assert_gql_ok "$J2_JC_EMPTY"
+printf '%s' "$J2_JC_EMPTY" | grep -q '"rows"'
+pass "j2: SELECT from empty jink-config"
+
+J2_JC_INS=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO \\\"jink-config\\\" (title, dashboard_title, quote_rotation_minutes, links_per_category) VALUES (\\\"jink-config\\\", \\\"Bobs Battlestation\\\", 30, 8)\") { message } }"}')
+assert_gql_ok "$J2_JC_INS"
+printf '%s' "$J2_JC_INS" | grep -qE '"message":"[0-9]+"'
+pass "j2: INSERT jink-config singleton"
+
+J2_JC_SEL=$(gql '{"query":"{ sql(query: \"SELECT quote_rotation_minutes FROM \\\"jink-config\\\" LIMIT 1\") { rows } }"}')
+assert_gql_ok "$J2_JC_SEL"
+printf '%s' "$J2_JC_SEL" | grep -q '\\"30\\"'
+pass "j2: SELECT quote_rotation_minutes returns 30"
+
+# Link CRUD (3 checks from sweep section 4).
+J2_LINK_INS=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO link (title, url, description) VALUES (\\\"Test Link\\\", \\\"https://example.com\\\", \\\"a test link\\\")\") { message } }"}')
+assert_gql_ok "$J2_LINK_INS"
+JINK_LINK_ID=$(printf '%s' "$J2_LINK_INS" | extract_id)
+[ -n "$JINK_LINK_ID" ]
+printf '%s' "$J2_LINK_INS" | grep -qE '"message":"[0-9]+"'
+pass "j2: INSERT link returns id"
+
+J2_LINK_GQL=$(gql "{\"query\":\"{ links(where: {id: {eq: \\\"$JINK_LINK_ID\\\"}}) { items { id title url description tags } } }\"}")
+assert_gql_ok "$J2_LINK_GQL"
+printf '%s' "$J2_LINK_GQL" | grep -q '"Test Link"'
+pass "j2: query links via GraphQL"
+
+J2_LINK_UPD=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE link SET favicon_path = 'favicon/x.png', favicon_origin = 'fetched' WHERE id = '$JINK_LINK_ID' AND url = 'https://example.com'\\\") { message affected } }\"}")
+assert_gql_ok "$J2_LINK_UPD"
+printf '%s' "$J2_LINK_UPD" | grep -q '"affected":1'
+pass "j2: UPDATE link favicon via compound-predicate SQL"
+
 # 18. expanded GraphQL operations
 RESULT=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$GQL_ID\\\", title: \\\"Smoke Updated\\\" }) { id title } }\"}")
 echo "$RESULT" | grep -q '"Smoke Updated"'
