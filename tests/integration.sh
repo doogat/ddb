@@ -469,6 +469,31 @@ printf '%s' "$B5_FAST" | grep -q '"affected":1'
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE link_b1 CASCADE\") { message } }"}' >/dev/null
 pass "issue-5-B1..B5: UPDATE/DELETE no-match GraphQL parity"
 
+# 18z2. executeBatch atomicity (issue #9 group F4). A batch where the second
+# statement fails on a UNIQUE constraint must roll back the first statement's
+# effect. Jink relies on this so partial writes can't leak out.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link_f4 (url VARCHAR(255))\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE membership_f4 (link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))\") { message } }"}' >/dev/null
+sleep 1
+F4_LINK=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO link_f4 (title, url) VALUES (\\\"initial\\\", \\\"https://f4.com\\\")\") { message } }"}')
+F4_LINK_ID=$(printf '%s' "$F4_LINK" | extract_id)
+[ -n "$F4_LINK_ID" ]
+gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO membership_f4 (title, link_id, category) VALUES ('m', '$F4_LINK_ID', 'work')\\\") { message } }\"}" >/dev/null
+# The batch: first UPDATE changes link title; second INSERT duplicates the
+# membership (UNIQUE violation). Expected: the entire batch is rolled back, so
+# link title stays "initial".
+F4_BATCH=$(gql "{\"query\":\"mutation { executeBatch(statements: [\\\"UPDATE link_f4 SET title = 'batched' WHERE id = '$F4_LINK_ID' AND url = 'https://f4.com'\\\", \\\"INSERT INTO membership_f4 (title, link_id, category) VALUES ('dup', '$F4_LINK_ID', 'work')\\\"]) { message } }\"}")
+assert_gql_errors "$F4_BATCH"
+printf '%s' "$F4_BATCH" | grep -q 'UNIQUE'
+# Verify the UPDATE was rolled back: title must still be "initial".
+F4_AFTER=$(gql "{\"query\":\"{ sql(query: \\\"SELECT title FROM link_f4 WHERE id = '$F4_LINK_ID'\\\") { rows } }\"}")
+assert_gql_ok "$F4_AFTER"
+printf '%s' "$F4_AFTER" | grep -q '"initial"'
+! printf '%s' "$F4_AFTER" | grep -q '"batched"'
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE link_f4 CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE membership_f4 CASCADE\") { message } }"}' >/dev/null
+pass "issue-9-F4: executeBatch rolls back all statements when one fails"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
