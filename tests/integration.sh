@@ -635,6 +635,42 @@ assert 'b' in col_names, f\"column b missing from typeDefs after ALTER, got: {co
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE altschema_f11 CASCADE\") { message } }"}' >/dev/null
 pass "issue-9-F11: ALTER TABLE ADD COLUMN appears in typeDefs introspection"
 
+# 18z7. GraphQL schema introspection contract (#9 group G). Two invariants:
+# G1 — every typed table has a plural query field AND an Aggregate field.
+# G2 — every *Connection type exposes items and totalCount.
+# Naming rules (per ddb-server/src/schema/base_types.rs):
+#  - capitalize() upper-cases the first char → type name `Gqtesta`
+#  - pluralize() appends `s` to the lowercased name → query field `gqtestas`
+#  - Aggregate field is `<plural>Aggregate` → `gqtestasAggregate`
+#  - Connection type is `<Type>Connection` → `GqtestaConnection`
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE gqtesta (label VARCHAR(255))\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE gqtestb (label VARCHAR(255))\") { message } }"}' >/dev/null
+sleep 1
+G_INTRO=$(gql '{"query":"{ __schema { queryType { fields { name } } types { name fields { name } } } }"}')
+assert_gql_ok "$G_INTRO"
+# G1: query fields `gqtestas` and `gqtestasAggregate` must exist (Gqtesta).
+printf '%s' "$G_INTRO" | grep -q '"name":"gqtestas"'
+printf '%s' "$G_INTRO" | grep -q '"name":"gqtestasAggregate"'
+printf '%s' "$G_INTRO" | grep -q '"name":"gqtestbs"'
+printf '%s' "$G_INTRO" | grep -q '"name":"gqtestbsAggregate"'
+# G2: Connection types must exist for both, and each must carry items +
+# totalCount. Use Python for structural parsing to avoid substring
+# ambiguity with the raw introspection JSON.
+printf '%s' "$G_INTRO" | python3 -c "
+import json, sys
+resp = json.loads(sys.stdin.read())
+types = {t['name']: t for t in resp['data']['__schema']['types']}
+for conn in ('GqtestaConnection', 'GqtestbConnection'):
+    assert conn in types, f'{conn} missing from schema types'
+    fields = {f['name'] for f in (types[conn].get('fields') or [])}
+    assert 'items' in fields, f'{conn} missing items field, got: {fields}'
+    assert 'totalCount' in fields, f'{conn} missing totalCount field, got: {fields}'
+"
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE gqtesta CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE gqtestb CASCADE\") { message } }"}' >/dev/null
+pass "issue-9-G1: every typed table has plural and Aggregate query fields"
+pass "issue-9-G2: every Connection type has items and totalCount fields"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
