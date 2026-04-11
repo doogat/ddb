@@ -131,6 +131,49 @@ echo "$RESULT" | grep -q '"Smoke Server"'
 GQL_ID=$(echo "$RESULT" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 pass "serve: graphql create"
 
+# 17.J1 — Jink schema CREATE TABLE definitions (#9 jink full-sweep section 1).
+# Seven table definitions ported from
+# dev/local/specs/jink-feedback/ddb-repros/validate-full-sweep.sh lines 34-60.
+# The tables persist through sub-blocks 17.J2, 18z8, 18z9, 18z10 below; task
+# 20 drops them all at the end. DO NOT add DROP TABLE statements between
+# these sub-blocks.
+J1_LINK=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL, subtitle VARCHAR(255), favicon_path VARCHAR(255), favicon_origin VARCHAR(255), bookmark_source VARCHAR(255), last_opened_at VARCHAR(255), description TEXT)\") { message } }"}')
+assert_gql_ok "$J1_LINK"
+printf '%s' "$J1_LINK" | grep -q '"message":"table link'
+pass "j1: created link table"
+
+J1_CAT=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE category (title VARCHAR(255) NOT NULL, fqn VARCHAR(255) NOT NULL, space VARCHAR(255) NOT NULL, sort_order INTEGER DEFAULT 0)\") { message } }"}')
+assert_gql_ok "$J1_CAT"
+printf '%s' "$J1_CAT" | grep -q '"message":"table category'
+pass "j1: created category table"
+
+J1_CM=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"category-membership\\\" (title VARCHAR(255) NOT NULL, link_id VARCHAR(255) NOT NULL, category_fqn VARCHAR(255) NOT NULL, pinned BOOLEAN DEFAULT FALSE, sort_order INTEGER DEFAULT 0, UNIQUE(link_id, category_fqn))\") { message } }"}')
+assert_gql_ok "$J1_CM"
+printf '%s' "$J1_CM" | grep -q '"message":"table category-membership'
+pass "j1: created category-membership table with composite UNIQUE"
+
+J1_Q=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE quote (title VARCHAR(255) NOT NULL, author VARCHAR(255), source VARCHAR(255), favorited BOOLEAN DEFAULT FALSE, text TEXT)\") { message } }"}')
+assert_gql_ok "$J1_Q"
+printf '%s' "$J1_Q" | grep -q '"message":"table quote'
+pass "j1: created quote table"
+
+J1_SS=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"saved-search\\\" (title VARCHAR(255) NOT NULL, query_raw VARCHAR(255) NOT NULL, query_normalized VARCHAR(255) NOT NULL)\") { message } }"}')
+assert_gql_ok "$J1_SS"
+printf '%s' "$J1_SS" | grep -q '"message":"table saved-search'
+pass "j1: created saved-search table"
+
+J1_PR=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"pinned-result\\\" (title VARCHAR(255) NOT NULL, query_normalized VARCHAR(255) NOT NULL, link_id VARCHAR(255) NOT NULL, sort_order INTEGER DEFAULT 0)\") { message } }"}')
+assert_gql_ok "$J1_PR"
+printf '%s' "$J1_PR" | grep -q '"message":"table pinned-result'
+pass "j1: created pinned-result table"
+
+J1_JC=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"jink-config\\\" (dashboard_title VARCHAR(255) DEFAULT '\''Bobs Battlestation'\'', quote_rotation_minutes INTEGER DEFAULT 30, links_per_category INTEGER DEFAULT 8, frontend_version VARCHAR(255))\") { message } }"}')
+assert_gql_ok "$J1_JC"
+printf '%s' "$J1_JC" | grep -q '"message":"table jink-config'
+pass "j1: created jink-config table"
+
+sleep 1
+
 # 18. expanded GraphQL operations
 RESULT=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$GQL_ID\\\", title: \\\"Smoke Updated\\\" }) { id title } }\"}")
 echo "$RESULT" | grep -q '"Smoke Updated"'
