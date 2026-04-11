@@ -792,6 +792,71 @@ assert_gql_ok "$J3_CM_CAT"
 printf '%s' "$J3_CM_CAT" | grep -q "$JINK_LINK_ID"
 pass "j3: categoryMemberships by category_fqn only"
 
+# 18z9. Jink quotes + saved-searches + pinned-results + jinkConfigs port
+# (#9 jink full-sweep sections 10-12). Ported from validate-full-sweep.sh
+# lines 188-241.
+
+# Quotes (4 checks).
+J4_Q=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO quote (title, author, text) VALUES (\\\"First\\\", \\\"Anon\\\", \\\"Hello world\\\")\") { message } }"}')
+assert_gql_ok "$J4_Q"
+JINK_QUOTE_ID=$(printf '%s' "$J4_Q" | extract_id)
+[ -n "$JINK_QUOTE_ID" ]
+pass "j4: INSERT quote"
+
+J4_Q_ID=$(gql "{\"query\":\"{ quotes(where: {id: {eq: \\\"$JINK_QUOTE_ID\\\"}}) { items { id title text author } } }\"}")
+assert_gql_ok "$J4_Q_ID"
+printf '%s' "$J4_Q_ID" | grep -q 'Hello world'
+pass "j4: quotes query by id"
+
+J4_Q_ALL=$(gql '{"query":"{ quotes { items { id } } }"}')
+assert_gql_ok "$J4_Q_ALL"
+printf '%s' "$J4_Q_ALL" | grep -q '"quotes"'
+pass "j4: quotes query all"
+
+J4_Q_UPD=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE quote SET favorited = 'true' WHERE id = '$JINK_QUOTE_ID' AND title = 'First'\\\") { affected } }\"}")
+assert_gql_ok "$J4_Q_UPD"
+printf '%s' "$J4_Q_UPD" | grep -q '"affected":1'
+pass "j4: UPDATE quote SET favorited (compound predicate)"
+
+# Saved-search (2 checks).
+J4_SS=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO \\\"saved-search\\\" (title, query_raw, query_normalized) VALUES (\\\"rust stuff\\\", \\\"Rust\\\", \\\"rust\\\")\") { message } }"}')
+assert_gql_ok "$J4_SS"
+JINK_SS_ID=$(printf '%s' "$J4_SS" | extract_id)
+[ -n "$JINK_SS_ID" ]
+pass "j4: INSERT saved-search"
+
+J4_SS_Q=$(gql "{\"query\":\"{ savedSearches(where: {id: {eq: \\\"$JINK_SS_ID\\\"}}) { items { id title query_raw query_normalized } } }\"}")
+assert_gql_ok "$J4_SS_Q"
+printf '%s' "$J4_SS_Q" | grep -q '"rust"'
+pass "j4: savedSearches query by id"
+
+# Pinned-result (2 checks).
+J4_PR=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO \\\\\\\"pinned-result\\\\\\\" (title, query_normalized, link_id, sort_order) VALUES ('pinned test', 'rust', '$JINK_LINK_ID', 0)\\\") { message } }\"}")
+assert_gql_ok "$J4_PR"
+printf '%s' "$J4_PR" | grep -qE '"message":"[0-9]+"'
+pass "j4: INSERT pinned-result"
+
+J4_PR_Q=$(gql '{"query":"{ pinnedResults(where: {query_normalized: {eq: \"rust\"}}) { items { id query_normalized link_id sort_order } } }"}')
+assert_gql_ok "$J4_PR_Q"
+printf '%s' "$J4_PR_Q" | grep -q "$JINK_LINK_ID"
+pass "j4: pinnedResults query by query_normalized"
+
+# jinkConfigs (3 checks).
+J4_JC=$(gql '{"query":"{ jinkConfigs { items { id dashboard_title quote_rotation_minutes links_per_category frontend_version } } }"}')
+assert_gql_ok "$J4_JC"
+printf '%s' "$J4_JC" | grep -q 'dashboard_title'
+pass "j4: jinkConfigs query"
+
+J4_JC_UPD=$(gql '{"query":"mutation { executeSql(sql: \"UPDATE \\\"jink-config\\\" SET frontend_version = '\''1.0.0'\'' WHERE title = '\''jink-config'\''\") { affected } }"}')
+assert_gql_ok "$J4_JC_UPD"
+printf '%s' "$J4_JC_UPD" | grep -q '"affected":1'
+pass "j4: UPDATE jink-config frontend_version (compound predicate)"
+
+J4_JC_SEL=$(gql '{"query":"{ sql(query: \"SELECT frontend_version FROM \\\"jink-config\\\" LIMIT 1\") { rows } }"}')
+assert_gql_ok "$J4_JC_SEL"
+printf '%s' "$J4_JC_SEL" | grep -q '\\"1.0.0\\"'
+pass "j4: SELECT frontend_version returns 1.0.0"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
