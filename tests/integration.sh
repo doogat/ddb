@@ -535,6 +535,43 @@ printf '%s' "$F7_CHECK" | grep -qE 'ñoño|\\u00f1o\\u00f1o'
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F7_ID\\\") }\"}" >/dev/null
 pass "issue-9-F7: updateDoogat preserves unicode tags"
 
+# 18z4. SQL feature coverage pins (#9 F9). Single per-feature check so a
+# regression in any one of COUNT, GROUP BY, ORDER BY, LIMIT, OFFSET, IS NULL,
+# LIKE is immediately attributable.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE feat (val INTEGER, label VARCHAR(255), maybe_null VARCHAR(255))\") { message } }"}' >/dev/null
+sleep 1
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label, maybe_null) VALUES (\\\"r1\\\", 1, \\\"a\\\", \\\"x\\\")\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label) VALUES (\\\"r2\\\", 2, \\\"a\\\")\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label, maybe_null) VALUES (\\\"r3\\\", 3, \\\"b\\\", \\\"y\\\")\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label) VALUES (\\\"r4\\\", 4, \\\"b\\\")\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label, maybe_null) VALUES (\\\"r5\\\", 5, \\\"c\\\", \\\"z\\\")\") { message } }"}' >/dev/null
+# COUNT(*)
+F9_CNT=$(gql '{"query":"{ sql(query: \"SELECT COUNT(*) FROM feat\") { rows } }"}')
+printf '%s' "$F9_CNT" | grep -q '"5"'
+# GROUP BY label → three groups
+F9_GRP=$(gql '{"query":"{ sql(query: \"SELECT label, COUNT(*) FROM feat GROUP BY label ORDER BY label\") { rows } }"}')
+printf '%s' "$F9_GRP" | grep -q '"a"'
+printf '%s' "$F9_GRP" | grep -q '"b"'
+printf '%s' "$F9_GRP" | grep -q '"c"'
+# ORDER BY DESC LIMIT 2 → rows with val 5, 4 (labels c, b)
+F9_ORD=$(gql '{"query":"{ sql(query: \"SELECT label FROM feat ORDER BY val DESC LIMIT 2\") { rows } }"}')
+printf '%s' "$F9_ORD" | grep -q '"c"'
+printf '%s' "$F9_ORD" | grep -q '"b"'
+! printf '%s' "$F9_ORD" | grep -q '"a"'
+# OFFSET skipping first 3 → rows with val 4, 5
+F9_OFF=$(gql '{"query":"{ sql(query: \"SELECT val FROM feat ORDER BY val ASC LIMIT 10 OFFSET 3\") { rows } }"}')
+printf '%s' "$F9_OFF" | grep -q '"4"'
+printf '%s' "$F9_OFF" | grep -q '"5"'
+! printf '%s' "$F9_OFF" | grep -q '"1"'
+# IS NULL → two rows (val 2, val 4)
+F9_NUL=$(gql '{"query":"{ sql(query: \"SELECT COUNT(*) FROM feat WHERE maybe_null IS NULL\") { rows } }"}')
+printf '%s' "$F9_NUL" | grep -q '"2"'
+# LIKE → two rows (label a)
+F9_LIK=$(gql '{"query":"{ sql(query: \"SELECT COUNT(*) FROM feat WHERE label LIKE \\\"a%\\\"\") { rows } }"}')
+printf '%s' "$F9_LIK" | grep -q '"2"'
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE feat CASCADE\") { message } }"}' >/dev/null
+pass "issue-9-F9: SQL feature coverage (COUNT, GROUP BY, ORDER BY, LIMIT, OFFSET, IS NULL, LIKE)"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
