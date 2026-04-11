@@ -69,6 +69,38 @@ gql() {
     -H "Content-Type: application/json" \
     -d "$1"
 }
+# Extract the "message" field of a successful executeSql response (which is the
+# new doogat id). Mirrors the helper from
+# dev/local/specs/jink-feedback/ddb-repros/_lib.sh:91 so jink-port checks can
+# use it verbatim.
+extract_id() {
+  grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//'
+}
+# Assert that the given response contains "errors" (i.e. GraphQL rejected the
+# call). Returns 0 if errors are present, 1 otherwise. Prints the response on
+# failure so set -e callers get diagnostic context.
+assert_gql_errors() {
+  local resp="$1"
+  if printf '%s' "$resp" | grep -q '"errors"'; then
+    return 0
+  fi
+  printf '  ✗ assert_gql_errors: response had no "errors" key\n    response: %s\n' "$resp" >&2
+  return 1
+}
+# Assert that the given response is a successful GraphQL response (has "data"
+# and no "errors"). Returns 0 if both hold, 1 otherwise.
+assert_gql_ok() {
+  local resp="$1"
+  if printf '%s' "$resp" | grep -q '"errors"'; then
+    printf '  ✗ assert_gql_ok: response had "errors"\n    response: %s\n' "$resp" >&2
+    return 1
+  fi
+  if ! printf '%s' "$resp" | grep -q '"data"'; then
+    printf '  ✗ assert_gql_ok: response had no "data" key\n    response: %s\n' "$resp" >&2
+    return 1
+  fi
+  return 0
+}
 rest() {
   curl -sf "$REST_URL$1" \
     -H "Authorization: Bearer $TOKEN" \

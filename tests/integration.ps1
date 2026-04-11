@@ -120,6 +120,33 @@ function gqlq([string]$query) {
     return gql (@{ query = $query } | ConvertTo-Json -Compress)
 }
 
+# Extract the "message" field of a successful executeSql response (which is the
+# new doogat id). Mirrors the bash extract_id helper for jink-port checks.
+function extractId([string]$response) {
+    $m = [regex]::Match($response, '"message":"([^"]+)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ""
+}
+
+# Assert that the given response contains "errors" (i.e. GraphQL rejected the
+# call). Throws on missing "errors" so set-style error handling kicks in.
+function assertGqlErrors([string]$response, [string]$context = "") {
+    if ($response -notmatch '"errors"') {
+        throw "assertGqlErrors$(if ($context) { " ($context)" }): response had no errors key`n  response: $response"
+    }
+}
+
+# Assert that the given response is a successful GraphQL response (has "data"
+# and no "errors"). Throws on either failure.
+function assertGqlOk([string]$response, [string]$context = "") {
+    if ($response -match '"errors"') {
+        throw "assertGqlOk$(if ($context) { " ($context)" }): response had errors`n  response: $response"
+    }
+    if ($response -notmatch '"data"') {
+        throw "assertGqlOk$(if ($context) { " ($context)" }): response had no data key`n  response: $response"
+    }
+}
+
 function rest {
     param([string]$path, [string]$method = "GET", [string]$body = $null)
     $params = @{
