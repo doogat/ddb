@@ -109,7 +109,7 @@ git config core.hooksPath dev/hooks
 A task is NOT complete unless ALL of these pass:
 
 1. **Tests** — unit tests in the module AND integration/e2e tests in `tests/` (not just unit tests; use `cargo test --workspace` for the full cargo suite)
-2. **Smoke/integration test** — if the change adds a CLI command or user-facing behavior, add a scenario to `tests/smoke.sh` and `tests/smoke.ps1`. If it adds a server endpoint, sync behavior, or CRDT logic, add it to `tests/integration.sh` and `tests/integration.ps1`. All four files follow the numbered-section + `pass` helper pattern
+2. **Smoke/integration test** — if the change adds a CLI command or user-facing behavior, add a scenario to `tests/smoke.sh` and `tests/smoke.ps1`. If it adds a server endpoint, sync behavior, or CRDT logic, add it to `tests/integration.sh` and `tests/integration.ps1`. All four files follow the numbered-section + `pass` helper pattern. Upstream jink-feedback repros for the SQL regression suite live at `dev/local/specs/jink-feedback/ddb-repros/` (gitignored); run `bash dev/local/specs/jink-feedback/ddb-repros/run-all.sh` for an independent verification channel
 3. **Docs** — update relevant files in `docs/src/` to reflect any behavioral or API changes
 4. **Build** — `cargo clippy --workspace`, fast-tier `cargo test`, and full-suite `cargo test --workspace` all pass
 5. **Walkthrough** — if the task adds a CLI command, server endpoint, or user-facing behavior, create an executable showboat walkthrough in `dev/local/walkthroughs/` (see Showboat Walkthroughs below)

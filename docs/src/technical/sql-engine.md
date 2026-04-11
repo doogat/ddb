@@ -447,3 +447,39 @@ PRD 00122 added (all in `ddb-core/src/sql_engine/tests.rs`):
 - 6 integration-script checks (D1-D6 in section 43 of `tests/integration.sh` and `tests/integration.ps1`).
 
 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns). 4 E2E tests for upsert/conflict handling in `tests/e2e/upsert.rs` (onConflict argument, IGNORE returns existing, ERROR on duplicate, mixed new/existing batch).
+
+### PRD 00124 regression test suite (groups A-G)
+
+PRD 00124 closed the regression-coverage gap exposed by the jink-feedback integration sweep (issues #4-#8). Groups A-G map to specific files and line ranges; any new SQL correctness bug should extend the same cluster so future regressions trace back to both the originating issue and the jink repro.
+
+**Upstream source.** The ported tests originate from shell scripts at `dev/local/specs/jink-feedback/ddb-repros/` (gitignored). The scripts use an inverted-assertion convention where exit 0 = bug reproduces. Running `bash dev/local/specs/jink-feedback/ddb-repros/run-all.sh` against a healthy build reports all four as FIXED and is a valid independent verification channel — the in-repo tests assert the opposite polarity.
+
+**Coverage map.**
+
+| Group | Bug | Rust cluster (`ddb-core/src/sql_engine/tests.rs`) | Integration (`tests/integration.sh`) | Smoke (`tests/smoke.sh`) |
+|-------|-----|---------------------------------------------------|--------------------------------------|--------------------------|
+| A1 | #4 cross-mutation parity | `update_after_unique_failure_succeeds_issue_4_a1`, `insert_after_unique_failure_succeeds_issue_4_a1`, `delete_after_unique_failure_succeeds_issue_4_a1` | Section 45 sub-block `45.A1` | Section 11 ghost-row pin |
+| A2 | #4 restart persistence | — (integration only) | Section 45 sub-block `45.A2` (kill + restart) | — |
+| A3 | #4 cross-table isolation | `failed_insert_on_table_a_does_not_corrupt_table_b_issue_4_a3` | Section 45 sub-block `45.A3` | — |
+| B1-B5 | #5 UPDATE/DELETE no-match | `update_with_missing_id_returns_affected_zero` and neighbours | Section 18 sub-block `18z` | Section 30 |
+| C1 | #6 search/normalize parity | `normalize_and_search_accept_same_inputs_issue_6_c1` in `search_query.rs` | Section 18h (PRD 00121) | — |
+| D1-D6 | #7 constraint enforcement | `executesql_*_rejects_*` cluster + `validate_*` | Section 43.D (PRD 00122) | — |
+| E1 | #8 JOIN pinning | `select_join_returns_joined_rows_issue_8_e1` plus CTE/subquery/UNION/window audit | Section 44 sub-block `44.E1` | — |
+| F1 | #9 composite UNIQUE error | `composite_unique_duplicate_rejected_with_clear_error_issue_9_f1` | Section 30 `30.F1` | — |
+| F4 | #9 executeBatch atomicity | — | Section 18 sub-block `18z2` | — |
+| F5-F7 | #9 updateDoogat tag semantics | — | Section 18 sub-block `18z3` | — |
+| F9 | #9 SQL feature smoke | — | Section 18 sub-block `18z4` | — |
+| F10 | #9 search limit boundaries | — | Section 18 sub-block `18z5` | — |
+| F11 | #9 ALTER + typeDefs | — | Section 18 sub-block `18z6` | — |
+| G1, G2 | #9 GraphQL schema contract | — | Section 18 sub-block `18z7` | — |
+
+**Jink full-sweep port.** The 40+ checks from `validate-full-sweep.sh` are distributed across the existing section 17 and section 18 numbered neighbourhoods via sub-blocks `17.J1`, `17.J2`, `18z8`, `18z9`, `18z10`. The jink tables (`link`, `category`, `category-membership`, `quote`, `saved-search`, `pinned-result`, `jink-config`) are created once in `17.J1` and dropped at the end of `18z10`; they persist across the F-group and G-group sub-blocks between them.
+
+**Property tests.** `ddb-core/tests/property_tests.rs` carries four SQL engine invariant properties under the `// SQL engine invariants` section header:
+
+- P1 `sql_update_delete_by_id_invariant_p1` — forall valid_id ⇒ affected=1; forall invalid_id ⇒ affected=0
+- P2 `search_normalize_round_trip_invariant_p2` — normalize ∘ compile_search_plan preserves validity
+- P3 `sql_unknown_column_insert_rejected_p3` — INSERT with an unlisted column errors
+- P4 `sql_unique_rollback_no_ghost_index_row_p4` — failed UNIQUE INSERT leaves no ghost row in the `doogats` index
+
+Thorough runs: `PROPTEST_CASES=5000 cargo test -p ddb-core --test property_tests`.

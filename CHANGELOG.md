@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **sql**: **breaking** — remove silent title fallback. INSERT into a table whose `title` is `NOT NULL` and which has no `title_template` no longer coerces `url`, `description`, or any other body/frontmatter column into the title slot. Such INSERTs now fail with `NOT NULL constraint violated: <table>.title`. Clients that relied on the fallback should provide an explicit `title`, declare a `title_template` on the typedef, or make `title` nullable (#7)
 
+### Added
+
+- **test**: comprehensive SQL correctness regression suite covering groups A-G from issue #9: cross-mutation parity after UNIQUE rollback (#4 A1), server-restart persistence (#4 A2), cross-table isolation (#4 A3), UPDATE/DELETE no-match GraphQL parity (#5 B1-B5), normalize/search round-trip (#6 C1), JOIN pinned as working plus CTE/subquery/UNION/window audit (#8 E), composite UNIQUE clear-error (#9 F1), executeBatch atomicity (#9 F4), updateDoogat tag semantics (#9 F5/F6/F7), SQL feature smoke (#9 F9), search limit boundaries (#9 F10), ALTER TABLE in typeDefs (#9 F11), GraphQL schema introspection contract (#9 G1/G2), and the jink full-sweep port distributed across integration sections 17 and 18. Adds four SQL engine invariant property tests (P1-P4) to `ddb-core/tests/property_tests.rs`
+
 ## [0.2.1] - 2026-04-09
 
 ### Fixed
