@@ -494,6 +494,47 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE link_f4 CASCADE\") { mess
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE membership_f4 CASCADE\") { message } }"}' >/dev/null
 pass "issue-9-F4: executeBatch rolls back all statements when one fails"
 
+# 18z3. updateDoogat tag semantics (#9 F5/F6/F7). Pins three invariants that
+# jink relies on: tags: [] clears, duplicate inputs dedupe, unicode round-trips.
+
+# F5 — tags: [] clears all tags.
+F5=$(gql '{"query":"mutation { createDoogat(input: { title: \"F5 tag clear\", tags: [\"a\", \"b\", \"c\"] }) { id tags } }"}')
+F5_ID=$(printf '%s' "$F5" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+[ -n "$F5_ID" ]
+printf '%s' "$F5" | grep -q '"a"'
+gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$F5_ID\\\", tags: [] }) { id } }\"}" >/dev/null
+F5_CHECK=$(gql "{\"query\":\"{ doogat(id: \\\"$F5_ID\\\") { id tags } }\"}")
+printf '%s' "$F5_CHECK" | grep -q '"tags":\[\]'
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F5_ID\\\") }\"}" >/dev/null
+pass "issue-9-F5: updateDoogat tags: [] clears all tags"
+
+# F6 — duplicate input tags are deduplicated.
+F6=$(gql '{"query":"mutation { createDoogat(input: { title: \"F6 dedupe\" }) { id } }"}')
+F6_ID=$(printf '%s' "$F6" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+[ -n "$F6_ID" ]
+gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$F6_ID\\\", tags: [\\\"x\\\", \\\"y\\\", \\\"x\\\", \\\"y\\\", \\\"x\\\"] }) { id tags } }\"}" >/dev/null
+F6_CHECK=$(gql "{\"query\":\"{ doogat(id: \\\"$F6_ID\\\") { id tags } }\"}")
+# Count occurrences of "x" and "y" in the tags array. Should be exactly 1 each.
+F6_X=$(printf '%s' "$F6_CHECK" | grep -o '"x"' | wc -l | tr -d ' ')
+F6_Y=$(printf '%s' "$F6_CHECK" | grep -o '"y"' | wc -l | tr -d ' ')
+[ "$F6_X" = "1" ]
+[ "$F6_Y" = "1" ]
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F6_ID\\\") }\"}" >/dev/null
+pass "issue-9-F6: updateDoogat dedupes input tags"
+
+# F7 — unicode tags round-trip intact.
+F7=$(gql '{"query":"mutation { createDoogat(input: { title: \"F7 unicode\", tags: [\"日本語\", \"café\", \"ñoño\"] }) { id tags } }"}')
+F7_ID=$(printf '%s' "$F7" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+[ -n "$F7_ID" ]
+F7_CHECK=$(gql "{\"query\":\"{ doogat(id: \\\"$F7_ID\\\") { id tags } }\"}")
+# Some JSON encoders escape non-ASCII as \uXXXX. Check for either the raw
+# codepoint or its \u escape so the test is resilient to either representation.
+printf '%s' "$F7_CHECK" | grep -qE '日本語|\\u65e5\\u672c\\u8a9e'
+printf '%s' "$F7_CHECK" | grep -qE 'café|caf\\u00e9'
+printf '%s' "$F7_CHECK" | grep -qE 'ñoño|\\u00f1o\\u00f1o'
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$F7_ID\\\") }\"}" >/dev/null
+pass "issue-9-F7: updateDoogat preserves unicode tags"
+
 # 19. REST API CRUD
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$REST_URL/doogats" \
   -H "Content-Type: application/json" \
