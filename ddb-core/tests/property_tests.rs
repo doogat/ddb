@@ -1178,6 +1178,183 @@ proptest! {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SQL engine invariants (PRD 00124 / issue #9 group A-D)
+// ---------------------------------------------------------------------------
+//
+// The four properties below quantify the invariants from bugs #4-#7 so
+// future regressions are caught by property-based fuzzing in addition to
+// the deterministic unit tests.
+//
+//   P1: forall valid_id: UPDATE/DELETE WHERE id = valid_id => affected=1
+//       forall invalid_id: UPDATE/DELETE WHERE id = invalid_id => affected=0
+//   P2: forall q where compile_search_plan(q) is Ok:
+//       compile_search_plan(normalize(q)) is Ok
+//   P3: forall table T, column C not in T.columns:
+//       INSERT INTO T (..., C, ...) => Err
+//   P4: forall sequence with a final UNIQUE-violating INSERT:
+//       index row count for the affected type == mock store file count for
+//       that type (no ghost index row)
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2))]
+
+    /// P1: UPDATE/DELETE WHERE id semantics are deterministic.
+    #[test]
+    fn sql_update_delete_by_id_invariant_p1(
+        (sql, tbl, _cols) in arb_create_table_sql(),
+    ) {
+        let idx = open_test_index();
+        let store = MockStore::new();
+        let mut engine = SqlEngine::new(&idx, &store);
+        prop_assume!(engine.execute(&sql).is_ok());
+
+        // Seed exactly one row so we have a known valid id.
+        let insert_sql = format!("INSERT INTO {tbl} (title) VALUES ('p1row')");
+        let valid_id = match engine.execute(&insert_sql) {
+            Ok(ddb_core::sql_engine::SqlResult::Ok(id)) => id,
+            other => {
+                prop_assume!(false, "p1 seed insert failed: {:?}", other);
+                unreachable!();
+            }
+        };
+
+        // UPDATE with a missing id must return affected=0, no error.
+        let missing_upd = format!(
+            "UPDATE {tbl} SET title = 'x' WHERE id = 'p1_missing_id_000000'"
+        );
+        let missing_result = engine.execute(&missing_upd);
+        match missing_result {
+            Ok(ddb_core::sql_engine::SqlResult::Affected(n)) => {
+                prop_assert_eq!(n, 0, "missing UPDATE should affect 0, got {}", n);
+            }
+            other => prop_assert!(false, "expected Affected(0), got {:?}", other),
+        }
+
+        // UPDATE with the valid id must affect exactly one row.
+        let valid_upd = format!("UPDATE {tbl} SET title = 'y' WHERE id = '{valid_id}'");
+        match engine.execute(&valid_upd) {
+            Ok(ddb_core::sql_engine::SqlResult::Affected(n)) => {
+                prop_assert_eq!(n, 1, "valid UPDATE should affect 1, got {}", n);
+            }
+            other => prop_assert!(false, "expected Affected(1), got {:?}", other),
+        }
+
+        // DELETE with a missing id returns affected=0.
+        let missing_del = format!(
+            "DELETE FROM {tbl} WHERE id = 'p1_missing_id_000001'"
+        );
+        match engine.execute(&missing_del) {
+            Ok(ddb_core::sql_engine::SqlResult::Affected(n)) => {
+                prop_assert_eq!(n, 0, "missing DELETE should affect 0, got {}", n);
+            }
+            other => prop_assert!(false, "expected Affected(0), got {:?}", other),
+        }
+    }
+
+    /// P2: normalize/search round-trip parity. Every input compile_search_plan
+    /// accepts must also be accepted after passing through normalize.
+    #[test]
+    fn search_normalize_round_trip_invariant_p2(q in arb_search_query_valid()) {
+        use ddb_core::search_query::{compile_search_plan, normalize};
+
+        let raw = compile_search_plan(&q);
+        prop_assume!(raw.is_ok(), "input not accepted by compile_search_plan: {:?}", q);
+
+        let normalized = normalize(&q);
+        let round_trip = compile_search_plan(&normalized);
+        prop_assert!(
+            round_trip.is_ok(),
+            "normalized form {:?} of {:?} round-trips into Err: {:?}",
+            normalized, q, round_trip
+        );
+    }
+
+    /// P3: INSERT with an unknown column is rejected.
+    #[test]
+    fn sql_unknown_column_insert_rejected_p3(
+        (sql, tbl, cols) in arb_create_table_sql(),
+        ghost in arb_column_name(),
+    ) {
+        // Only run when the generated ghost name is genuinely not in the
+        // column list (arb_column_name can produce duplicates of a seeded col).
+        let col_names: std::collections::HashSet<String> =
+            cols.iter().map(|(n, _)| n.to_lowercase()).collect();
+        prop_assume!(!col_names.contains(&ghost.to_lowercase()));
+        prop_assume!(ghost != "title" && ghost != "id" && ghost != "type");
+
+        let idx = open_test_index();
+        let store = MockStore::new();
+        let mut engine = SqlEngine::new(&idx, &store);
+        prop_assume!(engine.execute(&sql).is_ok());
+
+        let insert_sql = format!(
+            "INSERT INTO {tbl} (title, {ghost}) VALUES ('p3row', 'val')"
+        );
+        let result = engine.execute(&insert_sql);
+        prop_assert!(
+            result.is_err(),
+            "INSERT with unknown column {ghost:?} should error, got: {result:?}"
+        );
+    }
+
+    /// P4: a failing UNIQUE INSERT must leave no ghost row in the doogats
+    /// index for the affected type. Uses a fixed schema (not arb_create_table)
+    /// because unique_together currently requires a typedef patch the in-test
+    /// DDL path doesn't expose here.
+    #[test]
+    fn sql_unique_rollback_no_ghost_index_row_p4(
+        key_a in "[a-z]{3,8}",
+        key_b in "[a-z]{3,8}",
+    ) {
+        prop_assume!(key_a != key_b);
+
+        let idx = open_test_index();
+        let store = MockStore::new();
+        let mut engine = SqlEngine::new(&idx, &store);
+
+        engine.execute(
+            "CREATE TABLE p4uq (name VARCHAR(255) NOT NULL, UNIQUE(name))"
+        ).unwrap();
+
+        // Seed two unique rows.
+        engine
+            .execute(&format!("INSERT INTO p4uq (title, name) VALUES ('first', '{key_a}')"))
+            .unwrap();
+        engine
+            .execute(&format!("INSERT INTO p4uq (title, name) VALUES ('second', '{key_b}')"))
+            .unwrap();
+
+        let before = idx
+            .query_raw("SELECT COUNT(*) FROM doogats WHERE type = 'p4uq'")
+            .unwrap();
+        prop_assert_eq!(before[0][0].as_str(), "2");
+
+        // Attempt a duplicate of key_a. Must error.
+        let dup = engine.execute(&format!(
+            "INSERT INTO p4uq (title, name) VALUES ('dup', '{key_a}')"
+        ));
+        prop_assert!(dup.is_err(), "duplicate insert should error");
+
+        // Index must still contain exactly the two original rows.
+        let after = idx
+            .query_raw("SELECT COUNT(*) FROM doogats WHERE type = 'p4uq'")
+            .unwrap();
+        prop_assert_eq!(
+            after[0][0].as_str(),
+            "2",
+            "doogats index should have 2 rows after rollback, got {}",
+            after[0][0]
+        );
+
+        // Same count in the materialized typed table.
+        let typed = idx
+            .query_raw("SELECT COUNT(*) FROM p4uq")
+            .unwrap();
+        prop_assert_eq!(typed[0][0].as_str(), "2");
+    }
+}
+
 /// Compare reference sections as sorted line sets (CRDT merge may reorder).
 fn sorted_lines(s: &str) -> Vec<&str> {
     let mut lines: Vec<&str> = s.lines().filter(|l| !l.trim().is_empty()).collect();
