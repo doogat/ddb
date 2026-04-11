@@ -1166,6 +1166,43 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a3thing CASCADE\") { mess
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a3item CASCADE\") { message } }"}' >/dev/null
 pass "issue-4-A3: failed INSERT on a3item does not corrupt a3thing"
 
+# 45.A2 — Ghost-row fix persists across server restart (issue #4 group A2).
+# Seed a UNIQUE failure on the running server, kill it, restart on the same
+# $TMPDIR, then verify a fresh GraphQL write path still succeeds against the
+# restarted process. This catches a regression where the fix lives in memory
+# only and doesn't actually persist to the SQLite index file.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a2persist (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}' >/dev/null
+sleep 1
+A2_VALID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a2persist (title, name) VALUES (\\\"seed\\\", \\\"uniq_a2\\\")\") { message } }"}')
+A2_VALID_ID=$(printf '%s' "$A2_VALID" | extract_id)
+[ -n "$A2_VALID_ID" ]
+A2_DUP=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a2persist (title, name) VALUES (\\\"dup\\\", \\\"uniq_a2\\\")\") { message } }"}')
+assert_gql_errors "$A2_DUP"
+# Kill the server, confirm it's gone, then restart on the same $TMPDIR.
+kill "$SERVER_PID" 2>/dev/null || true
+wait "$SERVER_PID" 2>/dev/null || true
+$DDB serve --port "$SERVER_PORT" --pg-port "$PG_PORT" &
+SERVER_PID=$!
+for i in $(seq 1 20); do
+  if curl -sf "$GQL_URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"query":"{ typeDefs { name } }"}' >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.2
+done
+# Restarted server must be able to updateDoogat on the pre-restart row.
+A2_UPD=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$A2_VALID_ID\\\", tags: [\\\"restart-survived\\\"] }) { id tags } }\"}")
+assert_gql_ok "$A2_UPD"
+printf '%s' "$A2_UPD" | grep -q 'restart-survived'
+# And still accept fresh INSERTs on the same table.
+A2_FRESH=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a2persist (title, name) VALUES (\\\"fresh\\\", \\\"uniq_a2_post\\\")\") { message } }"}')
+assert_gql_ok "$A2_FRESH"
+printf '%s' "$A2_FRESH" | extract_id >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a2persist CASCADE\") { message } }"}' >/dev/null
+pass "issue-4-A2: ghost-row fix persists across server restart"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
