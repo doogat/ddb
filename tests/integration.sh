@@ -1145,6 +1145,27 @@ printf '%s' "$A1_DEL" | grep -q 'true'
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a1item CASCADE\") { message } }"}' >/dev/null
 pass "issue-4-A1: failed UNIQUE INSERT does not break update/create/delete mutations"
 
+# 45.A3 — Cross-table isolation (issue #4 group A3). A failed UNIQUE INSERT on
+# one table must not leak into a sibling table. Proves the savepoint rollback
+# is scoped correctly.
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a3thing (title VARCHAR(255) NOT NULL)\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a3item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}' >/dev/null
+sleep 1
+A3_THING=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a3thing (title) VALUES (\\\"t1\\\")\") { message } }"}')
+A3_THING_ID=$(printf '%s' "$A3_THING" | extract_id)
+[ -n "$A3_THING_ID" ]
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a3item (title, name) VALUES (\\\"a\\\", \\\"u1\\\")\") { message } }"}' >/dev/null
+A3_DUP=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a3item (title, name) VALUES (\\\"b\\\", \\\"u1\\\")\") { message } }"}')
+assert_gql_errors "$A3_DUP"
+printf '%s' "$A3_DUP" | grep -q 'UNIQUE'
+# Table a3thing must still be writable via updateDoogat after the A3 failure.
+A3_UPD=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$A3_THING_ID\\\", tags: [\\\"a3-isolated\\\"] }) { id tags } }\"}")
+assert_gql_ok "$A3_UPD"
+printf '%s' "$A3_UPD" | grep -q 'a3-isolated'
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a3thing CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a3item CASCADE\") { message } }"}' >/dev/null
+pass "issue-4-A3: failed INSERT on a3item does not corrupt a3thing"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

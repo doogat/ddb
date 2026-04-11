@@ -4058,6 +4058,75 @@ fn delete_after_unique_failure_succeeds_issue_4_a1() {
 }
 
 #[test]
+fn failed_insert_on_table_a_does_not_corrupt_table_b_issue_4_a3() {
+    // Issue #4 group A3: a failed UNIQUE INSERT on table A must leave table B
+    // fully writable. Proves the rollback is scoped to the failing table and
+    // doesn't poison sibling materialized tables sharing the index.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Table thing: plain NOT NULL column, no UNIQUE. Used to prove B remains
+    // writable after the failure on table item.
+    engine
+        .execute("CREATE TABLE thing (title VARCHAR(255) NOT NULL)")
+        .unwrap();
+    // Table item: carries the UNIQUE constraint whose violation triggers the
+    // rollback we're testing.
+    engine
+        .execute("CREATE TABLE item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))")
+        .unwrap();
+
+    // Seed table thing with one row we'll try to update after the failure.
+    let thing_id = match engine
+        .execute("INSERT INTO thing (title) VALUES ('t1')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok(id), got {other:?}"),
+    };
+
+    // Seed item with one row so the duplicate INSERT below has something to
+    // collide with.
+    engine
+        .execute("INSERT INTO item (title, name) VALUES ('a', 'u1')")
+        .unwrap();
+
+    // Failing UNIQUE INSERT on item.
+    let dup = engine.execute("INSERT INTO item (title, name) VALUES ('b', 'u1')");
+    assert!(dup.is_err(), "duplicate insert should fail, got {dup:?}");
+
+    // Table thing must still be writable via UPDATE.
+    let upd = engine
+        .execute(&format!(
+            "UPDATE thing SET title = 't2' WHERE id = '{thing_id}'"
+        ))
+        .unwrap();
+    match upd {
+        SqlResult::Affected(n) => assert_eq!(n, 1, "UPDATE should affect 1 row, got {n}"),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+
+    // Verify the UPDATE landed on thing and didn't leak into item.
+    let thing_rows = index.query_raw("SELECT title FROM thing").unwrap();
+    assert_eq!(thing_rows.len(), 1);
+    assert_eq!(thing_rows[0][0], "t2");
+    let item_rows = index
+        .query_raw("SELECT name FROM item ORDER BY name")
+        .unwrap();
+    assert_eq!(item_rows.len(), 1);
+    assert_eq!(item_rows[0][0], "u1");
+
+    // Table thing must still accept fresh INSERTs.
+    engine
+        .execute("INSERT INTO thing (title) VALUES ('t3')")
+        .unwrap();
+    let after = index
+        .query_raw("SELECT COUNT(*) FROM thing")
+        .unwrap();
+    assert_eq!(after[0][0], "2");
+}
+
+#[test]
 fn create_table_with_unique_constraint_enforced() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
