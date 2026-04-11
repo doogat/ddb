@@ -1366,4 +1366,44 @@ mod tests {
             "error message should mention 'unparseable', got: {err}"
         );
     }
+
+    // Issue #6 group C1: the contract is that every input compile_search_plan
+    // accepts produces a normalized form compile_search_plan also accepts. PRD
+    // 00121 fixed the original inconsistency where normalizeSearchQuery
+    // accepted `tag=rust` while search() rejected it. This test pins the
+    // contract at the unit level in addition to the GraphQL-surface check
+    // already in integration.sh section 18h.
+    #[test]
+    fn normalize_and_search_accept_same_inputs_issue_6_c1() {
+        // Curated inputs covering the patterns jink uses + the bugs from #6.
+        // Each input must (a) compile as-is and (b) still compile after
+        // passing through normalize().
+        let cases = &[
+            "tag=rust",
+            "category=work.dev",
+            "tag:rust",
+            "Hello World",
+            "rust AND crdt",
+            "rust OR python",
+            "NOT tag=python",
+            "tag=rust AND category=work.dev",
+            "\"phrase query\"",
+            "meeting minutes",
+            "(a OR b) AND c",
+        ];
+
+        for q in cases {
+            let raw = compile_search_plan(q);
+            assert!(
+                raw.is_ok(),
+                "compile_search_plan rejected curated input {q:?}: {raw:?}"
+            );
+            let normalized = normalize(q);
+            let round_trip = compile_search_plan(&normalized);
+            assert!(
+                round_trip.is_ok(),
+                "normalized form {normalized:?} of {q:?} round-trips into a rejection: {round_trip:?}"
+            );
+        }
+    }
 }
