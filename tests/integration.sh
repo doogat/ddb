@@ -1535,6 +1535,21 @@ $DDB query "SELECT score FROM smokenomatch WHERE id = '$NOMATCH_ID'" | grep -q "
 $DDB query "DROP TABLE smokenomatch CASCADE" | grep -q "dropped"
 pass "update/delete WHERE id no-match semantics (#5)"
 
+# 30.F1 — composite UNIQUE duplicate rejection surfaces a clear error on the
+# CLI (#9 group F1). The Rust unit test
+# composite_unique_duplicate_rejected_with_clear_error_issue_9_f1 covers the
+# error message at the engine level; this check confirms the CLI path
+# propagates the same error with the table context intact.
+cd "$TMPDIR"
+$DDB query 'CREATE TABLE f1mship (title VARCHAR(255), link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))' | grep -q "table f1mship created"
+$DDB query "INSERT INTO f1mship (title, link_id, category) VALUES ('a', 'link1', 'cat1')" >/dev/null
+! $DDB query "INSERT INTO f1mship (title, link_id, category) VALUES ('b', 'link1', 'cat1')" 2>&1 > /tmp/f1_out.txt
+grep -q "UNIQUE" /tmp/f1_out.txt
+grep -qE "f1mship|link_id|category" /tmp/f1_out.txt
+rm -f /tmp/f1_out.txt
+$DDB query "DROP TABLE f1mship CASCADE" | grep -q "dropped"
+pass "issue-9-F1: composite UNIQUE duplicate rejected with clear error"
+
 # 31. file attachments
 cd "$TMPDIR"
 echo "hello attachment" > $TMPDIR/ddb-smoke-attach.txt

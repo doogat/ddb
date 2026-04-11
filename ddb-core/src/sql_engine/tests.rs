@@ -4307,6 +4307,44 @@ fn create_table_with_unique_constraint_enforced() {
 }
 
 #[test]
+fn composite_unique_duplicate_rejected_with_clear_error_issue_9_f1() {
+    // Issue #9 group F1: composite UNIQUE duplicate rejection must produce a
+    // clear error message that identifies the table and at least one of the
+    // offending columns. The existing create_table_with_unique_constraint_enforced
+    // pins the rejection at is_err() level; this test pins the MESSAGE format
+    // so a regression that falls back to a generic "constraint failed" string
+    // (without the table/column context) still gets caught.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute(
+            "CREATE TABLE f1membership (title TEXT, link_id VARCHAR(255) NOT NULL, category VARCHAR(255) NOT NULL, UNIQUE(link_id, category))",
+        )
+        .unwrap();
+
+    engine
+        .execute("INSERT INTO f1membership (title, link_id, category) VALUES ('a', 'link1', 'cat1')")
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO f1membership (title, link_id, category) VALUES ('b', 'link1', 'cat1')")
+        .expect_err("composite UNIQUE duplicate must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("UNIQUE"),
+        "error message should contain 'UNIQUE', got: {msg}"
+    );
+    // At least one of the offending columns or the table name must appear.
+    // This keeps the test resilient if sqlite's error format changes the exact
+    // phrasing but still catches a regression that strips all context.
+    assert!(
+        msg.contains("f1membership") || msg.contains("link_id") || msg.contains("category"),
+        "error message should identify the table or a UNIQUE column, got: {msg}"
+    );
+}
+
+#[test]
 fn create_table_unique_constraint_persisted_in_typedef() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
