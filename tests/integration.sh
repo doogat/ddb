@@ -107,6 +107,27 @@ rest() {
     -H "Content-Type: application/json" \
     "${@:2}"
 }
+# Wait for the GraphQL schema to reload after a DDL statement. Polls
+# schemaVersion until it exceeds $1 (the version captured before the DDL).
+# Times out after 4 seconds (40 x 100ms).
+wait_schema_reload() {
+  local before="$1"
+  for i in $(seq 1 40); do
+    local ver
+    ver=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+    [ "$ver" -gt "$before" ] && return 0
+    sleep 0.1
+  done
+  printf '  ✗ wait_schema_reload: version did not advance past %s within 4s\n' "$before" >&2
+  return 1
+}
+# Execute a DDL mutation via gql and wait for schema reload.
+ddl() {
+  local ver
+  ver=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+  gql "$1" >/dev/null
+  wait_schema_reload "$ver"
+}
 
 # Test auth
 HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" "$GQL_URL" \
@@ -137,6 +158,7 @@ pass "serve: graphql create"
 # The tables persist through sub-blocks 17.J2, 18z8, 18z9, 18z10 below; task
 # 20 drops them all at the end. DO NOT add DROP TABLE statements between
 # these sub-blocks.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 J1_LINK=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL, subtitle VARCHAR(255), favicon_path VARCHAR(255), favicon_origin VARCHAR(255), bookmark_source VARCHAR(255), last_opened_at VARCHAR(255), description TEXT)\") { message } }"}')
 assert_gql_ok "$J1_LINK"
 printf '%s' "$J1_LINK" | grep -q '"message":"table link'
@@ -172,7 +194,7 @@ assert_gql_ok "$J1_JC"
 printf '%s' "$J1_JC" | grep -q '"message":"table jink-config'
 pass "j1: created jink-config table"
 
-sleep 1
+wait_schema_reload "$VER"
 
 # 17.J2 — jink-config singleton + Link CRUD (#9 jink full-sweep sections 3-4).
 # Ported from validate-full-sweep.sh lines 70-100. Uses the jink tables from
@@ -517,8 +539,7 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121G_ID\\\") }\"}" >/dev/n
 # 18z. UPDATE/DELETE WHERE id no-match GraphQL parity (issue #5 group B).
 # Rust unit tests and smoke CLI checks already cover B1-B5 at the lower layers;
 # this sub-block pins the same behavior at the GraphQL executeSql surface.
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link_b1 (url VARCHAR(255))\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE link_b1 (url VARCHAR(255))\") { message } }"}'
 B1_SEED=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO link_b1 (title, url) VALUES (\\\"A\\\", \\\"https://a.com\\\")\") { message } }"}')
 B1_SEED_ID=$(printf '%s' "$B1_SEED" | extract_id)
 [ -n "$B1_SEED_ID" ]
@@ -553,9 +574,10 @@ pass "issue-5-B1..B5: UPDATE/DELETE no-match GraphQL parity"
 # 18z2. executeBatch atomicity (issue #9 group F4). A batch where the second
 # statement fails on a UNIQUE constraint must roll back the first statement's
 # effect. Jink relies on this so partial writes can't leak out.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link_f4 (url VARCHAR(255))\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE membership_f4 (link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))\") { message } }"}' >/dev/null
-sleep 1
+wait_schema_reload "$VER"
 F4_LINK=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO link_f4 (title, url) VALUES (\\\"initial\\\", \\\"https://f4.com\\\")\") { message } }"}')
 F4_LINK_ID=$(printf '%s' "$F4_LINK" | extract_id)
 [ -n "$F4_LINK_ID" ]
@@ -621,8 +643,7 @@ pass "issue-9-F7: updateDoogat preserves unicode tags"
 # 18z4. SQL feature coverage pins (#9 F9). Single per-feature check so a
 # regression in any one of COUNT, GROUP BY, ORDER BY, LIMIT, OFFSET, IS NULL,
 # LIKE is immediately attributable.
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE feat (val INTEGER, label VARCHAR(255), maybe_null VARCHAR(255))\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE feat (val INTEGER, label VARCHAR(255), maybe_null VARCHAR(255))\") { message } }"}'
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label, maybe_null) VALUES (\\\"r1\\\", 1, \\\"a\\\", \\\"x\\\")\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label) VALUES (\\\"r2\\\", 2, \\\"a\\\")\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO feat (title, val, label, maybe_null) VALUES (\\\"r3\\\", 3, \\\"b\\\", \\\"y\\\")\") { message } }"}' >/dev/null
@@ -693,8 +714,7 @@ pass "issue-9-F10: search limit boundaries (0, 10000, 10001, -1)"
 # 18z6. ALTER TABLE ADD COLUMN surfaces in the typeDefs introspection query
 # (#9 F11). Jink relies on typeDefs to reflect the live schema so its client
 # code can validate columns before writing.
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE altschema_f11 (a VARCHAR(255))\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE altschema_f11 (a VARCHAR(255))\") { message } }"}'
 F11_BEFORE=$(gql '{"query":"{ typeDefs { name columns { name dataType } } }"}')
 assert_gql_ok "$F11_BEFORE"
 printf '%s' "$F11_BEFORE" | grep -q '"altschema_f11"'
@@ -708,8 +728,7 @@ col_names = [c['name'] for c in schemas['altschema_f11']]
 assert 'a' in col_names, f\"column a missing from altschema_f11, got: {col_names}\"
 assert 'b' not in col_names, f\"column b unexpectedly present before ALTER, got: {col_names}\"
 "
-gql '{"query":"mutation { executeSql(sql: \"ALTER TABLE altschema_f11 ADD COLUMN b INTEGER\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"ALTER TABLE altschema_f11 ADD COLUMN b INTEGER\") { message } }"}'
 F11_AFTER=$(gql '{"query":"{ typeDefs { name columns { name dataType } } }"}')
 assert_gql_ok "$F11_AFTER"
 printf '%s' "$F11_AFTER" | python3 -c "
@@ -732,9 +751,10 @@ pass "issue-9-F11: ALTER TABLE ADD COLUMN appears in typeDefs introspection"
 #  - pluralize() appends `s` to the lowercased name → query field `gqtestas`
 #  - Aggregate field is `<plural>Aggregate` → `gqtestasAggregate`
 #  - Connection type is `<Type>Connection` → `GqtestaConnection`
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE gqtesta (label VARCHAR(255))\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE gqtestb (label VARCHAR(255))\") { message } }"}' >/dev/null
-sleep 1
+wait_schema_reload "$VER"
 G_INTRO=$(gql '{"query":"{ __schema { queryType { fields { name } } types { name fields { name } } } }"}')
 assert_gql_ok "$G_INTRO"
 # G1: query fields `gqtestas` and `gqtestasAggregate` must exist (Gqtesta).
@@ -1006,8 +1026,7 @@ if command -v psql >/dev/null 2>&1; then
   pass "pgwire: auth rejection"
 
   # pgwire boolean type: BOOLEAN columns should return t/f
-  gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE pgbooltest (label TEXT, active BOOLEAN)\"){message}}"}' >/dev/null
-  sleep 1
+  ddl '{"query":"mutation{executeSql(sql:\"CREATE TABLE pgbooltest (label TEXT, active BOOLEAN)\"){message}}"}'
   gql '{"query":"mutation{executeSql(sql:\"INSERT INTO pgbooltest (label, active) VALUES ('\''yes'\'', true)\"){message}}"}' >/dev/null
   PG_BOOL=$(PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -t -A -c "SELECT active FROM pgbooltest WHERE label = 'yes'")
   echo "$PG_BOOL" | grep -q "t"
@@ -1124,9 +1143,10 @@ grep -q '"id"' "$WRITE_TMP"
 pass "serve: read-under-write (concurrent read + write)"
 
 # 38b. multi-value references via GraphQL + REST
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvcategory (name VARCHAR(100))\"){message}}"}'
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)\"){message}}"}'
-sleep 1
+wait_schema_reload "$VER"
 MV_CAT1=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (\\\"Science\\\")\"){message}}"}' | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
 MV_CAT2=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO mvcategory (name) VALUES (\\\"Math\\\")\"){message}}"}' | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
 [ -n "$MV_CAT1" ] && [ -n "$MV_CAT2" ]
@@ -1145,11 +1165,12 @@ echo "$RESULT" | grep -q '"mvcategory"'
 pass "serve: rest multi-value ref structured json"
 
 # 38b2. REFERENCES relation resolution
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokecat (label TEXT)\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)\") { message } }"}' >/dev/null
+wait_schema_reload "$VER"
 SCAT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokecat (title, label) VALUES ('Tech', 'tech')\\\") { message } }\"}")
 SCAT_ID=$(echo "$SCAT" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
-sleep 1
 SBM=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm (title, url) VALUES ('Example', 'https://example.com')\\\") { message } }\"}")
 SBM_ID=$(echo "$SBM" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
 gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO smokebm_smokecat (smokebm_id, smokecat_id) VALUES ('$SBM_ID', '$SCAT_ID')\\\") { message } }\"}" >/dev/null
@@ -1169,10 +1190,11 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokebm CASCADE\") { mess
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { message } }"}' >/dev/null
 
 # 38b2b. raw ID scalar + orderBy/limit on plural references
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlcat (label TEXT)\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlbm (url TEXT, rlcat TEXT REFERENCES rlcat)\") { message } }"}' >/dev/null
+wait_schema_reload "$VER"
 RL_C1=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"cherry\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
-sleep 1
 RL_C2=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"apple\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
 sleep 1
 RL_C3=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO rlcat (label) VALUES (\\\"banana\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
@@ -1248,8 +1270,7 @@ echo "$RESULT" | grep -qF '\"title\":'
 pass "serve: sql format objects returns keyed rows"
 
 sleep 1
-gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}'
 SMOKEPIN_ID=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)\\\"){message}}\"}" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
 [ -n "$SMOKEPIN_ID" ]
 RESULT=$(gql "{\"query\":\"{ sql(query: \\\"SELECT pinned FROM smokepin WHERE pinned = 1\\\") { rows } }\"}")
@@ -1306,9 +1327,10 @@ echo "$RESULT" | grep -qv '"errors"'
 pass "serve: executeBatch multiple INSERTs"
 
 # executeBatch with DDL triggers schema reload
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE batchtest (col1 TEXT)\"]) { message } }"}')
 echo "$RESULT" | grep -q '"message"'
-sleep 1
+wait_schema_reload "$VER"
 RESULT=$(gql '{"query":"{ batchtests { totalCount } }"}')
 echo "$RESULT" | grep -q '"totalCount":0'
 pass "serve: executeBatch DDL triggers schema reload"
@@ -1376,8 +1398,9 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID1\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID2\\\") }\"}" >/dev/null
 
 # 38i. typed field updates via GraphQL (updateDoogat fields/unsetFields, deleteDoogat cleanup)
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tfubookmark (url VARCHAR(200))\") { message } }"}' | grep -q "table tfubookmark created"
-sleep 1
+wait_schema_reload "$VER"
 TFU_ID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tfubookmark (title, url) VALUES (\\\"TFU Test\\\", \\\"https://old.com\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
 echo "$TFU_ID" | grep -qE "^[0-9]{14}$"
 # Verify initial materialized row
@@ -1406,8 +1429,7 @@ pass "serve: deleteDoogat cleans materialized type table row"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE tfubookmark CASCADE\") { message } }"}' >/dev/null
 
 # Hyphenated type names in GraphQL
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"test-widget\\\" (status TEXT, priority INTEGER)\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"test-widget\\\" (status TEXT, priority INTEGER)\") { message } }"}'
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO \\\"test-widget\\\" (status, priority) VALUES ('"'"'active'"'"', 1)\") { message } }"}' >/dev/null
 RESULT=$(gql '{"query":"{ testWidgets { items { id status priority } totalCount } }"}')
 echo "$RESULT" | jq -e '.data.testWidgets.totalCount == 1' >/dev/null
@@ -1469,9 +1491,10 @@ pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 # Six checks (D1-D6) extending the existing INSERT-validation neighborhood.
 
 # Setup: a NOT NULL link table for D1-D5 and a numeric table for D3.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE link_d1 (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)\"){message}}"}' >/dev/null
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE numeric_d3 (title VARCHAR(255) NOT NULL, count INTEGER)\"){message}}"}' >/dev/null
-sleep 1
+wait_schema_reload "$VER"
 
 # D1. NOT NULL: INSERT with NULL title is rejected and no row is created.
 D1_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO link_d1 (title, url) VALUES (NULL, \\\"https://n.com\\\")\"){message}}"}')
@@ -1514,8 +1537,7 @@ pass "serve: D5 unknown column on UPDATE is rejected, row unchanged"
 
 # D6. Silent title fallback removed: title NOT NULL with no template, INSERT
 # omitting title now fails instead of coercing url/description into title.
-gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE link_d6 (title VARCHAR(255) NOT NULL, url VARCHAR(255), description TEXT)\"){message}}"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation{executeSql(sql:\"CREATE TABLE link_d6 (title VARCHAR(255) NOT NULL, url VARCHAR(255), description TEXT)\"){message}}"}'
 D6_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO link_d6 (url) VALUES (\\\"https://notitle.com\\\")\"){message}}"}')
 echo "$D6_RESULT" | grep -q "NOT NULL constraint violated: link_d6.title"
 D6_COUNT=$(gql '{"query":"mutation{executeSql(sql:\"SELECT COUNT(*) FROM link_d6\"){rows}}"}')
@@ -1530,9 +1552,10 @@ gql '{"query":"mutation{executeSql(sql:\"DROP TABLE link_d6 CASCADE\"){message}}
 # 44.E1 — Pin JOIN as working (issue #8 group E1). PRD 00123 was archived
 # because JOIN actually works; this check pins the behavior at the GraphQL
 # surface so a regression can't silently drop joined rows.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE e1_link (url VARCHAR(255))\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE e1_num (count INTEGER)\") { message } }"}' >/dev/null
-sleep 1
+wait_schema_reload "$VER"
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO e1_link (title, url) VALUES (\\\"a\\\", \\\"https://a.com\\\")\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO e1_num (title, count) VALUES (\\\"a\\\", 1)\") { message } }"}' >/dev/null
 E1_JOIN=$(gql '{"query":"{ sql(query: \"SELECT l.title, n.count FROM e1_link l JOIN e1_num n ON l.title = n.title\") { rows } }"}')
@@ -1546,6 +1569,7 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE e1_num CASCADE\") { messa
 pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obsolete)"
 
 # 44. DDL response consistency (no spurious errors)
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 RESULT=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ddltest (name VARCHAR(100))\") { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'
 echo "$RESULT" | grep -q '"columns":\[\]'
@@ -1553,27 +1577,29 @@ echo "$RESULT" | grep -q '"rows":\[\]'
 echo "$RESULT" | grep -q '"message"'
 pass "serve: CREATE TABLE response has no errors"
 
-sleep 1
+wait_schema_reload "$VER"
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 RESULT=$(gql '{"query":"mutation { executeSql(sql: \"ALTER TABLE ddltest ADD COLUMN age INTEGER\") { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'
 echo "$RESULT" | grep -q '"columns":\[\]'
 echo "$RESULT" | grep -q '"rows":\[\]'
 pass "serve: ALTER TABLE response has no errors"
 
-sleep 1
+wait_schema_reload "$VER"
 RESULT=$(gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddltest\") { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'
 echo "$RESULT" | grep -q '"columns":\[\]'
 echo "$RESULT" | grep -q '"rows":\[\]'
 pass "serve: DROP TABLE response has no errors"
 
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE ddlbatch1 (name VARCHAR)\", \"CREATE TABLE ddlbatch2 (val INTEGER)\"]) { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'
 echo "$RESULT" | grep -q '"columns":\[\]'
 echo "$RESULT" | grep -q '"rows":\[\]'
 pass "serve: executeBatch DDL responses have no errors"
 
-sleep 1
+wait_schema_reload "$VER"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch1 CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ddlbatch2 CASCADE\") { message } }"}' >/dev/null
 
@@ -1584,8 +1610,7 @@ echo "$DML_RESULT" | grep -q '"message"'
 pass "serve: DML INSERT response unchanged"
 
 # 45. createMany onConflict: IGNORE (upsert via GraphQL)
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE upsertgql (code TEXT, label TEXT)\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE upsertgql (code TEXT, label TEXT)\") { message } }"}'
 # Patch typedef to add unique_together on [code]
 cd "$TMPDIR"
 UPSERT_TYPEDEF=$(find ddb/_typedef -name '*.md' -exec grep -l 'title: upsertgql' {} \;)
@@ -1609,8 +1634,7 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE upsertgql CASCADE\") { me
 # the unit level; this sub-block proves all THREE GraphQL write paths
 # (updateDoogat / createDoogat / deleteDoogat) still work after a UNIQUE
 # rollback. Issue #4 explicitly named all three as broken on the regression.
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a1item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE a1item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}'
 A1_VALID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a1item (title, name) VALUES (\\\"a\\\", \\\"unique1\\\")\") { message } }"}')
 A1_VALID_ID=$(printf '%s' "$A1_VALID" | extract_id)
 [ -n "$A1_VALID_ID" ]
@@ -1637,9 +1661,10 @@ pass "issue-4-A1: failed UNIQUE INSERT does not break update/create/delete mutat
 # 45.A3 — Cross-table isolation (issue #4 group A3). A failed UNIQUE INSERT on
 # one table must not leak into a sibling table. Proves the savepoint rollback
 # is scoped correctly.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a3thing (title VARCHAR(255) NOT NULL)\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a3item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}' >/dev/null
-sleep 1
+wait_schema_reload "$VER"
 A3_THING=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a3thing (title) VALUES (\\\"t1\\\")\") { message } }"}')
 A3_THING_ID=$(printf '%s' "$A3_THING" | extract_id)
 [ -n "$A3_THING_ID" ]
@@ -1660,8 +1685,7 @@ pass "issue-4-A3: failed INSERT on a3item does not corrupt a3thing"
 # $TMPDIR, then verify a fresh GraphQL write path still succeeds against the
 # restarted process. This catches a regression where the fix lives in memory
 # only and doesn't actually persist to the SQLite index file.
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a2persist (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}' >/dev/null
-sleep 1
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE a2persist (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}'
 A2_VALID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO a2persist (title, name) VALUES (\\\"seed\\\", \\\"uniq_a2\\\")\") { message } }"}')
 A2_VALID_ID=$(printf '%s' "$A2_VALID" | extract_id)
 [ -n "$A2_VALID_ID" ]

@@ -119,6 +119,23 @@ function gql($body) {
 function gqlq([string]$query) {
     return gql (@{ query = $query } | ConvertTo-Json -Compress)
 }
+# Wait for the GraphQL schema to reload after a DDL statement. Polls
+# schemaVersion until it exceeds $before. Times out after 4 seconds (40 x 100ms).
+function waitSchemaReload([int]$before) {
+    for ($i = 0; $i -lt 40; $i++) {
+        $r = gqlq '{ schemaVersion }'
+        if ($r -match '"schemaVersion":(\d+)' -and [int]$Matches[1] -gt $before) { return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "waitSchemaReload: version did not advance past $before within 4s"
+}
+# Execute a DDL mutation via gqlq and wait for schema reload.
+function ddl([string]$query) {
+    $r = gqlq '{ schemaVersion }'
+    $ver = if ($r -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+    gqlq $query | Out-Null
+    waitSchemaReload $ver
+}
 
 # Extract the "message" field of a successful executeSql response (which is the
 # new doogat id). Mirrors the bash extract_id helper for jink-port checks.
@@ -226,12 +243,12 @@ assertGqlOk $j1Pr "j1 pinned-result create"
 if ($j1Pr -notmatch '"message":"table pinned-result') { throw "j1: pinned-result create did not return expected message" }
 pass "j1: created pinned-result table"
 
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $j1Jc = gqlq 'mutation { executeSql(sql: "CREATE TABLE \"jink-config\" (dashboard_title VARCHAR(255) DEFAULT ''Bobs Battlestation'', quote_rotation_minutes INTEGER DEFAULT 30, links_per_category INTEGER DEFAULT 8, frontend_version VARCHAR(255))") { message } }'
 assertGqlOk $j1Jc "j1 jink-config create"
 if ($j1Jc -notmatch '"message":"table jink-config') { throw "j1: jink-config create did not return expected message" }
 pass "j1: created jink-config table"
-
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 
 # 17.J2 - jink-config singleton + Link CRUD (#9 jink full-sweep sections 3-4).
 $j2JcEmpty = gqlq '{ sql(query: "SELECT id FROM \"jink-config\" LIMIT 1") { rows } }'
@@ -552,8 +569,7 @@ gqlq "mutation { deleteDoogat(id: `"$PRD121B_ID`") }" | Out-Null
 gqlq "mutation { deleteDoogat(id: `"$PRD121G_ID`") }" | Out-Null
 
 # 18z - UPDATE/DELETE WHERE id no-match GraphQL parity (#5 group B).
-gqlq 'mutation { executeSql(sql: "CREATE TABLE link_b1 (url VARCHAR(255))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+ddl 'mutation { executeSql(sql: "CREATE TABLE link_b1 (url VARCHAR(255))") { message } }'
 $b1Seed = gqlq 'mutation { executeSql(sql: "INSERT INTO link_b1 (title, url) VALUES (''A'', ''https://a.com'')") { message } }'
 $B1_SEED_ID = extractId $b1Seed
 if (-not $B1_SEED_ID) { throw "18z: failed to seed B1 row" }
@@ -586,9 +602,10 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE link_b1 CASCADE") { message } }' | 
 pass "issue-5-B1..B5: UPDATE/DELETE no-match GraphQL parity"
 
 # 18z2 - executeBatch atomicity (#9 F4).
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq 'mutation { executeSql(sql: "CREATE TABLE link_f4 (url VARCHAR(255))") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "CREATE TABLE membership_f4 (link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 $f4Link = gqlq 'mutation { executeSql(sql: "INSERT INTO link_f4 (title, url) VALUES (''initial'', ''https://f4.com'')") { message } }'
 $F4_LINK_ID = extractId $f4Link
 if (-not $F4_LINK_ID) { throw "18z2: could not extract F4_LINK_ID" }
@@ -639,8 +656,7 @@ gqlq "mutation { deleteDoogat(id: `"$F7_ID`") }" | Out-Null
 pass "issue-9-F7: updateDoogat preserves unicode tags"
 
 # 18z4 - SQL feature coverage pins (#9 F9).
-gqlq 'mutation { executeSql(sql: "CREATE TABLE feat (val INTEGER, label VARCHAR(255), maybe_null VARCHAR(255))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+ddl 'mutation { executeSql(sql: "CREATE TABLE feat (val INTEGER, label VARCHAR(255), maybe_null VARCHAR(255))") { message } }'
 gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label, maybe_null) VALUES (''r1'', 1, ''a'', ''x'')") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label) VALUES (''r2'', 2, ''a'')") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "INSERT INTO feat (title, val, label, maybe_null) VALUES (''r3'', 3, ''b'', ''y'')") { message } }' | Out-Null
@@ -693,14 +709,12 @@ gqlq "mutation { deleteDoogat(id: `"$F10C_ID`") }" | Out-Null
 pass "issue-9-F10: search limit boundaries (0, 10000, 10001, -1)"
 
 # 18z6 - ALTER TABLE ADD COLUMN appears in typeDefs introspection (#9 F11).
-gqlq 'mutation { executeSql(sql: "CREATE TABLE altschema_f11 (a VARCHAR(255))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+ddl 'mutation { executeSql(sql: "CREATE TABLE altschema_f11 (a VARCHAR(255))") { message } }'
 $f11Before = gqlq '{ typeDefs { name columns { name dataType } } }'
 assertGqlOk $f11Before "F11 before"
 if ($f11Before -notmatch '"altschema_f11"') { throw "18z6 F11: altschema_f11 missing from typeDefs" }
 if ($f11Before -notmatch '"a"') { throw "18z6 F11: column a missing before ALTER" }
-gqlq 'mutation { executeSql(sql: "ALTER TABLE altschema_f11 ADD COLUMN b INTEGER") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+ddl 'mutation { executeSql(sql: "ALTER TABLE altschema_f11 ADD COLUMN b INTEGER") { message } }'
 $f11After = gqlq '{ typeDefs { name columns { name dataType } } }'
 assertGqlOk $f11After "F11 after"
 if ($f11After -notmatch '"b"') { throw "18z6 F11: column b missing after ALTER, got: $f11After" }
@@ -708,9 +722,10 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE altschema_f11 CASCADE") { message }
 pass "issue-9-F11: ALTER TABLE ADD COLUMN appears in typeDefs introspection"
 
 # 18z7 - GraphQL schema introspection contract (#9 group G).
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq 'mutation { executeSql(sql: "CREATE TABLE gqtesta (label VARCHAR(255))") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "CREATE TABLE gqtestb (label VARCHAR(255))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 $gIntro = gqlq '{ __schema { queryType { fields { name } } types { name fields { name } } } }'
 assertGqlOk $gIntro "G introspection"
 foreach ($fld in @('"name":"gqtestas"', '"name":"gqtestasAggregate"', '"name":"gqtestbs"', '"name":"gqtestbsAggregate"')) {
@@ -1069,9 +1084,10 @@ Remove-Job $writeJob
 pass "serve: read-under-write (concurrent read + write)"
 
 # 38b. multi-value references via GraphQL + REST
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq 'mutation{executeSql(sql:"CREATE TABLE mvcategory (name VARCHAR(100))"){message}}' | Out-Null
 gqlq 'mutation{executeSql(sql:"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)"){message}}' | Out-Null
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 $mvCat1 = (gqlq 'mutation{executeSql(sql:"INSERT INTO mvcategory (name) VALUES (''Science'')"){message}}') -replace '.*"message":"(\d+)".*','$1'
 $mvCat2 = (gqlq 'mutation{executeSql(sql:"INSERT INTO mvcategory (name) VALUES (''Math'')"){message}}') -replace '.*"message":"(\d+)".*','$1'
 $mvBm = (gqlq "mutation{executeSql(sql:`"INSERT INTO mvbookmark (mvcategory) VALUES ('$mvCat1')`"){message}}") -replace '.*"message":"(\d+)".*','$1'
@@ -1086,11 +1102,12 @@ if ($mvRest -notmatch '"mvcategory"') { throw "multi-value ref: no category key 
 pass "serve: rest multi-value ref structured json"
 
 # 38b2. REFERENCES relation resolution
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq 'mutation { executeSql(sql: "CREATE TABLE smokecat (label TEXT)") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)") { message } }' | Out-Null
+waitSchemaReload $ver
 $scat = gqlq "mutation { executeSql(sql: `"INSERT INTO smokecat (title, label) VALUES ('Tech', 'tech')`") { message } }"
 $SCAT_ID = if ($scat -match '"message":"([^"]+)"') { $Matches[1] }
-Start-Sleep -Seconds 1
 $sbm = gqlq "mutation { executeSql(sql: `"INSERT INTO smokebm (title, url) VALUES ('Example', 'https://example.com')`") { message } }"
 $SBM_ID = if ($sbm -match '"message":"([^"]+)"') { $Matches[1] }
 gqlq "mutation { executeSql(sql: `"INSERT INTO smokebm_smokecat (smokebm_id, smokecat_id) VALUES ('$SBM_ID', '$SCAT_ID')`") { message } }" | Out-Null
@@ -1110,10 +1127,11 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE smokebm CASCADE") { message } }' | 
 gqlq 'mutation { executeSql(sql: "DROP TABLE smokecat CASCADE") { message } }' | Out-Null
 
 # 38b2b. raw ID scalar + orderBy/limit on plural references
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq 'mutation { executeSql(sql: "CREATE TABLE rlcat (label TEXT)") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "CREATE TABLE rlbm (url TEXT, rlcat TEXT REFERENCES rlcat)") { message } }' | Out-Null
+waitSchemaReload $ver
 $rlC1 = (gqlq 'mutation { executeSql(sql: "INSERT INTO rlcat (label) VALUES (\"cherry\")") { message } }') -replace '.*"message":"([^"]+)".*','$1'
-Start-Sleep -Seconds 1
 $rlC2 = (gqlq 'mutation { executeSql(sql: "INSERT INTO rlcat (label) VALUES (\"apple\")") { message } }') -replace '.*"message":"([^"]+)".*','$1'
 Start-Sleep -Seconds 1
 $rlC3 = (gqlq 'mutation { executeSql(sql: "INSERT INTO rlcat (label) VALUES (\"banana\")") { message } }') -replace '.*"message":"([^"]+)".*','$1'
@@ -1184,7 +1202,7 @@ if ($result -notmatch '\\"id\\":') { throw "sql format objects: missing id key i
 if ($result -notmatch '\\"title\\":') { throw "sql format objects: missing title key in row object" }
 pass "serve: sql format objects returns keyed rows"
 
-gqlq 'mutation{executeSql(sql:"CREATE TABLE smokepin (pinned BOOLEAN)"){message}}' | Out-Null
+ddl 'mutation{executeSql(sql:"CREATE TABLE smokepin (pinned BOOLEAN)"){message}}'
 $smokepinId = (gqlq "mutation{executeSql(sql:`"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)`"){message}}") -replace '.*"message":"(\d+)".*','$1'
 if (-not $smokepinId) { throw "smokepin insert failed" }
 $result = gqlq "{ sql(query: `"SELECT pinned FROM smokepin WHERE pinned = 1`") { rows } }"
@@ -1238,9 +1256,10 @@ $result = gqlq 'mutation { executeBatch(statements: ["INSERT INTO foo (title, ba
 if ($result -match '"errors"') { throw "executeBatch errors: $result" }
 pass "serve: executeBatch multiple INSERTs"
 
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $result = gqlq 'mutation { executeBatch(statements: ["CREATE TABLE batchtest (col1 TEXT)"]) { message } }'
 if ($result -notmatch '"message"') { throw "executeBatch DDL: $result" }
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 $result = gqlq '{ batchtests { totalCount } }'
 if ($result -notmatch '"totalCount":0') { throw "executeBatch schema reload: $result" }
 pass "serve: executeBatch DDL triggers schema reload"
@@ -1308,9 +1327,10 @@ gqlq "mutation { deleteDoogat(id: `"$CM_ID1`") }" | Out-Null
 gqlq "mutation { deleteDoogat(id: `"$CM_ID2`") }" | Out-Null
 
 # 38i. typed field updates via GraphQL (updateDoogat fields/unsetFields, deleteDoogat cleanup)
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $output = gqlq 'mutation { executeSql(sql: "CREATE TABLE tfubookmark (url VARCHAR(200))") { message } }'
 if ($output -notmatch "table tfubookmark created") { throw "create tfubookmark failed: $output" }
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 $output = gqlq 'mutation { executeSql(sql: "INSERT INTO tfubookmark (title, url) VALUES (\"TFU Test\", \"https://old.com\")") { message } }'
 $TFU_ID = if ($output -match '"message":"(\d{14})"') { $Matches[1] } else { throw "insert tfubookmark bad id: $output" }
 # Verify initial materialized row
@@ -1339,8 +1359,7 @@ pass "serve: deleteDoogat cleans materialized type table row"
 gqlq 'mutation { executeSql(sql: "DROP TABLE tfubookmark CASCADE") { message } }' | Out-Null
 
 # Hyphenated type names in GraphQL
-gqlq "mutation { executeSql(sql: `"CREATE TABLE \`"test-widget\`" (status TEXT, priority INTEGER)`") { message } }" | Out-Null
-Start-Sleep -Seconds 1
+ddl "mutation { executeSql(sql: `"CREATE TABLE \`"test-widget\`" (status TEXT, priority INTEGER)`") { message } }"
 gqlq "mutation { executeSql(sql: `"INSERT INTO \`"test-widget\`" (status, priority) VALUES ('active', 1)`") { message } }" | Out-Null
 $result = gqlq "{ testWidgets { items { id status priority } totalCount } }"
 $parsed = $result | ConvertFrom-Json
@@ -1401,9 +1420,10 @@ pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 # Six checks (D1-D6) extending the existing INSERT-validation neighborhood.
 
 # Setup: NOT NULL link table for D1-D5 and a numeric table for D3.
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq "mutation{executeSql(sql:`"CREATE TABLE link_d1 (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)`"){message}}" | Out-Null
 gqlq "mutation{executeSql(sql:`"CREATE TABLE numeric_d3 (title VARCHAR(255) NOT NULL, count INTEGER)`"){message}}" | Out-Null
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 
 # D1. NOT NULL: INSERT with NULL title is rejected and no row is created.
 $d1Result = gqlq "mutation{executeSql(sql:`"INSERT INTO link_d1 (title, url) VALUES (NULL, \`"https://n.com\`")`"){message}}"
@@ -1456,8 +1476,7 @@ pass "serve: D5 unknown column on UPDATE is rejected, row unchanged"
 
 # D6. Silent title fallback removed: title NOT NULL with no template, INSERT
 # omitting title now fails instead of coercing url/description into title.
-gqlq "mutation{executeSql(sql:`"CREATE TABLE link_d6 (title VARCHAR(255) NOT NULL, url VARCHAR(255), description TEXT)`"){message}}" | Out-Null
-Start-Sleep -Seconds 1
+ddl "mutation{executeSql(sql:`"CREATE TABLE link_d6 (title VARCHAR(255) NOT NULL, url VARCHAR(255), description TEXT)`"){message}}"
 $d6Result = gqlq "mutation{executeSql(sql:`"INSERT INTO link_d6 (url) VALUES (\`"https://notitle.com\`")`"){message}}"
 if ($d6Result -notmatch 'NOT NULL constraint violated: link_d6.title') {
     throw "D6: expected NOT NULL error, got: $d6Result"
@@ -1472,9 +1491,10 @@ gqlq "mutation{executeSql(sql:`"DROP TABLE numeric_d3 CASCADE`"){message}}" | Ou
 gqlq "mutation{executeSql(sql:`"DROP TABLE link_d6 CASCADE`"){message}}" | Out-Null
 
 # 44.E1 - Pin JOIN as working (#8 group E1, PRD 00123 archived as obsolete).
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq 'mutation { executeSql(sql: "CREATE TABLE e1_link (url VARCHAR(255))") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "CREATE TABLE e1_num (count INTEGER)") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 gqlq 'mutation { executeSql(sql: "INSERT INTO e1_link (title, url) VALUES (''a'', ''https://a.com'')") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "INSERT INTO e1_num (title, count) VALUES (''a'', 1)") { message } }' | Out-Null
 $e1Join = gqlq '{ sql(query: "SELECT l.title, n.count FROM e1_link l JOIN e1_num n ON l.title = n.title") { rows } }'
@@ -1486,34 +1506,37 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE e1_num CASCADE") { message } }' | O
 pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obsolete)"
 
 # 44. DDL response consistency (no spurious errors)
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $result = gqlq 'mutation { executeSql(sql: "CREATE TABLE ddltest (name VARCHAR(100))") { columns rows message } }'
 if ($result -match '"errors"') { throw "CREATE TABLE has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "CREATE TABLE columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "CREATE TABLE rows not empty: $result" }
 if ($result -notmatch '"message"') { throw "CREATE TABLE missing message: $result" }
 pass "serve: CREATE TABLE response has no errors"
+waitSchemaReload $ver
 
-Start-Sleep -Seconds 1
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $result = gqlq 'mutation { executeSql(sql: "ALTER TABLE ddltest ADD COLUMN age INTEGER") { columns rows message } }'
 if ($result -match '"errors"') { throw "ALTER TABLE has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "ALTER TABLE columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "ALTER TABLE rows not empty: $result" }
 pass "serve: ALTER TABLE response has no errors"
+waitSchemaReload $ver
 
-Start-Sleep -Seconds 1
 $result = gqlq 'mutation { executeSql(sql: "DROP TABLE ddltest") { columns rows message } }'
 if ($result -match '"errors"') { throw "DROP TABLE has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "DROP TABLE columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "DROP TABLE rows not empty: $result" }
 pass "serve: DROP TABLE response has no errors"
 
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $result = gqlq 'mutation { executeBatch(statements: ["CREATE TABLE ddlbatch1 (name VARCHAR)", "CREATE TABLE ddlbatch2 (val INTEGER)"]) { columns rows message } }'
 if ($result -match '"errors"') { throw "executeBatch DDL has errors: $result" }
 if ($result -notmatch '"columns":\[\]') { throw "executeBatch DDL columns not empty: $result" }
 if ($result -notmatch '"rows":\[\]') { throw "executeBatch DDL rows not empty: $result" }
 pass "serve: executeBatch DDL responses have no errors"
+waitSchemaReload $ver
 
-Start-Sleep -Seconds 1
 gqlq 'mutation { executeSql(sql: "DROP TABLE ddlbatch1 CASCADE") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "DROP TABLE ddlbatch2 CASCADE") { message } }' | Out-Null
 
@@ -1523,8 +1546,7 @@ if ($dmlResult -notmatch '"message"') { throw "DML INSERT missing message: $dmlR
 pass "serve: DML INSERT response unchanged"
 
 # 45. createMany onConflict: IGNORE (upsert via GraphQL)
-gqlq 'mutation { executeSql(sql: "CREATE TABLE upsertgql (code TEXT, label TEXT)") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+ddl 'mutation { executeSql(sql: "CREATE TABLE upsertgql (code TEXT, label TEXT)") { message } }'
 Push-Location $TMPDIR
 $utFile = Get-ChildItem -Path ddb/_typedef -Filter *.md | Where-Object {
     (Get-Content $_.FullName -Raw) -match "title: upsertgql"
@@ -1547,8 +1569,7 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE upsertgql CASCADE") { message } }' 
 Pop-Location
 
 # 45.A1 - Cross-mutation parity after a failed UNIQUE INSERT (#4 group A1).
-gqlq 'mutation { executeSql(sql: "CREATE TABLE a1item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+ddl 'mutation { executeSql(sql: "CREATE TABLE a1item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }'
 $a1Valid = gqlq 'mutation { executeSql(sql: "INSERT INTO a1item (title, name) VALUES (''a'', ''unique1'')") { message } }'
 $A1_VALID_ID = extractId $a1Valid
 if (-not $A1_VALID_ID) { throw "45.A1: could not extract A1_VALID_ID" }
@@ -1568,9 +1589,10 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE a1item CASCADE") { message } }' | O
 pass "issue-4-A1: failed UNIQUE INSERT does not break update/create/delete mutations"
 
 # 45.A3 - Cross-table isolation (#4 group A3).
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 gqlq 'mutation { executeSql(sql: "CREATE TABLE a3thing (title VARCHAR(255) NOT NULL)") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "CREATE TABLE a3item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+waitSchemaReload $ver
 $a3Thing = gqlq 'mutation { executeSql(sql: "INSERT INTO a3thing (title) VALUES (''t1'')") { message } }'
 $A3_THING_ID = extractId $a3Thing
 if (-not $A3_THING_ID) { throw "45.A3: could not extract A3_THING_ID" }
@@ -1586,8 +1608,7 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE a3item CASCADE") { message } }' | O
 pass "issue-4-A3: failed INSERT on a3item does not corrupt a3thing"
 
 # 45.A2 - Ghost-row fix persists across server restart (#4 group A2).
-gqlq 'mutation { executeSql(sql: "CREATE TABLE a2persist (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }' | Out-Null
-Start-Sleep -Seconds 1
+ddl 'mutation { executeSql(sql: "CREATE TABLE a2persist (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }'
 $a2Valid = gqlq 'mutation { executeSql(sql: "INSERT INTO a2persist (title, name) VALUES (''seed'', ''uniq_a2'')") { message } }'
 $A2_VALID_ID = extractId $a2Valid
 if (-not $A2_VALID_ID) { throw "45.A2: could not extract A2_VALID_ID" }
