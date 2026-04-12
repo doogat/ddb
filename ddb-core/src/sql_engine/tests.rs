@@ -1513,16 +1513,15 @@ fn select_cte_current_behavior_issue_8() {
     // Audit: pin whatever the engine does with a simple CTE. If this changes,
     // the test needs updating and we need to decide whether the new behavior
     // is desirable.
-    let (_dir, repo, _index) = setup();
-    // Simple CTE that references no real table so we don't depend on schema.
-    let mut engine = SqlEngine::new(&_index, &repo);
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
     engine
         .execute("CREATE TABLE cte_probe_t (label VARCHAR(255))")
         .unwrap();
     engine
         .execute("INSERT INTO cte_probe_t (title, label) VALUES ('row', 'x')")
         .unwrap();
-    let result = _index
+    let result = index
         .query_raw("WITH w AS (SELECT label FROM cte_probe_t) SELECT label FROM w");
     // Whatever the current behavior is, pin it. A regression that flips Ok to
     // Err or changes the row count will fail this test.
