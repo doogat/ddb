@@ -534,6 +534,28 @@ pub fn compile_search_plan(query: &str) -> Result<SearchPlan, String> {
     })
 }
 
+/// Validate and compile a search query, rejecting truly empty plans.
+///
+/// Wraps [`compile_search_plan`] with the additional constraint that the
+/// resulting plan must contain at least one of: an FTS query, extracted
+/// filters, or extracted negated filters. This ensures `search()` and
+/// `normalizeSearchQuery` agree on the set of valid queries structurally
+/// rather than by duplicating the check in each caller.
+///
+/// Callers with external filters (types, tag, where) should handle the
+/// `Err` case themselves when those filters are present, since external
+/// filters rescue an otherwise-empty query.
+pub fn validate_and_compile(query: &str) -> Result<SearchPlan, String> {
+    let plan = compile_search_plan(query)?;
+    if plan.fts_query.is_none()
+        && plan.extracted_filters.is_empty()
+        && plan.extracted_negated_filters.is_empty()
+    {
+        return Err(format!("invalid search query: {query}"));
+    }
+    Ok(plan)
+}
+
 /// Normalize a search query to canonical form.
 /// On parse failure, falls back to lowercase + whitespace collapse.
 pub fn normalize(query: &str) -> String {
