@@ -1456,4 +1456,49 @@ mod tests {
             );
         }
     }
+
+    // ── validate_and_compile ───────────────────────────────────────
+
+    #[test]
+    fn validate_and_compile_valid_query() {
+        let plan = validate_and_compile("hello world").unwrap();
+        assert!(plan.fts_query.is_some());
+    }
+
+    #[test]
+    fn validate_and_compile_empty_string() {
+        let err = validate_and_compile("").unwrap_err();
+        assert!(err.contains("invalid search query"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_and_compile_whitespace_only() {
+        let err = validate_and_compile("   ").unwrap_err();
+        assert!(err.contains("invalid search query"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_and_compile_bare_wildcard() {
+        assert!(validate_and_compile("*").is_err());
+    }
+
+    #[test]
+    fn validate_and_compile_non_tag_negation() {
+        assert!(validate_and_compile("NOT url=example.com").is_err());
+    }
+
+    #[test]
+    fn validate_and_compile_field_only() {
+        let plan = validate_and_compile("tag=rust").unwrap();
+        assert!(plan.fts_query.is_none());
+        assert_eq!(plan.extracted_filters.len(), 1);
+        assert_eq!(plan.extracted_filters[0], ("tag".into(), "rust".into()));
+    }
+
+    #[test]
+    fn validate_and_compile_mixed_query() {
+        let plan = validate_and_compile("hello tag=rust").unwrap();
+        assert!(plan.fts_query.is_some());
+        assert_eq!(plan.extracted_filters.len(), 1);
+    }
 }
