@@ -115,6 +115,7 @@ wait_schema_reload() {
   for i in $(seq 1 40); do
     local ver
     ver=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+    ver=${ver:-0}
     [ "$ver" -gt "$before" ] && return 0
     sleep 0.1
   done
@@ -125,6 +126,7 @@ wait_schema_reload() {
 ddl() {
   local ver
   ver=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+  ver=${ver:-0}
   gql "$1" >/dev/null
   wait_schema_reload "$ver"
 }
@@ -159,6 +161,7 @@ pass "serve: graphql create"
 # 20 drops them all at the end. DO NOT add DROP TABLE statements between
 # these sub-blocks.
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 J1_LINK=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL, subtitle VARCHAR(255), favicon_path VARCHAR(255), favicon_origin VARCHAR(255), bookmark_source VARCHAR(255), last_opened_at VARCHAR(255), description TEXT)\") { message } }"}')
 assert_gql_ok "$J1_LINK"
 printf '%s' "$J1_LINK" | grep -q '"message":"table link'
@@ -575,6 +578,7 @@ pass "issue-5-B1..B5: UPDATE/DELETE no-match GraphQL parity"
 # statement fails on a UNIQUE constraint must roll back the first statement's
 # effect. Jink relies on this so partial writes can't leak out.
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE link_f4 (url VARCHAR(255))\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE membership_f4 (link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))\") { message } }"}' >/dev/null
 wait_schema_reload "$VER"
@@ -752,6 +756,7 @@ pass "issue-9-F11: ALTER TABLE ADD COLUMN appears in typeDefs introspection"
 #  - Aggregate field is `<plural>Aggregate` → `gqtestasAggregate`
 #  - Connection type is `<Type>Connection` → `GqtestaConnection`
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE gqtesta (label VARCHAR(255))\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE gqtestb (label VARCHAR(255))\") { message } }"}' >/dev/null
 wait_schema_reload "$VER"
@@ -1144,6 +1149,7 @@ pass "serve: read-under-write (concurrent read + write)"
 
 # 38b. multi-value references via GraphQL + REST
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvcategory (name VARCHAR(100))\"){message}}"}'
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)\"){message}}"}'
 wait_schema_reload "$VER"
@@ -1166,6 +1172,7 @@ pass "serve: rest multi-value ref structured json"
 
 # 38b2. REFERENCES relation resolution
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokecat (label TEXT)\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE smokebm (url TEXT, smokecat TEXT REFERENCES smokecat)\") { message } }"}' >/dev/null
 wait_schema_reload "$VER"
@@ -1191,6 +1198,7 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE smokecat CASCADE\") { mes
 
 # 38b2b. raw ID scalar + orderBy/limit on plural references
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlcat (label TEXT)\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rlbm (url TEXT, rlcat TEXT REFERENCES rlcat)\") { message } }"}' >/dev/null
 wait_schema_reload "$VER"
@@ -1328,6 +1336,7 @@ pass "serve: executeBatch multiple INSERTs"
 
 # executeBatch with DDL triggers schema reload
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE batchtest (col1 TEXT)\"]) { message } }"}')
 echo "$RESULT" | grep -q '"message"'
 wait_schema_reload "$VER"
@@ -1399,6 +1408,7 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$CM_ID2\\\") }\"}" >/dev/null
 
 # 38i. typed field updates via GraphQL (updateDoogat fields/unsetFields, deleteDoogat cleanup)
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tfubookmark (url VARCHAR(200))\") { message } }"}' | grep -q "table tfubookmark created"
 wait_schema_reload "$VER"
 TFU_ID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tfubookmark (title, url) VALUES (\\\"TFU Test\\\", \\\"https://old.com\\\")\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
@@ -1492,6 +1502,7 @@ pass "serve: executeBatch INSERT defaults date, created_at matches ID"
 
 # Setup: a NOT NULL link table for D1-D5 and a numeric table for D3.
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE link_d1 (title VARCHAR(255) NOT NULL, url VARCHAR(255) NOT NULL)\"){message}}"}' >/dev/null
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE numeric_d3 (title VARCHAR(255) NOT NULL, count INTEGER)\"){message}}"}' >/dev/null
 wait_schema_reload "$VER"
@@ -1553,6 +1564,7 @@ gql '{"query":"mutation{executeSql(sql:\"DROP TABLE link_d6 CASCADE\"){message}}
 # because JOIN actually works; this check pins the behavior at the GraphQL
 # surface so a regression can't silently drop joined rows.
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE e1_link (url VARCHAR(255))\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE e1_num (count INTEGER)\") { message } }"}' >/dev/null
 wait_schema_reload "$VER"
@@ -1570,6 +1582,7 @@ pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obs
 
 # 44. DDL response consistency (no spurious errors)
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 RESULT=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ddltest (name VARCHAR(100))\") { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'
 echo "$RESULT" | grep -q '"columns":\[\]'
@@ -1579,6 +1592,7 @@ pass "serve: CREATE TABLE response has no errors"
 
 wait_schema_reload "$VER"
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 RESULT=$(gql '{"query":"mutation { executeSql(sql: \"ALTER TABLE ddltest ADD COLUMN age INTEGER\") { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'
 echo "$RESULT" | grep -q '"columns":\[\]'
@@ -1593,6 +1607,7 @@ echo "$RESULT" | grep -q '"rows":\[\]'
 pass "serve: DROP TABLE response has no errors"
 
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 RESULT=$(gql '{"query":"mutation { executeBatch(statements: [\"CREATE TABLE ddlbatch1 (name VARCHAR)\", \"CREATE TABLE ddlbatch2 (val INTEGER)\"]) { columns rows message } }"}')
 echo "$RESULT" | grep -qv '"errors"'
 echo "$RESULT" | grep -q '"columns":\[\]'
@@ -1662,6 +1677,7 @@ pass "issue-4-A1: failed UNIQUE INSERT does not break update/create/delete mutat
 # one table must not leak into a sibling table. Proves the savepoint rollback
 # is scoped correctly.
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a3thing (title VARCHAR(255) NOT NULL)\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE a3item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))\") { message } }"}' >/dev/null
 wait_schema_reload "$VER"
