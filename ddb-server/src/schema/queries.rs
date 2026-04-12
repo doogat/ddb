@@ -213,15 +213,10 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                         let q = ctx.args.try_get("query")?.string()?.to_string();
                         // PRD 00121 invariant: normalizeSearchQuery must agree
                         // with search() on the set of valid inputs.
-                        // compile_search_plan rejects bare wildcards,
-                        // unparseable input, and non-tag negated field filters.
-                        if q.trim().is_empty() {
-                            return Err(to_server_error(DoogatError::BadRequest(
-                                format!("invalid search query: {q}"),
-                            ))
-                            .into());
-                        }
-                        search_query::compile_search_plan(&q).map_err(|_| {
+                        // validate_and_compile rejects bare wildcards,
+                        // unparseable input, empty queries, and non-tag
+                        // negated field filters.
+                        search_query::validate_and_compile(&q).map_err(|_| {
                             to_server_error(DoogatError::BadRequest(format!(
                                 "invalid search query: {q}"
                             )))
