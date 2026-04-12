@@ -1277,7 +1277,6 @@ echo "$RESULT" | grep -qF '\"id\":'
 echo "$RESULT" | grep -qF '\"title\":'
 pass "serve: sql format objects returns keyed rows"
 
-sleep 1
 ddl '{"query":"mutation{executeSql(sql:\"CREATE TABLE smokepin (pinned BOOLEAN)\"){message}}"}'
 SMOKEPIN_ID=$(gql "{\"query\":\"mutation{executeSql(sql:\\\"INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)\\\"){message}}\"}" | sed -n 's/.*"message":"\([0-9]*\)".*/\1/p')
 [ -n "$SMOKEPIN_ID" ]
