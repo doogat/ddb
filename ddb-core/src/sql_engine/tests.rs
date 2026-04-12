@@ -4345,6 +4345,67 @@ fn composite_unique_duplicate_rejected_with_clear_error_issue_9_f1() {
 }
 
 #[test]
+fn single_column_unique_duplicate_rejected_with_clear_error_issue_9_f2() {
+    // Issue #9 group F2: single-column UNIQUE duplicate produces a clear error.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE f2item (title TEXT, code VARCHAR(255) NOT NULL, UNIQUE(code))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO f2item (title, code) VALUES ('a', 'X1')")
+        .unwrap();
+
+    let err = engine
+        .execute("INSERT INTO f2item (title, code) VALUES ('b', 'X1')")
+        .expect_err("single-column UNIQUE duplicate must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("UNIQUE"),
+        "error message should contain 'UNIQUE', got: {msg}"
+    );
+    assert!(
+        msg.contains("f2item") || msg.contains("code"),
+        "error message should identify the table or column, got: {msg}"
+    );
+}
+
+#[test]
+fn concurrent_inserts_produce_unique_ids_issue_9_f8() {
+    // Issue #9 group F8: rapid sequential INSERTs all get distinct IDs.
+    // (True concurrency requires threads; this test exercises the fast-path
+    // sequential case which is what the SQL engine sees from a single actor.)
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE f8rapid (label TEXT)")
+        .unwrap();
+
+    let mut ids = Vec::new();
+    for i in 0..10 {
+        let result = engine
+            .execute(&format!("INSERT INTO f8rapid (title, label) VALUES ('row{i}', 'l{i}')"))
+            .unwrap();
+        match result {
+            SqlResult::Ok(id) => ids.push(id),
+            other => panic!("expected Ok(id) for row {i}, got {other:?}"),
+        }
+    }
+
+    // All IDs must be distinct.
+    let unique: std::collections::HashSet<&String> = ids.iter().collect();
+    assert_eq!(
+        unique.len(),
+        ids.len(),
+        "expected {} unique IDs, got {} — duplicates in: {ids:?}",
+        ids.len(),
+        unique.len()
+    );
+}
+
+#[test]
 fn create_table_unique_constraint_persisted_in_typedef() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);

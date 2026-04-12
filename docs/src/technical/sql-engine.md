@@ -466,6 +466,8 @@ PRD 00124 closed the regression-coverage gap exposed by the jink-feedback integr
 | D1-D6 | #7 constraint enforcement | `executesql_*_rejects_*` cluster + `validate_*` | Section 43.D (PRD 00122) | — |
 | E1 | #8 JOIN pinning | `select_join_returns_joined_rows_issue_8_e1` plus CTE/subquery/UNION/window audit | Section 44 sub-block `44.E1` | — |
 | F1 | #9 composite UNIQUE error | `composite_unique_duplicate_rejected_with_clear_error_issue_9_f1` | Section 30 `30.F1` | — |
+| F2 | #9 single-col UNIQUE error | `single_column_unique_duplicate_rejected_with_clear_error_issue_9_f2` | — (pre-existing `create_table_with_unique_constraint_enforced` covers rejection) | — |
+| F3 | #9 CREATE INDEX rejected | Pre-existing `create_index_rejected_with_reason` | Section 44 (pre-existing DDL consistency check) | — |
 | F4 | #9 executeBatch atomicity | — | Section 18 sub-block `18z2` | — |
 | F5-F7 | #9 updateDoogat tag semantics | — | Section 18 sub-block `18z3` | — |
 | F9 | #9 SQL feature smoke | — | Section 18 sub-block `18z4` | — |

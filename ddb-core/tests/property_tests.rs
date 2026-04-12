@@ -1197,7 +1197,7 @@ proptest! {
 //       that type (no ghost index row)
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(2))]
+    #![proptest_config(ProptestConfig::with_cases(5))]
 
     /// P1: UPDATE/DELETE WHERE id semantics are deterministic.
     #[test]
@@ -1249,6 +1249,15 @@ proptest! {
                 prop_assert_eq!(n, 0, "missing DELETE should affect 0, got {}", n);
             }
             other => prop_assert!(false, "expected Affected(0), got {:?}", other),
+        }
+
+        // DELETE with the valid id must affect exactly one row.
+        let valid_del = format!("DELETE FROM {tbl} WHERE id = '{valid_id}'");
+        match engine.execute(&valid_del) {
+            Ok(ddb_core::sql_engine::SqlResult::Affected(n)) => {
+                prop_assert_eq!(n, 1, "valid DELETE should affect 1, got {}", n);
+            }
+            other => prop_assert!(false, "expected Affected(1), got {:?}", other),
         }
     }
 

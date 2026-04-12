@@ -719,6 +719,16 @@ foreach ($fld in @('"name":"gqtestas"', '"name":"gqtestasAggregate"', '"name":"g
 foreach ($conn in @('GqtestaConnection', 'GqtestbConnection')) {
     if ($gIntro -notmatch $conn) { throw "18z7 G2: missing $conn connection type" }
 }
+# G2: verify items and totalCount fields on Connection types structurally.
+$gIntroObj = $gIntro | ConvertFrom-Json
+$gTypes = @{}
+foreach ($t in $gIntroObj.data.__schema.types) { $gTypes[$t.name] = $t }
+foreach ($conn in @('GqtestaConnection', 'GqtestbConnection')) {
+    if (-not $gTypes.ContainsKey($conn)) { throw "18z7 G2: $conn missing from schema types" }
+    $fields = @($gTypes[$conn].fields | ForEach-Object { $_.name })
+    if ('items' -notin $fields) { throw "18z7 G2: $conn missing items field, got: $($fields -join ',')" }
+    if ('totalCount' -notin $fields) { throw "18z7 G2: $conn missing totalCount field, got: $($fields -join ',')" }
+}
 gqlq 'mutation { executeSql(sql: "DROP TABLE gqtesta CASCADE") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "DROP TABLE gqtestb CASCADE") { message } }' | Out-Null
 pass "issue-9-G1: every typed table has plural and Aggregate query fields"

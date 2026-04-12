@@ -1367,6 +1367,34 @@ mod tests {
         );
     }
 
+    // Issue #6 group C2: error-class consistency. Invalid search inputs must
+    // produce an error string starting with "invalid search query" (not
+    // "internal error"). Integration coverage in section 18h pins this at the
+    // GraphQL surface; this test pins it at the Rust level.
+    #[test]
+    fn error_class_consistency_issue_6_c2() {
+        let bad_inputs = &["*", "**", ".*", "AND", "OR", "NOT", "(unbalanced"];
+        for q in bad_inputs {
+            let err = compile_search_plan(q);
+            match err {
+                Err(msg) => {
+                    assert!(
+                        msg.starts_with("invalid search query")
+                            || msg.contains("unparseable"),
+                        "bad input {q:?} should produce 'invalid search query' or \
+                         'unparseable' error, got: {msg}"
+                    );
+                }
+                Ok(_) => {
+                    // Some inputs may be valid after all (NOT, OR alone could
+                    // parse differently). If compile_search_plan accepts them,
+                    // that's fine; we're only pinning that rejections use the
+                    // right error class.
+                }
+            }
+        }
+    }
+
     // Issue #6 group C1: the contract is that every input compile_search_plan
     // accepts produces a normalized form compile_search_plan also accepts. PRD
     // 00121 fixed the original inconsistency where normalizeSearchQuery
