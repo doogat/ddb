@@ -1479,12 +1479,14 @@ mod tests {
 
     #[test]
     fn validate_and_compile_bare_wildcard() {
-        assert!(validate_and_compile("*").is_err());
+        let err = validate_and_compile("*").unwrap_err();
+        assert!(err.contains("bare wildcard"), "got: {err}");
     }
 
     #[test]
     fn validate_and_compile_non_tag_negation() {
-        assert!(validate_and_compile("NOT url=example.com").is_err());
+        let err = validate_and_compile("NOT url=example.com").unwrap_err();
+        assert!(err.contains("NOT is only supported for tag"), "got: {err}");
     }
 
     #[test]
