@@ -461,7 +461,7 @@ PRD 00124 closed the regression-coverage gap exposed by the jink-feedback integr
 | A1 | #4 cross-mutation parity | `update_after_unique_failure_succeeds_issue_4_a1`, `insert_after_unique_failure_succeeds_issue_4_a1`, `delete_after_unique_failure_succeeds_issue_4_a1` | Section 45 sub-block `45.A1` | Section 11 ghost-row pin |
 | A2 | #4 restart persistence | — (integration only) | Section 45 sub-block `45.A2` (kill + restart) | — |
 | A3 | #4 cross-table isolation | `failed_insert_on_table_a_does_not_corrupt_table_b_issue_4_a3` | Section 45 sub-block `45.A3` | — |
-| B1-B5 | #5 UPDATE/DELETE no-match | `update_with_missing_id_returns_affected_zero` and neighbours | Section 18 sub-block `18z` | Section 30 |
+| B1-B5 | #5 UPDATE/DELETE no-match | `update_with_missing_id_returns_affected_zero` and neighbours | Section 18 sub-block `18z` (GraphQL) + Section 30 (CLI) | — |
 | C1 | #6 search/normalize parity | `normalize_and_search_accept_same_inputs_issue_6_c1` in `search_query.rs` | Section 18h (PRD 00121) | — |
 | D1-D6 | #7 constraint enforcement | `executesql_*_rejects_*` cluster + `validate_*` | Section 43.D (PRD 00122) | — |
 | E1 | #8 JOIN pinning | `select_join_returns_joined_rows_issue_8_e1` plus CTE/subquery/UNION/window audit | Section 44 sub-block `44.E1` | — |
