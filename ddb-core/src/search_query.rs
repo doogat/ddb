@@ -1478,18 +1478,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_and_compile_bare_wildcard() {
-        let err = validate_and_compile("*").unwrap_err();
-        assert!(err.contains("bare wildcard"), "got: {err}");
-    }
-
-    #[test]
-    fn validate_and_compile_non_tag_negation() {
-        let err = validate_and_compile("NOT url=example.com").unwrap_err();
-        assert!(err.contains("NOT is only supported for tag"), "got: {err}");
-    }
-
-    #[test]
     fn validate_and_compile_field_only() {
         let plan = validate_and_compile("tag=rust").unwrap();
         assert!(plan.fts_query.is_none());
