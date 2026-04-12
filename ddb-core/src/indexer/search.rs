@@ -1,7 +1,7 @@
 use rusqlite::params;
 
 use crate::error::{DoogatError, Result};
-use crate::search_query::compile_search_plan;
+use crate::search_query::{compile_search_plan, validate_and_compile};
 use crate::types::{
     PaginatedSearchResult, SearchFieldFilter, SearchFieldOp, SearchFilters, SearchResult, TagEntry,
     TagQueryFilter,
@@ -180,34 +180,31 @@ impl Index {
         query: &str,
         filters: &SearchFilters,
     ) -> Result<CompiledSearchInputs> {
-        let plan = compile_search_plan(query).map_err(|reason| {
-            tracing::debug!(error = %reason, query, "search: compile_search_plan rejected query");
-            DoogatError::BadRequest(format!("invalid search query: {query}"))
-        })?;
-
-        // PRD 00121 SC3: reject a truly empty search (no query text AND no
-        // meaningful filters). An empty query combined with any non-empty filter
-        // (tag, types, or where_filters) is still allowed so callers can use the
-        // "filter-only" pattern. `Some(vec![])` and `Some("")` are treated as
-        // no-op filters, matching how the downstream filter builder interprets
-        // them.
-        let has_types = filters.types.as_ref().is_some_and(|t| !t.is_empty());
-        let has_tag = filters.tag.as_deref().is_some_and(|t| !t.is_empty());
-        let has_where = filters
-            .where_filters
-            .as_ref()
-            .is_some_and(|w| !w.is_empty());
-        if plan.fts_query.is_none()
-            && plan.extracted_filters.is_empty()
-            && plan.extracted_negated_filters.is_empty()
-            && !has_types
-            && !has_tag
-            && !has_where
-        {
-            return Err(DoogatError::BadRequest(format!(
-                "invalid search query: {query}"
-            )));
-        }
+        let plan = match validate_and_compile(query) {
+            Ok(plan) => plan,
+            Err(reason) => {
+                // External filters (types, tag, where) rescue an otherwise-empty
+                // query via the "filter-only" pattern. `Some(vec![])` and
+                // `Some("")` are treated as no-op filters.
+                let has_types = filters.types.as_ref().is_some_and(|t| !t.is_empty());
+                let has_tag = filters.tag.as_deref().is_some_and(|t| !t.is_empty());
+                let has_where = filters
+                    .where_filters
+                    .as_ref()
+                    .is_some_and(|w| !w.is_empty());
+                if has_types || has_tag || has_where {
+                    compile_search_plan(query).map_err(|r| {
+                        tracing::debug!(error = %r, query, "search: compile_search_plan rejected query");
+                        DoogatError::BadRequest(format!("invalid search query: {query}"))
+                    })?
+                } else {
+                    tracing::debug!(error = %reason, query, "search: validate_and_compile rejected query");
+                    return Err(DoogatError::BadRequest(format!(
+                        "invalid search query: {query}"
+                    )));
+                }
+            }
+        };
 
         let mut effective_filters = filters.clone();
         if !plan.extracted_filters.is_empty() {
