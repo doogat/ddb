@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-13
+
 ### Fixed
 
 - **sql**: materialized table constraint errors (UNIQUE violations, etc.) now surface to the client instead of being redacted to "internal error"
@@ -206,7 +208,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error responses never leak internal paths, stack traces, or SQL details
 - quinn-proto upgraded to 0.11.14 (RUSTSEC-2026-0037)
 
-[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/doogat/ddb/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/doogat/ddb/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/doogat/ddb/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/doogat/ddb/releases/tag/v0.1.0
