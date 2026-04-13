@@ -71,14 +71,39 @@ Constrain column values with ENUM or SET types:
 ENUM extracts allowed_values into the typedef schema. Values are
 validated on INSERT.
 
-5. TITLE RESOLUTION AND title_template
+5. STRICT TYPE AND CONSTRAINT ENFORCEMENT
+-----------------------------------------
+
+INSERTs are validated against the typedef before any write:
+
+  * NOT NULL columns reject missing or NULL values.
+  * INTEGER / REAL / BOOLEAN reject non-numeric strings (including '').
+  * VARCHAR(n) / CHAR(n) reject values longer than n.
+  * ENUM / SET reject values outside allowed_values.
+  * Composite UNIQUE rejects duplicates across the column set.
+
+Breaking change: title has no silent fallback. If title is NOT NULL and
+no title_template is set, INSERT without explicit title is rejected.
+Provide --title, declare a title_template, or make title nullable.
+
+6. MULTI-ROW INSERT ATOMICITY
+-----------------------------
+
+  ddb query \"INSERT INTO task (title, status)
+    VALUES ('a','todo'), ('b','doing'), ('c','bogus')\"
+
+All rows are pre-validated before any write. If any row fails, the
+entire batch is rejected and no rows are written. Partial success is
+not possible.
+
+7. TITLE RESOLUTION AND title_template
 --------------------------------------
 
 Doogat titles are resolved in this order:
 
   1. Explicit --title on create/update
   2. title_template on the typedef (pattern with {column} placeholders)
-  3. The doogat ID as fallback
+  3. The doogat ID as fallback (only when title is nullable)
 
 Set a title template:
 
@@ -88,17 +113,22 @@ Remove it:
 
   ddb query \"ALTER TABLE contact DROP TITLE TEMPLATE\"
 
-6. ZONE OVERRIDES WITH ALTER TABLE SET ZONE
---------------------------------------------
+8. SCHEMA EVOLUTION WITH ALTER TABLE
+------------------------------------
+
+Add, drop, or rename columns on an existing typedef:
+
+  ddb query \"ALTER TABLE task ADD COLUMN tags SET('urgent','blocked')\"
+  ddb query \"ALTER TABLE task DROP COLUMN priority\"
+  ddb query \"ALTER TABLE task RENAME COLUMN status TO state\"
 
 Override the default zone for a column:
 
   ddb query \"ALTER TABLE bookmark SET ZONE body FOR description\"
 
-This moves the column from frontmatter to body. Existing doogats are
-migrated on the next 'ddb fix --migrate'.
+Existing doogats are migrated on the next 'ddb fix --migrate'.
 
-7. JUNCTION TABLES FOR MULTI-VALUED REFERENCES
+9. JUNCTION TABLES FOR MULTI-VALUED REFERENCES
 -----------------------------------------------
 
 A REFERENCES column supports multiple values. Each INSERT appends a
@@ -110,8 +140,8 @@ reference line:
 Junction tables ({type}_{column}) are created automatically during
 materialization. DELETE removes the reference line.
 
-8. API ACCESS
--------------
+10. API ACCESS
+--------------
 
 CLI:
   ddb query \"SELECT id, title, url FROM bookmark\"
@@ -125,8 +155,8 @@ UniFFI (Swift/Kotlin, embedded):
   let driver = try DoogatDriver.createRepo(repoPath: path)
   try driver.executeSql(\"SELECT name FROM contact\")
 
-9. COMMON MISTAKES
-------------------
+11. COMMON MISTAKES
+-------------------
 
   * Manual typedefs: Use CREATE TABLE instead. Manual _typedef doogats
     are not CRDT-tracked and will be flagged by 'ddb fix'.
@@ -134,8 +164,8 @@ UniFFI (Swift/Kotlin, embedded):
   * Zone surprise: A TEXT column defaults to body, not frontmatter.
     Use VARCHAR(255) for short strings or SET ZONE to override.
 
-  * Title overwrite: Setting --title on a typed doogat overwrites the
-    title_template result. Omit --title to let the template work.
+  * Explicit --title overrides title_template. Omit --title when you
+    want the template to auto-generate the title.
 
 Full documentation: docs/src/guide/building-apps.md
 ";

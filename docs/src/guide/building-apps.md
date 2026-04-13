@@ -205,6 +205,8 @@ ALTER TABLE contact DROP TITLE TEMPLATE;
 
 `ddb fix` detects doogats whose titles don't match their type's template and offers to correct them.
 
+> **Breaking change (unreleased):** the silent title fallback (url/description) has been removed. If `title` is `NOT NULL` and no `title_template` is set, an INSERT without an explicit `title` is rejected. Choose one: provide explicit titles, declare a `title_template`, or make `title` nullable.
+
 ### Zone overrides
 
 Override the default zone for any column:

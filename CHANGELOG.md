@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **cli**: expand `ddb help create-app` guide to cover strict type/constraint enforcement, title NOT NULL fallback removal, multi-row INSERT atomicity, and `ALTER TABLE ADD/DROP/RENAME COLUMN`
+- **docs**: note title NOT NULL + no-title_template breaking change in `guide/building-apps.md`
 - **sql**: **breaking** — remove silent title fallback. INSERT into a table whose `title` is `NOT NULL` and which has no `title_template` no longer coerces `url`, `description`, or any other body/frontmatter column into the title slot. Such INSERTs now fail with `NOT NULL constraint violated: <table>.title`. Clients that relied on the fallback should provide an explicit `title`, declare a `title_template` on the typedef, or make `title` nullable (#7)
 
 ### Added
