@@ -1944,7 +1944,8 @@ pass "update/delete WHERE id no-match semantics (#5)"
 $output = ddb query 'CREATE TABLE f1mship (title VARCHAR(255), link_id VARCHAR(255), category VARCHAR(255), UNIQUE(link_id, category))'
 if ($output -notmatch "table f1mship created") { throw "f1mship create failed" }
 ddb query "INSERT INTO f1mship (title, link_id, category) VALUES ('a', 'link1', 'cat1')" | Out-Null
-$f1Dup = ddb query "INSERT INTO f1mship (title, link_id, category) VALUES ('b', 'link1', 'cat1')" 2>&1
+$f1Dup = & $DDB query "INSERT INTO f1mship (title, link_id, category) VALUES ('b', 'link1', 'cat1')" 2>&1 | Out-String
+if ($LASTEXITCODE -eq 0) { throw "30.F1: duplicate INSERT should have failed, got: $f1Dup" }
 if ($f1Dup -notmatch "UNIQUE") { throw "30.F1: duplicate INSERT should mention UNIQUE: $f1Dup" }
 if ($f1Dup -notmatch "f1mship|link_id|category") { throw "30.F1: error should mention table/col: $f1Dup" }
 $output = ddb query "DROP TABLE f1mship CASCADE"

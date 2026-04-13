@@ -202,7 +202,8 @@ if ($output -notmatch "table smokeghost created") { throw "smokeghost create fai
 $SG_ID = ddb query "INSERT INTO smokeghost (title, name) VALUES ('first', 'uq_a')"
 if ($SG_ID -is [array]) { $SG_ID = $SG_ID[-1] }
 if ($SG_ID -notmatch "^\d{14}$") { throw "smokeghost insert returned bad id: [$SG_ID]" }
-$dup = ddb query "INSERT INTO smokeghost (title, name) VALUES ('dup', 'uq_a')" 2>&1
+$dup = & $DDB query "INSERT INTO smokeghost (title, name) VALUES ('dup', 'uq_a')" 2>&1 | Out-String
+if ($LASTEXITCODE -eq 0) { throw "smokeghost duplicate should have failed, got: $dup" }
 if ($dup -notmatch "UNIQUE") { throw "smokeghost duplicate should error with UNIQUE, got: $dup" }
 $output = ddb query "UPDATE smokeghost SET title = 'recovered' WHERE id = '$SG_ID'"
 if ($output -notmatch "1 row\(s\) affected") { throw "smokeghost post-failure UPDATE failed: $output" }
