@@ -1430,7 +1430,7 @@ if ($d1Result -notmatch 'NOT NULL constraint violated: link_d1.title') {
     throw "D1: expected NOT NULL error, got: $d1Result"
 }
 $d1Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d1`"){rows}}"
-if ($d1Count -notmatch '\["0"\]') { throw "D1: expected zero rows, got: $d1Count" }
+if ($d1Count -notmatch '\[\\"0\\"\]') { throw "D1: expected zero rows, got: $d1Count" }
 pass "serve: D1 INSERT NULL on NOT NULL is rejected, no row created"
 
 # D2. VARCHAR(N) overflow: 300-char title against VARCHAR(255) is rejected.
@@ -1440,7 +1440,7 @@ if ($d2Result -notmatch 'value too long for link_d1.title') {
     throw "D2: expected length error, got: $d2Result"
 }
 $d2Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d1`"){rows}}"
-if ($d2Count -notmatch '\["0"\]') { throw "D2: expected zero rows, got: $d2Count" }
+if ($d2Count -notmatch '\[\\"0\\"\]') { throw "D2: expected zero rows, got: $d2Count" }
 pass "serve: D2 VARCHAR(N) overflow is rejected, no row created"
 
 # D3. INTEGER type mismatch: non-numeric value into INTEGER column is rejected.
@@ -1449,7 +1449,7 @@ if ($d3Result -notmatch 'type mismatch for numeric_d3.count: expected INTEGER') 
     throw "D3: expected type-mismatch error, got: $d3Result"
 }
 $d3Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM numeric_d3`"){rows}}"
-if ($d3Count -notmatch '\["0"\]') { throw "D3: expected zero rows, got: $d3Count" }
+if ($d3Count -notmatch '\[\\"0\\"\]') { throw "D3: expected zero rows, got: $d3Count" }
 pass "serve: D3 INTEGER type mismatch is rejected, no row created"
 
 # D4. Unknown column on INSERT: column not in schema is rejected.
@@ -1458,7 +1458,7 @@ if ($d4Result -notmatch 'unknown column: link_d1.unknown_col') {
     throw "D4: expected unknown-column error, got: $d4Result"
 }
 $d4Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d1`"){rows}}"
-if ($d4Count -notmatch '\["0"\]') { throw "D4: expected zero rows, got: $d4Count" }
+if ($d4Count -notmatch '\[\\"0\\"\]') { throw "D4: expected zero rows, got: $d4Count" }
 pass "serve: D4 unknown column on INSERT is rejected, no row created"
 
 # D5. Unknown column on UPDATE: insert one valid row, then UPDATE with bogus
@@ -1481,7 +1481,7 @@ if ($d6Result -notmatch 'NOT NULL constraint violated: link_d6.title') {
     throw "D6: expected NOT NULL error, got: $d6Result"
 }
 $d6Count = gqlq "mutation{executeSql(sql:`"SELECT COUNT(*) FROM link_d6`"){rows}}"
-if ($d6Count -notmatch '\["0"\]') { throw "D6: expected zero rows, got: $d6Count" }
+if ($d6Count -notmatch '\[\\"0\\"\]') { throw "D6: expected zero rows, got: $d6Count" }
 pass "serve: D6 silent title fallback removed, missing title rejected"
 
 # Cleanup D-tables
