@@ -122,7 +122,6 @@ wait_schema_reload() {
   printf '  ✗ wait_schema_reload: version did not advance past %s within 4s\n' "$before" >&2
   return 1
 }
-# Execute a DDL mutation via gql and wait for schema reload.
 ddl() {
   local ver
   ver=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')

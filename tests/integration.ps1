@@ -129,7 +129,6 @@ function waitSchemaReload([int]$before) {
     }
     throw "waitSchemaReload: version did not advance past $before within 4s"
 }
-# Execute a DDL mutation via gqlq and wait for schema reload.
 function ddl([string]$query) {
     $r = gqlq '{ schemaVersion }'
     $ver = if ($r -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
