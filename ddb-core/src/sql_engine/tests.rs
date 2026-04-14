@@ -5778,7 +5778,7 @@ fn bulk_delete_atomically_rejected_by_restrict_issue_10() {
     assert_eq!(ids, want);
 }
 
-// --- title_template placeholder parser tests (PRD 00127) ---
+// --- title_template placeholder parser tests ---
 
 #[test]
 fn parse_title_template_empty_returns_no_placeholders() {
@@ -5854,13 +5854,7 @@ fn parse_title_template_rejects_identifier_starting_with_digit() {
     assert!(parse_title_template("{col.1field}").is_err());
 }
 
-#[test]
-fn parse_title_template_preserves_bare_braces_without_content() {
-    let placeholders = parse_title_template("no braces here").unwrap();
-    assert!(placeholders.is_empty());
-}
-
-// --- REFERENCES-aware title_template INSERT resolution (PRD 00127) ---
+// --- REFERENCES-aware title_template INSERT resolution ---
 
 #[test]
 fn insert_title_template_dotted_ref_resolves_target_title() {

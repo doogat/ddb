@@ -5,7 +5,9 @@ use crate::types::{
     ColumnDef, DoogatId, DoogatMeta, InlineField, Link, ParsedDoogat, TableSchema, Value, Zone,
 };
 
-use super::helpers::{parse_title_template, re_unfilled_placeholder, to_yaml_value};
+use super::helpers::{
+    is_safe_sql_identifier, parse_title_template, re_unfilled_placeholder, to_yaml_value,
+};
 
 /// Convert a single `ColumnDef` into a YAML-style `Value::Map`.
 fn build_column_yaml(col: &ColumnDef) -> Value {
@@ -390,18 +392,6 @@ pub(super) fn recompute_template_title(
     }
 }
 
-fn is_safe_sql_identifier(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    let mut chars = s.chars();
-    let first = chars.next().unwrap();
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return false;
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-}
-
 /// Derive the date for a data doogat: prefer explicit `date` from extra/col_values, fall back to id.
 fn derive_date(
     id: &DoogatId,
@@ -677,7 +667,7 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
     // at ALTER TABLE time in `handle_title_template` because it needs the
     // target's schema. Syntactic + same-typedef checks run here so that
     // hand-edited or imported typedefs with bad templates are rejected at
-    // load time, not silently at runtime (PRD 00127 blind-review gap).
+    // load time, not silently at runtime.
     if let Some(tmpl) = opt.title_template.as_deref() {
         let placeholders = parse_title_template(tmpl)?;
         for p in &placeholders {

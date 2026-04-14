@@ -40,7 +40,7 @@ fn re_title_placeholder() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\{([^{}]*)\}").expect("valid regex"))
 }
 
-fn is_valid_template_identifier(s: &str) -> bool {
+pub(super) fn is_safe_sql_identifier(s: &str) -> bool {
     if s.is_empty() {
         return false;
     }
@@ -75,7 +75,7 @@ pub fn parse_title_template(tmpl: &str) -> Result<Vec<TemplatePlaceholder>> {
         let parts: Vec<&str> = inner.split('.').collect();
         match parts.as_slice() {
             [col] => {
-                if !is_valid_template_identifier(col) {
+                if !is_safe_sql_identifier(col) {
                     return Err(DoogatError::SqlEngine(format!(
                         "title_template has malformed placeholder {raw}"
                     )));
@@ -87,7 +87,7 @@ pub fn parse_title_template(tmpl: &str) -> Result<Vec<TemplatePlaceholder>> {
                 });
             }
             [col, field] => {
-                if !is_valid_template_identifier(col) || !is_valid_template_identifier(field) {
+                if !is_safe_sql_identifier(col) || !is_safe_sql_identifier(field) {
                     return Err(DoogatError::SqlEngine(format!(
                         "title_template has malformed placeholder {raw}"
                     )));
