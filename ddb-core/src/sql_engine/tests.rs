@@ -1,5 +1,8 @@
 
-use super::helpers::{data_type_to_string, eval_expr, is_literal_expr, value_to_sql};
+use super::helpers::{
+    data_type_to_string, eval_expr, is_literal_expr, parse_title_template, value_to_sql,
+    TemplatePlaceholder,
+};
 use super::*;
 use crate::git_ops::GitRepo;
 use crate::indexer::Index;
@@ -5719,4 +5722,86 @@ fn bulk_delete_atomically_rejected_by_restrict_issue_10() {
     let mut want = vec![link_id_blocked.as_str(), link_id_free.as_str()];
     want.sort();
     assert_eq!(ids, want);
+}
+
+// --- title_template placeholder parser tests (PRD 00127) ---
+
+#[test]
+fn parse_title_template_empty_returns_no_placeholders() {
+    let placeholders = parse_title_template("static text").unwrap();
+    assert!(placeholders.is_empty());
+}
+
+#[test]
+fn parse_title_template_bare_placeholder() {
+    let placeholders = parse_title_template("{link}").unwrap();
+    assert_eq!(
+        placeholders,
+        vec![TemplatePlaceholder {
+            raw: "{link}".into(),
+            col: "link".into(),
+            field: None,
+        }]
+    );
+}
+
+#[test]
+fn parse_title_template_dotted_placeholder() {
+    let placeholders = parse_title_template("{link.title}").unwrap();
+    assert_eq!(
+        placeholders,
+        vec![TemplatePlaceholder {
+            raw: "{link.title}".into(),
+            col: "link".into(),
+            field: Some("title".into()),
+        }]
+    );
+}
+
+#[test]
+fn parse_title_template_mixed_placeholders() {
+    let placeholders = parse_title_template("{link.title} in {category.fqn}").unwrap();
+    assert_eq!(placeholders.len(), 2);
+    assert_eq!(placeholders[0].col, "link");
+    assert_eq!(placeholders[0].field.as_deref(), Some("title"));
+    assert_eq!(placeholders[1].col, "category");
+    assert_eq!(placeholders[1].field.as_deref(), Some("fqn"));
+}
+
+#[test]
+fn parse_title_template_rejects_multi_hop() {
+    let err = parse_title_template("{a.b.c}").unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("multi-hop") || msg.contains("one-level"),
+        "unexpected message: {msg}"
+    );
+}
+
+#[test]
+fn parse_title_template_rejects_empty_segment() {
+    assert!(parse_title_template("{.x}").is_err());
+    assert!(parse_title_template("{x.}").is_err());
+    assert!(parse_title_template("{}").is_err());
+}
+
+#[test]
+fn parse_title_template_accepts_hyphen_in_identifier() {
+    let placeholders = parse_title_template("{my-col}").unwrap();
+    assert_eq!(placeholders[0].col, "my-col");
+    let placeholders = parse_title_template("{my-col.my-field}").unwrap();
+    assert_eq!(placeholders[0].col, "my-col");
+    assert_eq!(placeholders[0].field.as_deref(), Some("my-field"));
+}
+
+#[test]
+fn parse_title_template_rejects_identifier_starting_with_digit() {
+    assert!(parse_title_template("{1col}").is_err());
+    assert!(parse_title_template("{col.1field}").is_err());
+}
+
+#[test]
+fn parse_title_template_preserves_bare_braces_without_content() {
+    let placeholders = parse_title_template("no braces here").unwrap();
+    assert!(placeholders.is_empty());
 }
