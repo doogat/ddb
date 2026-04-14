@@ -2291,4 +2291,57 @@ pass "auto-register reuses existing registration"
 
 rm -rf "$AR_REMOTE" "$AR_NODE"
 
+# 46. title_template REFERENCES resolution (PRD 00127)
+echo "=== title_template REFERENCES resolution ==="
+cd "$TMPDIR"
+
+TT_VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+TT_VER=${TT_VER:-0}
+
+TT_LINK=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tt_link (url VARCHAR(255))\") { message } }"}')
+assert_gql_ok "$TT_LINK"
+pass "46: created tt_link table"
+
+TT_CAT=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tt_category (fqn VARCHAR(255))\") { message } }"}')
+assert_gql_ok "$TT_CAT"
+pass "46: created tt_category table"
+
+TT_MEM=$(gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE tt_membership (link VARCHAR(255) REFERENCES tt_link, category VARCHAR(255) REFERENCES tt_category)\") { message } }"}')
+assert_gql_ok "$TT_MEM"
+pass "46: created tt_membership junction table"
+
+TT_ALTER=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"ALTER TABLE tt_membership SET TITLE TEMPLATE '{link.title} in {category.fqn}'\\\") { message } }\"}")
+assert_gql_ok "$TT_ALTER"
+pass "46: applied dotted title_template"
+
+wait_schema_reload "$TT_VER"
+
+TT_LINK_ID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tt_link (title, url) VALUES ('\''My Link'\'', '\''https://x'\'')\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+[ -n "$TT_LINK_ID" ]
+pass "46: inserted link ($TT_LINK_ID)"
+
+sleep 1
+
+TT_CAT_ID=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO tt_category (title, fqn) VALUES ('\''Cat'\'', '\''A/B'\'')\") { message } }"}' | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+[ -n "$TT_CAT_ID" ]
+pass "46: inserted category ($TT_CAT_ID)"
+
+sleep 1
+
+TT_MEM_SQL="INSERT INTO tt_membership (link, category) VALUES ('$TT_LINK_ID', '$TT_CAT_ID')"
+TT_MEM_ID=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"$TT_MEM_SQL\\\") { message } }\"}" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+[ -n "$TT_MEM_ID" ]
+pass "46: inserted membership ($TT_MEM_ID)"
+
+# Verify title resolved from both referenced doogats
+TT_SELECT=$(gql "{\"query\":\"{ sql(query: \\\"SELECT title FROM tt_membership WHERE id = '$TT_MEM_ID'\\\") { rows } }\"}")
+printf '%s' "$TT_SELECT" | grep -q "My Link in A/B"
+pass "46: composed title 'My Link in A/B' from REFERENCES"
+
+# Bad dotted path is rejected at typedef materialization
+TT_BAD=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"ALTER TABLE tt_membership SET TITLE TEMPLATE '{link.does_not_exist}'\\\") { message } }\"}")
+assert_gql_errors "$TT_BAD"
+printf '%s' "$TT_BAD" | grep -q "does not exist on tt_link"
+pass "46: ALTER TABLE rejects bad dotted path"
+
 echo "=== all integration tests passed ==="
