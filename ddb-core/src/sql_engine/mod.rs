@@ -18,7 +18,9 @@ use crate::types::DoogatId;
 
 pub use builders::{build_typedef_doogat, schema_from_parsed};
 
-use helpers::{re_drop_title_template, re_set_title_template, re_set_zone};
+use helpers::{
+    normalize_alter_column_type, re_drop_title_template, re_set_title_template, re_set_zone,
+};
 
 #[derive(Debug)]
 pub enum SqlResult {
@@ -187,8 +189,13 @@ impl<'a> SqlEngine<'a> {
             return Ok(vec![result]);
         }
 
+        // PostgreSQL-style `ALTER COLUMN c TYPE X` is rewritten to the
+        // standard `SET DATA TYPE` form that GenericDialect understands.
+        let normalized = normalize_alter_column_type(sql);
+        let sql_parse = normalized.as_ref();
+
         let dialect = GenericDialect {};
-        let statements = Parser::parse_sql(&dialect, sql)
+        let statements = Parser::parse_sql(&dialect, sql_parse)
             .map_err(|e| DoogatError::SqlEngine(format!("parse: {e}")))?;
 
         if statements.is_empty() {

@@ -6206,3 +6206,286 @@ fn update_with_explicit_title_takes_priority_over_template() {
     );
 }
 
+// --- ALTER TABLE ALTER COLUMN TYPE (PRD 00128) ---
+
+#[test]
+fn alter_column_type_widens_varchar_metadata_only() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE widen (name VARCHAR(10))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO widen (title, name) VALUES ('t1', '1234567890')")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE widen ALTER COLUMN name TYPE VARCHAR(100)")
+        .unwrap();
+
+    let schema = engine.load_schema("widen").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "name").unwrap();
+    assert_eq!(col.data_type, "VARCHAR(100)");
+
+    engine
+        .execute(&format!(
+            "INSERT INTO widen (title, name) VALUES ('t2', '{}')",
+            "x".repeat(50)
+        ))
+        .unwrap();
+}
+
+#[test]
+fn alter_column_type_varchar_to_text_metadata_only() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE totext (url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute(&format!(
+            "INSERT INTO totext (title, url) VALUES ('t', '{}')",
+            "a".repeat(255)
+        ))
+        .unwrap();
+    engine
+        .execute("ALTER TABLE totext ALTER COLUMN url TYPE TEXT")
+        .unwrap();
+
+    let schema = engine.load_schema("totext").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "url").unwrap();
+    assert_eq!(col.data_type, "TEXT");
+
+    engine
+        .execute(&format!(
+            "INSERT INTO totext (title, url) VALUES ('t2', '{}')",
+            "b".repeat(2000)
+        ))
+        .unwrap();
+}
+
+#[test]
+fn alter_column_type_narrow_varchar_rejects_when_overflow() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE narrow_bad (name VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute(&format!(
+            "INSERT INTO narrow_bad (title, name) VALUES ('t', '{}')",
+            "x".repeat(50)
+        ))
+        .unwrap();
+
+    let err = engine
+        .execute("ALTER TABLE narrow_bad ALTER COLUMN name TYPE VARCHAR(20)")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("cannot narrow"), "{msg}");
+    assert!(msg.contains("VARCHAR(20)"), "{msg}");
+    assert!(msg.contains("1 existing rows"), "{msg}");
+}
+
+#[test]
+fn alter_column_type_narrow_varchar_allows_when_clean() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE narrow_ok (name VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO narrow_ok (title, name) VALUES ('t', 'short')")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE narrow_ok ALTER COLUMN name TYPE VARCHAR(20)")
+        .unwrap();
+
+    let schema = engine.load_schema("narrow_ok").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "name").unwrap();
+    assert_eq!(col.data_type, "VARCHAR(20)");
+}
+
+#[test]
+fn alter_column_type_integer_to_real_allows_when_clean() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE int_to_real (score INTEGER)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO int_to_real (title, score) VALUES ('t', 42)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE int_to_real ALTER COLUMN score TYPE REAL")
+        .unwrap();
+
+    let schema = engine.load_schema("int_to_real").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "score").unwrap();
+    assert_eq!(col.data_type, "REAL");
+}
+
+#[test]
+fn alter_column_type_real_to_integer_rejects_when_fractional() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE real_to_int (score REAL)")
+        .unwrap();
+    engine
+        .execute("INSERT INTO real_to_int (title, score) VALUES ('t', 3.14)")
+        .unwrap();
+
+    let err = engine
+        .execute("ALTER TABLE real_to_int ALTER COLUMN score TYPE INTEGER")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("cannot convert"), "{msg}");
+    assert!(msg.contains("INTEGER"), "{msg}");
+}
+
+#[test]
+fn alter_column_type_boolean_rejected() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE bool_t (flag BOOLEAN)")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE bool_t ALTER COLUMN flag TYPE INTEGER")
+        .unwrap_err();
+    assert!(format!("{err}").contains("not supported"));
+}
+
+#[test]
+fn alter_column_type_same_type_idempotent() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE idem (name VARCHAR(100))")
+        .unwrap();
+    let head_before = repo.head_oid().unwrap();
+    engine
+        .execute("ALTER TABLE idem ALTER COLUMN name TYPE VARCHAR(100)")
+        .unwrap();
+    let head_after = repo.head_oid().unwrap();
+    assert_eq!(
+        head_before.0, head_after.0,
+        "idempotent ALTER must not commit a new typedef"
+    );
+}
+
+#[test]
+fn alter_column_type_unknown_column_errors() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE alter_miss (name TEXT)")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE alter_miss ALTER COLUMN nonexistent TYPE TEXT")
+        .unwrap_err();
+    assert!(format!("{err}").contains("column not found"));
+}
+
+#[test]
+fn alter_column_type_text_to_varchar_rejects_when_overflow() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE text_narrow (body TEXT)")
+        .unwrap();
+    engine
+        .execute(&format!(
+            "INSERT INTO text_narrow (title, body) VALUES ('t', '{}')",
+            "x".repeat(500)
+        ))
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE text_narrow ALTER COLUMN body TYPE VARCHAR(100)")
+        .unwrap_err();
+    assert!(format!("{err}").contains("cannot narrow"));
+}
+
+#[test]
+fn alter_column_type_persists_in_typedef() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE persist (url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE persist ALTER COLUMN url TYPE TEXT")
+        .unwrap();
+
+    // Verify the typedef doogat on disk reflects the new type by reloading.
+    let schema_after = engine.load_schema("persist").unwrap();
+    let col = schema_after
+        .columns
+        .iter()
+        .find(|c| c.name == "url")
+        .unwrap();
+    assert_eq!(col.data_type, "TEXT");
+
+    // Rebuild by reading the typedef file back from git.
+    let rows = index
+        .query_raw("SELECT id FROM doogats WHERE type = '_typedef' AND title = 'persist'")
+        .unwrap();
+    let typedef_id = &rows[0][0];
+    let path = format!("ddb/_typedef/{typedef_id}.md");
+    let content = repo.read_file(&path).unwrap();
+    assert!(
+        content.contains("TEXT"),
+        "typedef should contain TEXT: {content}"
+    );
+    assert!(
+        !content.contains("VARCHAR(255)"),
+        "typedef should no longer contain VARCHAR(255): {content}"
+    );
+}
+
+#[test]
+fn alter_column_type_references_column_rejects_non_widening() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE ref_parent (name TEXT)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE ref_child (parent VARCHAR(32) REFERENCES ref_parent)")
+        .unwrap();
+
+    let err = engine
+        .execute("ALTER TABLE ref_child ALTER COLUMN parent TYPE INTEGER")
+        .unwrap_err();
+    assert!(format!("{err}").contains("REFERENCES column"));
+}
+
+#[test]
+fn alter_column_type_set_data_type_form_also_accepted() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE stdform (name VARCHAR(10))")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE stdform ALTER COLUMN name SET DATA TYPE VARCHAR(100)")
+        .unwrap();
+
+    let schema = engine.load_schema("stdform").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "name").unwrap();
+    assert_eq!(col.data_type, "VARCHAR(100)");
+}
+

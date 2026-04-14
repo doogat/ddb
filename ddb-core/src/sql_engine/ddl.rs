@@ -1,5 +1,5 @@
 use rusqlite::params;
-use sqlparser::ast::{AlterTableOperation, ObjectType, TableConstraint};
+use sqlparser::ast::{AlterColumnOperation, AlterTableOperation, ObjectType, TableConstraint};
 
 use crate::error::{DoogatError, Result};
 use crate::indexer::materialize::{is_core_column, junction_table_ddl};
@@ -9,7 +9,8 @@ use crate::types::{ColumnDef, DoogatId, TableSchema, Zone};
 use super::builders::{build_typedef_doogat, rename_key_in_doogat, schema_from_parsed};
 use super::helpers::{
     data_type_to_string, extract_allowed_values, extract_default, extract_references, is_not_null,
-    is_numeric_type, is_reserved_table, is_short_string_type, unquote_identifier,
+    is_numeric_type, is_reserved_table, is_short_string_type, parse_varchar_length,
+    unquote_identifier,
 };
 use super::{SqlEngine, SqlResult};
 
@@ -314,6 +315,18 @@ impl<'a> SqlEngine<'a> {
                         &new_column_name.value.to_lowercase(),
                     );
                 }
+                AlterTableOperation::AlterColumn {
+                    column_name,
+                    op: AlterColumnOperation::SetDataType { data_type, .. },
+                } => {
+                    let col_name = column_name.value.to_lowercase();
+                    let new_type = data_type_to_string(data_type);
+                    if self.handle_alter_column_type(&table_name, &mut schema, &col_name, &new_type)?
+                    {
+                        // Idempotent no-op: skip persistence and rematerialize.
+                        return Ok(SqlResult::Ok(format!("table {table_name} altered")));
+                    }
+                }
                 other => {
                     return Err(DoogatError::SqlEngine(format!(
                         "unsupported ALTER TABLE operation: {other}"
@@ -326,6 +339,194 @@ impl<'a> SqlEngine<'a> {
         self.index.rematerialize_type(&table_name, self.repo)?;
 
         Ok(SqlResult::Ok(format!("table {table_name} altered")))
+    }
+
+    /// Handle `ALTER TABLE t ALTER COLUMN c SET DATA TYPE new_type`.
+    ///
+    /// Mutates `schema.columns[i].data_type` in place when the conversion is
+    /// allowed, otherwise returns `Err`. Returns `Ok(true)` for the idempotent
+    /// no-op case (new type equals old type), signalling the caller to skip
+    /// typedef persistence and rematerialize entirely. Returns `Ok(false)`
+    /// for a successful change that still needs to be persisted.
+    ///
+    /// Supported conversions (v1):
+    ///   - `VARCHAR(N) -> VARCHAR(M)` where `M > N` — metadata-only
+    ///   - `VARCHAR(N)` / `CHAR(N)` -> `TEXT` — metadata-only
+    ///   - `VARCHAR(N) -> VARCHAR(M)` where `M < N` — pre-flight scan
+    ///   - `TEXT -> VARCHAR(N)` — pre-flight scan
+    ///   - `INTEGER <-> REAL` — pre-flight scan on existing values
+    ///
+    /// REFERENCES columns only allow widening (VARCHAR → wider VARCHAR / TEXT);
+    /// other conversions are rejected to keep the reference target stable.
+    fn handle_alter_column_type(
+        &self,
+        table_name: &str,
+        schema: &mut TableSchema,
+        col_name: &str,
+        new_type: &str,
+    ) -> Result<bool> {
+        let idx = schema
+            .columns
+            .iter()
+            .position(|c| c.name == col_name)
+            .ok_or_else(|| DoogatError::SqlEngine(format!("column not found: {col_name}")))?;
+
+        let old_type = schema.columns[idx].data_type.clone();
+        let is_reference = schema.columns[idx].references.is_some();
+
+        // Idempotent case: same type, caller skips persistence.
+        if old_type.eq_ignore_ascii_case(new_type) {
+            return Ok(true);
+        }
+
+        let old_up = old_type.to_uppercase();
+        let new_up = new_type.to_uppercase();
+        let old_varchar_len = parse_varchar_length(&old_up);
+        let new_varchar_len = parse_varchar_length(&new_up);
+        let old_is_text = old_up == "TEXT";
+        let new_is_text = new_up == "TEXT";
+        let old_is_integer = old_up == "INTEGER";
+        let new_is_integer = new_up == "INTEGER";
+        let old_is_real = old_up == "REAL";
+        let new_is_real = new_up == "REAL";
+        let touches_boolean = old_up == "BOOLEAN" || new_up == "BOOLEAN";
+
+        if touches_boolean {
+            return Err(DoogatError::SqlEngine(format!(
+                "cannot alter {table_name}.{col_name}: conversion from {old_type} to {new_type} is not supported"
+            )));
+        }
+
+        let is_widening =
+            matches!((old_varchar_len, new_varchar_len), (Some(a), Some(b)) if b > a)
+                || (old_varchar_len.is_some() && new_is_text);
+
+        if is_reference && !is_widening {
+            return Err(DoogatError::SqlEngine(format!(
+                "cannot alter {table_name}.{col_name}: REFERENCES column only supports widening to a larger VARCHAR or TEXT"
+            )));
+        }
+
+        // Classify conversion.
+        let metadata_only = match (old_varchar_len, new_varchar_len, new_is_text, old_is_text) {
+            // VARCHAR(N) -> VARCHAR(M) where M >= N
+            (Some(a), Some(b), _, _) if b >= a => true,
+            // VARCHAR(N) / CHAR(N) -> TEXT
+            (Some(_), None, true, false) => true,
+            _ => false,
+        };
+
+        if metadata_only {
+            schema.columns[idx].data_type = new_up.clone();
+            return Ok(false);
+        }
+
+        // Pre-flight scans for lossy conversions.
+        if let (Some(_), Some(max_len)) = (old_varchar_len, new_varchar_len) {
+            // VARCHAR narrowing.
+            self.preflight_narrow_varchar(table_name, col_name, max_len)?;
+            schema.columns[idx].data_type = new_up;
+            return Ok(false);
+        }
+
+        if old_is_text && new_varchar_len.is_some() {
+            let max_len = new_varchar_len.unwrap();
+            self.preflight_narrow_varchar(table_name, col_name, max_len)?;
+            schema.columns[idx].data_type = new_up;
+            return Ok(false);
+        }
+
+        if (old_is_integer && new_is_real) || (old_is_real && new_is_integer) {
+            self.preflight_numeric(table_name, col_name, &new_up)?;
+            schema.columns[idx].data_type = new_up;
+            return Ok(false);
+        }
+
+        Err(DoogatError::SqlEngine(format!(
+            "cannot alter {table_name}.{col_name}: conversion from {old_type} to {new_type} is not supported"
+        )))
+    }
+
+    /// Reject a VARCHAR narrowing when any existing row exceeds the new
+    /// length. NULL rows are allowed through.
+    fn preflight_narrow_varchar(
+        &self,
+        table_name: &str,
+        col_name: &str,
+        max_len: u32,
+    ) -> Result<()> {
+        let sql = format!(
+            "SELECT COUNT(*) FROM \"{table_name}\" WHERE \"{col_name}\" IS NOT NULL AND LENGTH(\"{col_name}\") > ?1"
+        );
+        let count: i64 = self
+            .index
+            .sql_conn()
+            .query_row(&sql, params![max_len as i64], |row| row.get(0))
+            .map_err(|e| {
+                DoogatError::SqlEngine(format!(
+                    "preflight scan failed on {table_name}.{col_name}: {e}"
+                ))
+            })?;
+        if count > 0 {
+            return Err(DoogatError::SqlEngine(format!(
+                "cannot narrow {table_name}.{col_name} to VARCHAR({max_len}): {count} existing rows exceed limit"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Reject an INTEGER↔REAL cross-conversion when any existing value cannot
+    /// round-trip through the new type. NULL rows are allowed through.
+    fn preflight_numeric(
+        &self,
+        table_name: &str,
+        col_name: &str,
+        new_type: &str,
+    ) -> Result<()> {
+        let sql = format!(
+            "SELECT \"{col_name}\" FROM \"{table_name}\" WHERE \"{col_name}\" IS NOT NULL"
+        );
+        let conn = self.index.sql_conn();
+        let mut stmt = conn.prepare(&sql).map_err(|e| {
+            DoogatError::SqlEngine(format!(
+                "preflight scan failed on {table_name}.{col_name}: {e}"
+            ))
+        })?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, rusqlite::types::Value>(0))
+            .map_err(|e| {
+                DoogatError::SqlEngine(format!(
+                    "preflight scan failed on {table_name}.{col_name}: {e}"
+                ))
+            })?;
+
+        let mut fail_count: u64 = 0;
+        for row in rows {
+            let value = row.map_err(|e| {
+                DoogatError::SqlEngine(format!(
+                    "preflight scan failed on {table_name}.{col_name}: {e}"
+                ))
+            })?;
+            let ok = match (&value, new_type) {
+                (rusqlite::types::Value::Null, _) => true,
+                (rusqlite::types::Value::Integer(_), "INTEGER") => true,
+                (rusqlite::types::Value::Integer(_), "REAL") => true,
+                (rusqlite::types::Value::Real(f), "INTEGER") => f.fract() == 0.0,
+                (rusqlite::types::Value::Real(_), "REAL") => true,
+                (rusqlite::types::Value::Text(s), "INTEGER") => s.parse::<i64>().is_ok(),
+                (rusqlite::types::Value::Text(s), "REAL") => s.parse::<f64>().is_ok(),
+                _ => false,
+            };
+            if !ok {
+                fail_count += 1;
+            }
+        }
+        if fail_count > 0 {
+            return Err(DoogatError::SqlEngine(format!(
+                "cannot convert {table_name}.{col_name} to {new_type}: {fail_count} existing rows are not valid {new_type}"
+            )));
+        }
+        Ok(())
     }
 
     /// Serialize a modified TableSchema back to its typedef doogat, commit to Git, re-index.

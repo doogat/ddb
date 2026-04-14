@@ -537,6 +537,32 @@ pub(super) fn is_numeric_type(dt: &str) -> bool {
     matches!(dt.to_uppercase().as_str(), "INTEGER" | "REAL" | "BOOLEAN")
 }
 
+/// Parse a declared `VARCHAR(N)` or `CHAR(N)` type string and return the
+/// length. Returns `None` for `TEXT`, bare `VARCHAR`, non-string types, or
+/// malformed input. Case-insensitive.
+pub(super) fn parse_varchar_length(dt: &str) -> Option<u32> {
+    let up = dt.trim().to_uppercase();
+    let rest = up
+        .strip_prefix("VARCHAR(")
+        .or_else(|| up.strip_prefix("CHAR("))?;
+    let n_str = rest.strip_suffix(')')?;
+    n_str.trim().parse::<u32>().ok()
+}
+
+/// Rewrite the PostgreSQL shorthand `ALTER COLUMN <c> TYPE <t>` into the
+/// standard `ALTER COLUMN <c> SET DATA TYPE <t>` form that the GenericDialect
+/// parser accepts. Idempotent: input already containing `SET DATA TYPE` is
+/// returned unchanged because the pattern requires `TYPE` immediately after
+/// the column identifier.
+pub(super) fn normalize_alter_column_type(sql: &str) -> std::borrow::Cow<'_, str> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r#"(?i)\b(ALTER\s+COLUMN\s+(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_-]*)\s+)TYPE(\s+)"#)
+            .expect("valid regex")
+    });
+    re.replace_all(sql, "${1}SET DATA TYPE$2")
+}
+
 /// Determine if a SQL data type represents a short string (<=255 chars) that
 /// should default to frontmatter zone rather than body.
 pub(super) fn is_short_string_type(dt: &DataType) -> bool {

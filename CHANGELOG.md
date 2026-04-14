@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sql**: `ALTER TABLE t ALTER COLUMN c TYPE <new_type>` on materialized type tables. Widening (`VARCHAR(N)` → wider `VARCHAR`, `VARCHAR`/`CHAR` → `TEXT`) is metadata-only. Narrowing (`VARCHAR(N)` → smaller `VARCHAR`, `TEXT` → `VARCHAR(N)`) runs a pre-flight scan and rejects with a row-count message when existing data exceeds the new limit. `INTEGER` ↔ `REAL` conversions scan existing values the same way. REFERENCES columns only accept widening. Accepts both the standard `SET DATA TYPE` syntax and the PostgreSQL-style `TYPE` shorthand. (jink feedback, PRD 00128)
 - **sql**: `title_template` placeholders can dereference `REFERENCES` columns via the dotted form `{col.field}`. On INSERT and UPDATE, `{link.title}` pulls the `title` off the referenced link doogat and composes it into the junction row's title — any typed column on the target type works, not just `title`. Bad paths (missing column, non-`REFERENCES` column, missing target field, multi-hop `{a.b.c}`) are rejected at `ALTER TABLE ... SET TITLE TEMPLATE` time. Missing target row or NULL field renders empty at write time. Updates recompute the title automatically when the SET list touches any template-referenced column. Cascading re-title when the referenced doogat changes is out of scope. (jink feedback, PRD 00127)
 
 ### Fixed
