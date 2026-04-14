@@ -1694,6 +1694,58 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a3thing CASCADE\") { mess
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a3item CASCADE\") { message } }"}' >/dev/null
 pass "issue-4-A3: failed INSERT on a3item does not corrupt a3thing"
 
+# 45.R10 — RESTRICT on NOT NULL REFERENCES blocks the parent delete through
+# both the SQL and deleteDoogat GraphQL surfaces (#10). The Rust unit tests
+# delete_rejected_by_not_null_references_issue_10 pin the engine invariant.
+# This scenario confirms the GraphQL layer propagates the error and leaves
+# both the parent and the child row intact.
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE r10link (url VARCHAR(255) NOT NULL)\") { message } }"}'
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE r10cat (name VARCHAR(255) NOT NULL)\") { message } }"}'
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE \\\"r10-mem\\\" (link_id VARCHAR(255) NOT NULL REFERENCES r10link(id), cat_id VARCHAR(255) NOT NULL REFERENCES r10cat(id), UNIQUE(link_id, cat_id))\") { message } }"}'
+# Use raw curl (not the `-sf` gql helper) so a transient non-2xx surfaces as
+# a diagnostic instead of killing the script via set -e.
+gql_noexit() {
+  curl -s "$GQL_URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$1"
+}
+# Extract id from a JSON string; sed -n won't trip pipefail on no-match.
+extract_id_str() {
+  local s="$1"
+  printf '%s' "$s" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p'
+}
+R10_L_RESP=$(gql_noexit '{"query":"mutation { executeSql(sql: \"INSERT INTO r10link (title, url) VALUES (\\\"L\\\", \\\"https://r10.example\\\")\") { message } }"}')
+R10_L_ID=$(extract_id_str "$R10_L_RESP")
+[ -n "$R10_L_ID" ] || { printf '  ✗ 45.R10: INSERT r10link returned no id: %s\n' "$R10_L_RESP" >&2; exit 1; }
+R10_C_RESP=$(gql_noexit '{"query":"mutation { executeSql(sql: \"INSERT INTO r10cat (title, name) VALUES (\\\"C\\\", \\\"c\\\")\") { message } }"}')
+R10_C_ID=$(extract_id_str "$R10_C_RESP")
+[ -n "$R10_C_ID" ] || { printf '  ✗ 45.R10: INSERT r10cat returned no id: %s\n' "$R10_C_RESP" >&2; exit 1; }
+gql_noexit "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO \\\\\\\"r10-mem\\\\\\\" (title, link_id, cat_id) VALUES (\\\\\\\"M\\\\\\\", \\\\\\\"$R10_L_ID\\\\\\\", \\\\\\\"$R10_C_ID\\\\\\\")\\\") { message } }\"}" >/dev/null
+# SQL DELETE via executeSql must surface the RESTRICT error via "errors"
+R10_SQL_ERR=$(gql_noexit "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM r10link WHERE id = \\\\\\\"$R10_L_ID\\\\\\\"\\\") { message } }\"}")
+assert_gql_errors "$R10_SQL_ERR"
+printf '%s' "$R10_SQL_ERR" | grep -q "NOT NULL REFERENCES"
+printf '%s' "$R10_SQL_ERR" | grep -q "r10-mem"
+# deleteDoogat GraphQL mutation must also fail
+R10_GQL_ERR=$(gql_noexit "{\"query\":\"mutation { deleteDoogat(id: \\\"$R10_L_ID\\\") }\"}")
+assert_gql_errors "$R10_GQL_ERR"
+printf '%s' "$R10_GQL_ERR" | grep -q "NOT NULL REFERENCES"
+# Parent + child rows must both still exist (executeSql is a Mutation field).
+R10_PARENT=$(gql_noexit "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM r10link WHERE id = \\\\\\\"$R10_L_ID\\\\\\\"\\\") { rows } }\"}")
+printf '%s' "$R10_PARENT" | grep -q '"rows":\["\[\\"1\\"\]"\]'
+R10_CHILD=$(gql_noexit "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM \\\\\\\"r10-mem\\\\\\\" WHERE link_id = \\\\\\\"$R10_L_ID\\\\\\\"\\\") { rows } }\"}")
+printf '%s' "$R10_CHILD" | grep -q '"rows":\["\[\\"1\\"\]"\]'
+# After deleting the child, the parent delete succeeds
+gql_noexit "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM \\\\\\\"r10-mem\\\\\\\" WHERE link_id = \\\\\\\"$R10_L_ID\\\\\\\"\\\") { message } }\"}" >/dev/null
+R10_OK=$(gql_noexit "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM r10link WHERE id = \\\\\\\"$R10_L_ID\\\\\\\"\\\") { affected } }\"}")
+assert_gql_ok "$R10_OK"
+printf '%s' "$R10_OK" | grep -q '"affected":1'
+gql_noexit '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"r10-mem\\\" CASCADE\") { message } }"}' >/dev/null
+gql_noexit '{"query":"mutation { executeSql(sql: \"DROP TABLE r10link CASCADE\") { message } }"}' >/dev/null
+gql_noexit '{"query":"mutation { executeSql(sql: \"DROP TABLE r10cat CASCADE\") { message } }"}' >/dev/null
+pass "issue-10: RESTRICT blocks delete via SQL and deleteDoogat"
+
 # 45.A2 — Ghost-row fix persists across server restart (issue #4 group A2).
 # Seed a UNIQUE failure on the running server, kill it, restart on the same
 # $TMPDIR, then verify a fresh GraphQL write path still succeeds against the

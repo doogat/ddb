@@ -518,6 +518,33 @@ ddb query "DROP TABLE cdbm2 CASCADE" | Out-Null
 ddb query "DROP TABLE cdcat2 CASCADE" | Out-Null
 pass "cascade delete (service path)"
 
+# 18b. RESTRICT on NOT NULL REFERENCES (#10)
+ddb query "CREATE TABLE r10link (url VARCHAR(255) NOT NULL)" | Out-Null
+ddb query "CREATE TABLE r10cat (name VARCHAR(255) NOT NULL)" | Out-Null
+ddb query 'CREATE TABLE "r10-mem" (link_id VARCHAR(255) NOT NULL REFERENCES r10link(id), cat_id VARCHAR(255) NOT NULL REFERENCES r10cat(id), UNIQUE(link_id, cat_id))' | Out-Null
+$R10_L = ddb query "INSERT INTO r10link (title, url) VALUES ('L', 'https://r10.example')"
+Start-Sleep -Seconds 1
+$R10_C = ddb query "INSERT INTO r10cat (title, name) VALUES ('C', 'c')"
+ddb query "INSERT INTO `"r10-mem`" (title, link_id, cat_id) VALUES ('M', '$R10_L', '$R10_C')" | Out-Null
+# SQL DELETE of parent must fail with the RESTRICT message
+$R10_ERR = & $DDB query "DELETE FROM r10link WHERE id = '$R10_L'" 2>&1
+if ($LASTEXITCODE -eq 0) { throw "DELETE of parent with NOT NULL REFERENCES child should have failed" }
+$R10_ERR_TEXT = [string]::Join("`n", @($R10_ERR) | ForEach-Object { "$_" })
+if ($R10_ERR_TEXT -notmatch "NOT NULL REFERENCES") { throw "expected RESTRICT error, got: $R10_ERR_TEXT" }
+if ($R10_ERR_TEXT -notmatch "r10-mem") { throw "expected blocking table name in error, got: $R10_ERR_TEXT" }
+# Parent still present
+$output = ddb query "SELECT COUNT(*) FROM r10link WHERE id = '$R10_L'"
+if ($output -notmatch "1") { throw "parent deleted despite RESTRICT: $output" }
+# `ddb delete` of parent must also fail
+if (-not (ddb-fails delete $R10_L)) { throw "ddb delete of parent with NOT NULL REFERENCES child should fail" }
+# After removing the child, parent delete succeeds
+ddb query "DELETE FROM `"r10-mem`" WHERE link_id = '$R10_L'" | Out-Null
+ddb query "DELETE FROM r10link WHERE id = '$R10_L'" | Out-Null
+ddb query "DROP TABLE `"r10-mem`" CASCADE" | Out-Null
+ddb query "DROP TABLE r10link CASCADE" | Out-Null
+ddb query "DROP TABLE r10cat CASCADE" | Out-Null
+pass "issue-10: RESTRICT blocks delete with NOT NULL REFERENCES child"
+
 # 19. boolean consistency in SQL responses
 ddb query "CREATE TABLE booltest (label TEXT, active BOOLEAN)" | Out-Null
 ddb query "INSERT INTO booltest (label, active) VALUES ('on', true)" | Out-Null

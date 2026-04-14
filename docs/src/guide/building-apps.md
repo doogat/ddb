@@ -267,6 +267,29 @@ JOIN category c ON c.id = bc.category_id;
 
 Dropping a table cascades to its junction tables.
 
+### Required foreign keys (RESTRICT)
+
+A column declared `NOT NULL REFERENCES other(id)` blocks the parent's delete: any row currently pointing at the parent will keep it alive. The error names the blocking table, column, and child row id, so client code can resolve the dependency before retrying:
+
+```sql
+CREATE TABLE link (url TEXT NOT NULL);
+CREATE TABLE "category-membership" (
+  link_id     VARCHAR(255) NOT NULL REFERENCES link(id),
+  category_id VARCHAR(255) NOT NULL REFERENCES category(id),
+  UNIQUE(link_id, category_id)
+);
+
+-- Fails: "cannot delete '<link-id>': NOT NULL REFERENCES from
+--         category-membership.link_id in row '<membership-id>'"
+DELETE FROM link WHERE id = '<link-id>';
+
+-- Works: remove the membership first, then the link.
+DELETE FROM "category-membership" WHERE link_id = '<link-id>';
+DELETE FROM link WHERE id = '<link-id>';
+```
+
+Nullable `REFERENCES` columns keep the existing cascade (the wikilink is stripped and the parent is deleted). Use `NOT NULL REFERENCES` only when a missing parent should be treated as schema corruption.
+
 ## API access
 
 ### GraphQL

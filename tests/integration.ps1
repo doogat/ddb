@@ -1606,6 +1606,40 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE a3thing CASCADE") { message } }' | 
 gqlq 'mutation { executeSql(sql: "DROP TABLE a3item CASCADE") { message } }' | Out-Null
 pass "issue-4-A3: failed INSERT on a3item does not corrupt a3thing"
 
+# 45.R10 - RESTRICT on NOT NULL REFERENCES blocks delete via SQL and
+# deleteDoogat (#10). Mirrors the Bash scenario.
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+gqlq 'mutation { executeSql(sql: "CREATE TABLE r10link (url VARCHAR(255) NOT NULL)") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE r10cat (name VARCHAR(255) NOT NULL)") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE \"r10-mem\" (link_id VARCHAR(255) NOT NULL REFERENCES r10link(id), cat_id VARCHAR(255) NOT NULL REFERENCES r10cat(id), UNIQUE(link_id, cat_id))") { message } }' | Out-Null
+waitSchemaReload $ver
+$r10L = gqlq 'mutation { executeSql(sql: "INSERT INTO r10link (title, url) VALUES (''L'', ''https://r10.example'')") { message } }'
+$R10_L_ID = extractId $r10L
+if (-not $R10_L_ID) { throw "45.R10: could not extract R10_L_ID" }
+$r10C = gqlq 'mutation { executeSql(sql: "INSERT INTO r10cat (title, name) VALUES (''C'', ''c'')") { message } }'
+$R10_C_ID = extractId $r10C
+if (-not $R10_C_ID) { throw "45.R10: could not extract R10_C_ID" }
+gqlq "mutation { executeSql(sql: ""INSERT INTO \""r10-mem\"" (title, link_id, cat_id) VALUES ('M', '$R10_L_ID', '$R10_C_ID')"") { message } }" | Out-Null
+$r10SqlErr = gqlq "mutation { executeSql(sql: ""DELETE FROM r10link WHERE id = '$R10_L_ID'"") { message } }"
+assertGqlErrors $r10SqlErr "R10 SQL DELETE"
+if ($r10SqlErr -notmatch "NOT NULL REFERENCES") { throw "45.R10: SQL DELETE error missing 'NOT NULL REFERENCES': $r10SqlErr" }
+if ($r10SqlErr -notmatch "r10-mem") { throw "45.R10: SQL DELETE error missing blocking table 'r10-mem': $r10SqlErr" }
+$r10GqlErr = gqlq "mutation { deleteDoogat(id: `"$R10_L_ID`") }"
+assertGqlErrors $r10GqlErr "R10 deleteDoogat"
+if ($r10GqlErr -notmatch "NOT NULL REFERENCES") { throw "45.R10: deleteDoogat error missing 'NOT NULL REFERENCES': $r10GqlErr" }
+$r10Parent = gqlq "mutation { executeSql(sql: ""SELECT COUNT(*) FROM r10link WHERE id = '$R10_L_ID'"") { rows } }"
+if ($r10Parent -notmatch '"rows":\["\[\\"1\\"\]"\]') { throw "45.R10: parent row missing after blocked delete: $r10Parent" }
+$r10Child = gqlq "mutation { executeSql(sql: ""SELECT COUNT(*) FROM \""r10-mem\"" WHERE link_id = '$R10_L_ID'"") { rows } }"
+if ($r10Child -notmatch '"rows":\["\[\\"1\\"\]"\]') { throw "45.R10: child row missing after blocked delete: $r10Child" }
+gqlq "mutation { executeSql(sql: ""DELETE FROM \""r10-mem\"" WHERE link_id = '$R10_L_ID'"") { message } }" | Out-Null
+$r10Ok = gqlq "mutation { executeSql(sql: ""DELETE FROM r10link WHERE id = '$R10_L_ID'"") { affected } }"
+assertGqlOk $r10Ok "R10 final DELETE"
+if ($r10Ok -notmatch '"affected":1') { throw "45.R10: expected affected:1 after child removed, got: $r10Ok" }
+gqlq 'mutation { executeSql(sql: "DROP TABLE \"r10-mem\" CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE r10link CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE r10cat CASCADE") { message } }' | Out-Null
+pass "issue-10: RESTRICT blocks delete via SQL and deleteDoogat"
+
 # 45.A2 - Ghost-row fix persists across server restart (#4 group A2).
 ddl 'mutation { executeSql(sql: "CREATE TABLE a2persist (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }'
 $a2Valid = gqlq 'mutation { executeSql(sql: "INSERT INTO a2persist (title, name) VALUES (''seed'', ''uniq_a2'')") { message } }'

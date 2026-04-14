@@ -291,6 +291,14 @@ When a doogat is deleted via `DELETE FROM`, two cascade operations happen automa
 
 Both operations, plus the original delete, land in a single atomic git commit. Inside a transaction, they are buffered and committed together with other transaction operations.
 
+### RESTRICT for NOT NULL REFERENCES
+
+Columns declared as `NOT NULL REFERENCES other(id)` enforce **RESTRICT** semantics on the referenced parent's delete. If any row in any typed table currently holds the parent's id in such a column, the delete is rejected with `cannot delete '<id>': NOT NULL REFERENCES from <table>.<column> in row '<blocker>'` — the parent and the child stay intact.
+
+The check fires for every delete entry point: SQL `DELETE FROM`, the `deleteDoogat` GraphQL mutation, and `ddb delete <id>` on the CLI. Bulk SQL deletes are atomic: if any matched id has a required-FK dependent, the whole statement is rejected and no rows are deleted.
+
+Nullable `REFERENCES` columns are unaffected — the existing wikilink-strip cascade still applies, and the parent delete still proceeds. Issue [#10](https://github.com/doogat/ddb/issues/10).
+
 ## Expressions in INSERT and UPDATE
 
 INSERT VALUES and UPDATE SET positions accept expressions beyond literal values.

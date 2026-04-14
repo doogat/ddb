@@ -488,6 +488,10 @@ impl<G: GitBackend> DoogatService<G> {
     pub fn delete_doogat(&self, id: &str, message: &str) -> Result<Vec<(String, String)>> {
         self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
+        // RESTRICT: reject the delete if any typed-table row holds `id` in a
+        // `NOT NULL REFERENCES` column. Wikilink stripping would otherwise
+        // leave that row with NULL in a NOT NULL column (#10).
+        self.index.check_restrict_blocks_delete(&self.repo, id)?;
         let broken = self.index.backlinking_doogat_paths(id)?;
         // Look up type before removing from index (needed for cascade)
         let doogat_type: Option<String> = self

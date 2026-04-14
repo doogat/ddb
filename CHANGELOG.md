@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **sql**: deleting a doogat that is referenced by a typed-table row through a `NOT NULL REFERENCES` column now fails with `cannot delete '<id>': NOT NULL REFERENCES from <table>.<column> in row '<blocker>'` instead of silently stripping the wikilink and leaving the row with `NULL` in a `NOT NULL` column. Enforced on every delete entry point: SQL `DELETE FROM`, the `deleteDoogat` GraphQL mutation, and `ddb delete <id>` on the CLI. Bulk SQL deletes are atomic — if any matched id has a required-FK dependent, no rows are deleted. Nullable `REFERENCES` columns are unaffected (the wikilink-strip cascade still applies). (#10)
+
 ### Changed
 
 - **build**: bump direct `rand` dependency from 0.8 to 0.9 and ignore RUSTSEC-2026-0097 for the transitive `rand 0.8.5` pulled by `pgwire 0.25` (advisory unsoundness path requires a custom `log` logger that calls `rand::rng()` inside its own output; ddb uses `tracing` and has no such logger)

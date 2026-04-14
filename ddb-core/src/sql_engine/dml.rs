@@ -660,6 +660,9 @@ impl<'a> SqlEngine<'a> {
         doogat_id: &str,
     ) -> Result<SqlResult> {
         let path = self.index.resolve_path(doogat_id)?;
+        // RESTRICT: block the delete if any typed-table row holds this id in
+        // a NOT NULL REFERENCES column (#10).
+        self.index.check_restrict_blocks_delete(self.repo, doogat_id)?;
         self.index.remove_doogat(doogat_id)?;
         self.index.sql_conn().execute(
             &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
@@ -695,6 +698,12 @@ impl<'a> SqlEngine<'a> {
         let matches = self.resolve_matching_ids(table_name, selection)?;
         if matches.is_empty() {
             return Ok(SqlResult::Affected(0));
+        }
+
+        // RESTRICT pre-pass: if any matched id has a NOT NULL REFERENCES
+        // dependent, reject the whole bulk before touching state (#10).
+        for (id, _) in &matches {
+            self.index.check_restrict_blocks_delete(self.repo, id)?;
         }
 
         let mut all_ref_edits: Vec<PendingWrite> = Vec::new();

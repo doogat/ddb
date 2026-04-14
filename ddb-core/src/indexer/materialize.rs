@@ -477,6 +477,51 @@ impl Index {
         schemas
     }
 
+    /// Enforce RESTRICT semantics for `NOT NULL REFERENCES` columns before a
+    /// parent doogat is deleted. Scans every typedef for columns with both
+    /// `required = true` and `references = Some(_)`, and asks the
+    /// materialized table whether any row currently holds `deleted_id` in
+    /// that column. Returns `Err(Validation(..))` at the first blocker found.
+    ///
+    /// This is the whole RESTRICT check: we do not enumerate the child type
+    /// of the deleted doogat, because `references` records only the target
+    /// table name, not the column pair, and the materialized table is the
+    /// authoritative place where the FK value actually lives. Rows that
+    /// reference the deleted id from a nullable FK column are not blocked
+    /// here — the existing wikilink-stripping cascade handles those.
+    pub(crate) fn check_restrict_blocks_delete(
+        &self,
+        repo: &dyn DoogatSource,
+        deleted_id: &str,
+    ) -> Result<()> {
+        use crate::error::DoogatError;
+        use rusqlite::OptionalExtension;
+
+        let schemas = self.load_all_typedefs(repo);
+        for (table_name, schema) in &schemas {
+            for col in &schema.columns {
+                if !col.required || col.references.is_none() {
+                    continue;
+                }
+                let sql = format!(
+                    "SELECT id FROM \"{}\" WHERE \"{}\" = ?1 LIMIT 1",
+                    table_name, col.name
+                );
+                let blocker: Option<String> = self
+                    .conn
+                    .query_row(&sql, params![deleted_id], |row| row.get(0))
+                    .optional()?;
+                if let Some(blocker_id) = blocker {
+                    return Err(DoogatError::Validation(format!(
+                        "cannot delete '{deleted_id}': NOT NULL REFERENCES from {table_name}.{col_name} in row '{blocker_id}'",
+                        col_name = col.name
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Load typedef schemas from pre-parsed doogats (no git reads).
     fn load_all_typedefs_from(
         doogats: &[ParsedDoogat],

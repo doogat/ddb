@@ -642,6 +642,14 @@ impl crate::traits::SqlBackend for Index {
     ) -> Result<Vec<(String, String)>> {
         self.backlinks_by_target(target_id, target_path)
     }
+
+    fn check_restrict_blocks_delete(
+        &self,
+        source: &dyn crate::traits::DoogatSource,
+        deleted_id: &str,
+    ) -> Result<()> {
+        self.check_restrict_blocks_delete(source, deleted_id)
+    }
 }
 
 impl crate::traits::DoogatIndex for Index {

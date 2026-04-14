@@ -92,6 +92,16 @@ pub trait SqlBackend: DoogatIndex {
         target_id: &str,
         target_path: &str,
     ) -> Result<Vec<(String, String)>>;
+
+    /// Enforce RESTRICT semantics for `NOT NULL REFERENCES` columns before a
+    /// parent doogat is deleted. Returns `Err(Validation(..))` if any typed
+    /// table holds `deleted_id` in a required FK column; the caller must not
+    /// proceed with the delete. See `Index::check_restrict_blocks_delete`.
+    fn check_restrict_blocks_delete(
+        &self,
+        source: &dyn DoogatSource,
+        deleted_id: &str,
+    ) -> Result<()>;
 }
 
 /// CRDT-based conflict resolution strategy.

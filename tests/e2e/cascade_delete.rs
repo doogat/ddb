@@ -235,3 +235,141 @@ fn cascade_delete_via_ddb_delete_cleans_junction_and_refs() {
         .success()
         .stdout(predicate::str::contains(format!("[[{cat_id}]]")).not());
 }
+
+// Issue #10: RESTRICT semantics for typed tables with NOT NULL REFERENCES.
+// Both the SQL `DELETE FROM parent` path and the CLI `ddb delete` path must
+// reject the delete when a child row would be left with NULL in a NOT NULL
+// FK column.
+
+#[test]
+fn delete_rejected_by_not_null_references_sql_issue_10() {
+    let repo = DdbTestRepo::init();
+
+    repo.ddb()
+        .args(["query", "CREATE TABLE link (url VARCHAR(255) NOT NULL)"])
+        .assert()
+        .success();
+    repo.ddb()
+        .args(["query", "CREATE TABLE category (name VARCHAR(255) NOT NULL)"])
+        .assert()
+        .success();
+    repo.ddb()
+        .args([
+            "query",
+            "CREATE TABLE \"category-membership\" (\
+                 link_id VARCHAR(255) NOT NULL REFERENCES link(id),\
+                 category_id VARCHAR(255) NOT NULL REFERENCES category(id),\
+                 UNIQUE(link_id, category_id)\
+             )",
+        ])
+        .assert()
+        .success();
+
+    let link_out = repo
+        .ddb()
+        .args(["query", "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')"])
+        .output()
+        .unwrap();
+    let link_id = String::from_utf8_lossy(&link_out.stdout).trim().to_string();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    let cat_out = repo
+        .ddb()
+        .args(["query", "INSERT INTO category (title, name) VALUES ('C', 'c')"])
+        .output()
+        .unwrap();
+    let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
+
+    repo.ddb()
+        .args([
+            "query",
+            &format!(
+                "INSERT INTO \"category-membership\" (title, link_id, category_id) \
+                 VALUES ('M', '{link_id}', '{cat_id}')"
+            ),
+        ])
+        .assert()
+        .success();
+
+    // SQL DELETE must fail and report the blocker.
+    repo.ddb()
+        .args(["query", &format!("DELETE FROM link WHERE id = '{link_id}'")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("NOT NULL REFERENCES"))
+        .stderr(predicate::str::contains("category-membership"))
+        .stderr(predicate::str::contains("link_id"));
+
+    // The link is still there and the child row still holds the FK.
+    repo.ddb()
+        .args(["query", &format!("SELECT COUNT(*) FROM link WHERE id = '{link_id}'")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"));
+    repo.ddb()
+        .args([
+            "query",
+            &format!(
+                "SELECT COUNT(*) FROM \"category-membership\" WHERE link_id = '{link_id}'"
+            ),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"));
+}
+
+#[test]
+fn delete_rejected_by_not_null_references_cli_issue_10() {
+    let repo = DdbTestRepo::init();
+
+    repo.ddb()
+        .args(["query", "CREATE TABLE link (url VARCHAR(255) NOT NULL)"])
+        .assert()
+        .success();
+    repo.ddb()
+        .args(["query", "CREATE TABLE category (name VARCHAR(255) NOT NULL)"])
+        .assert()
+        .success();
+    repo.ddb()
+        .args([
+            "query",
+            "CREATE TABLE \"category-membership\" (\
+                 link_id VARCHAR(255) NOT NULL REFERENCES link(id),\
+                 category_id VARCHAR(255) NOT NULL REFERENCES category(id),\
+                 UNIQUE(link_id, category_id)\
+             )",
+        ])
+        .assert()
+        .success();
+
+    let link_out = repo
+        .ddb()
+        .args(["query", "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')"])
+        .output()
+        .unwrap();
+    let link_id = String::from_utf8_lossy(&link_out.stdout).trim().to_string();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let cat_out = repo
+        .ddb()
+        .args(["query", "INSERT INTO category (title, name) VALUES ('C', 'c')"])
+        .output()
+        .unwrap();
+    let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
+    repo.ddb()
+        .args([
+            "query",
+            &format!(
+                "INSERT INTO \"category-membership\" (title, link_id, category_id) \
+                 VALUES ('M', '{link_id}', '{cat_id}')"
+            ),
+        ])
+        .assert()
+        .success();
+
+    // `ddb delete` must also reject the delete.
+    repo.ddb()
+        .args(["delete", &link_id])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("NOT NULL REFERENCES"));
+}

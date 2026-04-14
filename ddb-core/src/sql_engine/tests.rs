@@ -5517,3 +5517,206 @@ fn executesql_insert_rejects_varchar_overflow() {
     assert_eq!(count_rows(&index, "shortname"), 0);
     assert_eq!(count_index_rows(&index, "shortname"), 0);
 }
+
+// --- Issue #10: RESTRICT semantics for NOT NULL REFERENCES columns.
+//
+// Deleting a parent doogat that is referenced by a typed-table row via a
+// NOT NULL REFERENCES column used to silently strip the wikilink, leaving
+// the row with NULL in a NOT NULL column. We now reject the delete.
+
+fn setup_restrict_schema(repo: &GitRepo, index: &Index) {
+    let mut engine = SqlEngine::new(index, repo);
+    engine
+        .execute("CREATE TABLE link (url VARCHAR(255) NOT NULL)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE category (name VARCHAR(255) NOT NULL)")
+        .unwrap();
+    engine
+        .execute(
+            "CREATE TABLE \"category-membership\" (\
+                 link_id VARCHAR(255) NOT NULL REFERENCES link(id),\
+                 category_id VARCHAR(255) NOT NULL REFERENCES category(id),\
+                 UNIQUE(link_id, category_id)\
+             )",
+        )
+        .unwrap();
+}
+
+fn seed_membership(repo: &GitRepo, index: &Index) -> (String, String, String) {
+    let link_id = engine_exec_id(
+        repo,
+        index,
+        "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')",
+    );
+    let cat_id = engine_exec_id(
+        repo,
+        index,
+        "INSERT INTO category (title, name) VALUES ('C', 'c')",
+    );
+    let mem_id = engine_exec_id(
+        repo,
+        index,
+        &format!(
+            "INSERT INTO \"category-membership\" (title, link_id, category_id) \
+             VALUES ('M', '{link_id}', '{cat_id}')"
+        ),
+    );
+    (link_id, cat_id, mem_id)
+}
+
+#[test]
+fn delete_rejected_by_not_null_references_issue_10() {
+    let (_dir, repo, index) = setup();
+    setup_restrict_schema(&repo, &index);
+    let (link_id, _cat_id, mem_id) = seed_membership(&repo, &index);
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    let err = engine
+        .execute(&format!("DELETE FROM link WHERE id = '{link_id}'"))
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("cannot delete")
+            && msg.contains(&link_id)
+            && msg.contains("category-membership")
+            && msg.contains("link_id")
+            && msg.contains(&mem_id),
+        "error should name the deleted id, blocking table, column, and row; got: {msg}"
+    );
+
+    // Parent row still present in its typed table and in the index.
+    assert_eq!(count_rows(&index, "link"), 1);
+    assert_eq!(count_index_rows(&index, "link"), 1);
+    // Child row still present with the FK intact.
+    let rows = index
+        .query_raw("SELECT link_id FROM \"category-membership\"")
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], link_id);
+}
+
+#[test]
+fn delete_service_path_rejected_by_not_null_references_issue_10() {
+    use crate::service::DoogatService;
+
+    let (dir, repo, index) = setup();
+    setup_restrict_schema(&repo, &index);
+    let (link_id, _cat_id, _mem_id) = seed_membership(&repo, &index);
+    // Drop local handles so DoogatService can open the repo.
+    drop(repo);
+    drop(index);
+
+    let svc = DoogatService::open(dir.path()).unwrap();
+    let err = svc
+        .delete_doogat(&link_id, &format!("delete link {link_id}"))
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL REFERENCES"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn delete_succeeds_after_child_removed_issue_10() {
+    let (_dir, repo, index) = setup();
+    setup_restrict_schema(&repo, &index);
+    let (link_id, _cat_id, mem_id) = seed_membership(&repo, &index);
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Remove the child row first.
+    let affected = engine
+        .execute(&format!(
+            "DELETE FROM \"category-membership\" WHERE id = '{mem_id}'"
+        ))
+        .unwrap();
+    match affected {
+        SqlResult::Affected(n) => assert_eq!(n, 1),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+
+    // Parent delete now succeeds.
+    let affected = engine
+        .execute(&format!("DELETE FROM link WHERE id = '{link_id}'"))
+        .unwrap();
+    match affected {
+        SqlResult::Affected(n) => assert_eq!(n, 1),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+    assert_eq!(count_rows(&index, "link"), 0);
+}
+
+#[test]
+fn delete_allowed_when_reference_is_nullable_issue_10() {
+    // Without NOT NULL, the existing wikilink-strip cascade runs and the
+    // parent delete proceeds. This test pins that RESTRICT only fires on
+    // required FKs and does not regress nullable-reference behavior.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE link (url VARCHAR(255) NOT NULL)")
+        .unwrap();
+    engine
+        .execute(
+            "CREATE TABLE bookmark (\
+                 note VARCHAR(255),\
+                 link_id VARCHAR(255) REFERENCES link(id)\
+             )",
+        )
+        .unwrap();
+    let link_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')",
+    );
+    engine_exec_ok(
+        &repo,
+        &index,
+        &format!(
+            "INSERT INTO bookmark (title, note, link_id) VALUES ('B', 'n', '{link_id}')"
+        ),
+    );
+
+    let affected = engine
+        .execute(&format!("DELETE FROM link WHERE id = '{link_id}'"))
+        .unwrap();
+    match affected {
+        SqlResult::Affected(n) => assert_eq!(n, 1),
+        other => panic!("expected Affected(1), got {other:?}"),
+    }
+    assert_eq!(count_rows(&index, "link"), 0);
+}
+
+#[test]
+fn bulk_delete_atomically_rejected_by_restrict_issue_10() {
+    // A bulk DELETE that touches any parent with a NOT NULL REFERENCES
+    // dependent must reject the whole statement without deleting any rows.
+    let (_dir, repo, index) = setup();
+    setup_restrict_schema(&repo, &index);
+    let (link_id_blocked, _, _) = seed_membership(&repo, &index);
+    let link_id_free = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('L2', 'https://b.com')",
+    );
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    let err = engine
+        .execute("DELETE FROM link WHERE url LIKE 'https://%'")
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("NOT NULL REFERENCES"),
+        "got: {err}"
+    );
+
+    // Both rows must still be there — bulk delete is atomic.
+    assert_eq!(count_rows(&index, "link"), 2);
+    let remaining = index
+        .query_raw("SELECT id FROM link ORDER BY id")
+        .unwrap();
+    let mut ids: Vec<&str> = remaining.iter().map(|r| r[0].as_str()).collect();
+    ids.sort();
+    let mut want = vec![link_id_blocked.as_str(), link_id_free.as_str()];
+    want.sort();
+    assert_eq!(ids, want);
+}

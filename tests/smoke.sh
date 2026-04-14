@@ -424,6 +424,32 @@ $DDB query "DROP TABLE cdbm2 CASCADE" >/dev/null
 $DDB query "DROP TABLE cdcat2 CASCADE" >/dev/null
 pass "cascade delete (service path)"
 
+# 18b. RESTRICT on NOT NULL REFERENCES (#10)
+$DDB query "CREATE TABLE r10link (url VARCHAR(255) NOT NULL)" >/dev/null
+$DDB query "CREATE TABLE r10cat (name VARCHAR(255) NOT NULL)" >/dev/null
+$DDB query 'CREATE TABLE "r10-mem" (link_id VARCHAR(255) NOT NULL REFERENCES r10link(id), cat_id VARCHAR(255) NOT NULL REFERENCES r10cat(id), UNIQUE(link_id, cat_id))' >/dev/null
+R10_L=$($DDB query "INSERT INTO r10link (title, url) VALUES ('L', 'https://r10.example')")
+sleep 1
+R10_C=$($DDB query "INSERT INTO r10cat (title, name) VALUES ('C', 'c')")
+$DDB query "INSERT INTO \"r10-mem\" (title, link_id, cat_id) VALUES ('M', '$R10_L', '$R10_C')" >/dev/null
+# SQL DELETE of parent must fail with a clear message naming the blocking row
+R10_ERR=$($DDB query "DELETE FROM r10link WHERE id = '$R10_L'" 2>&1 || true)
+echo "$R10_ERR" | grep -q "NOT NULL REFERENCES"
+echo "$R10_ERR" | grep -q "r10-mem"
+# Parent still present
+$DDB query "SELECT COUNT(*) FROM r10link WHERE id = '$R10_L'" | grep -q "1"
+# `ddb delete` of parent must also fail
+if $DDB delete "$R10_L" 2>/dev/null; then
+  echo "FAIL: ddb delete of parent with NOT NULL REFERENCES child should fail" >&2; exit 1
+fi
+# After removing the child, parent delete succeeds
+$DDB query "DELETE FROM \"r10-mem\" WHERE link_id = '$R10_L'" | grep -q "1 row(s) affected"
+$DDB query "DELETE FROM r10link WHERE id = '$R10_L'" | grep -q "1 row(s) affected"
+$DDB query "DROP TABLE \"r10-mem\" CASCADE" >/dev/null
+$DDB query "DROP TABLE r10link CASCADE" >/dev/null
+$DDB query "DROP TABLE r10cat CASCADE" >/dev/null
+pass "issue-10: RESTRICT blocks delete with NOT NULL REFERENCES child"
+
 # 19. boolean consistency in SQL responses
 $DDB query "CREATE TABLE booltest (label TEXT, active BOOLEAN)" | grep -q "table booltest created"
 $DDB query "INSERT INTO booltest (label, active) VALUES ('on', true)" >/dev/null
