@@ -5923,6 +5923,92 @@ fn insert_title_template_dotted_ref_missing_target_field_empty() {
 }
 
 #[test]
+fn set_title_template_rejects_dotted_on_non_ref_column() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE thing (label TEXT)")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE thing SET TITLE TEMPLATE '{label.title}'")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not a REFERENCES column"),
+        "expected non-ref rejection: {msg}"
+    );
+}
+
+#[test]
+fn set_title_template_rejects_missing_column() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE thing (label TEXT)").unwrap();
+    let err = engine
+        .execute("ALTER TABLE thing SET TITLE TEMPLATE '{ghost.title}'")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "expected column-not-found rejection: {msg}"
+    );
+}
+
+#[test]
+fn set_title_template_rejects_bad_field_on_target_type() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE '{link.bogus}'")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("does not exist on link"),
+        "expected field-not-found rejection: {msg}"
+    );
+}
+
+#[test]
+fn set_title_template_accepts_title_on_any_ref() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE '{link.title}'")
+        .unwrap();
+}
+
+#[test]
+fn set_title_template_rejects_multi_hop() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE '{link.other.title}'")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("multi-hop") || msg.contains("one-level"),
+        "expected multi-hop rejection: {msg}"
+    );
+}
+
+#[test]
 fn insert_title_template_dotted_ref_on_non_ref_column_renders_empty() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
