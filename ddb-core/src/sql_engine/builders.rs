@@ -5,7 +5,7 @@ use crate::types::{
     ColumnDef, DoogatId, DoogatMeta, InlineField, Link, ParsedDoogat, TableSchema, Value, Zone,
 };
 
-use super::helpers::{re_unfilled_placeholder, to_yaml_value};
+use super::helpers::{parse_title_template, re_unfilled_placeholder, to_yaml_value};
 
 /// Convert a single `ColumnDef` into a YAML-style `Value::Map`.
 fn build_column_yaml(col: &ColumnDef) -> Value {
@@ -208,16 +208,14 @@ fn process_column_zones(
 /// 3. `"{type} {id}"` last-resort fallback (only fires for tables whose
 ///    title is nullable and has no template).
 ///
-/// The previous third and fourth priorities (first body column / first
-/// frontmatter string) silently coerced unrelated fields like `url` or
-/// `description` into the title slot, masking what should be a NOT NULL
-/// violation. Removed in PRD 00122 / issue #7. The pre-write
-/// `validate_row_against_schema` check is what now rejects an INSERT that
-/// omits a NOT NULL title with no template.
+/// Dotted placeholders (`{ref_col.field}`) dereference REFERENCES columns by
+/// reading the target doogat's field from its materialized row. Missing
+/// target or NULL field substitutes empty string (PRD 00127).
 fn resolve_insert_title(
     id: &DoogatId,
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,
+    conn: Option<&rusqlite::Connection>,
 ) -> String {
     // Priority 1: explicit title column
     if let Some(t) = col_values.get("title") {
@@ -225,20 +223,107 @@ fn resolve_insert_title(
     }
     // Priority 2: title_template interpolation
     if let Some(ref tmpl) = schema.title_template {
-        let mut rendered = tmpl.clone();
-        for (key, val) in col_values {
-            rendered = rendered.replace(&format!("{{{key}}}"), val);
-        }
-        let rendered = re_unfilled_placeholder()
+        let rendered = render_title_template(tmpl, schema, col_values, conn);
+        let stripped = re_unfilled_placeholder()
             .replace_all(&rendered, "")
             .trim()
             .to_string();
-        if !rendered.is_empty() {
-            return rendered;
+        if !stripped.is_empty() {
+            return stripped;
         }
     }
     // Priority 3: "{type} {id}" fallback
     format!("{} {}", schema.table_name, id.0)
+}
+
+/// Substitute placeholders in a template. Bare `{col}` substitutes the row's
+/// value for that column; `{col.field}` dereferences a REFERENCES column by
+/// reading `field` off the target doogat's materialized row.
+pub(super) fn render_title_template(
+    tmpl: &str,
+    schema: &TableSchema,
+    col_values: &BTreeMap<String, String>,
+    conn: Option<&rusqlite::Connection>,
+) -> String {
+    let placeholders = match parse_title_template(tmpl) {
+        Ok(p) => p,
+        // Fall back to naive substitution when the template has a syntactic
+        // problem (multi-hop, malformed ident). Typedef materialization
+        // should reject such templates before they reach runtime; if a
+        // hand-edited typedef slips through, empty substitution is safer
+        // than crashing the INSERT.
+        Err(_) => {
+            return tmpl.to_string();
+        }
+    };
+    let mut rendered = tmpl.to_string();
+    for p in &placeholders {
+        let value = match &p.field {
+            None => col_values.get(&p.col).cloned().unwrap_or_default(),
+            Some(field) => resolve_reference_field(schema, col_values, &p.col, field, conn),
+        };
+        rendered = rendered.replace(&p.raw, &value);
+    }
+    rendered
+}
+
+fn resolve_reference_field(
+    schema: &TableSchema,
+    col_values: &BTreeMap<String, String>,
+    col: &str,
+    field: &str,
+    conn: Option<&rusqlite::Connection>,
+) -> String {
+    let target_id = match col_values.get(col) {
+        Some(v) if !v.is_empty() => v.clone(),
+        _ => return String::new(),
+    };
+    let col_def = match schema.columns.iter().find(|c| c.name == col) {
+        Some(c) => c,
+        None => return String::new(),
+    };
+    let Some(target_type) = col_def.references.as_deref() else {
+        return String::new();
+    };
+    let Some(conn) = conn else {
+        return String::new();
+    };
+    if !is_safe_sql_identifier(target_type) || !is_safe_sql_identifier(field) {
+        return String::new();
+    }
+    // Guard against SQLite's legacy double-quoted-string-as-identifier
+    // fallback: if `field` isn't a real column on `target_type`, `SELECT
+    // "field" FROM ...` would return the literal string "field" instead
+    // of erroring. Verify the column exists up front.
+    let col_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+            rusqlite::params![target_type, field],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )
+        .unwrap_or(false);
+    if !col_exists {
+        return String::new();
+    }
+    let sql = format!("SELECT \"{field}\" FROM \"{target_type}\" WHERE id = ?1");
+    conn.query_row(&sql, rusqlite::params![target_id], |row| {
+        row.get::<_, Option<String>>(0)
+    })
+    .ok()
+    .flatten()
+    .unwrap_or_default()
+}
+
+fn is_safe_sql_identifier(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let mut chars = s.chars();
+    let first = chars.next().unwrap();
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Derive the date for a data doogat: prefer explicit `date` from extra/col_values, fall back to id.
@@ -272,10 +357,11 @@ pub(super) fn build_data_doogat(
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,
     ref_folder_types: &std::collections::HashSet<String>,
+    conn: Option<&rusqlite::Connection>,
 ) -> ParsedDoogat {
     let mut zones = process_column_zones(schema, col_values, ref_folder_types);
 
-    let title = resolve_insert_title(id, schema, col_values);
+    let title = resolve_insert_title(id, schema, col_values, conn);
 
     let body = join_sections(&zones.body_sections, "\n", "\n", "\n\n");
     let reference_section = join_sections(&zones.ref_lines, "", "\n", "\n");

@@ -5805,3 +5805,146 @@ fn parse_title_template_preserves_bare_braces_without_content() {
     let placeholders = parse_title_template("no braces here").unwrap();
     assert!(placeholders.is_empty());
 }
+
+// --- REFERENCES-aware title_template INSERT resolution (PRD 00127) ---
+
+#[test]
+fn insert_title_template_dotted_ref_resolves_target_title() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE category (fqn TEXT)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link, category TEXT REFERENCES category)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE '{link.title} in {category.fqn}'")
+        .unwrap();
+
+    let link_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('My Link', 'https://x')",
+    );
+    let cat_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO category (title, fqn) VALUES ('Cat', 'A/B')",
+    );
+    let mem_id = engine_exec_id(
+        &repo,
+        &index,
+        &format!(
+            "INSERT INTO membership (link, category) VALUES ('{link_id}', '{cat_id}')"
+        ),
+    );
+
+    let path = index.resolve_path(&mem_id).unwrap();
+    let content = repo.read_file(&path).unwrap();
+    assert!(
+        content.contains("My Link in A/B"),
+        "dotted template should resolve: {content}"
+    );
+}
+
+#[test]
+fn insert_title_template_bare_ref_still_returns_id() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE 'raw: {link}'")
+        .unwrap();
+
+    let link_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('My Link', 'https://x')",
+    );
+    let mem_id = engine_exec_id(
+        &repo,
+        &index,
+        &format!("INSERT INTO membership (link) VALUES ('{link_id}')"),
+    );
+
+    let path = index.resolve_path(&mem_id).unwrap();
+    let content = repo.read_file(&path).unwrap();
+    let expected = format!("raw: {link_id}");
+    assert!(
+        content.contains(&expected),
+        "bare ref should substitute id: {content}"
+    );
+}
+
+#[test]
+fn insert_title_template_dotted_ref_missing_target_field_empty() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE 'prefix {link.nonexistent} suffix'")
+        .unwrap();
+
+    let link_id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('My Link', 'https://x')",
+    );
+    let mem_id = engine_exec_id(
+        &repo,
+        &index,
+        &format!("INSERT INTO membership (link) VALUES ('{link_id}')"),
+    );
+
+    let path = index.resolve_path(&mem_id).unwrap();
+    let content = repo.read_file(&path).unwrap();
+    // nonexistent field should render empty, producing "prefix  suffix"
+    // (YAML may normalize the title row format — the key signal is
+    // that the full "prefix nonexistent suffix" string does NOT appear.)
+    assert!(
+        content.contains("prefix  suffix") || content.contains("'prefix  suffix'"),
+        "missing field should render empty: {content}"
+    );
+    assert!(
+        !content.contains("prefix nonexistent suffix"),
+        "nonexistent identifier should not appear literally: {content}"
+    );
+}
+
+#[test]
+fn insert_title_template_dotted_ref_on_non_ref_column_renders_empty() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE thing (label TEXT, name TEXT)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE thing SET TITLE TEMPLATE 'x:{label.title} y'")
+        .unwrap();
+
+    let id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO thing (label, name) VALUES ('Plain', 'Name')",
+    );
+
+    let path = index.resolve_path(&id).unwrap();
+    let content = repo.read_file(&path).unwrap();
+    // `label` is not a REFERENCES column — dotted form should render empty
+    assert!(
+        content.contains("x: y") || content.contains("\"x: y\""),
+        "dotted on non-ref should render empty: {content}"
+    );
+}

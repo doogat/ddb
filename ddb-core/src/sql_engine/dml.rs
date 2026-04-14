@@ -301,7 +301,8 @@ impl<'a> SqlEngine<'a> {
         col_values: &BTreeMap<String, String>,
         ref_folder_types: &std::collections::HashSet<String>,
     ) -> Result<(String, String)> {
-        let doogat = build_data_doogat(id, schema, col_values, ref_folder_types);
+        let doogat =
+            build_data_doogat(id, schema, col_values, ref_folder_types, Some(self.index.sql_conn()));
         let content = parser::serialize(&doogat);
         let path = if table_name == "doogats" {
             format!("ddb/{}.md", id.0)
