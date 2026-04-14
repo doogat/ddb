@@ -432,6 +432,16 @@ Priorities 3 and 4 silently coerced unrelated fields like `url` or `description`
 
 **Behavioral change**: a table whose `title` is `NOT NULL` and which has no `title_template` now rejects INSERTs that omit the title with `NOT NULL constraint violated: <table>.title`. Clients that relied on the fallback should either provide an explicit `title`, declare a `title_template`, or make the title nullable.
 
+### REFERENCES-aware title_template (PRD 00127)
+
+A `title_template` placeholder of the form `{col.field}` dereferences a `REFERENCES` column and pulls `field` off the target doogat. The column list in `parse_title_template` (ddb-core/src/sql_engine/helpers.rs) is reused by both the validator and the INSERT/UPDATE resolvers.
+
+- Parsing rejects multi-hop paths (`{a.b.c}`) and malformed identifiers.
+- `handle_title_template` validates dotted paths against the current schema (column exists, is `REFERENCES`) and against the target type's schema (field exists). `title` is accepted on any reference.
+- `resolve_insert_title` (builders.rs) runs a `SELECT "field" FROM "target_type" WHERE id = ?1` per dotted placeholder, guarded by `pragma_table_info` to avoid SQLite's legacy double-quoted-string fallback. Missing target or NULL field renders empty.
+- `recompute_template_title` (builders.rs) runs on `UPDATE` when the SET list touches any template-referenced column and no explicit `title` was supplied. It merges the updated values with the current materialized row and re-renders the template.
+- Cascading re-title when the **target** doogat's field changes is out of scope. Consumers can fall back to `ddb fix` or an explicit `UPDATE` to repair stale junction titles.
+
 ### Limitations
 
 - Pre-existing rows that violate a newly-added constraint are **not** validated retroactively at index rebuild time. The validator only runs on the SQL write path (INSERT and UPDATE). A `cargo test ... reindex` does not re-check stored data.

@@ -195,7 +195,36 @@ By default, a doogat's title comes from the `title` frontmatter field. For typed
 ALTER TABLE contact SET TITLE TEMPLATE '{name} ({relationship})';
 ```
 
-Template syntax: `{column_name}` placeholders are interpolated from frontmatter values. Unfilled placeholders (missing values) are stripped automatically.
+Template syntax: `{column_name}` placeholders are interpolated from the row's column values. Unfilled placeholders (missing values) are stripped automatically.
+
+**Dereferencing REFERENCES columns.** When a column is declared `REFERENCES <target_type>`, use the dotted form `{column.field}` to reach through the reference and pull `field` off the target doogat. `field` can be the target's `title` or any typed column on the target's typedef.
+
+```sql
+CREATE TABLE link (url TEXT);
+CREATE TABLE category (fqn TEXT);
+CREATE TABLE "category-membership" (
+  link TEXT REFERENCES link,
+  category TEXT REFERENCES category
+);
+ALTER TABLE "category-membership"
+  SET TITLE TEMPLATE '{link.title} in {category.fqn}';
+```
+
+Inserting a membership composes the title from the referenced doogats:
+
+```sql
+INSERT INTO "category-membership" (link, category)
+VALUES ('20260101000000', '20260102000000');
+-- title becomes "My Link in Work/Jink"
+```
+
+Rules:
+
+- Only one hop is supported. `{a.b.c}` is rejected at typedef materialization.
+- Bare `{col}` on a REFERENCES column keeps its existing behavior and substitutes the raw id.
+- Typedefs with a bad dotted path (column not found, column not REFERENCES, field missing on target) are rejected when the template is applied.
+- At runtime, a missing target row or NULL target field substitutes the empty string. The INSERT still succeeds.
+- Title is recomputed on `UPDATE` when the SET list touches any column referenced by the template. Cascading re-title when the **target** doogat's field changes is out of scope; stale junction titles must be fixed via `ddb fix` or a follow-up `UPDATE`.
 
 Remove a template:
 
