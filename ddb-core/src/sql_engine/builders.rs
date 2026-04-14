@@ -672,6 +672,35 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
     let columns = parse_column_definitions(columns_seq)?;
     let opt = extract_optional_schema_fields(&doogat.meta.extra);
 
+    // Validate title_template against this typedef's own columns. Cross-
+    // typedef field validation (e.g. `field` exists on `target_type`) runs
+    // at ALTER TABLE time in `handle_title_template` because it needs the
+    // target's schema. Syntactic + same-typedef checks run here so that
+    // hand-edited or imported typedefs with bad templates are rejected at
+    // load time, not silently at runtime (PRD 00127 blind-review gap).
+    if let Some(tmpl) = opt.title_template.as_deref() {
+        let placeholders = parse_title_template(tmpl)?;
+        for p in &placeholders {
+            let Some(_) = &p.field else { continue };
+            let col = columns.iter().find(|c| c.name == p.col).ok_or_else(|| {
+                DoogatError::SqlEngine(format!(
+                    "title_template references {raw}: column '{col}' not found on {table}",
+                    raw = p.raw,
+                    col = p.col,
+                    table = table_name
+                ))
+            })?;
+            if col.references.is_none() {
+                return Err(DoogatError::SqlEngine(format!(
+                    "title_template references {raw}: column '{col}' is not a REFERENCES column on {table}",
+                    raw = p.raw,
+                    col = p.col,
+                    table = table_name
+                )));
+            }
+        }
+    }
+
     Ok(TableSchema {
         table_name,
         columns,

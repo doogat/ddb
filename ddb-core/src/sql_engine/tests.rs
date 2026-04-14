@@ -3852,6 +3852,60 @@ fn make_typedef_parsed(title: &str, extra: BTreeMap<String, Value>) -> ParsedDoo
 }
 
 #[test]
+fn schema_from_parsed_rejects_multi_hop_title_template() {
+    let mut extra = BTreeMap::new();
+    extra.insert("columns".to_string(), Value::List(vec![]));
+    extra.insert(
+        "title_template".to_string(),
+        Value::String("{a.b.c}".to_string()),
+    );
+    let parsed = make_typedef_parsed("my_type", extra);
+    let err = schema_from_parsed(&parsed).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("multi-hop") || msg.contains("one-level"),
+        "expected multi-hop rejection: {msg}"
+    );
+}
+
+#[test]
+fn schema_from_parsed_rejects_dotted_path_on_non_ref_column() {
+    let mut col = BTreeMap::new();
+    col.insert("name".to_string(), Value::String("label".into()));
+    col.insert("data_type".to_string(), Value::String("TEXT".into()));
+    let mut extra = BTreeMap::new();
+    extra.insert("columns".to_string(), Value::List(vec![Value::Map(col)]));
+    extra.insert(
+        "title_template".to_string(),
+        Value::String("{label.title}".to_string()),
+    );
+    let parsed = make_typedef_parsed("my_type", extra);
+    let err = schema_from_parsed(&parsed).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not a REFERENCES column"),
+        "expected non-ref rejection: {msg}"
+    );
+}
+
+#[test]
+fn schema_from_parsed_rejects_dotted_path_on_missing_column() {
+    let mut extra = BTreeMap::new();
+    extra.insert("columns".to_string(), Value::List(vec![]));
+    extra.insert(
+        "title_template".to_string(),
+        Value::String("{ghost.title}".to_string()),
+    );
+    let parsed = make_typedef_parsed("my_type", extra);
+    let err = schema_from_parsed(&parsed).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "expected column-not-found rejection: {msg}"
+    );
+}
+
+#[test]
 fn schema_from_parsed_unique_together_absent() {
     let mut extra = BTreeMap::new();
     extra.insert("columns".to_string(), Value::List(vec![]));
