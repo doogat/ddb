@@ -294,13 +294,24 @@ fn resolve_reference_field(
     // Guard against SQLite's legacy double-quoted-string-as-identifier
     // fallback: if `field` isn't a real column on `target_type`, `SELECT
     // "field" FROM ...` would return the literal string "field" instead
-    // of erroring. Verify the column exists up front.
-    let col_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
-            rusqlite::params![target_type, field],
-            |row| row.get::<_, i64>(0).map(|n| n > 0),
-        )
+    // of erroring. Verify the column exists up front via PRAGMA.
+    // (Both identifiers already validated as safe above, so interpolation
+    // is safe.)
+    let pragma_sql = format!("PRAGMA table_info(\"{target_type}\")");
+    let col_exists = conn
+        .prepare(&pragma_sql)
+        .and_then(|mut stmt| {
+            let mut rows = stmt.query([])?;
+            let mut found = false;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(1)?;
+                if name == field {
+                    found = true;
+                    break;
+                }
+            }
+            Ok(found)
+        })
         .unwrap_or(false);
     if !col_exists {
         return String::new();

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **sql**: `title_template` placeholders can dereference `REFERENCES` columns via the dotted form `{col.field}`. On INSERT and UPDATE, `{link.title}` pulls the `title` off the referenced link doogat and composes it into the junction row's title — any typed column on the target type works, not just `title`. Bad paths (missing column, non-`REFERENCES` column, missing target field, multi-hop `{a.b.c}`) are rejected at `ALTER TABLE ... SET TITLE TEMPLATE` time. Missing target row or NULL field renders empty at write time. Updates recompute the title automatically when the SET list touches any template-referenced column. Cascading re-title when the referenced doogat changes is out of scope. (jink feedback, PRD 00127)
+
 ### Fixed
 
 - **sql**: deleting a doogat that is referenced by a typed-table row through a `NOT NULL REFERENCES` column now fails with `cannot delete '<id>': NOT NULL REFERENCES from <table>.<column> in row '<blocker>'` instead of silently stripping the wikilink and leaving the row with `NULL` in a `NOT NULL` column. Enforced on every delete entry point: SQL `DELETE FROM`, the `deleteDoogat` GraphQL mutation, and `ddb delete <id>` on the CLI. Bulk SQL deletes are atomic — if any matched id has a required-FK dependent, no rows are deleted. Nullable `REFERENCES` columns are unaffected (the wikilink-strip cascade still applies). (#10)
