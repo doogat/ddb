@@ -267,6 +267,12 @@ pub(super) fn render_title_template(
     rendered
 }
 
+/// Resolve `{col.field}` against the referenced doogat's materialized row.
+///
+/// Caller contract: the target row must already be committed to the SQLite
+/// index. For single-process INSERTs this is trivially true (every INSERT
+/// uses one connection). For multi-process writers, the referenced target
+/// doogat must have been inserted and committed before the dependent row.
 fn resolve_reference_field(
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,

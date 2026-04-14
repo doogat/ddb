@@ -5977,6 +5977,25 @@ fn set_title_template_rejects_bad_field_on_target_type() {
 }
 
 #[test]
+fn set_title_template_accepts_title_when_target_type_not_yet_materialized() {
+    // Forward reference: target type isn't materialized yet. Validation
+    // should still accept `{ref.title}` because `title` is always available
+    // on any typed doogat, and field-existence checks on typed columns are
+    // skipped when the target schema can't be loaded (runtime falls back
+    // to empty string).
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Note: `ghost_type` does not exist — no CREATE TABLE for it.
+    engine
+        .execute("CREATE TABLE stub (target TEXT REFERENCES ghost_type)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE stub SET TITLE TEMPLATE '{target.title}'")
+        .unwrap();
+}
+
+#[test]
 fn set_title_template_accepts_title_on_any_ref() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
