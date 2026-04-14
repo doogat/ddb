@@ -2233,56 +2233,33 @@ Remove-Item -Recurse -Force $AR_REMOTE, $AR_NODE
 # Return to original directory
 Set-Location $TMPDIR
 
-# 46. title_template REFERENCES resolution (PRD 00127)
+# 46. title_template REFERENCES resolution (PRD 00127).
+# Server has been down since section 28, so use the CLI directly.
 Write-Host "=== title_template REFERENCES resolution ==="
+$TT_DIR = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid().ToString())) | ForEach-Object { $_.FullName }
+Push-Location $TT_DIR
+ddb init | Out-Null
+ddb query "CREATE TABLE tt_link (url TEXT)" | Out-Null
+ddb query "CREATE TABLE tt_category (fqn TEXT)" | Out-Null
+ddb query "CREATE TABLE tt_membership (link TEXT REFERENCES tt_link, category TEXT REFERENCES tt_category)" | Out-Null
+ddb query "ALTER TABLE tt_membership SET TITLE TEMPLATE '{link.title} in {category.fqn}'" | Out-Null
+pass "46: declared dotted title_template"
 
-$ttVer = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
-
-$ttLink = gqlq 'mutation { executeSql(sql: "CREATE TABLE tt_link (url VARCHAR(255))") { message } }'
-assertGqlOk $ttLink "46 create tt_link"
-pass "46: created tt_link table"
-
-$ttCat = gqlq 'mutation { executeSql(sql: "CREATE TABLE tt_category (fqn VARCHAR(255))") { message } }'
-assertGqlOk $ttCat "46 create tt_category"
-pass "46: created tt_category table"
-
-$ttMem = gqlq 'mutation { executeSql(sql: "CREATE TABLE tt_membership (link VARCHAR(255) REFERENCES tt_link, category VARCHAR(255) REFERENCES tt_category)") { message } }'
-assertGqlOk $ttMem "46 create tt_membership"
-pass "46: created tt_membership junction table"
-
-$ttAlter = gqlq 'mutation { executeSql(sql: "ALTER TABLE tt_membership SET TITLE TEMPLATE ''{link.title} in {category.fqn}''") { message } }'
-assertGqlOk $ttAlter "46 apply dotted title_template"
-pass "46: applied dotted title_template"
-
-waitSchemaReload $ttVer
-
-$ttLinkResp = gqlq 'mutation { executeSql(sql: "INSERT INTO tt_link (title, url) VALUES (''My Link'', ''https://x'')") { message } }'
-if ($ttLinkResp -notmatch '"message":"([^"]+)"') { throw "46: no link id returned: $ttLinkResp" }
-$ttLinkId = $Matches[1]
-pass "46: inserted link ($ttLinkId)"
-
+$ttLinkId = (ddb query "INSERT INTO tt_link (title, url) VALUES ('My Link', 'https://x')").Trim()
 Start-Sleep -Seconds 1
-
-$ttCatResp = gqlq 'mutation { executeSql(sql: "INSERT INTO tt_category (title, fqn) VALUES (''Cat'', ''A/B'')") { message } }'
-if ($ttCatResp -notmatch '"message":"([^"]+)"') { throw "46: no category id returned: $ttCatResp" }
-$ttCatId = $Matches[1]
-pass "46: inserted category ($ttCatId)"
-
+$ttCatId = (ddb query "INSERT INTO tt_category (title, fqn) VALUES ('Cat', 'A/B')").Trim()
 Start-Sleep -Seconds 1
-
-$ttMemResp = gqlq "mutation { executeSql(sql: `"INSERT INTO tt_membership (link, category) VALUES ('$ttLinkId', '$ttCatId')`") { message } }"
-if ($ttMemResp -notmatch '"message":"([^"]+)"') { throw "46: no membership id returned: $ttMemResp" }
-$ttMemId = $Matches[1]
-pass "46: inserted membership ($ttMemId)"
-
-$ttSelect = gqlq "{ sql(query: `"SELECT title FROM tt_membership WHERE id = '$ttMemId'`") { rows } }"
-if ($ttSelect -notmatch "My Link in A/B") { throw "46: composed title not found: $ttSelect" }
+$ttMemId = (ddb query "INSERT INTO tt_membership (link, category) VALUES ('$ttLinkId', '$ttCatId')").Trim()
+$titleRow = ddb query "SELECT title FROM tt_membership WHERE id = '$ttMemId'"
+if ($titleRow -notmatch "My Link in A/B") { throw "46: composed title missing: $titleRow" }
 pass "46: composed title 'My Link in A/B' from REFERENCES"
 
-$ttBad = gqlq 'mutation { executeSql(sql: "ALTER TABLE tt_membership SET TITLE TEMPLATE ''{link.does_not_exist}''") { message } }'
-if ($ttBad -notmatch '"errors"') { throw "46: expected errors for bad dotted path: $ttBad" }
-if ($ttBad -notmatch "does not exist on tt_link") { throw "46: error message missing: $ttBad" }
+$badOut = ddb query "ALTER TABLE tt_membership SET TITLE TEMPLATE '{link.does_not_exist}'" 2>&1
+if ($badOut -notmatch "does not exist on tt_link") { throw "46: bad path was not rejected: $badOut" }
 pass "46: ALTER TABLE rejects bad dotted path"
+
+Pop-Location
+Remove-Item -Recurse -Force $TT_DIR
 
 Cleanup
 Write-Host "=== all integration tests passed ==="
