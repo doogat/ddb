@@ -314,6 +314,65 @@ fn resolve_reference_field(
     .unwrap_or_default()
 }
 
+/// Recompute the template-derived title when an UPDATE touches any column
+/// the template references. Returns `Ok(Some(new_title))` when the title
+/// should change, `Ok(None)` when the template isn't engaged or no touched
+/// column appears in it (or the user supplied an explicit `title` update).
+pub(super) fn recompute_template_title(
+    conn: &rusqlite::Connection,
+    schema: &TableSchema,
+    table_name: &str,
+    id: &str,
+    updates: &BTreeMap<String, String>,
+) -> Result<Option<String>> {
+    let Some(tmpl) = schema.title_template.as_ref() else {
+        return Ok(None);
+    };
+    if updates.contains_key("title") {
+        return Ok(None);
+    }
+    let placeholders = parse_title_template(tmpl).unwrap_or_default();
+    if placeholders.is_empty() {
+        return Ok(None);
+    }
+    let template_cols: std::collections::HashSet<String> =
+        placeholders.iter().map(|p| p.col.clone()).collect();
+    let touches_template = updates.keys().any(|k| template_cols.contains(k));
+    if !touches_template {
+        return Ok(None);
+    }
+
+    let mut col_values: BTreeMap<String, String> = BTreeMap::new();
+    if !is_safe_sql_identifier(table_name) {
+        return Ok(None);
+    }
+    for col_name in &template_cols {
+        if let Some(v) = updates.get(col_name) {
+            col_values.insert(col_name.clone(), v.clone());
+            continue;
+        }
+        if !is_safe_sql_identifier(col_name) {
+            continue;
+        }
+        let sql = format!("SELECT \"{col_name}\" FROM \"{table_name}\" WHERE id = ?1");
+        if let Ok(Some(v)) = conn.query_row(&sql, rusqlite::params![id], |r| {
+            r.get::<_, Option<String>>(0)
+        }) {
+            col_values.insert(col_name.clone(), v);
+        }
+    }
+    let rendered = render_title_template(tmpl, schema, &col_values, Some(conn));
+    let stripped = re_unfilled_placeholder()
+        .replace_all(&rendered, "")
+        .trim()
+        .to_string();
+    if stripped.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(stripped))
+    }
+}
+
 fn is_safe_sql_identifier(s: &str) -> bool {
     if s.is_empty() {
         return false;
@@ -640,13 +699,20 @@ pub(super) fn apply_updates_to_doogat(
             }
             Zone::Body => {
                 update_body_section(&mut doogat.body, col_name, new_val);
-                if let Some(first_body) = schema
-                    .columns
-                    .iter()
-                    .find(|c| c.effective_zone() == Zone::Body)
-                {
-                    if first_body.name == *col_name {
-                        doogat.meta.title = Some(new_val.clone());
+                // Legacy behavior: if the first body-zone column is updated
+                // and the table has no `title_template`, mirror the new value
+                // into `title`. When a `title_template` is declared, the
+                // template owns the title and UPDATE runs
+                // `recompute_template_title` to derive a fresh value.
+                if schema.title_template.is_none() {
+                    if let Some(first_body) = schema
+                        .columns
+                        .iter()
+                        .find(|c| c.effective_zone() == Zone::Body)
+                    {
+                        if first_body.name == *col_name {
+                            doogat.meta.title = Some(new_val.clone());
+                        }
                     }
                 }
             }

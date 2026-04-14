@@ -5884,18 +5884,21 @@ fn insert_title_template_bare_ref_still_returns_id() {
 }
 
 #[test]
-fn insert_title_template_dotted_ref_missing_target_field_empty() {
+fn insert_title_template_dotted_ref_null_target_field_renders_empty() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
-    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE link (url TEXT, subtitle TEXT)")
+        .unwrap();
     engine
         .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
         .unwrap();
     engine
-        .execute("ALTER TABLE membership SET TITLE TEMPLATE 'prefix {link.nonexistent} suffix'")
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE 'prefix {link.subtitle} suffix'")
         .unwrap();
 
+    // Insert a link without providing subtitle — subtitle column is NULL on the target row.
     let link_id = engine_exec_id(
         &repo,
         &index,
@@ -5909,16 +5912,14 @@ fn insert_title_template_dotted_ref_missing_target_field_empty() {
 
     let path = index.resolve_path(&mem_id).unwrap();
     let content = repo.read_file(&path).unwrap();
-    // nonexistent field should render empty, producing "prefix  suffix"
-    // (YAML may normalize the title row format — the key signal is
-    // that the full "prefix nonexistent suffix" string does NOT appear.)
+    // subtitle is NULL on target → empty substitution → "prefix  suffix"
     assert!(
         content.contains("prefix  suffix") || content.contains("'prefix  suffix'"),
-        "missing field should render empty: {content}"
+        "null target field should render empty: {content}"
     );
     assert!(
-        !content.contains("prefix nonexistent suffix"),
-        "nonexistent identifier should not appear literally: {content}"
+        !content.contains("prefix subtitle suffix"),
+        "column identifier should not leak as literal: {content}"
     );
 }
 
@@ -6009,28 +6010,132 @@ fn set_title_template_rejects_multi_hop() {
 }
 
 #[test]
-fn insert_title_template_dotted_ref_on_non_ref_column_renders_empty() {
+fn update_recomputes_title_when_ref_column_changes() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE '{link.title}'")
+        .unwrap();
+
+    let link_a = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('Link A', 'https://a')",
+    );
+    let link_b = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('Link B', 'https://b')",
+    );
+    let mem_id = engine_exec_id(
+        &repo,
+        &index,
+        &format!("INSERT INTO membership (link) VALUES ('{link_a}')"),
+    );
+
+    engine
+        .execute(&format!(
+            "UPDATE membership SET link = '{link_b}' WHERE id = '{mem_id}'"
+        ))
+        .unwrap();
+
+    let path = index.resolve_path(&mem_id).unwrap();
+    let content = repo.read_file(&path).unwrap();
+    assert!(
+        content.contains("Link B"),
+        "title should recompute to Link B: {content}"
+    );
+    assert!(
+        !content.contains("Link A"),
+        "old title should be gone: {content}"
+    );
+}
+
+#[test]
+fn update_does_not_recompute_title_when_unrelated_column_changes() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
     engine
-        .execute("CREATE TABLE thing (label TEXT, name TEXT)")
+        .execute("CREATE TABLE link (url TEXT)")
         .unwrap();
     engine
-        .execute("ALTER TABLE thing SET TITLE TEMPLATE 'x:{label.title} y'")
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link, note TEXT)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE '{link.title}'")
         .unwrap();
 
-    let id = engine_exec_id(
+    let link_a = engine_exec_id(
         &repo,
         &index,
-        "INSERT INTO thing (label, name) VALUES ('Plain', 'Name')",
+        "INSERT INTO link (title, url) VALUES ('Link A', 'https://a')",
+    );
+    let mem_id = engine_exec_id(
+        &repo,
+        &index,
+        &format!("INSERT INTO membership (link) VALUES ('{link_a}')"),
     );
 
-    let path = index.resolve_path(&id).unwrap();
+    engine
+        .execute(&format!(
+            "UPDATE membership SET note = 'hello' WHERE id = '{mem_id}'"
+        ))
+        .unwrap();
+
+    let path = index.resolve_path(&mem_id).unwrap();
     let content = repo.read_file(&path).unwrap();
-    // `label` is not a REFERENCES column — dotted form should render empty
     assert!(
-        content.contains("x: y") || content.contains("\"x: y\""),
-        "dotted on non-ref should render empty: {content}"
+        content.contains("Link A"),
+        "title should stay Link A: {content}"
     );
 }
+
+#[test]
+fn update_with_explicit_title_takes_priority_over_template() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE membership SET TITLE TEMPLATE '{link.title}'")
+        .unwrap();
+
+    let link_a = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('Link A', 'https://a')",
+    );
+    let link_b = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO link (title, url) VALUES ('Link B', 'https://b')",
+    );
+    let mem_id = engine_exec_id(
+        &repo,
+        &index,
+        &format!("INSERT INTO membership (link) VALUES ('{link_a}')"),
+    );
+
+    engine
+        .execute(&format!(
+            "UPDATE membership SET link = '{link_b}', title = 'Manual' WHERE id = '{mem_id}'"
+        ))
+        .unwrap();
+
+    let path = index.resolve_path(&mem_id).unwrap();
+    let content = repo.read_file(&path).unwrap();
+    assert!(
+        content.contains("Manual"),
+        "explicit title should win over template: {content}"
+    );
+}
+

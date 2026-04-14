@@ -7,7 +7,7 @@ use crate::indexer::materialize::{is_core_column, normalize_bool_str};
 use crate::parser;
 use crate::types::{DoogatId, TableSchema};
 
-use super::builders::{apply_updates_to_doogat, build_data_doogat};
+use super::builders::{apply_updates_to_doogat, build_data_doogat, recompute_template_title};
 use super::helpers::{
     eval_values_nullable, expr_to_string, extract_from_table, extract_junction_where,
     extract_where_id, is_literal_expr, sqlite_value_to_string_nullable, unquote_identifier,
@@ -591,6 +591,15 @@ impl<'a> SqlEngine<'a> {
             let content = self.read_content(path)?;
             let mut parsed = parser::parse(&content, path)?;
             apply_updates_to_doogat(&mut parsed, schema, &row_updates);
+            if let Some(new_title) = recompute_template_title(
+                self.index.sql_conn(),
+                schema,
+                table_name,
+                id,
+                &row_updates,
+            )? {
+                parsed.meta.title = Some(new_title);
+            }
             files.push((path.clone(), parser::serialize(&parsed)));
             per_row_updates.push(row_updates);
         }
@@ -925,6 +934,15 @@ impl<'a> SqlEngine<'a> {
         let content = self.read_content(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
         apply_updates_to_doogat(&mut parsed, schema, updates);
+        if let Some(new_title) = recompute_template_title(
+            self.index.sql_conn(),
+            schema,
+            table_name,
+            doogat_id,
+            updates,
+        )? {
+            parsed.meta.title = Some(new_title);
+        }
         let new_content = parser::serialize(&parsed);
         if let Some(ref mut buf) = self.txn {
             buf.writes.push(PendingWrite {
