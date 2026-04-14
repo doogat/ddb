@@ -810,7 +810,7 @@ fn chaos_convergence() {
     // Phase 2: each node performs 5 random ops (create or update only)
     for (i, (node, ids)) in setup.nodes.iter().zip(local_ids.iter_mut()).enumerate() {
         for _ in 0..5 {
-            let op: u8 = rng.gen_range(0..3);
+            let op: u8 = rng.random_range(0..3);
             match op {
                 0 => {
                     // Create
@@ -824,7 +824,7 @@ fn chaos_convergence() {
                 }
                 1 if !ids.is_empty() => {
                     // Update a random known doogat
-                    let idx = rng.gen_range(0..ids.len());
+                    let idx = rng.random_range(0..ids.len());
                     let id = ids[idx].clone();
                     MultiNodeSetup::update(
                         node,

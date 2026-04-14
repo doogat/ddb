@@ -70,7 +70,7 @@ struct DdbAuthSource {
 impl AuthSource for DdbAuthSource {
     async fn get_password(&self, login_info: &LoginInfo) -> PgWireResult<Password> {
         // Random 4-byte salt per connection, per PG protocol spec
-        let salt: Vec<u8> = rand::thread_rng().gen::<[u8; 4]>().to_vec();
+        let salt: Vec<u8> = rand::rng().random::<[u8; 4]>().to_vec();
         let user = login_info.user().unwrap_or("ddb");
         let hashed = hash_md5_password(user, &self.token, &salt);
         Ok(Password::new(Some(salt), hashed.as_bytes().to_vec()))

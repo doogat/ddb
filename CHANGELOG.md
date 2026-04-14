@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **build**: bump direct `rand` dependency from 0.8 to 0.9 and ignore RUSTSEC-2026-0097 for the transitive `rand 0.8.5` pulled by `pgwire 0.25` (advisory unsoundness path requires a custom `log` logger that calls `rand::rng()` inside its own output; ddb uses `tracing` and has no such logger)
+
 ## [0.2.4] - 2026-04-13
 
 ## [0.2.3] - 2026-04-13

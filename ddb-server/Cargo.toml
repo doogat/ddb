@@ -23,7 +23,7 @@ pgwire = "0.25"
 indexmap = "2"
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
-rand = "0.8"
+rand = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 sqlparser = "0.55"
 uuid = { version = "1", features = ["v4"] }

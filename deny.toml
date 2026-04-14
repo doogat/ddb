@@ -1,7 +1,9 @@
 # cargo-deny configuration — https://embarkstudios.github.io/cargo-deny/
 
 [advisories]
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2026-0097", reason = "unsound only when a custom `log` logger calls `rand::rng()` inside its own output; ddb uses `tracing` and has no such logger. Transitive via pgwire 0.25 (our direct rand is 0.9.4, unaffected). Revisit when pgwire bumps rand." },
+]
 
 [licenses]
 allow = [
