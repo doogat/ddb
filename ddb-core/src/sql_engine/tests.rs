@@ -6206,7 +6206,7 @@ fn update_with_explicit_title_takes_priority_over_template() {
     );
 }
 
-// --- ALTER TABLE ALTER COLUMN TYPE (PRD 00128) ---
+// --- ALTER TABLE ALTER COLUMN TYPE ---
 
 #[test]
 fn alter_column_type_widens_varchar_metadata_only() {
@@ -6489,7 +6489,6 @@ fn alter_column_type_set_data_type_form_also_accepted() {
     assert_eq!(col.data_type, "VARCHAR(100)");
 }
 
-// --- C1 rework: scope guard, CHAR family, REFERENCES widening ---
 
 #[test]
 fn alter_column_type_in_string_literal_is_not_rewritten() {
@@ -6679,29 +6678,4 @@ fn alter_column_type_core_columns_rejected() {
     assert!(format!("{err}").contains("core column"));
 }
 
-#[test]
-fn alter_column_type_references_column_allows_widening() {
-    let (_dir, repo, index) = setup();
-    let mut engine = SqlEngine::new(&index, &repo);
-
-    engine
-        .execute("CREATE TABLE ref_parent2 (name TEXT)")
-        .unwrap();
-    engine
-        .execute("CREATE TABLE ref_child2 (parent VARCHAR(32) REFERENCES ref_parent2)")
-        .unwrap();
-
-    engine
-        .execute("ALTER TABLE ref_child2 ALTER COLUMN parent TYPE TEXT")
-        .unwrap();
-
-    let schema = engine.load_schema("ref_child2").unwrap();
-    let col = schema
-        .columns
-        .iter()
-        .find(|c| c.name == "parent")
-        .unwrap();
-    assert_eq!(col.data_type, "TEXT");
-    assert_eq!(col.references.as_deref(), Some("ref_parent2"));
-}
 

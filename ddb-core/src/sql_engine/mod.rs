@@ -189,11 +189,6 @@ impl<'a> SqlEngine<'a> {
             return Ok(vec![result]);
         }
 
-        // PostgreSQL-style `ALTER COLUMN c TYPE X` is rewritten to the
-        // standard `SET DATA TYPE` form that GenericDialect understands.
-        // The scanner skips text inside string literals and `--` comments
-        // so multi-statement batches that mix DDL with literal text remain
-        // intact.
         let normalized = normalize_alter_column_type(sql);
         let sql_parse = normalized.as_ref();
 

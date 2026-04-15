@@ -470,7 +470,6 @@ impl<'a> SqlEngine<'a> {
             )));
         }
 
-        // Classify the conversion.
         let metadata_only = match (&old_kind, &new_kind) {
             (TypeKind::Varchar(a), TypeKind::Varchar(b)) if b >= a => true,
             (TypeKind::Char(a), TypeKind::Char(b)) if b >= a => true,
