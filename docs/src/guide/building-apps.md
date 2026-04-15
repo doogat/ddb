@@ -153,6 +153,39 @@ You can also add constraints to existing tables:
 ALTER TABLE task ADD COLUMN tags SET('urgent', 'blocked', 'review');
 ```
 
+### Changing a column's type
+
+When a declared type becomes too narrow (for example, `VARCHAR(255)` for URLs
+that sometimes exceed the cap), migrate the column with
+`ALTER TABLE ... ALTER COLUMN ... TYPE`:
+
+```sql
+ALTER TABLE link ALTER COLUMN url TYPE TEXT;
+ALTER TABLE link ALTER COLUMN url TYPE VARCHAR(2048);
+ALTER TABLE numeric ALTER COLUMN score TYPE REAL;
+```
+
+Supported conversions:
+
+- **Widening `VARCHAR(N)` → `VARCHAR(M)` where `M ≥ N`**: metadata-only, no
+  data scan.
+- **`VARCHAR(N)` / `CHAR(N)` → `TEXT`**: metadata-only, no data scan. Use this
+  when the length cap is the problem.
+- **Narrowing `VARCHAR(N)` → `VARCHAR(M)` where `M < N`, or `TEXT → VARCHAR`**:
+  runs a pre-flight scan. If any existing row exceeds the new limit, the
+  statement fails with `cannot narrow <table>.<column> to VARCHAR(M): <n>
+  existing rows exceed limit`. Widen the problem rows or DELETE them first.
+- **`INTEGER` ↔ `REAL`**: scans every existing value. Fractional values fail
+  when narrowing to `INTEGER`; non-numeric values are also rejected.
+
+The `SET DATA TYPE` form is also accepted (`ALTER COLUMN url SET DATA TYPE
+TEXT`). Both forms are identical in effect.
+
+Out of scope for v1: `BOOLEAN` conversions, cross-category conversions needing
+data rewrites (e.g. `TEXT → INTEGER` where some strings are non-numeric), and
+changing `NOT NULL`/`DEFAULT`/`REFERENCES` alongside the type. For those,
+migrate via a temporary column + `UPDATE` + `DROP COLUMN`.
+
 ### Body sections for rich content
 
 Use `template_sections` to define expected body headings. Note: `template_sections` must be set by editing the typedef YAML directly - there is no SQL DDL syntax for this yet.

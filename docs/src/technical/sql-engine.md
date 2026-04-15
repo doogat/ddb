@@ -26,6 +26,7 @@ All methods take `&mut self`. The CLI creates `SqlEngine` per invocation; the se
 | `ALTER TABLE foo ADD COLUMN bar TEXT` | Adds column to typedef schema; existing rows get NULL |
 | `ALTER TABLE foo DROP COLUMN bar` | Removes column from typedef schema; orphaned data keys ignored |
 | `ALTER TABLE foo RENAME COLUMN old TO new` | Renames column in typedef + rewrites all data doogats |
+| `ALTER TABLE foo ALTER COLUMN c TYPE t` | Changes column type; widening is metadata-only, narrowing pre-flights existing data |
 | `ALTER TABLE foo SET ZONE frontmatter FOR col` | Override column zone (custom DDL, pre-parse intercepted) |
 | `ALTER TABLE foo SET TITLE TEMPLATE 'tpl'` | Set title template on typedef |
 | `ALTER TABLE foo DROP TITLE TEMPLATE` | Remove title template from typedef |
@@ -173,6 +174,7 @@ Bare UPDATE/DELETE (no WHERE) operates on all rows of the table.
 - **ADD COLUMN**: Appends to typedef schema, rematerializes. Existing data doogats untouched (NULL for new column).
 - **DROP COLUMN**: Removes from typedef schema, rematerializes. Orphaned data keys in doogats are ignored.
 - **RENAME COLUMN**: Rewrites typedef + all data doogats in a single commit. Uses `rename_key_in_doogat` for zone-aware renaming (frontmatter extra keys, body `## heading`, reference `- key::` lines).
+- **ALTER COLUMN TYPE**: Changes a column's declared data type on the typedef. Widening (`VARCHAR(N)` → wider `VARCHAR`, `VARCHAR`/`CHAR` → `TEXT`) is metadata-only. Narrowing (`VARCHAR` → smaller `VARCHAR`, `TEXT` → `VARCHAR(N)`) and numeric cross-conversion (`INTEGER` ↔ `REAL`) run a pre-flight scan over the materialized table; any existing row that would violate the new type rejects the statement with a row-count message and no change is persisted. REFERENCES columns only accept widening. `BOOLEAN` conversions are not supported. The PostgreSQL shorthand (`ALTER COLUMN c TYPE t`) is normalized to the standard `SET DATA TYPE` form via regex rewrite before parsing.
 - **SET ZONE**: Custom DDL (pre-parse intercepted). Updates column zone in typedef, rematerializes. Existing data doogats are NOT migrated — they stay in the old zone until next update.
 - **SET/DROP TITLE TEMPLATE**: Custom DDL. Sets or removes `title_template` on the typedef. No rematerialization needed.
 

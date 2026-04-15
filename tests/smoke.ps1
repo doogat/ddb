@@ -701,5 +701,18 @@ if ($UPSERT_ID3 -eq $UPSERT_ID1) { throw "upsert: non-duplicate should create ne
 ddb query "DROP TABLE upsert_test CASCADE" | Out-Null
 pass "ON CONFLICT DO NOTHING (upsert)"
 
+# 28. ALTER TABLE ALTER COLUMN TYPE (PRD 00128)
+ddb query "CREATE TABLE alter_type_smoke (url VARCHAR(10))" | Out-Null
+$smokeAtId = ddb query "INSERT INTO alter_type_smoke (title, url) VALUES ('start', '1234567890')"
+if ($smokeAtId -notmatch "^\d{14}$") { throw "alter-col-type: bad id: $smokeAtId" }
+ddb query "ALTER TABLE alter_type_smoke ALTER COLUMN url TYPE TEXT" | Out-Null
+Start-Sleep -Seconds 1
+$longUrl = 'x' * 500
+$smokeAtId2 = ddb query "INSERT INTO alter_type_smoke (title, url) VALUES ('post', '$longUrl')"
+if ($smokeAtId2 -notmatch "^\d{14}$") { throw "alter-col-type: post-widen insert failed: $smokeAtId2" }
+$rows = ddb query "SELECT id FROM alter_type_smoke"
+if ($rows -notmatch $smokeAtId2) { throw "alter-col-type: widened row not visible" }
+pass "ALTER TABLE ALTER COLUMN TYPE widening (VARCHAR -> TEXT)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

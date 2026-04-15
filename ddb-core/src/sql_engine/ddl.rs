@@ -429,8 +429,7 @@ impl<'a> SqlEngine<'a> {
             return Ok(false);
         }
 
-        if old_is_text && new_varchar_len.is_some() {
-            let max_len = new_varchar_len.unwrap();
+        if let (true, Some(max_len)) = (old_is_text, new_varchar_len) {
             self.preflight_narrow_varchar(table_name, col_name, max_len)?;
             schema.columns[idx].data_type = new_up;
             return Ok(false);

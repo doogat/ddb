@@ -591,4 +591,16 @@ UPSERT_ID3=$($DDB query "INSERT INTO upsert_test (title, code, label) VALUES ('T
 $DDB query "DROP TABLE upsert_test CASCADE" | grep -q "dropped"
 pass "ON CONFLICT DO NOTHING (upsert)"
 
+# 28. ALTER TABLE ALTER COLUMN TYPE (PRD 00128)
+$DDB query "CREATE TABLE alter_type_smoke (url VARCHAR(10))" >/dev/null
+SMOKE_AT_ID=$($DDB query "INSERT INTO alter_type_smoke (title, url) VALUES ('start', '1234567890')")
+echo "$SMOKE_AT_ID" | grep -qE "^[0-9]{14}$"
+$DDB query "ALTER TABLE alter_type_smoke ALTER COLUMN url TYPE TEXT" >/dev/null
+LONG_URL=$(printf 'x%.0s' $(seq 1 500))
+sleep 1
+SMOKE_AT_ID2=$($DDB query "INSERT INTO alter_type_smoke (title, url) VALUES ('post', '$LONG_URL')")
+echo "$SMOKE_AT_ID2" | grep -qE "^[0-9]{14}$"
+$DDB query "SELECT id FROM alter_type_smoke" | grep -q "$SMOKE_AT_ID2"
+pass "ALTER TABLE ALTER COLUMN TYPE widening (VARCHAR -> TEXT)"
+
 echo "=== all smoke tests passed ==="

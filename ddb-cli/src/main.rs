@@ -122,6 +122,14 @@ Add, drop, or rename columns on an existing typedef:
   ddb query \"ALTER TABLE task DROP COLUMN priority\"
   ddb query \"ALTER TABLE task RENAME COLUMN status TO state\"
 
+Change a column's declared type (widen VARCHAR, convert to TEXT, etc.):
+
+  ddb query \"ALTER TABLE link ALTER COLUMN url TYPE TEXT\"
+  ddb query \"ALTER TABLE link ALTER COLUMN url TYPE VARCHAR(2048)\"
+
+Widening is metadata-only; narrowing pre-flights existing rows and rejects
+with a row-count message if any would exceed the new limit.
+
 Override the default zone for a column:
 
   ddb query \"ALTER TABLE bookmark SET ZONE body FOR description\"

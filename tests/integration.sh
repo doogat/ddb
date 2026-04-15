@@ -2319,4 +2319,51 @@ pass "46: ALTER TABLE rejects bad dotted path"
 cd "$TMPDIR"
 rm -rf "$TT_DIR"
 
+# 47. ALTER TABLE ALTER COLUMN TYPE (PRD 00128).
+# Server is not running at this point; drive via CLI.
+echo "=== ALTER TABLE ALTER COLUMN TYPE ==="
+AC_DIR="$(mktemp -d)"
+cd "$AC_DIR"
+$DDB init >/dev/null
+$DDB query "CREATE TABLE ac_link (url VARCHAR(32))" >/dev/null
+
+# Insert a row at the boundary.
+AC_SHORT=$(printf 'a%.0s' $(seq 1 32))
+AC_ID1=$($DDB query "INSERT INTO ac_link (title, url) VALUES ('boundary', '$AC_SHORT')" | tr -d '[:space:]')
+[ -n "$AC_ID1" ]
+pass "47: baseline VARCHAR(32) insert at boundary"
+
+# Pre-ALTER: long insert must fail.
+AC_LONG=$(printf 'b%.0s' $(seq 1 80))
+AC_FAIL_OUT="$($DDB query "INSERT INTO ac_link (title, url) VALUES ('toolong', '$AC_LONG')" 2>&1 || true)"
+printf '%s' "$AC_FAIL_OUT" | grep -qi "varchar"
+pass "47: pre-ALTER INSERT rejects 80-char value for VARCHAR(32)"
+
+# Widen to VARCHAR(100).
+$DDB query "ALTER TABLE ac_link ALTER COLUMN url TYPE VARCHAR(100)" >/dev/null
+pass "47: widen VARCHAR(32) -> VARCHAR(100) succeeds"
+
+# Post-ALTER: the same long value succeeds.
+sleep 1
+AC_ID2=$($DDB query "INSERT INTO ac_link (title, url) VALUES ('now-ok', '$AC_LONG')" | tr -d '[:space:]')
+[ -n "$AC_ID2" ]
+pass "47: post-ALTER INSERT accepts 80-char value"
+
+# Narrowing with over-limit rows is rejected with a row-count message.
+AC_NARROW_OUT="$($DDB query "ALTER TABLE ac_link ALTER COLUMN url TYPE VARCHAR(5)" 2>&1 || true)"
+printf '%s' "$AC_NARROW_OUT" | grep -q "cannot narrow"
+printf '%s' "$AC_NARROW_OUT" | grep -q "existing rows exceed limit"
+pass "47: narrowing rejects with cannot-narrow row-count message"
+
+# Widen to TEXT and insert a 2000-char value.
+$DDB query "ALTER TABLE ac_link ALTER COLUMN url TYPE TEXT" >/dev/null
+sleep 1
+AC_HUGE=$(printf 'c%.0s' $(seq 1 2000))
+AC_ID3=$($DDB query "INSERT INTO ac_link (title, url) VALUES ('text-row', '$AC_HUGE')" | tr -d '[:space:]')
+[ -n "$AC_ID3" ]
+pass "47: VARCHAR -> TEXT widening persists and accepts long values"
+
+cd "$TMPDIR"
+rm -rf "$AC_DIR"
+
 echo "=== all integration tests passed ==="

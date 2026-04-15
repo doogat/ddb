@@ -2261,5 +2261,45 @@ pass "46: ALTER TABLE rejects bad dotted path"
 Pop-Location
 Remove-Item -Recurse -Force $TT_DIR
 
+# 47. ALTER TABLE ALTER COLUMN TYPE (PRD 00128).
+Write-Host "=== ALTER TABLE ALTER COLUMN TYPE ==="
+$AC_DIR = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid().ToString())) | ForEach-Object { $_.FullName }
+Push-Location $AC_DIR
+ddb init | Out-Null
+ddb query "CREATE TABLE ac_link (url VARCHAR(32))" | Out-Null
+
+$acShort = 'a' * 32
+$acId1 = (ddb query "INSERT INTO ac_link (title, url) VALUES ('boundary', '$acShort')").Trim()
+if (-not $acId1) { throw "47: expected boundary insert to return an id" }
+pass "47: baseline VARCHAR(32) insert at boundary"
+
+$acLong = 'b' * 80
+$acFailOut = ddb query "INSERT INTO ac_link (title, url) VALUES ('toolong', '$acLong')" 2>&1
+if ($acFailOut -notmatch "varchar|VARCHAR") { throw "47: pre-ALTER 80-char insert should have been rejected: $acFailOut" }
+pass "47: pre-ALTER INSERT rejects 80-char value for VARCHAR(32)"
+
+ddb query "ALTER TABLE ac_link ALTER COLUMN url TYPE VARCHAR(100)" | Out-Null
+pass "47: widen VARCHAR(32) -> VARCHAR(100) succeeds"
+
+Start-Sleep -Seconds 1
+$acId2 = (ddb query "INSERT INTO ac_link (title, url) VALUES ('now-ok', '$acLong')").Trim()
+if (-not $acId2) { throw "47: post-ALTER 80-char insert should succeed" }
+pass "47: post-ALTER INSERT accepts 80-char value"
+
+$acNarrowOut = ddb query "ALTER TABLE ac_link ALTER COLUMN url TYPE VARCHAR(5)" 2>&1
+if ($acNarrowOut -notmatch "cannot narrow") { throw "47: narrowing should emit 'cannot narrow': $acNarrowOut" }
+if ($acNarrowOut -notmatch "existing rows exceed limit") { throw "47: narrowing should include row-count message: $acNarrowOut" }
+pass "47: narrowing rejects with cannot-narrow row-count message"
+
+ddb query "ALTER TABLE ac_link ALTER COLUMN url TYPE TEXT" | Out-Null
+Start-Sleep -Seconds 1
+$acHuge = 'c' * 2000
+$acId3 = (ddb query "INSERT INTO ac_link (title, url) VALUES ('text-row', '$acHuge')").Trim()
+if (-not $acId3) { throw "47: 2000-char insert should succeed after widening to TEXT" }
+pass "47: VARCHAR -> TEXT widening persists and accepts long values"
+
+Pop-Location
+Remove-Item -Recurse -Force $AC_DIR
+
 Cleanup
 Write-Host "=== all integration tests passed ==="

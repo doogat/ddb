@@ -1,3 +1,4 @@
+mod alter_column_type;
 mod attachments;
 mod cascade_delete;
 mod checkboxes;
