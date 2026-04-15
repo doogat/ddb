@@ -191,14 +191,10 @@ impl<'a> SqlEngine<'a> {
 
         // PostgreSQL-style `ALTER COLUMN c TYPE X` is rewritten to the
         // standard `SET DATA TYPE` form that GenericDialect understands.
-        // Only applied when the batch is an ALTER statement; otherwise the
-        // rewrite would corrupt string literals that happen to contain the
-        // sequence `ALTER COLUMN <ident> TYPE`.
-        let normalized = if sql.trim_start().get(..5).is_some_and(|p| p.eq_ignore_ascii_case("ALTER")) {
-            normalize_alter_column_type(sql)
-        } else {
-            std::borrow::Cow::Borrowed(sql)
-        };
+        // The scanner skips text inside string literals and `--` comments
+        // so multi-statement batches that mix DDL with literal text remain
+        // intact.
+        let normalized = normalize_alter_column_type(sql);
         let sql_parse = normalized.as_ref();
 
         let dialect = GenericDialect {};

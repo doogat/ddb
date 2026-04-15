@@ -539,16 +539,75 @@ pub(super) fn is_numeric_type(dt: &str) -> bool {
 
 /// Rewrite the PostgreSQL shorthand `ALTER COLUMN <c> TYPE <t>` into the
 /// standard `ALTER COLUMN <c> SET DATA TYPE <t>` form that the GenericDialect
-/// parser accepts. Idempotent: input already containing `SET DATA TYPE` is
-/// returned unchanged because the pattern requires `TYPE` immediately after
-/// the column identifier.
+/// parser accepts. The rewrite skips text inside SQL string literals (`'...'`,
+/// `"..."`) and `--` comments so multi-statement batches that mix DDL with
+/// DML literal text remain intact.
 pub(super) fn normalize_alter_column_type(sql: &str) -> std::borrow::Cow<'_, str> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
         Regex::new(r#"(?i)\b(ALTER\s+COLUMN\s+(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_-]*)\s+)TYPE(\s+)"#)
             .expect("valid regex")
     });
-    re.replace_all(sql, "${1}SET DATA TYPE$2")
+
+    // Cheap fast path: if neither shorthand fragment nor any quote/comment
+    // appears, return the original borrow.
+    if !sql.to_ascii_uppercase().contains("ALTER COLUMN") {
+        return std::borrow::Cow::Borrowed(sql);
+    }
+
+    // Scan the SQL once, copying segments outside string literals/comments
+    // into a buffer where the regex rewrite is safe to apply. Inside literals
+    // and comments, segments are appended verbatim.
+    let bytes = sql.as_bytes();
+    let mut out = String::with_capacity(sql.len() + 16);
+    let mut i = 0;
+    let mut code_start = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'\'' | b'"' => {
+                let quote = b;
+                // Flush accumulated code-region.
+                let segment = &sql[code_start..i];
+                out.push_str(&re.replace_all(segment, "${1}SET DATA TYPE$2"));
+                // Emit the literal verbatim, including doubled-quote escapes.
+                let literal_start = i;
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == quote {
+                        if i + 1 < bytes.len() && bytes[i + 1] == quote {
+                            i += 2; // doubled-quote escape
+                            continue;
+                        }
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+                out.push_str(&sql[literal_start..i]);
+                code_start = i;
+            }
+            b'-' if i + 1 < bytes.len() && bytes[i + 1] == b'-' => {
+                let segment = &sql[code_start..i];
+                out.push_str(&re.replace_all(segment, "${1}SET DATA TYPE$2"));
+                let comment_start = i;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                out.push_str(&sql[comment_start..i]);
+                code_start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    let tail = &sql[code_start..];
+    out.push_str(&re.replace_all(tail, "${1}SET DATA TYPE$2"));
+
+    if out == sql {
+        std::borrow::Cow::Borrowed(sql)
+    } else {
+        std::borrow::Cow::Owned(out)
+    }
 }
 
 /// Determine if a SQL data type represents a short string (<=255 chars) that

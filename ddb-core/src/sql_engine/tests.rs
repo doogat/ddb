@@ -6589,6 +6589,57 @@ fn alter_column_type_references_column_widens_to_text() {
 }
 
 #[test]
+fn alter_column_type_in_multi_statement_batch_does_not_corrupt_following_insert() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE batch_notes (body TEXT)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE batch_alter (val VARCHAR(50))")
+        .unwrap();
+
+    // Single batch: ALTER first, then INSERT with the literal text in a string.
+    engine
+        .execute_batch(
+            "ALTER TABLE batch_alter ALTER COLUMN val TYPE TEXT; \
+             INSERT INTO batch_notes (title, body) VALUES ('quoted', 'ALTER COLUMN foo TYPE bar')",
+        )
+        .unwrap();
+
+    let result = engine
+        .execute("SELECT body FROM batch_notes WHERE title = 'quoted'")
+        .unwrap();
+    match result {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(rows[0][0], "ALTER COLUMN foo TYPE bar");
+        }
+        _ => panic!("expected Rows"),
+    }
+}
+
+#[test]
+fn alter_column_type_shorthand_works_inside_transactional_batch() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE txn_alter (val VARCHAR(10))")
+        .unwrap();
+
+    engine
+        .execute_batch(
+            "BEGIN; ALTER TABLE txn_alter ALTER COLUMN val TYPE TEXT; COMMIT",
+        )
+        .unwrap();
+
+    let schema = engine.load_schema("txn_alter").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "val").unwrap();
+    assert_eq!(col.data_type, "TEXT");
+}
+
+#[test]
 fn normalize_alter_column_type_only_rewrites_alter_form() {
     use crate::sql_engine::helpers::normalize_alter_column_type;
 
