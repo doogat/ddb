@@ -410,6 +410,15 @@ impl<'a> SqlEngine<'a> {
         col_name: &str,
         new_type: &str,
     ) -> Result<bool> {
+        // Core columns (id, type, title, date, etc.) are materialized as TEXT
+        // regardless of their declared type. Allowing a type change on the
+        // typedef would persist metadata that contradicts materialization.
+        if is_core_column(col_name) {
+            return Err(DoogatError::SqlEngine(format!(
+                "cannot alter {table_name}.{col_name}: {col_name} is a core column managed by ddb"
+            )));
+        }
+
         let idx = schema
             .columns
             .iter()
