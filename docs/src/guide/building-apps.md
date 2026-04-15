@@ -168,15 +168,23 @@ ALTER TABLE numeric ALTER COLUMN score TYPE REAL;
 Supported conversions:
 
 - **Widening `VARCHAR(N)` → `VARCHAR(M)` where `M ≥ N`**: metadata-only, no
-  data scan.
+  data scan. The same applies to `CHAR(N) → CHAR(M)` widening.
 - **`VARCHAR(N)` / `CHAR(N)` → `TEXT`**: metadata-only, no data scan. Use this
   when the length cap is the problem.
-- **Narrowing `VARCHAR(N)` → `VARCHAR(M)` where `M < N`, or `TEXT → VARCHAR`**:
-  runs a pre-flight scan. If any existing row exceeds the new limit, the
-  statement fails with `cannot narrow <table>.<column> to VARCHAR(M): <n>
-  existing rows exceed limit`. Widen the problem rows or DELETE them first.
+- **Narrowing `VARCHAR(N)` → `VARCHAR(M)` where `M < N`, or `TEXT → VARCHAR`,
+  or `CHAR(N) → CHAR(M)` where `M < N`**: runs a pre-flight scan. If any
+  existing row exceeds the new limit, the statement fails with
+  `cannot narrow <table>.<column> to <new_type>: <n> existing rows exceed
+  limit`. Widen the problem rows or DELETE them first.
 - **`INTEGER` ↔ `REAL`**: scans every existing value. Fractional values fail
   when narrowing to `INTEGER`; non-numeric values are also rejected.
+
+`CHAR` and `VARCHAR` are different families (CHAR is fixed-width with padding
+semantics) and cross-family conversions are rejected. Migrate via a temporary
+column when you need to change family.
+
+`REFERENCES` columns only accept widening within the same family or to `TEXT`.
+Other type changes are rejected to keep the foreign-key target stable.
 
 The `SET DATA TYPE` form is also accepted (`ALTER COLUMN url SET DATA TYPE
 TEXT`). Both forms are identical in effect.
