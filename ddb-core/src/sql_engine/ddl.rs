@@ -9,10 +9,52 @@ use crate::types::{ColumnDef, DoogatId, TableSchema, Zone};
 use super::builders::{build_typedef_doogat, rename_key_in_doogat, schema_from_parsed};
 use super::helpers::{
     data_type_to_string, extract_allowed_values, extract_default, extract_references, is_not_null,
-    is_numeric_type, is_reserved_table, is_short_string_type, parse_varchar_length,
-    unquote_identifier,
+    is_numeric_type, is_reserved_table, is_short_string_type, unquote_identifier,
 };
 use super::{SqlEngine, SqlResult};
+
+/// Coarse classification of a SQL type literal. Used by `ALTER COLUMN TYPE`
+/// to distinguish CHAR from VARCHAR without falling into the trap of
+/// treating them as one family. `Other` covers blobs, dates, and any type
+/// not listed in PRD 00128.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TypeKind {
+    Varchar(u32),
+    Char(u32),
+    Text,
+    Integer,
+    Real,
+    Boolean,
+    Other,
+}
+
+impl TypeKind {
+    fn classify(uppercased: &str) -> Self {
+        if uppercased == "TEXT" {
+            return TypeKind::Text;
+        }
+        if uppercased == "INTEGER" {
+            return TypeKind::Integer;
+        }
+        if uppercased == "REAL" {
+            return TypeKind::Real;
+        }
+        if uppercased == "BOOLEAN" {
+            return TypeKind::Boolean;
+        }
+        if let Some(rest) = uppercased.strip_prefix("VARCHAR(") {
+            if let Some(n) = rest.strip_suffix(')').and_then(|s| s.trim().parse().ok()) {
+                return TypeKind::Varchar(n);
+            }
+        }
+        if let Some(rest) = uppercased.strip_prefix("CHAR(") {
+            if let Some(n) = rest.strip_suffix(')').and_then(|s| s.trim().parse().ok()) {
+                return TypeKind::Char(n);
+            }
+        }
+        TypeKind::Other
+    }
+}
 
 impl<'a> SqlEngine<'a> {
     pub(super) fn handle_create_table(
@@ -351,13 +393,16 @@ impl<'a> SqlEngine<'a> {
     ///
     /// Supported conversions (v1):
     ///   - `VARCHAR(N) -> VARCHAR(M)` where `M > N` — metadata-only
+    ///   - `CHAR(N) -> CHAR(M)` where `M > N` — metadata-only
     ///   - `VARCHAR(N)` / `CHAR(N)` -> `TEXT` — metadata-only
     ///   - `VARCHAR(N) -> VARCHAR(M)` where `M < N` — pre-flight scan
+    ///   - `CHAR(N) -> CHAR(M)` where `M < N` — pre-flight scan
     ///   - `TEXT -> VARCHAR(N)` — pre-flight scan
     ///   - `INTEGER <-> REAL` — pre-flight scan on existing values
     ///
-    /// REFERENCES columns only allow widening (VARCHAR → wider VARCHAR / TEXT);
-    /// other conversions are rejected to keep the reference target stable.
+    /// CHAR ↔ VARCHAR cross-family conversions are rejected (semantic
+    /// mismatch on padding/trimming behavior).
+    /// REFERENCES columns only allow widening within the same family or to TEXT.
     fn handle_alter_column_type(
         &self,
         table_name: &str,
@@ -381,79 +426,89 @@ impl<'a> SqlEngine<'a> {
 
         let old_up = old_type.to_uppercase();
         let new_up = new_type.to_uppercase();
-        let old_varchar_len = parse_varchar_length(&old_up);
-        let new_varchar_len = parse_varchar_length(&new_up);
-        let old_is_text = old_up == "TEXT";
-        let new_is_text = new_up == "TEXT";
-        let old_is_integer = old_up == "INTEGER";
-        let new_is_integer = new_up == "INTEGER";
-        let old_is_real = old_up == "REAL";
-        let new_is_real = new_up == "REAL";
-        let touches_boolean = old_up == "BOOLEAN" || new_up == "BOOLEAN";
+        let old_kind = TypeKind::classify(&old_up);
+        let new_kind = TypeKind::classify(&new_up);
 
-        if touches_boolean {
-            return Err(DoogatError::SqlEngine(format!(
+        let unsupported = || {
+            DoogatError::SqlEngine(format!(
                 "cannot alter {table_name}.{col_name}: conversion from {old_type} to {new_type} is not supported"
-            )));
+            ))
+        };
+
+        if matches!(old_kind, TypeKind::Boolean) || matches!(new_kind, TypeKind::Boolean) {
+            return Err(unsupported());
         }
 
-        let is_widening =
-            matches!((old_varchar_len, new_varchar_len), (Some(a), Some(b)) if b > a)
-                || (old_varchar_len.is_some() && new_is_text);
+        // Reject CHAR <-> VARCHAR cross-family explicitly. Same-length is an
+        // identity transition that the idempotent guard above already covers.
+        if matches!(
+            (&old_kind, &new_kind),
+            (TypeKind::Char(_), TypeKind::Varchar(_)) | (TypeKind::Varchar(_), TypeKind::Char(_))
+        ) {
+            return Err(unsupported());
+        }
+
+        let is_widening = match (&old_kind, &new_kind) {
+            (TypeKind::Varchar(a), TypeKind::Varchar(b)) => b > a,
+            (TypeKind::Char(a), TypeKind::Char(b)) => b > a,
+            (TypeKind::Varchar(_) | TypeKind::Char(_), TypeKind::Text) => true,
+            _ => false,
+        };
 
         if is_reference && !is_widening {
             return Err(DoogatError::SqlEngine(format!(
-                "cannot alter {table_name}.{col_name}: REFERENCES column only supports widening to a larger VARCHAR or TEXT"
+                "cannot alter {table_name}.{col_name}: REFERENCES column only supports widening within the same family or to TEXT"
             )));
         }
 
-        // Classify conversion.
-        let metadata_only = match (old_varchar_len, new_varchar_len, new_is_text, old_is_text) {
-            // VARCHAR(N) -> VARCHAR(M) where M >= N
-            (Some(a), Some(b), _, _) if b >= a => true,
-            // VARCHAR(N) / CHAR(N) -> TEXT
-            (Some(_), None, true, false) => true,
+        // Classify the conversion.
+        let metadata_only = match (&old_kind, &new_kind) {
+            (TypeKind::Varchar(a), TypeKind::Varchar(b)) if b >= a => true,
+            (TypeKind::Char(a), TypeKind::Char(b)) if b >= a => true,
+            (TypeKind::Varchar(_) | TypeKind::Char(_), TypeKind::Text) => true,
             _ => false,
         };
 
         if metadata_only {
-            schema.columns[idx].data_type = new_up.clone();
+            schema.columns[idx].data_type = new_up;
             return Ok(false);
         }
 
         // Pre-flight scans for lossy conversions.
-        if let (Some(_), Some(max_len)) = (old_varchar_len, new_varchar_len) {
-            // VARCHAR narrowing.
-            self.preflight_narrow_varchar(table_name, col_name, max_len)?;
-            schema.columns[idx].data_type = new_up;
-            return Ok(false);
+        match (&old_kind, &new_kind) {
+            (TypeKind::Varchar(_), TypeKind::Varchar(_))
+            | (TypeKind::Char(_), TypeKind::Char(_))
+            | (TypeKind::Text, TypeKind::Varchar(_))
+            | (TypeKind::Text, TypeKind::Char(_)) => {
+                self.preflight_narrow_string(table_name, col_name, &new_kind, &new_up)?;
+                schema.columns[idx].data_type = new_up;
+                Ok(false)
+            }
+            (TypeKind::Integer, TypeKind::Real)
+            | (TypeKind::Real, TypeKind::Integer) => {
+                self.preflight_numeric(table_name, col_name, &new_up)?;
+                schema.columns[idx].data_type = new_up;
+                Ok(false)
+            }
+            _ => Err(unsupported()),
         }
-
-        if let (true, Some(max_len)) = (old_is_text, new_varchar_len) {
-            self.preflight_narrow_varchar(table_name, col_name, max_len)?;
-            schema.columns[idx].data_type = new_up;
-            return Ok(false);
-        }
-
-        if (old_is_integer && new_is_real) || (old_is_real && new_is_integer) {
-            self.preflight_numeric(table_name, col_name, &new_up)?;
-            schema.columns[idx].data_type = new_up;
-            return Ok(false);
-        }
-
-        Err(DoogatError::SqlEngine(format!(
-            "cannot alter {table_name}.{col_name}: conversion from {old_type} to {new_type} is not supported"
-        )))
     }
 
-    /// Reject a VARCHAR narrowing when any existing row exceeds the new
-    /// length. NULL rows are allowed through.
-    fn preflight_narrow_varchar(
+    /// Reject a VARCHAR/CHAR narrowing when any existing row exceeds the new
+    /// length. NULL rows are allowed through. The error message uses the
+    /// caller-supplied `new_type` literal so CHAR narrowing reports `CHAR(N)`
+    /// rather than the family-collapsed `VARCHAR(N)`.
+    fn preflight_narrow_string(
         &self,
         table_name: &str,
         col_name: &str,
-        max_len: u32,
+        new_kind: &TypeKind,
+        new_type_literal: &str,
     ) -> Result<()> {
+        let max_len = match new_kind {
+            TypeKind::Varchar(n) | TypeKind::Char(n) => *n,
+            _ => unreachable!("preflight_narrow_string called with non-string TypeKind"),
+        };
         let sql = format!(
             "SELECT COUNT(*) FROM \"{table_name}\" WHERE \"{col_name}\" IS NOT NULL AND LENGTH(\"{col_name}\") > ?1"
         );
@@ -468,7 +523,7 @@ impl<'a> SqlEngine<'a> {
             })?;
         if count > 0 {
             return Err(DoogatError::SqlEngine(format!(
-                "cannot narrow {table_name}.{col_name} to VARCHAR({max_len}): {count} existing rows exceed limit"
+                "cannot narrow {table_name}.{col_name} to {new_type_literal}: {count} existing rows exceed limit"
             )));
         }
         Ok(())

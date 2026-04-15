@@ -6489,3 +6489,122 @@ fn alter_column_type_set_data_type_form_also_accepted() {
     assert_eq!(col.data_type, "VARCHAR(100)");
 }
 
+// --- C1 rework: scope guard, CHAR family, REFERENCES widening ---
+
+#[test]
+fn alter_column_type_in_string_literal_is_not_rewritten() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE notes (body TEXT)").unwrap();
+    let id = engine_exec_id(
+        &repo,
+        &index,
+        "INSERT INTO notes (title, body) VALUES ('alter quote', 'ALTER COLUMN foo TYPE bar')",
+    );
+
+    let result = engine
+        .execute(&format!("SELECT body FROM notes WHERE id = '{id}'"))
+        .unwrap();
+    match result {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(rows[0][0], "ALTER COLUMN foo TYPE bar");
+        }
+        _ => panic!("expected Rows"),
+    }
+}
+
+#[test]
+fn alter_column_type_char_to_varchar_rejected() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE charcross (code CHAR(10))")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE charcross ALTER COLUMN code TYPE VARCHAR(20)")
+        .unwrap_err();
+    assert!(format!("{err}").contains("not supported"));
+}
+
+#[test]
+fn alter_column_type_char_widens_metadata_only() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE charwide (code CHAR(5))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO charwide (title, code) VALUES ('t', 'abcde')")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE charwide ALTER COLUMN code TYPE CHAR(20)")
+        .unwrap();
+
+    let schema = engine.load_schema("charwide").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "code").unwrap();
+    assert_eq!(col.data_type, "CHAR(20)");
+}
+
+#[test]
+fn alter_column_type_char_narrowing_uses_char_in_error() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE charnarrow (code CHAR(20))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO charnarrow (title, code) VALUES ('t', '12345678901234567890')")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE charnarrow ALTER COLUMN code TYPE CHAR(5)")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("CHAR(5)"), "expected CHAR(5) in error, got: {msg}");
+    assert!(!msg.contains("VARCHAR"), "error should not mention VARCHAR: {msg}");
+}
+
+#[test]
+fn alter_column_type_references_column_widens_to_text() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE ref_parent_w (name TEXT)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE ref_child_w (parent VARCHAR(32) REFERENCES ref_parent_w)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE ref_child_w ALTER COLUMN parent TYPE TEXT")
+        .unwrap();
+
+    let schema = engine.load_schema("ref_child_w").unwrap();
+    let col = schema.columns.iter().find(|c| c.name == "parent").unwrap();
+    assert_eq!(col.data_type, "TEXT");
+    assert_eq!(col.references.as_deref(), Some("ref_parent_w"));
+}
+
+#[test]
+fn normalize_alter_column_type_only_rewrites_alter_form() {
+    use crate::sql_engine::helpers::normalize_alter_column_type;
+
+    // Rewrite happens for the shorthand form.
+    let rewritten = normalize_alter_column_type("ALTER TABLE t ALTER COLUMN c TYPE TEXT");
+    assert!(rewritten.contains("SET DATA TYPE"));
+
+    // Idempotent for the canonical form.
+    let canonical = "ALTER TABLE t ALTER COLUMN c SET DATA TYPE TEXT";
+    let after = normalize_alter_column_type(canonical);
+    assert_eq!(after.as_ref(), canonical);
+
+    // Rewrite is local to ALTER COLUMN context — does not touch surrounding text.
+    let mixed = normalize_alter_column_type(
+        "ALTER TABLE t ALTER COLUMN c TYPE VARCHAR(5); -- followed by text",
+    );
+    assert!(mixed.contains("SET DATA TYPE"));
+}
+

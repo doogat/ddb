@@ -537,18 +537,6 @@ pub(super) fn is_numeric_type(dt: &str) -> bool {
     matches!(dt.to_uppercase().as_str(), "INTEGER" | "REAL" | "BOOLEAN")
 }
 
-/// Parse a declared `VARCHAR(N)` or `CHAR(N)` type string and return the
-/// length. Returns `None` for `TEXT`, bare `VARCHAR`, non-string types, or
-/// malformed input. Case-insensitive.
-pub(super) fn parse_varchar_length(dt: &str) -> Option<u32> {
-    let up = dt.trim().to_uppercase();
-    let rest = up
-        .strip_prefix("VARCHAR(")
-        .or_else(|| up.strip_prefix("CHAR("))?;
-    let n_str = rest.strip_suffix(')')?;
-    n_str.trim().parse::<u32>().ok()
-}
-
 /// Rewrite the PostgreSQL shorthand `ALTER COLUMN <c> TYPE <t>` into the
 /// standard `ALTER COLUMN <c> SET DATA TYPE <t>` form that the GenericDialect
 /// parser accepts. Idempotent: input already containing `SET DATA TYPE` is
