@@ -532,13 +532,11 @@ pub(crate) fn add_typed_doogat_accessors(
         if BASE_DOOGAT_FIELDS.contains(&field_name.as_str()) {
             continue;
         }
-        let typename_for_resolver = target_typename.clone();
         doogat = doogat.field(Field::new(
             &field_name,
             TypeRef::named(&target_typename),
             move |ctx| {
                 let target_table = target_table.clone();
-                let _typename = typename_for_resolver.clone();
                 FieldFuture::new(async move {
                     let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
                     let GqlValue::Object(map) = parent else {

@@ -1303,18 +1303,6 @@ mod tests {
     fn build_where_input_includes_tags_field_when_no_collision_prd_00129() {
         // Default: typed `link` table has no `tags` column, so the
         // synthetic `tags: TagsFilter` is added by the where builder.
-        use ddb_core::types::ColumnDef;
-        let _ = ColumnDef {
-            name: "url".into(),
-            data_type: "TEXT".into(),
-            references: None,
-            zone: None,
-            required: false,
-            search_boost: None,
-            allowed_values: None,
-            default_value: None,
-            on_delete: ddb_core::types::OnDeleteAction::Restrict,
-        };
         let schema = schema_with_table("link", vec!["title", "url"]);
         let input = build_where_input("Link", &schema);
         let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
