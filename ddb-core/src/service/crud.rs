@@ -12,6 +12,22 @@ use crate::traits::GitBackend;
 use super::validation::{BareNextCounters, PartitionedNextCounters};
 use super::{DoogatService, ExtraFieldUpdates};
 
+/// Names that the doogat pipeline reserves for itself. A typed `createDoogat`
+/// may legally include these in `fields` without triggering UNKNOWN_FIELD —
+/// the pipeline either owns them (`id`, `title`, `type`, `date`,
+/// `created_at`, `updated_at`) or routes them to a separate index
+/// (`tags`). Mirrors the SQL validator's RESERVED_COLUMNS set in
+/// `ddb-core/src/sql_engine/dml.rs`. PRD 00129 §1.
+const RESERVED_TYPED_COLUMNS: &[&str] = &[
+    "id",
+    "title",
+    "type",
+    "date",
+    "created_at",
+    "updated_at",
+    "tags",
+];
+
 impl<G: GitBackend> DoogatService<G> {
     // ── CRUD ────────────────────────────────────────────────────────────
 
@@ -385,7 +401,7 @@ impl<G: GitBackend> DoogatService<G> {
         self.commit_batch_creates(&writes)?;
 
         // Phase 3: index new writes and fill result slots
-        self.index_batch_creates(&writes, &mut results)?;
+        self.index_batch_creates(&writes, &schemas, &mut results)?;
 
         Ok(results.into_iter().flatten().collect())
     }
@@ -398,6 +414,12 @@ impl<G: GitBackend> DoogatService<G> {
         next_counters: &mut BareNextCounters,
         partitioned_counters: &mut PartitionedNextCounters,
     ) -> Result<(String, String)> {
+        // PRD 00129 §1: typed-create rejection happens before any defaults
+        // are resolved or git is touched. Catches TYPE_NOT_REGISTERED and
+        // UNKNOWN_FIELD (NOT_NULL_VIOLATION runs after default resolution
+        // below since defaults can satisfy a NOT NULL column).
+        Self::validate_typed_create_pre_defaults(input, schemas)?;
+
         let id = self.unique_id();
         let id_str = id.to_string();
 
@@ -410,6 +432,7 @@ impl<G: GitBackend> DoogatService<G> {
 
         let mut extra = input.fields.clone();
         self.resolve_column_defaults(input, schemas, &mut extra, next_counters, partitioned_counters)?;
+        Self::validate_typed_create_post_defaults(input, schemas, &extra)?;
         self.validate_column_constraints(input, schemas, &extra)?;
 
         let meta = DoogatMeta {
@@ -459,15 +482,112 @@ impl<G: GitBackend> DoogatService<G> {
     fn index_batch_creates(
         &self,
         writes: &[(usize, String, String)],
+        schemas: &[TableSchema],
         results: &mut [Option<ParsedDoogat>],
     ) -> Result<()> {
         for (slot, path, content) in writes {
-            let parsed = self.reindex_and_rematerialize(content, path, None)?;
+            // PRD 00129 §1: pass schemas so the materialized type-table row
+            // is written via `materialize_single` after the git commit.
+            // Before this, batch_create populated only the `doogats` index
+            // row and the materialized typed table stayed empty —
+            // duplicates couldn't violate UNIQUE because there was nothing
+            // to violate.
+            let parsed = self.reindex_and_rematerialize(content, path, Some(schemas))?;
             results[*slot] = Some(parsed);
         }
         if !writes.is_empty() {
             self.index.store_head(&self.repo.head_oid()?.0)?;
         }
+        Ok(())
+    }
+
+    /// PRD 00129 §1: pre-defaults validation for typed creates. Runs
+    /// before `resolve_column_defaults` so unknown fields and unregistered
+    /// types reject without polluting the defaults pipeline. NOT NULL
+    /// runs in [`validate_typed_create_post_defaults`] because a column
+    /// default can legitimately satisfy a NOT NULL column.
+    fn validate_typed_create_pre_defaults(
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+    ) -> Result<()> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(()),
+        };
+        let schema = schemas.iter().find(|s| s.table_name == *type_name);
+        // The PRD requires an unregistered type to reject. Today the
+        // singular `create_doogat_with_extra` (CLI / FFI) silently allows
+        // it, so we only reject from the GraphQL surface — which routes
+        // through batch_create. Untyped creates skip above; typed creates
+        // with no fields supplied still reject so callers can't silently
+        // tag a doogat with a nonexistent type via this path.
+        let schema = match schema {
+            Some(s) => s,
+            None => {
+                return Err(DoogatError::type_not_registered(type_name.clone()));
+            }
+        };
+
+        // UNKNOWN_FIELD: every key in input.fields must either be a
+        // declared column or one of the reserved core columns. Reserved
+        // names are owned by the doogat pipeline and pass through silently
+        // (matches the SQL validator's reserved-set behavior).
+        for key in input.fields.keys() {
+            if schema.columns.iter().any(|c| &c.name == key) {
+                continue;
+            }
+            if RESERVED_TYPED_COLUMNS.contains(&key.as_str()) {
+                continue;
+            }
+            return Err(DoogatError::unknown_field(type_name.clone(), key.clone()));
+        }
+
+        Ok(())
+    }
+
+    /// PRD 00129 §1: NOT NULL enforcement once column defaults have been
+    /// resolved. A required column is satisfied when `extra` carries a
+    /// non-null value for it, when the typedef declares a `default_value`
+    /// (already merged into `extra` by `resolve_column_defaults`), or — for
+    /// the special `title` column — when the typedef declares a
+    /// `title_template` (the title is synthesized at INSERT time, mirroring
+    /// the SQL validator's exemption from PRD 00122).
+    fn validate_typed_create_post_defaults(
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(()),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(()), // pre-defaults check already rejected
+        };
+
+        for col in &schema.columns {
+            if !col.required {
+                continue;
+            }
+            // Title is satisfied by `input.title` always (BatchCreateInput
+            // requires it as a non-Option String) or by the title_template
+            // synthesis path. Skip the NOT NULL check for it.
+            if col.name == "title" {
+                continue;
+            }
+            if col.default_value.is_some() {
+                continue;
+            }
+            if extra.contains_key(&col.name) {
+                continue;
+            }
+            return Err(DoogatError::not_null_violation(
+                type_name.clone(),
+                col.name.clone(),
+            ));
+        }
+
         Ok(())
     }
 

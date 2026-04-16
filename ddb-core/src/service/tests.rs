@@ -2427,3 +2427,186 @@ fn batch_update_mixed_with_and_without_fields() {
         crate::types::Value::String("https://changed.example.com".to_string()),
     );
 }
+
+// ── PRD 00129 §1: typed createDoogat populates the type-specific table ──
+
+#[test]
+fn batch_create_typed_writes_to_type_table_prd_00129() {
+    // The PRD's headline blocker #1: createDoogat with type+fields must
+    // populate the type-specific materialized table, not just `doogats`.
+    // Pre-PRD 00129, batch_create wrote only the index row and the
+    // materialized table stayed empty — so even existing UNIQUE indexes
+    // had nothing to constrain.
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "url".to_string(),
+        crate::types::Value::String("https://example.com".to_string()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: "Example".to_string(),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let results = svc.batch_create(&inputs).unwrap();
+    assert_eq!(results.len(), 1);
+    let id = results[0].meta.id.as_ref().unwrap().0.clone();
+
+    // Read back via SQL — the row must exist in the materialized `link`
+    // table with the supplied url. Pre-PRD 00129 this row was never
+    // written.
+    let res = svc
+        .execute_sql(&format!(
+            "SELECT url FROM link WHERE id = '{}'",
+            id
+        ))
+        .unwrap();
+    match res {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(rows.len(), 1, "type-table row must be materialized");
+            assert_eq!(rows[0][0], "https://example.com");
+        }
+        _ => panic!("expected SELECT to return rows"),
+    }
+}
+
+#[test]
+fn batch_create_with_unregistered_type_rejects_with_type_not_registered_prd_00129() {
+    let (_tmp, svc) = fresh_svc();
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: "x".to_string(),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("nonexistent".to_string()),
+        fields: std::collections::BTreeMap::new(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc
+        .batch_create(&inputs)
+        .expect_err("unregistered type must reject");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("\"nonexistent\"") && msg.contains("not a registered typedef"),
+        "expected TYPE_NOT_REGISTERED message, got: {msg}"
+    );
+}
+
+#[test]
+fn batch_create_with_unknown_field_rejects_with_unknown_field_prd_00129() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "bogus".to_string(),
+        crate::types::Value::String("ignored".to_string()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: "x".to_string(),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc
+        .batch_create(&inputs)
+        .expect_err("unknown field must reject");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("unknown column: link.bogus"),
+        "expected UNKNOWN_FIELD message, got: {msg}"
+    );
+}
+
+#[test]
+fn batch_create_missing_required_column_rejects_with_not_null_prd_00129() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT, url VARCHAR(255) NOT NULL)")
+        .unwrap();
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: "x".to_string(),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields: std::collections::BTreeMap::new(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc
+        .batch_create(&inputs)
+        .expect_err("missing required column must reject");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("NOT NULL constraint violated: link.url"),
+        "expected NOT_NULL_VIOLATION message, got: {msg}"
+    );
+}
+
+#[test]
+fn batch_create_typed_no_fields_with_only_nullable_columns_succeeds_prd_00129() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: "Bare Link".to_string(),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields: std::collections::BTreeMap::new(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let results = svc
+        .batch_create(&inputs)
+        .expect("typed create with all-nullable columns must succeed");
+    assert_eq!(results.len(), 1);
+    let id = results[0].meta.id.as_ref().unwrap().0.clone();
+
+    let res = svc
+        .execute_sql(&format!(
+            "SELECT title FROM link WHERE id = '{}'",
+            id
+        ))
+        .unwrap();
+    match res {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(rows.len(), 1, "type-table row must be materialized");
+            assert_eq!(rows[0][0], "Bare Link", "title from input.title");
+        }
+        _ => panic!("expected SELECT to return rows"),
+    }
+}
+
+#[test]
+fn batch_create_untyped_doogat_unaffected_by_typed_validation_prd_00129() {
+    // Sanity: untyped creates (no doogat_type) bypass typedef validation
+    // entirely — same behavior as before PRD 00129.
+    let (_tmp, svc) = fresh_svc();
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: "Untyped".to_string(),
+        body: None,
+        tags: vec!["misc".to_string()],
+        doogat_type: None,
+        fields: std::collections::BTreeMap::new(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+    let results = svc.batch_create(&inputs).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].meta.doogat_type.is_none());
+}
