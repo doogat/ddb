@@ -55,6 +55,10 @@ CREATE TABLE items (title TEXT, code VARCHAR(255), UNIQUE(code))
 
 `CREATE INDEX` is not supported as a standalone statement (see [Not Supported](#not-supported)). Use `UNIQUE()` in `CREATE TABLE` instead.
 
+`CREATE INDEX IF NOT EXISTS ...` and `CREATE UNIQUE INDEX IF NOT EXISTS ...` are tolerated as no-ops (info-level log, no error) so apps with legacy startup migrations keep booting after upgrade. Plain `CREATE [UNIQUE] INDEX` (no `IF NOT EXISTS`) continues to reject — that's an intentional declaration the caller should drop. PRD 00129 §3b.
+
+UNIQUE-constraint violations carry `extensions.code = "UNIQUE_VIOLATION"` on the GraphQL surface plus structured `table` / `columns` / `values` fields. The legacy `message` text continues to mirror SQLite's `"UNIQUE constraint failed: <table>.<col>[, <table>.<col>]..."` so callers still string-matching the substring keep working. PRD 00129 §3a + §6.
+
 `BOOLEAN` columns are stored as `INTEGER` (1/0) in SQLite. SQL `SELECT` queries against materialized type tables automatically coerce these values to `"true"`/`"false"` in the response. This coercion applies only to tables with typedefs; queries against raw internal tables (`_ddb_*`, `doogats`) return uncoerced values.
 
 ### DEFAULT NEXT (auto-increment)
@@ -300,6 +304,25 @@ Columns declared as `NOT NULL REFERENCES other(id)` enforce **RESTRICT** semanti
 The check fires for every delete entry point: SQL `DELETE FROM`, the `deleteDoogat` GraphQL mutation, and `ddb delete <id>` on the CLI. Bulk SQL deletes are atomic: if any matched id has a required-FK dependent, the whole statement is rejected and no rows are deleted.
 
 Nullable `REFERENCES` columns are unaffected — the existing wikilink-strip cascade still applies, and the parent delete still proceeds. Issue [#10](https://github.com/doogat/ddb/issues/10).
+
+### ON DELETE CASCADE (PRD 00129 §2)
+
+A `REFERENCES` column can opt into `ON DELETE CASCADE` at typedef declaration time. When the referenced parent is deleted, every row that holds the parent's id through a CASCADE-marked column is also deleted. Cascade walks recursively through chains of CASCADE references, all in a single git commit.
+
+```sql
+CREATE TABLE "category-membership" (
+  link     VARCHAR(255) NOT NULL REFERENCES link(id)     ON DELETE CASCADE,
+  category VARCHAR(255) NOT NULL REFERENCES category(id) ON DELETE RESTRICT
+)
+```
+
+Supported actions for v1: `RESTRICT` (default, behavior above) and `CASCADE`. `SET NULL`, `SET DEFAULT`, and `ON UPDATE` are rejected at `CREATE TABLE` time.
+
+Mixed actions on one table behave per-column independently — the example above lets a `link` delete cascade through the membership rows while a `category` delete with live memberships still rejects.
+
+**Cycle detection**: a cascade walk that would re-enter a node already in the in-progress set rejects with `cascade delete would form a cycle through <tables>` (`extensions.code = "CASCADE_CYCLE"`). No arbitrary depth limit; only true cycles reject.
+
+The action persists on the typedef as a per-column `on_delete: cascade` field; absent or any other value parses as `RESTRICT`.
 
 ## Expressions in INSERT and UPDATE
 

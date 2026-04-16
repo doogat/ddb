@@ -242,6 +242,8 @@ type CompactResult {
 
 `deleteDoogat` removes the doogat file, its index entries, and its materialized type table row (if typed). Junction table rows referencing the deleted doogat are cascade-cleaned.
 
+`createDoogat` and `createMany` populate the type-specific materialized table whenever `type` is set. Pre-PRD 00129 only the base `doogats` row was written. Now: an `input.type` referencing an unregistered typedef rejects with `TYPE_NOT_REGISTERED`, an `input.fields` key not in the typedef rejects with `UNKNOWN_FIELD`, and a missing required column with no default rejects with `NOT_NULL_VIOLATION`. The CLI `ddb create` path is unchanged — it still permits silent base-only creation for unregistered types.
+
 `createMany` creates multiple doogats atomically in a single git commit. All records are created or none (rollback on any failure). Returns created records in input order. The optional `fields` parameter accepts a JSON string of key-value pairs for typed columns (e.g. `"{\"category\":\"books\",\"priority\":\"1\"}"`). When the record has a type with a typedef, column defaults (including `DEFAULT NEXT` auto-increment) are resolved automatically for omitted fields. Allowed-value and foreign-key constraints are validated per record.
 
 Both `createDoogat` and `createMany` accept an optional `onConflict` argument. When set to `IGNORE`, if the new record would violate a `unique_together` constraint on the typedef, creation is skipped and the existing doogat is returned instead. When omitted or set to `ERROR` (default), a unique constraint violation returns an error. The pre-check matches field values against the `_ddb_fields` index, so the caller must pass the constrained fields via the `fields` parameter on `CreateManyItemInput`.
@@ -501,6 +503,21 @@ Sorting and limiting happen in-memory after batch-fetching, which is efficient a
 
 Resolution is single-level only (no recursive nesting). Plural fields batch-fetch all referenced IDs for each parent item in a single call. Singular fields resolve individually. If the target type schema is unknown, the resolver falls back to the base `Doogat` type.
 
+#### Typed accessor on `Doogat` (PRD 00129 §4)
+
+Every registered typedef adds a matching nested accessor to the base `Doogat` GraphQL type. `Doogat.link` resolves to the `Link` typed object when the row's `type` is `link`, and `null` otherwise. The accessor is available on every mutation response (`createDoogat`, `updateDoogat`, `createMany`, `batchUpdate`) and every read path (`doogat(id:)`, `doogats`, nested references) — letting clients pull typed fields in a single round trip:
+
+```graphql
+mutation {
+  createDoogat(input: {type: "link", title: "x", fields: "{\"url\":\"https://x\"}"}) {
+    id title
+    link { url description }
+  }
+}
+```
+
+The field name is the camelCased table name (`category-membership` -> `categoryMembership`). Collisions with reserved Doogat fields (`id`, `title`, `type`, `tags`, `body`, etc.) are skipped silently.
+
 Tags are always available on typed connection queries via the `tags` field, populated from the parsed doogat's frontmatter and body hashtags.
 
 The REST API exposes multi-value references via a `references` JSON object on each doogat. Each key maps to an array of referenced IDs:
@@ -527,7 +544,23 @@ input BoolFilter   { eq: Boolean }
 input IDFilter     { eq: ID, in: [ID] }
 ```
 
-Every `{Type}Where` input includes `id: IDFilter` and `title: StringFilter` in addition to user-defined columns. These base fields exist in all materialized type tables, enabling single-record lookups and title searches on any typed query:
+Every `{Type}Where` input includes `id: IDFilter`, `title: StringFilter`, and `tags: TagsFilter` in addition to user-defined columns. PRD 00129 §5 added the `tags` filter:
+
+```graphql
+input TagsFilter { contains: String, containsAll: [String!], containsAny: [String!] }
+```
+
+- `contains: "rust"` — row carries the named tag.
+- `containsAll: ["a", "b"]` — row carries every listed tag.
+- `containsAny: ["a", "b"]` — row carries at least one listed tag. Empty list matches nothing (mirrors `in: []`).
+
+```graphql
+{ links(where: { tags: { contains: "rust" } }) { items { id title url } } }
+```
+
+Composes with column filters via the existing AND conjunction. Backed by `EXISTS` against the `_ddb_tags` index, no new storage.
+
+These base fields exist in all materialized type tables, enabling single-record lookups and title searches on any typed query:
 
 ```graphql
 { links(where: { id: { eq: "20260401074007" } }) { items { id title url } } }
@@ -663,6 +696,19 @@ No server restart is needed. Clients can poll the `schemaVersion` query field to
 | `BadRequest` | `BAD_REQUEST` | Original message |
 | `SqlEngine` | `SQL_ERROR` | Original message (user-actionable: syntax errors, unsupported DDL, constraint violations) |
 | All others | `INTERNAL_ERROR` | Redacted to `"internal error"` (details logged server-side) |
+
+### Structured error codes (PRD 00129 §6)
+
+A vocabulary of stable machine-readable codes is attached to specific error classes via `extensions.code` and per-code structured fields. The `message` text remains stable for each code so callers still string-matching it keep working — the `code` is additive.
+
+| `code` | When | Extensions |
+|---|---|---|
+| `UNIQUE_VIOLATION` | typedef-declared `UNIQUE(...)` violated at INSERT/UPDATE | `{ table, columns, values }` |
+| `REFERENCES_VIOLATION` | `NOT NULL REFERENCES` parent delete blocked by RESTRICT | `{ table, column, referencing_table, referencing_id }` |
+| `NOT_NULL_VIOLATION` | required column missing or set to NULL on INSERT/UPDATE | `{ table, column }` |
+| `UNKNOWN_FIELD` | `fields` JSON has a key not declared in the typedef | `{ table, unknown_field }` |
+| `TYPE_NOT_REGISTERED` | `createDoogat`/`createMany` `type` references a typedef that doesn't exist | `{ type }` |
+| `CASCADE_CYCLE` | `ON DELETE CASCADE` walk would form a cycle | `{ tables }` |
 
 ## PostgreSQL Wire Protocol
 
