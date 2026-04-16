@@ -195,6 +195,66 @@ pub(super) fn extract_references(options: &[sqlparser::ast::ColumnOptionDef]) ->
     None
 }
 
+/// PRD 00129 §2: extract the `ON DELETE` action off a column-level
+/// `REFERENCES` option.
+///
+/// - Missing clause -> [`OnDeleteAction::Restrict`] (the default
+///   established by issue #10 / commit 5a55296).
+/// - Explicit `RESTRICT` or `NO ACTION` -> [`OnDeleteAction::Restrict`]
+///   (NO ACTION is treated as RESTRICT here since v1 doesn't model the
+///   deferred-check distinction).
+/// - Explicit `CASCADE` -> [`OnDeleteAction::Cascade`].
+/// - `SET NULL` / `SET DEFAULT` -> error (out of scope for v1 per the
+///   PRD §Out of scope list).
+/// - Any `ON UPDATE` clause -> error (out of scope; `ON UPDATE` is silent
+///   today and the PRD explicitly leaves it out).
+///
+/// Non-FK columns return RESTRICT (the field is meaningless without a
+/// REFERENCES clause; downstream code only consults `on_delete` when
+/// `references.is_some()`).
+pub(super) fn extract_on_delete(
+    options: &[sqlparser::ast::ColumnOptionDef],
+) -> crate::error::Result<crate::types::OnDeleteAction> {
+    use crate::error::DoogatError;
+    use crate::types::OnDeleteAction;
+    use sqlparser::ast::ReferentialAction;
+
+    for opt in options {
+        if let ColumnOption::ForeignKey {
+            on_delete,
+            on_update,
+            ..
+        } = &opt.option
+        {
+            if let Some(action) = on_update {
+                return Err(DoogatError::SqlEngine(format!(
+                    "ON UPDATE {action} not supported: v1 supports only ON DELETE CASCADE | RESTRICT"
+                )));
+            }
+            return Ok(match on_delete {
+                None => OnDeleteAction::Restrict,
+                Some(ReferentialAction::Restrict | ReferentialAction::NoAction) => {
+                    OnDeleteAction::Restrict
+                }
+                Some(ReferentialAction::Cascade) => OnDeleteAction::Cascade,
+                Some(ReferentialAction::SetNull) => {
+                    return Err(DoogatError::SqlEngine(
+                        "ON DELETE SET NULL not supported: v1 supports only ON DELETE CASCADE | RESTRICT"
+                            .into(),
+                    ));
+                }
+                Some(ReferentialAction::SetDefault) => {
+                    return Err(DoogatError::SqlEngine(
+                        "ON DELETE SET DEFAULT not supported: v1 supports only ON DELETE CASCADE | RESTRICT"
+                            .into(),
+                    ));
+                }
+            });
+        }
+    }
+    Ok(crate::types::OnDeleteAction::Restrict)
+}
+
 /// Returns true when the column declares `NOT NULL` in its DDL options.
 pub(super) fn is_not_null(options: &[sqlparser::ast::ColumnOptionDef]) -> bool {
     options

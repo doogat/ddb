@@ -818,6 +818,7 @@ fn finalize_schema_columns(
                 search_boost: None,
                 allowed_values: None,
                 default_value: None,
+                on_delete: crate::types::OnDeleteAction::Restrict,
             }
         })
         .collect();

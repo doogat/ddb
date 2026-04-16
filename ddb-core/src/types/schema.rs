@@ -2,6 +2,40 @@ use std::fmt;
 
 use super::doogat::Zone;
 
+/// SQL `ON DELETE` action for a `REFERENCES` column. Default is
+/// [`OnDeleteAction::Restrict`] — the parent delete is rejected while
+/// referencing rows exist (issue #10 / commit 5a55296). PRD 00129 §2 adds
+/// [`OnDeleteAction::Cascade`] as an opt-in.
+///
+/// `SET NULL`, `SET DEFAULT`, and `ON UPDATE` are out of scope for v1
+/// per PRD 00129 §Out of scope; the DDL parser rejects them with a
+/// clear message.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OnDeleteAction {
+    #[default]
+    Restrict,
+    Cascade,
+}
+
+impl OnDeleteAction {
+    /// Stable lowercase identifier used in the typedef YAML serialization.
+    pub fn as_typedef_str(self) -> &'static str {
+        match self {
+            OnDeleteAction::Restrict => "restrict",
+            OnDeleteAction::Cascade => "cascade",
+        }
+    }
+
+    /// Parse the typedef YAML form. Unknown strings fall back to RESTRICT
+    /// to preserve the safer default on legacy / malformed typedefs.
+    pub fn parse_typedef_str(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "cascade" => OnDeleteAction::Cascade,
+            _ => OnDeleteAction::Restrict,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ColumnDef {
     pub name: String,
@@ -12,6 +46,10 @@ pub struct ColumnDef {
     pub search_boost: Option<f64>,
     pub allowed_values: Option<Vec<String>>,
     pub default_value: Option<String>,
+    /// PRD 00129 §2: `ON DELETE` action for a REFERENCES column. Defaults
+    /// to RESTRICT (the existing #10 behavior). Only meaningful when
+    /// `references.is_some()`.
+    pub on_delete: OnDeleteAction,
 }
 
 impl ColumnDef {
@@ -225,6 +263,7 @@ mod tests {
             search_boost: None,
             allowed_values: None,
             default_value: None,
+            on_delete: OnDeleteAction::Restrict,
         };
         assert_eq!(col("VARCHAR").effective_zone(), Zone::Frontmatter);
         assert_eq!(col("VARCHAR(100)").effective_zone(), Zone::Frontmatter);

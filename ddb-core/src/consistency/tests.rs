@@ -351,6 +351,7 @@ fn detect_schema_required_field_with_default() {
             search_boost: None,
             allowed_values: None,
             default_value: Some("0".into()),
+            on_delete: crate::types::OnDeleteAction::Restrict,
         }],
         crdt_strategy: None,
         template_sections: vec![],
@@ -387,6 +388,7 @@ fn detect_schema_required_field_present_no_fix() {
             search_boost: None,
             allowed_values: None,
             default_value: Some("0".into()),
+            on_delete: crate::types::OnDeleteAction::Restrict,
         }],
         crdt_strategy: None,
         template_sections: vec![],
@@ -786,6 +788,7 @@ fn title_noncompliant_detected() {
             search_boost: None,
             allowed_values: None,
             default_value: None,
+            on_delete: crate::types::OnDeleteAction::Restrict,
         }],
     );
     let fixes = detect_fixes(&parsed, Some(&schema));
@@ -817,6 +820,7 @@ fn title_compliant_not_flagged() {
             search_boost: None,
             allowed_values: None,
             default_value: None,
+            on_delete: crate::types::OnDeleteAction::Restrict,
         }],
     );
     let fixes = detect_fixes(&parsed, Some(&schema));
@@ -849,6 +853,7 @@ fn title_template_unfilled_placeholders_stripped() {
                 search_boost: None,
                 allowed_values: None,
                 default_value: None,
+                on_delete: crate::types::OnDeleteAction::Restrict,
             },
             ColumnDef {
                 name: "missing".into(),
@@ -859,6 +864,7 @@ fn title_template_unfilled_placeholders_stripped() {
                 search_boost: None,
                 allowed_values: None,
                 default_value: None,
+                on_delete: crate::types::OnDeleteAction::Restrict,
             },
         ],
     );
@@ -926,6 +932,7 @@ fn migrate_body_to_frontmatter() {
         search_boost: None,
         allowed_values: None,
         default_value: None,
+        on_delete: crate::types::OnDeleteAction::Restrict,
     };
 
     let current = detect_current_zone(&parsed, "description");
@@ -1068,6 +1075,7 @@ fn migrate_idempotent() {
         search_boost: None,
         allowed_values: None,
         default_value: None,
+        on_delete: crate::types::OnDeleteAction::Restrict,
     };
 
     // Data already in correct zone

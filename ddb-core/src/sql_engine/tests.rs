@@ -1429,6 +1429,150 @@ fn create_unique_index_if_not_exists_accepted_as_no_op_prd_00129() {
     assert!(msg.contains("ignored"), "expected no-op message, got: {msg}");
 }
 
+// ── PRD 00129 §2: ON DELETE action parsing ──
+
+#[test]
+fn create_table_references_on_delete_cascade_parses_and_persists_prd_00129() {
+    // The typed DDL accepts `REFERENCES t(id) ON DELETE CASCADE` and the
+    // action is stored on the typedef column. Default (clause absent) is
+    // RESTRICT — the existing #10 behavior.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute(
+            "CREATE TABLE membership (title TEXT, \
+             link VARCHAR(255) NOT NULL REFERENCES link(id) ON DELETE CASCADE, \
+             cat VARCHAR(255) NOT NULL REFERENCES link(id))",
+        )
+        .unwrap();
+
+    let schemas = index.load_all_typedefs(&repo);
+    let membership = schemas
+        .get("membership")
+        .expect("membership typedef should be materialized");
+
+    let link_col = membership
+        .columns
+        .iter()
+        .find(|c| c.name == "link")
+        .expect("link column present");
+    assert_eq!(
+        link_col.on_delete,
+        crate::types::OnDeleteAction::Cascade,
+        "explicit ON DELETE CASCADE must store Cascade"
+    );
+
+    let cat_col = membership
+        .columns
+        .iter()
+        .find(|c| c.name == "cat")
+        .expect("cat column present");
+    assert_eq!(
+        cat_col.on_delete,
+        crate::types::OnDeleteAction::Restrict,
+        "omitted ON DELETE clause must default to Restrict"
+    );
+}
+
+#[test]
+fn create_table_references_on_delete_restrict_explicit_parses_prd_00129() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute(
+            "CREATE TABLE blocker (title TEXT, \
+             link VARCHAR(255) NOT NULL REFERENCES link(id) ON DELETE RESTRICT)",
+        )
+        .unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    let blocker = schemas.get("blocker").unwrap();
+    let link_col = blocker.columns.iter().find(|c| c.name == "link").unwrap();
+    assert_eq!(
+        link_col.on_delete,
+        crate::types::OnDeleteAction::Restrict,
+        "explicit RESTRICT must store Restrict"
+    );
+}
+
+#[test]
+fn create_table_references_on_delete_set_null_rejected_prd_00129() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    let err = engine
+        .execute(
+            "CREATE TABLE bad (title TEXT, \
+             link VARCHAR(255) NOT NULL REFERENCES link(id) ON DELETE SET NULL)",
+        )
+        .expect_err("SET NULL must reject in v1");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("SET NULL not supported")
+            && msg.contains("CASCADE | RESTRICT"),
+        "expected v1-scope rejection message, got: {msg}"
+    );
+}
+
+#[test]
+fn create_table_references_on_update_rejected_prd_00129() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    let err = engine
+        .execute(
+            "CREATE TABLE bad (title TEXT, \
+             link VARCHAR(255) NOT NULL REFERENCES link(id) ON UPDATE CASCADE)",
+        )
+        .expect_err("ON UPDATE must reject in v1");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("ON UPDATE") && msg.contains("not supported"),
+        "expected ON UPDATE rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn on_delete_action_typedef_yaml_roundtrip_prd_00129() {
+    // CREATE TABLE -> typedef YAML -> schema_from_parsed roundtrip
+    // preserves the ON DELETE action.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute(
+            "CREATE TABLE m (title TEXT, \
+             link VARCHAR(255) NOT NULL REFERENCES link(id) ON DELETE CASCADE)",
+        )
+        .unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    let m = schemas.get("m").unwrap().clone();
+    // Re-serialize and re-parse
+    let doogat = super::builders::build_typedef_doogat(
+        &crate::types::DoogatId("00000000000000".to_string()),
+        &m,
+    );
+    let roundtripped = super::builders::schema_from_parsed(&doogat).unwrap();
+    let link_col = roundtripped
+        .columns
+        .iter()
+        .find(|c| c.name == "link")
+        .unwrap();
+    assert_eq!(link_col.on_delete, crate::types::OnDeleteAction::Cascade);
+}
+
 #[test]
 fn plain_create_index_still_rejects_after_prd_00129() {
     // Regression: PRD 00129 §3b only relaxes `IF NOT EXISTS`; the bare
@@ -4837,6 +4981,7 @@ fn col(name: &str, data_type: &str, required: bool) -> ColumnDef {
         search_boost: None,
         allowed_values: None,
         default_value: None,
+        on_delete: crate::types::OnDeleteAction::Restrict,
     }
 }
 

@@ -8,8 +8,9 @@ use crate::types::{ColumnDef, DoogatId, TableSchema, Zone};
 
 use super::builders::{build_typedef_doogat, rename_key_in_doogat, schema_from_parsed};
 use super::helpers::{
-    data_type_to_string, extract_allowed_values, extract_default, extract_references, is_not_null,
-    is_numeric_type, is_reserved_table, is_short_string_type, unquote_identifier,
+    data_type_to_string, extract_allowed_values, extract_default, extract_on_delete,
+    extract_references, is_not_null, is_numeric_type, is_reserved_table, is_short_string_type,
+    unquote_identifier,
 };
 use super::{SqlEngine, SqlResult};
 
@@ -156,6 +157,11 @@ impl<'a> SqlEngine<'a> {
                     )));
                 }
             }
+            // PRD 00129 §2: pull `ON DELETE` action off the FK option. For
+            // non-REFERENCES columns it stays at the default RESTRICT.
+            // SET NULL / SET DEFAULT / NO ACTION reject here so callers
+            // get a clear error rather than silent-RESTRICT-fallback.
+            let on_delete = extract_on_delete(&col.options)?;
             out.push(ColumnDef {
                 name,
                 data_type,
@@ -165,6 +171,7 @@ impl<'a> SqlEngine<'a> {
                 search_boost: None,
                 allowed_values,
                 default_value,
+                on_delete,
             });
         }
 
@@ -314,6 +321,7 @@ impl<'a> SqlEngine<'a> {
                     } else {
                         Some(Zone::Body)
                     };
+                    let on_delete = extract_on_delete(&column_def.options)?;
                     schema.columns.push(ColumnDef {
                         name: col_name,
                         data_type: dt,
@@ -323,6 +331,7 @@ impl<'a> SqlEngine<'a> {
                         references: refs,
                         allowed_values: extract_allowed_values(&column_def.data_type),
                         default_value,
+                        on_delete,
                     });
                 }
                 AlterTableOperation::DropColumn {

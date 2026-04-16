@@ -33,6 +33,15 @@ fn build_column_yaml(col: &ColumnDef) -> Value {
     }
     if let Some(ref r) = col.references {
         map.insert("references".to_string(), Value::String(r.clone()));
+        // PRD 00129 §2: only emit `on_delete` when it diverges from the
+        // RESTRICT default. Keeps existing typedefs unchanged on rewrite
+        // and avoids polluting the YAML for the common case.
+        if col.on_delete != crate::types::OnDeleteAction::Restrict {
+            map.insert(
+                "on_delete".to_string(),
+                Value::String(col.on_delete.as_typedef_str().into()),
+            );
+        }
     }
     if let Some(ref vals) = col.allowed_values {
         map.insert(
@@ -461,6 +470,8 @@ struct OptionalColumnFields {
     search_boost: Option<f64>,
     allowed_values: Option<Vec<String>>,
     default_value: Option<String>,
+    /// PRD 00129 §2: per-column `ON DELETE` action. Default RESTRICT.
+    on_delete: crate::types::OnDeleteAction,
 }
 
 fn parse_optional_column_fields(map: &BTreeMap<String, Value>) -> OptionalColumnFields {
@@ -491,6 +502,11 @@ fn parse_optional_column_fields(map: &BTreeMap<String, Value>) -> OptionalColumn
         .get("default_value")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let on_delete = map
+        .get("on_delete")
+        .and_then(|v| v.as_str())
+        .map(crate::types::OnDeleteAction::parse_typedef_str)
+        .unwrap_or_default();
     OptionalColumnFields {
         references,
         zone,
@@ -498,6 +514,7 @@ fn parse_optional_column_fields(map: &BTreeMap<String, Value>) -> OptionalColumn
         search_boost,
         allowed_values,
         default_value,
+        on_delete,
     }
 }
 
@@ -522,6 +539,7 @@ fn parse_single_column(item: &Value) -> Result<ColumnDef> {
         search_boost,
         allowed_values,
         default_value,
+        on_delete,
     } = parse_optional_column_fields(map);
     Ok(ColumnDef {
         name,
@@ -532,6 +550,7 @@ fn parse_single_column(item: &Value) -> Result<ColumnDef> {
         search_boost,
         allowed_values,
         default_value,
+        on_delete,
     })
 }
 
