@@ -1166,9 +1166,7 @@ impl<'a> SqlEngine<'a> {
             if RESERVED_COLUMNS.contains(&name.as_str()) {
                 continue;
             }
-            return Err(DoogatError::Validation(format!(
-                "unknown column: {table_name}.{name}"
-            )));
+            return Err(DoogatError::unknown_field(table_name, name));
         }
         Ok(())
     }
@@ -1185,10 +1183,7 @@ impl<'a> SqlEngine<'a> {
                 continue;
             }
             if null_cols.contains(&col.name) {
-                return Err(DoogatError::Validation(format!(
-                    "NOT NULL constraint violated: {table_name}.{}",
-                    col.name
-                )));
+                return Err(DoogatError::not_null_violation(table_name, &col.name));
             }
             if is_insert && !col_values.contains_key(&col.name) {
                 // Title is special: when the typedef declares a
@@ -1203,10 +1198,7 @@ impl<'a> SqlEngine<'a> {
                 if col.name == "title" && schema.title_template.is_some() {
                     continue;
                 }
-                return Err(DoogatError::Validation(format!(
-                    "NOT NULL constraint violated: {table_name}.{}",
-                    col.name
-                )));
+                return Err(DoogatError::not_null_violation(table_name, &col.name));
             }
         }
         Ok(())

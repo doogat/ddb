@@ -55,6 +55,15 @@ impl From<DoogatError> for DdbError {
             },
             #[cfg(feature = "nosql")]
             DoogatError::Redb(msg) => DdbError::Io { msg },
+            // Structured errors carry a stable code (e.g. UNIQUE_VIOLATION)
+            // plus a user-safe message. The FFI surface drops the per-code
+            // context and routes by code into the closest legacy bucket so
+            // existing FFI consumers don't need to learn the structured
+            // shape. PRD 00129 §6.
+            DoogatError::Structured { code, message, .. } => match code {
+                "REFERENCES_VIOLATION" | "CASCADE_CYCLE" => DdbError::SqlEngine { msg: message },
+                _ => DdbError::Validation { msg: message },
+            },
         }
     }
 }
