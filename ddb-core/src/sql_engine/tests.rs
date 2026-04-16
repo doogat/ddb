@@ -1390,6 +1390,63 @@ fn create_index_rejected_with_reason() {
 }
 
 #[test]
+fn create_index_if_not_exists_accepted_as_no_op_prd_00129() {
+    // PRD 00129 §3b: `CREATE INDEX IF NOT EXISTS` is tolerated as a no-op
+    // so apps with legacy startup migrations (jink today) keep booting
+    // after upgrade. The intended path is `UNIQUE(...)` in the typedef.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    let result = engine
+        .execute("CREATE INDEX IF NOT EXISTS idx_link_url ON link(url)")
+        .expect("CREATE INDEX IF NOT EXISTS should be tolerated as no-op");
+    let msg = format!("{result:?}");
+    assert!(
+        msg.contains("ignored") && msg.contains("idx_link_url"),
+        "expected no-op message, got: {msg}"
+    );
+}
+
+#[test]
+fn create_unique_index_if_not_exists_accepted_as_no_op_prd_00129() {
+    // jink's actual migration is `CREATE UNIQUE INDEX IF NOT EXISTS` —
+    // verify the unique flavor takes the same no-op path.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute(
+            "CREATE TABLE \"category-membership\" (title TEXT, link VARCHAR(255), category VARCHAR(255))",
+        )
+        .unwrap();
+    let result = engine
+        .execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_membership_unique ON \"category-membership\"(link, category)",
+        )
+        .expect("CREATE UNIQUE INDEX IF NOT EXISTS should be tolerated as no-op");
+    let msg = format!("{result:?}");
+    assert!(msg.contains("ignored"), "expected no-op message, got: {msg}");
+}
+
+#[test]
+fn plain_create_index_still_rejects_after_prd_00129() {
+    // Regression: PRD 00129 §3b only relaxes `IF NOT EXISTS`; the bare
+    // form continues to reject so callers learn to drop redundant
+    // declarations.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    let err = engine
+        .execute("CREATE UNIQUE INDEX idx_link_url ON link(url)")
+        .expect_err("plain CREATE [UNIQUE] INDEX must still reject");
+    let msg = format!("{err}");
+    assert!(msg.contains("CREATE INDEX not supported"), "{msg}");
+}
+
+#[test]
 fn create_view_rejected_with_reason() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);

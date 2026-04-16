@@ -235,6 +235,30 @@ impl<'a> SqlEngine<'a> {
     }
 
     fn execute_statement(&mut self, stmt: &Statement) -> Result<SqlResult> {
+        // PRD 00129 §3b: `CREATE [UNIQUE] INDEX IF NOT EXISTS ...` is
+        // accepted as a no-op so apps with legacy startup migrations
+        // (jink today) keep booting after upgrade. The intended uniqueness
+        // path is `UNIQUE(...)` in the typedef, enforced by the typed
+        // create write path. Plain `CREATE INDEX` (no IF NOT EXISTS) is
+        // still rejected by `reject_unsupported_ddl` below — that's an
+        // intentional declaration the caller should learn to drop.
+        if let Statement::CreateIndex(ci) = stmt {
+            if ci.if_not_exists {
+                let name = ci
+                    .name
+                    .as_ref()
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "<anonymous>".to_string());
+                tracing::info!(
+                    index_name = %name,
+                    "create_index_ignored: managed by typedef UNIQUE/PRIMARY KEY"
+                );
+                return Ok(SqlResult::Ok(format!(
+                    "ignored: index '{name}' is managed by typedef UNIQUE/PRIMARY KEY constraints"
+                )));
+            }
+        }
+
         if let Some(err) = reject_unsupported_ddl(stmt) {
             return Err(err);
         }
