@@ -508,6 +508,71 @@ const BASE_DOOGAT_FIELDS: &[&str] = &[
     "updated_at", "created_at",
 ];
 
+/// PRD 00129 §4 (Option B): add per-typedef nested accessors to the base
+/// `Doogat` object so `Doogat.link { url }` resolves the typed link row
+/// in a single round trip when the doogat's type matches, and returns
+/// null when it doesn't. Same accessor lights up on every mutation
+/// response (`createDoogat`, `updateDoogat`, etc.) and every read path
+/// (`doogat(id:)`, `doogats`, nested references), because all of them
+/// share this Object.
+pub(crate) fn add_typed_doogat_accessors(
+    mut doogat: Object,
+    type_schemas: &[TableSchema],
+    known_types: &HashMap<String, String>,
+) -> Object {
+    for ts in type_schemas {
+        let target_table = ts.table_name.clone();
+        let target_typename = match known_types.get(&target_table) {
+            Some(name) => name.clone(),
+            None => continue, // not a registered GraphQL type (kebab collision, etc.)
+        };
+        let field_name = sanitize_field_name(&target_table);
+        // Don't shadow the reserved Doogat fields (id/title/type/tags/etc).
+        // `BASE_DOOGAT_FIELDS` enumerates them; collision = skip.
+        if BASE_DOOGAT_FIELDS.contains(&field_name.as_str()) {
+            continue;
+        }
+        let typename_for_resolver = target_typename.clone();
+        doogat = doogat.field(Field::new(
+            &field_name,
+            TypeRef::named(&target_typename),
+            move |ctx| {
+                let target_table = target_table.clone();
+                let _typename = typename_for_resolver.clone();
+                FieldFuture::new(async move {
+                    let parent = ctx.parent_value.try_downcast_ref::<GqlValue>()?;
+                    let GqlValue::Object(map) = parent else {
+                        return Ok(None);
+                    };
+                    let id = match map.get("id") {
+                        Some(GqlValue::String(s)) if !s.is_empty() => s.clone(),
+                        _ => return Ok(None),
+                    };
+                    let ztype = match map.get("type") {
+                        Some(GqlValue::String(s)) => s.clone(),
+                        _ => return Ok(None),
+                    };
+                    if ztype != target_table {
+                        return Ok(None);
+                    }
+                    let pool = ctx.data::<crate::read_pool::ReadPool>()?;
+                    let schemas = ctx.data::<TypeSchemaMap>()?;
+                    let z = match pool.get_doogat(id).await {
+                        Ok(z) => z,
+                        Err(_) => return Ok(None),
+                    };
+                    let val = match schemas.0.get(&target_table) {
+                        Some(ts) => typed_doogat_to_value(&z, ts),
+                        None => doogat_to_value(&z),
+                    };
+                    Ok(Some(FieldValue::owned_any(val)))
+                })
+            },
+        ));
+    }
+    doogat
+}
+
 pub(crate) fn doogat_object(name: &str) -> Object {
     Object::new(name)
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))

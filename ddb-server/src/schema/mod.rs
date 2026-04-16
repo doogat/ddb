@@ -24,10 +24,19 @@ pub fn build_schema(
     type_schemas: Vec<TableSchema>,
     reloader: Option<Arc<SchemaReloader>>,
 ) -> Result<Schema, String> {
-    let type_defs = type_defs::build_type_defs();
+    let mut type_defs = type_defs::build_type_defs();
     let q = queries::build_query_fields(&type_schemas);
     let m = mutations::build_mutation_fields();
     let s = subscriptions::build_subscription_fields(&q.known_types, &type_schemas);
+
+    // PRD 00129 §4 (Option B): extend the base `Doogat` GraphQL object
+    // with one nested accessor per registered typedef. e.g. `Doogat.link`
+    // resolves to the `Link` typed object when the row's type is `link`,
+    // and null otherwise. Available on every mutation response and read
+    // path that returns a Doogat — eliminates the round-trip jink does
+    // today through `links(where:{id:eq:...})` after every mutation.
+    type_defs.doogat_type =
+        base_types::add_typed_doogat_accessors(type_defs.doogat_type, &type_schemas, &q.known_types);
 
     let mut dynamic_inputs = q.dynamic_inputs;
     dynamic_inputs.push(m.attach_input);
@@ -182,6 +191,35 @@ mod tests {
         assert!(
             sdl.contains("testItemChanged"),
             "SDL should contain subscription field 'testItemChanged', got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn doogat_object_includes_typed_accessor_per_typedef_prd_00129() {
+        // PRD 00129 §4 (Option B): every registered typedef gets a
+        // matching nested accessor on the base `Doogat` GraphQL type so
+        // mutation responses and read paths can pull typed fields in
+        // one round trip. The field name is the camelCased table name.
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let schemas = vec![
+            make_table_schema("link", vec![simple_column("url")]),
+            make_table_schema("category-membership", vec![simple_column("link")]),
+        ];
+
+        let schema = build_schema(actor, pool, schemas, None)
+            .expect("schema should build successfully");
+        let sdl = schema.sdl();
+
+        // Doogat picks up `link: Link` and `categoryMembership: CategoryMembership`.
+        assert!(
+            sdl.contains("link: Link"),
+            "Doogat must expose `link: Link` accessor, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("categoryMembership: CategoryMembership"),
+            "Doogat must expose camelCased `categoryMembership` accessor, got:\n{sdl}"
         );
     }
 
