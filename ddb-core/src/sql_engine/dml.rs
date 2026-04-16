@@ -1452,7 +1452,7 @@ impl<'a> SqlEngine<'a> {
         self.index
             .sql_conn()
             .execute(&sql, params.as_slice())
-            .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
+            .map_err(|e| classify_materialized_insert_error(e, schema, col_values))?;
         Ok(())
     }
 
@@ -1517,6 +1517,64 @@ impl<'a> SqlEngine<'a> {
                 set_clauses.push(format!("{col_name} = ?{}", vals.len()));
             }
         }
+    }
+}
+
+/// PRD 00129 §3a + §6: convert a SQLite error from
+/// `insert_materialized_row` into the appropriate structured DoogatError.
+/// Today the relevant case is the typedef `UNIQUE(...)` index hitting a
+/// duplicate tuple; SQLite emits a `SqliteFailure` with code
+/// `ConstraintUnique` and a message of the form
+/// `UNIQUE constraint failed: <table>.<col>[, <table>.<col>]...`. We
+/// extract the column names from the message (so the GraphQL extensions
+/// reflect what actually conflicted, not what the typedef declared in
+/// case multiple `UNIQUE(...)` groups exist on the same table) and look
+/// up the offending values from `col_values`. Anything else falls through
+/// to the legacy `DoogatError::SqlEngine(message)`.
+fn classify_materialized_insert_error(
+    err: rusqlite::Error,
+    schema: &TableSchema,
+    col_values: &BTreeMap<String, String>,
+) -> DoogatError {
+    use rusqlite::ErrorCode;
+    if let rusqlite::Error::SqliteFailure(ref ffi_err, ref msg) = err {
+        if ffi_err.code == ErrorCode::ConstraintViolation {
+            if let Some(detail) = msg.as_deref() {
+                if let Some(cols) = parse_unique_failure_columns(detail, &schema.table_name) {
+                    let values: Vec<String> = cols
+                        .iter()
+                        .map(|c| col_values.get(c).cloned().unwrap_or_default())
+                        .collect();
+                    return DoogatError::unique_violation(
+                        schema.table_name.clone(),
+                        cols,
+                        values,
+                    );
+                }
+            }
+        }
+    }
+    DoogatError::SqlEngine(err.to_string())
+}
+
+/// Pull the conflicting column names out of SQLite's
+/// `"UNIQUE constraint failed: t.col1, t.col2"` message, scoped to the
+/// expected table. Returns `None` when the message isn't a UNIQUE
+/// failure or doesn't reference the expected table — in that case the
+/// caller falls back to the legacy generic error.
+fn parse_unique_failure_columns(detail: &str, table_name: &str) -> Option<Vec<String>> {
+    let prefix = "UNIQUE constraint failed: ";
+    let rest = detail.strip_prefix(prefix)?;
+    let qualified_prefix = format!("{table_name}.");
+    let cols: Vec<String> = rest
+        .split(',')
+        .map(str::trim)
+        .filter_map(|tok| tok.strip_prefix(&qualified_prefix).map(str::to_string))
+        .collect();
+    if cols.is_empty() {
+        None
+    } else {
+        Some(cols)
     }
 }
 

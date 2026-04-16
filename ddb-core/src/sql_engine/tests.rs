@@ -1429,6 +1429,54 @@ fn create_unique_index_if_not_exists_accepted_as_no_op_prd_00129() {
     assert!(msg.contains("ignored"), "expected no-op message, got: {msg}");
 }
 
+// ── PRD 00129 §3a + §6: typedef UNIQUE produces UNIQUE_VIOLATION code ──
+
+#[test]
+fn unique_constraint_failure_emits_structured_unique_violation_prd_00129() {
+    // Per PRD 00129 §3a + §6, a typedef-declared UNIQUE that fires at
+    // insert_materialized_row produces DoogatError::Structured with
+    // code UNIQUE_VIOLATION and the {table, columns, values} extension
+    // fields. Pre-PRD 00129 the error came through as
+    // DoogatError::SqlEngine(<sqlite message>) with no code.
+    use crate::error::{DoogatError, ErrorValue};
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute(
+            "CREATE TABLE membership (title TEXT, link_id VARCHAR(255) NOT NULL, cat VARCHAR(255) NOT NULL, UNIQUE(link_id, cat))",
+        )
+        .unwrap();
+    engine
+        .execute("INSERT INTO membership (title, link_id, cat) VALUES ('a', 'L1', 'C1')")
+        .unwrap();
+    let err = engine
+        .execute("INSERT INTO membership (title, link_id, cat) VALUES ('b', 'L1', 'C1')")
+        .expect_err("duplicate must reject");
+    match err {
+        DoogatError::Structured {
+            code,
+            message,
+            context,
+        } => {
+            assert_eq!(code, "UNIQUE_VIOLATION");
+            assert!(
+                message.contains("UNIQUE constraint failed: membership.link_id"),
+                "message preserves SQLite wording: {message}"
+            );
+            let table = context.iter().find(|(k, _)| k == "table").unwrap();
+            assert_eq!(table.1, ErrorValue::String("membership".into()));
+            let cols = context.iter().find(|(k, _)| k == "columns").unwrap();
+            assert_eq!(
+                cols.1,
+                ErrorValue::List(vec!["link_id".into(), "cat".into()])
+            );
+            let vals = context.iter().find(|(k, _)| k == "values").unwrap();
+            assert_eq!(vals.1, ErrorValue::List(vec!["L1".into(), "C1".into()]));
+        }
+        other => panic!("expected Structured UNIQUE_VIOLATION, got: {other:?}"),
+    }
+}
+
 // ── PRD 00129 §2: ON DELETE action parsing ──
 
 #[test]
