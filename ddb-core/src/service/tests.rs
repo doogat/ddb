@@ -2594,6 +2594,109 @@ fn batch_create_typed_no_fields_with_only_nullable_columns_succeeds_prd_00129() 
 }
 
 #[test]
+fn batch_create_many_ignore_duplicate_does_not_write_half_row_prd_00129() {
+    // PRD 00129 §1 (createMany half): when `onConflict: IGNORE` skips a
+    // duplicate, neither the base `doogats` row nor the materialized
+    // type-table row is written for that item. Only the new items go in.
+    // The pre-T3 path silently passed because the materialized table was
+    // never written either way; this test pins the new typed-write path.
+    let (_tmp, svc) = fresh_svc();
+    setup_widget_typedef(&svc);
+
+    let mut fields_a = std::collections::BTreeMap::new();
+    fields_a.insert(
+        "name".to_string(),
+        crate::types::Value::String("a".to_string()),
+    );
+
+    // Seed: create the original widget so the second batch hits a conflict.
+    let first = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: "Widget A".to_string(),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields: fields_a.clone(),
+            on_conflict: crate::types::ConflictAction::Ignore,
+        }])
+        .unwrap();
+    let original_id = first[0].meta.id.as_ref().unwrap().0.clone();
+
+    let widget_count_before: i64 = svc
+        .index
+        .conn
+        .query_row("SELECT COUNT(*) FROM widget", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        widget_count_before, 1,
+        "first batch must have materialized exactly 1 widget row"
+    );
+
+    // Mixed batch: one new widget + one duplicate.
+    let mut fields_b = std::collections::BTreeMap::new();
+    fields_b.insert(
+        "name".to_string(),
+        crate::types::Value::String("b".to_string()),
+    );
+
+    let results = svc
+        .batch_create(&[
+            crate::types::BatchCreateInput {
+                title: "Widget A Duplicate".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields: fields_a,
+                on_conflict: crate::types::ConflictAction::Ignore,
+            },
+            crate::types::BatchCreateInput {
+                title: "Widget B".to_string(),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields: fields_b,
+                on_conflict: crate::types::ConflictAction::Ignore,
+            },
+        ])
+        .unwrap();
+
+    assert_eq!(results.len(), 2, "both slots return a doogat");
+    let returned_a_id = results[0].meta.id.as_ref().unwrap().0.clone();
+    let returned_b_id = results[1].meta.id.as_ref().unwrap().0.clone();
+    assert_eq!(
+        returned_a_id, original_id,
+        "duplicate slot must return the original widget id"
+    );
+    assert_ne!(returned_b_id, original_id, "second slot must be a new id");
+
+    // Verify exactly 2 widget rows in the materialized table — no
+    // half-row, no double-write, no clobber of the original.
+    let widget_count_after: i64 = svc
+        .index
+        .conn
+        .query_row("SELECT COUNT(*) FROM widget", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        widget_count_after, 2,
+        "exactly 2 widget rows after IGNORE skip + new insert"
+    );
+
+    let original_still_present: i64 = svc
+        .index
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM widget WHERE id = ?1",
+            rusqlite::params![original_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        original_still_present, 1,
+        "original widget row must still be present after IGNORE"
+    );
+}
+
+#[test]
 fn batch_create_untyped_doogat_unaffected_by_typed_validation_prd_00129() {
     // Sanity: untyped creates (no doogat_type) bypass typedef validation
     // entirely — same behavior as before PRD 00129.
