@@ -2366,4 +2366,64 @@ pass "47: VARCHAR -> TEXT widening persists and accepts long values"
 cd "$TMPDIR"
 rm -rf "$AC_DIR"
 
+# 48. PRD 00129: typed write blocker & simplification SQL surface.
+# Server is not running at this point; drive via CLI.
+echo "=== PRD 00129: typed write blockers + ON DELETE CASCADE + INDEX no-op ==="
+P9_DIR="$(mktemp -d)"
+cd "$P9_DIR"
+$DDB init >/dev/null
+
+# §3b: CREATE INDEX IF NOT EXISTS is accepted as a no-op so legacy
+# startup migrations keep working.
+$DDB query "CREATE TABLE p9_link (title TEXT, url VARCHAR(255))" >/dev/null
+P9_INDEX_OUT="$($DDB query "CREATE INDEX IF NOT EXISTS idx_p9_url ON p9_link(url)" 2>&1)"
+printf '%s' "$P9_INDEX_OUT" | grep -q "ignored"
+pass "48: CREATE INDEX IF NOT EXISTS accepted as no-op"
+
+# Plain CREATE INDEX still rejects.
+P9_PLAIN_OUT="$($DDB query "CREATE INDEX idx_plain ON p9_link(url)" 2>&1 || true)"
+printf '%s' "$P9_PLAIN_OUT" | grep -q "CREATE INDEX not supported"
+pass "48: plain CREATE INDEX still rejects"
+
+# §2: ON DELETE CASCADE walks one level.
+$DDB query "CREATE TABLE p9_membership (title TEXT, link VARCHAR(255) REFERENCES p9_link(id) ON DELETE CASCADE)" >/dev/null
+P9_LINK_ID=$($DDB query "INSERT INTO p9_link (title, url) VALUES ('Parent', 'https://x')" | tr -d '[:space:]')
+sleep 1
+P9_MEM_ID=$($DDB query "INSERT INTO p9_membership (title, link) VALUES ('Child', '$P9_LINK_ID')" | tr -d '[:space:]')
+[ -n "$P9_MEM_ID" ]
+pass "48: typed insert into cascade-bound child succeeds"
+
+$DDB delete "$P9_LINK_ID" >/dev/null
+P9_AFTER_LINK="$($DDB query "SELECT id FROM p9_link WHERE id = '$P9_LINK_ID'" 2>&1 || true)"
+P9_AFTER_MEM="$($DDB query "SELECT id FROM p9_membership WHERE id = '$P9_MEM_ID'" 2>&1 || true)"
+printf '%s' "$P9_AFTER_LINK" | grep -qv "$P9_LINK_ID"
+printf '%s' "$P9_AFTER_MEM" | grep -qv "$P9_MEM_ID"
+pass "48: ON DELETE CASCADE removes parent and child in one delete"
+
+# §2: ON DELETE RESTRICT (default) blocks parent delete.
+$DDB query "CREATE TABLE p9_blocker (title TEXT, link VARCHAR(255) NOT NULL REFERENCES p9_link(id))" >/dev/null
+P9_LINK_ID2=$($DDB query "INSERT INTO p9_link (title, url) VALUES ('R Parent', 'https://r')" | tr -d '[:space:]')
+sleep 1
+$DDB query "INSERT INTO p9_blocker (title, link) VALUES ('Block', '$P9_LINK_ID2')" >/dev/null
+P9_RESTRICT_OUT="$($DDB delete "$P9_LINK_ID2" 2>&1 || true)"
+printf '%s' "$P9_RESTRICT_OUT" | grep -q "NOT NULL REFERENCES from p9_blocker.link"
+pass "48: ON DELETE RESTRICT (default) rejects parent delete"
+
+# §2: cascade cycle detection.
+$DDB query "CREATE TABLE p9_a (title TEXT)" >/dev/null
+$DDB query "CREATE TABLE p9_b (title TEXT)" >/dev/null
+$DDB query "ALTER TABLE p9_a ADD COLUMN b VARCHAR(255) REFERENCES p9_b(id) ON DELETE CASCADE" >/dev/null
+$DDB query "ALTER TABLE p9_b ADD COLUMN a VARCHAR(255) REFERENCES p9_a(id) ON DELETE CASCADE" >/dev/null
+P9_A_ID=$($DDB query "INSERT INTO p9_a (title) VALUES ('A')" | tr -d '[:space:]')
+sleep 1
+P9_B_ID=$($DDB query "INSERT INTO p9_b (title) VALUES ('B')" | tr -d '[:space:]')
+$DDB query "UPDATE p9_a SET b = '$P9_B_ID' WHERE id = '$P9_A_ID'" >/dev/null
+$DDB query "UPDATE p9_b SET a = '$P9_A_ID' WHERE id = '$P9_B_ID'" >/dev/null
+P9_CYCLE_OUT="$($DDB delete "$P9_A_ID" 2>&1 || true)"
+printf '%s' "$P9_CYCLE_OUT" | grep -q "cascade delete would form a cycle"
+pass "48: ON DELETE CASCADE cycle detection rejects"
+
+cd "$TMPDIR"
+rm -rf "$P9_DIR"
+
 echo "=== all integration tests passed ==="

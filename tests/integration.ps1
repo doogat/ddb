@@ -2301,5 +2301,62 @@ pass "47: VARCHAR -> TEXT widening persists and accepts long values"
 Pop-Location
 Remove-Item -Recurse -Force $AC_DIR
 
+# 48. PRD 00129: typed write blockers + ON DELETE CASCADE + INDEX no-op.
+Write-Host "=== PRD 00129: typed write blockers + ON DELETE CASCADE + INDEX no-op ==="
+$P9_DIR = New-TempDir
+Push-Location $P9_DIR
+ddb init | Out-Null
+
+# §3b: CREATE INDEX IF NOT EXISTS is accepted as a no-op.
+ddb query "CREATE TABLE p9_link (title TEXT, url VARCHAR(255))" | Out-Null
+$p9IndexOut = ddb query "CREATE INDEX IF NOT EXISTS idx_p9_url ON p9_link(url)" 2>&1
+if ($p9IndexOut -notmatch "ignored") { throw "48: CREATE INDEX IF NOT EXISTS should emit 'ignored': $p9IndexOut" }
+pass "48: CREATE INDEX IF NOT EXISTS accepted as no-op"
+
+$p9PlainOut = ddb query "CREATE INDEX idx_plain ON p9_link(url)" 2>&1
+if ($p9PlainOut -notmatch "CREATE INDEX not supported") { throw "48: plain CREATE INDEX should reject: $p9PlainOut" }
+pass "48: plain CREATE INDEX still rejects"
+
+# §2: ON DELETE CASCADE walks one level.
+ddb query "CREATE TABLE p9_membership (title TEXT, link VARCHAR(255) REFERENCES p9_link(id) ON DELETE CASCADE)" | Out-Null
+$p9LinkId = (ddb query "INSERT INTO p9_link (title, url) VALUES ('Parent', 'https://x')").Trim()
+Start-Sleep -Seconds 1
+$p9MemId = (ddb query "INSERT INTO p9_membership (title, link) VALUES ('Child', '$p9LinkId')").Trim()
+if (-not $p9MemId) { throw "48: typed insert into cascade-bound child failed" }
+pass "48: typed insert into cascade-bound child succeeds"
+
+ddb delete $p9LinkId | Out-Null
+$p9AfterLink = ddb query "SELECT id FROM p9_link WHERE id = '$p9LinkId'" 2>&1
+$p9AfterMem = ddb query "SELECT id FROM p9_membership WHERE id = '$p9MemId'" 2>&1
+if ($p9AfterLink -match $p9LinkId) { throw "48: parent should be gone after CASCADE delete" }
+if ($p9AfterMem -match $p9MemId) { throw "48: child should be gone after CASCADE delete" }
+pass "48: ON DELETE CASCADE removes parent and child in one delete"
+
+# §2: ON DELETE RESTRICT (default) blocks parent delete.
+ddb query "CREATE TABLE p9_blocker (title TEXT, link VARCHAR(255) NOT NULL REFERENCES p9_link(id))" | Out-Null
+$p9LinkId2 = (ddb query "INSERT INTO p9_link (title, url) VALUES ('R Parent', 'https://r')").Trim()
+Start-Sleep -Seconds 1
+ddb query "INSERT INTO p9_blocker (title, link) VALUES ('Block', '$p9LinkId2')" | Out-Null
+$p9RestrictOut = ddb delete $p9LinkId2 2>&1
+if ($p9RestrictOut -notmatch "NOT NULL REFERENCES from p9_blocker.link") { throw "48: RESTRICT should block parent delete: $p9RestrictOut" }
+pass "48: ON DELETE RESTRICT (default) rejects parent delete"
+
+# §2: cascade cycle detection.
+ddb query "CREATE TABLE p9_a (title TEXT)" | Out-Null
+ddb query "CREATE TABLE p9_b (title TEXT)" | Out-Null
+ddb query "ALTER TABLE p9_a ADD COLUMN b VARCHAR(255) REFERENCES p9_b(id) ON DELETE CASCADE" | Out-Null
+ddb query "ALTER TABLE p9_b ADD COLUMN a VARCHAR(255) REFERENCES p9_a(id) ON DELETE CASCADE" | Out-Null
+$p9AId = (ddb query "INSERT INTO p9_a (title) VALUES ('A')").Trim()
+Start-Sleep -Seconds 1
+$p9BId = (ddb query "INSERT INTO p9_b (title) VALUES ('B')").Trim()
+ddb query "UPDATE p9_a SET b = '$p9BId' WHERE id = '$p9AId'" | Out-Null
+ddb query "UPDATE p9_b SET a = '$p9AId' WHERE id = '$p9BId'" | Out-Null
+$p9CycleOut = ddb delete $p9AId 2>&1
+if ($p9CycleOut -notmatch "cascade delete would form a cycle") { throw "48: cycle should be detected: $p9CycleOut" }
+pass "48: ON DELETE CASCADE cycle detection rejects"
+
+Pop-Location
+Remove-Item -Recurse -Force $P9_DIR
+
 Cleanup
 Write-Host "=== all integration tests passed ==="
