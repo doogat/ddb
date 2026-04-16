@@ -2696,6 +2696,174 @@ fn batch_create_many_ignore_duplicate_does_not_write_half_row_prd_00129() {
     );
 }
 
+// ── PRD 00129 §2: ON DELETE CASCADE walk ──
+//
+// Tests use executeSql INSERT (not createDoogat) for typed REFERENCES
+// rows because the SQL path correctly routes REFERENCES values into the
+// reference zone, where check_restrict_blocks_delete /
+// collect_cascade_children look for them. Using createDoogat would put
+// the value into frontmatter `extra`, which doesn't materialize into the
+// reference column. (See PRD 00129 follow-up note: createDoogat could
+// also route REFERENCES correctly, but that's a wider zone-handling
+// change beyond T3's scope.)
+
+fn parent_id_from_insert(svc: &mut DoogatService, sql: &str) -> String {
+    match svc.execute_sql(sql).unwrap() {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected SqlResult::Ok with id, got {other:?}"),
+    }
+}
+
+#[test]
+fn delete_cascades_to_referencing_rows_when_marked_cascade_prd_00129() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT)").unwrap();
+    svc.execute_sql(
+        "CREATE TABLE membership (title TEXT, link VARCHAR(255) NOT NULL REFERENCES link(id) ON DELETE CASCADE)",
+    )
+    .unwrap();
+
+    let link_id = parent_id_from_insert(&mut svc, "INSERT INTO link (title) VALUES ('Parent')");
+    svc.execute_sql(&format!(
+        "INSERT INTO membership (title, link) VALUES ('Child', '{link_id}')"
+    ))
+    .unwrap();
+
+    svc.delete_doogat(&link_id, &format!("delete {link_id}"))
+        .expect("CASCADE delete must succeed");
+
+    let link_count: i64 = svc
+        .index
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM link WHERE id = ?1",
+            rusqlite::params![link_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(link_count, 0, "parent link row removed");
+    let mem_count: i64 = svc
+        .index
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM membership WHERE link = ?1",
+            rusqlite::params![link_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        mem_count, 0,
+        "child membership row removed by CASCADE walk"
+    );
+}
+
+#[test]
+fn delete_blocks_when_referencing_column_is_restrict_prd_00129() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT)").unwrap();
+    svc.execute_sql(
+        "CREATE TABLE blocker (title TEXT, link VARCHAR(255) NOT NULL REFERENCES link(id))",
+    )
+    .unwrap();
+
+    let link_id = parent_id_from_insert(&mut svc, "INSERT INTO link (title) VALUES ('Parent')");
+    svc.execute_sql(&format!(
+        "INSERT INTO blocker (title, link) VALUES ('Blocks', '{link_id}')"
+    ))
+    .unwrap();
+
+    let err = svc
+        .delete_doogat(&link_id, "delete")
+        .expect_err("RESTRICT must block parent delete");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("NOT NULL REFERENCES from blocker.link"),
+        "expected REFERENCES_VIOLATION wording, got: {msg}"
+    );
+}
+
+#[test]
+fn delete_with_mixed_restrict_cascade_columns_behaves_per_column_prd_00129() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT)").unwrap();
+    svc.execute_sql("CREATE TABLE category (title TEXT)")
+        .unwrap();
+    svc.execute_sql(
+        "CREATE TABLE membership (title TEXT, \
+         link VARCHAR(255) NOT NULL REFERENCES link(id) ON DELETE CASCADE, \
+         category VARCHAR(255) NOT NULL REFERENCES category(id) ON DELETE RESTRICT)",
+    )
+    .unwrap();
+
+    let link_id =
+        parent_id_from_insert(&mut svc, "INSERT INTO link (title) VALUES ('Parent Link')");
+    let cat_id = parent_id_from_insert(
+        &mut svc,
+        "INSERT INTO category (title) VALUES ('Parent Cat')",
+    );
+    svc.execute_sql(&format!(
+        "INSERT INTO membership (title, link, category) VALUES ('M', '{link_id}', '{cat_id}')"
+    ))
+    .unwrap();
+
+    let err = svc
+        .delete_doogat(&cat_id, "delete cat")
+        .expect_err("RESTRICT side must block");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("NOT NULL REFERENCES from membership.category"),
+        "expected RESTRICT block on category side, got: {msg}"
+    );
+
+    svc.delete_doogat(&link_id, "delete link")
+        .expect("CASCADE side must allow delete");
+    let mem_count: i64 = svc
+        .index
+        .conn
+        .query_row("SELECT COUNT(*) FROM membership", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(mem_count, 0, "membership cascaded away with link delete");
+}
+
+#[test]
+fn delete_with_cascade_cycle_rejects_prd_00129() {
+    // Two-table cycle: A.b REFERENCES B ON DELETE CASCADE, B.a REFERENCES
+    // A ON DELETE CASCADE. The cascade walk must detect the cycle and
+    // reject rather than loop forever.
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE node_a (title TEXT)").unwrap();
+    svc.execute_sql("CREATE TABLE node_b (title TEXT)").unwrap();
+    svc.execute_sql(
+        "ALTER TABLE node_a ADD COLUMN b VARCHAR(255) REFERENCES node_b(id) ON DELETE CASCADE",
+    )
+    .unwrap();
+    svc.execute_sql(
+        "ALTER TABLE node_b ADD COLUMN a VARCHAR(255) REFERENCES node_a(id) ON DELETE CASCADE",
+    )
+    .unwrap();
+
+    let a_id = parent_id_from_insert(&mut svc, "INSERT INTO node_a (title) VALUES ('A')");
+    let b_id = parent_id_from_insert(&mut svc, "INSERT INTO node_b (title) VALUES ('B')");
+    // Cross-link the two rows after creation so each references the other.
+    svc.execute_sql(&format!(
+        "UPDATE node_a SET b = '{b_id}' WHERE id = '{a_id}'"
+    ))
+    .unwrap();
+    svc.execute_sql(&format!(
+        "UPDATE node_b SET a = '{a_id}' WHERE id = '{b_id}'"
+    ))
+    .unwrap();
+
+    let err = svc
+        .delete_doogat(&a_id, "delete a")
+        .expect_err("cycle must be detected");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("cascade delete would form a cycle"),
+        "expected CASCADE_CYCLE message, got: {msg}"
+    );
+}
+
 #[test]
 fn batch_create_untyped_doogat_unaffected_by_typed_validation_prd_00129() {
     // Sanity: untyped creates (no doogat_type) bypass typedef validation

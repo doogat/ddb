@@ -603,49 +603,110 @@ impl<G: GitBackend> DoogatService<G> {
 
     /// Delete a doogat by ID. Returns broken backlinks `(source_id, source_path)`.
     ///
-    /// Cascade behavior: junction table rows and dangling wikilinks in
-    /// referencing files are cleaned up atomically in a single git commit.
+    /// Cascade behavior:
+    /// - Junction table rows and dangling wikilinks in referencing files
+    ///   are cleaned up atomically in a single git commit.
+    /// - PRD 00129 §2: typed-table rows that reference the deleted id
+    ///   through an `ON DELETE CASCADE` column are deleted recursively in
+    ///   the same commit. Cycle detection rejects with `CASCADE_CYCLE`.
     pub fn delete_doogat(&self, id: &str, message: &str) -> Result<Vec<(String, String)>> {
         self.ensure_fresh()?;
-        let path = self.index.resolve_path(id)?;
-        // RESTRICT: reject the delete if any typed-table row holds `id` in a
-        // `NOT NULL REFERENCES` column. Wikilink stripping would otherwise
-        // leave that row with NULL in a NOT NULL column (#10).
-        self.index.check_restrict_blocks_delete(&self.repo, id)?;
-        let broken = self.index.backlinking_doogat_paths(id)?;
-        // Look up type before removing from index (needed for cascade)
-        let doogat_type: Option<String> = self
-            .index
-            .conn
-            .query_row(
-                "SELECT type FROM doogats WHERE id = ?1",
-                params![id],
-                |row| row.get(0),
-            )
-            .ok();
-        // Collect reference edits before deleting
-        let ref_edits = self.collect_ref_edits(id, &path)?;
-        // Update index
-        self.index.remove_doogat(id)?;
-        self.nosql_remove_doogat(id);
-        // Cascade: remove materialized type table row and junction table rows
-        if let Some(ref dtype) = doogat_type {
-            if !dtype.is_empty() && dtype != "_typedef" {
-                // Remove from materialized type table (ignore error if table doesn't exist)
-                let _ = self.index.conn.execute(
-                    &format!("DELETE FROM \"{}\" WHERE id = ?1", dtype),
-                    params![id],
-                );
-                self.index.cascade_junction_cleanup(&self.repo, dtype, id)?;
+        // Build the full cascade plan up front so the commit covers the
+        // whole graph atomically (parent + every cascade-collected
+        // descendant + their reference edits).
+        let plan = self.build_cascade_delete_plan(id)?;
+        self.execute_delete_plan(plan, id, message)
+    }
+
+    /// PRD 00129 §2: walk the CASCADE graph rooted at `id`, returning the
+    /// ordered list of (id, path) pairs to delete. Cycle detection rejects
+    /// with `CASCADE_CYCLE` listing the offending tables.
+    fn build_cascade_delete_plan(&self, id: &str) -> Result<Vec<(String, String)>> {
+        use std::collections::BTreeSet;
+        let root_path = self.index.resolve_path(id)?;
+        let mut ordered: Vec<(String, String)> = vec![(id.to_string(), root_path)];
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        seen.insert(id.to_string());
+        // Process FIFO so children of children land in a stable, depth-first
+        // order. Cycle = revisiting a parent we've already enqueued; we
+        // collect the tables involved for the error context.
+        let mut cursor = 0;
+        while cursor < ordered.len() {
+            let parent = ordered[cursor].0.clone();
+            cursor += 1;
+            // RESTRICT check applies at every level: if any cascade-deleted
+            // child has a RESTRICT-marked back-reference, the whole delete
+            // rejects.
+            self.index.check_restrict_blocks_delete(&self.repo, &parent)?;
+            let children = self.index.collect_cascade_children(&self.repo, &parent)?;
+            for (child_table, child_id) in children {
+                if !seen.insert(child_id.clone()) {
+                    return Err(DoogatError::cascade_cycle([child_table, parent.clone()]));
+                }
+                let child_path = match self.index.resolve_path(&child_id) {
+                    Ok(p) => p,
+                    Err(_) => continue, // child already gone? skip silently
+                };
+                ordered.push((child_id, child_path));
             }
         }
-        // Atomic commit: delete + reference edits in one operation
+        Ok(ordered)
+    }
+
+    /// Execute a pre-collected cascade plan: collect ref edits, update the
+    /// index, and commit every deletion + edit in a single batch.
+    fn execute_delete_plan(
+        &self,
+        plan: Vec<(String, String)>,
+        root_id: &str,
+        message: &str,
+    ) -> Result<Vec<(String, String)>> {
+        use std::collections::BTreeSet;
+        let broken = self.index.backlinking_doogat_paths(root_id)?;
+        // Paths that will be deleted in this batch — we must not emit a
+        // write edit for them (commit_batch can't both write and delete
+        // the same path in one commit; git2 errors on the conflicting
+        // index op). Edits to other backlinking files are still emitted.
+        let delete_paths: BTreeSet<&str> =
+            plan.iter().map(|(_, p)| p.as_str()).collect();
+        let mut ref_edits: Vec<(String, String)> = Vec::new();
+        for (id, path) in &plan {
+            let edits = self.collect_ref_edits(id, path)?;
+            for (p, c) in edits {
+                if delete_paths.contains(p.as_str()) {
+                    continue;
+                }
+                ref_edits.push((p, c));
+            }
+        }
+        for (id, _path) in &plan {
+            let doogat_type: Option<String> = self
+                .index
+                .conn
+                .query_row(
+                    "SELECT type FROM doogats WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .ok();
+            self.index.remove_doogat(id)?;
+            self.nosql_remove_doogat(id);
+            if let Some(ref dtype) = doogat_type {
+                if !dtype.is_empty() && dtype != "_typedef" {
+                    let _ = self.index.conn.execute(
+                        &format!("DELETE FROM \"{}\" WHERE id = ?1", dtype),
+                        params![id],
+                    );
+                    self.index.cascade_junction_cleanup(&self.repo, dtype, id)?;
+                }
+            }
+        }
         let writes: Vec<(&str, &str)> = ref_edits
             .iter()
             .map(|(p, c)| (p.as_str(), c.as_str()))
             .collect();
-        self.repo.commit_batch(&writes, &[&path], message)?;
-        // Sync stored HEAD to avoid spurious incremental_reindex on next call
+        let deletes: Vec<&str> = plan.iter().map(|(_, p)| p.as_str()).collect();
+        self.repo.commit_batch(&writes, &deletes, message)?;
         self.index.store_head(&self.repo.head_oid()?.0)?;
         Ok(broken)
     }
