@@ -1074,6 +1074,7 @@ mod tests {
                 search_boost: None,
                 allowed_values: None,
                 default_value: None,
+                on_delete: ddb_core::types::OnDeleteAction::Restrict,
             }],
             crdt_strategy: None,
             template_sections: vec![],
@@ -1244,6 +1245,7 @@ mod tests {
             search_boost: None,
             allowed_values: None,
             default_value: None,
+            on_delete: ddb_core::types::OnDeleteAction::Restrict,
         };
 
         // After the change, known_types is HashMap<String, String>
@@ -1272,6 +1274,7 @@ mod tests {
             search_boost: None,
             allowed_values: None,
             default_value: None,
+            on_delete: ddb_core::types::OnDeleteAction::Restrict,
         };
 
         let known_types: HashMap<String, String> = HashMap::new();

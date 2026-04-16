@@ -103,6 +103,7 @@ fn register_shared_types(
         .register(crate::filter::float_filter())
         .register(crate::filter::bool_filter())
         .register(crate::filter::id_filter())
+        .register(crate::filter::tags_filter())
         .register(crate::filter::sort_order_enum())
 }
 
@@ -147,6 +148,7 @@ mod tests {
             search_boost: None,
             allowed_values: None,
             default_value: None,
+            on_delete: ddb_core::types::OnDeleteAction::Restrict,
         }
     }
 
@@ -331,6 +333,7 @@ mod tests {
                         search_boost: None,
                         allowed_values: None,
                         default_value: None,
+                        on_delete: ddb_core::types::OnDeleteAction::Restrict,
                     },
                 ],
             ),

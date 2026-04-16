@@ -59,6 +59,32 @@ pub fn id_filter() -> InputObject {
         .field(InputValue::new("in", TypeRef::named_list(TypeRef::ID)))
 }
 
+/// `TagsFilter` — match the tag set on the doogat-level `_ddb_tags`
+/// index. Available on every per-type query's `where` input. PRD 00129
+/// §5. The filter composes with column filters via the same conjunction
+/// the rest of the where clause uses; combinator semantics:
+/// - `contains`: row has the named tag.
+/// - `containsAll`: row has every listed tag (one EXISTS per tag,
+///   AND-ed).
+/// - `containsAny`: row has at least one of the listed tags.
+pub fn tags_filter() -> InputObject {
+    InputObject::new("TagsFilter")
+        .description(
+            "Filter doogats by tag set. `contains` matches a single tag, `containsAll` matches \
+             rows that carry every listed tag, `containsAny` matches rows with at least one \
+             listed tag. Empty `containsAll` / `containsAny` match nothing (mirrors empty `in`).",
+        )
+        .field(InputValue::new("contains", TypeRef::named(TypeRef::STRING)))
+        .field(InputValue::new(
+            "containsAll",
+            TypeRef::named_nn_list_nn(TypeRef::STRING),
+        ))
+        .field(InputValue::new(
+            "containsAny",
+            TypeRef::named_nn_list_nn(TypeRef::STRING),
+        ))
+}
+
 /// Returns the GraphQL type name for the filter matching a column's data type.
 pub fn filter_type_for_column(col: &ddb_core::types::ColumnDef) -> &'static str {
     if col.references.is_some() {
@@ -95,6 +121,13 @@ pub fn build_where_input(type_name: &str, schema: &TableSchema) -> InputObject {
     }
     if !sanitized.iter().any(|n| n == "title") {
         input = input.field(InputValue::new("title", TypeRef::named("StringFilter")));
+    }
+
+    // PRD 00129 §5: every per-type Where input exposes tag filtering
+    // backed by the doogat-level `_ddb_tags` table. Hidden when a typedef
+    // declares its own `tags` column to avoid a name collision.
+    if !sanitized.iter().any(|n| n == "tags") {
+        input = input.field(InputValue::new("tags", TypeRef::named("TagsFilter")));
     }
 
     // Compound combinators (self-referencing)
@@ -451,6 +484,19 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
                     conditions.push(cond);
                 }
             }
+            // PRD 00129 §5: `tags` is a synthetic field backed by the
+            // doogat-level `_ddb_tags` index, not a column on the
+            // materialized type table. It only fires when the typedef
+            // doesn't have its own `tags` column (the where-input
+            // generator hides `TagsFilter` in that case so this branch
+            // only runs for the synthetic path).
+            "tags" if !schema.columns.iter().any(|c| c.name == "tags") => {
+                if let Some(cond) =
+                    build_tags_filter_condition(value, &schema.table_name, &mut params)
+                {
+                    conditions.push(cond);
+                }
+            }
             _ => build_column_conditions(field, value, schema, &mut conditions, &mut params),
         }
     }
@@ -462,6 +508,79 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
             sql: conditions.join(" AND "),
             params,
         }
+    }
+}
+
+/// PRD 00129 §5: build the SQL fragment for a `TagsFilter` value.
+///
+/// Returns the EXISTS / aggregate-COUNT clause that joins the
+/// materialized type table against the doogat-level `_ddb_tags` index.
+/// All values are bound parameters (never interpolated). Empty lists
+/// produce an always-false condition (matches no rows) to mirror the
+/// `in: []` semantics elsewhere in the where input.
+fn build_tags_filter_condition(
+    value: &GqlValue,
+    table_name: &str,
+    params: &mut Vec<SqlValue>,
+) -> Option<String> {
+    let GqlValue::Object(filter) = value else {
+        return None;
+    };
+    let mut clauses = Vec::new();
+    for (op, val) in filter {
+        let op_str = op.as_str();
+        match op_str {
+            "contains" => {
+                let GqlValue::String(tag) = val else { continue };
+                params.push(SqlValue::Text(tag.clone()));
+                clauses.push(format!(
+                    "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag = ?)",
+                    table = table_name,
+                ));
+            }
+            "containsAll" => {
+                let GqlValue::List(items) = val else { continue };
+                if items.is_empty() {
+                    clauses.push("0 = 1".to_string());
+                    continue;
+                }
+                for item in items {
+                    let GqlValue::String(tag) = item else { continue };
+                    params.push(SqlValue::Text(tag.clone()));
+                    clauses.push(format!(
+                        "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag = ?)",
+                        table = table_name,
+                    ));
+                }
+            }
+            "containsAny" => {
+                let GqlValue::List(items) = val else { continue };
+                if items.is_empty() {
+                    clauses.push("0 = 1".to_string());
+                    continue;
+                }
+                let mut placeholders = Vec::with_capacity(items.len());
+                for item in items {
+                    let GqlValue::String(tag) = item else { continue };
+                    params.push(SqlValue::Text(tag.clone()));
+                    placeholders.push("?".to_string());
+                }
+                if placeholders.is_empty() {
+                    continue;
+                }
+                clauses.push(format!(
+                    "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag IN ({tags}))",
+                    table = table_name,
+                    tags = placeholders.join(", "),
+                ));
+            }
+            _ => {}
+        }
+    }
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(format!("({})", clauses.join(" AND ")))
     }
 }
 
@@ -618,6 +737,7 @@ mod tests {
                     search_boost: None,
                     allowed_values: None,
                     default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
                 },
                 ColumnDef {
                     name: "priority".to_string(),
@@ -628,6 +748,7 @@ mod tests {
                     search_boost: None,
                     allowed_values: None,
                     default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
                 },
                 ColumnDef {
                     name: "status".to_string(),
@@ -638,6 +759,7 @@ mod tests {
                     search_boost: None,
                     allowed_values: None,
                     default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
                 },
                 ColumnDef {
                     name: "category".to_string(),
@@ -648,6 +770,7 @@ mod tests {
                     search_boost: None,
                     allowed_values: None,
                     default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
                 },
             ],
             crdt_strategy: None,
@@ -940,6 +1063,7 @@ mod tests {
                 search_boost: None,
                 allowed_values: None,
                 default_value: None,
+                on_delete: ddb_core::types::OnDeleteAction::Restrict,
             }],
             crdt_strategy: None,
             template_sections: Vec::new(),
@@ -1114,6 +1238,7 @@ mod tests {
             .register(string_filter())
             .register(int_filter())
             .register(id_filter())
+            .register(tags_filter())
             .register(input)
             .register(async_graphql::dynamic::Object::new("Query").field(
                 Field::new("dummy", TypeRef::named(TypeRef::STRING), |_| {
@@ -1125,5 +1250,177 @@ mod tests {
         let sdl = sdl_schema.sdl();
         assert!(sdl.contains("id: IDFilter"), "SDL must contain 'id: IDFilter' in BookmarkWhere, got:\n{sdl}");
         assert!(sdl.contains("title: StringFilter"), "SDL must contain 'title: StringFilter' in BookmarkWhere, got:\n{sdl}");
+    }
+
+    // ── PRD 00129 §5: tags filter on per-type Where inputs ──
+
+    fn schema_with_table(name: &str, columns: Vec<&str>) -> TableSchema {
+        TableSchema {
+            table_name: name.into(),
+            columns: columns
+                .into_iter()
+                .map(|c| ColumnDef {
+                    name: c.into(),
+                    data_type: "TEXT".into(),
+                    references: None,
+                    zone: None,
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
+                })
+                .collect(),
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+            unique_together: None,
+        }
+    }
+
+    #[test]
+    fn tags_filter_input_object_exposes_three_operators_prd_00129() {
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(tags_filter())
+            .register(async_graphql::dynamic::Object::new("Query").field(
+                Field::new("dummy", TypeRef::named(TypeRef::STRING), |_| {
+                    FieldFuture::new(async { Ok(Option::<FieldValue>::None) })
+                }),
+            ))
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+        assert!(sdl.contains("input TagsFilter"), "{sdl}");
+        assert!(sdl.contains("contains: String"), "{sdl}");
+        assert!(sdl.contains("containsAll: [String!]"), "{sdl}");
+        assert!(sdl.contains("containsAny: [String!]"), "{sdl}");
+    }
+
+    #[test]
+    fn build_where_input_includes_tags_field_when_no_collision_prd_00129() {
+        // Default: typed `link` table has no `tags` column, so the
+        // synthetic `tags: TagsFilter` is added by the where builder.
+        use ddb_core::types::ColumnDef;
+        let _ = ColumnDef {
+            name: "url".into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: None,
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+            on_delete: ddb_core::types::OnDeleteAction::Restrict,
+        };
+        let schema = schema_with_table("link", vec!["title", "url"]);
+        let input = build_where_input("Link", &schema);
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(string_filter())
+            .register(int_filter())
+            .register(float_filter())
+            .register(bool_filter())
+            .register(id_filter())
+            .register(tags_filter())
+            .register(input)
+            .register(async_graphql::dynamic::Object::new("Query").field(
+                Field::new("dummy", TypeRef::named(TypeRef::STRING), |_| {
+                    FieldFuture::new(async { Ok(Option::<FieldValue>::None) })
+                }),
+            ))
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+        assert!(
+            sdl.contains("tags: TagsFilter"),
+            "LinkWhere must expose tags: TagsFilter, got:\n{sdl}"
+        );
+    }
+
+    #[test]
+    fn tags_contains_emits_exists_against_ddb_tags_prd_00129() {
+        let schema = schema_with_table("link", vec!["title", "url"]);
+        let mut filter = IndexMap::new();
+        filter.insert(Name::new("contains"), GqlValue::String("rust".into()));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("tags"), GqlValue::Object(filter));
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &schema);
+        assert_eq!(
+            wc.sql,
+            r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?))"#
+        );
+        assert_eq!(wc.params, vec![SqlValue::Text("rust".into())]);
+    }
+
+    #[test]
+    fn tags_contains_all_emits_exists_per_tag_prd_00129() {
+        let schema = schema_with_table("link", vec!["title", "url"]);
+        let mut filter = IndexMap::new();
+        filter.insert(
+            Name::new("containsAll"),
+            GqlValue::List(vec![
+                GqlValue::String("a".into()),
+                GqlValue::String("b".into()),
+            ]),
+        );
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("tags"), GqlValue::Object(filter));
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &schema);
+        // Two EXISTS clauses joined by AND
+        let expected_one = r#"EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?)"#;
+        assert!(
+            wc.sql.contains(expected_one),
+            "expected EXISTS clauses, got: {}",
+            wc.sql
+        );
+        assert_eq!(wc.params.len(), 2);
+        assert_eq!(
+            wc.params,
+            vec![SqlValue::Text("a".into()), SqlValue::Text("b".into())]
+        );
+    }
+
+    #[test]
+    fn tags_contains_any_emits_single_exists_with_in_prd_00129() {
+        let schema = schema_with_table("link", vec!["title", "url"]);
+        let mut filter = IndexMap::new();
+        filter.insert(
+            Name::new("containsAny"),
+            GqlValue::List(vec![
+                GqlValue::String("a".into()),
+                GqlValue::String("b".into()),
+            ]),
+        );
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("tags"), GqlValue::Object(filter));
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &schema);
+        assert_eq!(
+            wc.sql,
+            r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag IN (?, ?)))"#
+        );
+        assert_eq!(
+            wc.params,
+            vec![SqlValue::Text("a".into()), SqlValue::Text("b".into())]
+        );
+    }
+
+    #[test]
+    fn tags_contains_any_empty_list_emits_false_prd_00129() {
+        // `tags: { containsAny: [] }` mirrors the empty-`in: []` semantics
+        // elsewhere — match nothing, not "match everything vacuously".
+        let schema = schema_with_table("link", vec!["title"]);
+        let mut filter = IndexMap::new();
+        filter.insert(Name::new("containsAny"), GqlValue::List(vec![]));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("tags"), GqlValue::Object(filter));
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &schema);
+        assert_eq!(wc.sql, "(0 = 1)");
+        assert!(wc.params.is_empty());
     }
 }
