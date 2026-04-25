@@ -299,11 +299,14 @@ pass "serve: search hits include updated_at"
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$TS_ID\\\") }\"}" >/dev/null
 
 # 18d. GraphQL search filters
-SF1=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Alpha\", type: \"link\", tags: [\"sf-tag\"] }) { id } }"}')
+# Section j1 above registered the `link` typedef with url NOT NULL, so typed
+# creates must supply url. SF2 stays untyped since `note` is not a registered
+# typedef and PRD 00129 rejects unregistered types from GraphQL createDoogat.
+SF1=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Alpha\", type: \"link\", tags: [\"sf-tag\"], fields: \"{\\\"url\\\":\\\"https://example.com/sf1\\\"}\" }) { id } }"}')
 SF1_ID=$(echo "$SF1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-SF2=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Beta\", type: \"note\", tags: [\"sf-tag\"] }) { id } }"}')
+SF2=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Beta\", tags: [\"sf-tag\"] }) { id } }"}')
 SF2_ID=$(echo "$SF2" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-SF3=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Gamma\", type: \"link\" }) { id } }"}')
+SF3=$(gql '{"query":"mutation { createDoogat(input: { title: \"SearchFilter Gamma\", type: \"link\", fields: \"{\\\"url\\\":\\\"https://example.com/sf3\\\"}\" }) { id } }"}')
 SF3_ID=$(echo "$SF3" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 
 RESULT=$(gql '{"query":"{ search(query: \"SearchFilter\", types: [\"link\"]) { totalCount hits { id } } }"}')
@@ -2336,7 +2339,7 @@ pass "47: baseline VARCHAR(32) insert at boundary"
 # Pre-ALTER: long insert must fail.
 AC_LONG=$(printf 'b%.0s' $(seq 1 80))
 AC_FAIL_OUT="$($DDB query "INSERT INTO ac_link (title, url) VALUES ('toolong', '$AC_LONG')" 2>&1 || true)"
-printf '%s' "$AC_FAIL_OUT" | grep -qi "varchar"
+printf '%s' "$AC_FAIL_OUT" | grep -q "exceeds limit"
 pass "47: pre-ALTER INSERT rejects 80-char value for VARCHAR(32)"
 
 # Widen to VARCHAR(100).
@@ -2396,8 +2399,11 @@ pass "48: typed insert into cascade-bound child succeeds"
 $DDB delete "$P9_LINK_ID" >/dev/null
 P9_AFTER_LINK="$($DDB query "SELECT id FROM p9_link WHERE id = '$P9_LINK_ID'" 2>&1 || true)"
 P9_AFTER_MEM="$($DDB query "SELECT id FROM p9_membership WHERE id = '$P9_MEM_ID'" 2>&1 || true)"
-printf '%s' "$P9_AFTER_LINK" | grep -qv "$P9_LINK_ID"
-printf '%s' "$P9_AFTER_MEM" | grep -qv "$P9_MEM_ID"
+# `grep -qv` returned 0 on empty stdin under ugrep on developer hosts but 1
+# under GNU grep on CI, masking the assertion. Use bash's [[ != *X* ]] which
+# does abort under set -e and behaves the same regardless of grep flavor.
+[[ "$P9_AFTER_LINK" != *"$P9_LINK_ID"* ]]
+[[ "$P9_AFTER_MEM" != *"$P9_MEM_ID"* ]]
 pass "48: ON DELETE CASCADE removes parent and child in one delete"
 
 # §2: ON DELETE RESTRICT (default) blocks parent delete.

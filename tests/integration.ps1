@@ -341,11 +341,14 @@ pass "serve: search hits include updated_at"
 gqlq "mutation { deleteDoogat(id: `"$TS_ID`") }" | Out-Null
 
 # 18d. GraphQL search filters
-$sf1 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Alpha", type: "link", tags: ["sf-tag"] }) { id } }'
+# Section j1 above registered the `link` typedef with url NOT NULL, so typed
+# creates must supply url. SF2 stays untyped since `note` is not a registered
+# typedef and PRD 00129 rejects unregistered types from GraphQL createDoogat.
+$sf1 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Alpha", type: "link", tags: ["sf-tag"], fields: "{\"url\":\"https://example.com/sf1\"}" }) { id } }'
 $SF1_ID = if ($sf1 -match '"id":"([^"]+)"') { $Matches[1] }
-$sf2 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Beta", type: "note", tags: ["sf-tag"] }) { id } }'
+$sf2 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Beta", tags: ["sf-tag"] }) { id } }'
 $SF2_ID = if ($sf2 -match '"id":"([^"]+)"') { $Matches[1] }
-$sf3 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Gamma", type: "link" }) { id } }'
+$sf3 = gqlq 'mutation { createDoogat(input: { title: "SearchFilter Gamma", type: "link", fields: "{\"url\":\"https://example.com/sf3\"}" }) { id } }'
 $SF3_ID = if ($sf3 -match '"id":"([^"]+)"') { $Matches[1] }
 
 $result = gqlq '{ search(query: "SearchFilter", types: ["link"]) { totalCount hits { id } } }'
@@ -2275,7 +2278,7 @@ pass "47: baseline VARCHAR(32) insert at boundary"
 
 $acLong = 'b' * 80
 $acFailOut = ddb query "INSERT INTO ac_link (title, url) VALUES ('toolong', '$acLong')" 2>&1
-if ($acFailOut -notmatch "varchar|VARCHAR") { throw "47: pre-ALTER 80-char insert should have been rejected: $acFailOut" }
+if ($acFailOut -notmatch "exceeds limit") { throw "47: pre-ALTER 80-char insert should have been rejected: $acFailOut" }
 pass "47: pre-ALTER INSERT rejects 80-char value for VARCHAR(32)"
 
 ddb query "ALTER TABLE ac_link ALTER COLUMN url TYPE VARCHAR(100)" | Out-Null
