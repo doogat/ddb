@@ -197,9 +197,11 @@ fn subscribe_type_filter() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    // Create two types
+    // Create two types. PRD 00129 made typed createDoogat populate the type
+    // table and enforce NOT NULL, so leave `name` nullable here — the test
+    // only cares about the doogat type, not column constraints.
     for table in ["contact", "bookmark"] {
-        let sql = format!("CREATE TABLE {table} (name TEXT NOT NULL)");
+        let sql = format!("CREATE TABLE {table} (name TEXT)");
         let result = server.graphql_with_vars(
             r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
             serde_json::json!({ "sql": sql }),
