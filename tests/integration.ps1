@@ -2257,9 +2257,11 @@ $titleRow = ddb query "SELECT title FROM tt_membership WHERE id = '$ttMemId'"
 if ($titleRow -notmatch "My Link in A/B") { throw "46: composed title missing: $titleRow" }
 pass "46: composed title 'My Link in A/B' from REFERENCES"
 
-# Call $DDB directly so the non-zero exit is captured in $badOut; the `ddb`
-# wrapper throws on non-zero exit which is the wrong behavior here.
-$badOut = & $DDB query "ALTER TABLE tt_membership SET TITLE TEMPLATE '{link.does_not_exist}'" 2>&1
+# Call $DDB directly (the `ddb` wrapper throws on non-zero exit) and flatten
+# stderr+stdout with Out-String so -match operates on a single string instead
+# of a per-line array (where -notmatch returns non-matching elements, not a
+# bool).
+$badOut = & $DDB query "ALTER TABLE tt_membership SET TITLE TEMPLATE '{link.does_not_exist}'" 2>&1 | Out-String
 if ($badOut -notmatch "does not exist on tt_link") { throw "46: bad path was not rejected: $badOut" }
 pass "46: ALTER TABLE rejects bad dotted path"
 
@@ -2279,7 +2281,7 @@ if (-not $acId1) { throw "47: expected boundary insert to return an id" }
 pass "47: baseline VARCHAR(32) insert at boundary"
 
 $acLong = 'b' * 80
-$acFailOut = & $DDB query "INSERT INTO ac_link (title, url) VALUES ('toolong', '$acLong')" 2>&1
+$acFailOut = & $DDB query "INSERT INTO ac_link (title, url) VALUES ('toolong', '$acLong')" 2>&1 | Out-String
 if ($acFailOut -notmatch "exceeds limit") { throw "47: pre-ALTER 80-char insert should have been rejected: $acFailOut" }
 pass "47: pre-ALTER INSERT rejects 80-char value for VARCHAR(32)"
 
@@ -2291,7 +2293,7 @@ $acId2 = (ddb query "INSERT INTO ac_link (title, url) VALUES ('now-ok', '$acLong
 if (-not $acId2) { throw "47: post-ALTER 80-char insert should succeed" }
 pass "47: post-ALTER INSERT accepts 80-char value"
 
-$acNarrowOut = & $DDB query "ALTER TABLE ac_link ALTER COLUMN url TYPE VARCHAR(5)" 2>&1
+$acNarrowOut = & $DDB query "ALTER TABLE ac_link ALTER COLUMN url TYPE VARCHAR(5)" 2>&1 | Out-String
 if ($acNarrowOut -notmatch "cannot narrow") { throw "47: narrowing should emit 'cannot narrow': $acNarrowOut" }
 if ($acNarrowOut -notmatch "existing rows exceed limit") { throw "47: narrowing should include row-count message: $acNarrowOut" }
 pass "47: narrowing rejects with cannot-narrow row-count message"
@@ -2318,7 +2320,7 @@ $p9IndexOut = ddb query "CREATE INDEX IF NOT EXISTS idx_p9_url ON p9_link(url)" 
 if ($p9IndexOut -notmatch "ignored") { throw "48: CREATE INDEX IF NOT EXISTS should emit 'ignored': $p9IndexOut" }
 pass "48: CREATE INDEX IF NOT EXISTS accepted as no-op"
 
-$p9PlainOut = & $DDB query "CREATE INDEX idx_plain ON p9_link(url)" 2>&1
+$p9PlainOut = & $DDB query "CREATE INDEX idx_plain ON p9_link(url)" 2>&1 | Out-String
 if ($p9PlainOut -notmatch "CREATE INDEX not supported") { throw "48: plain CREATE INDEX should reject: $p9PlainOut" }
 pass "48: plain CREATE INDEX still rejects"
 
@@ -2342,7 +2344,7 @@ ddb query "CREATE TABLE p9_blocker (title TEXT, link VARCHAR(255) NOT NULL REFER
 $p9LinkId2 = (ddb query "INSERT INTO p9_link (title, url) VALUES ('R Parent', 'https://r')").Trim()
 Start-Sleep -Seconds 1
 ddb query "INSERT INTO p9_blocker (title, link) VALUES ('Block', '$p9LinkId2')" | Out-Null
-$p9RestrictOut = & $DDB delete $p9LinkId2 2>&1
+$p9RestrictOut = & $DDB delete $p9LinkId2 2>&1 | Out-String
 if ($p9RestrictOut -notmatch "NOT NULL REFERENCES from p9_blocker.link") { throw "48: RESTRICT should block parent delete: $p9RestrictOut" }
 pass "48: ON DELETE RESTRICT (default) rejects parent delete"
 
@@ -2356,7 +2358,7 @@ Start-Sleep -Seconds 1
 $p9BId = (ddb query "INSERT INTO p9_b (title) VALUES ('B')").Trim()
 ddb query "UPDATE p9_a SET b = '$p9BId' WHERE id = '$p9AId'" | Out-Null
 ddb query "UPDATE p9_b SET a = '$p9AId' WHERE id = '$p9BId'" | Out-Null
-$p9CycleOut = & $DDB delete $p9AId 2>&1
+$p9CycleOut = & $DDB delete $p9AId 2>&1 | Out-String
 if ($p9CycleOut -notmatch "cascade delete would form a cycle") { throw "48: cycle should be detected: $p9CycleOut" }
 pass "48: ON DELETE CASCADE cycle detection rejects"
 
