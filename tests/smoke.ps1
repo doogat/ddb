@@ -529,7 +529,7 @@ ddb query "INSERT INTO `"r10-mem`" (title, link_id, cat_id) VALUES ('M', '$R10_L
 # SQL DELETE of parent must fail with the RESTRICT message
 $R10_ERR = & $DDB query "DELETE FROM r10link WHERE id = '$R10_L'" 2>&1
 if ($LASTEXITCODE -eq 0) { throw "DELETE of parent with NOT NULL REFERENCES child should have failed" }
-$R10_ERR_TEXT = [string]::Join("`n", @($R10_ERR) | ForEach-Object { "$_" })
+$R10_ERR_TEXT = [string]::Join("`n", (@($R10_ERR) | ForEach-Object { "$_" }))
 if ($R10_ERR_TEXT -notmatch "NOT NULL REFERENCES") { throw "expected RESTRICT error, got: $R10_ERR_TEXT" }
 if ($R10_ERR_TEXT -notmatch "r10-mem") { throw "expected blocking table name in error, got: $R10_ERR_TEXT" }
 # Parent still present
