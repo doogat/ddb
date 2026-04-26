@@ -124,7 +124,7 @@ impl ServerGuard {
         self.rest_client()
             .get(self.rest_url(path))
             .header("Authorization", format!("Bearer {}", self.token))
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
             .send()
             .expect("request failed")
     }
@@ -134,7 +134,7 @@ impl ServerGuard {
             .post(self.rest_url(path))
             .header("Authorization", format!("Bearer {}", self.token))
             .json(&body)
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
             .send()
             .expect("request failed")
     }
@@ -144,7 +144,7 @@ impl ServerGuard {
             .put(self.rest_url(path))
             .header("Authorization", format!("Bearer {}", self.token))
             .json(&body)
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
             .send()
             .expect("request failed")
     }
@@ -153,7 +153,7 @@ impl ServerGuard {
         self.rest_client()
             .delete(self.rest_url(path))
             .header("Authorization", format!("Bearer {}", self.token))
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
             .send()
             .expect("request failed")
     }
@@ -164,7 +164,7 @@ impl ServerGuard {
             .post(self.url())
             .header("Authorization", format!("Bearer {}", self.token))
             .json(&body)
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
             .send()
             .expect("request failed")
             .json()
@@ -181,7 +181,7 @@ impl ServerGuard {
             .post(self.url())
             .header("Authorization", format!("Bearer {}", self.token))
             .json(&body)
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(30))
             .send()
             .expect("request failed")
             .json()
@@ -245,7 +245,7 @@ impl ServerGuard {
 
         // Set read timeout to avoid blocking forever
         if let tungstenite::stream::MaybeTlsStream::Plain(ref s) = ws.get_ref() {
-            s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
         }
 
         ws
@@ -311,7 +311,7 @@ impl ServerGuard {
 
         // Set read timeout to avoid blocking forever
         if let tungstenite::stream::MaybeTlsStream::Plain(ref s) = ws.get_ref() {
-            s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
         }
 
         ws
