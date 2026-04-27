@@ -3179,3 +3179,178 @@ fn batch_create_untyped_doogat_unaffected_by_typed_validation_prd_00129() {
     assert_eq!(results.len(), 1);
     assert!(results[0].meta.doogat_type.is_none());
 }
+
+// ── PRD 00131: structured-error code propagation through batch_create ──
+//
+// jink probes ddb 0.2.5+dev.g8c924a5 and finds duplicate-key violations
+// returning GraphQL error envelopes without `extensions.code`. The flatten
+// happens before `to_server_error` (which is unit-tested green at
+// `ddb-server/src/error.rs:241-262`): `batch_create` must return a
+// `DoogatError::Structured` variant for the GraphQL boundary to attach the
+// code. These tests assert the Structured shape at the service boundary,
+// which is the same boundary the actor / mutation resolver chain consumes.
+
+/// Install a typedef for type "link" with a NOT NULL column.
+fn setup_link_typedef_with_required_url(svc: &DoogatService) {
+    let typedef = "---
+id: 20260601000001
+title: link
+type: _typedef
+columns:
+  - name: url
+    data_type: TEXT
+    zone: frontmatter
+    required: true
+---
+";
+    let typedef_path = "ddb/_typedef/20260601000001.md";
+    svc.repo
+        .commit_file(typedef_path, typedef, "add link typedef")
+        .unwrap();
+    let parsed = crate::parser::parse(typedef, typedef_path).unwrap();
+    svc.index.index_doogat(&parsed).unwrap();
+    svc.index.materialize_all_types(&svc.repo).unwrap();
+}
+
+#[test]
+fn batch_create_cross_batch_unique_violation_returns_structured_error_prd_00131() {
+    let (_tmp, svc) = fresh_svc();
+    setup_widget_typedef(&svc);
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "name".to_string(),
+        crate::types::Value::String("foo".to_string()),
+    );
+
+    // First insert succeeds.
+    svc.batch_create(&[crate::types::BatchCreateInput {
+        title: Some("Foo Widget".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("widget".to_string()),
+        fields: fields.clone(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }])
+    .unwrap();
+
+    // Second insert with same unique key in a separate batch must surface a
+    // Structured UNIQUE_VIOLATION so `to_server_error` attaches
+    // `extensions.code = "UNIQUE_VIOLATION"` to the GraphQL response.
+    let err = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("Foo Widget Again".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields,
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .expect_err("duplicate insert with on_conflict: Error must error");
+
+    match err {
+        crate::error::DoogatError::Structured {
+            code,
+            ref context,
+            ..
+        } => {
+            assert_eq!(code, crate::error::codes::UNIQUE_VIOLATION);
+            let columns = context
+                .iter()
+                .find(|(k, _)| k == "columns")
+                .map(|(_, v)| v)
+                .expect("columns context entry");
+            match columns {
+                crate::error::ErrorValue::List(items) => {
+                    assert_eq!(items, &vec!["name".to_string()]);
+                }
+                other => panic!("expected List for columns, got {other:?}"),
+            }
+        }
+        other => panic!("expected Structured UNIQUE_VIOLATION, got {other:?}"),
+    }
+}
+
+#[test]
+fn batch_create_intra_batch_unique_violation_returns_structured_error_prd_00131() {
+    let (_tmp, svc) = fresh_svc();
+    setup_widget_typedef(&svc);
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "name".to_string(),
+        crate::types::Value::String("foo".to_string()),
+    );
+
+    // Two inputs with the same unique key in one batch under Error: surface a
+    // Structured UNIQUE_VIOLATION (intra-batch path is the second flatten
+    // site fixed by PRD 00131).
+    let err = svc
+        .batch_create(&[
+            crate::types::BatchCreateInput {
+                title: Some("Foo Widget A".to_string()),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields: fields.clone(),
+                on_conflict: crate::types::ConflictAction::Error,
+            },
+            crate::types::BatchCreateInput {
+                title: Some("Foo Widget B".to_string()),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("widget".to_string()),
+                fields,
+                on_conflict: crate::types::ConflictAction::Error,
+            },
+        ])
+        .expect_err("intra-batch duplicate with on_conflict: Error must error");
+
+    match err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::UNIQUE_VIOLATION);
+        }
+        other => panic!("expected Structured UNIQUE_VIOLATION, got {other:?}"),
+    }
+}
+
+#[test]
+fn batch_create_not_null_violation_returns_structured_error_prd_00131() {
+    // Sanity check: NOT_NULL path is already structured (via
+    // `validate_typed_create_post_defaults` -> `not_null_violation`).
+    // Asserting it here locks in the current behavior so the audit pass
+    // (PRD 00131 task #6) doesn't regress it.
+    let (_tmp, svc) = fresh_svc();
+    setup_link_typedef_with_required_url(&svc);
+
+    let err = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("No URL".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("link".to_string()),
+            fields: std::collections::BTreeMap::new(),
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .expect_err("missing required column must error");
+
+    match err {
+        crate::error::DoogatError::Structured {
+            code,
+            ref context,
+            ..
+        } => {
+            assert_eq!(code, crate::error::codes::NOT_NULL_VIOLATION);
+            let column = context
+                .iter()
+                .find(|(k, _)| k == "column")
+                .map(|(_, v)| v)
+                .expect("column context entry");
+            match column {
+                crate::error::ErrorValue::String(s) => assert_eq!(s, "url"),
+                other => panic!("expected String for column, got {other:?}"),
+            }
+        }
+        other => panic!("expected Structured NOT_NULL_VIOLATION, got {other:?}"),
+    }
+}
