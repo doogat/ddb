@@ -232,10 +232,21 @@ impl<G: GitBackend> DoogatService<G> {
                     return Ok(Some(self.get_doogat_parsed(existing_id)?));
                 }
                 crate::types::ConflictAction::Error => {
-                    return Err(DoogatError::Validation(format!(
-                        "duplicate unique constraint on type '{}' for columns {:?}",
-                        type_name, group
-                    )));
+                    let values: Vec<String> = group
+                        .iter()
+                        .map(|col| {
+                            input
+                                .fields
+                                .get(col)
+                                .map(Self::value_to_string)
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    return Err(DoogatError::unique_violation(
+                        type_name.clone(),
+                        group.clone(),
+                        values,
+                    ));
                 }
             }
         }
