@@ -205,7 +205,7 @@ impl<'a> SqlEngine<'a> {
         // `build_and_index_row` still handles UNIQUE collisions (those
         // happen at write time, not pre-check time), so a single-row
         // failure here still rolls back its own row cleanly.
-        for (col_values, id) in prepared_rows.into_iter().zip(ids.into_iter()) {
+        for (col_values, id) in prepared_rows.into_iter().zip(ids) {
             let (path, content) =
                 self.build_and_index_row(&schema, &table_name, &id, &col_values, &ref_folder_types)?;
             self.buffer_or_collect_write(path, content, &mut files);
@@ -1254,7 +1254,7 @@ impl<'a> SqlEngine<'a> {
 
         for (row_idx, (row_values, nulls)) in rows
             .into_iter()
-            .zip(null_cols_per_row.into_iter())
+            .zip(null_cols_per_row)
             .enumerate()
         {
             if let Some(id) = self.find_conflict_match(schema, constraints, col_names, &row_values)

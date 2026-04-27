@@ -545,7 +545,7 @@ impl Index {
             }
         }
 
-        stale.sort_by(|a, b| b.days_stale.cmp(&a.days_stale));
+        stale.sort_by_key(|s| std::cmp::Reverse(s.days_stale));
         Ok(stale)
     }
 
@@ -751,7 +751,7 @@ impl Index {
             entries.push(count_links(id, title, doogat_type, path, &mut out_stmt, &mut in_stmt));
         }
 
-        entries.sort_by(|a, b| b.density_score.cmp(&a.density_score));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.density_score));
         Ok(entries)
     }
 
