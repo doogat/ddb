@@ -63,16 +63,18 @@ type UniqueKey = (String, Vec<String>, Vec<String>);
 
 /// If `input` would collide on any of its typedef's `unique_together`
 /// tuples with a row already prepared earlier in the same batch, return
-/// the array index of that earlier input. Used by `batch_create` to honour
-/// `on_conflict` semantics for intra-batch duplicates (issue #12).
+/// the array index of that earlier input alongside the colliding key.
+/// Used by `batch_create` to honour `on_conflict` semantics for intra-batch
+/// duplicates (issue #12) and to surface a structured `UNIQUE_VIOLATION`
+/// error (PRD 00131).
 fn find_intra_batch_duplicate(
     input: &BatchCreateInput,
     schemas: &[TableSchema],
     seen: &std::collections::HashMap<UniqueKey, usize>,
-) -> Option<usize> {
+) -> Option<(usize, UniqueKey)> {
     for key in input_unique_keys(input, schemas) {
         if let Some(prior_idx) = seen.get(&key) {
-            return Some(*prior_idx);
+            return Some((*prior_idx, key));
         }
     }
     None
@@ -490,17 +492,17 @@ impl<G: GitBackend> DoogatService<G> {
                 continue;
             }
 
-            if let Some(prior_idx) = find_intra_batch_duplicate(input, &schemas, &seen_unique) {
+            if let Some((prior_idx, conflict_key)) =
+                find_intra_batch_duplicate(input, &schemas, &seen_unique)
+            {
                 match input.on_conflict {
                     crate::types::ConflictAction::Ignore => {
                         intra_dup_links[input_idx] = Some(prior_idx);
                         continue;
                     }
                     crate::types::ConflictAction::Error => {
-                        let type_name = input.doogat_type.as_deref().unwrap_or("");
-                        return Err(DoogatError::Validation(format!(
-                            "duplicate unique constraint within batch on type '{type_name}'"
-                        )));
+                        let (table, columns, values) = conflict_key;
+                        return Err(DoogatError::unique_violation(table, columns, values));
                     }
                 }
             }
