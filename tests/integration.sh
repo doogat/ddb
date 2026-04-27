@@ -1886,6 +1886,56 @@ printf '%s' "$A2_FRESH" | extract_id >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE a2persist CASCADE\") { message } }"}' >/dev/null
 pass "issue-4-A2: ghost-row fix persists across server restart"
 
+# 49. PRD 00131: structured-error code propagation through typed mutations.
+# Restores `extensions.code = "UNIQUE_VIOLATION"` (and NOT_NULL_VIOLATION)
+# on duplicate-key and missing-required-column violations through
+# `createDoogat` and `createMany`. The codes regressed in 0.2.5 when the
+# service-layer batch_create path flattened structured errors to plain
+# `Validation` strings; PRD 00131 swaps both flatten sites
+# (validation.rs:234, crud.rs:499) back to `DoogatError::unique_violation`.
+# Placed here while the GraphQL server is still running (it shuts down
+# below before sections 46-48, which use the CLI).
+echo "=== PRD 00131: structured-error code propagation ==="
+
+# 49.1 — GraphQL UNIQUE violation on createDoogat carries extensions.code.
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE puv_link (title VARCHAR(255), slug VARCHAR(255) NOT NULL, space VARCHAR(255) NOT NULL, UNIQUE(slug, space))\") { message } }"}'
+
+SE_FIRST=$(gql '{"query":"mutation { createDoogat(input: {type: \"puv_link\", title: \"first\", fields: \"{\\\"slug\\\":\\\"hn\\\",\\\"space\\\":\\\"news\\\"}\"}) { id } }"}')
+assert_gql_ok "$SE_FIRST"
+
+SE_DUP=$(gql '{"query":"mutation { createDoogat(input: {type: \"puv_link\", title: \"dup\", fields: \"{\\\"slug\\\":\\\"hn\\\",\\\"space\\\":\\\"news\\\"}\"}) { id } }"}')
+assert_gql_errors "$SE_DUP"
+echo "$SE_DUP" | jq -e '.errors[0].extensions.code == "UNIQUE_VIOLATION"' >/dev/null
+echo "$SE_DUP" | jq -e '.errors[0].extensions.columns == ["slug", "space"]' >/dev/null
+echo "$SE_DUP" | jq -e '.errors[0].extensions.values | type == "array" and length == 2' >/dev/null
+pass "49.1: createDoogat UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
+
+# 49.2 — GraphQL NOT NULL violation on createDoogat carries extensions.code.
+# Sanity-locks the structured-shape audit so a future flatten can't slip
+# in for NOT_NULL while still passing 49.1.
+SE_NN=$(gql '{"query":"mutation { createDoogat(input: {type: \"puv_link\", title: \"missing-slug\", fields: \"{\\\"space\\\":\\\"news\\\"}\"}) { id } }"}')
+assert_gql_errors "$SE_NN"
+echo "$SE_NN" | jq -e '.errors[0].extensions.code == "NOT_NULL_VIOLATION"' >/dev/null
+echo "$SE_NN" | jq -e '.errors[0].extensions.column == "slug"' >/dev/null
+pass "49.2: createDoogat NOT NULL violation carries extensions.code = NOT_NULL_VIOLATION"
+
+# 49.3 — createMany single-input duplicate under ERROR carries extensions.code.
+SE_CM=$(gql '{"query":"mutation { createMany(inputs: [{type: \"puv_link\", title: \"cm-dup\", fields: \"{\\\"slug\\\":\\\"hn\\\",\\\"space\\\":\\\"news\\\"}\"}], onConflict: ERROR) { id } }"}')
+assert_gql_errors "$SE_CM"
+echo "$SE_CM" | jq -e '.errors[0].extensions.code == "UNIQUE_VIOLATION"' >/dev/null
+pass "49.3: createMany ERROR UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
+
+# 49.4 — createMany multi-input intra-batch duplicate under ERROR carries
+# extensions.code. Exercises the batch_create intra-batch flatten site
+# fixed by PRD 00131 (crud.rs:499).
+SE_CM_INTRA=$(gql '{"query":"mutation { createMany(inputs: [{type: \"puv_link\", title: \"cm-a\", fields: \"{\\\"slug\\\":\\\"twin\\\",\\\"space\\\":\\\"news\\\"}\"}, {type: \"puv_link\", title: \"cm-b\", fields: \"{\\\"slug\\\":\\\"twin\\\",\\\"space\\\":\\\"news\\\"}\"}], onConflict: ERROR) { id } }"}')
+assert_gql_errors "$SE_CM_INTRA"
+echo "$SE_CM_INTRA" | jq -e '.errors[0].extensions.code == "UNIQUE_VIOLATION"' >/dev/null
+pass "49.4: createMany intra-batch ERROR carries extensions.code = UNIQUE_VIOLATION"
+
+# Cleanup: drop the typedef so subsequent runs start clean.
+ddl '{"query":"mutation { executeSql(sql: \"DROP TABLE puv_link\") { message } }"}'
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
@@ -2532,57 +2582,5 @@ pass "48: ON DELETE CASCADE cycle detection rejects"
 
 cd "$TMPDIR"
 rm -rf "$P9_DIR"
-
-# 49. PRD 00131: structured-error code propagation through typed mutations.
-# Restores `extensions.code = "UNIQUE_VIOLATION"` (and NOT_NULL_VIOLATION)
-# on duplicate-key and missing-required-column violations through
-# `createDoogat` and `createMany`. The codes regressed in 0.2.5 when the
-# service-layer batch_create path flattened structured errors to plain
-# `Validation` strings; PRD 00131 swaps both flatten sites
-# (validation.rs:234, crud.rs:499) back to `DoogatError::unique_violation`.
-echo "=== PRD 00131: structured-error code propagation ==="
-
-# 49.1 — GraphQL UNIQUE violation on createDoogat carries extensions.code.
-SE_VER_BEFORE=$(gql '{"query":"{ schemaVersion }"}' | jq -r '.data.schemaVersion')
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE puv_link (title VARCHAR(255), slug VARCHAR(255) NOT NULL, space VARCHAR(255) NOT NULL, UNIQUE(slug, space))\") { message } }"}' | grep -q '"message":"table puv_link'
-wait_for_schema_version "$SE_VER_BEFORE"
-
-SE_FIRST=$(gql '{"query":"mutation { createDoogat(input: {type: \"puv_link\", title: \"first\", fields: \"{\\\"slug\\\":\\\"hn\\\",\\\"space\\\":\\\"news\\\"}\"}) { id } }"}')
-assert_gql_ok "$SE_FIRST"
-
-SE_DUP=$(gql '{"query":"mutation { createDoogat(input: {type: \"puv_link\", title: \"dup\", fields: \"{\\\"slug\\\":\\\"hn\\\",\\\"space\\\":\\\"news\\\"}\"}) { id } }"}')
-assert_gql_errors "$SE_DUP"
-echo "$SE_DUP" | jq -e '.errors[0].extensions.code == "UNIQUE_VIOLATION"' >/dev/null
-echo "$SE_DUP" | jq -e '.errors[0].extensions.columns == ["slug", "space"]' >/dev/null
-echo "$SE_DUP" | jq -e '.errors[0].extensions.values | type == "array" and length == 2' >/dev/null
-pass "49.1: createDoogat UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
-
-# 49.2 — GraphQL NOT NULL violation on createDoogat carries extensions.code.
-# Sanity-locks the structured-shape audit so a future flatten can't slip
-# in for NOT_NULL while still passing 49.1.
-SE_NN=$(gql '{"query":"mutation { createDoogat(input: {type: \"puv_link\", title: \"missing-slug\", fields: \"{\\\"space\\\":\\\"news\\\"}\"}) { id } }"}')
-assert_gql_errors "$SE_NN"
-echo "$SE_NN" | jq -e '.errors[0].extensions.code == "NOT_NULL_VIOLATION"' >/dev/null
-echo "$SE_NN" | jq -e '.errors[0].extensions.column == "slug"' >/dev/null
-pass "49.2: createDoogat NOT NULL violation carries extensions.code = NOT_NULL_VIOLATION"
-
-# 49.3 — createMany single-input duplicate under ABORT carries extensions.code.
-SE_CM=$(gql '{"query":"mutation { createMany(inputs: [{type: \"puv_link\", title: \"cm-dup\", fields: \"{\\\"slug\\\":\\\"hn\\\",\\\"space\\\":\\\"news\\\"}\"}], onConflict: ABORT) { id } }"}')
-assert_gql_errors "$SE_CM"
-echo "$SE_CM" | jq -e '.errors[0].extensions.code == "UNIQUE_VIOLATION"' >/dev/null
-pass "49.3: createMany ABORT UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
-
-# 49.4 — createMany multi-input intra-batch duplicate under ABORT carries
-# extensions.code. Exercises the batch_create intra-batch flatten site
-# fixed by PRD 00131 (crud.rs:499).
-SE_CM_INTRA=$(gql '{"query":"mutation { createMany(inputs: [{type: \"puv_link\", title: \"cm-a\", fields: \"{\\\"slug\\\":\\\"twin\\\",\\\"space\\\":\\\"news\\\"}\"}, {type: \"puv_link\", title: \"cm-b\", fields: \"{\\\"slug\\\":\\\"twin\\\",\\\"space\\\":\\\"news\\\"}\"}], onConflict: ABORT) { id } }"}')
-assert_gql_errors "$SE_CM_INTRA"
-echo "$SE_CM_INTRA" | jq -e '.errors[0].extensions.code == "UNIQUE_VIOLATION"' >/dev/null
-pass "49.4: createMany intra-batch ABORT carries extensions.code = UNIQUE_VIOLATION"
-
-# Cleanup: drop the typedef so subsequent runs start clean.
-SE_VER_DROP=$(gql '{"query":"{ schemaVersion }"}' | jq -r '.data.schemaVersion')
-gql '{"query":"mutation { executeSql(sql: \"DROP TABLE puv_link\") { message } }"}' | grep -q "dropped"
-wait_for_schema_version "$SE_VER_DROP"
 
 echo "=== all integration tests passed ==="

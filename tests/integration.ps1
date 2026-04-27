@@ -1768,6 +1768,68 @@ assertGqlOk $a2Fresh "A2 fresh insert after restart"
 gqlq 'mutation { executeSql(sql: "DROP TABLE a2persist CASCADE") { message } }' | Out-Null
 pass "issue-4-A2: ghost-row fix persists across server restart"
 
+# 49. PRD 00131: structured-error code propagation through typed mutations.
+# Mirrors tests/integration.sh §49. Asserts `extensions.code` returns
+# UNIQUE_VIOLATION / NOT_NULL_VIOLATION on createDoogat and createMany.
+# Placed here while the GraphQL server is still running (it shuts down
+# below before sections 46-48, which use the CLI).
+Write-Host "=== PRD 00131: structured-error code propagation ==="
+
+# 49.1 - createDoogat UNIQUE violation carries extensions.code.
+ddl 'mutation { executeSql(sql: "CREATE TABLE puv_link (title VARCHAR(255), slug VARCHAR(255) NOT NULL, space VARCHAR(255) NOT NULL, UNIQUE(slug, space))") { message } }'
+
+$seFirst = gqlq 'mutation { createDoogat(input: {type: "puv_link", title: "first", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}) { id } }'
+assertGqlOk $seFirst "49.1 first insert"
+
+$seDup = gqlq 'mutation { createDoogat(input: {type: "puv_link", title: "dup", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}) { id } }'
+assertGqlErrors $seDup "49.1 duplicate"
+$seDupParsed = $seDup | ConvertFrom-Json
+if ($seDupParsed.errors[0].extensions.code -ne "UNIQUE_VIOLATION") {
+    throw "49.1: expected UNIQUE_VIOLATION, got: $($seDupParsed.errors[0].extensions.code)"
+}
+$seDupCols = $seDupParsed.errors[0].extensions.columns
+if (-not ($seDupCols -is [array]) -or $seDupCols.Count -ne 2 -or $seDupCols[0] -ne "slug" -or $seDupCols[1] -ne "space") {
+    throw "49.1: expected columns [slug, space], got: $($seDupCols -join ',')"
+}
+$seDupVals = $seDupParsed.errors[0].extensions.values
+if (-not ($seDupVals -is [array]) -or $seDupVals.Count -ne 2) {
+    throw "49.1: expected values list of length 2, got: $($seDupVals -join ',')"
+}
+pass "49.1: createDoogat UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
+
+# 49.2 - createDoogat NOT NULL violation carries extensions.code.
+$seNn = gqlq 'mutation { createDoogat(input: {type: "puv_link", title: "missing-slug", fields: "{\"space\":\"news\"}"}) { id } }'
+assertGqlErrors $seNn "49.2 missing required column"
+$seNnParsed = $seNn | ConvertFrom-Json
+if ($seNnParsed.errors[0].extensions.code -ne "NOT_NULL_VIOLATION") {
+    throw "49.2: expected NOT_NULL_VIOLATION, got: $($seNnParsed.errors[0].extensions.code)"
+}
+if ($seNnParsed.errors[0].extensions.column -ne "slug") {
+    throw "49.2: expected column=slug, got: $($seNnParsed.errors[0].extensions.column)"
+}
+pass "49.2: createDoogat NOT NULL violation carries extensions.code = NOT_NULL_VIOLATION"
+
+# 49.3 - createMany single-input ERROR carries extensions.code.
+$seCm = gqlq 'mutation { createMany(inputs: [{type: "puv_link", title: "cm-dup", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}], onConflict: ERROR) { id } }'
+assertGqlErrors $seCm "49.3 createMany ERROR"
+$seCmParsed = $seCm | ConvertFrom-Json
+if ($seCmParsed.errors[0].extensions.code -ne "UNIQUE_VIOLATION") {
+    throw "49.3: expected UNIQUE_VIOLATION, got: $($seCmParsed.errors[0].extensions.code)"
+}
+pass "49.3: createMany ERROR UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
+
+# 49.4 - createMany multi-input intra-batch duplicate under ERROR.
+$seCmIntra = gqlq 'mutation { createMany(inputs: [{type: "puv_link", title: "cm-a", fields: "{\"slug\":\"twin\",\"space\":\"news\"}"}, {type: "puv_link", title: "cm-b", fields: "{\"slug\":\"twin\",\"space\":\"news\"}"}], onConflict: ERROR) { id } }'
+assertGqlErrors $seCmIntra "49.4 intra-batch ERROR"
+$seCmIntraParsed = $seCmIntra | ConvertFrom-Json
+if ($seCmIntraParsed.errors[0].extensions.code -ne "UNIQUE_VIOLATION") {
+    throw "49.4: expected UNIQUE_VIOLATION, got: $($seCmIntraParsed.errors[0].extensions.code)"
+}
+pass "49.4: createMany intra-batch ERROR carries extensions.code = UNIQUE_VIOLATION"
+
+# Cleanup: drop the typedef so subsequent runs start clean.
+ddl 'mutation { executeSql(sql: "DROP TABLE puv_link") { message } }'
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
@@ -2459,66 +2521,6 @@ pass "48: ON DELETE CASCADE cycle detection rejects"
 
 Pop-Location
 Remove-Item -Recurse -Force $P9_DIR
-
-# 49. PRD 00131: structured-error code propagation through typed mutations.
-# Mirrors tests/integration.sh §49. Asserts `extensions.code` returns
-# UNIQUE_VIOLATION / NOT_NULL_VIOLATION on createDoogat and createMany.
-Write-Host "=== PRD 00131: structured-error code propagation ==="
-
-# 49.1 - createDoogat UNIQUE violation carries extensions.code.
-ddl 'mutation { executeSql(sql: "CREATE TABLE puv_link (title VARCHAR(255), slug VARCHAR(255) NOT NULL, space VARCHAR(255) NOT NULL, UNIQUE(slug, space))") { message } }'
-
-$seFirst = gqlq 'mutation { createDoogat(input: {type: "puv_link", title: "first", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}) { id } }'
-assertGqlOk $seFirst "49.1 first insert"
-
-$seDup = gqlq 'mutation { createDoogat(input: {type: "puv_link", title: "dup", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}) { id } }'
-assertGqlErrors $seDup "49.1 duplicate"
-$seDupParsed = $seDup | ConvertFrom-Json
-if ($seDupParsed.errors[0].extensions.code -ne "UNIQUE_VIOLATION") {
-    throw "49.1: expected UNIQUE_VIOLATION, got: $($seDupParsed.errors[0].extensions.code)"
-}
-$seDupCols = $seDupParsed.errors[0].extensions.columns
-if (-not ($seDupCols -is [array]) -or $seDupCols.Count -ne 2 -or $seDupCols[0] -ne "slug" -or $seDupCols[1] -ne "space") {
-    throw "49.1: expected columns [slug, space], got: $($seDupCols -join ',')"
-}
-$seDupVals = $seDupParsed.errors[0].extensions.values
-if (-not ($seDupVals -is [array]) -or $seDupVals.Count -ne 2) {
-    throw "49.1: expected values list of length 2, got: $($seDupVals -join ',')"
-}
-pass "49.1: createDoogat UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
-
-# 49.2 - createDoogat NOT NULL violation carries extensions.code.
-$seNn = gqlq 'mutation { createDoogat(input: {type: "puv_link", title: "missing-slug", fields: "{\"space\":\"news\"}"}) { id } }'
-assertGqlErrors $seNn "49.2 missing required column"
-$seNnParsed = $seNn | ConvertFrom-Json
-if ($seNnParsed.errors[0].extensions.code -ne "NOT_NULL_VIOLATION") {
-    throw "49.2: expected NOT_NULL_VIOLATION, got: $($seNnParsed.errors[0].extensions.code)"
-}
-if ($seNnParsed.errors[0].extensions.column -ne "slug") {
-    throw "49.2: expected column=slug, got: $($seNnParsed.errors[0].extensions.column)"
-}
-pass "49.2: createDoogat NOT NULL violation carries extensions.code = NOT_NULL_VIOLATION"
-
-# 49.3 - createMany single-input ABORT carries extensions.code.
-$seCm = gqlq 'mutation { createMany(inputs: [{type: "puv_link", title: "cm-dup", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}], onConflict: ABORT) { id } }'
-assertGqlErrors $seCm "49.3 createMany ABORT"
-$seCmParsed = $seCm | ConvertFrom-Json
-if ($seCmParsed.errors[0].extensions.code -ne "UNIQUE_VIOLATION") {
-    throw "49.3: expected UNIQUE_VIOLATION, got: $($seCmParsed.errors[0].extensions.code)"
-}
-pass "49.3: createMany ABORT UNIQUE violation carries extensions.code = UNIQUE_VIOLATION"
-
-# 49.4 - createMany multi-input intra-batch duplicate under ABORT.
-$seCmIntra = gqlq 'mutation { createMany(inputs: [{type: "puv_link", title: "cm-a", fields: "{\"slug\":\"twin\",\"space\":\"news\"}"}, {type: "puv_link", title: "cm-b", fields: "{\"slug\":\"twin\",\"space\":\"news\"}"}], onConflict: ABORT) { id } }'
-assertGqlErrors $seCmIntra "49.4 intra-batch ABORT"
-$seCmIntraParsed = $seCmIntra | ConvertFrom-Json
-if ($seCmIntraParsed.errors[0].extensions.code -ne "UNIQUE_VIOLATION") {
-    throw "49.4: expected UNIQUE_VIOLATION, got: $($seCmIntraParsed.errors[0].extensions.code)"
-}
-pass "49.4: createMany intra-batch ABORT carries extensions.code = UNIQUE_VIOLATION"
-
-# Cleanup: drop the typedef so subsequent runs start clean.
-ddl 'mutation { executeSql(sql: "DROP TABLE puv_link") { message } }'
 
 Cleanup
 Write-Host "=== all integration tests passed ==="
