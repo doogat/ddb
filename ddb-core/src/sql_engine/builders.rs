@@ -222,7 +222,7 @@ fn process_column_zones(
 /// Dotted placeholders (`{ref_col.field}`) dereference REFERENCES columns by
 /// reading the target doogat's field from its materialized row. Missing
 /// target or NULL field substitutes empty string (PRD 00127).
-fn resolve_insert_title(
+pub(crate) fn resolve_insert_title(
     id: &DoogatId,
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,

@@ -34,7 +34,10 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                     let a = ctx.data::<ActorHandle>()?;
                     let input = ctx.args.try_get("input")?;
                     let input = input.object()?;
-                    let title = input.try_get("title")?.string()?.to_string();
+                    let title = input
+                        .get("title")
+                        .and_then(|v| v.string().ok())
+                        .map(|s| s.to_string());
                     let content = input
                         .get("content")
                         .and_then(|v| v.string().ok())
@@ -233,7 +236,10 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                         let mut inputs = Vec::with_capacity(inputs_val.len());
                         for item in inputs_val.iter() {
                             let obj = item.object()?;
-                            let title = obj.try_get("title")?.string()?.to_string();
+                            let title = obj
+                                .get("title")
+                                .and_then(|v| v.string().ok())
+                                .map(|s| s.to_string());
                             let body = obj
                                 .get("content")
                                 .and_then(|v| v.string().ok())

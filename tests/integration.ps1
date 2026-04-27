@@ -1570,6 +1570,101 @@ pass "serve: createMany onConflict IGNORE returns existing"
 gqlq 'mutation { executeSql(sql: "DROP TABLE upsertgql CASCADE") { message } }' | Out-Null
 Pop-Location
 
+# === PRD 00130: GraphQL typed-write polish (issues #11/#12/#13) ===
+
+# 45.G13 - issue #13: createDoogat must omit `title` when the typedef has a
+# title_template, rendering it server-side. Pre-PRD-00130 the schema marked
+# title NON_NULL so the template never fired through GraphQL.
+ddl 'mutation { executeSql(sql: "CREATE TABLE g13link (title TEXT, url VARCHAR(255))") { message } }'
+ddl "mutation { executeSql(sql: ""ALTER TABLE g13link SET TITLE TEMPLATE 'link-{url}'"") { message } }"
+$g13Omit = gqlq 'mutation { createDoogat(input: {type: "g13link", fields: "{\"url\":\"https://example.com\"}"}) { id title } }'
+assertGqlOk $g13Omit "G13 omit title"
+$g13Title = ($g13Omit | ConvertFrom-Json).data.createDoogat.title
+if ($g13Title -ne "link-https://example.com") { throw "issue-13: expected link-https://example.com, got $g13Title" }
+pass "issue-13: createDoogat omits title when typedef has title_template"
+
+ddl 'mutation { executeSql(sql: "CREATE TABLE g13plain (title TEXT, url VARCHAR(255))") { message } }'
+$g13Null = gqlq 'mutation { createDoogat(input: {type: "g13plain", fields: "{\"url\":\"https://x\"}"}) { id } }'
+assertGqlErrors $g13Null "G13 plain rejection"
+if ($g13Null -notmatch 'NOT NULL constraint violated: g13plain\.title') { throw "issue-13: expected NOT_NULL_VIOLATION on g13plain.title, got $g13Null" }
+pass "issue-13: createDoogat without title or template rejects with NOT_NULL_VIOLATION"
+
+gqlq 'mutation { executeSql(sql: "DROP TABLE g13link CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE g13plain CASCADE") { message } }' | Out-Null
+
+# 45.G12 - issue #12: createMany(onConflict: IGNORE) returns the surviving
+# row's ID for skipped rows when both duplicates appear in the same batch.
+ddl 'mutation { executeSql(sql: "CREATE TABLE g12item (code TEXT, label TEXT)") { message } }'
+Push-Location $TMPDIR
+$g12File = Get-ChildItem -Path ddb/_typedef -Filter *.md | Where-Object {
+    (Get-Content $_.FullName -Raw) -match "title: g12item"
+} | Select-Object -First 1
+$g12Content = Get-Content $g12File.FullName -Raw
+$g12Content = $g12Content -replace "type: _typedef", "type: _typedef`nunique_together:`n  - - code"
+Set-Content -Path $g12File.FullName -Value $g12Content -NoNewline
+git add -A | Out-Null
+git commit -m "add unique_together to g12item" --quiet | Out-Null
+ddb reindex | Out-Null
+$g12Batch = gqlq 'mutation { createMany(inputs: [{title: "A", type: "g12item", fields: "{\"code\":\"K1\",\"label\":\"first\"}"}, {title: "A Dup", type: "g12item", fields: "{\"code\":\"K1\",\"label\":\"second\"}"}], onConflict: IGNORE) { id title } }'
+assertGqlOk $g12Batch "G12 batch"
+$g12Items = ($g12Batch | ConvertFrom-Json).data.createMany
+if (-not $g12Items[0].id) { throw "issue-12: empty surviving id" }
+if ($g12Items[0].id -ne $g12Items[1].id) { throw "issue-12: intra-batch duplicate must return same surviving id, got $($g12Items[0].id) vs $($g12Items[1].id)" }
+if ($g12Items[1].title -ne "A") { throw "issue-12: duplicate payload must carry surviving title 'A', got $($g12Items[1].title)" }
+$g12CountResp = gqlq 'mutation { executeSql(sql: "SELECT COUNT(*) FROM g12item") { rows } }'
+$g12Count = (($g12CountResp | ConvertFrom-Json).data.executeSql.rows[0] | ConvertFrom-Json)[0]
+if ($g12Count -ne "1") { throw "issue-12: expected exactly 1 row in g12item, got $g12Count" }
+pass "issue-12: createMany IGNORE returns surviving ID for intra-batch duplicate"
+Pop-Location
+gqlq 'mutation { executeSql(sql: "DROP TABLE g12item CASCADE") { message } }' | Out-Null
+
+# 45.G11 - issue #11: TagsFilter operators are nullable; contains-only
+# filter parses; empty filter and empty arrays are rejected at resolve time.
+ddl 'mutation { executeSql(sql: "CREATE TABLE g11link (title TEXT, url VARCHAR(255))") { message } }'
+$g11Create = gqlq 'mutation { createDoogat(input: {title: "Tagged", type: "g11link", tags: ["rust", "sql"], fields: "{\"url\":\"https://example.com\"}"}) { id } }'
+assertGqlOk $g11Create "G11 create"
+
+$g11Contains = gqlq '{ g11links(where: {tags: {contains: "rust"}}) { totalCount } }'
+assertGqlOk $g11Contains "G11 contains-only"
+$g11ContainsCount = ($g11Contains | ConvertFrom-Json).data.g11links.totalCount
+if ($g11ContainsCount -ne 1) { throw "issue-11: contains-only expected 1 row, got $g11ContainsCount" }
+pass "issue-11: TagsFilter contains-only filter parses and matches"
+
+$g11All = gqlq '{ g11links(where: {tags: {containsAll: ["rust", "sql"]}}) { totalCount } }'
+assertGqlOk $g11All "G11 containsAll-only"
+if ((($g11All | ConvertFrom-Json).data.g11links.totalCount) -ne 1) { throw "issue-11: containsAll-only count mismatch" }
+pass "issue-11: TagsFilter containsAll-only filter parses"
+
+$g11Any = gqlq '{ g11links(where: {tags: {containsAny: ["rust", "go"]}}) { totalCount } }'
+assertGqlOk $g11Any "G11 containsAny-only"
+if ((($g11Any | ConvertFrom-Json).data.g11links.totalCount) -ne 1) { throw "issue-11: containsAny-only count mismatch" }
+pass "issue-11: TagsFilter containsAny-only filter parses"
+
+$g11Empty = gqlq '{ g11links(where: {tags: {}}) { totalCount } }'
+assertGqlErrors $g11Empty "G11 empty filter"
+if ($g11Empty -notmatch "tags filter requires at least one of") { throw "issue-11: empty filter wrong error: $g11Empty" }
+pass "issue-11: empty TagsFilter rejected with clear error"
+
+$g11EmptyAll = gqlq '{ g11links(where: {tags: {containsAll: []}}) { totalCount } }'
+assertGqlErrors $g11EmptyAll "G11 empty containsAll"
+if ($g11EmptyAll -notmatch "containsAll cannot be empty") { throw "issue-11: empty containsAll wrong error: $g11EmptyAll" }
+pass "issue-11: empty containsAll rejected with clear error"
+
+$g11EmptyAny = gqlq '{ g11links(where: {tags: {containsAny: []}}) { totalCount } }'
+assertGqlErrors $g11EmptyAny "G11 empty containsAny"
+if ($g11EmptyAny -notmatch "containsAny cannot be empty") { throw "issue-11: empty containsAny wrong error: $g11EmptyAny" }
+pass "issue-11: empty containsAny rejected with clear error"
+
+$g11Sdl = gqlq '{ __type(name: "TagsFilter") { inputFields { name type { kind ofType { kind name ofType { kind name } } } } } }'
+$g11SdlFields = ($g11Sdl | ConvertFrom-Json).data.__type.inputFields
+$g11AllField = $g11SdlFields | Where-Object { $_.name -eq "containsAll" }
+$g11AnyField = $g11SdlFields | Where-Object { $_.name -eq "containsAny" }
+if ($g11AllField.type.kind -ne "LIST") { throw "issue-11: containsAll must be nullable LIST at top level, got $($g11AllField.type.kind)" }
+if ($g11AnyField.type.kind -ne "LIST") { throw "issue-11: containsAny must be nullable LIST at top level, got $($g11AnyField.type.kind)" }
+pass "issue-11: TagsFilter introspection confirms containsAll/containsAny are nullable lists"
+
+gqlq 'mutation { executeSql(sql: "DROP TABLE g11link CASCADE") { message } }' | Out-Null
+
 # 45.A1 - Cross-mutation parity after a failed UNIQUE INSERT (#4 group A1).
 ddl 'mutation { executeSql(sql: "CREATE TABLE a1item (title VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, UNIQUE(name))") { message } }'
 $a1Valid = gqlq 'mutation { executeSql(sql: "INSERT INTO a1item (title, name) VALUES (''a'', ''unique1'')") { message } }'

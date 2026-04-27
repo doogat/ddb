@@ -16,7 +16,7 @@ use ddb_core::types::{ConflictAction, ListFilter, ParsedDoogat, SearchFilters, V
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBody {
-    pub title: String,
+    pub title: Option<String>,
     pub body: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,

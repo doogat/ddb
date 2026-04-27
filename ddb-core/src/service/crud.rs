@@ -28,6 +28,98 @@ const RESERVED_TYPED_COLUMNS: &[&str] = &[
     "tags",
 ];
 
+/// Stringify `extra` into the `BTreeMap<String, String>` shape that
+/// `resolve_insert_title` expects. Mirrors the conversions the SQL INSERT
+/// path performs when it builds `col_values` from raw VALUES literals; the
+/// goal is for both paths to produce the same template input for the same
+/// logical row.
+fn extra_to_template_col_values(
+    extra: &std::collections::BTreeMap<String, crate::types::Value>,
+) -> std::collections::BTreeMap<String, String> {
+    extra
+        .iter()
+        .map(|(k, v)| (k.clone(), value_to_unique_key(v)))
+        .collect()
+}
+
+/// Stringify a `Value` for purposes of intra-batch unique-tuple comparison.
+/// Same encoding as `extra_to_template_col_values` — sticking with one
+/// representation keeps "the unique-key check" and "the title template
+/// substitution" agreeing on what counts as the same value.
+fn value_to_unique_key(v: &crate::types::Value) -> String {
+    use crate::types::Value;
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Composite key for intra-batch unique-tuple tracking: type name +
+/// the column tuple (as declared in `unique_together`) + the values
+/// supplied in `input.fields` for those columns.
+type UniqueKey = (String, Vec<String>, Vec<String>);
+
+/// If `input` would collide on any of its typedef's `unique_together`
+/// tuples with a row already prepared earlier in the same batch, return
+/// the array index of that earlier input. Used by `batch_create` to honour
+/// `on_conflict` semantics for intra-batch duplicates (issue #12).
+fn find_intra_batch_duplicate(
+    input: &BatchCreateInput,
+    schemas: &[TableSchema],
+    seen: &std::collections::HashMap<UniqueKey, usize>,
+) -> Option<usize> {
+    for key in input_unique_keys(input, schemas) {
+        if let Some(prior_idx) = seen.get(&key) {
+            return Some(*prior_idx);
+        }
+    }
+    None
+}
+
+/// Record every unique-tuple key derivable from `input` so later inputs in
+/// the same batch can detect collisions via `find_intra_batch_duplicate`.
+fn record_intra_batch_unique(
+    input: &BatchCreateInput,
+    schemas: &[TableSchema],
+    seen: &mut std::collections::HashMap<UniqueKey, usize>,
+    input_idx: usize,
+) {
+    for key in input_unique_keys(input, schemas) {
+        seen.entry(key).or_insert(input_idx);
+    }
+}
+
+/// Yield one composite key per declared `unique_together` group on the
+/// input's typedef, skipping groups that don't have all their columns
+/// supplied in `input.fields` (those can't form a complete tuple yet, so
+/// they can't collide).
+fn input_unique_keys(input: &BatchCreateInput, schemas: &[TableSchema]) -> Vec<UniqueKey> {
+    let type_name = match input.doogat_type.as_deref() {
+        Some(t) => t,
+        None => return vec![],
+    };
+    let schema = match schemas.iter().find(|s| s.table_name == type_name) {
+        Some(s) => s,
+        None => return vec![],
+    };
+    let groups = match schema.unique_together.as_ref() {
+        Some(g) => g,
+        None => return vec![],
+    };
+    groups
+        .iter()
+        .filter_map(|group| {
+            let values: Option<Vec<String>> = group
+                .iter()
+                .map(|col| input.fields.get(col).map(value_to_unique_key))
+                .collect();
+            values.map(|vals| (type_name.to_string(), group.clone(), vals))
+        })
+        .collect()
+}
+
 impl<G: GitBackend> DoogatService<G> {
     // ── CRUD ────────────────────────────────────────────────────────────
 
@@ -365,6 +457,13 @@ impl<G: GitBackend> DoogatService<G> {
     ///
     /// Generates unique IDs, resolves typedef defaults (including DEFAULT NEXT),
     /// validates constraints, and commits all files atomically.
+    ///
+    /// Issue #12: cross-batch duplicates (DB conflict) and intra-batch
+    /// duplicates (two inputs in the same batch with the same unique
+    /// tuple) both honour `on_conflict`. For `Ignore`, the response payload
+    /// at the duplicate input's array index is the surviving row's
+    /// payload — the rejected ID is discarded. For `Error`, the whole
+    /// batch fails.
     pub fn batch_create(&self, inputs: &[BatchCreateInput]) -> Result<Vec<ParsedDoogat>> {
         if inputs.is_empty() {
             return Ok(vec![]);
@@ -377,16 +476,36 @@ impl<G: GitBackend> DoogatService<G> {
             self.precompute_next_counters(inputs, &schemas)?;
 
         // Phase 1: prepare all writes.
-        let mut results: Vec<Option<ParsedDoogat>> = Vec::with_capacity(inputs.len());
+        // `intra_dup_links[i] = Some(j)` means input i is an intra-batch
+        // duplicate of input j; resolve `results[i] = results[j]` after
+        // Phase 3 fills the surviving row.
+        let mut results: Vec<Option<ParsedDoogat>> = (0..inputs.len()).map(|_| None).collect();
         let mut writes: Vec<(usize, String, String)> = Vec::with_capacity(inputs.len());
-        for input in inputs {
+        let mut intra_dup_links: Vec<Option<usize>> = vec![None; inputs.len()];
+        let mut seen_unique: std::collections::HashMap<UniqueKey, usize> =
+            std::collections::HashMap::new();
+        for (input_idx, input) in inputs.iter().enumerate() {
             if let Some(existing) = self.check_unique_constraints(input, &schemas)? {
-                results.push(Some(existing));
+                results[input_idx] = Some(existing);
                 continue;
             }
 
-            let slot = results.len();
-            results.push(None);
+            if let Some(prior_idx) = find_intra_batch_duplicate(input, &schemas, &seen_unique) {
+                match input.on_conflict {
+                    crate::types::ConflictAction::Ignore => {
+                        intra_dup_links[input_idx] = Some(prior_idx);
+                        continue;
+                    }
+                    crate::types::ConflictAction::Error => {
+                        let type_name = input.doogat_type.as_deref().unwrap_or("");
+                        return Err(DoogatError::Validation(format!(
+                            "duplicate unique constraint within batch on type '{type_name}'"
+                        )));
+                    }
+                }
+            }
+
+            record_intra_batch_unique(input, &schemas, &mut seen_unique, input_idx);
 
             let (path, content) = self.prepare_create(
                 input,
@@ -394,7 +513,7 @@ impl<G: GitBackend> DoogatService<G> {
                 &mut next_counters,
                 &mut partitioned_counters,
             )?;
-            writes.push((slot, path, content));
+            writes.push((input_idx, path, content));
         }
 
         // Phase 2: atomic commit
@@ -402,6 +521,13 @@ impl<G: GitBackend> DoogatService<G> {
 
         // Phase 3: index new writes and fill result slots
         self.index_batch_creates(&writes, &schemas, &mut results)?;
+
+        // Resolve intra-batch duplicate links to the surviving row's payload.
+        for (i, link) in intra_dup_links.iter().enumerate() {
+            if let Some(j) = link {
+                results[i] = results[*j].clone();
+            }
+        }
 
         Ok(results.into_iter().flatten().collect())
     }
@@ -435,9 +561,11 @@ impl<G: GitBackend> DoogatService<G> {
         Self::validate_typed_create_post_defaults(input, schemas, &extra)?;
         self.validate_column_constraints(input, schemas, &extra)?;
 
+        let title = self.resolve_create_title(input, schemas, &id, &extra)?;
+
         let meta = DoogatMeta {
             id: Some(id),
-            title: Some(input.title.clone()),
+            title: Some(title),
             date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
             doogat_type: input.doogat_type.clone(),
             tags: input.tags.clone(),
@@ -459,6 +587,50 @@ impl<G: GitBackend> DoogatService<G> {
 
         let content = parser::serialize(&parsed);
         Ok((path, content))
+    }
+
+    /// Resolve the title for a batch create. Mirrors the `executeSql INSERT`
+    /// path's title chain so the GraphQL surface (issue #13) and the SQL
+    /// surface produce identical titles for the same input.
+    ///
+    /// - `Some(t)` from the caller is used verbatim.
+    /// - `None` with a typedef that declares `title_template` renders the
+    ///   template via the shared `resolve_insert_title` helper.
+    /// - `None` with a typedef that has no template, or no typedef at all,
+    ///   is rejected with `NOT_NULL_VIOLATION` on the title column.
+    fn resolve_create_title(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+        id: &DoogatId,
+        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<String> {
+        if let Some(t) = input.title.clone() {
+            return Ok(t);
+        }
+        let schema = input
+            .doogat_type
+            .as_deref()
+            .and_then(|t| schemas.iter().find(|s| s.table_name == t));
+        match schema {
+            Some(s) if s.title_template.is_some() => {
+                let col_values = extra_to_template_col_values(extra);
+                Ok(crate::sql_engine::resolve_insert_title(
+                    id,
+                    s,
+                    &col_values,
+                    Some(&self.index.conn),
+                ))
+            }
+            Some(s) => Err(DoogatError::not_null_violation(
+                s.table_name.clone(),
+                "title".to_string(),
+            )),
+            None => Err(DoogatError::not_null_violation(
+                "doogats".to_string(),
+                "title".to_string(),
+            )),
+        }
     }
 
     /// Phase 2: atomic commit for batch creates (no-op when writes is empty).
@@ -570,9 +742,10 @@ impl<G: GitBackend> DoogatService<G> {
             if !col.required {
                 continue;
             }
-            // Title is satisfied by `input.title` always (BatchCreateInput
-            // requires it as a non-Option String) or by the title_template
-            // synthesis path. Skip the NOT NULL check for it.
+            // Title is enforced separately in `resolve_create_title`, which
+            // accepts `Some(t)`, falls back to the typedef's `title_template`
+            // when `None`, and emits its own `NOT_NULL_VIOLATION` when neither
+            // is available. Skip it here so we don't double-emit.
             if col.name == "title" {
                 continue;
             }

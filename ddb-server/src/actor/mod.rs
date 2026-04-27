@@ -50,7 +50,7 @@ pub enum ActorCommand {
         filters: SearchFilters,
     },
     CreateDoogat {
-        title: String,
+        title: Option<String>,
         body: Option<String>,
         tags: Vec<String>,
         doogat_type: Option<String>,
@@ -298,7 +298,7 @@ impl ActorHandle {
 
     pub async fn create_doogat(
         &self,
-        title: String,
+        title: Option<String>,
         body: Option<String>,
         tags: Vec<String>,
         doogat_type: Option<String>,

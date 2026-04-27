@@ -17,6 +17,7 @@ use crate::traits::DoogatStore;
 use crate::types::DoogatId;
 
 pub use builders::{build_typedef_doogat, schema_from_parsed};
+pub(crate) use builders::resolve_insert_title;
 
 use helpers::{
     normalize_alter_column_type, re_drop_title_template, re_set_title_template, re_set_zone,

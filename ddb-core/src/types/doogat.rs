@@ -473,9 +473,13 @@ pub enum ConflictAction {
 }
 
 /// Input for batch creation of doogats.
+///
+/// `title` is optional: when `None`, the engine renders the title from the
+/// typedef's `title_template` if one is declared; otherwise the create is
+/// rejected with `NOT_NULL_VIOLATION` on the title column.
 #[derive(Debug, Clone)]
 pub struct BatchCreateInput {
-    pub title: String,
+    pub title: Option<String>,
     pub body: Option<String>,
     pub tags: Vec<String>,
     pub doogat_type: Option<String>,

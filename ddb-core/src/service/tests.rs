@@ -1142,7 +1142,7 @@ fn batch_create_basic() {
 
     let inputs = vec![
         crate::types::BatchCreateInput {
-            title: "Alpha".to_string(),
+            title: Some("Alpha".to_string()),
             body: None,
             tags: vec![],
             doogat_type: None,
@@ -1150,7 +1150,7 @@ fn batch_create_basic() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Beta".to_string(),
+            title: Some("Beta".to_string()),
             body: None,
             tags: vec![],
             doogat_type: None,
@@ -1158,7 +1158,7 @@ fn batch_create_basic() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Gamma".to_string(),
+            title: Some("Gamma".to_string()),
             body: None,
             tags: vec![],
             doogat_type: None,
@@ -1203,7 +1203,7 @@ fn batch_create_return_order() {
     let inputs: Vec<crate::types::BatchCreateInput> = titles
         .iter()
         .map(|t| crate::types::BatchCreateInput {
-            title: t.to_string(),
+            title: Some(t.to_string()),
             body: None,
             tags: vec![],
             doogat_type: None,
@@ -1232,7 +1232,7 @@ fn batch_create_with_type() {
 
     let inputs = vec![
         crate::types::BatchCreateInput {
-            title: "Task A".to_string(),
+            title: Some("Task A".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("task".to_string()),
@@ -1240,7 +1240,7 @@ fn batch_create_with_type() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Task B".to_string(),
+            title: Some("Task B".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("task".to_string()),
@@ -1267,7 +1267,7 @@ fn batch_create_with_tags() {
 
     let inputs = vec![
         crate::types::BatchCreateInput {
-            title: "Tagged One".to_string(),
+            title: Some("Tagged One".to_string()),
             body: None,
             tags: vec!["rust".to_string(), "testing".to_string()],
             doogat_type: None,
@@ -1275,7 +1275,7 @@ fn batch_create_with_tags() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Tagged Two".to_string(),
+            title: Some("Tagged Two".to_string()),
             body: None,
             tags: vec!["python".to_string()],
             doogat_type: None,
@@ -1296,7 +1296,7 @@ fn batch_create_with_body() {
 
     let inputs = vec![
         crate::types::BatchCreateInput {
-            title: "With Body".to_string(),
+            title: Some("With Body".to_string()),
             body: Some("Hello world content".to_string()),
             tags: vec![],
             doogat_type: None,
@@ -1304,7 +1304,7 @@ fn batch_create_with_body() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Empty Body".to_string(),
+            title: Some("Empty Body".to_string()),
             body: None,
             tags: vec![],
             doogat_type: None,
@@ -1351,7 +1351,7 @@ fn batch_create_with_fields() {
 
     let inputs = vec![
         crate::types::BatchCreateInput {
-            title: "Item One".to_string(),
+            title: Some("Item One".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("items".to_string()),
@@ -1359,7 +1359,7 @@ fn batch_create_with_fields() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Item Two".to_string(),
+            title: Some("Item Two".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("items".to_string()),
@@ -1397,7 +1397,7 @@ fn batch_create_single_commit() {
 
     let inputs: Vec<crate::types::BatchCreateInput> = (0..3)
         .map(|i| crate::types::BatchCreateInput {
-            title: format!("Commit Test {i}"),
+            title: Some(format!("Commit Test {i}")),
             body: None,
             tags: vec![],
             doogat_type: None,
@@ -1433,7 +1433,7 @@ fn batch_create_default_next() {
                 crate::types::Value::String(name.to_string()),
             );
             crate::types::BatchCreateInput {
-                title: format!("Ranked {name}"),
+                title: Some(format!("Ranked {name}")),
                 body: None,
                 tags: vec![],
                 doogat_type: Some("ranked".to_string()),
@@ -1477,7 +1477,7 @@ fn batch_create_partitioned_next() {
                     crate::types::Value::String(cat.to_string()),
                 );
                 crate::types::BatchCreateInput {
-                    title: format!("Item {name}"),
+                    title: Some(format!("Item {name}")),
                     body: None,
                     tags: vec![],
                     doogat_type: Some("items".to_string()),
@@ -1523,7 +1523,7 @@ fn batch_create_rollback_on_failure() {
 
     let inputs = vec![
         crate::types::BatchCreateInput {
-            title: "Good One".to_string(),
+            title: Some("Good One".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("linked".to_string()),
@@ -1531,7 +1531,7 @@ fn batch_create_rollback_on_failure() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Bad FK".to_string(),
+            title: Some("Bad FK".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("linked".to_string()),
@@ -1573,7 +1573,7 @@ fn batch_create_mixed_types() {
 
     let inputs = vec![
         crate::types::BatchCreateInput {
-            title: "My Note".to_string(),
+            title: Some("My Note".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("note".to_string()),
@@ -1581,7 +1581,7 @@ fn batch_create_mixed_types() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "My Task".to_string(),
+            title: Some("My Task".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("task".to_string()),
@@ -1589,7 +1589,7 @@ fn batch_create_mixed_types() {
             on_conflict: crate::types::ConflictAction::Error,
         },
         crate::types::BatchCreateInput {
-            title: "Untyped".to_string(),
+            title: Some("Untyped".to_string()),
             body: None,
             tags: vec![],
             doogat_type: None,
@@ -1642,7 +1642,7 @@ fn batch_create_on_conflict_ignore_first_insert_succeeds() {
     );
 
     let inputs = vec![crate::types::BatchCreateInput {
-        title: "Foo Widget".to_string(),
+        title: Some("Foo Widget".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("widget".to_string()),
@@ -1675,7 +1675,7 @@ fn batch_create_on_conflict_ignore_duplicate_returns_existing() {
     // First insert
     let first = svc
         .batch_create(&[crate::types::BatchCreateInput {
-            title: "Foo Widget".to_string(),
+            title: Some("Foo Widget".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("widget".to_string()),
@@ -1690,7 +1690,7 @@ fn batch_create_on_conflict_ignore_duplicate_returns_existing() {
     // Second insert - same name, Ignore -> must return the existing doogat
     let second = svc
         .batch_create(&[crate::types::BatchCreateInput {
-            title: "Foo Widget Duplicate".to_string(),
+            title: Some("Foo Widget Duplicate".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("widget".to_string()),
@@ -1732,7 +1732,7 @@ fn batch_create_on_conflict_ignore_non_duplicate_creates_new() {
     // Insert "foo" first
     let first = svc
         .batch_create(&[crate::types::BatchCreateInput {
-            title: "Foo Widget".to_string(),
+            title: Some("Foo Widget".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("widget".to_string()),
@@ -1745,7 +1745,7 @@ fn batch_create_on_conflict_ignore_non_duplicate_creates_new() {
     // Insert "bar" - different name, should create a new doogat
     let second = svc
         .batch_create(&[crate::types::BatchCreateInput {
-            title: "Bar Widget".to_string(),
+            title: Some("Bar Widget".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("widget".to_string()),
@@ -1776,7 +1776,7 @@ fn batch_create_on_conflict_error_duplicate_fails() {
 
     // First insert - succeeds
     svc.batch_create(&[crate::types::BatchCreateInput {
-        title: "Foo Widget".to_string(),
+        title: Some("Foo Widget".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("widget".to_string()),
@@ -1787,7 +1787,7 @@ fn batch_create_on_conflict_error_duplicate_fails() {
 
     // Second insert with same unique key and Error -> must fail
     let result = svc.batch_create(&[crate::types::BatchCreateInput {
-        title: "Foo Widget Again".to_string(),
+        title: Some("Foo Widget Again".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("widget".to_string()),
@@ -2448,7 +2448,7 @@ fn batch_create_typed_writes_to_type_table_prd_00129() {
     );
 
     let inputs = vec![crate::types::BatchCreateInput {
-        title: "Example".to_string(),
+        title: Some("Example".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("link".to_string()),
@@ -2483,7 +2483,7 @@ fn batch_create_with_unregistered_type_rejects_with_type_not_registered_prd_0012
     let (_tmp, svc) = fresh_svc();
 
     let inputs = vec![crate::types::BatchCreateInput {
-        title: "x".to_string(),
+        title: Some("x".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("nonexistent".to_string()),
@@ -2514,7 +2514,7 @@ fn batch_create_with_unknown_field_rejects_with_unknown_field_prd_00129() {
     );
 
     let inputs = vec![crate::types::BatchCreateInput {
-        title: "x".to_string(),
+        title: Some("x".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("link".to_string()),
@@ -2539,7 +2539,7 @@ fn batch_create_missing_required_column_rejects_with_not_null_prd_00129() {
         .unwrap();
 
     let inputs = vec![crate::types::BatchCreateInput {
-        title: "x".to_string(),
+        title: Some("x".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("link".to_string()),
@@ -2564,7 +2564,7 @@ fn batch_create_typed_no_fields_with_only_nullable_columns_succeeds_prd_00129() 
         .unwrap();
 
     let inputs = vec![crate::types::BatchCreateInput {
-        title: "Bare Link".to_string(),
+        title: Some("Bare Link".to_string()),
         body: None,
         tags: vec![],
         doogat_type: Some("link".to_string()),
@@ -2594,6 +2594,304 @@ fn batch_create_typed_no_fields_with_only_nullable_columns_succeeds_prd_00129() 
 }
 
 #[test]
+fn batch_create_intra_batch_duplicate_ignore_returns_surviving_id_issue_12() {
+    // Issue #12: when `createMany(onConflict: IGNORE)` skips a duplicate
+    // *within the same batch*, the response payload must return the
+    // surviving (winning) row's ID — not the rejected/rolled-back ID
+    // for that input. The single-row `createDoogat(onConflict: IGNORE)`
+    // already returns the existing row's ID for cross-batch duplicates;
+    // this test pins the same semantics for intra-batch duplicates.
+    let (_tmp, svc) = fresh_svc();
+    setup_widget_typedef(&svc);
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "name".to_string(),
+        crate::types::Value::String("a".to_string()),
+    );
+
+    let inputs = vec![
+        crate::types::BatchCreateInput {
+            title: Some("Widget A".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields: fields.clone(),
+            on_conflict: crate::types::ConflictAction::Ignore,
+        },
+        crate::types::BatchCreateInput {
+            title: Some("Widget A Duplicate".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields,
+            on_conflict: crate::types::ConflictAction::Ignore,
+        },
+    ];
+
+    let results = svc.batch_create(&inputs).unwrap();
+    assert_eq!(results.len(), 2, "two payloads, one per input");
+
+    let id1 = results[0].meta.id.as_ref().unwrap().0.clone();
+    let id2 = results[1].meta.id.as_ref().unwrap().0.clone();
+    assert_eq!(
+        id1, id2,
+        "intra-batch duplicate must return the surviving row's ID at both array indices"
+    );
+
+    // Exactly one widget row exists; the rejected ID is not present anywhere.
+    let widget_count: i64 = svc
+        .index
+        .conn
+        .query_row("SELECT COUNT(*) FROM widget", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(widget_count, 1, "exactly one materialized widget row");
+    let doogats_count: i64 = svc
+        .index
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM doogats WHERE type = 'widget'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        doogats_count, 1,
+        "exactly one base doogats row (no half-written second row)"
+    );
+}
+
+#[test]
+fn batch_create_intra_batch_duplicate_error_rejects_whole_batch_issue_12() {
+    // Issue #12 sibling: with `on_conflict: Error`, an intra-batch
+    // duplicate fails the whole batch — same posture as a cross-batch
+    // duplicate. No partial commits.
+    let (_tmp, svc) = fresh_svc();
+    setup_widget_typedef(&svc);
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "name".to_string(),
+        crate::types::Value::String("a".to_string()),
+    );
+
+    let inputs = vec![
+        crate::types::BatchCreateInput {
+            title: Some("Widget A".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields: fields.clone(),
+            on_conflict: crate::types::ConflictAction::Error,
+        },
+        crate::types::BatchCreateInput {
+            title: Some("Widget A Duplicate".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("widget".to_string()),
+            fields,
+            on_conflict: crate::types::ConflictAction::Error,
+        },
+    ];
+
+    let err = svc
+        .batch_create(&inputs)
+        .expect_err("intra-batch duplicate with Error must reject");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("duplicate unique constraint within batch"),
+        "expected intra-batch error, got: {msg}"
+    );
+
+    let widget_count: i64 = svc
+        .index
+        .conn
+        .query_row("SELECT COUNT(*) FROM widget", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(widget_count, 0, "no widget rows committed on rejection");
+}
+
+#[test]
+fn batch_create_omitted_title_renders_via_title_template_issue_13() {
+    // Issue #13: the GraphQL `createDoogat` surface needs to omit `title`
+    // for typedefs that declare a `title_template` (PRD 00127), the same
+    // way SQL `INSERT` already does. The shared engine call sits inside
+    // `prepare_create`, so a service-layer `batch_create` exercises it
+    // without going through the GraphQL surface.
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    svc.execute_sql("ALTER TABLE link SET TITLE TEMPLATE 'link-{url}'")
+        .unwrap();
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "url".to_string(),
+        crate::types::Value::String("https://example.com".to_string()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: None,
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let results = svc
+        .batch_create(&inputs)
+        .expect("typed create with template-bearing typedef must succeed without title");
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].meta.title.as_deref(),
+        Some("link-https://example.com"),
+        "title rendered from title_template"
+    );
+}
+
+#[test]
+fn batch_create_omitted_title_no_template_rejects_with_not_null_issue_13() {
+    // Issue #13 negative: typedef without a title_template, omitted title
+    // → NOT_NULL_VIOLATION on the title column.
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "url".to_string(),
+        crate::types::Value::String("https://example.com".to_string()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: None,
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc
+        .batch_create(&inputs)
+        .expect_err("omitted title with no template must reject");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("NOT NULL constraint violated: link.title"),
+        "expected NOT_NULL_VIOLATION on link.title, got: {msg}"
+    );
+}
+
+#[test]
+fn batch_create_omitted_title_no_typedef_rejects_with_not_null_issue_13() {
+    // Issue #13 negative: untyped create with no title → NOT_NULL_VIOLATION
+    // against the base `doogats` table. Prevents writing a base doogat
+    // with no title at all (which would defeat the base NOT NULL).
+    let (_tmp, svc) = fresh_svc();
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: None,
+        body: None,
+        tags: vec![],
+        doogat_type: None,
+        fields: std::collections::BTreeMap::new(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc
+        .batch_create(&inputs)
+        .expect_err("untyped create with no title must reject");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("NOT NULL constraint violated: doogats.title"),
+        "expected NOT_NULL_VIOLATION on doogats.title, got: {msg}"
+    );
+}
+
+#[test]
+fn batch_create_omitted_title_renders_via_references_template_issue_13() {
+    // Issue #13 + PRD 00127: the renderer dereferences REFERENCES columns
+    // through the SQLite index. createDoogat → prepare_create →
+    // resolve_create_title → resolve_insert_title chain must pass the
+    // sqlite conn so the lookup succeeds.
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE link (title TEXT, url VARCHAR(255))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE category (title TEXT, fqn VARCHAR(255))")
+        .unwrap();
+    svc.execute_sql(
+        "CREATE TABLE \"category-membership\" (\
+         link_id VARCHAR(255) NOT NULL REFERENCES link(id),\
+         category_id VARCHAR(255) NOT NULL REFERENCES category(id))",
+    )
+    .unwrap();
+    svc.execute_sql(
+        "ALTER TABLE \"category-membership\" SET TITLE TEMPLATE \
+         '{link_id.title} in {category_id.fqn}'",
+    )
+    .unwrap();
+
+    // Seed link + category so the REFERENCES dereferences resolve.
+    let mut link_fields = std::collections::BTreeMap::new();
+    link_fields.insert(
+        "url".to_string(),
+        crate::types::Value::String("https://example.com".to_string()),
+    );
+    let link = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("Example".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("link".to_string()),
+            fields: link_fields,
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .unwrap();
+    let link_id = link[0].meta.id.as_ref().unwrap().0.clone();
+
+    let mut cat_fields = std::collections::BTreeMap::new();
+    cat_fields.insert(
+        "fqn".to_string(),
+        crate::types::Value::String("work.dev".to_string()),
+    );
+    let cat = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("Dev".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("category".to_string()),
+            fields: cat_fields,
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .unwrap();
+    let cat_id = cat[0].meta.id.as_ref().unwrap().0.clone();
+
+    let mut mem_fields = std::collections::BTreeMap::new();
+    mem_fields.insert(
+        "link_id".to_string(),
+        crate::types::Value::String(link_id),
+    );
+    mem_fields.insert(
+        "category_id".to_string(),
+        crate::types::Value::String(cat_id),
+    );
+    let result = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: None,
+            body: None,
+            tags: vec![],
+            doogat_type: Some("category-membership".to_string()),
+            fields: mem_fields,
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .expect("template-with-REFERENCES create must succeed without title");
+    assert_eq!(
+        result[0].meta.title.as_deref(),
+        Some("Example in work.dev"),
+        "title rendered from REFERENCES title_template"
+    );
+}
+
+#[test]
 fn batch_create_many_ignore_duplicate_does_not_write_half_row_prd_00129() {
     // PRD 00129 §1 (createMany half): when `onConflict: IGNORE` skips a
     // duplicate, neither the base `doogats` row nor the materialized
@@ -2612,7 +2910,7 @@ fn batch_create_many_ignore_duplicate_does_not_write_half_row_prd_00129() {
     // Seed: create the original widget so the second batch hits a conflict.
     let first = svc
         .batch_create(&[crate::types::BatchCreateInput {
-            title: "Widget A".to_string(),
+            title: Some("Widget A".to_string()),
             body: None,
             tags: vec![],
             doogat_type: Some("widget".to_string()),
@@ -2642,7 +2940,7 @@ fn batch_create_many_ignore_duplicate_does_not_write_half_row_prd_00129() {
     let results = svc
         .batch_create(&[
             crate::types::BatchCreateInput {
-                title: "Widget A Duplicate".to_string(),
+                title: Some("Widget A Duplicate".to_string()),
                 body: None,
                 tags: vec![],
                 doogat_type: Some("widget".to_string()),
@@ -2650,7 +2948,7 @@ fn batch_create_many_ignore_duplicate_does_not_write_half_row_prd_00129() {
                 on_conflict: crate::types::ConflictAction::Ignore,
             },
             crate::types::BatchCreateInput {
-                title: "Widget B".to_string(),
+                title: Some("Widget B".to_string()),
                 body: None,
                 tags: vec![],
                 doogat_type: Some("widget".to_string()),
@@ -2870,7 +3168,7 @@ fn batch_create_untyped_doogat_unaffected_by_typed_validation_prd_00129() {
     // entirely — same behavior as before PRD 00129.
     let (_tmp, svc) = fresh_svc();
     let inputs = vec![crate::types::BatchCreateInput {
-        title: "Untyped".to_string(),
+        title: Some("Untyped".to_string()),
         body: None,
         tags: vec!["misc".to_string()],
         doogat_type: None,

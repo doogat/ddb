@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **server**: `createDoogat` accepts an omitted `title` (the `CreateDoogatInput.title` field is now nullable). Typedefs that declare a `title_template` render it server-side, matching the SQL `INSERT` path. Typedefs without a template, or untyped creates, still reject the missing title with `NOT_NULL_VIOLATION`. Same change on `createMany` items. (#13)
+- **server**: `createMany(onConflict: IGNORE)` returns the surviving row's ID for skipped rows in both cross-batch and intra-batch duplicate scenarios. Earlier the bulk path returned the rejected/rolled-back ID for intra-batch duplicates, so callers using the response IDs for follow-up reads silently missed. (#12)
+- **server**: `TagsFilter` operators `containsAll` and `containsAny` are now nullable (`[String!]` instead of `[String!]!`), so `where: { tags: { contains: "rust" } }` no longer requires every caller to also pass empty `containsAll` / `containsAny` arrays. Empty filter (zero operators) and empty arrays are rejected at resolve time with a clear error instead of silently matching nothing. (#11)
+
 ## [0.2.5] - 2026-04-27
 
 ### Added

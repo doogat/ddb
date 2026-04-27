@@ -67,21 +67,27 @@ pub fn id_filter() -> InputObject {
 /// - `containsAll`: row has every listed tag (one EXISTS per tag,
 ///   AND-ed).
 /// - `containsAny`: row has at least one of the listed tags.
+///
+/// Issue #11: all three operators are nullable. Callers supply at least
+/// one; resolve-time validation rejects an empty filter (no operator
+/// supplied) or empty `containsAll` / `containsAny` arrays. The earlier
+/// schema marked `containsAll` / `containsAny` as `[String!]!`, forcing
+/// every caller to pass all three even when only `contains` was meant.
 pub fn tags_filter() -> InputObject {
     InputObject::new("TagsFilter")
         .description(
-            "Filter doogats by tag set. `contains` matches a single tag, `containsAll` matches \
-             rows that carry every listed tag, `containsAny` matches rows with at least one \
-             listed tag. Empty `containsAll` / `containsAny` match nothing (mirrors empty `in`).",
+            "Filter doogats by tag set. Supply at least one of: `contains` (single tag), \
+             `containsAll` (every listed tag), `containsAny` (any one of the listed tags). \
+             Empty filter or empty `containsAll` / `containsAny` arrays are rejected.",
         )
         .field(InputValue::new("contains", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new(
             "containsAll",
-            TypeRef::named_nn_list_nn(TypeRef::STRING),
+            TypeRef::named_nn_list(TypeRef::STRING),
         ))
         .field(InputValue::new(
             "containsAny",
-            TypeRef::named_nn_list_nn(TypeRef::STRING),
+            TypeRef::named_nn_list(TypeRef::STRING),
         ))
 }
 
@@ -438,6 +444,7 @@ pub fn aggregate_row_to_value(row: &[String], names: &[String]) -> GqlValue {
 // -- WHERE clause builder --
 
 /// Parameterized SQL WHERE clause.
+#[derive(Debug)]
 pub struct WhereClause {
     pub sql: String,
     pub params: Vec<SqlValue>,
@@ -459,17 +466,20 @@ impl WhereClause {
 /// Base doogat fields present in every materialized table but not in `schema.columns`.
 const BASE_FILTER_FIELDS: &[&str] = &["id", "title"];
 
-/// Build a parameterized WHERE clause from a GraphQL filter input value.
+/// Build a parameterized WHERE clause from a GraphQL filter input value,
+/// surfacing user-input validation errors (e.g. an empty `TagsFilter`)
+/// to the caller. Resolvers prefer this entry point so they can return
+/// a clean GraphQL error instead of silently dropping the clause.
 ///
 /// The `input` should be the resolved `{Type}Where` object value.
 /// Column names are validated against the schema to prevent injection.
-pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
+pub fn try_build_where_sql(input: &GqlValue, schema: &TableSchema) -> Result<WhereClause, String> {
     let mut conditions = Vec::new();
     let mut params = Vec::new();
 
     let obj = match input {
         GqlValue::Object(obj) => obj,
-        _ => return WhereClause::empty(),
+        _ => return Ok(WhereClause::empty()),
     };
 
     for (name, value) in obj {
@@ -492,7 +502,7 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
             // only runs for the synthetic path).
             "tags" if !schema.columns.iter().any(|c| c.name == "tags") => {
                 if let Some(cond) =
-                    build_tags_filter_condition(value, &schema.table_name, &mut params)
+                    build_tags_filter_condition(value, &schema.table_name, &mut params)?
                 {
                     conditions.push(cond);
                 }
@@ -501,37 +511,58 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
         }
     }
 
-    if conditions.is_empty() {
+    let wc = if conditions.is_empty() {
         WhereClause::empty()
     } else {
         WhereClause {
             sql: conditions.join(" AND "),
             params,
         }
-    }
+    };
+    Ok(wc)
 }
 
-/// PRD 00129 §5: build the SQL fragment for a `TagsFilter` value.
+/// Tests-and-internal-callers entry point. Discards validation errors and
+/// returns an empty clause instead — production resolvers should call
+/// `try_build_where_sql` so user-input errors surface to the GraphQL
+/// response.
+pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
+    try_build_where_sql(input, schema).unwrap_or_else(|_| WhereClause::empty())
+}
+
+/// PRD 00129 §5 + issue #11: build the SQL fragment for a `TagsFilter`
+/// value, validating that the caller supplied at least one operator and
+/// no empty lists.
 ///
-/// Returns the EXISTS / aggregate-COUNT clause that joins the
-/// materialized type table against the doogat-level `_ddb_tags` index.
-/// All values are bound parameters (never interpolated). Empty lists
-/// produce an always-false condition (matches no rows) to mirror the
-/// `in: []` semantics elsewhere in the where input.
+/// Returns the EXISTS clause that joins the materialized type table
+/// against the doogat-level `_ddb_tags` index. All values are bound
+/// parameters (never interpolated).
+///
+/// Errors:
+/// - `tags filter requires at least one of: contains, containsAll, containsAny`
+///   when no operator is supplied (or none with a usable value).
+/// - `containsAll cannot be empty` / `containsAny cannot be empty` when
+///   the array is `[]` (silently matching nothing was the trap).
 fn build_tags_filter_condition(
     value: &GqlValue,
     table_name: &str,
     params: &mut Vec<SqlValue>,
-) -> Option<String> {
+) -> Result<Option<String>, String> {
     let GqlValue::Object(filter) = value else {
-        return None;
+        return Ok(None);
     };
+
     let mut clauses = Vec::new();
+    let mut any_operator_supplied = false;
     for (op, val) in filter {
         let op_str = op.as_str();
+        if matches!(val, GqlValue::Null) {
+            continue;
+        }
         match op_str {
             "contains" => {
                 let GqlValue::String(tag) = val else { continue };
+                any_operator_supplied = true;
                 params.push(SqlValue::Text(tag.clone()));
                 clauses.push(format!(
                     "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag = ?)",
@@ -540,9 +571,9 @@ fn build_tags_filter_condition(
             }
             "containsAll" => {
                 let GqlValue::List(items) = val else { continue };
+                any_operator_supplied = true;
                 if items.is_empty() {
-                    clauses.push("0 = 1".to_string());
-                    continue;
+                    return Err("containsAll cannot be empty".to_string());
                 }
                 for item in items {
                     let GqlValue::String(tag) = item else { continue };
@@ -555,9 +586,9 @@ fn build_tags_filter_condition(
             }
             "containsAny" => {
                 let GqlValue::List(items) = val else { continue };
+                any_operator_supplied = true;
                 if items.is_empty() {
-                    clauses.push("0 = 1".to_string());
-                    continue;
+                    return Err("containsAny cannot be empty".to_string());
                 }
                 let mut placeholders = Vec::with_capacity(items.len());
                 for item in items {
@@ -577,10 +608,17 @@ fn build_tags_filter_condition(
             _ => {}
         }
     }
+
+    if !any_operator_supplied {
+        return Err(
+            "tags filter requires at least one of: contains, containsAll, containsAny".to_string(),
+        );
+    }
+
     if clauses.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(format!("({})", clauses.join(" AND ")))
+        Ok(Some(format!("({})", clauses.join(" AND "))))
     }
 }
 
@@ -1282,7 +1320,10 @@ mod tests {
     }
 
     #[test]
-    fn tags_filter_input_object_exposes_three_operators_prd_00129() {
+    fn tags_filter_input_object_exposes_three_nullable_operators_issue_11() {
+        // Issue #11: all three operators must be nullable in the schema.
+        // The earlier shape (`[String!]!`) forced every caller to pass all
+        // three keys even when only `contains` was meant.
         let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
             .register(tags_filter())
             .register(async_graphql::dynamic::Object::new("Query").field(
@@ -1295,8 +1336,23 @@ mod tests {
         let sdl = sdl_schema.sdl();
         assert!(sdl.contains("input TagsFilter"), "{sdl}");
         assert!(sdl.contains("contains: String"), "{sdl}");
-        assert!(sdl.contains("containsAll: [String!]"), "{sdl}");
-        assert!(sdl.contains("containsAny: [String!]"), "{sdl}");
+        // `[String!]` (nullable list of non-null strings) — no trailing `!`.
+        assert!(
+            sdl.contains("containsAll: [String!]\n") || sdl.contains("containsAll: [String!] "),
+            "containsAll must be [String!] (nullable list), got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("containsAny: [String!]\n") || sdl.contains("containsAny: [String!] "),
+            "containsAny must be [String!] (nullable list), got:\n{sdl}"
+        );
+        assert!(
+            !sdl.contains("containsAll: [String!]!"),
+            "containsAll must not be required, got:\n{sdl}"
+        );
+        assert!(
+            !sdl.contains("containsAny: [String!]!"),
+            "containsAny must not be required, got:\n{sdl}"
+        );
     }
 
     #[test]
@@ -1398,17 +1454,72 @@ mod tests {
     }
 
     #[test]
-    fn tags_contains_any_empty_list_emits_false_prd_00129() {
-        // `tags: { containsAny: [] }` mirrors the empty-`in: []` semantics
-        // elsewhere — match nothing, not "match everything vacuously".
+    fn tags_contains_any_empty_list_rejected_issue_11() {
+        // Issue #11: empty `containsAny` is rejected at resolve time
+        // instead of silently matching nothing. The earlier "always-false
+        // clause" semantics were a trap (callers expected a no-op).
         let schema = schema_with_table("link", vec!["title"]);
         let mut filter = IndexMap::new();
         filter.insert(Name::new("containsAny"), GqlValue::List(vec![]));
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(filter));
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &schema);
-        assert_eq!(wc.sql, "(0 = 1)");
-        assert!(wc.params.is_empty());
+        let err = try_build_where_sql(&input, &schema)
+            .expect_err("empty containsAny must reject");
+        assert!(err.contains("containsAny cannot be empty"), "got: {err}");
+    }
+
+    #[test]
+    fn tags_contains_all_empty_list_rejected_issue_11() {
+        let schema = schema_with_table("link", vec!["title"]);
+        let mut filter = IndexMap::new();
+        filter.insert(Name::new("containsAll"), GqlValue::List(vec![]));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("tags"), GqlValue::Object(filter));
+        let input = GqlValue::Object(obj);
+        let err = try_build_where_sql(&input, &schema)
+            .expect_err("empty containsAll must reject");
+        assert!(err.contains("containsAll cannot be empty"), "got: {err}");
+    }
+
+    #[test]
+    fn tags_filter_with_no_operators_rejected_issue_11() {
+        // `tags: {}` (or `tags: { contains: null, containsAll: null,
+        // containsAny: null }`) is meaningless — reject with a clear
+        // error naming the three operators.
+        let schema = schema_with_table("link", vec!["title"]);
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("tags"), GqlValue::Object(IndexMap::new()));
+        let input = GqlValue::Object(obj);
+        let err = try_build_where_sql(&input, &schema)
+            .expect_err("empty tags filter must reject");
+        assert!(
+            err.contains("tags filter requires at least one of") &&
+                err.contains("contains") &&
+                err.contains("containsAll") &&
+                err.contains("containsAny"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn tags_filter_only_contains_succeeds_issue_11() {
+        // The headline regression: prior to issue #11, the schema marked
+        // containsAll/containsAny as required, so this caller form
+        // failed at parse time. The schema is fixed; this test pins the
+        // resolver against the supplied form.
+        let schema = schema_with_table("link", vec!["title", "url"]);
+        let mut filter = IndexMap::new();
+        filter.insert(Name::new("contains"), GqlValue::String("rust".into()));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("tags"), GqlValue::Object(filter));
+        let input = GqlValue::Object(obj);
+        let wc = try_build_where_sql(&input, &schema)
+            .expect("contains-only filter must succeed");
+        assert_eq!(
+            wc.sql,
+            r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?))"#
+        );
+        assert_eq!(wc.params, vec![SqlValue::Text("rust".into())]);
     }
 }

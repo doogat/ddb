@@ -425,7 +425,7 @@ pub(crate) fn build_type_defs() -> TypeDefs {
 
     let create_input = InputObject::new("CreateDoogatInput")
         .description("Input for creating a new doogat.")
-        .field(InputValue::new("title", TypeRef::named_nn(TypeRef::STRING)))
+        .field(InputValue::new("title", TypeRef::named(TypeRef::STRING)).description("Title for the new doogat. Omit (or pass null) to render server-side from the typedef's title_template; rejected with NOT_NULL_VIOLATION when no template is declared."))
         .field(InputValue::new("content", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new(
             "tags",
@@ -436,7 +436,7 @@ pub(crate) fn build_type_defs() -> TypeDefs {
 
     let create_many_item_input = InputObject::new("CreateManyItemInput")
         .description("Input for a single item in a batch create operation.")
-        .field(InputValue::new("title", TypeRef::named_nn(TypeRef::STRING)))
+        .field(InputValue::new("title", TypeRef::named(TypeRef::STRING)).description("Title for the new doogat. Omit (or pass null) to render server-side from the typedef's title_template; rejected with NOT_NULL_VIOLATION when no template is declared."))
         .field(InputValue::new("content", TypeRef::named(TypeRef::STRING)))
         .field(InputValue::new(
             "tags",

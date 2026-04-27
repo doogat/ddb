@@ -244,9 +244,13 @@ type CompactResult {
 
 `createDoogat` and `createMany` populate the type-specific materialized table whenever `type` is set. Pre-PRD 00129 only the base `doogats` row was written. Now: an `input.type` referencing an unregistered typedef rejects with `TYPE_NOT_REGISTERED`, an `input.fields` key not in the typedef rejects with `UNKNOWN_FIELD`, and a missing required column with no default rejects with `NOT_NULL_VIOLATION`. The CLI `ddb create` path is unchanged — it still permits silent base-only creation for unregistered types.
 
+`CreateDoogatInput.title` and `CreateManyItemInput.title` are nullable (PRD 00130 / issue #13). When `title` is omitted on a typedef that declares a `title_template`, the engine renders the title server-side from the template — the same path the SQL `INSERT` already used. Without a template (or for an untyped create), an omitted title rejects with `NOT_NULL_VIOLATION` on the `title` column.
+
 `createMany` creates multiple doogats atomically in a single git commit. All records are created or none (rollback on any failure). Returns created records in input order. The optional `fields` parameter accepts a JSON string of key-value pairs for typed columns (e.g. `"{\"category\":\"books\",\"priority\":\"1\"}"`). When the record has a type with a typedef, column defaults (including `DEFAULT NEXT` auto-increment) are resolved automatically for omitted fields. Allowed-value and foreign-key constraints are validated per record.
 
 Both `createDoogat` and `createMany` accept an optional `onConflict` argument. When set to `IGNORE`, if the new record would violate a `unique_together` constraint on the typedef, creation is skipped and the existing doogat is returned instead. When omitted or set to `ERROR` (default), a unique constraint violation returns an error. The pre-check matches field values against the `_ddb_fields` index, so the caller must pass the constrained fields via the `fields` parameter on `CreateManyItemInput`.
+
+PRD 00130 / issue #12: `createMany(onConflict: IGNORE)` returns the surviving row's ID (and full payload) at the array index of every skipped duplicate — both for cross-batch conflicts (an existing row in the index) and for intra-batch conflicts (two inputs in the same batch carrying the same unique tuple). Earlier the bulk path returned the rejected/rolled-back ID for intra-batch duplicates, leaving callers with an ID that did not exist anywhere.
 
 `sync` defaults to `remote: "origin"`, `branch: "master"` (override via arguments for repos using a different default branch). Returns an error if no remote is configured.
 `compact` defaults to `force: false`. When no node is registered, returns a no-op report (zeros).
@@ -552,11 +556,13 @@ input TagsFilter { contains: String, containsAll: [String!], containsAny: [Strin
 
 - `contains: "rust"` — row carries the named tag.
 - `containsAll: ["a", "b"]` — row carries every listed tag.
-- `containsAny: ["a", "b"]` — row carries at least one listed tag. Empty list matches nothing (mirrors `in: []`).
+- `containsAny: ["a", "b"]` — row carries at least one listed tag.
 
 ```graphql
 { links(where: { tags: { contains: "rust" } }) { items { id title url } } }
 ```
+
+All three operators are nullable (PRD 00130 / issue #11) — a contains-only call no longer requires the caller to also pass empty `containsAll` / `containsAny` arrays. The resolver rejects two user-input mistakes that earlier silently matched no rows: an empty filter (`tags: {}`) returns `tags filter requires at least one of: contains, containsAll, containsAny`, and an empty array (`containsAll: []` or `containsAny: []`) returns `containsAll cannot be empty` / `containsAny cannot be empty`.
 
 Composes with column filters via the existing AND conjunction. Backed by `EXISTS` against the `_ddb_tags` index, no new storage.
 

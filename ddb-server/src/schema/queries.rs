@@ -448,12 +448,16 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                                 .and_then(|v| v.deserialize::<GqlValue>().ok())
                                 .and_then(|v| crate::filter::build_order_sql(&v, &schema_clone));
 
-                            // Build where clause
+                            // Build where clause. Validation errors (e.g.
+                            // empty `tags` filter, issue #11) bubble out
+                            // as GraphQL errors instead of silently
+                            // matching no rows.
                             let where_val =
                                 ctx.args.get("where").map(|v| v.deserialize::<GqlValue>());
                             let wc = match &where_val {
                                 Some(Ok(ref filter_input)) => {
-                                    crate::filter::build_where_sql(filter_input, &schema_clone)
+                                    crate::filter::try_build_where_sql(filter_input, &schema_clone)
+                                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?
                                 }
                                 _ => crate::filter::WhereClause::empty(),
                             };
@@ -545,12 +549,17 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                         let table_name = table_name2.clone();
                         FieldFuture::new(async move {
                             let pool = ctx.data::<ReadPool>()?;
-                            let wc = ctx
+                            // Aggregate `where` shares the issue-#11
+                            // validation; bubble errors out cleanly.
+                            let wc = match ctx
                                 .args
                                 .get("where")
                                 .and_then(|v| v.deserialize::<GqlValue>().ok())
-                                .map(|v| crate::filter::build_where_sql(&v, &schema_clone))
-                                .unwrap_or_else(crate::filter::WhereClause::empty);
+                            {
+                                Some(v) => crate::filter::try_build_where_sql(&v, &schema_clone)
+                                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
+                                None => crate::filter::WhereClause::empty(),
+                            };
 
                             let group_by = ctx
                                 .args

@@ -1645,6 +1645,107 @@ CM2_TITLE=$(echo "$CM2" | jq -r '.data.createMany[0].title')
 pass "serve: createMany onConflict IGNORE returns existing"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE upsertgql CASCADE\") { message } }"}' >/dev/null
 
+# === PRD 00130: GraphQL typed-write polish (issues #11/#12/#13) ===
+
+# 45.G13 — issue #13: createDoogat must omit `title` when the typedef has a
+# title_template, rendering it server-side. Pre-PRD-00130 the schema marked
+# title NON_NULL so the template never fired through GraphQL.
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE g13link (title TEXT, url VARCHAR(255))\") { message } }"}'
+ddl "{\"query\":\"mutation { executeSql(sql: \\\"ALTER TABLE g13link SET TITLE TEMPLATE 'link-{url}'\\\") { message } }\"}"
+G13_OMIT=$(gql '{"query":"mutation { createDoogat(input: {type: \"g13link\", fields: \"{\\\"url\\\":\\\"https://example.com\\\"}\"}) { id title } }"}')
+assert_gql_ok "$G13_OMIT"
+G13_TITLE=$(echo "$G13_OMIT" | jq -r '.data.createDoogat.title')
+[ "$G13_TITLE" = "link-https://example.com" ]
+pass "issue-13: createDoogat omits title when typedef has title_template"
+
+# Negative: typedef without a template + omitted title → NOT_NULL_VIOLATION
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE g13plain (title TEXT, url VARCHAR(255))\") { message } }"}'
+G13_NULL=$(gql '{"query":"mutation { createDoogat(input: {type: \"g13plain\", fields: \"{\\\"url\\\":\\\"https://x\\\"}\"}) { id } }"}')
+assert_gql_errors "$G13_NULL"
+printf '%s' "$G13_NULL" | grep -q "NOT NULL constraint violated: g13plain.title"
+pass "issue-13: createDoogat without title or template rejects with NOT_NULL_VIOLATION"
+
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE g13link CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE g13plain CASCADE\") { message } }"}' >/dev/null
+
+# 45.G12 — issue #12: createMany(onConflict: IGNORE) returns the surviving
+# row's ID for skipped rows when both duplicates appear in the same batch.
+# The pre-PRD-00130 path returned the rejected (rolled-back) ID, which
+# does not exist anywhere — callers using the returned ID for follow-up
+# reads silently missed.
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE g12item (code TEXT, label TEXT)\") { message } }"}'
+G12_TYPEDEF=$(find ddb/_typedef -name '*.md' -exec grep -l 'title: g12item' {} \;)
+sed -i.bak 's/type: _typedef/type: _typedef\nunique_together:\n  - - code/' "$G12_TYPEDEF"
+rm -f "${G12_TYPEDEF}.bak"
+git add -A && git commit -m "add unique_together to g12item" --quiet
+$DDB reindex >/dev/null
+G12_BATCH=$(gql '{"query":"mutation { createMany(inputs: [{title: \"A\", type: \"g12item\", fields: \"{\\\"code\\\":\\\"K1\\\",\\\"label\\\":\\\"first\\\"}\"}, {title: \"A Dup\", type: \"g12item\", fields: \"{\\\"code\\\":\\\"K1\\\",\\\"label\\\":\\\"second\\\"}\"}], onConflict: IGNORE) { id title } }"}')
+assert_gql_ok "$G12_BATCH"
+G12_ID0=$(echo "$G12_BATCH" | jq -r '.data.createMany[0].id')
+G12_ID1=$(echo "$G12_BATCH" | jq -r '.data.createMany[1].id')
+[ -n "$G12_ID0" ]
+[ "$G12_ID0" = "$G12_ID1" ]
+G12_TITLE1=$(echo "$G12_BATCH" | jq -r '.data.createMany[1].title')
+[ "$G12_TITLE1" = "A" ]
+# Exactly one row in the type table; the rejected ID is nowhere.
+G12_COUNT=$(gql '{"query":"mutation { executeSql(sql: \"SELECT COUNT(*) FROM g12item\") { rows } }"}' | jq -r '.data.executeSql.rows[0]' | jq -r '.[0]')
+[ "$G12_COUNT" = "1" ]
+pass "issue-12: createMany IGNORE returns surviving ID for intra-batch duplicate"
+
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE g12item CASCADE\") { message } }"}' >/dev/null
+
+# 45.G11 — issue #11: TagsFilter operators are nullable; a contains-only
+# filter parses (was rejected pre-PRD-00130 because containsAll/containsAny
+# were schema-required); empty filter and empty arrays are rejected at
+# resolve time.
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE g11link (title TEXT, url VARCHAR(255))\") { message } }"}'
+G11_CREATE=$(gql '{"query":"mutation { createDoogat(input: {title: \"Tagged\", type: \"g11link\", tags: [\"rust\", \"sql\"], fields: \"{\\\"url\\\":\\\"https://example.com\\\"}\"}) { id } }"}')
+assert_gql_ok "$G11_CREATE"
+# contains-only filter must succeed without supplying containsAll/containsAny
+G11_CONTAINS=$(gql '{"query":"{ g11links(where: {tags: {contains: \"rust\"}}) { totalCount items { id } } }"}')
+assert_gql_ok "$G11_CONTAINS"
+G11_TC=$(echo "$G11_CONTAINS" | jq -r '.data.g11links.totalCount')
+[ "$G11_TC" = "1" ]
+pass "issue-11: TagsFilter contains-only filter parses and matches"
+
+# containsAll-only must succeed
+G11_ALL=$(gql '{"query":"{ g11links(where: {tags: {containsAll: [\"rust\", \"sql\"]}}) { totalCount } }"}')
+assert_gql_ok "$G11_ALL"
+[ "$(echo "$G11_ALL" | jq -r '.data.g11links.totalCount')" = "1" ]
+pass "issue-11: TagsFilter containsAll-only filter parses"
+
+# containsAny-only must succeed
+G11_ANY=$(gql '{"query":"{ g11links(where: {tags: {containsAny: [\"rust\", \"go\"]}}) { totalCount } }"}')
+assert_gql_ok "$G11_ANY"
+[ "$(echo "$G11_ANY" | jq -r '.data.g11links.totalCount')" = "1" ]
+pass "issue-11: TagsFilter containsAny-only filter parses"
+
+# Empty filter: rejected at resolve time
+G11_EMPTY=$(gql '{"query":"{ g11links(where: {tags: {}}) { totalCount } }"}')
+assert_gql_errors "$G11_EMPTY"
+printf '%s' "$G11_EMPTY" | grep -q "tags filter requires at least one of"
+pass "issue-11: empty TagsFilter rejected with clear error"
+
+# Empty containsAll: rejected
+G11_EMPTY_ALL=$(gql '{"query":"{ g11links(where: {tags: {containsAll: []}}) { totalCount } }"}')
+assert_gql_errors "$G11_EMPTY_ALL"
+printf '%s' "$G11_EMPTY_ALL" | grep -q "containsAll cannot be empty"
+pass "issue-11: empty containsAll rejected with clear error"
+
+# Empty containsAny: rejected
+G11_EMPTY_ANY=$(gql '{"query":"{ g11links(where: {tags: {containsAny: []}}) { totalCount } }"}')
+assert_gql_errors "$G11_EMPTY_ANY"
+printf '%s' "$G11_EMPTY_ANY" | grep -q "containsAny cannot be empty"
+pass "issue-11: empty containsAny rejected with clear error"
+
+# Schema introspection: containsAll / containsAny must be nullable list
+G11_SDL=$(gql '{"query":"{ __type(name: \"TagsFilter\") { inputFields { name type { kind ofType { kind name ofType { kind name } } } } } }"}')
+echo "$G11_SDL" | jq -e '.data.__type.inputFields[] | select(.name == "containsAll") | .type.kind == "LIST"' >/dev/null
+echo "$G11_SDL" | jq -e '.data.__type.inputFields[] | select(.name == "containsAny") | .type.kind == "LIST"' >/dev/null
+pass "issue-11: TagsFilter introspection confirms containsAll/containsAny are nullable lists"
+
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE g11link CASCADE\") { message } }"}' >/dev/null
+
 # 45.A1 — Cross-mutation parity after a failed UNIQUE INSERT (issue #4 group A1).
 # duplicate_insert_does_not_leave_ghost_doogats_row pins the index invariant at
 # the unit level; this sub-block proves all THREE GraphQL write paths
