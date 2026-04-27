@@ -1,4 +1,4 @@
-use async_graphql::ServerError;
+use async_graphql::{Error, ServerError};
 use ddb_core::error::{DoogatError, ErrorContext, ErrorValue};
 
 /// Classify a DoogatError for external exposure.
@@ -37,11 +37,19 @@ pub fn classify(e: &DoogatError) -> (&'static str, String) {
     }
 }
 
-/// Convert a DoogatError to a ServerError, attaching `extensions.code` and
-/// any structured per-code context fields (PRD 00129 §6).
-pub fn to_server_error(e: DoogatError) -> ServerError {
+/// Convert a DoogatError to an `async_graphql::Error`, attaching
+/// `extensions.code` and any structured per-code context fields
+/// (PRD 00129 §6).
+///
+/// Returning `Error` (not `ServerError`) is load-bearing: dynamic-schema
+/// `FieldFuture::new` closures resolve to `Result<_, async_graphql::Error>`
+/// and rely on `?` propagating the value-with-extensions directly. Going
+/// through `ServerError` here would invoke async-graphql's blanket
+/// `impl<T: Display> From<T> for Error` (PRD 00131), which builds a fresh
+/// `Error` from `to_string()` and silently drops `extensions`.
+pub fn to_graphql_error(e: DoogatError) -> Error {
     let (code, message) = classify(&e);
-    let mut err = ServerError::new(message, None);
+    let mut err = Error::new(message);
     let mut map = async_graphql::ErrorExtensionValues::default();
     map.set("code", code);
     if let DoogatError::Structured { context, .. } = &e {
@@ -49,6 +57,21 @@ pub fn to_server_error(e: DoogatError) -> ServerError {
     }
     err.extensions = Some(map);
     err
+}
+
+/// `ServerError` variant of [`to_graphql_error`] for non-resolver call
+/// sites (e.g. tests that need a `ServerError` shape). Resolvers must
+/// use [`to_graphql_error`] so `extensions` survive the
+/// `FieldFuture::new` boundary; see PRD 00131.
+pub fn to_server_error(e: DoogatError) -> ServerError {
+    let err = to_graphql_error(e);
+    ServerError {
+        message: err.message,
+        source: err.source,
+        locations: Vec::new(),
+        path: Vec::new(),
+        extensions: err.extensions,
+    }
 }
 
 /// Copy each `(key, value)` pair from a structured-error context into the

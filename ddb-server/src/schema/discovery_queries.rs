@@ -2,7 +2,7 @@ use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
 use indexmap::IndexMap;
 
-use crate::error::to_server_error;
+use crate::error::to_graphql_error;
 use crate::read_pool::ReadPool;
 
 use super::base_types::{simple_field, validate_limit};
@@ -30,7 +30,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     FieldFuture::new(async move {
                         let pool = ctx.data::<ReadPool>()?;
                         let id = ctx.args.try_get("id")?.string()?.to_string();
-                        let mentions = pool.unlinked_mentions(id).await.map_err(to_server_error)?;
+                        let mentions = pool.unlinked_mentions(id).await.map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(mentions.iter().map(|m| {
                             let mut obj = IndexMap::new();
                             obj.insert(Name::new("sourceId"), GqlValue::from(m.source_id.as_str()));
@@ -63,7 +63,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                         let suggestions = pool
                             .suggest_links(id, limit)
                             .await
-                            .map_err(to_server_error)?;
+                            .map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(suggestions.iter().map(|s| {
                             let tags: Vec<GqlValue> = s
                                 .shared_tags
@@ -103,7 +103,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                         let stale = pool
                             .stale_doogats(type_filter)
                             .await
-                            .map_err(to_server_error)?;
+                            .map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(stale.iter().map(|s| {
                             let mut obj = IndexMap::new();
                             obj.insert(Name::new("id"), GqlValue::from(s.id.as_str()));
@@ -152,7 +152,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                         let orphans = pool
                             .orphan_doogats(type_filter)
                             .await
-                            .map_err(to_server_error)?;
+                            .map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(orphans.iter().map(|o| {
                             let mut obj = IndexMap::new();
                             obj.insert(Name::new("id"), GqlValue::from(o.id.as_str()));
@@ -258,7 +258,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
                     let id = ctx.args.try_get("id")?.string()?.to_string();
-                    let info = pool.sequence_info(id).await.map_err(to_server_error)?;
+                    let info = pool.sequence_info(id).await.map_err(to_graphql_error)?;
 
                     let parent_val = match &info.parent {
                         Some(p) => seq_node_to_gql(p),
@@ -291,7 +291,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     FieldFuture::new(async move {
                         let pool = ctx.data::<ReadPool>()?;
                         let id = ctx.args.try_get("id")?.string()?.to_string();
-                        let children = pool.sequence_children(id).await.map_err(to_server_error)?;
+                        let children = pool.sequence_children(id).await.map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(
                             children
                                 .iter()
@@ -318,7 +318,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                         let bc = pool
                             .sequence_breadcrumb(id)
                             .await
-                            .map_err(to_server_error)?;
+                            .map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(
                             bc.iter().map(|n| FieldValue::owned_any(seq_node_to_gql(n))),
                         )))
@@ -338,7 +338,7 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
             |ctx| {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
-                    let broken = pool.broken_sequences().await.map_err(to_server_error)?;
+                    let broken = pool.broken_sequences().await.map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::list(broken.iter().map(|b| {
                         let mut obj = IndexMap::new();
                         obj.insert(Name::new("doogatId"), GqlValue::from(b.doogat_id.as_str()));

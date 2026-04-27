@@ -754,7 +754,7 @@ fn build_plural_ref_field(
                 let doogats = pool
                     .get_doogats_batch(ids)
                     .await
-                    .map_err(crate::error::to_server_error)?;
+                    .map_err(crate::error::to_graphql_error)?;
                 let mut values: Vec<GqlValue> = doogats
                     .iter()
                     .map(|z| match target_schema {

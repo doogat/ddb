@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::actor::ActorHandle;
-use crate::error::to_server_error;
+use crate::error::to_graphql_error;
 use crate::read_pool::ReadPool;
 use crate::reload::SchemaReloader;
 
@@ -37,7 +37,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
                     let id = ctx.args.try_get("id")?.string()?.to_string();
-                    let z = pool.get_doogat(id).await.map_err(to_server_error)?;
+                    let z = pool.get_doogat(id).await.map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
@@ -79,7 +79,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                             ..Default::default()
                         })
                         .await
-                        .map_err(to_server_error)?;
+                        .map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::list(
                         doogats
                             .iter()
@@ -169,7 +169,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                     let result = pool
                         .search(q, limit, offset, filters)
                         .await
-                        .map_err(to_server_error)?;
+                        .map_err(to_graphql_error)?;
                     let mut obj = IndexMap::new();
                     obj.insert(
                         Name::new("hits"),
@@ -217,7 +217,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                         // unparseable input, empty queries, and non-tag
                         // negated field filters.
                         search_query::validate_and_compile(&q).map_err(|_| {
-                            to_server_error(DoogatError::BadRequest(format!(
+                            to_graphql_error(DoogatError::BadRequest(format!(
                                 "invalid search query: {q}"
                             )))
                         })?;
@@ -239,7 +239,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
             |ctx| {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
-                    let schemas = pool.get_type_schemas().await.map_err(to_server_error)?;
+                    let schemas = pool.get_type_schemas().await.map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::list(
                         schemas
                             .iter()
@@ -259,10 +259,10 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                     let fmt = validate_format(&ctx)?;
                     let result = if crate::pgwire::is_select_only(&q) {
                         let pool = ctx.data::<ReadPool>()?;
-                        pool.execute_select(q).await.map_err(to_server_error)?
+                        pool.execute_select(q).await.map_err(to_graphql_error)?
                     } else {
                         let a = ctx.data::<ActorHandle>()?;
-                        a.execute_sql(q).await.map_err(to_server_error)?
+                        a.execute_sql(q).await.map_err(to_graphql_error)?
                     };
                     Ok(Some(FieldValue::owned_any(sql_result_to_value(&result, fmt))))
                 })
@@ -313,7 +313,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                         let rows = pool
                             .query_checkboxes(state, doogat_id, limit, offset)
                             .await
-                            .map_err(to_server_error)?;
+                            .map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(rows.iter().map(|row| {
                             FieldValue::owned_any(checkbox_row_to_value(row))
                         }))))
@@ -341,7 +341,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                         let rows = pool
                             .query_checkboxes(Some("open".to_string()), None, limit, None)
                             .await
-                            .map_err(to_server_error)?;
+                            .map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(rows.iter().map(|row| {
                             FieldValue::owned_any(checkbox_row_to_value(row))
                         }))))
@@ -475,7 +475,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                                     distinct: distinct.clone(),
                                 })
                                 .await
-                                .map_err(to_server_error)?;
+                                .map_err(to_graphql_error)?;
 
                             // Fetch totalCount (same where + tag filters, no limit/offset)
                             let mut count_conditions = Vec::new();
@@ -504,7 +504,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                             let count_row = pool
                                 .aggregate_query(count_sql, wc.params)
                                 .await
-                                .map_err(to_server_error)?;
+                                .map_err(to_graphql_error)?;
                             let total_count: i64 =
                                 count_row.first().and_then(|s| s.parse().ok()).unwrap_or(0);
 
@@ -581,7 +581,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                                 let rows = pool
                                     .aggregate_query_rows(sql, wc.params)
                                     .await
-                                    .map_err(to_server_error)?;
+                                    .map_err(to_graphql_error)?;
                                 let groups: Vec<GqlValue> = rows
                                     .iter()
                                     .map(|row| {
@@ -611,7 +611,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                                 let row = pool
                                     .aggregate_query(sql, wc.params)
                                     .await
-                                    .map_err(to_server_error)?;
+                                    .map_err(to_graphql_error)?;
                                 let val =
                                     crate::filter::aggregate_row_to_value(&row, &names);
                                 Ok(Some(FieldValue::owned_any(val)))
@@ -634,7 +634,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
             |ctx| {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
-                    let tags = pool.list_tags().await.map_err(to_server_error)?;
+                    let tags = pool.list_tags().await.map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::list(
                         tags.iter()
                             .map(|(name, count)| FieldValue::owned_any(tag_info_to_value(name, *count))),
@@ -701,7 +701,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                         }
 
                         let entries =
-                            pool.query_tags(filter).await.map_err(to_server_error)?;
+                            pool.query_tags(filter).await.map_err(to_graphql_error)?;
                         let total_count = entries.len() as i64;
                         let items = GqlValue::List(
                             entries.iter().map(tag_entry_to_value).collect(),

@@ -8,7 +8,7 @@ use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ConflictAction};
 use std::sync::Arc;
 
 use crate::actor::ActorHandle;
-use crate::error::to_server_error;
+use crate::error::to_graphql_error;
 use crate::reload::SchemaReloader;
 
 use super::base_types::*;
@@ -70,7 +70,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                     let z = a
                         .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
                         .await
-                        .map_err(to_server_error)?;
+                        .map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
@@ -131,7 +131,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                             id, title, body: content, tags, doogat_type, fields, unset_fields,
                         })
                         .await
-                        .map_err(to_server_error)?;
+                        .map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
@@ -204,7 +204,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                             });
                         }
                         let results =
-                            a.batch_update(updates).await.map_err(to_server_error)?;
+                            a.batch_update(updates).await.map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(
                             results.iter().map(|z| FieldValue::owned_any(doogat_to_value(z))),
                         )))
@@ -275,7 +275,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                             });
                         }
                         let results =
-                            a.create_many(inputs).await.map_err(to_server_error)?;
+                            a.create_many(inputs).await.map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(
                             results
                                 .iter()
@@ -302,7 +302,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                 FieldFuture::new(async move {
                     let a = ctx.data::<ActorHandle>()?;
                     let id = ctx.args.try_get("id")?.string()?.to_string();
-                    a.delete_doogat(id).await.map_err(to_server_error)?;
+                    a.delete_doogat(id).await.map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::value(GqlValue::from(true))))
                 })
             })
@@ -349,7 +349,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                     let info = a
                         .attach_file(doogat_id, filename, bytes, mime)
                         .await
-                        .map_err(to_server_error)?;
+                        .map_err(to_graphql_error)?;
                     let zid = &info.path.split('/').nth(1).unwrap_or("");
                     let url = format!("/attachments/{}/{}", zid, info.name);
                     let mut obj = IndexMap::new();
@@ -378,7 +378,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                     let filename = ctx.args.try_get("filename")?.string()?.to_string();
                     a.detach_file(doogat_id, filename)
                         .await
-                        .map_err(to_server_error)?;
+                        .map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::value(GqlValue::from(true))))
                 })
             })
@@ -399,7 +399,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                     let a = ctx.data::<ActorHandle>()?;
                     let sql = ctx.args.try_get("sql")?.string()?.to_string();
                     let fmt = validate_format(&ctx)?;
-                    let result = a.execute_sql(sql.clone()).await.map_err(to_server_error)?;
+                    let result = a.execute_sql(sql.clone()).await.map_err(to_graphql_error)?;
 
                     // Await schema reload if this was a typedef-mutating statement
                     let upper = sql.to_uppercase();
@@ -445,7 +445,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                         });
 
                         let results =
-                            a.execute_batch(statements).await.map_err(to_server_error)?;
+                            a.execute_batch(statements).await.map_err(to_graphql_error)?;
 
                         if has_ddl {
                             if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>() {
@@ -548,7 +548,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "master".to_string());
-                    let report = a.sync(remote, branch).await.map_err(to_server_error)?;
+                    let report = a.sync(remote, branch).await.map_err(to_graphql_error)?;
                     let mut obj = IndexMap::new();
                     obj.insert(
                         Name::new("direction"),
@@ -603,7 +603,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                     let report = a
                         .compact(force, no_backup, backup_path)
                         .await
-                        .map_err(to_server_error)?;
+                        .map_err(to_graphql_error)?;
                     let mut obj = IndexMap::new();
                     obj.insert(
                         Name::new("filesRemoved"),
@@ -694,7 +694,7 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
                             .get("task")
                             .and_then(|v| v.string().ok())
                             .map(|s| s.to_string());
-                        let report = a.run_maintenance(task).await.map_err(to_server_error)?;
+                        let report = a.run_maintenance(task).await.map_err(to_graphql_error)?;
                         let tasks_run: Vec<GqlValue> = report
                             .tasks_run
                             .iter()
