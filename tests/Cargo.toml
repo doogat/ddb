@@ -1,6 +1,6 @@
 [package]
 name = "ddb-e2e"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "BUSL-1.1"
 publish = false

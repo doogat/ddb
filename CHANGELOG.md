@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-04-27
+
 ### Added
 
 - **server**: structured error code vocabulary on GraphQL `errors[].extensions`. `NOT NULL` violations now carry `code: "NOT_NULL_VIOLATION"` plus `table` / `column` fields; unknown-column rejections carry `code: "UNKNOWN_FIELD"` plus `table` / `unknown_field`. Future codes (`UNIQUE_VIOLATION`, `REFERENCES_VIOLATION`, `TYPE_NOT_REGISTERED`, `CASCADE_CYCLE`) light up as their respective enforcement paths are wired. The legacy `message` text is unchanged for every code, so callers still string-matching `"NOT NULL constraint violated"` / `"unknown column"` keep working. (jink feedback, PRD 00129 §6)
@@ -232,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error responses never leak internal paths, stack traces, or SQL details
 - quinn-proto upgraded to 0.11.14 (RUSTSEC-2026-0037)
 
-[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/doogat/ddb/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/doogat/ddb/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/doogat/ddb/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/doogat/ddb/compare/v0.2.1...v0.2.2
