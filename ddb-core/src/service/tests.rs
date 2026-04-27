@@ -2697,11 +2697,18 @@ fn batch_create_intra_batch_duplicate_error_rejects_whole_batch_issue_12() {
     let err = svc
         .batch_create(&inputs)
         .expect_err("intra-batch duplicate with Error must reject");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("duplicate unique constraint within batch"),
-        "expected intra-batch error, got: {msg}"
-    );
+    // PRD 00131: intra-batch UNIQUE conflict surfaces the structured
+    // UNIQUE_VIOLATION code so `to_server_error` can attach
+    // `extensions.code` to the GraphQL error envelope. Earlier wording
+    // ("duplicate unique constraint within batch") was a Validation
+    // string; assert the structured shape instead, since the message
+    // text is informative-but-not-contractual.
+    match &err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(*code, crate::error::codes::UNIQUE_VIOLATION);
+        }
+        other => panic!("expected Structured UNIQUE_VIOLATION, got: {other:?}"),
+    }
 
     let widget_count: i64 = svc
         .index
