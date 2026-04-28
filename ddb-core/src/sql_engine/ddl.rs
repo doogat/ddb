@@ -14,6 +14,31 @@ use super::helpers::{
 };
 use super::{SqlEngine, SqlResult};
 
+/// All file writes and deletes that an `ALTER TABLE foo RENAME TO bar` will
+/// perform. Computed up front so the operation can fail validation before
+/// touching the working tree.
+#[derive(Debug, Default)]
+pub(super) struct RenamePlan {
+    pub writes: Vec<(String, String)>,
+    pub deletes: Vec<String>,
+}
+
+/// Apply path-based wikilink rewrites for every `(old_path, new_path)` pair.
+/// Each pair is rewritten both with and without the trailing `.md`, covering
+/// the two common wikilink target shapes. ID-based links are left alone.
+fn apply_path_pair_rewrites(content: &str, path_pairs: &[(String, String)]) -> String {
+    let mut out = content.to_string();
+    for (old_path, new_path) in path_pairs {
+        out = parser::rewrite_links(&out, old_path, new_path);
+        let old_no_md = old_path.trim_end_matches(".md");
+        let new_no_md = new_path.trim_end_matches(".md");
+        if old_no_md != old_path {
+            out = parser::rewrite_links(&out, old_no_md, new_no_md);
+        }
+    }
+    out
+}
+
 /// Coarse classification of a SQL type literal. Used by `ALTER COLUMN TYPE`
 /// to distinguish CHAR from VARCHAR without falling into the trap of
 /// treating them as one family. `Other` covers blobs, dates, and any type
@@ -726,13 +751,14 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
-    /// `ALTER TABLE foo RENAME TO bar`. Validates and stops before any write
-    /// — the actual rename plan + commit + SQLite rename land in later tasks.
+    /// `ALTER TABLE foo RENAME TO bar`. Validates inputs, computes the full
+    /// rename plan (writes + deletes), and stops before commit. Task 5 will
+    /// thread the plan through `commit_batch` + SQLite ALTER + reindex.
     fn handle_rename_table(
         &mut self,
         table_name: &str,
-        _typedef_id: &str,
-        _typedef_path: &str,
+        typedef_id: &str,
+        typedef_path: &str,
         new_name: &str,
     ) -> Result<SqlResult> {
         validate_rename_target_name(new_name)?;
@@ -755,9 +781,162 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
+        let _plan = self.build_rename_plan(
+            table_name,
+            typedef_id,
+            typedef_path,
+            new_name,
+            &data_doogats,
+        )?;
+
         Err(DoogatError::SqlEngine(
             "ALTER TABLE RENAME TO is not yet implemented".into(),
         ))
+    }
+
+    fn build_rename_plan(
+        &mut self,
+        table_name: &str,
+        typedef_id: &str,
+        typedef_path: &str,
+        new_name: &str,
+        data_doogats: &[(String, String)],
+    ) -> Result<RenamePlan> {
+        let mut writes: Vec<(String, String)> = Vec::new();
+        let mut deletes: Vec<String> = Vec::new();
+
+        let path_pairs: Vec<(String, String)> = data_doogats
+            .iter()
+            .map(|(id, old_path)| (old_path.clone(), format!("ddb/{new_name}/{id}.md")))
+            .collect();
+
+        self.plan_typedef_rewrite(
+            table_name,
+            typedef_id,
+            typedef_path,
+            new_name,
+            &mut writes,
+        )?;
+
+        self.plan_data_doogats_move(
+            new_name,
+            data_doogats,
+            &path_pairs,
+            &mut writes,
+            &mut deletes,
+        )?;
+
+        self.plan_references_rewrite(table_name, typedef_id, new_name, &mut writes)?;
+
+        self.plan_backlinks_rewrite(table_name, &path_pairs, &deletes, &mut writes)?;
+
+        Ok(RenamePlan { writes, deletes })
+    }
+
+    fn plan_typedef_rewrite(
+        &mut self,
+        table_name: &str,
+        typedef_id: &str,
+        typedef_path: &str,
+        new_name: &str,
+        writes: &mut Vec<(String, String)>,
+    ) -> Result<()> {
+        let mut schema = self.load_schema(table_name)?;
+        schema.table_name = new_name.to_string();
+        let typedef =
+            build_typedef_doogat(&DoogatId(typedef_id.to_string()), &schema);
+        writes.push((typedef_path.to_string(), parser::serialize(&typedef)));
+        Ok(())
+    }
+
+    fn plan_data_doogats_move(
+        &self,
+        new_name: &str,
+        data_doogats: &[(String, String)],
+        path_pairs: &[(String, String)],
+        writes: &mut Vec<(String, String)>,
+        deletes: &mut Vec<String>,
+    ) -> Result<()> {
+        for (id, old_path) in data_doogats {
+            let content = self.repo.read_file(old_path)?;
+            let mut parsed = parser::parse(&content, old_path)?;
+            parsed.meta.doogat_type = Some(new_name.to_string());
+            let serialized = parser::serialize(&parsed);
+            let rewritten = apply_path_pair_rewrites(&serialized, path_pairs);
+            let new_path = format!("ddb/{new_name}/{id}.md");
+            writes.push((new_path, rewritten));
+            deletes.push(old_path.clone());
+        }
+        Ok(())
+    }
+
+    fn plan_references_rewrite(
+        &mut self,
+        table_name: &str,
+        source_typedef_id: &str,
+        new_name: &str,
+        writes: &mut Vec<(String, String)>,
+    ) -> Result<()> {
+        let mut stmt = self.index.sql_conn().prepare(
+            "SELECT id, path FROM doogats WHERE type = '_typedef' AND id != ?1",
+        )?;
+        let other_typedefs: Vec<(String, String)> = stmt
+            .query_map(params![source_typedef_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        for (other_id, other_path) in other_typedefs {
+            let content = self.repo.read_file(&other_path)?;
+            let parsed = parser::parse(&content, &other_path)?;
+            let mut schema = schema_from_parsed(&parsed)?;
+            let mut changed = false;
+            for col in schema.columns.iter_mut() {
+                if col.references.as_deref() == Some(table_name) {
+                    col.references = Some(new_name.to_string());
+                    changed = true;
+                }
+            }
+            if changed {
+                let rewritten = build_typedef_doogat(&DoogatId(other_id), &schema);
+                writes.push((other_path, parser::serialize(&rewritten)));
+            }
+        }
+        Ok(())
+    }
+
+    fn plan_backlinks_rewrite(
+        &self,
+        table_name: &str,
+        path_pairs: &[(String, String)],
+        deletes: &[String],
+        writes: &mut Vec<(String, String)>,
+    ) -> Result<()> {
+        let folder_prefix = format!("ddb/{table_name}/");
+        let mut stmt = self.index.sql_conn().prepare(
+            "SELECT DISTINCT z.path FROM _ddb_links l \
+             JOIN doogats z ON l.source_id = z.id \
+             WHERE l.target_path LIKE ?1 || '%'",
+        )?;
+        let backlink_paths: Vec<String> = stmt
+            .query_map(params![folder_prefix], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        for src_path in backlink_paths {
+            if deletes.contains(&src_path) || writes.iter().any(|(p, _)| *p == src_path) {
+                continue;
+            }
+            let original = self.repo.read_file(&src_path)?;
+            let rewritten = apply_path_pair_rewrites(&original, path_pairs);
+            if rewritten != original {
+                writes.push((src_path, rewritten));
+            }
+        }
+        Ok(())
     }
 
     fn handle_rename_column(
