@@ -501,6 +501,11 @@ impl<G: GitBackend> DoogatService<G> {
                         continue;
                     }
                     crate::types::ConflictAction::Error => {
+                        // `values` is built from `value_to_unique_key`, which
+                        // emits an empty string for non-scalar `Value` variants
+                        // (List, Map, Null). Surfaced as-is in
+                        // `extensions.values`; lossy for those variants but
+                        // current typedefs constrain unique columns to scalars.
                         let (table, columns, values) = conflict_key;
                         return Err(DoogatError::unique_violation(table, columns, values));
                     }

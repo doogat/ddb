@@ -2698,7 +2698,7 @@ fn batch_create_intra_batch_duplicate_error_rejects_whole_batch_issue_12() {
         .batch_create(&inputs)
         .expect_err("intra-batch duplicate with Error must reject");
     // PRD 00131: intra-batch UNIQUE conflict surfaces the structured
-    // UNIQUE_VIOLATION code so `to_server_error` can attach
+    // UNIQUE_VIOLATION code so `to_graphql_error` can attach
     // `extensions.code` to the GraphQL error envelope. Earlier wording
     // ("duplicate unique constraint within batch") was a Validation
     // string; assert the structured shape instead, since the message
@@ -3191,8 +3191,8 @@ fn batch_create_untyped_doogat_unaffected_by_typed_validation_prd_00129() {
 //
 // jink probes ddb 0.2.5+dev.g8c924a5 and finds duplicate-key violations
 // returning GraphQL error envelopes without `extensions.code`. The flatten
-// happens before `to_server_error` (which is unit-tested green at
-// `ddb-server/src/error.rs:241-262`): `batch_create` must return a
+// happens before `to_graphql_error` (the load-bearing resolver-side
+// adapter, unit-tested at `ddb-server/src/error.rs`): `batch_create` must return a
 // `DoogatError::Structured` variant for the GraphQL boundary to attach the
 // code. These tests assert the Structured shape at the service boundary,
 // which is the same boundary the actor / mutation resolver chain consumes.
@@ -3242,7 +3242,7 @@ fn batch_create_cross_batch_unique_violation_returns_structured_error_prd_00131(
     .unwrap();
 
     // Second insert with same unique key in a separate batch must surface a
-    // Structured UNIQUE_VIOLATION so `to_server_error` attaches
+    // Structured UNIQUE_VIOLATION so `to_graphql_error` attaches
     // `extensions.code = "UNIQUE_VIOLATION"` to the GraphQL response.
     let err = svc
         .batch_create(&[crate::types::BatchCreateInput {

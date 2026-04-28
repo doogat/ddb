@@ -333,4 +333,43 @@ mod tests {
             ])
         );
     }
+
+    // PRD 00131: `to_graphql_error` is the load-bearing path because dynamic
+    // `FieldFuture::new` closures resolve to `Result<_, async_graphql::Error>`,
+    // and async-graphql's blanket `From<Display>` would silently drop
+    // `extensions` if a `ServerError` were propagated through `?` instead.
+    #[test]
+    fn to_graphql_error_preserves_extensions_on_unique_violation_prd_00131() {
+        let err = to_graphql_error(DoogatError::unique_violation(
+            "category-membership",
+            ["link", "category"],
+            ["20260416120000", "20260416120001"],
+        ));
+        let exts = err.extensions.as_ref().expect("extensions must be set");
+        assert_eq!(
+            exts.get("code").cloned().unwrap_or(Value::Null),
+            Value::String("UNIQUE_VIOLATION".into())
+        );
+        assert_eq!(
+            exts.get("columns").cloned().unwrap_or(Value::Null),
+            Value::List(vec![
+                Value::String("link".into()),
+                Value::String("category".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn to_graphql_error_preserves_extensions_on_not_null_prd_00131() {
+        let err = to_graphql_error(DoogatError::not_null_violation("link", "url"));
+        let exts = err.extensions.as_ref().expect("extensions must be set");
+        assert_eq!(
+            exts.get("code").cloned().unwrap_or(Value::Null),
+            Value::String("NOT_NULL_VIOLATION".into())
+        );
+        assert_eq!(
+            exts.get("column").cloned().unwrap_or(Value::Null),
+            Value::String("url".into())
+        );
+    }
 }
