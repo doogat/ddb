@@ -147,6 +147,46 @@ pub(super) fn is_reserved_table(name: &str) -> bool {
     name == "doogats" || name.starts_with("_ddb_") || name.starts_with("sqlite_")
 }
 
+/// Validate a typedef rename target name. Rejects empty strings, non-identifier
+/// shapes (leading digit, hyphen, dot, whitespace), and reserved internal names
+/// (`doogats`, `_typedef`, `_ddb_*`, `sqlite_*`).
+///
+/// Mirrors `is_valid_graphql_name` from `ddb-server/src/schema/base_types.rs`
+/// — keep both in sync. Duplicated here to keep `ddb-core` independent of the
+/// server crate.
+pub(super) fn validate_rename_target_name(new_name: &str) -> Result<()> {
+    if new_name.is_empty() {
+        return Err(DoogatError::SqlEngine(
+            "invalid identifier: empty name".into(),
+        ));
+    }
+    let mut chars = new_name.chars();
+    match chars.next() {
+        Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
+        _ => {
+            return Err(DoogatError::SqlEngine(format!(
+                "invalid identifier: {new_name} (must start with letter or underscore)"
+            )));
+        }
+    }
+    if !chars.all(|c| c == '_' || c.is_ascii_alphanumeric()) {
+        return Err(DoogatError::SqlEngine(format!(
+            "invalid identifier: {new_name} (only letters, digits, and underscores)"
+        )));
+    }
+    if is_reserved_table(new_name) {
+        return Err(DoogatError::SqlEngine(format!(
+            "reserved table name: {new_name}"
+        )));
+    }
+    if new_name == "_typedef" {
+        return Err(DoogatError::SqlEngine(
+            "reserved table name: _typedef".into(),
+        ));
+    }
+    Ok(())
+}
+
 // --- Data type conversion ---
 
 pub(super) fn data_type_to_string(dt: &DataType) -> String {
@@ -701,6 +741,64 @@ pub(super) fn to_yaml_value(val: &str, data_type: &str) -> Value {
             Value::Bool(b)
         }
         _ => Value::String(val.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_rename_target_name_accepts_valid_identifiers() {
+        assert!(validate_rename_target_name("foo").is_ok());
+        assert!(validate_rename_target_name("snake_case").is_ok());
+        assert!(validate_rename_target_name("camelCase").is_ok());
+        assert!(validate_rename_target_name("Field123").is_ok());
+        assert!(validate_rename_target_name("_private").is_ok());
+    }
+
+    #[test]
+    fn validate_rename_target_name_rejects_empty() {
+        let err = validate_rename_target_name("").unwrap_err();
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn validate_rename_target_name_rejects_leading_digit() {
+        let err = validate_rename_target_name("123abc").unwrap_err();
+        assert!(err.to_string().contains("must start with"));
+    }
+
+    #[test]
+    fn validate_rename_target_name_rejects_hyphen() {
+        let err = validate_rename_target_name("with-hyphen").unwrap_err();
+        assert!(err.to_string().contains("only letters"));
+    }
+
+    #[test]
+    fn validate_rename_target_name_rejects_dot_and_space() {
+        assert!(validate_rename_target_name("with.dot").is_err());
+        assert!(validate_rename_target_name("with space").is_err());
+    }
+
+    #[test]
+    fn validate_rename_target_name_rejects_reserved_names() {
+        assert!(validate_rename_target_name("doogats")
+            .unwrap_err()
+            .to_string()
+            .contains("reserved"));
+        assert!(validate_rename_target_name("_typedef")
+            .unwrap_err()
+            .to_string()
+            .contains("reserved"));
+        assert!(validate_rename_target_name("_ddb_locks")
+            .unwrap_err()
+            .to_string()
+            .contains("reserved"));
+        assert!(validate_rename_target_name("sqlite_master")
+            .unwrap_err()
+            .to_string()
+            .contains("reserved"));
     }
 }
 
