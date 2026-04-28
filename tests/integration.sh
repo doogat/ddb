@@ -1936,6 +1936,35 @@ pass "49.4: createMany intra-batch ERROR carries extensions.code = UNIQUE_VIOLAT
 # Cleanup: drop the typedef so subsequent runs start clean.
 ddl '{"query":"mutation { executeSql(sql: \"DROP TABLE puv_link\") { message } }"}'
 
+# 50. PRD 00132: ALTER TABLE foo RENAME TO bar across protocols.
+# 50a. via GraphQL executeSql
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE rngql_src (title VARCHAR(64))\") { message } }"}'
+ddl '{"query":"mutation { executeSql(sql: \"ALTER TABLE rngql_src RENAME TO rngql_dst\") { message } }"}'
+RNGQL_COUNT=$(gql '{"query":"mutation { executeSql(sql: \"SELECT count(*) FROM rngql_dst\") { message } }"}')
+echo "$RNGQL_COUNT" | grep -q '"data"'
+RNGQL_OLD=$(gql '{"query":"mutation { executeSql(sql: \"SELECT count(*) FROM rngql_src\") { message } }"}')
+echo "$RNGQL_OLD" | grep -q '"errors"'
+pass "50a: ALTER TABLE RENAME TO via GraphQL executeSql succeeds; old name no longer resolves"
+
+# 50b. MySQL alias rejected with explicit message (no internal error leak).
+RNGQL_ALIAS=$(gql '{"query":"mutation { executeSql(sql: \"RENAME TABLE rngql_dst TO rngql_dst2\") { message } }"}')
+echo "$RNGQL_ALIAS" | jq -e '.errors[0].message | contains("RENAME TABLE not supported")' >/dev/null
+pass "50b: MySQL RENAME TABLE alias rejected with explicit ALTER TABLE hint"
+
+# 50c. via PgWire when psql is available.
+if command -v psql >/dev/null 2>&1; then
+  PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -c "CREATE TABLE rnpg_src (title VARCHAR(64))" >/dev/null
+  PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -c "ALTER TABLE rnpg_src RENAME TO rnpg_dst" >/dev/null
+  PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -tAc "SELECT count(*) FROM rnpg_dst" | grep -q "0"
+  pass "50c: ALTER TABLE RENAME TO via PgWire succeeds"
+fi
+
+# Cleanup the rename-test typedefs so subsequent runs start clean.
+ddl '{"query":"mutation { executeSql(sql: \"DROP TABLE rngql_dst\") { message } }"}'
+if command -v psql >/dev/null 2>&1; then
+  ddl '{"query":"mutation { executeSql(sql: \"DROP TABLE rnpg_dst\") { message } }"}'
+fi
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

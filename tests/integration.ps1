@@ -1830,6 +1830,26 @@ pass "49.4: createMany intra-batch ERROR carries extensions.code = UNIQUE_VIOLAT
 # Cleanup: drop the typedef so subsequent runs start clean.
 ddl 'mutation { executeSql(sql: "DROP TABLE puv_link") { message } }'
 
+# 50. PRD 00132: ALTER TABLE foo RENAME TO bar across protocols.
+# 50a. via GraphQL executeSql.
+ddl 'mutation { executeSql(sql: "CREATE TABLE rngql_src (title VARCHAR(64))") { message } }'
+ddl 'mutation { executeSql(sql: "ALTER TABLE rngql_src RENAME TO rngql_dst") { message } }'
+$rnGqlOk = gqlq 'mutation { executeSql(sql: "SELECT count(*) FROM rngql_dst") { message } }'
+if ($rnGqlOk -notmatch '"data"') { throw "50a: expected data after rename, got $rnGqlOk" }
+$rnGqlOld = gqlq 'mutation { executeSql(sql: "SELECT count(*) FROM rngql_src") { message } }'
+assertGqlErrors $rnGqlOld "50a: old name should no longer resolve"
+pass "50a: ALTER TABLE RENAME TO via GraphQL executeSql succeeds; old name no longer resolves"
+
+# 50b. MySQL alias rejected with explicit message.
+$rnAlias = gqlq 'mutation { executeSql(sql: "RENAME TABLE rngql_dst TO rngql_dst2") { message } }'
+if ($rnAlias -notmatch 'RENAME TABLE not supported') {
+    throw "50b: expected RENAME TABLE rejection hint, got $rnAlias"
+}
+pass "50b: MySQL RENAME TABLE alias rejected with explicit ALTER TABLE hint"
+
+# Cleanup so subsequent runs start clean.
+ddl 'mutation { executeSql(sql: "DROP TABLE rngql_dst") { message } }'
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
