@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **sql**: `ALTER TABLE foo RENAME TO bar` across GraphQL `executeSql`, raw SQL via `ddb query`, and PgWire. One git commit covers the typedef name change, the data folder rename (folder-typed) or `type:` frontmatter rewrite (flat-layout), an auto-rewrite of every other typedef whose `columns:` lists `references: foo`, and any path-based wikilinks pointing into `ddb/foo/`. The materialized SQLite table is renamed via native `ALTER TABLE` after the git commit lands, and `materialize_all_types` now drops orphan tables on rebuild so a kill between commit and SQLite rename is recovered automatically. Validation rejects empty / non-identifier / reserved (`doogats`, `_typedef`, `_ddb_*`, `sqlite_*`) target names up front. The MySQL alias `RENAME TABLE foo TO bar` is rejected with an explicit hint pointing at the supported syntax instead of leaking an internal error. (#14, PRD 00132)
+
 ### Fixed
 
 - **server**: GraphQL error envelopes now actually carry `extensions.code` (and the structured-context fields documented in v0.2.5) on every resolver path — typed mutations (`createDoogat`, `createMany`, `updateDoogat`, `batchUpdate`, `deleteDoogat`) and `executeSql` alike. Two regressions were stacked. First, the service-layer `batch_create` path flattened structured errors to `DoogatError::Validation(String)` at the cross-batch (`validation.rs`) and intra-batch (`crud.rs`) conflict sites; both now return `DoogatError::unique_violation` instead. Second, the resolver-layer `to_server_error` returned `async_graphql::ServerError`, which then went through async-graphql v7's blanket `impl<T: Display> From<T> for Error` when propagated by `?` inside `FieldFuture::new` closures, silently dropping `extensions`. The new `to_graphql_error` returns `async_graphql::Error` directly so the extensions survive. Affects every code defined in PRD 00129 §6 (`UNIQUE_VIOLATION`, `NOT_NULL_VIOLATION`, `REFERENCES_VIOLATION`, `UNKNOWN_FIELD`, `TYPE_NOT_REGISTERED`, `CASCADE_CYCLE`). (jink PRD 00022 blocker, PRD 00131)
