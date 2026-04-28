@@ -726,16 +726,35 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
-    /// `ALTER TABLE foo RENAME TO bar`. Stub — full implementation lands in
-    /// later tasks (validation, plan computation, atomic commit, reindex).
+    /// `ALTER TABLE foo RENAME TO bar`. Validates and stops before any write
+    /// — the actual rename plan + commit + SQLite rename land in later tasks.
     fn handle_rename_table(
         &mut self,
-        _table_name: &str,
+        table_name: &str,
         _typedef_id: &str,
         _typedef_path: &str,
         new_name: &str,
     ) -> Result<SqlResult> {
         validate_rename_target_name(new_name)?;
+
+        if self.load_typedef_location(new_name).is_ok() {
+            return Err(DoogatError::SqlEngine(format!(
+                "typedef already exists: {new_name}"
+            )));
+        }
+
+        let data_doogats = self.find_type_data_doogats(table_name)?;
+        for (id, path) in &data_doogats {
+            let content = self.repo.read_file(path)?;
+            let parsed = parser::parse(&content, path)?;
+            let actual = parsed.meta.doogat_type.as_deref();
+            if actual != Some(table_name) {
+                return Err(DoogatError::SqlEngine(format!(
+                    "consistency error: doogat {id} at {path} has type {actual:?}, expected {table_name:?}"
+                )));
+            }
+        }
+
         Err(DoogatError::SqlEngine(
             "ALTER TABLE RENAME TO is not yet implemented".into(),
         ))
