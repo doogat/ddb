@@ -259,9 +259,48 @@ impl Index {
             }
         }
 
+        self.drop_orphan_materialized_tables(&typedef_schemas)?;
         self.refresh_boost_table(&typedef_schemas)?;
 
         Ok((tables_materialized, types_inferred))
+    }
+
+    /// Drop any user-table left in SQLite that no longer corresponds to a
+    /// typedef (or its reference subtable). Recovers from the partial-rename
+    /// case where the git commit landed but the SQLite ALTER did not.
+    fn drop_orphan_materialized_tables(
+        &self,
+        typedef_schemas: &std::collections::HashMap<String, crate::types::TableSchema>,
+    ) -> Result<()> {
+        let mut keep: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["doogats".to_string()]);
+        for (name, schema) in typedef_schemas {
+            keep.insert(name.clone());
+            for col in &schema.columns {
+                if col.references.is_some() {
+                    keep.insert(format!("{name}_{col_name}", col_name = col.name));
+                }
+            }
+        }
+
+        let mut stmt = self.conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' \
+             AND name NOT LIKE '\\_ddb\\_%' ESCAPE '\\' \
+             AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+        )?;
+        let names: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        for name in names {
+            if !keep.contains(&name) {
+                self.conn
+                    .execute(&format!("DROP TABLE IF EXISTS \"{name}\""), [])?;
+            }
+        }
+        Ok(())
     }
 
     /// Infer a TableSchema from pre-parsed doogats (no git reads).

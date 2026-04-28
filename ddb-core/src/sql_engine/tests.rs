@@ -1306,6 +1306,58 @@ fn mysql_rename_table_alias_rejected_with_clear_message() {
 }
 
 #[test]
+fn rebuild_drops_orphan_materialized_tables() {
+    // Simulates the partial-rename crash case: a SQLite table exists with no
+    // matching typedef. The rebuild path should drop it.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE rorphan_keep (title TEXT)")
+        .unwrap();
+    drop(engine);
+
+    // Inject an orphan table by hand.
+    index
+        .sql_conn()
+        .execute("CREATE TABLE \"rorphan_stale\" (id TEXT, title TEXT)", [])
+        .unwrap();
+    let exists_before: i64 = index
+        .sql_conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rorphan_stale'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(exists_before, 1);
+
+    // Trigger rebuild via materialize_all_types — the rebuild path called
+    // automatically when typedefs change.
+    let (_, _) = index.materialize_all_types(&repo).unwrap();
+
+    let exists_after: i64 = index
+        .sql_conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rorphan_stale'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(exists_after, 0, "orphan table should have been dropped");
+
+    // Legitimate typedef table is still present.
+    let kept: i64 = index
+        .sql_conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rorphan_keep'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, 1);
+}
+
+#[test]
 fn alter_table_rename_to_rewrites_references_in_other_typedefs() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
