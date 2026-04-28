@@ -1115,6 +1115,38 @@ fn alter_table_rename_column_rejects_collision() {
     );
 }
 
+#[test]
+fn alter_table_rename_to_dispatches_to_handler() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE renamesrc (title TEXT)")
+        .unwrap();
+
+    // Stub still in place — handler returns explicit "not yet implemented".
+    let err = engine
+        .execute("ALTER TABLE renamesrc RENAME TO renamedst")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("not yet implemented"),
+        "expected stub message, got: {err}"
+    );
+}
+
+#[test]
+fn alter_table_rename_to_rejects_invalid_target_name() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE renamesrc2 (title TEXT)")
+        .unwrap();
+
+    let err = engine
+        .execute("ALTER TABLE renamesrc2 RENAME TO doogats")
+        .unwrap_err();
+    assert!(err.to_string().contains("reserved"), "{err}");
+}
+
 /// Count git commits by walking the HEAD log.
 fn count_commits(repo: &GitRepo) -> usize {
     let git = git2::Repository::open(&repo.path).unwrap();

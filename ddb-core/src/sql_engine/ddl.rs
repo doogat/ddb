@@ -10,7 +10,7 @@ use super::builders::{build_typedef_doogat, rename_key_in_doogat, schema_from_pa
 use super::helpers::{
     data_type_to_string, extract_allowed_values, extract_default, extract_on_delete,
     extract_references, is_not_null, is_numeric_type, is_reserved_table, is_short_string_type,
-    unquote_identifier,
+    unquote_identifier, validate_rename_target_name,
 };
 use super::{SqlEngine, SqlResult};
 
@@ -378,6 +378,16 @@ impl<'a> SqlEngine<'a> {
                         return Ok(SqlResult::Ok(format!("table {table_name} altered")));
                     }
                 }
+                AlterTableOperation::RenameTable {
+                    table_name: new_table_name,
+                } => {
+                    return self.handle_rename_table(
+                        &table_name,
+                        &typedef_id,
+                        &typedef_path,
+                        &unquote_identifier(&new_table_name.to_string()),
+                    );
+                }
                 other => {
                     return Err(DoogatError::SqlEngine(format!(
                         "unsupported ALTER TABLE operation: {other}"
@@ -714,6 +724,21 @@ impl<'a> SqlEngine<'a> {
             }
         }
         Ok(())
+    }
+
+    /// `ALTER TABLE foo RENAME TO bar`. Stub — full implementation lands in
+    /// later tasks (validation, plan computation, atomic commit, reindex).
+    fn handle_rename_table(
+        &mut self,
+        _table_name: &str,
+        _typedef_id: &str,
+        _typedef_path: &str,
+        new_name: &str,
+    ) -> Result<SqlResult> {
+        validate_rename_target_name(new_name)?;
+        Err(DoogatError::SqlEngine(
+            "ALTER TABLE RENAME TO is not yet implemented".into(),
+        ))
     }
 
     fn handle_rename_column(
