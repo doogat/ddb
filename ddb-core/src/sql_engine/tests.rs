@@ -1116,21 +1116,25 @@ fn alter_table_rename_column_rejects_collision() {
 }
 
 #[test]
-fn alter_table_rename_to_dispatches_to_handler() {
+fn alter_table_rename_to_renames_empty_typedef() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
     engine
         .execute("CREATE TABLE renamesrc (title TEXT)")
         .unwrap();
 
-    // Stub still in place — handler returns explicit "not yet implemented".
-    let err = engine
+    let result = engine
         .execute("ALTER TABLE renamesrc RENAME TO renamedst")
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("not yet implemented"),
-        "expected stub message, got: {err}"
-    );
+        .unwrap();
+    let msg = match &result {
+        SqlResult::Ok(m) => m.clone(),
+        _ => panic!("unexpected result variant: {result:?}"),
+    };
+    assert!(msg.contains("renamesrc") && msg.contains("renamedst"), "{msg}");
+
+    // Old name no longer resolves; new name does.
+    assert!(engine.load_typedef_location("renamesrc").is_err());
+    assert!(engine.load_typedef_location("renamedst").is_ok());
 }
 
 #[test]
@@ -1145,6 +1149,110 @@ fn alter_table_rename_to_rejects_invalid_target_name() {
         .execute("ALTER TABLE renamesrc2 RENAME TO doogats")
         .unwrap_err();
     assert!(err.to_string().contains("reserved"), "{err}");
+}
+
+#[test]
+fn alter_table_rename_to_rewrites_type_field_and_renames_table() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE rdata (title VARCHAR(64))")
+        .unwrap();
+    engine
+        .execute("INSERT INTO rdata (id, title) VALUES ('20260428000001', 'one')")
+        .unwrap();
+    engine
+        .execute("INSERT INTO rdata (id, title) VALUES ('20260428000002', 'two')")
+        .unwrap();
+
+    engine
+        .execute("ALTER TABLE rdata RENAME TO rmoved")
+        .unwrap();
+
+    // Materialized table now lives under the new name and rows survived.
+    let count: i64 = engine
+        .index
+        .sql_conn()
+        .query_row("SELECT COUNT(*) FROM rmoved", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 2);
+
+    // Old materialized table is gone.
+    let exists: i64 = engine
+        .index
+        .sql_conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rdata'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(exists, 0);
+
+    // After rename, the index rows for both data records reflect the new type.
+    let typed_count: i64 = engine
+        .index
+        .sql_conn()
+        .query_row(
+            "SELECT COUNT(*) FROM doogats WHERE type = 'rmoved'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(typed_count, 2, "two data rows should now have type=rmoved");
+
+    let stale_count: i64 = engine
+        .index
+        .sql_conn()
+        .query_row(
+            "SELECT COUNT(*) FROM doogats WHERE type = 'rdata'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale_count, 0, "no data rows should retain the old type");
+
+    // Read one data file from its on-disk path and confirm `type:` frontmatter was rewritten.
+    let path: String = engine
+        .index
+        .sql_conn()
+        .query_row(
+            "SELECT path FROM doogats WHERE type = 'rmoved' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let abs_path = repo.path.join(&path);
+    let content = std::fs::read_to_string(&abs_path).expect("read data file");
+    assert!(content.contains("type: rmoved"), "{content}");
+    assert!(!content.contains("type: rdata\n"), "stale type in {content}");
+}
+
+#[test]
+fn alter_table_rename_to_rewrites_references_in_other_typedefs() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE rrefsrc (title VARCHAR(64))")
+        .unwrap();
+    engine
+        .execute(
+            "CREATE TABLE rrefdst (title VARCHAR(64), parent VARCHAR(14) REFERENCES rrefsrc(id))",
+        )
+        .unwrap();
+
+    engine
+        .execute("ALTER TABLE rrefsrc RENAME TO rrefnew")
+        .unwrap();
+
+    // Reload the rrefdst typedef and assert its parent column now references rrefnew.
+    let schema = engine.load_schema("rrefdst").unwrap();
+    let parent = schema
+        .columns
+        .iter()
+        .find(|c| c.name == "parent")
+        .expect("parent column missing");
+    assert_eq!(parent.references.as_deref(), Some("rrefnew"));
 }
 
 /// Count git commits by walking the HEAD log.

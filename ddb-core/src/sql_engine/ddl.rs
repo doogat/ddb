@@ -751,9 +751,12 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
-    /// `ALTER TABLE foo RENAME TO bar`. Validates inputs, computes the full
-    /// rename plan (writes + deletes), and stops before commit. Task 5 will
-    /// thread the plan through `commit_batch` + SQLite ALTER + reindex.
+    /// `ALTER TABLE foo RENAME TO bar`. Validates inputs, computes a rename
+    /// plan covering typedef + folder + REFERENCES + backlinks, commits all
+    /// writes in one git commit, then renames the materialized SQLite table
+    /// and reindexes affected files. Crash semantics are git's: either the
+    /// commit lands or it doesn't. A crash between commit and SQLite
+    /// rename is recoverable via `consistency::fix_all`.
     fn handle_rename_table(
         &mut self,
         table_name: &str,
@@ -781,7 +784,9 @@ impl<'a> SqlEngine<'a> {
             }
         }
 
-        let _plan = self.build_rename_plan(
+        let old_schema = self.load_schema(table_name)?;
+
+        let plan = self.build_rename_plan(
             table_name,
             typedef_id,
             typedef_path,
@@ -789,9 +794,31 @@ impl<'a> SqlEngine<'a> {
             &data_doogats,
         )?;
 
-        Err(DoogatError::SqlEngine(
-            "ALTER TABLE RENAME TO is not yet implemented".into(),
-        ))
+        let write_refs: Vec<(&str, &str)> = plan
+            .writes
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
+        let delete_refs: Vec<&str> = plan.deletes.iter().map(String::as_str).collect();
+        self.repo.commit_batch(
+            &write_refs,
+            &delete_refs,
+            &format!("rename type {table_name} → {new_name}"),
+        )?;
+
+        self.cleanup_materialized_tables(table_name, Some(&old_schema))?;
+
+        for (path, _) in &plan.writes {
+            let content = self.repo.read_file(path)?;
+            let parsed = parser::parse(&content, path)?;
+            self.index.index_doogat(&parsed)?;
+        }
+
+        self.index.rematerialize_type(new_name, self.repo)?;
+
+        Ok(SqlResult::Ok(format!(
+            "table {table_name} renamed to {new_name}"
+        )))
     }
 
     fn build_rename_plan(
@@ -805,8 +832,10 @@ impl<'a> SqlEngine<'a> {
         let mut writes: Vec<(String, String)> = Vec::new();
         let mut deletes: Vec<String> = Vec::new();
 
+        let folder_prefix = format!("ddb/{table_name}/");
         let path_pairs: Vec<(String, String)> = data_doogats
             .iter()
+            .filter(|(_, old_path)| old_path.starts_with(&folder_prefix))
             .map(|(id, old_path)| (old_path.clone(), format!("ddb/{new_name}/{id}.md")))
             .collect();
 
@@ -819,6 +848,7 @@ impl<'a> SqlEngine<'a> {
         )?;
 
         self.plan_data_doogats_move(
+            table_name,
             new_name,
             data_doogats,
             &path_pairs,
@@ -851,21 +881,28 @@ impl<'a> SqlEngine<'a> {
 
     fn plan_data_doogats_move(
         &self,
+        table_name: &str,
         new_name: &str,
         data_doogats: &[(String, String)],
         path_pairs: &[(String, String)],
         writes: &mut Vec<(String, String)>,
         deletes: &mut Vec<String>,
     ) -> Result<()> {
+        let folder_prefix = format!("ddb/{table_name}/");
         for (id, old_path) in data_doogats {
             let content = self.repo.read_file(old_path)?;
             let mut parsed = parser::parse(&content, old_path)?;
             parsed.meta.doogat_type = Some(new_name.to_string());
             let serialized = parser::serialize(&parsed);
             let rewritten = apply_path_pair_rewrites(&serialized, path_pairs);
-            let new_path = format!("ddb/{new_name}/{id}.md");
-            writes.push((new_path, rewritten));
-            deletes.push(old_path.clone());
+            if old_path.starts_with(&folder_prefix) {
+                let new_path = format!("ddb/{new_name}/{id}.md");
+                writes.push((new_path, rewritten));
+                deletes.push(old_path.clone());
+            } else {
+                // Flat layout: keep the path, just rewrite content.
+                writes.push((old_path.clone(), rewritten));
+            }
         }
         Ok(())
     }
