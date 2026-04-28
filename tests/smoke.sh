@@ -174,6 +174,17 @@ $DDB query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)" | grep -q "table newifn
 $DDB query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)" | grep -q "already exists"
 pass "create table if not exists (idempotent)"
 
+# 11e. ALTER TABLE RENAME TO (PRD 00132)
+$DDB query "CREATE TABLE smokerename_src (note TEXT)" | grep -q "table smokerename_src created"
+$DDB query "INSERT INTO smokerename_src (title, note) VALUES ('hi', 'first')" >/dev/null
+$DDB query "ALTER TABLE smokerename_src RENAME TO smokerename_dst" | grep -q "renamed to smokerename_dst"
+$DDB query "SELECT count(*) FROM smokerename_dst" | grep -q "1"
+# Capture stderr of the failing rename so set -euo pipefail doesn't abort.
+SR_RESERVED=$($DDB query "ALTER TABLE smokerename_dst RENAME TO doogats" 2>&1 || true)
+echo "$SR_RESERVED" | grep -q "reserved"
+$DDB query "DROP TABLE smokerename_dst CASCADE" | grep -q "dropped"
+pass "alter table rename to + reserved-name rejection"
+
 # 12. install bundled type
 $DDB type install contact | grep -q "installed type"
 pass "type install"

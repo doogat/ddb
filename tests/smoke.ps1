@@ -246,6 +246,21 @@ $output = ddb query "CREATE TABLE IF NOT EXISTS newifne (x TEXT)"
 if ($output -notmatch "already exists") { throw "IF NOT EXISTS idempotent failed" }
 pass "create table if not exists (idempotent)"
 
+# 11e. ALTER TABLE RENAME TO (PRD 00132)
+$output = ddb query "CREATE TABLE smokerename_src (note TEXT)"
+if ($output -notmatch "table smokerename_src created") { throw "rename src create failed" }
+ddb query "INSERT INTO smokerename_src (title, note) VALUES ('hi', 'first')" | Out-Null
+$output = ddb query "ALTER TABLE smokerename_src RENAME TO smokerename_dst"
+if ($output -notmatch "renamed to smokerename_dst") { throw "rename to failed: $output" }
+$output = ddb query "SELECT count(*) FROM smokerename_dst"
+if ($output -notmatch "1") { throw "row count after rename failed: $output" }
+# `ddb` exits non-zero on failure; capture both streams without aborting.
+$output = (& ddb query "ALTER TABLE smokerename_dst RENAME TO doogats" 2>&1 | Out-String)
+if ($output -notmatch "reserved") { throw "expected reserved-name rejection, got: $output" }
+$output = ddb query "DROP TABLE smokerename_dst CASCADE"
+if ($output -notmatch "dropped") { throw "rename cleanup drop failed" }
+pass "alter table rename to + reserved-name rejection"
+
 # 12. install bundled type
 $output = ddb type install contact
 if ($output -notmatch "installed type") { throw "type install failed" }
