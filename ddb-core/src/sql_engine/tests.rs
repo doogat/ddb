@@ -1229,6 +1229,60 @@ fn alter_table_rename_to_rewrites_type_field_and_renames_table() {
 }
 
 #[test]
+fn alter_table_rename_to_rejects_target_already_exists() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE rconflict_a (title TEXT)").unwrap();
+    engine.execute("CREATE TABLE rconflict_b (title TEXT)").unwrap();
+
+    let err = engine
+        .execute("ALTER TABLE rconflict_a RENAME TO rconflict_b")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("already exists"),
+        "{err}"
+    );
+
+    // Both typedefs intact.
+    assert!(engine.load_typedef_location("rconflict_a").is_ok());
+    assert!(engine.load_typedef_location("rconflict_b").is_ok());
+}
+
+#[test]
+fn alter_table_rename_to_rejects_unknown_source() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    let err = engine
+        .execute("ALTER TABLE rmissing RENAME TO rmissing_new")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("table not found"),
+        "{err}"
+    );
+}
+
+#[test]
+fn alter_table_rename_to_rejects_invalid_identifier_shapes() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE rinvalid (title TEXT)").unwrap();
+
+    let err_typedef = engine
+        .execute("ALTER TABLE rinvalid RENAME TO _typedef")
+        .unwrap_err();
+    assert!(err_typedef.to_string().contains("reserved"), "{err_typedef}");
+
+    let err_ddb = engine
+        .execute("ALTER TABLE rinvalid RENAME TO _ddb_links")
+        .unwrap_err();
+    assert!(err_ddb.to_string().contains("reserved"), "{err_ddb}");
+
+    // Source is intact after each rejection.
+    assert!(engine.load_typedef_location("rinvalid").is_ok());
+}
+
+#[test]
 fn mysql_rename_table_alias_rejected_with_clear_message() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
