@@ -1229,6 +1229,29 @@ fn alter_table_rename_to_rewrites_type_field_and_renames_table() {
 }
 
 #[test]
+fn mysql_rename_table_alias_rejected_with_clear_message() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE rmysql (title TEXT)")
+        .unwrap();
+
+    let err = engine
+        .execute("RENAME TABLE rmysql TO rmysql_renamed")
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("RENAME TABLE not supported"),
+        "expected explicit rejection, got: {msg}"
+    );
+    assert!(
+        msg.contains("ALTER TABLE"),
+        "rejection should hint at the supported form: {msg}"
+    );
+    assert!(!msg.contains("internal"), "should not surface internal error: {msg}");
+}
+
+#[test]
 fn alter_table_rename_to_rewrites_references_in_other_typedefs() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);

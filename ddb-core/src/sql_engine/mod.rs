@@ -342,6 +342,9 @@ fn reject_unsupported_ddl(stmt: &Statement) -> Option<DoogatError> {
         Statement::AlterIndex { .. } => {
             "ALTER INDEX not supported: indexes are managed automatically and rebuilt on reindex"
         }
+        Statement::RenameTable(_) => {
+            "RENAME TABLE not supported: use ALTER TABLE foo RENAME TO bar"
+        }
         _ => return None,
     };
     Some(DoogatError::SqlEngine(msg.into()))
