@@ -81,6 +81,10 @@ pub struct AttachmentInfo {
 
 `mime_from_filename()` detects MIME type from extension (jpg, png, pdf, csv, md, html, etc.), falling back to `application/octet-stream`.
 
+### Typedef Rename
+
+`ALTER TABLE foo RENAME TO bar` (PRD 00132) renames the typedef and atomically moves every folder-typed data doogat from `ddb/foo/{id}.md` to `ddb/bar/{id}.md`, rewriting each file's `type:` frontmatter from `foo` to `bar`. Flat-layout doogats (typedefs with `folder: false`) keep their `ddb/{id}.md` paths and only have their `type:` field rewritten. All writes land in one git commit, so a kill mid-rename leaves the working tree at the pre-rename state. Other typedefs whose `columns:` lists `references: foo` are rewritten to `references: bar` in the same commit. See [SQL Engine](sql-engine.md#alter-table) for the full procedure.
+
 ### File Storage
 
 Attachment blobs live in the Git repository under `reference/{doogat_id}/`:
