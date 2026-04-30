@@ -12,10 +12,6 @@
 //! via a separate `category-membership` typedef whose `category_id`
 //! REFERENCES category and whose `link_id` REFERENCES link) is OUT OF
 //! SCOPE for this PRD and is not covered here.
-//!
-//! All three tests below MUST currently FAIL on master — they are the
-//! bisect harness and the permanent regression coverage. After the fix in
-//! Task #3 they MUST pass.
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
 use ddb_core::sql_engine::{SqlEngine, SqlResult};
@@ -123,9 +119,9 @@ fn seed(repo: &GitRepo, index: &Index) -> Vec<String> {
 }
 
 /// title= via in-query syntax must do LIKE/substring match.
-/// Currently FAILS on master: build_filter_clauses routes `title` through
-/// the core-column branch as `z.title = ?` (exact), so 'Archive' does
-/// not match 'Meeting Notes Archive'.
+/// Why: build_filter_clauses used to route `title` through the core-column
+/// branch as `z.title = ?` (exact), so 'Archive' did not match 'Meeting
+/// Notes Archive'. PRD 00133 changed in-query `title=` to Contains.
 #[test]
 fn search_title_field_filter_does_substring_match() {
     let (_dir, repo, index) = setup();
@@ -148,11 +144,10 @@ fn search_title_field_filter_does_substring_match() {
 
 /// Direct REFERENCES field-filter resolves `value` against the referenced
 /// typedef's `title` with LIKE.
-/// Currently FAILS on master: build_filter_clauses materialized-table
-/// branch does `WHERE "category" = ?` directly against the materialized
-/// column, which stores the referenced doogat's ID (a 14-digit
-/// timestamp). 'Development' is the category's TITLE, not its ID, so 0
-/// rows match.
+/// Why: the materialized column stores the referenced doogat's ID (a
+/// 14-digit timestamp), not its title. Without title resolution,
+/// `category=Development` would compare 'Development' to the stored ID
+/// and return 0 rows.
 #[test]
 fn search_category_field_filter_resolves_via_referenced_title() {
     let (_dir, repo, index) = setup();
@@ -178,9 +173,9 @@ fn search_category_field_filter_resolves_via_referenced_title() {
     );
 }
 
-/// Tag + REFERENCES intersection. Currently FAILS on master for the same
-/// reason as `search_category_field_filter_resolves_via_referenced_title`:
-/// the category clause filters out everything.
+/// Tag + REFERENCES intersection. Pins that the AND of two field filters
+/// returns the intersection (not empty), once REFERENCES title resolution
+/// is in place.
 #[test]
 fn search_tag_and_category_intersection_returns_intersection() {
     let (_dir, repo, index) = setup();
