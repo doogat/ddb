@@ -108,30 +108,44 @@ impl<G: GitBackend> DoogatService<G> {
         group: &[String],
         fields: &std::collections::BTreeMap<String, crate::types::Value>,
     ) -> Option<(String, Vec<rusqlite::types::Value>)> {
-        let mut joins = Vec::with_capacity(group.len());
-        let mut param_vals: Vec<rusqlite::types::Value> = Vec::with_capacity(group.len() * 2 + 1);
+        // PRD 00133: query the materialized typedef table directly. Before
+        // unification, the service path joined `_ddb_fields` which only
+        // indexes frontmatter; once typed creates routed TEXT columns to
+        // body, the join missed those columns and unique_together silently
+        // stopped catching duplicates. The materialized type-table writer
+        // (`insert_materialized_row`) writes every column regardless of
+        // zone, mirroring the SQL path's UNIQUE-index source of truth.
+        let mut where_parts = Vec::with_capacity(group.len());
+        let mut param_vals: Vec<rusqlite::types::Value> = Vec::with_capacity(group.len());
 
-        for (i, col_name) in group.iter().enumerate() {
+        for col_name in group.iter() {
+            // Defensive identifier check; column names that aren't safe to
+            // inline shouldn't reach this far, but reject rather than build
+            // an injectable query.
+            if !col_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return None;
+            }
             let val = fields.get(col_name)?;
             let val_str = Self::value_to_string(val);
-            let alias = format!("f{}", i + 1);
-            let key_idx = param_vals.len() + 1;
-            param_vals.push(rusqlite::types::Value::Text(col_name.clone()));
             let val_idx = param_vals.len() + 1;
             param_vals.push(rusqlite::types::Value::Text(val_str));
-            joins.push(format!(
-                "JOIN _ddb_fields {alias} ON \
-                 {alias}.doogat_id = d.id AND \
-                 {alias}.key = ?{key_idx} AND \
-                 {alias}.value = ?{val_idx}"
-            ));
+            where_parts.push(format!("\"{col_name}\" = ?{val_idx}"));
         }
 
-        param_vals.push(rusqlite::types::Value::Text(type_name.to_owned()));
+        // Hyphenated typedef names (e.g. `category-membership`) are valid as
+        // table identifiers when quoted; allow them here.
+        if !type_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return None;
+        }
         let sql = format!(
-            "SELECT d.id FROM doogats d {} WHERE d.type = ?{} LIMIT 1",
-            joins.join(" "),
-            param_vals.len()
+            "SELECT id FROM \"{type_name}\" WHERE {} LIMIT 1",
+            where_parts.join(" AND ")
         );
         Some((sql, param_vals))
     }

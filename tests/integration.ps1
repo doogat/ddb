@@ -2572,5 +2572,43 @@ pass "48: ON DELETE CASCADE cycle detection rejects"
 Pop-Location
 Remove-Item -Recurse -Force $P9_DIR
 
+# 49. PRD 00133 unify-typed-write-paths: CLI typed `create` on a registered
+# typedef must populate the reference zone for REFERENCES columns and reject
+# FK to wrong-type ids. Unit-test suite covers GraphQL parity end-to-end
+# (`service::tests::batch_create_*`, `create_doogat_with_extra_*`); this
+# section drives the CLI/FFI surface so cross-shell regressions surface in CI.
+Write-Host "=== PRD 00133: unified typed-write paths (CLI parity) ==="
+$TW_DIR = New-TemporaryDirectory
+Push-Location $TW_DIR
+ddb init | Out-Null
+ddb query "CREATE TABLE tw_category (label VARCHAR(64))" | Out-Null
+$twCat1 = (ddb query "INSERT INTO tw_category (title, label) VALUES ('c1', 'alpha')").Trim()
+Start-Sleep -Seconds 1
+$twCat2 = (ddb query "INSERT INTO tw_category (title, label) VALUES ('c2', 'beta')").Trim()
+if (-not $twCat1 -or -not $twCat2) { throw "49: failed to seed tw_category rows" }
+pass "49: junction typedef setup with two category rows"
+
+ddb query "CREATE TABLE tw_membership (link VARCHAR(64) REFERENCES tw_category, parent VARCHAR(64) REFERENCES tw_category)" | Out-Null
+Start-Sleep -Seconds 1
+$twMemId = (ddb create --type tw_membership --title "M1" --set "link=$twCat1" --set "parent=$twCat2").Trim()
+if (-not $twMemId) { throw "49: CLI create on junction typedef returned empty id" }
+pass "49: CLI create on junction-style typedef succeeds"
+
+$twRaw = (ddb get $twMemId | Out-String)
+if ($twRaw -notmatch [regex]::Escape("link:: [[$twCat1]]")) { throw "49: link reference zone missing: $twRaw" }
+if ($twRaw -notmatch [regex]::Escape("parent:: [[$twCat2]]")) { throw "49: parent reference zone missing: $twRaw" }
+pass "49: CLI create populates reference zone for REFERENCES columns"
+
+ddb query "CREATE TABLE tw_link (label VARCHAR(64))" | Out-Null
+Start-Sleep -Seconds 1
+$twLinkId = (ddb query "INSERT INTO tw_link (title, label) VALUES ('not a category', 'plain')").Trim()
+if (-not $twLinkId) { throw "49: tw_link seed failed" }
+$twBadOut = (& $DDB create --type tw_membership --title "Bogus" --set "link=$twLinkId" --set "parent=$twCat1" 2>&1 | Out-String)
+if ($twBadOut -notmatch "references non-existent tw_category") { throw "49: expected wrong-type FK rejection, got: $twBadOut" }
+pass "49: CLI create rejects FK to wrong-type id"
+
+Pop-Location
+Remove-Item -Recurse -Force $TW_DIR
+
 Cleanup
 Write-Host "=== all integration tests passed ==="

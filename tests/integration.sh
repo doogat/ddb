@@ -2648,4 +2648,52 @@ pass "48: ON DELETE CASCADE cycle detection rejects"
 cd "$TMPDIR"
 rm -rf "$P9_DIR"
 
+# 49. PRD 00133 unify-typed-write-paths: CLI typed `create` on a registered
+# typedef must populate the reference zone for REFERENCES columns and reject
+# FK to wrong-type ids. The unit-test suite covers GraphQL `createDoogat` /
+# `createMany` parity end-to-end (see `service::tests::batch_create_*` and
+# `service::tests::create_doogat_with_extra_*`); here we drive the CLI/FFI
+# entry point through the `ddb create --field` shell surface so cross-shell
+# regressions surface in CI.
+echo "=== PRD 00133: unified typed-write paths (CLI parity) ==="
+TW_DIR="$(mktemp -d)"
+cd "$TW_DIR"
+$DDB init >/dev/null
+$DDB query "CREATE TABLE tw_category (label VARCHAR(64))" >/dev/null
+TW_CAT1=$($DDB query "INSERT INTO tw_category (title, label) VALUES ('c1', 'alpha')" | tr -d '[:space:]')
+sleep 1
+TW_CAT2=$($DDB query "INSERT INTO tw_category (title, label) VALUES ('c2', 'beta')" | tr -d '[:space:]')
+[ -n "$TW_CAT1" ] && [ -n "$TW_CAT2" ]
+pass "49: junction typedef setup with two category rows"
+
+# CLI create on tw_membership (two REFERENCES columns -> tw_category). The
+# resulting doogat must have REFERENCES values in the reference zone.
+$DDB query "CREATE TABLE tw_membership (link VARCHAR(64) REFERENCES tw_category, parent VARCHAR(64) REFERENCES tw_category)" >/dev/null
+sleep 1
+TW_MEM_ID=$($DDB create --type tw_membership --title "M1" --set "link=$TW_CAT1" --set "parent=$TW_CAT2" 2>&1 | tr -d '[:space:]')
+[ -n "$TW_MEM_ID" ]
+pass "49: CLI create on junction-style typedef succeeds"
+
+TW_RAW=$($DDB get "$TW_MEM_ID")
+printf '%s' "$TW_RAW" | grep -q "link:: \\[\\[$TW_CAT1\\]\\]"
+printf '%s' "$TW_RAW" | grep -q "parent:: \\[\\[$TW_CAT2\\]\\]"
+pass "49: CLI create populates reference zone for REFERENCES columns"
+
+# CLI create with FK pointing at a row of the wrong type must reject. Use a
+# row from an unrelated typedef to prove the FK queries the typedef target
+# table (tw_category), not the generic doogats index.
+$DDB query "CREATE TABLE tw_link (label VARCHAR(64))" >/dev/null
+sleep 1
+TW_LINK_ID=$($DDB query "INSERT INTO tw_link (title, label) VALUES ('not a category', 'plain')" | tr -d '[:space:]')
+[ -n "$TW_LINK_ID" ]
+TW_BAD_OUT=$($DDB create --type tw_membership --title "Bogus" --set "link=$TW_LINK_ID" --set "parent=$TW_CAT1" 2>&1 || true)
+# CLI prints the human-readable message ("references non-existent <type>");
+# the structured REFERENCES_VIOLATION code is asserted at the GraphQL layer
+# by the unit-test suite.
+printf '%s' "$TW_BAD_OUT" | grep -q "references non-existent tw_category" || { echo "CLI rejection output: $TW_BAD_OUT"; exit 1; }
+pass "49: CLI create rejects FK to wrong-type id"
+
+cd "$TMPDIR"
+rm -rf "$TW_DIR"
+
 echo "=== all integration tests passed ==="
