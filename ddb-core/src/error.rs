@@ -172,6 +172,34 @@ impl DoogatError {
         }
     }
 
+    /// INSERT-time dangling FK: a typed column with `REFERENCES <type>` was
+    /// supplied a value that doesn't match any row in the target type's
+    /// materialized table. Distinct from `references_violation`, which
+    /// covers delete-time RESTRICT blocking.
+    pub fn dangling_reference(
+        table: impl Into<String>,
+        column: impl Into<String>,
+        target_table: impl Into<String>,
+        target_id: impl Into<String>,
+    ) -> Self {
+        let table = table.into();
+        let column = column.into();
+        let target_table = target_table.into();
+        let target_id = target_id.into();
+        DoogatError::Structured {
+            code: codes::REFERENCES_VIOLATION,
+            message: format!(
+                "{table}.{column} references non-existent {target_table} '{target_id}'"
+            ),
+            context: vec![
+                ("table".into(), ErrorValue::String(table)),
+                ("column".into(), ErrorValue::String(column)),
+                ("target_table".into(), ErrorValue::String(target_table)),
+                ("target_id".into(), ErrorValue::String(target_id)),
+            ],
+        }
+    }
+
     /// Required column missing on INSERT, or `SET col = NULL` on a NOT NULL
     /// column on UPDATE. Message matches the PRD 00122 wording emitted from
     /// `dml.rs::check_not_null`.

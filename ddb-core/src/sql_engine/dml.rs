@@ -13,6 +13,7 @@ use super::helpers::{
     extract_where_id, is_literal_expr, sqlite_value_to_string_nullable, unquote_identifier,
     value_to_sql,
 };
+use super::typed_insert::{prepare_typed_insert_validate, TypedInsertCounters};
 use super::{PendingDelete, PendingWrite, SqlEngine, SqlResult};
 
 /// Column names that are not declared in `schema.columns` but are accepted by
@@ -125,22 +126,6 @@ type PartitionedAssignments = (BTreeMap<String, String>, Vec<(String, String)>);
 /// Prepared bulk-update output: file contents and per-row update maps.
 type BulkUpdateFiles = (Vec<(String, String)>, Vec<BTreeMap<String, String>>);
 
-/// In-memory NEXT counter state for the duration of a single multi-row INSERT.
-///
-/// Tracks both bare `DEFAULT NEXT` and `DEFAULT NEXT(partition_col)` so the
-/// pre-validation pass (PRD 00122 blind review C2) can compute correct
-/// monotonic values without requiring per-row writes to materialize. Without
-/// this, pass 1 would call SQLite's `MAX(...)` on a table that hasn't seen
-/// the previous rows yet and every row would get the same value.
-#[derive(Default)]
-struct InsertNextCounters {
-    /// Per-column counter for `DEFAULT NEXT` (no partition).
-    bare: BTreeMap<String, i64>,
-    /// Per-(column, partition_value) counter for `DEFAULT NEXT(partition)`.
-    /// Lazily seeded from SQLite on first use of each partition value.
-    partitioned: BTreeMap<(String, String), i64>,
-}
-
 impl<'a> SqlEngine<'a> {
     pub(super) fn handle_insert(
         &mut self,
@@ -169,7 +154,7 @@ impl<'a> SqlEngine<'a> {
         let ref_folder_types = self.ref_folder_types(&schema);
         let mut created_ids = Vec::with_capacity(rows.len());
         let mut files: Vec<(String, String)> = Vec::with_capacity(rows.len());
-        let mut next_counters = self.precompute_insert_next_counters(&schema);
+        let mut next_counters = TypedInsertCounters::default();
 
         // Pass 1: validate every row before any side effects. PRD 00122
         // blind review C2 — without pre-validation, a multi-row INSERT
@@ -189,7 +174,12 @@ impl<'a> SqlEngine<'a> {
                 .zip(row_values.iter())
                 .map(|(n, v)| (n.clone(), v.clone()))
                 .collect();
-            self.fill_defaults_and_validate(&schema, &mut col_values, &mut next_counters)?;
+            prepare_typed_insert_validate(
+                &schema,
+                &mut col_values,
+                &mut next_counters,
+                self.index.sql_conn(),
+            )?;
             Self::validate_row_against_schema(
                 &schema,
                 &table_name,
@@ -962,157 +952,6 @@ impl<'a> SqlEngine<'a> {
         Ok(SqlResult::Affected(1))
     }
 
-    /// Pre-compute bare NEXT counters for auto-increment columns.
-    fn precompute_insert_next_counters(
-        &self,
-        schema: &TableSchema,
-    ) -> InsertNextCounters {
-        let mut counters = InsertNextCounters::default();
-        for col_def in &schema.columns {
-            if col_def.default_value.as_deref() != Some("NEXT") {
-                continue;
-            }
-            let max_val: i64 = self
-                .index
-                .sql_conn()
-                .query_row(
-                    &format!(
-                        "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\"",
-                        col_def.name, schema.table_name
-                    ),
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            counters.bare.insert(col_def.name.clone(), max_val);
-        }
-        counters
-    }
-
-    /// Fill default values and validate constraints for a single INSERT row.
-    fn fill_defaults_and_validate(
-        &self,
-        schema: &TableSchema,
-        col_values: &mut BTreeMap<String, String>,
-        next_counters: &mut InsertNextCounters,
-    ) -> Result<()> {
-        self.fill_column_defaults(schema, col_values, next_counters)?;
-        self.validate_insert_constraints(schema, col_values)
-    }
-
-    fn fill_column_defaults(
-        &self,
-        schema: &TableSchema,
-        col_values: &mut BTreeMap<String, String>,
-        next_counters: &mut InsertNextCounters,
-    ) -> Result<()> {
-        for col_def in &schema.columns {
-            if col_values.contains_key(&col_def.name) {
-                continue;
-            }
-            let default = match col_def.default_value {
-                Some(ref d) => d,
-                None => continue,
-            };
-            let value = self.resolve_insert_default(default, col_def, schema, col_values, next_counters);
-            col_values.insert(col_def.name.clone(), value);
-        }
-        Ok(())
-    }
-
-    /// Resolve a single column default for an INSERT row.
-    fn resolve_insert_default(
-        &self,
-        default: &str,
-        col_def: &crate::types::ColumnDef,
-        schema: &TableSchema,
-        col_values: &BTreeMap<String, String>,
-        next_counters: &mut InsertNextCounters,
-    ) -> String {
-        if default == "NEXT" {
-            let counter = next_counters
-                .bare
-                .get_mut(&col_def.name)
-                .expect("key pre-populated above");
-            *counter += 1;
-            return counter.to_string();
-        }
-        if default.starts_with("NEXT(") && default.ends_with(')') {
-            let partition_col = &default[5..default.len() - 1];
-            let partition_val = col_values.get(partition_col).cloned().unwrap_or_default();
-            let key = (col_def.name.clone(), partition_val.clone());
-            let counter = next_counters
-                .partitioned
-                .entry(key)
-                .or_insert_with(|| {
-                    self.index
-                        .sql_conn()
-                        .query_row(
-                            &format!(
-                                "SELECT COALESCE(MAX(\"{}\"), 0) FROM \"{}\" WHERE \"{}\" = ?1",
-                                col_def.name, schema.table_name, partition_col
-                            ),
-                            params![partition_val],
-                            |row| row.get(0),
-                        )
-                        .unwrap_or(0)
-                });
-            *counter += 1;
-            return counter.to_string();
-        }
-        default.to_owned()
-    }
-
-    fn validate_insert_constraints(
-        &self,
-        schema: &TableSchema,
-        col_values: &BTreeMap<String, String>,
-    ) -> Result<()> {
-        for col_def in &schema.columns {
-            let allowed = match col_def.allowed_values {
-                Some(ref a) => a,
-                None => continue,
-            };
-            let val = match col_values.get(&col_def.name) {
-                Some(v) if !v.is_empty() => v,
-                _ => continue,
-            };
-            if !allowed.contains(val) {
-                return Err(DoogatError::Validation(format!(
-                    "column '{}': value '{}' not in allowed values {:?}",
-                    col_def.name, val, allowed
-                )));
-            }
-        }
-
-        for col_def in &schema.columns {
-            if col_def.references.is_none() {
-                continue;
-            }
-            let ref_id = match col_values.get(&col_def.name) {
-                Some(v) if !v.is_empty() => v,
-                _ => continue,
-            };
-            let exists: bool = self
-                .index
-                .sql_conn()
-                .query_row(
-                    "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                    params![ref_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(false);
-            if !exists {
-                return Err(DoogatError::SqlEngine(format!(
-                    "referenced doogat not found: {}",
-                    ref_id
-                )));
-            }
-        }
-
-        Ok(())
-    }
-
     /// Validate a row's column names and values against the table schema.
     ///
     /// Runs six constraint checks that the SQL parser accepts but does not
@@ -1133,8 +972,9 @@ impl<'a> SqlEngine<'a> {
     /// 6. **VARCHAR(N) / CHAR(N) length** — character count must not exceed
     ///    the declared length. Bare `VARCHAR`/`CHAR` (no length) is unbounded.
     ///
-    /// `allowed_values` (ENUM) and `REFERENCES` are validated separately by
-    /// `validate_insert_constraints`. This helper is additive.
+    /// `allowed_values` (ENUM) and `REFERENCES` are validated separately in
+    /// `super::typed_insert::prepare_typed_insert_validate`. This helper is
+    /// additive.
     ///
     /// On failure returns `DoogatError::Validation` with one of the exact
     /// error strings documented in `docs/src/technical/sql-engine.md`.

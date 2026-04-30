@@ -416,11 +416,16 @@ fn insert_with_fk_validates_reference() {
         .execute("CREATE TABLE tasks (name TEXT, assignee TEXT REFERENCES people(id))")
         .unwrap();
 
-    // Insert with non-existent reference should fail
+    // Insert with non-existent reference should fail with structured
+    // REFERENCES_VIOLATION code (PRD 00133 unify-typed-write-paths).
     let err = engine
         .execute("INSERT INTO tasks (name, assignee) VALUES ('Fix bug', '99999999999999')")
         .unwrap_err();
-    assert!(format!("{err}").contains("referenced doogat not found"));
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("references non-existent people"),
+        "expected dangling reference message, got: {msg}"
+    );
 }
 
 #[test]

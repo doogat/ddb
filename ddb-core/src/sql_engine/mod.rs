@@ -4,6 +4,7 @@ mod dml;
 mod helpers;
 mod junction;
 mod transaction;
+mod typed_insert;
 
 use rusqlite::params;
 use sqlparser::ast::{ObjectType, Statement};
