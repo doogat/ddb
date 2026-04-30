@@ -617,13 +617,14 @@ impl<G: GitBackend> DoogatService<G> {
 
     /// Build a single doogat for batch_create: generate ID, resolve defaults, serialize.
     ///
-    /// PRD 00133: typed creates route through `sql_engine::prepare_typed_insert_validate`
-    /// + `build_data_doogat` so the resulting `ParsedDoogat` has REFERENCES
-    /// values in the reference zone (not frontmatter), FK validation queries
-    /// the typedef target table (not the generic `doogats` index), and
-    /// `allowed_values` rejects with the same wording the SQL path emits.
-    /// Untyped creates keep the legacy "straight frontmatter" behavior to
-    /// preserve PRD 00129 §T3 (CLI silent base-only creation).
+    /// PRD 00133: typed creates route through the unified
+    /// `prepare_typed_insert_validate` and `build_data_doogat` helpers so the
+    /// resulting `ParsedDoogat` has REFERENCES values in the reference zone
+    /// (not frontmatter), FK validation queries the typedef target table
+    /// (not the generic `doogats` index), and `allowed_values` rejects with
+    /// the same wording the SQL path emits. Untyped creates keep the legacy
+    /// "straight frontmatter" behavior to preserve PRD 00129 §T3 (CLI silent
+    /// base-only creation).
     fn prepare_create(
         &self,
         input: &BatchCreateInput,
@@ -661,11 +662,11 @@ impl<G: GitBackend> DoogatService<G> {
         Ok((path, content))
     }
 
-    /// Typed-create branch of `prepare_create`: stringify input fields, call
-    /// the shared `prepare_typed_insert_validate` (defaults + allowed_values
-    /// + FK), enforce post-defaults NOT NULL, and build the `ParsedDoogat`
-    /// via `build_data_doogat` so REFERENCES values land in the reference
-    /// zone.
+    /// Typed-create branch of `prepare_create`. Stringifies input fields,
+    /// delegates default + ENUM + FK validation to
+    /// `prepare_typed_insert_validate`, enforces post-defaults NOT NULL, and
+    /// builds the `ParsedDoogat` via `build_data_doogat` so REFERENCES
+    /// values land in the reference zone.
     fn build_typed_create(
         &self,
         input: &BatchCreateInput,

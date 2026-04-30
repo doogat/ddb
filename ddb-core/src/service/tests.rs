@@ -3629,3 +3629,53 @@ fn create_doogat_with_extra_preserves_unregistered_type_silent_create() {
     );
     assert_eq!(parsed.meta.doogat_type.as_deref(), Some("widget"));
 }
+
+/// PRD 00133 §Origin: typed FK validation must reject ids that don't exist
+/// in the referenced typedef table. Combined with `*_rejects_fk_to_wrong_type`
+/// this proves the helper queries `<referenced_type>` and not the generic
+/// `doogats` index.
+#[test]
+fn typed_create_rejects_fk_to_nonexistent_id() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql(
+        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
+    )
+    .unwrap();
+
+    // Bogus id that exists nowhere — neither in `category` nor in `doogats`.
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "target".to_string(),
+        crate::types::Value::String("99999999999999".to_string()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: Some("Bogus link".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields: fields.clone(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc.batch_create(&inputs).unwrap_err();
+    match err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::REFERENCES_VIOLATION);
+        }
+        other => panic!("expected Structured REFERENCES_VIOLATION, got {other:?}"),
+    }
+
+    // Same input through CLI/FFI surface — must reject identically.
+    let err2 = svc
+        .create_doogat_with_extra("Bogus link", &[], Some("link"), "", fields)
+        .unwrap_err();
+    match err2 {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::REFERENCES_VIOLATION);
+        }
+        other => panic!("expected Structured REFERENCES_VIOLATION, got {other:?}"),
+    }
+}
