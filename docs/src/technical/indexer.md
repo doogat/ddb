@@ -254,7 +254,7 @@ pub struct PaginatedSearchResult {
 
 1. **Tag**: `field == "tag"` routes to `_ddb_tags` (exact match via `eq`, substring via `contains`, or set membership via `in`).
 2. **Core column**: if the field matches a core `doogats` column (e.g. `type`, `title`, `date`), resolves directly against that column.
-3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. For `Eq` and `In`, compares the raw column value directly. For `Contains` on a REFERENCES-backed column (i.e. a junction table `{type}_{field}` also exists), routes through junction JOIN traversal to match against the referenced doogat's title rather than the raw stored ID.
+3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. For `Eq` and `In`, compares the raw column value directly. For `Contains` on a REFERENCES-backed column, resolution priority is: (a) if a same-named typedef table exists (convention: `<col>` matches the referenced typedef name), resolve `<val>` against that table's `title` with LIKE — see PRD 00133; (b) else if a junction table `{type}_{field}` exists, JOIN through it on referenced doogat title; (c) else direct LIKE on the materialized column. Path (a) is preferred because the SQL INSERT path populates the materialized column but does not auto-populate the junction table (only full rebuilds do), so freshly-inserted data with no rebuild never matches via path (b).
 4. **`_ddb_fields` fallback**: if the field is not found in any type table, falls back to the generic key-value store. Uses two SQL parameters (key + value).
 
 #### SearchFieldOp
@@ -294,7 +294,7 @@ The search query language supports the following constructs:
 
 - **Bare words**: `meeting`, `rust` - matched against FTS5 index
 - **Quoted strings**: `"conflict resolution"` - exact phrase match
-- **Field filters**: `tag=svelte`, `category:work.portals` - both `=` and `:` syntax, with optional quoted values (`title:"meeting minutes"`)
+- **Field filters**: `tag=svelte`, `category:work.portals` - both `=` and `:` syntax, with optional quoted values (`title:"meeting minutes"`). For non-tag fields, in-query `field=value` extracts as `Contains` (substring/LIKE match). The `tag=value` form keeps exact-match. The explicit `where: { field, eq }` API filter remains exact-match for all fields. This asymmetry is intentional — in-query syntax is the user-facing convenience form; explicit `where` filters are programmatic precision (PRD 00133).
 - **Boolean operators**: `AND`, `OR`, `NOT` (case-insensitive)
 - **Implicit AND**: `meeting minutes` is equivalent to `meeting AND minutes`
 - **Parentheses**: `(a OR b) AND c` - override default precedence
