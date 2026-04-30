@@ -108,6 +108,14 @@ CREATE TABLE memberships (cat TEXT, sort_order INTEGER DEFAULT NEXT(cat))
 - **Transaction-aware**: within a `BEGIN`/`COMMIT` block, writes are buffered as usual
 - **Folder-aware paths**: if the typedef has `folder: true`, created files go to `ddb/{type}/{id}.md`; otherwise they stay flat at `ddb/{id}.md`
 
+## Shared typed-insert helper (PRD 00133)
+
+The data-shaping core of `INSERT` lives in `sql_engine::typed_insert::prepare_typed_insert_validate` (default resolution + `allowed_values` + FK existence) and `builders::build_data_doogat` (zone routing + `ParsedDoogat` construction). These helpers are also called by the service layer's `batch_create::prepare_create` and `create_doogat_with_extra` so that every typed-create entry point — SQL `INSERT`, GraphQL `createDoogat` / `createMany`, CLI `ddb create` — produces identical doogats for identical inputs. Notably:
+
+- REFERENCES column values land in the *reference zone* (`- col:: [[id]]`), not in frontmatter `extra`. Junction-style typedefs (a typedef whose columns are mostly REFERENCES) populate cleanly via every entry point.
+- FK existence is validated against the *referenced typedef's* materialized table (`SELECT 1 FROM "<ref_type>" WHERE id = ?`), not the generic `doogats` index. An FK pointing at an id of the wrong type rejects with `REFERENCES_VIOLATION`.
+- `allowed_values` (ENUM) constraints are checked once, in the helper, instead of being duplicated across the SQL and service paths.
+
 ## Date Defaulting
 
 `INSERT` without an explicit `date` column defaults the doogat's `date` field to the date portion of its ID. Since DoogatId is a 14-digit timestamp (`YYYYMMDDHHmmss`), slicing `id[0..4]-id[4..6]-id[6..8]` produces a `YYYY-MM-DD` date.
