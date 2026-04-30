@@ -541,6 +541,42 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121A_ID\\\") }\"}" >/dev/n
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121B_ID\\\") }\"}" >/dev/null
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$PRD121G_ID\\\") }\"}" >/dev/null
 
+# 18i. In-query field-filter substring + REFERENCES title resolution (PRD 00133)
+# Pins the contract: title=X does LIKE; <ref_col>=X resolves via referenced
+# typedef title; explicit `where: { eq: X }` stays exact.
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE int133cat (label VARCHAR(100))\") { message } }"}'
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE int133link (url TEXT, int133cat VARCHAR(14) REFERENCES int133cat(id))\") { message } }"}'
+P133_DEV=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO int133cat (title, label) VALUES (\\\"Development\\\", \\\"dev\\\")\") { message } }"}')
+P133_DEV_ID=$(printf '%s' "$P133_DEV" | extract_id)
+[ -n "$P133_DEV_ID" ]
+gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO int133link (title, url, int133cat) VALUES ('Rust Async', 'https://example.com/rust-async', '$P133_DEV_ID')\\\") { message } }\"}" >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO int133link (title, url) VALUES (\\\"Meeting Notes Archive\\\", \\\"https://example.com/archive\\\")\") { message } }"}' >/dev/null
+
+RESULT=$(gql '{"query":"{ search(query: \"title=Archive\") { totalCount hits { title } } }"}')
+echo "$RESULT" | grep -q "Meeting Notes Archive"
+pass "serve: in-query title=X does substring match"
+
+RESULT=$(gql '{"query":"{ search(query: \"int133cat=Development\") { totalCount hits { title } } }"}')
+echo "$RESULT" | grep -q "Rust Async"
+pass "serve: in-query <ref_col>=X resolves via referenced typedef title"
+
+# Explicit where: { eq } stays exact — Eq against the materialized column ID.
+# Title="Development" does NOT match the link.int133cat column (it stores the
+# category doogat ID), so eq with the title literal returns 0.
+RESULT=$(gql '{"query":"{ search(query: \"\", where: [{field: \"int133cat\", eq: \"Development\"}]) { totalCount } }"}')
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "0" ]
+pass "serve: explicit where eq stays exact (not LIKE) for REFERENCES"
+
+# But where: { eq: <id> } against the same column works (Eq on the stored ID).
+RESULT=$(gql "{\"query\":\"{ search(query: \\\"\\\", where: [{field: \\\"int133cat\\\", eq: \\\"$P133_DEV_ID\\\"}]) { totalCount } }\"}")
+COUNT=$(echo "$RESULT" | sed -n 's/.*"totalCount":\([0-9]*\).*/\1/p')
+[ "$COUNT" = "1" ]
+pass "serve: explicit where eq matches REFERENCES doogat ID exactly"
+
+ddl '{"query":"mutation { executeSql(sql: \"DROP TABLE int133link CASCADE\") { message } }"}'
+ddl '{"query":"mutation { executeSql(sql: \"DROP TABLE int133cat CASCADE\") { message } }"}'
+
 # 18z. UPDATE/DELETE WHERE id no-match GraphQL parity (issue #5 group B).
 # Rust unit tests and smoke CLI checks already cover B1-B5 at the lower layers;
 # this sub-block pins the same behavior at the GraphQL executeSql surface.

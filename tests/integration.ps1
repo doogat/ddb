@@ -570,6 +570,36 @@ gqlq "mutation { deleteDoogat(id: `"$PRD121A_ID`") }" | Out-Null
 gqlq "mutation { deleteDoogat(id: `"$PRD121B_ID`") }" | Out-Null
 gqlq "mutation { deleteDoogat(id: `"$PRD121G_ID`") }" | Out-Null
 
+# 18i. In-query field-filter substring + REFERENCES title resolution (PRD 00133)
+ddl 'mutation { executeSql(sql: "CREATE TABLE int133cat (label VARCHAR(100))") { message } }'
+ddl 'mutation { executeSql(sql: "CREATE TABLE int133link (url TEXT, int133cat VARCHAR(14) REFERENCES int133cat(id))") { message } }'
+$p133Dev = gqlq 'mutation { executeSql(sql: "INSERT INTO int133cat (title, label) VALUES (''Development'', ''dev'')") { message } }'
+$P133_DEV_ID = extractId $p133Dev
+if (-not $P133_DEV_ID) { throw "18i: failed to seed category row" }
+gqlq "mutation { executeSql(sql: `"INSERT INTO int133link (title, url, int133cat) VALUES ('Rust Async', 'https://example.com/rust-async', '$P133_DEV_ID')`") { message } }" | Out-Null
+gqlq 'mutation { executeSql(sql: "INSERT INTO int133link (title, url) VALUES (''Meeting Notes Archive'', ''https://example.com/archive'')") { message } }' | Out-Null
+
+$result = gqlq '{ search(query: "title=Archive") { totalCount hits { title } } }'
+if ($result -notmatch 'Meeting Notes Archive') { throw "18i: title=Archive did not substring-match: $result" }
+pass "serve: in-query title=X does substring match"
+
+$result = gqlq '{ search(query: "int133cat=Development") { totalCount hits { title } } }'
+if ($result -notmatch 'Rust Async') { throw "18i: int133cat=Development did not resolve via referenced title: $result" }
+pass "serve: in-query <ref_col>=X resolves via referenced typedef title"
+
+$result = gqlq '{ search(query: "", where: [{field: "int133cat", eq: "Development"}]) { totalCount } }'
+$count = if ($result -match '"totalCount":(\d+)') { $Matches[1] }
+if ($count -ne '0') { throw "18i: explicit where eq should not LIKE-match for REFERENCES, got count=$count" }
+pass "serve: explicit where eq stays exact (not LIKE) for REFERENCES"
+
+$result = gqlq "{ search(query: `"`", where: [{field: `"int133cat`", eq: `"$P133_DEV_ID`"}]) { totalCount } }"
+$count = if ($result -match '"totalCount":(\d+)') { $Matches[1] }
+if ($count -ne '1') { throw "18i: explicit where eq <id> should match exactly, got count=$count" }
+pass "serve: explicit where eq matches REFERENCES doogat ID exactly"
+
+ddl 'mutation { executeSql(sql: "DROP TABLE int133link CASCADE") { message } }'
+ddl 'mutation { executeSql(sql: "DROP TABLE int133cat CASCADE") { message } }'
+
 # 18z - UPDATE/DELETE WHERE id no-match GraphQL parity (#5 group B).
 ddl 'mutation { executeSql(sql: "CREATE TABLE link_b1 (url VARCHAR(255))") { message } }'
 $b1Seed = gqlq 'mutation { executeSql(sql: "INSERT INTO link_b1 (title, url) VALUES (''A'', ''https://a.com'')") { message } }'

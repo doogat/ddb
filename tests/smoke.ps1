@@ -716,7 +716,26 @@ if ($UPSERT_ID3 -eq $UPSERT_ID1) { throw "upsert: non-duplicate should create ne
 ddb query "DROP TABLE upsert_test CASCADE" | Out-Null
 pass "ON CONFLICT DO NOTHING (upsert)"
 
-# 28. ALTER TABLE ALTER COLUMN TYPE (PRD 00128)
+# 28. in-query field filter substring + REFERENCES title resolution (PRD 00133)
+ddb query "CREATE TABLE smoke_cat (label VARCHAR(100))" | Out-Null
+ddb query "CREATE TABLE smoke_link (url TEXT, smoke_cat VARCHAR(14) REFERENCES smoke_cat(id))" | Out-Null
+$scDevId = ddb query "INSERT INTO smoke_cat (title, label) VALUES ('Development', 'dev')"
+ddb query "INSERT INTO smoke_link (title, url, smoke_cat) VALUES ('Rust Async', 'https://example.com/rust-async', '$scDevId')" | Out-Null
+ddb query "INSERT INTO smoke_link (title, url) VALUES ('Meeting Notes Archive', 'https://example.com/archive')" | Out-Null
+ddb reindex | Out-Null
+
+$titleLikeResult = ddb search "title=Archive" | Out-String
+if ($titleLikeResult -notmatch "Meeting Notes Archive") { throw "in-query title=X did not substring-match: $titleLikeResult" }
+pass "in-query title=X does substring match"
+
+$catResolveResult = ddb search "smoke_cat=Development" | Out-String
+if ($catResolveResult -notmatch "Rust Async") { throw "in-query <ref_col>=X did not resolve via referenced title: $catResolveResult" }
+pass "in-query <ref_col>=X resolves via referenced typedef title"
+
+ddb query "DROP TABLE smoke_link CASCADE" | Out-Null
+ddb query "DROP TABLE smoke_cat CASCADE" | Out-Null
+
+# 29. ALTER TABLE ALTER COLUMN TYPE (PRD 00128)
 ddb query "CREATE TABLE alter_type_smoke (url VARCHAR(10))" | Out-Null
 $smokeAtId = ddb query "INSERT INTO alter_type_smoke (title, url) VALUES ('start', '1234567890')"
 if ($smokeAtId -notmatch "^\d{14}$") { throw "alter-col-type: bad id: $smokeAtId" }

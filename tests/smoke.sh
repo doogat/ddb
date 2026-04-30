@@ -602,7 +602,26 @@ UPSERT_ID3=$($DDB query "INSERT INTO upsert_test (title, code, label) VALUES ('T
 $DDB query "DROP TABLE upsert_test CASCADE" | grep -q "dropped"
 pass "ON CONFLICT DO NOTHING (upsert)"
 
-# 28. ALTER TABLE ALTER COLUMN TYPE (PRD 00128)
+# 28. in-query field filter substring + REFERENCES title resolution (PRD 00133)
+$DDB query "CREATE TABLE smoke_cat (label VARCHAR(100))" >/dev/null
+$DDB query "CREATE TABLE smoke_link (url TEXT, smoke_cat VARCHAR(14) REFERENCES smoke_cat(id))" >/dev/null
+SC_DEV_ID=$($DDB query "INSERT INTO smoke_cat (title, label) VALUES ('Development', 'dev')")
+$DDB query "INSERT INTO smoke_link (title, url, smoke_cat) VALUES ('Rust Async', 'https://example.com/rust-async', '$SC_DEV_ID')" >/dev/null
+$DDB query "INSERT INTO smoke_link (title, url) VALUES ('Meeting Notes Archive', 'https://example.com/archive')" >/dev/null
+$DDB reindex >/dev/null
+
+TITLE_LIKE_RESULT=$($DDB search "title=Archive")
+echo "$TITLE_LIKE_RESULT" | grep -q "Meeting Notes Archive"
+pass "in-query title=X does substring match"
+
+CAT_RESOLVE_RESULT=$($DDB search "smoke_cat=Development")
+echo "$CAT_RESOLVE_RESULT" | grep -q "Rust Async"
+pass "in-query <ref_col>=X resolves via referenced typedef title"
+
+$DDB query "DROP TABLE smoke_link CASCADE" >/dev/null
+$DDB query "DROP TABLE smoke_cat CASCADE" >/dev/null
+
+# 29. ALTER TABLE ALTER COLUMN TYPE (PRD 00128)
 $DDB query "CREATE TABLE alter_type_smoke (url VARCHAR(10))" >/dev/null
 SMOKE_AT_ID=$($DDB query "INSERT INTO alter_type_smoke (title, url) VALUES ('start', '1234567890')")
 echo "$SMOKE_AT_ID" | grep -qE "^[0-9]{14}$"
