@@ -210,10 +210,23 @@ impl Index {
         if !plan.extracted_filters.is_empty() {
             let mut wf = effective_filters.where_filters.take().unwrap_or_default();
             for (field, value) in plan.extracted_filters {
-                wf.push(SearchFieldFilter {
-                    field,
-                    op: SearchFieldOp::Eq(value),
-                });
+                // PRD 00133: in-query syntax is the user-facing convenience
+                // form. `tag=svelte` keeps Eq (exact tag match — that is the
+                // tag contract). Every other field is a "search this field"
+                // expression: `title=Archive` matches titles containing
+                // "Archive", and `category=Development` matches links whose
+                // category REFERENCES a doogat titled "Development". Both
+                // fall out of `Contains` semantics — the core-column branch
+                // does `z."{col}" LIKE`, and the materialized-table branch
+                // resolves via the same-named typedef's title with LIKE. The
+                // explicit `where:` API filter still uses Eq for programmatic
+                // precision.
+                let op = if field == "tag" {
+                    SearchFieldOp::Eq(value)
+                } else {
+                    SearchFieldOp::Contains(value)
+                };
+                wf.push(SearchFieldFilter { field, op });
             }
             effective_filters.where_filters = Some(wf);
         }

@@ -427,25 +427,78 @@ impl Index {
                             }
                         }
                         SearchFieldOp::Contains(val) => {
-                            // For REFERENCES columns, the materialized column stores raw IDs.
-                            // Prefer junction table JOIN so Contains matches on referenced title.
-                            let jt_tables: Vec<String> = tables_with_field
-                                .iter()
-                                .filter(|t| {
-                                    let jt_name = format!("{}_{}", t, wf.field);
-                                    self.conn
-                                        .query_row(
-                                            "SELECT COUNT(*) > 0 FROM sqlite_master \
-                                             WHERE type='table' AND name=?1",
-                                            [&jt_name],
-                                            |row| row.get::<_, bool>(0),
-                                        )
-                                        .unwrap_or(false)
-                                })
-                                .cloned()
-                                .collect();
+                            // PRD 00133: resolution priority for REFERENCES
+                            // columns where the parent type has the column
+                            // materialized:
+                            //   1. If a typedef table named `<col>` exists,
+                            //      resolve <val> against that table's title
+                            //      with LIKE. This is the new preferred path
+                            //      because `INSERT INTO link (category)
+                            //      VALUES (...)` populates the materialized
+                            //      column directly but does NOT populate the
+                            //      auto-junction `link_category` (that only
+                            //      happens during full rebuild), so a
+                            //      junction-based query would return 0 rows
+                            //      on fresh data.
+                            //   2. Else if the auto-junction
+                            //      `<type>_<col>` exists AND has rows, JOIN
+                            //      through it on referenced doogat title.
+                            //      This is the legacy path; it stays for
+                            //      callers / tests that pre-populate the
+                            //      junction (e.g. by going through a full
+                            //      rebuild, or by manual setup).
+                            //   3. Else fall back to direct column LIKE on
+                            //      the materialized column.
+                            let ref_table_exists = self
+                                .conn
+                                .query_row(
+                                    "SELECT COUNT(*) > 0 FROM sqlite_master \
+                                     WHERE type='table' AND name=?1",
+                                    [&wf.field],
+                                    |row| row.get::<_, bool>(0),
+                                )
+                                .unwrap_or(false);
 
-                            if !jt_tables.is_empty() {
+                            let jt_tables: Vec<String> = if ref_table_exists {
+                                Vec::new()
+                            } else {
+                                tables_with_field
+                                    .iter()
+                                    .filter(|t| {
+                                        let jt_name = format!("{}_{}", t, wf.field);
+                                        self.conn
+                                            .query_row(
+                                                "SELECT COUNT(*) > 0 FROM sqlite_master \
+                                                 WHERE type='table' AND name=?1",
+                                                [&jt_name],
+                                                |row| row.get::<_, bool>(0),
+                                            )
+                                            .unwrap_or(false)
+                                    })
+                                    .cloned()
+                                    .collect()
+                            };
+
+                            if ref_table_exists {
+                                let ph = format!("?{idx}");
+                                idx += 1;
+                                let safe_ref = escape_sql_ident(&wf.field);
+                                let subs: Vec<String> = tables_with_field
+                                    .iter()
+                                    .map(|t| {
+                                        let safe_table = escape_sql_ident(t);
+                                        format!(
+                                            "SELECT id FROM \"{safe_table}\" \
+                                             WHERE \"{safe_col}\" IN (\
+                                                SELECT id FROM \"{safe_ref}\" \
+                                                WHERE title LIKE '%' || {ph} || '%')"
+                                        )
+                                    })
+                                    .collect();
+                                clauses
+                                    .push(format!("AND z.id IN ({})", subs.join(" UNION ")));
+                                params.push(val.clone());
+                            } else if !jt_tables.is_empty() {
                                 let ph = format!("?{idx}");
                                 idx += 1;
                                 let subs: Vec<String> = jt_tables
