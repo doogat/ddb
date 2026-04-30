@@ -1371,21 +1371,27 @@ fn batch_create_with_fields() {
     let results = svc.batch_create(&inputs).unwrap();
     assert_eq!(results.len(), 2);
 
-    assert_eq!(
-        results[0].meta.extra.get("category"),
-        Some(&crate::types::Value::String("electronics".to_string()))
+    // PRD 00133: typed creates route by `effective_zone`. `category TEXT`
+    // (long-text default) goes to body; `priority INTEGER` (numeric default)
+    // goes to frontmatter `extra` as `Value::Number` (the SQL path's
+    // `to_yaml_value` typed conversion).
+    assert!(
+        results[0].body.contains("electronics"),
+        "expected 'electronics' in body, got: {}",
+        results[0].body
     );
     assert_eq!(
         results[0].meta.extra.get("priority"),
-        Some(&crate::types::Value::String("5".to_string()))
+        Some(&crate::types::Value::Number(5.0))
     );
-    assert_eq!(
-        results[1].meta.extra.get("category"),
-        Some(&crate::types::Value::String("books".to_string()))
+    assert!(
+        results[1].body.contains("books"),
+        "expected 'books' in body, got: {}",
+        results[1].body
     );
     assert_eq!(
         results[1].meta.extra.get("priority"),
-        Some(&crate::types::Value::String("3".to_string()))
+        Some(&crate::types::Value::Number(3.0))
     );
 }
 
@@ -3360,4 +3366,152 @@ fn batch_create_not_null_violation_returns_structured_error_prd_00131() {
         }
         other => panic!("expected Structured NOT_NULL_VIOLATION, got {other:?}"),
     }
+}
+
+// ── PRD 00133 unify-typed-write-paths-v1 ──────────────────────────────
+
+/// REFERENCES column values must land in the reference zone (inline_fields)
+/// after batch_create, not in the frontmatter `extra` map. Junction-style
+/// typedefs (e.g. `category-membership`) depend on this — before PRD 00133
+/// they had to use raw `executeSql INSERT` because GraphQL `createDoogat`
+/// dumped FK ids into frontmatter.
+#[test]
+fn batch_create_routes_references_to_reference_zone() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    let cat_one = svc
+        .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap();
+    let cat_id = match cat_one {
+        crate::sql_engine::SqlResult::Ok(s) => s,
+        other => panic!("expected Ok with new id, got {other:?}"),
+    };
+
+    svc.execute_sql(
+        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
+    )
+    .unwrap();
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "target".to_string(),
+        crate::types::Value::String(cat_id.clone()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: Some("My Link".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let results = svc.batch_create(&inputs).unwrap();
+    assert_eq!(results.len(), 1);
+
+    let parsed = &results[0];
+    assert!(
+        parsed.meta.extra.get("target").is_none(),
+        "REFERENCES column 'target' must NOT be in frontmatter extra; \
+         got extra: {:?}",
+        parsed.meta.extra
+    );
+    assert!(
+        parsed
+            .inline_fields
+            .iter()
+            .any(|f| f.key == "target" && f.value.contains(&cat_id)),
+        "expected reference zone inline_field for 'target' with id {cat_id}; \
+         got inline_fields: {:?}",
+        parsed.inline_fields
+    );
+}
+
+/// FK validation must query the referenced typedef table (e.g. `category`)
+/// not the generic `doogats` index. PRD 00133: an FK to a row of the wrong
+/// type must reject. Before the unification, `validate_fk_reference` did
+/// `SELECT COUNT(*) FROM doogats WHERE id = ?`, which accepted any id.
+#[test]
+fn batch_create_rejects_fk_to_wrong_type() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    // Two unrelated typedefs.
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE note (label VARCHAR(64))").unwrap();
+    let note_create = svc
+        .execute_sql("INSERT INTO note (label) VALUES ('not a category')")
+        .unwrap();
+    let note_id = match note_create {
+        crate::sql_engine::SqlResult::Ok(s) => s,
+        other => panic!("expected Ok with new id, got {other:?}"),
+    };
+
+    // `link` has a column REFERENCES category. Pointing it at a `note` row
+    // must reject — `note_id` exists in the global `doogats` index but not
+    // in the `category` table.
+    svc.execute_sql(
+        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
+    )
+    .unwrap();
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "target".to_string(),
+        crate::types::Value::String(note_id.clone()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: Some("Bogus link".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("link".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc.batch_create(&inputs).unwrap_err();
+    match err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::REFERENCES_VIOLATION);
+        }
+        other => panic!("expected Structured REFERENCES_VIOLATION, got {other:?}"),
+    }
+}
+
+/// `allowed_values` must be enforced uniformly on every typed-create entry
+/// point. Before PRD 00133, GraphQL rejected invalid enums but the CLI/FFI
+/// path silently accepted them. Now both paths route through the same
+/// helper.
+#[test]
+fn batch_create_rejects_invalid_allowed_values() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql(
+        "CREATE TABLE task (status ENUM('open', 'closed'))",
+    )
+    .unwrap();
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "status".to_string(),
+        crate::types::Value::String("invalid".to_string()),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: Some("Test".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("task".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let err = svc.batch_create(&inputs).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not in allowed values"),
+        "expected allowed_values rejection, got: {msg}"
+    );
 }

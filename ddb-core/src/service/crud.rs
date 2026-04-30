@@ -3,6 +3,8 @@ use rusqlite::params;
 use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
+use crate::sql_engine::build_data_doogat;
+use crate::sql_engine::typed_insert::{prepare_typed_insert_validate, TypedInsertCounters};
 use crate::types::{
     BatchCreateInput, BatchUpdateInput, DoogatId, DoogatMeta, ParsedDoogat, TableSchema,
 };
@@ -27,20 +29,6 @@ const RESERVED_TYPED_COLUMNS: &[&str] = &[
     "updated_at",
     "tags",
 ];
-
-/// Stringify `extra` into the `BTreeMap<String, String>` shape that
-/// `resolve_insert_title` expects. Mirrors the conversions the SQL INSERT
-/// path performs when it builds `col_values` from raw VALUES literals; the
-/// goal is for both paths to produce the same template input for the same
-/// logical row.
-fn extra_to_template_col_values(
-    extra: &std::collections::BTreeMap<String, crate::types::Value>,
-) -> std::collections::BTreeMap<String, String> {
-    extra
-        .iter()
-        .map(|(k, v)| (k.clone(), value_to_unique_key(v)))
-        .collect()
-}
 
 /// Stringify a `Value` for purposes of intra-batch unique-tuple comparison.
 /// Same encoding as `extra_to_template_col_values` — sticking with one
@@ -540,6 +528,14 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// Build a single doogat for batch_create: generate ID, resolve defaults, serialize.
+    ///
+    /// PRD 00133: typed creates route through `sql_engine::prepare_typed_insert_validate`
+    /// + `build_data_doogat` so the resulting `ParsedDoogat` has REFERENCES
+    /// values in the reference zone (not frontmatter), FK validation queries
+    /// the typedef target table (not the generic `doogats` index), and
+    /// `allowed_values` rejects with the same wording the SQL path emits.
+    /// Untyped creates keep the legacy "straight frontmatter" behavior to
+    /// preserve PRD 00129 §T3 (CLI silent base-only creation).
     fn prepare_create(
         &self,
         input: &BatchCreateInput,
@@ -563,23 +559,106 @@ impl<G: GitBackend> DoogatService<G> {
             .unwrap_or(false);
         let path = git_ops::doogat_path(&id_str, input.doogat_type.as_deref(), folder);
 
-        let mut extra = input.fields.clone();
-        self.resolve_column_defaults(input, schemas, &mut extra, next_counters, partitioned_counters)?;
-        Self::validate_typed_create_post_defaults(input, schemas, &extra)?;
-        self.validate_column_constraints(input, schemas, &extra)?;
+        let schema = input
+            .doogat_type
+            .as_deref()
+            .and_then(|t| schemas.iter().find(|s| s.table_name == t));
 
-        let title = self.resolve_create_title(input, schemas, &id, &extra)?;
+        let parsed = match schema {
+            Some(schema) => self.build_typed_create(input, schema, &id, &path, next_counters, partitioned_counters)?,
+            None => self.build_untyped_create(input, &id, &path)?,
+        };
 
+        let content = parser::serialize(&parsed);
+        Ok((path, content))
+    }
+
+    /// Typed-create branch of `prepare_create`: stringify input fields, call
+    /// the shared `prepare_typed_insert_validate` (defaults + allowed_values
+    /// + FK), enforce post-defaults NOT NULL, and build the `ParsedDoogat`
+    /// via `build_data_doogat` so REFERENCES values land in the reference
+    /// zone.
+    fn build_typed_create(
+        &self,
+        input: &BatchCreateInput,
+        schema: &TableSchema,
+        id: &DoogatId,
+        path: &str,
+        next_counters: &mut BareNextCounters,
+        partitioned_counters: &mut PartitionedNextCounters,
+    ) -> Result<ParsedDoogat> {
+        let mut col_values = stringify_typed_input_fields(input, schema)?;
+
+        let mut helper_counters = extract_helper_counters_for_table(
+            &schema.table_name,
+            next_counters,
+            partitioned_counters,
+        );
+
+        prepare_typed_insert_validate(
+            schema,
+            &mut col_values,
+            &mut helper_counters,
+            &self.index.conn,
+        )?;
+
+        write_back_helper_counters(
+            &schema.table_name,
+            &helper_counters,
+            next_counters,
+            partitioned_counters,
+        );
+
+        Self::validate_typed_create_post_defaults(input, schema, &col_values)?;
+
+        let title = self.resolve_create_title(input, Some(schema), id, &col_values)?;
+        col_values.insert("title".to_string(), title);
+
+        let ref_folder_types: std::collections::HashSet<String> = schema
+            .columns
+            .iter()
+            .filter_map(|c| c.references.as_ref())
+            .filter(|ref_table| self.index.type_uses_folder(ref_table, &self.repo))
+            .cloned()
+            .collect();
+
+        let mut parsed = build_data_doogat(
+            id,
+            schema,
+            &col_values,
+            &ref_folder_types,
+            Some(&self.index.conn),
+        );
+        parsed.meta.tags = input.tags.clone();
+        if let Some(ref body) = input.body {
+            parsed.body = body.clone();
+        }
+        parsed.path = path.to_string();
+        Ok(parsed)
+    }
+
+    /// Untyped-create branch: no typedef, so no defaults/zones/FK validation
+    /// applies. Preserves the legacy `create_doogat`-style frontmatter dump
+    /// for PRD 00129 §T3 (CLI silent base-only creation). Title is required
+    /// here — there is no template to fall back on.
+    fn build_untyped_create(
+        &self,
+        input: &BatchCreateInput,
+        id: &DoogatId,
+        path: &str,
+    ) -> Result<ParsedDoogat> {
+        let title = input.title.clone().ok_or_else(|| {
+            DoogatError::not_null_violation("doogats", "title".to_string())
+        })?;
         let meta = DoogatMeta {
-            id: Some(id),
+            id: Some(id.clone()),
             title: Some(title),
             date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
             doogat_type: input.doogat_type.clone(),
             tags: input.tags.clone(),
-            extra,
+            extra: input.fields.clone(),
         };
-
-        let parsed = ParsedDoogat {
+        Ok(ParsedDoogat {
             meta,
             body: input.body.clone().unwrap_or_default(),
             sections: vec![],
@@ -588,12 +667,9 @@ impl<G: GitBackend> DoogatService<G> {
             links: vec![],
             body_tags: vec![],
             checkboxes: vec![],
-            path: path.clone(),
+            path: path.to_string(),
             updated_at: None,
-        };
-
-        let content = parser::serialize(&parsed);
-        Ok((path, content))
+        })
     }
 
     /// Resolve the title for a batch create. Mirrors the `executeSql INSERT`
@@ -608,27 +684,20 @@ impl<G: GitBackend> DoogatService<G> {
     fn resolve_create_title(
         &self,
         input: &BatchCreateInput,
-        schemas: &[TableSchema],
+        schema: Option<&TableSchema>,
         id: &DoogatId,
-        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+        col_values: &std::collections::BTreeMap<String, String>,
     ) -> Result<String> {
         if let Some(t) = input.title.clone() {
             return Ok(t);
         }
-        let schema = input
-            .doogat_type
-            .as_deref()
-            .and_then(|t| schemas.iter().find(|s| s.table_name == t));
         match schema {
-            Some(s) if s.title_template.is_some() => {
-                let col_values = extra_to_template_col_values(extra);
-                Ok(crate::sql_engine::resolve_insert_title(
-                    id,
-                    s,
-                    &col_values,
-                    Some(&self.index.conn),
-                ))
-            }
+            Some(s) if s.title_template.is_some() => Ok(crate::sql_engine::resolve_insert_title(
+                id,
+                s,
+                col_values,
+                Some(&self.index.conn),
+            )),
             Some(s) => Err(DoogatError::not_null_violation(
                 s.table_name.clone(),
                 "title".to_string(),
@@ -725,24 +794,20 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// PRD 00129 §1: NOT NULL enforcement once column defaults have been
-    /// resolved. A required column is satisfied when `extra` carries a
-    /// non-null value for it, when the typedef declares a `default_value`
-    /// (already merged into `extra` by `resolve_column_defaults`), or — for
-    /// the special `title` column — when the typedef declares a
+    /// resolved. A required column is satisfied when `col_values` carries a
+    /// non-empty value for it, when the typedef declares a `default_value`
+    /// (already merged into `col_values` by `prepare_typed_insert_validate`),
+    /// or — for the special `title` column — when the typedef declares a
     /// `title_template` (the title is synthesized at INSERT time, mirroring
     /// the SQL validator's exemption from PRD 00122).
     fn validate_typed_create_post_defaults(
         input: &BatchCreateInput,
-        schemas: &[TableSchema],
-        extra: &std::collections::BTreeMap<String, crate::types::Value>,
+        schema: &TableSchema,
+        col_values: &std::collections::BTreeMap<String, String>,
     ) -> Result<()> {
         let type_name = match input.doogat_type {
             Some(ref t) => t,
             None => return Ok(()),
-        };
-        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
-            Some(s) => s,
-            None => return Ok(()), // pre-defaults check already rejected
         };
 
         for col in &schema.columns {
@@ -759,7 +824,7 @@ impl<G: GitBackend> DoogatService<G> {
             if col.default_value.is_some() {
                 continue;
             }
-            if extra.contains_key(&col.name) {
+            if col_values.contains_key(&col.name) {
                 continue;
             }
             return Err(DoogatError::not_null_violation(
@@ -984,6 +1049,90 @@ impl<G: GitBackend> DoogatService<G> {
 
     #[cfg(not(feature = "nosql"))]
     fn nosql_remove_doogat(&self, _id: &str) {}
+}
+
+/// Stringify a typed `BatchCreateInput`'s fields into the `BTreeMap<String, String>`
+/// shape `prepare_typed_insert_validate` expects. Reserved core columns
+/// (id/title/type/date/created_at/updated_at/tags) are skipped — they don't
+/// participate in zone routing or per-column validation. Structured values
+/// (`List`/`Map`) on declared scalar columns reject up front; they cannot
+/// satisfy `allowed_values` or FK checks and would silently disappear in
+/// `value_to_comparable_string`.
+fn stringify_typed_input_fields(
+    input: &BatchCreateInput,
+    schema: &TableSchema,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut out = std::collections::BTreeMap::new();
+    for (key, val) in &input.fields {
+        if RESERVED_TYPED_COLUMNS.contains(&key.as_str()) {
+            continue;
+        }
+        if !schema.columns.iter().any(|c| &c.name == key) {
+            // Pre-defaults check already rejected unknown columns; defensive
+            // skip in case of future drift.
+            continue;
+        }
+        match crate::types::Value::clone(val) {
+            crate::types::Value::String(s) => {
+                out.insert(key.clone(), s);
+            }
+            crate::types::Value::Number(n) => {
+                out.insert(key.clone(), n.to_string());
+            }
+            crate::types::Value::Bool(b) => {
+                out.insert(key.clone(), if b { "1".into() } else { "0".into() });
+            }
+            crate::types::Value::List(_) | crate::types::Value::Map(_) => {
+                return Err(DoogatError::Validation(format!(
+                    "field '{key}' has structured value (list/map) but typed column '{}.{key}' expects a scalar",
+                    schema.table_name
+                )));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Copy the rows of `bare`/`partitioned` that target `table` into a
+/// column-keyed `TypedInsertCounters` view the shared helper consumes.
+/// Cross-input batch-aware counters keep advancing because callers write
+/// the helper-side mutations back via `write_back_helper_counters`.
+fn extract_helper_counters_for_table(
+    table: &str,
+    bare: &BareNextCounters,
+    partitioned: &PartitionedNextCounters,
+) -> TypedInsertCounters {
+    let mut result = TypedInsertCounters::default();
+    for ((t, col), val) in bare {
+        if t == table {
+            result.bare.insert(col.clone(), *val);
+        }
+    }
+    for ((t, col, partition), val) in partitioned {
+        if t == table {
+            result
+                .partitioned
+                .insert((col.clone(), partition.clone()), *val);
+        }
+    }
+    result
+}
+
+/// Inverse of `extract_helper_counters_for_table`: write the helper's
+/// mutated counter view back into the service-side table-keyed maps so the
+/// next input in the same batch sees the advanced counters.
+fn write_back_helper_counters(
+    table: &str,
+    helper: &TypedInsertCounters,
+    bare: &mut BareNextCounters,
+    partitioned: &mut PartitionedNextCounters,
+) {
+    for (col, val) in &helper.bare {
+        bare.insert((table.to_owned(), col.clone()), *val);
+    }
+    for ((col, partition), val) in &helper.partitioned {
+        partitioned.insert((table.to_owned(), col.clone(), partition.clone()), *val);
+    }
 }
 
 fn apply_field_updates(

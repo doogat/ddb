@@ -427,7 +427,7 @@ fn join_sections(sections: &[String], prefix: &str, suffix: &str, sep: &str) -> 
 }
 
 /// Build a data doogat from column values according to the schema's zone mapping.
-pub(super) fn build_data_doogat(
+pub(crate) fn build_data_doogat(
     id: &DoogatId,
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,

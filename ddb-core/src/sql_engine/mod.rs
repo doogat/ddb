@@ -4,7 +4,9 @@ mod dml;
 mod helpers;
 mod junction;
 mod transaction;
-mod typed_insert;
+pub(crate) mod typed_insert;
+
+pub(crate) use builders::build_data_doogat;
 
 use rusqlite::params;
 use sqlparser::ast::{ObjectType, Statement};
