@@ -141,6 +141,15 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// Create a new doogat with optional extra frontmatter fields.
+    ///
+    /// PRD 00133: when `doogat_type` resolves to a registered typedef, the
+    /// extra fields route through `prepare_typed_insert_validate` +
+    /// `build_data_doogat` so the CLI/FFI surface matches the SQL/GraphQL
+    /// behavior — `REFERENCES` columns land in the reference zone,
+    /// `allowed_values` and FK constraints are enforced, and unknown columns
+    /// reject with `UNKNOWN_FIELD`. PRD 00129 §T3 still applies for
+    /// unregistered types: untyped or unregistered-type creates keep the
+    /// "straight frontmatter" behavior.
     pub fn create_doogat_with_extra(
         &self,
         title: &str,
@@ -157,26 +166,47 @@ impl<G: GitBackend> DoogatService<G> {
             .unwrap_or(false);
         let path = git_ops::doogat_path(&id_str, doogat_type, folder);
 
-        let meta = DoogatMeta {
-            id: Some(id),
-            title: Some(title.to_owned()),
-            date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
-            doogat_type: doogat_type.map(str::to_owned),
-            tags: tags.to_vec(),
-            extra,
+        let typedef = match doogat_type {
+            Some(t) => self
+                .list_type_schemas()?
+                .into_iter()
+                .find(|s| s.table_name == t),
+            None => None,
         };
 
-        let mut parsed = ParsedDoogat {
-            meta,
-            body: body.to_owned(),
-            sections: vec![],
-            reference_section: String::new(),
-            inline_fields: vec![],
-            links: vec![],
-            body_tags: vec![],
-            checkboxes: vec![],
-            path: path.clone(),
-            updated_at: None,
+        // Lower the explicit args into a synthetic `BatchCreateInput` so the
+        // typed-create pipeline (pre-defaults, helper, post-defaults) runs
+        // with the same shape `batch_create` uses, no parallel logic.
+        let synth_input = BatchCreateInput {
+            title: Some(title.to_owned()),
+            body: Some(body.to_owned()),
+            tags: tags.to_vec(),
+            doogat_type: doogat_type.map(str::to_owned),
+            fields: extra.clone(),
+            on_conflict: crate::types::ConflictAction::Error,
+        };
+
+        let mut parsed = match typedef.as_ref() {
+            Some(schema) => self.build_typed_single_create(&synth_input, &id, &path, schema)?,
+            None => ParsedDoogat {
+                meta: DoogatMeta {
+                    id: Some(id.clone()),
+                    title: Some(title.to_owned()),
+                    date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
+                    doogat_type: doogat_type.map(str::to_owned),
+                    tags: tags.to_vec(),
+                    extra,
+                },
+                body: body.to_owned(),
+                sections: vec![],
+                reference_section: String::new(),
+                inline_fields: vec![],
+                links: vec![],
+                body_tags: vec![],
+                checkboxes: vec![],
+                path: path.clone(),
+                updated_at: None,
+            },
         };
 
         let content = parser::serialize(&parsed);
@@ -186,6 +216,64 @@ impl<G: GitBackend> DoogatService<G> {
         self.nosql_index_doogat(&parsed);
         parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
 
+        Ok(parsed)
+    }
+
+    /// Single-row typed-create branch of `create_doogat_with_extra`. Mirrors
+    /// `build_typed_create` (used by `batch_create`) but with a fresh
+    /// per-call `TypedInsertCounters` (no batch-aware NEXT(partition) state
+    /// to share).
+    fn build_typed_single_create(
+        &self,
+        input: &BatchCreateInput,
+        id: &DoogatId,
+        path: &str,
+        schema: &TableSchema,
+    ) -> Result<ParsedDoogat> {
+        let schemas_slice = std::slice::from_ref(schema);
+        Self::validate_typed_create_pre_defaults(input, schemas_slice)?;
+
+        let mut col_values = stringify_typed_input_fields(input, schema)?;
+        let mut counters = TypedInsertCounters::default();
+
+        prepare_typed_insert_validate(
+            schema,
+            &mut col_values,
+            &mut counters,
+            &self.index.conn,
+        )?;
+
+        Self::validate_typed_create_post_defaults(input, schema, &col_values)?;
+
+        // CLI/FFI always supplies an explicit title; insert it into
+        // col_values so `build_data_doogat`'s priority-1 title resolution
+        // picks it up.
+        if let Some(ref t) = input.title {
+            col_values.insert("title".to_string(), t.clone());
+        }
+
+        let ref_folder_types: std::collections::HashSet<String> = schema
+            .columns
+            .iter()
+            .filter_map(|c| c.references.as_ref())
+            .filter(|ref_table| self.index.type_uses_folder(ref_table, &self.repo))
+            .cloned()
+            .collect();
+
+        let mut parsed = build_data_doogat(
+            id,
+            schema,
+            &col_values,
+            &ref_folder_types,
+            Some(&self.index.conn),
+        );
+        parsed.meta.tags = input.tags.clone();
+        if let Some(ref b) = input.body {
+            if !b.is_empty() {
+                parsed.body = b.clone();
+            }
+        }
+        parsed.path = path.to_owned();
         Ok(parsed)
     }
 

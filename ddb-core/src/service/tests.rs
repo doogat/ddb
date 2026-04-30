@@ -3515,3 +3515,117 @@ fn batch_create_rejects_invalid_allowed_values() {
         "expected allowed_values rejection, got: {msg}"
     );
 }
+
+/// `create_doogat_with_extra` (CLI/FFI single-create surface) must route
+/// REFERENCES values through the unified helper for registered types.
+/// Before PRD 00133, the CLI dumped FK ids into frontmatter `extra` while
+/// GraphQL `createDoogat` had its own bug-prone path; both surfaces now
+/// share `prepare_typed_insert_validate` + `build_data_doogat`.
+#[test]
+fn create_doogat_with_extra_routes_references_for_registered_type() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    let cat_create = svc
+        .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap();
+    let cat_id = match cat_create {
+        crate::sql_engine::SqlResult::Ok(s) => s,
+        other => panic!("expected Ok with new id, got {other:?}"),
+    };
+
+    svc.execute_sql(
+        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
+    )
+    .unwrap();
+
+    let mut extra = std::collections::BTreeMap::new();
+    extra.insert(
+        "target".to_string(),
+        crate::types::Value::String(cat_id.clone()),
+    );
+
+    let parsed = svc
+        .create_doogat_with_extra("CLI link", &[], Some("link"), "", extra)
+        .unwrap();
+
+    assert!(
+        parsed.meta.extra.get("target").is_none(),
+        "REFERENCES column 'target' must NOT be in frontmatter extra; \
+         got extra: {:?}",
+        parsed.meta.extra
+    );
+    assert!(
+        parsed
+            .inline_fields
+            .iter()
+            .any(|f| f.key == "target" && f.value.contains(&cat_id)),
+        "expected reference zone inline_field for 'target' with id {cat_id}; \
+         got inline_fields: {:?}",
+        parsed.inline_fields
+    );
+}
+
+/// CLI/FFI must reject typed inputs with FK pointing at a row of the wrong
+/// type. PRD 00133 §Behavior changes: CLI used to silently accept; now
+/// rejects with REFERENCES_VIOLATION.
+#[test]
+fn create_doogat_with_extra_rejects_fk_to_wrong_type() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE note (label VARCHAR(64))").unwrap();
+    let note_create = svc
+        .execute_sql("INSERT INTO note (label) VALUES ('not a category')")
+        .unwrap();
+    let note_id = match note_create {
+        crate::sql_engine::SqlResult::Ok(s) => s,
+        other => panic!("expected Ok with new id, got {other:?}"),
+    };
+
+    svc.execute_sql(
+        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
+    )
+    .unwrap();
+
+    let mut extra = std::collections::BTreeMap::new();
+    extra.insert(
+        "target".to_string(),
+        crate::types::Value::String(note_id.clone()),
+    );
+
+    let err = svc
+        .create_doogat_with_extra("Bogus link", &[], Some("link"), "", extra)
+        .unwrap_err();
+    match err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::REFERENCES_VIOLATION);
+        }
+        other => panic!("expected Structured REFERENCES_VIOLATION, got {other:?}"),
+    }
+}
+
+/// PRD 00129 §T3 explicitly preserves CLI silent base-only creation for
+/// UNREGISTERED types. Regression guard.
+#[test]
+fn create_doogat_with_extra_preserves_unregistered_type_silent_create() {
+    let (_tmp, svc) = fresh_svc();
+
+    let mut extra = std::collections::BTreeMap::new();
+    extra.insert(
+        "arbitrary".to_string(),
+        crate::types::Value::String("anything".to_string()),
+    );
+
+    // "widget" has no typedef. Must succeed and dump `arbitrary` into
+    // frontmatter (no UNKNOWN_FIELD rejection).
+    let parsed = svc
+        .create_doogat_with_extra("Widget A", &[], Some("widget"), "body", extra)
+        .unwrap();
+
+    assert_eq!(
+        parsed.meta.extra.get("arbitrary"),
+        Some(&crate::types::Value::String("anything".to_string()))
+    );
+    assert_eq!(parsed.meta.doogat_type.as_deref(), Some("widget"));
+}
