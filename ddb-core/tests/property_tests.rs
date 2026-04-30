@@ -2323,3 +2323,78 @@ proptest! {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// PRD 00133: in-query field-filter superset invariant
+// ---------------------------------------------------------------------------
+// For each working filter shape (`tag=X`, `title=X`, plain text), narrowing
+// the query with `AND tag=Y` returns a subset of the unnarrowed query —
+// never more rows. If this fails, an AND filter is silently broadening the
+// result set, which means the filter SQL is wrong.
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn search_and_narrowing_returns_subset(
+        narrow_tag in prop::sample::select(vec!["rust", "python", "archive", "missingtag"]),
+        broad_kind in 0u8..3,
+        broad_value in prop::sample::select(vec!["meeting", "note", "Archive", "missingvalue"]),
+    ) {
+        // Seed a small fixed corpus on a fresh in-memory index. The seed is
+        // deterministic so the property holds regardless of the generated
+        // input — we vary the QUERIES, not the data.
+        let dir = tempfile::TempDir::new().unwrap();
+        let _repo = ddb_core::git_ops::GitRepo::init(dir.path()).unwrap();
+        let db_path = dir.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = ddb_core::indexer::Index::open(&db_path).unwrap();
+
+        let docs: &[(&str, &str, Vec<&str>)] = &[
+            ("Rust Async Notes", "rust async runtime meeting notes", vec!["rust"]),
+            ("Python Patterns", "python design patterns note", vec!["python"]),
+            ("Meeting Archive", "old meeting notes archive", vec!["archive", "meetings"]),
+            ("Standup Note", "daily standup quick note", vec!["meetings"]),
+        ];
+        for (i, (title, body, tags)) in docs.iter().enumerate() {
+            let id = format!("2026040112{i:04}");
+            let doogat = ddb_core::types::ParsedDoogat {
+                meta: ddb_core::types::DoogatMeta {
+                    id: Some(ddb_core::types::DoogatId(id.clone())),
+                    title: Some((*title).to_string()),
+                    date: Some("2026-04-01".into()),
+                    doogat_type: Some("note".into()),
+                    tags: tags.iter().map(|s| (*s).to_string()).collect(),
+                    extra: Default::default(),
+                },
+                body: (*body).to_string(),
+                sections: vec![],
+                reference_section: String::new(),
+                inline_fields: vec![],
+                links: vec![],
+                body_tags: vec![],
+                checkboxes: vec![],
+                path: format!("ddb/{id}.md"),
+                updated_at: None,
+            };
+            idx.index_doogat(&doogat).unwrap();
+        }
+
+        let broad = match broad_kind {
+            0 => format!("title={broad_value}"),
+            1 => format!("tag={broad_value}"),
+            _ => broad_value.to_string(),
+        };
+        let narrow = format!("{broad} AND tag={narrow_tag}");
+
+        let broad_hits = idx.search(&broad).map(|h| h.len()).unwrap_or(0);
+        let narrow_hits = idx.search(&narrow).map(|h| h.len()).unwrap_or(0);
+
+        prop_assert!(
+            narrow_hits <= broad_hits,
+            "narrowing search broadened results: '{broad}' -> {broad_hits} hits, '{narrow}' -> {narrow_hits} hits",
+        );
+
+        drop(dir);
+    }
+}
