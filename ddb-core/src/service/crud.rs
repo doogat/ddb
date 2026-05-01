@@ -550,8 +550,13 @@ impl<G: GitBackend> DoogatService<G> {
         self.ensure_fresh()?;
 
         let schemas = self.list_type_schemas()?;
-        let (mut next_counters, mut partitioned_counters) =
-            self.precompute_next_counters(inputs, &schemas)?;
+        // Cross-input NEXT counters. Start empty; the helper's
+        // `prepare_typed_insert_validate` lazy-seeds each entry from
+        // `MAX(col)` on first encounter and increments per row, so the
+        // batch-aware sequence stays monotonic across inputs sharing a
+        // table without an upfront pre-seed pass.
+        let mut next_counters = BareNextCounters::new();
+        let mut partitioned_counters = PartitionedNextCounters::new();
 
         // Phase 1: prepare all writes.
         // `intra_dup_links[i] = Some(j)` means input i is an intra-batch
