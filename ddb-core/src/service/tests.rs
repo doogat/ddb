@@ -3413,7 +3413,7 @@ fn batch_create_routes_references_to_reference_zone() {
 
     let parsed = &results[0];
     assert!(
-        parsed.meta.extra.get("target").is_none(),
+        !parsed.meta.extra.contains_key("target"),
         "REFERENCES column 'target' must NOT be in frontmatter extra; \
          got extra: {:?}",
         parsed.meta.extra
@@ -3550,7 +3550,7 @@ fn create_doogat_with_extra_routes_references_for_registered_type() {
         .unwrap();
 
     assert!(
-        parsed.meta.extra.get("target").is_none(),
+        !parsed.meta.extra.contains_key("target"),
         "REFERENCES column 'target' must NOT be in frontmatter extra; \
          got extra: {:?}",
         parsed.meta.extra
