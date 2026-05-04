@@ -255,7 +255,12 @@ pub struct PaginatedSearchResult {
 1. **Tag**: `field == "tag"` routes to `_ddb_tags` (exact match via `eq`, substring via `contains`, or set membership via `in`).
 2. **Core column**: if the field matches a core `doogats` column (e.g. `type`, `title`, `date`), resolves directly against that column.
 3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. For `Eq` and `In`, compares the raw column value directly. For `Contains` on a REFERENCES-backed column, resolution priority is: (a) if a same-named typedef table exists (convention: `<col>` matches the referenced typedef name), resolve `<val>` against that table's `title` with LIKE — see PRD 00133; (b) else if a junction table `{type}_{field}` exists, JOIN through it on referenced doogat title; (c) else direct LIKE on the materialized column. Path (a) is preferred because the SQL INSERT path populates the materialized column but does not auto-populate the junction table (only full rebuilds do), so freshly-inserted data with no rebuild never matches via path (b).
-4. **`_ddb_fields` fallback**: if the field is not found in any type table, falls back to the generic key-value store. Uses two SQL parameters (key + value).
+4. **FK routes (no direct column match)**: when no candidate type table has a column literally named `<field>`, the resolver scans the SQLite catalog for routes that reach a referenced typedef via the `<field>_id` convention. Three shapes are tried, all UNIONed when present (see ddb#15 follow-up):
+   - **Self-route** — the type table itself carries `<field>_id` (e.g. `link.category_id` REFERENCES `category(id)`).
+   - **Auto-junction** — the materializer-generated `{type}_{field}` table with `{type}_id` + `{field}_id`.
+   - **User-junction** — any other materialized table (typically a typedef-defined membership table such as jink's `category-membership`) that carries both `<type>_id` and `<field>_id` (or bare `<field>`). Detection is purely by column shape, not table name.
+   `Eq`/`In` compare the raw FK column value to the user-supplied id; `Contains` JOINs to `doogats.title` via the FK column.
+5. **`_ddb_fields` fallback**: if no FK routes match either, falls back to the generic key-value store. Uses two SQL parameters (key + value).
 
 #### SearchFieldOp
 
@@ -276,17 +281,23 @@ Junction table traversal is triggered in two situations:
 1. The where-filter field does not exist as a materialized scalar column on any candidate type table.
 2. The field exists as a materialized column but the op is `Contains` - in this case the materialized column stores raw IDs, not titles, so a JOIN through the junction table is required to match by referenced doogat title.
 
-Junction tables are named `{type}_{field}` and are created during materialization for REFERENCES columns (see `junction_table_ddl`).
+Auto-junction tables are named `{type}_{field}` and are created during materialization for REFERENCES columns (see `junction_table_ddl`).
 
-If junction tables exist, the filter resolves via a subquery join:
+In situation (1), the resolver collects **FK routes** (see `collect_fk_routes` in `indexer/filter.rs`). A route is one of three shapes:
 
-- **Eq**: `SELECT "{type}_id" FROM "{type}_{field}" WHERE "{field}_id" = ?` - direct FK match
-- **Contains**: `SELECT jt."{type}_id" FROM "{type}_{field}" jt JOIN doogats d ON d.id = jt."{field}_id" WHERE d.title LIKE '%' || ? || '%'` - joins to doogats to match by referenced doogat title
-- **In**: `SELECT "{type}_id" FROM "{type}_{field}" WHERE "{field}_id" IN (?, ?, ...)` - FK set membership
+- **Self-route**: the type table itself has a `<field>_id` column. SQL uses `table = "<type>"`, `type_id_col = "id"`, `fk_col = "<field>_id"`.
+- **Auto-junction**: as above. SQL uses `table = "<type>_<field>"`, `type_id_col = "<type>_id"`, `fk_col = "<field>_id"`.
+- **User-junction**: any other materialized table that carries both `<type>_id` and `<field>_id` (or bare `<field>`). Covers user-defined membership tables whose name does not follow the auto-junction convention. SQL uses `table = "<user table>"`, `type_id_col = "<type>_id"`, `fk_col = "<field>_id"` (or `"<field>"`). Detection is by column shape only; the table name is irrelevant.
 
-When multiple type tables have junction tables for the same field, subqueries are UNIONed with shared parameter placeholders (same pattern as materialized column resolution).
+Each route generates a subquery, all UNIONed:
 
-If no junction tables are found, the filter falls through to the `_ddb_fields` key-value fallback.
+- **Eq**: `SELECT "<type_id_col>" FROM "<table>" WHERE "<fk_col>" = ?` - direct FK match
+- **Contains**: `SELECT jt."<type_id_col>" FROM "<table>" jt JOIN doogats d ON d.id = jt."<fk_col>" WHERE d.title LIKE '%' || ? || '%'` - joins to doogats to match by referenced doogat title
+- **In**: `SELECT "<type_id_col>" FROM "<table>" WHERE "<fk_col>" IN (?, ?, ...)` - FK set membership
+
+When multiple types or multiple membership tables produce routes for the same field, all subqueries are UNIONed with a shared parameter placeholder.
+
+If no FK routes are found, the filter falls through to the `_ddb_fields` key-value fallback.
 
 ### Search query language
 

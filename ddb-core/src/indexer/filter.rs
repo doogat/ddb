@@ -8,6 +8,29 @@ pub(super) fn escape_sql_ident(name: &str) -> String {
     name.replace('"', "\"\"")
 }
 
+/// One way to filter a candidate doogat type by a referenced typedef. Built
+/// from the SQLite catalog when a where-filter field has no direct
+/// materialized column on the candidate type. Each route translates into a
+/// `SELECT <type_id_col> FROM <table> WHERE ...` subquery; routes from
+/// `collect_fk_routes` are UNIONed together. Three shapes:
+///
+/// * **Self-route** — the type table itself carries `<field>_id` (e.g.
+///   `link.category_id`). `type_id_col = "id"`, `table = <type>`.
+/// * **Auto-junction** — the materializer-generated `<type>_<field>` table
+///   with `<type>_id` + `<field>_id` (PRD 00133). `type_id_col = "<type>_id"`,
+///   `table = "<type>_<field>"`.
+/// * **User-junction** — any other materialized table that happens to carry
+///   both `<type>_id` and `<field>_id` (or bare `<field>`). Covers
+///   user-defined membership tables like jink's `category-membership` whose
+///   name does not follow the auto-junction convention. See ddb#15
+///   follow-up.
+#[derive(Debug)]
+struct FkRoute {
+    table: String,
+    type_id_col: String,
+    fk_col: String,
+}
+
 impl Index {
     /// Parse the query and extract negation info.
     /// Returns `None` if no negation handling needed (original behavior).
@@ -100,6 +123,122 @@ impl Index {
             result = result.replace(&marker, &new);
         }
         result
+    }
+
+    /// Read column names of a SQLite table via `PRAGMA table_info`.
+    /// Returns an empty vec if the table does not exist or the pragma fails.
+    fn table_columns(&self, table: &str) -> Vec<String> {
+        self.conn
+            .prepare(&format!(
+                "PRAGMA table_info(\"{}\")",
+                escape_sql_ident(table)
+            ))
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| row.get::<_, String>(1))
+                    .map(|rows| rows.flatten().collect::<Vec<_>>())
+            })
+            .unwrap_or_default()
+    }
+
+    /// List all user (non-internal, non-system) tables in the SQLite catalog.
+    fn list_user_tables(&self) -> Vec<String> {
+        self.conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' \
+                 AND name NOT LIKE '\\_ddb\\_%' ESCAPE '\\' \
+                 AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \
+                 AND name != 'doogats'",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .map(|rows| rows.flatten().collect::<Vec<_>>())
+            })
+            .unwrap_or_default()
+    }
+
+    /// Build the set of FK routes from each candidate doogat type to a
+    /// referenced typedef named `field`. See `FkRoute` for the three shapes.
+    /// Used by `build_filter_clauses` when no candidate type has a direct
+    /// materialized column matching the where-filter field.
+    fn collect_fk_routes(&self, candidate_types: &[String], field: &str) -> Vec<FkRoute> {
+        let field_id = format!("{field}_id");
+        let all_tables = self.list_user_tables();
+        let mut routes: Vec<FkRoute> = Vec::new();
+
+        let push_unique = |routes: &mut Vec<FkRoute>, route: FkRoute| {
+            if !routes.iter().any(|r| {
+                r.table == route.table
+                    && r.type_id_col == route.type_id_col
+                    && r.fk_col == route.fk_col
+            }) {
+                routes.push(route);
+            }
+        };
+
+        for type_name in candidate_types {
+            let type_id = format!("{type_name}_id");
+            let auto_jt = format!("{type_name}_{field}");
+
+            for table in &all_tables {
+                let cols = self.table_columns(table);
+                if cols.is_empty() {
+                    continue;
+                }
+
+                // Self-route: the type table itself carries `<field>_id`.
+                if table == type_name && cols.iter().any(|c| c == &field_id) {
+                    push_unique(
+                        &mut routes,
+                        FkRoute {
+                            table: table.clone(),
+                            type_id_col: "id".to_string(),
+                            fk_col: field_id.clone(),
+                        },
+                    );
+                    continue;
+                }
+
+                // Auto-junction `<type>_<field>` with `<type>_id` + `<field>_id`.
+                if table == &auto_jt
+                    && cols.iter().any(|c| c == &type_id)
+                    && cols.iter().any(|c| c == &field_id)
+                {
+                    push_unique(
+                        &mut routes,
+                        FkRoute {
+                            table: table.clone(),
+                            type_id_col: type_id.clone(),
+                            fk_col: field_id.clone(),
+                        },
+                    );
+                    continue;
+                }
+
+                // User-junction: any other table carrying both `<type>_id`
+                // and `<field>_id` (preferred) or bare `<field>`.
+                if cols.iter().any(|c| c == &type_id) {
+                    let fk = if cols.iter().any(|c| c == &field_id) {
+                        Some(field_id.clone())
+                    } else if cols.iter().any(|c| c == field) {
+                        Some(field.to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(fk_col) = fk {
+                        push_unique(
+                            &mut routes,
+                            FkRoute {
+                                table: table.clone(),
+                                type_id_col: type_id.clone(),
+                                fk_col,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        routes
     }
 
     pub(super) fn build_filter_clauses(&self, filters: &SearchFilters) -> (Vec<String>, Vec<String>) {
@@ -257,67 +396,57 @@ impl Index {
                 }
 
                 if tables_with_field.is_empty() {
-                    // Check for junction tables ({type}_{field}) before
-                    // falling back to _ddb_fields.
-                    let safe_field = escape_sql_ident(&wf.field);
-                    let mut junction_tables: Vec<String> = Vec::new();
-                    for table in &candidate_tables {
-                        let jt_name = format!("{}_{}", table, wf.field);
-                        let exists: bool = self
-                            .conn
-                            .query_row(
-                                "SELECT COUNT(*) > 0 FROM sqlite_master \
-                                 WHERE type='table' AND name=?1",
-                                [&jt_name],
-                                |row| row.get(0),
-                            )
-                            .unwrap_or(false);
-                        if exists {
-                            junction_tables.push(table.clone());
-                        }
-                    }
+                    // Resolve via FK routes (self-route, auto-junction,
+                    // user-junction) before falling back to _ddb_fields.
+                    // See `FkRoute` for the three shapes.
+                    let routes = self.collect_fk_routes(&candidate_tables, &wf.field);
 
-                    if !junction_tables.is_empty() {
+                    if !routes.is_empty() {
+                        let route_sql = |op: &SearchFieldOp,
+                                         ph_sql: &str,
+                                         in_list: Option<&str>|
+                         -> Vec<String> {
+                            routes
+                                .iter()
+                                .map(|r| {
+                                    let st = escape_sql_ident(&r.table);
+                                    let tid = escape_sql_ident(&r.type_id_col);
+                                    let fk = escape_sql_ident(&r.fk_col);
+                                    match op {
+                                        SearchFieldOp::Eq(_) => format!(
+                                            "SELECT \"{tid}\" FROM \"{st}\" \
+                                             WHERE \"{fk}\" = {ph_sql}"
+                                        ),
+                                        SearchFieldOp::Contains(_) => format!(
+                                            "SELECT jt.\"{tid}\" FROM \"{st}\" jt \
+                                             JOIN doogats d ON d.id = jt.\"{fk}\" \
+                                             WHERE d.title LIKE '%' || {ph_sql} || '%'"
+                                        ),
+                                        SearchFieldOp::In(_) => {
+                                            let list = in_list.unwrap_or("");
+                                            format!(
+                                                "SELECT \"{tid}\" FROM \"{st}\" \
+                                                 WHERE \"{fk}\" IN ({list})"
+                                            )
+                                        }
+                                    }
+                                })
+                                .collect()
+                        };
+
                         match &wf.op {
                             SearchFieldOp::Eq(val) => {
                                 let ph = format!("?{idx}");
                                 idx += 1;
-                                let subs: Vec<String> = junction_tables
-                                    .iter()
-                                    .map(|t| {
-                                        let st = escape_sql_ident(t);
-                                        let jt = format!("{st}_{safe_field}");
-                                        format!(
-                                            "SELECT \"{st}_id\" FROM \"{jt}\" \
-                                             WHERE \"{safe_field}_id\" = {ph}"
-                                        )
-                                    })
-                                    .collect();
-                                clauses.push(format!(
-                                    "AND z.id IN ({})",
-                                    subs.join(" UNION ")
-                                ));
+                                let subs = route_sql(&wf.op, &ph, None);
+                                clauses.push(format!("AND z.id IN ({})", subs.join(" UNION ")));
                                 params.push(val.clone());
                             }
                             SearchFieldOp::Contains(val) => {
                                 let ph = format!("?{idx}");
                                 idx += 1;
-                                let subs: Vec<String> = junction_tables
-                                    .iter()
-                                    .map(|t| {
-                                        let st = escape_sql_ident(t);
-                                        let jt = format!("{st}_{safe_field}");
-                                        format!(
-                                            "SELECT jt.\"{st}_id\" FROM \"{jt}\" jt \
-                                             JOIN doogats d ON d.id = jt.\"{safe_field}_id\" \
-                                             WHERE d.title LIKE '%' || {ph} || '%'"
-                                        )
-                                    })
-                                    .collect();
-                                clauses.push(format!(
-                                    "AND z.id IN ({})",
-                                    subs.join(" UNION ")
-                                ));
+                                let subs = route_sql(&wf.op, &ph, None);
+                                clauses.push(format!("AND z.id IN ({})", subs.join(" UNION ")));
                                 params.push(val.clone());
                             }
                             SearchFieldOp::In(vals) => {
@@ -333,21 +462,9 @@ impl Index {
                                         })
                                         .collect();
                                     let in_list = phs.join(", ");
-                                    let subs: Vec<String> = junction_tables
-                                        .iter()
-                                        .map(|t| {
-                                            let st = escape_sql_ident(t);
-                                            let jt = format!("{st}_{safe_field}");
-                                            format!(
-                                                "SELECT \"{st}_id\" FROM \"{jt}\" \
-                                                 WHERE \"{safe_field}_id\" IN ({in_list})"
-                                            )
-                                        })
-                                        .collect();
-                                    clauses.push(format!(
-                                        "AND z.id IN ({})",
-                                        subs.join(" UNION ")
-                                    ));
+                                    let subs = route_sql(&wf.op, "", Some(&in_list));
+                                    clauses
+                                        .push(format!("AND z.id IN ({})", subs.join(" UNION ")));
                                     params.extend(vals.clone());
                                 }
                             }
@@ -393,7 +510,7 @@ impl Index {
                                 }
                             }
                         }
-                    } // end junction_tables else (fallback)
+                    } // end FK routes else (fallback)
                 } else {
                     // Resolve against materialized type table(s)
                     let safe_col = escape_sql_ident(&wf.field);

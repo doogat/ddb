@@ -3150,3 +3150,217 @@ processed: true
         ids.sort();
         assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
     }
+
+    // --- ddb#15 follow-up: user-defined membership tables and `<field>_id` self-route ---
+
+    #[test]
+    fn search_filter_by_user_junction_contains() {
+        // Jink-shape membership: a user-defined `category-membership` table
+        // carries `link_id` + `category_id` instead of the auto-junction
+        // `link_category` shape. `category=Tech` with types=["link"] must
+        // route through the membership table by JOINing to category title.
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat001', 'Technology Hub', 'category', 'ddb/cat001.md');\
+                 INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat002', 'Science Corner', 'category', 'ddb/cat002.md');\
+                 CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT, \
+                     url TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date, url) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01', 'https://a');\
+                 INSERT OR REPLACE INTO link (id, title, date, url) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01', 'https://b');\
+                 CREATE TABLE IF NOT EXISTS category (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO category (id, title, date) \
+                     VALUES ('cat001', 'Technology Hub', '2026-03-01');\
+                 INSERT OR REPLACE INTO category (id, title, date) \
+                     VALUES ('cat002', 'Science Corner', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS \"category-membership\" (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT, \
+                     \"link_id\" TEXT NOT NULL, \"category_id\" TEXT NOT NULL\
+                 );\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m1', 'Link 0 in Technology Hub', '20260301120000', 'cat001');\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m2', 'Link 1 in Science Corner', '20260301120001', 'cat002');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Contains("Tech".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            1,
+            "user-junction Contains should match link0 via Technology Hub title, got: {:?}",
+            result.hits.iter().map(|h| &h.id).collect::<Vec<_>>()
+        );
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_by_user_junction_eq() {
+        // Same membership shape, Eq op: filter by raw category id.
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS \"category-membership\" (\
+                     id TEXT PRIMARY KEY, title TEXT, \
+                     \"link_id\" TEXT NOT NULL, \"category_id\" TEXT NOT NULL\
+                 );\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m1', 'membership 1', '20260301120000', 'cat001');\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m2', 'membership 2', '20260301120001', 'cat002');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Eq("cat001".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(result.hits.len(), 1, "user-junction Eq should match link0");
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
+
+    #[test]
+    fn search_filter_by_user_junction_in() {
+        // Same membership shape, In op.
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        let z2 = make_typed_doogat(2, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+        idx.index_doogat(&z2).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120002', 'Link 2', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS \"category-membership\" (\
+                     id TEXT PRIMARY KEY, title TEXT, \
+                     \"link_id\" TEXT NOT NULL, \"category_id\" TEXT NOT NULL\
+                 );\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m1', 'membership 1', '20260301120000', 'cat001');\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m2', 'membership 2', '20260301120001', 'cat002');\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m3', 'membership 3', '20260301120002', 'cat003');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::In(vec!["cat001".into(), "cat002".into()]),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(result.hits.len(), 2, "user-junction In should match link0 and link1");
+        let mut ids: Vec<&str> = result.hits.iter().map(|h| h.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["20260301120000", "20260301120001"]);
+    }
+
+    #[test]
+    fn search_filter_self_route_field_id_contains() {
+        // Self-route: the type table itself carries `<field>_id` (no separate
+        // junction). `category=Tech` with types=["link"] must JOIN through
+        // link.category_id to the category typedef title. Covers the
+        // proposal's literal Case 2 in ddb#15 follow-up.
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat001', 'Technology Hub', 'category', 'ddb/cat001.md');\
+                 INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat002', 'Science Corner', 'category', 'ddb/cat002.md');\
+                 CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT, \
+                     \"category_id\" TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date, category_id) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01', 'cat001');\
+                 INSERT OR REPLACE INTO link (id, title, date, category_id) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01', 'cat002');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Contains("Tech".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            1,
+            "self-route Contains should match link0 via category_id JOIN"
+        );
+        assert_eq!(result.hits[0].id, "20260301120000");
+    }
