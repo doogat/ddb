@@ -101,6 +101,8 @@ Diffs `old_head` against the current HEAD and processes only changed files. Adde
 
 When multiple files are changed (2+), uses `batch_index()` (single transaction) instead of per-doogat `index_doogat()` for better throughput.
 
+After indexing, typed data doogats are also materialized into their type tables (and removed from them on delete) so search filters that go through path (a) or FK routes match newly-indexed rows immediately, without requiring a full `ddb reindex`. Schema lookups are cached per type for the duration of the call. Per-doogat materialization failures are logged and skipped — incremental indexing stays best-effort.
+
 This is the common path for keeping the index current after `git pull` or direct file edits — fast and non-destructive (no table drops).
 
 ### Integrity Check
@@ -254,13 +256,19 @@ pub struct PaginatedSearchResult {
 
 1. **Tag**: `field == "tag"` routes to `_ddb_tags` (exact match via `eq`, substring via `contains`, or set membership via `in`).
 2. **Core column**: if the field matches a core `doogats` column (e.g. `type`, `title`, `date`), resolves directly against that column.
-3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. For `Eq` and `In`, compares the raw column value directly. For `Contains` on a REFERENCES-backed column, resolution priority is: (a) if a same-named typedef table exists (convention: `<col>` matches the referenced typedef name), resolve `<val>` against that table's `title` with LIKE — see PRD 00133; (b) else if a junction table `{type}_{field}` exists, JOIN through it on referenced doogat title; (c) else direct LIKE on the materialized column. Path (a) is preferred because the SQL INSERT path populates the materialized column but does not auto-populate the junction table (only full rebuilds do), so freshly-inserted data with no rebuild never matches via path (b).
+3. **Materialized columns**: introspects candidate type tables via `PRAGMA table_info`. When `types` filter is set, only those tables are checked. When a field exists in multiple type tables, subqueries are UNIONed. For `Eq` and `In`, compares the raw column value directly. For `Contains` on a REFERENCES-backed column, resolution priority is: (a) if a same-named typedef table exists (convention: `<col>` matches the referenced typedef name), resolve `<val>` against that table's *search-key column* with LIKE — see PRD 00133; (b) else if a junction table `{type}_{field}` exists, JOIN through it on referenced doogat title; (c) else direct LIKE on the materialized column. Path (a) is preferred because the SQL INSERT path populates the materialized column but does not auto-populate the junction table (only full rebuilds do), so freshly-inserted data with no rebuild never matches via path (b).
 4. **FK routes (no direct column match)**: when no candidate type table has a column literally named `<field>`, the resolver scans the SQLite catalog for routes that reach a referenced typedef via the `<field>_id` convention. Three shapes are tried, all UNIONed when present (see ddb#15 follow-up):
    - **Self-route** — the type table itself carries `<field>_id` (e.g. `link.category_id` REFERENCES `category(id)`).
    - **Auto-junction** — the materializer-generated `{type}_{field}` table with `{type}_id` + `{field}_id`.
    - **User-junction** — any other materialized table (typically a typedef-defined membership table such as jink's `category-membership`) that carries both `<type>_id` and `<field>_id` (or bare `<field>`). Detection is purely by column shape, not table name.
-   `Eq`/`In` compare the raw FK column value to the user-supplied id; `Contains` JOINs to `doogats.title` via the FK column.
+   `Eq`/`In` compare the raw FK column value to the user-supplied id; `Contains` JOINs to the typed referenced table on its *search-key column* (default `title`, configurable via `ALTER TABLE … SET SEARCH KEY`) — falls back to `doogats.title` when the typedef table is absent.
 5. **`_ddb_fields` fallback**: if no FK routes match either, falls back to the generic key-value store. Uses two SQL parameters (key + value).
+
+#### Search key override
+
+Each typedef defaults to `title` as the column substring-matched in path (a) and FK-route Contains. Authors can override that default with `ALTER TABLE <name> SET SEARCH KEY <col>` (and `DROP SEARCH KEY` to reset to the default). The chosen column must exist on the typedef and must not be a `REFERENCES` column. The change persists in the typedef YAML (`search_key: <col>` frontmatter) and in `_ddb_meta(key='search_key:<type>')` for fast filter-time lookup. `refresh_boost_table` re-emits these meta rows on every full rebuild, so a hand-edited typedef YAML reflects in the next rebuild without manual intervention.
+
+Common case: a typedef carrying both a human-readable `title` and a machine-readable canonical identifier (e.g. jink's `category` typedef where `title="Portals"` and `fqn="work.portals"`). Setting `SET SEARCH KEY fqn` makes `category=work.portals` resolve to the row regardless of its title.
 
 #### SearchFieldOp
 

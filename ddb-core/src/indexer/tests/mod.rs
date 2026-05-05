@@ -3364,3 +3364,145 @@ processed: true
         );
         assert_eq!(result.hits[0].id, "20260301120000");
     }
+
+    // --- ddb#15 follow-up #2: SET SEARCH KEY redirects path-(a) match column ---
+
+    #[test]
+    fn search_filter_user_junction_contains_uses_search_key() {
+        // Jink-shape: category typedef has fqn="work.portals" but title="Portals".
+        // After `ALTER TABLE category SET SEARCH KEY fqn`, refresh_boost_table
+        // writes `_ddb_meta(key='search_key:category', value='fqn')`.
+        // FK-route Contains must JOIN through the typed `category` table on
+        // its `fqn` column (not `doogats.title`), so `category=work.portals`
+        // hits link0 instead of returning 0.
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        let z1 = make_typed_doogat(1, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+        idx.index_doogat(&z1).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat001', 'Marketing Hub', 'category', 'ddb/cat001.md');\
+                 INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat002', 'Notes', 'category', 'ddb/cat002.md');\
+                 CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120001', 'Link 1', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS category (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT, \
+                     fqn TEXT, space TEXT\
+                 );\
+                 INSERT OR REPLACE INTO category (id, title, date, fqn, space) \
+                     VALUES ('cat001', 'Marketing Hub', '2026-03-01', 'work.portals', 'work');\
+                 INSERT OR REPLACE INTO category (id, title, date, fqn, space) \
+                     VALUES ('cat002', 'Notes', '2026-03-01', 'home.notes', 'home');\
+                 CREATE TABLE IF NOT EXISTS \"category-membership\" (\
+                     id TEXT PRIMARY KEY, title TEXT, \
+                     \"link_id\" TEXT NOT NULL, \"category_id\" TEXT NOT NULL\
+                 );\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m1', 'Link 0 in work.portals', '20260301120000', 'cat001');\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m2', 'Link 1 in home.notes', '20260301120001', 'cat002');\
+                 INSERT OR REPLACE INTO _ddb_meta (key, value) \
+                     VALUES ('search_key:category', 'fqn');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Contains("work.portals".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            1,
+            "search_key=fqn should make `category=work.portals` match link0"
+        );
+        assert_eq!(result.hits[0].id, "20260301120000");
+
+        // The reverse query — matching by title under the FQN search key —
+        // should NOT find anything: the typedef opted in to fqn matching.
+        // "Marketing" appears only in the title, never in fqn.
+        let filters_title = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Contains("Marketing".into()),
+            }]),
+            ..Default::default()
+        };
+        let result_title = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters_title)
+            .unwrap();
+        assert_eq!(
+            result_title.hits.len(),
+            0,
+            "with search_key=fqn, title-only Contains must miss"
+        );
+    }
+
+    #[test]
+    fn search_filter_user_junction_contains_default_title_when_unset() {
+        // Without SET SEARCH KEY, FK-route Contains keeps the legacy
+        // `JOIN doogats … WHERE d.title LIKE` behaviour. Identical setup
+        // to the previous test minus the `_ddb_meta` row.
+        let idx = in_memory_index();
+
+        let z0 = make_typed_doogat(0, "link", vec![]);
+        idx.index_doogat(&z0).unwrap();
+
+        idx.conn
+            .execute_batch(
+                "INSERT INTO doogats (id, title, type, path) \
+                     VALUES ('cat001', 'Portals', 'category', 'ddb/cat001.md');\
+                 CREATE TABLE IF NOT EXISTS link (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT\
+                 );\
+                 INSERT OR REPLACE INTO link (id, title, date) \
+                     VALUES ('20260301120000', 'Link 0', '2026-03-01');\
+                 CREATE TABLE IF NOT EXISTS category (\
+                     id TEXT PRIMARY KEY, title TEXT, date TEXT, updated_at TEXT, \
+                     fqn TEXT\
+                 );\
+                 INSERT OR REPLACE INTO category (id, title, date, fqn) \
+                     VALUES ('cat001', 'Portals', '2026-03-01', 'work.portals');\
+                 CREATE TABLE IF NOT EXISTS \"category-membership\" (\
+                     id TEXT PRIMARY KEY, title TEXT, \
+                     \"link_id\" TEXT NOT NULL, \"category_id\" TEXT NOT NULL\
+                 );\
+                 INSERT INTO \"category-membership\" (id, title, link_id, category_id) \
+                     VALUES ('m1', 'Link 0 in Portals', '20260301120000', 'cat001');",
+            )
+            .unwrap();
+
+        let filters = SearchFilters {
+            types: Some(vec!["link".into()]),
+            where_filters: Some(vec![SearchFieldFilter {
+                field: "category".into(),
+                op: SearchFieldOp::Contains("Portals".into()),
+            }]),
+            ..Default::default()
+        };
+        let result = idx
+            .search_paginated_filtered("Searchable", 100, 0, &filters)
+            .unwrap();
+        assert_eq!(
+            result.hits.len(),
+            1,
+            "default behaviour: title-based match must still hit link0"
+        );
+    }

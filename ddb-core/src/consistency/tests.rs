@@ -360,6 +360,7 @@ fn detect_schema_required_field_with_default() {
         title_template: None,
         origin: None,
         unique_together: None,
+        search_key: None,
     };
     let fixes = detect_fixes(&parsed, Some(&schema));
     assert!(
@@ -397,6 +398,7 @@ fn detect_schema_required_field_present_no_fix() {
         title_template: None,
         origin: None,
         unique_together: None,
+        search_key: None,
     };
     let fixes = detect_fixes(&parsed, Some(&schema));
     assert!(
@@ -765,6 +767,7 @@ fn make_schema_with_template(template: &str, columns: Vec<ColumnDef>) -> TableSc
         title_template: Some(template.into()),
         origin: Some("ddl".into()),
         unique_together: None,
+        search_key: None,
     }
 }
 
@@ -891,6 +894,7 @@ fn title_compliance_no_template_skipped() {
         title_template: None,
         origin: None,
         unique_together: None,
+        search_key: None,
     };
     let fixes = detect_fixes(&parsed, Some(&schema));
     assert!(

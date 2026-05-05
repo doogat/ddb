@@ -23,7 +23,8 @@ pub use builders::{build_typedef_doogat, schema_from_parsed};
 pub(crate) use builders::resolve_insert_title;
 
 use helpers::{
-    normalize_alter_column_type, re_drop_title_template, re_set_title_template, re_set_zone,
+    normalize_alter_column_type, re_drop_search_key, re_drop_title_template, re_set_search_key,
+    re_set_title_template, re_set_zone,
 };
 
 #[derive(Debug)]
@@ -183,6 +184,27 @@ impl<'a> SqlEngine<'a> {
                 .expect("regex guarantees group 1 or 2")
                 .as_str();
             return Ok(Some(self.handle_title_template(table, None)?));
+        }
+        if let Some(caps) = re_set_search_key().captures(sql) {
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            let column = caps
+                .get(3)
+                .or(caps.get(4))
+                .expect("regex guarantees group 3 or 4")
+                .as_str();
+            return Ok(Some(self.handle_search_key(table, Some(column))?));
+        }
+        if let Some(caps) = re_drop_search_key().captures(sql) {
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            return Ok(Some(self.handle_search_key(table, None)?));
         }
         Ok(None)
     }

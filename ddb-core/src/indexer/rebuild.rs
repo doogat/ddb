@@ -73,11 +73,29 @@ impl Index {
 
         let (to_index_paths, to_delete, typedef_changed) = Self::partition_changes(&changes);
 
+        // Capture pre-delete types so we can also evict the deleted rows
+        // from their materialized type tables.
+        let mut delete_types: Vec<(String, String)> = Vec::new();
         for id in &to_delete {
+            let t: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT type FROM doogats WHERE id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten();
+            if let Some(t) = t {
+                if !t.is_empty() && t != "_typedef" {
+                    delete_types.push((id.clone(), t));
+                }
+            }
             self.remove_doogat(id)?;
         }
+        self.unmaterialize_data_doogats(&delete_types)?;
 
-        let indexed = self.batch_index_changes(repo, &to_index_paths)?;
+        let (indexed, parsed_changes) = self.batch_index_changes(repo, &to_index_paths)?;
         let mut report = crate::types::RebuildReport {
             indexed,
             ..Default::default()
@@ -85,6 +103,11 @@ impl Index {
 
         if typedef_changed {
             self.rematerialize_if_typedef_changed(repo, &mut report)?;
+        } else {
+            // Typed data doogats need their materialized rows refreshed
+            // even when no typedef changed; otherwise path (a) JOINs miss
+            // newly-added/edited rows until a full `ddb reindex`.
+            self.materialize_data_doogat_changes(repo, &parsed_changes)?;
         }
 
         self.store_head(&new_head)?;
@@ -128,12 +151,13 @@ impl Index {
     }
 
     /// Read changed files from the repo, parse them, and index. Returns the
-    /// number of doogats indexed.
+    /// number of doogats indexed and the parsed doogats themselves so
+    /// callers can also rematerialize affected type tables.
     fn batch_index_changes(
         &self,
         repo: &impl DoogatSource,
         paths: &[String],
-    ) -> Result<usize> {
+    ) -> Result<(usize, Vec<ParsedDoogat>)> {
         if paths.len() > 1 {
             let contents = repo.read_files_batch(paths)?;
             let mut parsed = Vec::with_capacity(contents.len());
@@ -141,15 +165,101 @@ impl Index {
                 let content = content_result?;
                 parsed.push(crate::parser::parse(&content, &path)?);
             }
-            self.batch_index(&parsed)
+            let count = self.batch_index(&parsed)?;
+            Ok((count, parsed))
         } else if let Some(path) = paths.first() {
             let content = repo.read_file(path)?;
             let parsed = crate::parser::parse(&content, path)?;
             self.index_doogat(&parsed)?;
-            Ok(1)
+            Ok((1, vec![parsed]))
         } else {
-            Ok(0)
+            Ok((0, Vec::new()))
         }
+    }
+
+    /// Materialize newly-added or modified data doogats into their type
+    /// tables. Skips typedef doogats (handled by `materialize_all_types`)
+    /// and untyped doogats (no type table to write to). Loads each typed
+    /// doogat's schema once per distinct type to avoid redundant typedef
+    /// reads. Errors loading a single type's schema are logged and
+    /// skipped — incremental indexing must remain best-effort.
+    fn materialize_data_doogat_changes(
+        &self,
+        repo: &(impl DoogatSource + ?Sized),
+        parsed: &[ParsedDoogat],
+    ) -> Result<()> {
+        use crate::sql_engine::schema_from_parsed;
+        use std::collections::HashMap;
+
+        let mut schemas: HashMap<String, Option<crate::types::TableSchema>> = HashMap::new();
+        for doogat in parsed {
+            let Some(type_name) = doogat.meta.doogat_type.as_deref() else {
+                continue;
+            };
+            if type_name.is_empty() || type_name == "_typedef" {
+                continue;
+            }
+            let id = doogat.meta.id.as_ref().map(|d| d.0.as_str()).unwrap_or("");
+            if id.is_empty() {
+                continue;
+            }
+            let schema_opt = schemas.entry(type_name.to_string()).or_insert_with(|| {
+                let typedef_path: Option<String> = self
+                    .conn
+                    .query_row(
+                        "SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1 LIMIT 1",
+                        rusqlite::params![type_name],
+                        |row| row.get(0),
+                    )
+                    .ok();
+                let typedef_path = typedef_path?;
+                let typedef_content = repo.read_file(&typedef_path).ok()?;
+                let typedef_parsed = crate::parser::parse(&typedef_content, &typedef_path).ok()?;
+                schema_from_parsed(&typedef_parsed).ok()
+            });
+            let Some(schema) = schema_opt.as_ref() else {
+                continue;
+            };
+            if let Err(e) = self.materialize_single(schema, id, doogat) {
+                tracing::warn!(
+                    error = %e,
+                    type_name = %type_name,
+                    id = %id,
+                    "incremental materialization failed for data doogat"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Mirror `materialize_data_doogat_changes` for deletions: remove rows
+    /// for deleted typed doogats from their materialized type tables.
+    fn unmaterialize_data_doogats(&self, deleted: &[(String, String)]) -> Result<()> {
+        for (id, type_name) in deleted {
+            // Quote the table name; user-defined typedefs may legally
+            // contain hyphens (e.g. `category-membership`).
+            let table = type_name.replace('"', "\"\"");
+            let exists: bool = self
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM sqlite_master \
+                     WHERE type = 'table' AND name = ?1",
+                    rusqlite::params![type_name],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+            if !exists {
+                continue;
+            }
+            // Junction tables for any REFERENCES column on this type are
+            // cleaned up at delete time by `cascade_junction_cleanup` in the
+            // service layer; here we only evict the type-table row itself.
+            let _ = self.conn.execute(
+                &format!("DELETE FROM \"{table}\" WHERE id = ?1"),
+                rusqlite::params![id],
+            );
+        }
+        Ok(())
     }
 
     fn rematerialize_if_typedef_changed(

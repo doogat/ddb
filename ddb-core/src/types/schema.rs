@@ -101,6 +101,13 @@ pub struct TableSchema {
     pub title_template: Option<String>,
     pub origin: Option<String>,
     pub unique_together: Option<Vec<Vec<String>>>,
+    /// Column to match against in `field=val` substring searches that
+    /// resolve through this typedef. `None` falls back to `title`. Set via
+    /// `ALTER TABLE <name> SET SEARCH KEY <col>` and reset via
+    /// `ALTER TABLE <name> DROP SEARCH KEY` (ddb#15 follow-up: jink
+    /// categories use `fqn` as the user-facing identifier rather than the
+    /// leaf `title`).
+    pub search_key: Option<String>,
 }
 
 #[derive(Debug, Clone)]

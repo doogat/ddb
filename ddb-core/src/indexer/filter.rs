@@ -125,6 +125,20 @@ impl Index {
         result
     }
 
+    /// Look up the per-typedef search key (the column to substring-match for
+    /// `field=val` queries), recorded by `refresh_boost_table` in
+    /// `_ddb_meta`. `None` falls back to `title` at the call site.
+    fn lookup_search_key(&self, type_name: &str) -> Option<String> {
+        let key = format!("search_key:{type_name}");
+        self.conn
+            .query_row(
+                "SELECT value FROM _ddb_meta WHERE key = ?1",
+                [&key],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+    }
+
     /// Read column names of a SQLite table via `PRAGMA table_info`.
     /// Returns an empty vec if the table does not exist or the pragma fails.
     fn table_columns(&self, table: &str) -> Vec<String> {
@@ -402,6 +416,24 @@ impl Index {
                     let routes = self.collect_fk_routes(&candidate_tables, &wf.field);
 
                     if !routes.is_empty() {
+                        // For Contains, we substring-match against either:
+                        //   - the typedef table's `search_key` column
+                        //     (set via `ALTER TABLE … SET SEARCH KEY <col>`),
+                        //   - or the global `doogats.title` (default).
+                        // Default keeps the pre-search-key behaviour intact.
+                        let typedef_has_id = self
+                            .table_columns(&wf.field)
+                            .iter()
+                            .any(|c| c == "id");
+                        let sk_col = self.lookup_search_key(&wf.field);
+                        let (contains_join_table, contains_match_col) =
+                            match (typedef_has_id, sk_col) {
+                                (true, Some(col)) => (wf.field.clone(), col),
+                                _ => ("doogats".to_string(), "title".to_string()),
+                            };
+                        let safe_join_tbl = escape_sql_ident(&contains_join_table);
+                        let safe_match_col = escape_sql_ident(&contains_match_col);
+
                         let route_sql = |op: &SearchFieldOp,
                                          ph_sql: &str,
                                          in_list: Option<&str>|
@@ -419,8 +451,8 @@ impl Index {
                                         ),
                                         SearchFieldOp::Contains(_) => format!(
                                             "SELECT jt.\"{tid}\" FROM \"{st}\" jt \
-                                             JOIN doogats d ON d.id = jt.\"{fk}\" \
-                                             WHERE d.title LIKE '%' || {ph_sql} || '%'"
+                                             JOIN \"{safe_join_tbl}\" d ON d.id = jt.\"{fk}\" \
+                                             WHERE d.\"{safe_match_col}\" LIKE '%' || {ph_sql} || '%'"
                                         ),
                                         SearchFieldOp::In(_) => {
                                             let list = in_list.unwrap_or("");
@@ -600,6 +632,13 @@ impl Index {
                                 let ph = format!("?{idx}");
                                 idx += 1;
                                 let safe_ref = escape_sql_ident(&wf.field);
+                                // Use the typedef's search_key column (set via
+                                // ALTER TABLE … SET SEARCH KEY <col>) when
+                                // present; default to `title`.
+                                let sk = self
+                                    .lookup_search_key(&wf.field)
+                                    .unwrap_or_else(|| "title".to_string());
+                                let safe_sk = escape_sql_ident(&sk);
                                 let subs: Vec<String> = tables_with_field
                                     .iter()
                                     .map(|t| {
@@ -608,7 +647,7 @@ impl Index {
                                             "SELECT id FROM \"{safe_table}\" \
                                              WHERE \"{safe_col}\" IN (\
                                                 SELECT id FROM \"{safe_ref}\" \
-                                                WHERE title LIKE '%' || {ph} || '%')"
+                                                WHERE \"{safe_sk}\" LIKE '%' || {ph} || '%')"
                                         )
                                     })
                                     .collect();

@@ -5318,6 +5318,7 @@ fn schema_with(cols: Vec<ColumnDef>) -> TableSchema {
         title_template: None,
         origin: None,
         unique_together: None,
+        search_key: None,
     }
 }
 
@@ -7200,6 +7201,114 @@ fn alter_column_type_core_columns_rejected() {
         .execute("ALTER TABLE corecol ALTER COLUMN date TYPE INTEGER")
         .unwrap_err();
     assert!(format!("{err}").contains("core column"));
+}
+
+// --- SET SEARCH KEY (ddb#15 follow-up #2) ---
+
+#[test]
+fn set_search_key_persists_to_typedef() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (fqn VARCHAR(255), space VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE category SET SEARCH KEY fqn")
+        .unwrap();
+
+    // _ddb_meta should now record the search key for "category".
+    let v: Option<String> = index
+        .conn
+        .query_row(
+            "SELECT value FROM _ddb_meta WHERE key = 'search_key:category'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    assert_eq!(v.as_deref(), Some("fqn"));
+}
+
+#[test]
+fn set_search_key_round_trips_through_typedef_yaml() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE thing (label TEXT)").unwrap();
+    engine
+        .execute("ALTER TABLE thing SET SEARCH KEY label")
+        .unwrap();
+
+    let typedef_path: String = index
+        .conn
+        .query_row(
+            "SELECT path FROM doogats WHERE type = '_typedef' AND title = 'thing'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let content = repo.read_file(&typedef_path).unwrap();
+    assert!(content.contains("search_key: label"), "{content}");
+    let parsed = crate::parser::parse(&content, &typedef_path).unwrap();
+    let schema = crate::sql_engine::schema_from_parsed(&parsed).unwrap();
+    assert_eq!(schema.search_key.as_deref(), Some("label"));
+}
+
+#[test]
+fn drop_search_key_clears_typedef() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (fqn VARCHAR(255))")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE category SET SEARCH KEY fqn")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE category DROP SEARCH KEY")
+        .unwrap();
+
+    let v: Option<String> = index
+        .conn
+        .query_row(
+            "SELECT value FROM _ddb_meta WHERE key = 'search_key:category'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    assert_eq!(v, None);
+}
+
+#[test]
+fn set_search_key_rejects_missing_column() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (fqn TEXT)")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE category SET SEARCH KEY ghost")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("not found"), "{msg}");
+}
+
+#[test]
+fn set_search_key_rejects_references_column() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE membership (link TEXT REFERENCES link)")
+        .unwrap();
+    let err = engine
+        .execute("ALTER TABLE membership SET SEARCH KEY link")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("REFERENCES"), "{msg}");
 }
 
 

@@ -31,6 +31,8 @@ All methods take `&mut self`. The CLI creates `SqlEngine` per invocation; the se
 | `ALTER TABLE foo SET ZONE frontmatter FOR col` | Override column zone (custom DDL, pre-parse intercepted) |
 | `ALTER TABLE foo SET TITLE TEMPLATE 'tpl'` | Set title template on typedef |
 | `ALTER TABLE foo DROP TITLE TEMPLATE` | Remove title template from typedef |
+| `ALTER TABLE foo SET SEARCH KEY col` | Set the column substring-matched by `field=val` searches |
+| `ALTER TABLE foo DROP SEARCH KEY` | Reset to the default (`title`) |
 | `DROP TABLE foo` | Strips `type:` from data doogats, deletes typedef |
 | `DROP TABLE foo CASCADE` | Deletes typedef + all data doogats |
 | `DROP TABLE IF EXISTS foo` | No-op if table doesn't exist |
@@ -191,10 +193,11 @@ Bare UPDATE/DELETE (no WHERE) operates on all rows of the table.
 - **ALTER COLUMN TYPE**: Changes a column's declared data type on the typedef. Widening (`VARCHAR(N)` → wider `VARCHAR`, `VARCHAR`/`CHAR` → `TEXT`) is metadata-only. Narrowing (`VARCHAR` → smaller `VARCHAR`, `TEXT` → `VARCHAR(N)`) and numeric cross-conversion (`INTEGER` ↔ `REAL`) run a pre-flight scan over the materialized table; any existing row that would violate the new type rejects the statement with a row-count message and no change is persisted. REFERENCES columns only accept widening. `BOOLEAN` conversions are not supported. The PostgreSQL shorthand (`ALTER COLUMN c TYPE t`) is normalized to the standard `SET DATA TYPE` form via regex rewrite before parsing.
 - **SET ZONE**: Custom DDL (pre-parse intercepted). Updates column zone in typedef, rematerializes. Existing data doogats are NOT migrated — they stay in the old zone until next update.
 - **SET/DROP TITLE TEMPLATE**: Custom DDL. Sets or removes `title_template` on the typedef. No rematerialization needed.
+- **SET/DROP SEARCH KEY**: Custom DDL (ddb#15 follow-up). Sets `search_key` on the typedef so `field=val` substring searches resolve through `<col>` instead of the default `title`. Validates that `<col>` exists on the typedef and is not a `REFERENCES` column. Mirrored into `_ddb_meta(key='search_key:<type>')` for fast filter-time lookup. No rematerialization needed.
 
 ## Pre-Parse Interception
 
-Three custom DDL statements are intercepted via regex before sqlparser parsing: `SET ZONE`, `SET TITLE TEMPLATE`, `DROP TITLE TEMPLATE`. These use `try_custom_ddl()` in `execute()` with OnceLock-cached regexes. Supports quoted identifiers for hyphenated names.
+Five custom DDL statements are intercepted via regex before sqlparser parsing: `SET ZONE`, `SET TITLE TEMPLATE`, `DROP TITLE TEMPLATE`, `SET SEARCH KEY`, `DROP SEARCH KEY`. These use `try_custom_ddl()` in `execute()` with OnceLock-cached regexes. Supports quoted identifiers for hyphenated names.
 
 ## DROP TABLE
 

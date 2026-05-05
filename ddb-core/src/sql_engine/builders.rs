@@ -86,6 +86,9 @@ fn build_typedef_extra_fields(schema: &TableSchema, extra: &mut BTreeMap<String,
     if let Some(ref o) = schema.origin {
         extra.insert("origin".to_string(), Value::String(o.clone()));
     }
+    if let Some(ref sk) = schema.search_key {
+        extra.insert("search_key".to_string(), Value::String(sk.clone()));
+    }
     if let Some(ref constraints) = schema.unique_together {
         if !constraints.is_empty() {
             let outer = Value::List(
@@ -637,6 +640,11 @@ fn extract_optional_schema_fields(extra: &BTreeMap<String, Value>) -> OptionalSc
         .get("unique_together")
         .and_then(parse_unique_together);
 
+    let search_key = extra
+        .get("search_key")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     OptionalSchemaFields {
         crdt_strategy,
         template_sections,
@@ -645,6 +653,7 @@ fn extract_optional_schema_fields(extra: &BTreeMap<String, Value>) -> OptionalSc
         title_template,
         origin,
         unique_together,
+        search_key,
     }
 }
 
@@ -657,6 +666,7 @@ struct OptionalSchemaFields {
     title_template: Option<String>,
     origin: Option<String>,
     unique_together: Option<Vec<Vec<String>>>,
+    search_key: Option<String>,
 }
 
 /// Extract a TableSchema from a parsed _typedef doogat.
@@ -720,6 +730,7 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         title_template: opt.title_template,
         origin: opt.origin,
         unique_together: opt.unique_together,
+        search_key: opt.search_key,
     })
 }
 

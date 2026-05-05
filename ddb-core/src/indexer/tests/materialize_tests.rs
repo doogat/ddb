@@ -455,6 +455,7 @@ Widget
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         };
         let inferred = TableSchema {
             table_name: "foo".to_string(),
@@ -466,6 +467,7 @@ Widget
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -497,6 +499,7 @@ Widget
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         };
 
         let merged = Index::merge_schemas(None, inferred);
@@ -528,6 +531,7 @@ Widget
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         };
         let inferred = TableSchema {
             table_name: "baz".to_string(),
@@ -562,6 +566,7 @@ Widget
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -596,6 +601,7 @@ Widget
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         };
         let inferred = TableSchema {
             table_name: "qux".to_string(),
@@ -630,6 +636,7 @@ Widget
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -1298,5 +1305,108 @@ Task body.
         assert!(!rows[0][2].is_empty(), "date should be populated");
         assert!(!rows[0][3].is_empty(), "updated_at should be populated");
         assert_eq!(rows[0][4], "high", "priority mismatch");
+    }
+
+    #[test]
+    fn incremental_reindex_materializes_new_typed_doogat() {
+        // ddb#15 follow-up #2: a `ddb create` (or external git pull) of a
+        // typed doogat must populate the materialized type table without
+        // requiring a full `ddb reindex`. Otherwise FK-route Contains
+        // queries through that type return 0 hits until the next rebuild.
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        repo.commit_file(
+            "ddb/_typedef/20240101000000.md",
+            "---\nid: 20240101000000\ntitle: category\ntype: _typedef\ncolumns:\n  - {name: fqn, data_type: TEXT}\n---\n",
+            "add typedef",
+        )
+        .unwrap();
+        repo.commit_file(
+            "ddb/20240102000000.md",
+            "---\nid: 20240102000000\ntitle: First\ntype: category\nfqn: a.b\n---\n",
+            "add first",
+        )
+        .unwrap();
+
+        let db_path = dir.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+
+        let rows0 = idx
+            .query_raw("SELECT id FROM category ORDER BY id")
+            .unwrap();
+        assert_eq!(rows0.len(), 1, "seed materialization missing");
+
+        repo.commit_file(
+            "ddb/20240103000000.md",
+            "---\nid: 20240103000000\ntitle: Second\ntype: category\nfqn: c.d\n---\n",
+            "add second",
+        )
+        .unwrap();
+        let old_head = idx.stored_head_oid().unwrap();
+        let report = idx.incremental_reindex(&repo, &old_head).unwrap();
+        assert_eq!(report.indexed, 1);
+
+        let rows1 = idx
+            .query_raw("SELECT id, title FROM category ORDER BY id")
+            .unwrap();
+        assert_eq!(
+            rows1.len(),
+            2,
+            "incremental did not materialize the new typed doogat: {:?}",
+            rows1
+        );
+        let ids: Vec<&str> = rows1.iter().map(|r| r[0].as_str()).collect();
+        assert_eq!(ids, vec!["20240102000000", "20240103000000"]);
+    }
+
+    #[test]
+    fn incremental_reindex_unmaterializes_deleted_typed_doogat() {
+        // Mirror for deletions: a deleted typed doogat must be evicted from
+        // its type table so subsequent FK-route JOINs don't see stale rows.
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = GitRepo::init(dir.path()).unwrap();
+
+        repo.commit_file(
+            "ddb/_typedef/20240101000000.md",
+            "---\nid: 20240101000000\ntitle: category\ntype: _typedef\ncolumns:\n  - {name: fqn, data_type: TEXT}\n---\n",
+            "add typedef",
+        )
+        .unwrap();
+        repo.commit_file(
+            "ddb/20240102000000.md",
+            "---\nid: 20240102000000\ntitle: First\ntype: category\nfqn: a.b\n---\n",
+            "add first",
+        )
+        .unwrap();
+        repo.commit_file(
+            "ddb/20240103000000.md",
+            "---\nid: 20240103000000\ntitle: Second\ntype: category\nfqn: c.d\n---\n",
+            "add second",
+        )
+        .unwrap();
+
+        let db_path = dir.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let idx = Index::open(&db_path).unwrap();
+        idx.rebuild(&repo).unwrap();
+        assert_eq!(
+            idx.query_raw("SELECT id FROM category").unwrap().len(),
+            2,
+            "seed materialization wrong"
+        );
+
+        repo.delete_file("ddb/20240103000000.md", "delete second")
+            .unwrap();
+        let old_head = idx.stored_head_oid().unwrap();
+        idx.incremental_reindex(&repo, &old_head).unwrap();
+
+        let rows = idx
+            .query_raw("SELECT id FROM category ORDER BY id")
+            .unwrap();
+        assert_eq!(rows.len(), 1, "deletion did not propagate to type table");
+        assert_eq!(rows[0][0], "20240102000000");
     }
 

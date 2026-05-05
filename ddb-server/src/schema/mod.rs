@@ -144,6 +144,7 @@ mod tests {
             title_template: None,
             origin: None,
             unique_together: None,
+            search_key: None,
         }
     }
 

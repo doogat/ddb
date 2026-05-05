@@ -30,6 +30,20 @@ pub(super) fn re_drop_title_template() -> &'static Regex {
     })
 }
 
+pub(super) fn re_set_search_key() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+SET\s+SEARCH\s+KEY\s+(?:"([^"]+)"|(\w[\w-]*))\s*;?\s*$"#).expect("valid regex")
+    })
+}
+
+pub(super) fn re_drop_search_key() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+SEARCH\s+KEY\s*;?\s*$"#).expect("valid regex")
+    })
+}
+
 pub(super) fn re_unfilled_placeholder() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\{[^}]+\}").expect("valid regex"))

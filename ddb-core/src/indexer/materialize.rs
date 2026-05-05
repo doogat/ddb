@@ -633,14 +633,20 @@ impl Index {
         schemas
     }
 
-    /// Rebuild the `_ddb_boost` table from typedef schemas.
-    /// Stores max(search_boost) per type for FTS5 bm25() weighting.
+    /// Rebuild the `_ddb_boost` table from typedef schemas. Stores
+    /// max(search_boost) per type for FTS5 bm25() weighting and the
+    /// per-typedef `search_key` column (in `_ddb_meta`) used by the search
+    /// filter resolver to substitute the default `title` match column.
     fn refresh_boost_table(
         &self,
         schemas: &std::collections::HashMap<String, crate::types::TableSchema>,
     ) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM _ddb_boost", [])?;
+        self.conn.execute("DELETE FROM _ddb_boost", [])?;
+        // Wipe stale search_key entries; we re-emit fresh rows below.
+        self.conn.execute(
+            "DELETE FROM _ddb_meta WHERE key LIKE 'search_key:%'",
+            [],
+        )?;
         for (type_name, schema) in schemas {
             let max_boost = schema
                 .columns
@@ -651,6 +657,12 @@ impl Index {
                 self.conn.execute(
                     "INSERT INTO _ddb_boost (type_name, max_boost) VALUES (?1, ?2)",
                     rusqlite::params![type_name, max_boost],
+                )?;
+            }
+            if let Some(ref sk) = schema.search_key {
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO _ddb_meta (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![format!("search_key:{type_name}"), sk],
                 )?;
             }
         }
@@ -928,6 +940,7 @@ fn finalize_schema_columns(
         title_template: None,
         origin: None,
         unique_together: None,
+        search_key: None,
     }
 }
 
