@@ -316,7 +316,8 @@ impl<'a> SqlEngine<'a> {
         let write_result = self
             .index
             .index_doogat(&parsed)
-            .and_then(|()| self.insert_materialized_row(schema, &id.0, col_values));
+            .and_then(|()| self.insert_materialized_row(schema, &id.0, col_values))
+            .and_then(|()| self.index.populate_junction_tables(schema, &id.0, &parsed));
 
         if let Err(e) = write_result {
             // Best-effort rollback. If these fail the savepoint stack is

@@ -631,6 +631,15 @@ impl crate::traits::SqlBackend for Index {
         self.materialize_single(schema, id, parsed)
     }
 
+    fn populate_junction_tables(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        parsed: &crate::types::ParsedDoogat,
+    ) -> Result<()> {
+        self.populate_junction_tables(schema, id, parsed)
+    }
+
     fn type_uses_folder(&self, type_name: &str, source: &dyn crate::traits::DoogatSource) -> bool {
         self.type_uses_folder(type_name, source)
     }

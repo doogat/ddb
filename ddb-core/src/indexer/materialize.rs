@@ -731,7 +731,9 @@ impl Index {
     }
 
     /// Insert junction table rows for REFERENCES columns.
-    fn populate_junction_tables(
+    ///
+    /// Also used by the SQL INSERT path in `SqlEngine::build_and_index_row`.
+    pub(crate) fn populate_junction_tables(
         &self,
         schema: &crate::types::TableSchema,
         id: &str,

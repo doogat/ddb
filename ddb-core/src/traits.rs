@@ -83,6 +83,14 @@ pub trait SqlBackend: DoogatIndex {
         parsed: &ParsedDoogat,
     ) -> Result<()>;
 
+    /// Insert junction table rows for REFERENCES columns for one doogat.
+    fn populate_junction_tables(
+        &self,
+        schema: &TableSchema,
+        id: &str,
+        parsed: &ParsedDoogat,
+    ) -> Result<()>;
+
     /// Check whether a type uses folder-based storage.
     fn type_uses_folder(&self, type_name: &str, source: &dyn DoogatSource) -> bool;
 
