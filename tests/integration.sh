@@ -1617,6 +1617,49 @@ gql '{"query":"mutation { executeSql(sql: \"DROP TABLE e1_link CASCADE\") { mess
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE e1_num CASCADE\") { message } }"}' >/dev/null
 pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obsolete)"
 
+# 44.J — Auto-junction tables populated atomically on SQL INSERT and UPDATE
+# (PRD 00134). Before this PRD, `INSERT INTO <typed> (..., <ref>, ...)` and
+# `UPDATE <typed> SET <ref> = ...` skipped the `<type>_<ref>` junction table,
+# so SQL JOINs against the junction returned 0 rows until a full reindex.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE j134_cat (label VARCHAR(100))\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE j134_bm (url TEXT, category TEXT REFERENCES j134_cat)\") { message } }"}' >/dev/null
+wait_schema_reload "$VER"
+
+# Insert two distinct category rows.
+J134_CAT_A=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO j134_cat (label) VALUES (\\\"alpha\\\")\") { message } }"}' | extract_id)
+[ -n "$J134_CAT_A" ]
+J134_CAT_B=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO j134_cat (label) VALUES (\\\"beta\\\")\") { message } }"}' | extract_id)
+[ -n "$J134_CAT_B" ]
+[ "$J134_CAT_A" != "$J134_CAT_B" ]
+
+# Insert a bookmark with the category column populated. T1's INSERT-side fix
+# must populate j134_bm_category atomically.
+J134_BM=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO j134_bm (url, category) VALUES ('https://j134.example', '$J134_CAT_A')\\\") { message } }\"}" | extract_id)
+[ -n "$J134_BM" ]
+
+J134_J1=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT category_id FROM j134_bm_category WHERE j134_bm_id = '$J134_BM'\\\") { rows } }\"}")
+printf '%s' "$J134_J1" | grep -qF "$J134_CAT_A"
+pass "PRD 00134: SQL INSERT populates auto-junction atomically (no rebuild)"
+
+# UPDATE the bookmark's category. T2's UPDATE-side fix must remove the old
+# junction row and insert the new one.
+gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE j134_bm SET category = '$J134_CAT_B' WHERE id = '$J134_BM'\\\") { message } }\"}" >/dev/null
+
+# Old junction row pointing at cat_a must be gone.
+J134_J_OLD=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$J134_BM' AND category_id = '$J134_CAT_A'\\\") { rows } }\"}")
+printf '%s' "$J134_J_OLD" | grep -qF '\"0\"'
+
+# New junction row pointing at cat_b must be present.
+J134_J_NEW=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$J134_BM' AND category_id = '$J134_CAT_B'\\\") { rows } }\"}")
+printf '%s' "$J134_J_NEW" | grep -qF '\"1\"'
+pass "PRD 00134: SQL UPDATE syncs auto-junction (old removed, new inserted)"
+
+# Cleanup
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE j134_bm CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE j134_cat CASCADE\") { message } }"}' >/dev/null
+
 # 44. DDL response consistency (no spurious errors)
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 VER=${VER:-0}

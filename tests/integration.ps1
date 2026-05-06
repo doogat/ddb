@@ -1537,6 +1537,43 @@ gqlq 'mutation { executeSql(sql: "DROP TABLE e1_link CASCADE") { message } }' | 
 gqlq 'mutation { executeSql(sql: "DROP TABLE e1_num CASCADE") { message } }' | Out-Null
 pass "issue-8-E1: SELECT ... JOIN returns joined rows (PRD 00123 archived as obsolete)"
 
+# 44.J - Auto-junction tables populated atomically on SQL INSERT and UPDATE
+# (PRD 00134). Mirrors the bash section 44.J in tests/integration.sh.
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+gqlq 'mutation { executeSql(sql: "CREATE TABLE j134_cat (label VARCHAR(100))") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE j134_bm (url TEXT, category TEXT REFERENCES j134_cat)") { message } }' | Out-Null
+waitSchemaReload $ver
+
+$j134CatA = extractId (gqlq 'mutation { executeSql(sql: "INSERT INTO j134_cat (label) VALUES (''alpha'')") { message } }')
+if (-not $j134CatA) { throw "44.J: failed to capture cat_a id" }
+$j134CatB = extractId (gqlq 'mutation { executeSql(sql: "INSERT INTO j134_cat (label) VALUES (''beta'')") { message } }')
+if (-not $j134CatB) { throw "44.J: failed to capture cat_b id" }
+if ($j134CatA -eq $j134CatB) { throw "44.J: categories must have distinct ids" }
+
+# T1's INSERT-side fix: bookmark INSERT must populate j134_bm_category.
+$j134BmResp = gqlq "mutation { executeSql(sql: `"INSERT INTO j134_bm (url, category) VALUES ('https://j134.example', '$j134CatA')`") { message } }"
+$j134Bm = extractId $j134BmResp
+if (-not $j134Bm) { throw "44.J: failed to capture bookmark id: $j134BmResp" }
+
+$j134J1 = gqlq "mutation { executeSql(sql: `"SELECT category_id FROM j134_bm_category WHERE j134_bm_id = '$j134Bm'`") { rows } }"
+if ($j134J1 -notmatch [regex]::Escape($j134CatA)) { throw "44.J: junction missing cat_a after INSERT: $j134J1" }
+pass "PRD 00134: SQL INSERT populates auto-junction atomically (no rebuild)"
+
+# T2's UPDATE-side fix: re-pointing the REFERENCES column must drop the old
+# junction row and insert the new one.
+gqlq "mutation { executeSql(sql: `"UPDATE j134_bm SET category = '$j134CatB' WHERE id = '$j134Bm'`") { message } }" | Out-Null
+
+$j134JOld = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$j134Bm' AND category_id = '$j134CatA'`") { rows } }"
+if ($j134JOld -notmatch '\\"0\\"') { throw "44.J: stale junction row to cat_a not removed after UPDATE: $j134JOld" }
+
+$j134JNew = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$j134Bm' AND category_id = '$j134CatB'`") { rows } }"
+if ($j134JNew -notmatch '\\"1\\"') { throw "44.J: new junction row to cat_b not inserted after UPDATE: $j134JNew" }
+pass "PRD 00134: SQL UPDATE syncs auto-junction (old removed, new inserted)"
+
+# Cleanup
+gqlq 'mutation { executeSql(sql: "DROP TABLE j134_bm CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE j134_cat CASCADE") { message } }' | Out-Null
+
 # 44. DDL response consistency (no spurious errors)
 $ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $result = gqlq 'mutation { executeSql(sql: "CREATE TABLE ddltest (name VARCHAR(100))") { columns rows message } }'
