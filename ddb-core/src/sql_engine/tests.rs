@@ -7458,6 +7458,85 @@ fn sql_update_syncs_auto_junction_when_references_changes() {
     );
 }
 
+/// PRD 00134 cycle-1 review C1 task #3: `UPDATE … SET col = NULL` on a
+/// REFERENCES column must clear the junction (no row), not leave an
+/// empty-string `<col>_id` ghost. Today `expr_to_string` collapses NULL
+/// to "", `update_reference_line` writes `- col:: [[]]`,
+/// `extract_multi_reference_values` returns `[""]`, and the helper would
+/// `INSERT (parent_id, '')` into the junction. Filtering empty/whitespace
+/// in `extract_multi_reference_values` gives a single uniform fix for
+/// every caller (insert + sync + extract_column_values).
+#[test]
+fn sql_update_set_null_on_references_clears_auto_junction() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // UPDATE … SET category = NULL.
+    match engine
+        .execute(&format!(
+            "UPDATE bookmark SET category = NULL WHERE id = '{bm_id}'"
+        ))
+        .unwrap()
+    {
+        SqlResult::Affected(n) => assert_eq!(n, 1, "expected one row affected"),
+        other => panic!("expected Affected, got {other:?}"),
+    }
+
+    // Junction must be empty for this bookmark — no rows at all, and
+    // certainly no empty-string category_id ghost.
+    let total = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        total[0][0], "0",
+        "SET col = NULL on a REFERENCES column must clear the junction (no rows, no empty-string ghost)"
+    );
+
+    // Materialized row should now read NULL/empty for category. (It
+    // existed pre-update; only the FK changed.)
+    let cat_after = index
+        .query_raw(&format!(
+            "SELECT category FROM bookmark WHERE id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        cat_after.len(),
+        1,
+        "bookmark row must still exist after SET NULL"
+    );
+    assert!(
+        cat_after[0][0].is_empty() || cat_after[0][0] == "NULL",
+        "bookmark.category must be NULL/empty after SET NULL, got: {:?}",
+        cat_after[0][0]
+    );
+}
+
 #[test]
 fn sql_delete_referenced_target_clears_auto_junction_rows() {
     // Regression coverage for T3 / PRD 00134 §"Non-goals" verification:
