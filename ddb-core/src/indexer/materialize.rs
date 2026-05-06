@@ -756,6 +756,40 @@ impl Index {
         }
         Ok(())
     }
+
+    pub(crate) fn sync_junction_tables_for_columns(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        doogat: &crate::types::ParsedDoogat,
+        changed_cols: &std::collections::BTreeSet<String>,
+    ) -> Result<()> {
+        for col in &schema.columns {
+            if changed_cols.contains(&col.name) && col.references.is_some() {
+                self.conn.execute(
+                    &format!(
+                        "DELETE FROM \"{t}_{c}\" WHERE \"{t}_id\" = ?1",
+                        t = schema.table_name,
+                        c = col.name
+                    ),
+                    params![id],
+                )?;
+
+                let ref_values = extract_multi_reference_values(doogat, &col.name);
+                for ref_id in &ref_values {
+                    self.conn.execute(
+                        &format!(
+                            "INSERT OR IGNORE INTO \"{t}_{c}\" (\"{t}_id\", \"{c}_id\") VALUES (?1, ?2)",
+                            t = schema.table_name,
+                            c = col.name
+                        ),
+                        params![id, ref_id],
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Check if a key appears in multiple zones across a doogat, emitting warnings for duplicates.

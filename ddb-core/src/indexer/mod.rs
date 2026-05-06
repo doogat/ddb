@@ -640,6 +640,16 @@ impl crate::traits::SqlBackend for Index {
         self.populate_junction_tables(schema, id, parsed)
     }
 
+    fn sync_junction_tables_for_columns(
+        &self,
+        schema: &crate::types::TableSchema,
+        id: &str,
+        parsed: &crate::types::ParsedDoogat,
+        changed_cols: &std::collections::BTreeSet<String>,
+    ) -> Result<()> {
+        self.sync_junction_tables_for_columns(schema, id, parsed, changed_cols)
+    }
+
     fn type_uses_folder(&self, type_name: &str, source: &dyn crate::traits::DoogatSource) -> bool {
         self.type_uses_folder(type_name, source)
     }

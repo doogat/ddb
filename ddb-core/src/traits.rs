@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -89,6 +90,15 @@ pub trait SqlBackend: DoogatIndex {
         schema: &TableSchema,
         id: &str,
         parsed: &ParsedDoogat,
+    ) -> Result<()>;
+
+    /// Replace junction table rows for changed REFERENCES columns for one doogat.
+    fn sync_junction_tables_for_columns(
+        &self,
+        schema: &TableSchema,
+        id: &str,
+        parsed: &ParsedDoogat,
+        changed_cols: &BTreeSet<String>,
     ) -> Result<()>;
 
     /// Check whether a type uses folder-based storage.

@@ -538,6 +538,9 @@ impl<'a> SqlEngine<'a> {
             let reparsed = parser::parse(&content, path)?;
             self.index.index_doogat(&reparsed)?;
             self.update_materialized_row(schema, id, row_updates)?;
+            let changed_cols: BTreeSet<String> = row_updates.keys().cloned().collect();
+            self.index
+                .sync_junction_tables_for_columns(schema, id, &reparsed, &changed_cols)?;
         }
 
         Ok(SqlResult::Affected(matches.len()))
@@ -950,6 +953,9 @@ impl<'a> SqlEngine<'a> {
         let reparsed = parser::parse(&new_content, &path)?;
         self.index.index_doogat(&reparsed)?;
         self.update_materialized_row(schema, doogat_id, updates)?;
+        let changed_cols: BTreeSet<String> = updates.keys().cloned().collect();
+        self.index
+            .sync_junction_tables_for_columns(schema, doogat_id, &reparsed, &changed_cols)?;
         Ok(SqlResult::Affected(1))
     }
 
