@@ -280,6 +280,15 @@ Junction tables are created automatically during `materialize_tables()` for ever
 
 Both columns together form the effective composite key. The junction table is populated during materialization by scanning each data doogat's reference section for matching `- col:: [[id]]` lines.
 
+### Auto-Junction Sync on Typed INSERT and UPDATE (PRD 00134)
+
+`INSERT INTO <typed_table>` and `UPDATE <typed_table> SET <ref_col> = ...` keep the auto-junction `{type}_{ref_col}` table in sync atomically with the row write. Both paths share `populate_junction_tables` / `sync_junction_tables_for_columns` on `Index` (see [`indexer.md`](indexer.md) for materialization details):
+
+- **INSERT** — `SqlEngine::build_and_index_row` calls `Index::populate_junction_tables` after `insert_materialized_row` succeeds. Both writes land inside the existing `SAVEPOINT insert_row`, so a junction-insert failure rolls back the typed-table row and the `doogats` index row together.
+- **UPDATE** — Both UPDATE call sites (`update_bulk_rows` and the single-row WHERE-id path) call `Index::sync_junction_tables_for_columns` after `update_materialized_row`, scoped to the columns named in the `SET` list. For each REFERENCES column in that set, the helper deletes existing junction rows for the doogat and reinserts using the parsed doogat's current values.
+
+Junction tables therefore reflect the latest typed write without a `ddb reindex` step. Before this fix, only full rebuilds populated junctions, so SQL JOIN, GraphQL plural relation traversal, and PgWire JOIN against `<type>_<ref_col>` returned 0 rows after a fresh INSERT or stale rows after an UPDATE.
+
 ### INSERT Write-Through
 
 ```sql

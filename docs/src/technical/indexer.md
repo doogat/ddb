@@ -156,6 +156,10 @@ For each distinct type in the index:
 
 Also creates empty tables for typedef-only types with no data doogats.
 
+### populate_junction_tables / sync_junction_tables_for_columns
+
+`Index::populate_junction_tables(schema, id, doogat)` and `Index::sync_junction_tables_for_columns(schema, id, doogat, changed_cols)` are the two entry points that keep auto-junction `{type}_{ref_col}` tables aligned with a single doogat's REFERENCES values. Both used to be private helpers reachable only from `materialize_single` / `materialize_row`. PRD 00134 promoted them to `pub(crate)` (and exposed them on the `SqlBackend` trait) so the SQL `INSERT` and `UPDATE` paths in `ddb-core/src/sql_engine/dml.rs` share the same implementation as the full-rebuild path. See [`sql-engine.md`](sql-engine.md#auto-junction-sync-on-typed-insert-and-update-prd-00134) for the SQL-side wiring.
+
 ### unique_together constraints
 
 Typedefs can declare composite unique constraints via the `unique_together` frontmatter field. The value is a list of column-name lists:
