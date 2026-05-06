@@ -7517,3 +7517,168 @@ fn sql_delete_referenced_target_clears_auto_junction_rows() {
         "junction rows must be removed when the referenced typed row is deleted (cascade)"
     );
 }
+
+#[test]
+fn sql_update_single_row_rolls_back_materialized_when_junction_sync_fails() {
+    // PRD 00134 cycle-1 review (C1): the WHERE-id fast path in
+    // `apply_single_row_update` calls `update_materialized_row` followed by
+    // `sync_junction_tables_for_columns` without a SAVEPOINT. If the junction
+    // sync fails, the materialized-row update is left half-applied: SQLite
+    // reflects the new value while the operation as a whole errored. The fix
+    // wraps both calls in a SAVEPOINT so a sync failure rolls back the
+    // materialized update.
+    //
+    // We force sync failure by dropping the auto-junction table after the row
+    // exists. The subsequent UPDATE on a row that touches the REFERENCES
+    // column will:
+    //   1. Update the materialized `bookmark` row (succeeds).
+    //   2. Try to sync `bookmark_category` (fails: table dropped).
+    // With the bug: error propagates, but `url` shows the new value.
+    // With the fix: SAVEPOINT rollback restores `url` to the old value.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_a_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let cat_b_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('beta')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://old.example.com', '{cat_a_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Force `sync_junction_tables_for_columns` to fail by dropping the
+    // auto-junction table. The materialized `bookmark` UPDATE will still
+    // succeed (it touches `bookmark`, not `bookmark_category`), so the
+    // failure window is exactly the one the SAVEPOINT must cover.
+    engine
+        .index
+        .sql_conn()
+        .execute("DROP TABLE \"bookmark_category\"", [])
+        .unwrap();
+
+    // WHERE-id fast path (single-row): UPDATE both a regular column AND the
+    // REFERENCES column.
+    let result = engine.execute(&format!(
+        "UPDATE bookmark SET url = 'https://new.example.com', category = '{cat_b_id}' WHERE id = '{bm_id}'"
+    ));
+    assert!(
+        result.is_err(),
+        "UPDATE must error when junction sync fails, got: {result:?}"
+    );
+
+    // Materialized row's regular column must be the OLD value: the SAVEPOINT
+    // rollback should have undone the SQLite UPDATE on `bookmark` when the
+    // subsequent junction-sync DELETE on the dropped `bookmark_category`
+    // failed.
+    let url: String = engine
+        .index
+        .sql_conn()
+        .query_row(
+            "SELECT url FROM bookmark WHERE id = ?1",
+            params![bm_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        url, "https://old.example.com",
+        "materialized url must roll back to OLD value when junction sync fails (single-row path)"
+    );
+}
+
+#[test]
+fn sql_update_bulk_rolls_back_materialized_when_junction_sync_fails() {
+    // Same atomicity invariant as the single-row test, but exercising
+    // `update_bulk_rows` (the WHERE clause does not match the
+    // `WHERE id = '<literal>'` fast path, so `extract_where_id` fails and
+    // execution falls through to `resolve_matching_ids`). The bulk-loop
+    // body in `update_bulk_rows` likewise calls `update_materialized_row`
+    // and then `sync_junction_tables_for_columns` without a SAVEPOINT.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_a_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let cat_b_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('beta')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://old.example.com', '{cat_a_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    engine
+        .index
+        .sql_conn()
+        .execute("DROP TABLE \"bookmark_category\"", [])
+        .unwrap();
+
+    // Bulk path: `WHERE id IN (...)` is not the `id = '<literal>'` fast path,
+    // so `extract_where_id` returns Err and `update_bulk_rows` runs.
+    let result = engine.execute(&format!(
+        "UPDATE bookmark SET url = 'https://new.example.com', category = '{cat_b_id}' WHERE id IN ('{bm_id}')"
+    ));
+    assert!(
+        result.is_err(),
+        "bulk UPDATE must error when junction sync fails, got: {result:?}"
+    );
+
+    let url: String = engine
+        .index
+        .sql_conn()
+        .query_row(
+            "SELECT url FROM bookmark WHERE id = ?1",
+            params![bm_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        url, "https://old.example.com",
+        "materialized url must roll back to OLD value when junction sync fails (bulk path)"
+    );
+}
