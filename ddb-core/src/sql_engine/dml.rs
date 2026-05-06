@@ -536,11 +536,7 @@ impl<'a> SqlEngine<'a> {
         for ((id, path), row_updates) in matches.iter().zip(per_row_updates.iter()) {
             let content = self.read_content(path)?;
             let reparsed = parser::parse(&content, path)?;
-            self.index.index_doogat(&reparsed)?;
-            self.update_materialized_row(schema, id, row_updates)?;
-            let changed_cols: BTreeSet<String> = row_updates.keys().cloned().collect();
-            self.index
-                .sync_junction_tables_for_columns(schema, id, &reparsed, &changed_cols)?;
+            self.update_indexes_atomically(schema, id, &reparsed, row_updates)?;
         }
 
         Ok(SqlResult::Affected(matches.len()))
@@ -951,12 +947,68 @@ impl<'a> SqlEngine<'a> {
             )?;
         }
         let reparsed = parser::parse(&new_content, &path)?;
-        self.index.index_doogat(&reparsed)?;
-        self.update_materialized_row(schema, doogat_id, updates)?;
-        let changed_cols: BTreeSet<String> = updates.keys().cloned().collect();
-        self.index
-            .sync_junction_tables_for_columns(schema, doogat_id, &reparsed, &changed_cols)?;
+        self.update_indexes_atomically(schema, doogat_id, &reparsed, updates)?;
         Ok(SqlResult::Affected(1))
+    }
+
+    /// Apply the SQL-side index writes for a typed UPDATE inside a SAVEPOINT
+    /// so the doogats/typed-table/junction trio stays consistent if any step
+    /// fails. Mirrors the INSERT atomicity pattern in `build_and_index_row`
+    /// (PRD 00134 cycle-1 review C1).
+    ///
+    /// The git write happens before this call (see `apply_single_row_update`
+    /// and `update_bulk_rows`); a sync-side failure here is reconcilable on
+    /// next index rebuild, but a half-applied SQL state is not, so the
+    /// SAVEPOINT scope is exactly the three SQL writes:
+    /// `index_doogat` → `update_materialized_row` → `sync_junction_tables_for_columns`.
+    fn update_indexes_atomically(
+        &mut self,
+        schema: &TableSchema,
+        doogat_id: &str,
+        reparsed: &crate::types::ParsedDoogat,
+        updates: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        self.index
+            .sql_conn()
+            .execute("SAVEPOINT update_row", [])
+            .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
+
+        let changed_cols: BTreeSet<String> = updates.keys().cloned().collect();
+        let write_result = self
+            .index
+            .index_doogat(reparsed)
+            .and_then(|()| self.update_materialized_row(schema, doogat_id, updates))
+            .and_then(|()| {
+                self.index.sync_junction_tables_for_columns(
+                    schema,
+                    doogat_id,
+                    reparsed,
+                    &changed_cols,
+                )
+            });
+
+        if let Err(e) = write_result {
+            // Best-effort rollback. If these fail the savepoint stack is
+            // already in trouble; propagate the original error either way.
+            if let Err(rb_err) = self
+                .index
+                .sql_conn()
+                .execute("ROLLBACK TO update_row", [])
+            {
+                tracing::warn!(error = %rb_err, "failed to rollback update_row savepoint");
+            }
+            if let Err(rl_err) = self.index.sql_conn().execute("RELEASE update_row", []) {
+                tracing::warn!(error = %rl_err, "failed to release update_row savepoint");
+            }
+            return Err(e);
+        }
+
+        self.index
+            .sql_conn()
+            .execute("RELEASE update_row", [])
+            .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
+
+        Ok(())
     }
 
     /// Validate a row's column names and values against the table schema.
