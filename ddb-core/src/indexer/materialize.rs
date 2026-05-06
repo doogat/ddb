@@ -1039,6 +1039,15 @@ fn extract_column_value(
 }
 
 /// Extract all reference values for a given column name from a parsed doogat.
+///
+/// Empty / whitespace-only values are filtered out. PRD 00134 cycle-1 review
+/// C1 task #3: `UPDATE … SET col = NULL` collapses to `- col:: [[]]` in the
+/// reference zone (`expr_to_string` turns NULL into ""), and without this
+/// filter the helper would `INSERT (parent_id, '')` into the junction
+/// table, leaving an empty-string ghost row instead of clearing the FK.
+/// Filtering here gives a single uniform fix for every caller
+/// (`populate_junction_tables`, `sync_junction_tables_for_columns`,
+/// `extract_column_values`).
 fn extract_multi_reference_values(
     doogat: &crate::types::ParsedDoogat,
     col_name: &str,
@@ -1048,6 +1057,7 @@ fn extract_multi_reference_values(
         .iter()
         .filter(|f| f.key == col_name && f.zone == crate::types::Zone::Reference)
         .map(|f| f.value.trim().to_string())
+        .filter(|v| !v.is_empty())
         .collect()
 }
 
