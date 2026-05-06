@@ -136,6 +136,22 @@ Override the default zone for a column:
 
 Existing doogats are migrated on the next 'ddb fix --migrate'.
 
+Override the column matched by '<col>=<val>' substring searches:
+
+  ddb query \"ALTER TABLE category SET SEARCH KEY fqn\"
+  ddb query \"ALTER TABLE category DROP SEARCH KEY\"
+
+By default, 'category=Y' substring-matches against category.title. SET
+SEARCH KEY redirects the match to a different column on the typedef --
+useful when the canonical user-facing identifier is not the leaf title
+(e.g. category.fqn = 'work.portals' while category.title = 'Portals',
+or article.slug = 'getting-started' while title is the long form).
+
+The chosen column must exist on the typedef and must not be a
+REFERENCES column. Validation runs at SET time and rejects with a
+clear error otherwise. The change persists in the typedef YAML
+(search_key:) and takes effect immediately -- no rebuild required.
+
 9. JUNCTION TABLES FOR MULTI-VALUED REFERENCES
 -----------------------------------------------
 
