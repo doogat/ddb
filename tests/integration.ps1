@@ -1578,7 +1578,10 @@ $j134kCat = extractId (gqlq "mutation { executeSql(sql: `"INSERT INTO j134_cat (
 if (-not $j134kCat) { throw "44.K: failed to capture cat id" }
 $j134kFields = "{\`"url\`":\`"https://k.example\`",\`"category\`":\`"$j134kCat\`"}"
 $j134kResp = gqlq "mutation { createDoogat(input: { type: `"j134_bm`", title: `"K`", fields: `"$j134kFields`" }) { id } }"
-$j134kBm = extractId $j134kResp
+# `createDoogat` returns the id under `data.createDoogat.id`, not `message`,
+# so extractId (which scans for "message") would yield empty. Match the id
+# field directly.
+$j134kBm = if ($j134kResp -match '"id":"([^"]+)"') { $Matches[1] } else { "" }
 if (-not $j134kBm) { throw "44.K: failed to capture bookmark id from createDoogat: $j134kResp" }
 $j134kJ = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$j134kBm' AND category_id = '$j134kCat'`") { rows } }"
 if ($j134kJ -notmatch '\\"1\\"') { throw "44.K: createDoogat did not populate auto-junction: $j134kJ" }

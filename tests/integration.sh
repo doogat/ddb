@@ -1640,7 +1640,9 @@ J134_BM=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO j134_bm (
 [ -n "$J134_BM" ]
 
 J134_J1=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT category_id FROM j134_bm_category WHERE j134_bm_id = '$J134_BM'\\\") { rows } }\"}")
-printf '%s' "$J134_J1" | jq -e --arg id "$J134_CAT_A" '.data.executeSql.rows[0][0] == $id' >/dev/null
+# `rows` is a list of JSON-stringified rows (e.g. ["[\"<id>\"]"]); `fromjson`
+# parses the inner row before indexing.
+printf '%s' "$J134_J1" | jq -e --arg id "$J134_CAT_A" '(.data.executeSql.rows[0] | fromjson)[0] == $id' >/dev/null
 pass "PRD 00134: SQL INSERT populates auto-junction atomically (no rebuild)"
 
 # UPDATE the bookmark's category. T2's UPDATE-side fix must remove the old
@@ -1649,11 +1651,11 @@ gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE j134_bm SET category = '
 
 # Old junction row pointing at cat_a must be gone.
 J134_J_OLD=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$J134_BM' AND category_id = '$J134_CAT_A'\\\") { rows } }\"}")
-printf '%s' "$J134_J_OLD" | jq -e '.data.executeSql.rows[0][0] == "0"' >/dev/null
+printf '%s' "$J134_J_OLD" | jq -e '(.data.executeSql.rows[0] | fromjson)[0] == "0"' >/dev/null
 
 # New junction row pointing at cat_b must be present.
 J134_J_NEW=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$J134_BM' AND category_id = '$J134_CAT_B'\\\") { rows } }\"}")
-printf '%s' "$J134_J_NEW" | jq -e '.data.executeSql.rows[0][0] == "1"' >/dev/null
+printf '%s' "$J134_J_NEW" | jq -e '(.data.executeSql.rows[0] | fromjson)[0] == "1"' >/dev/null
 pass "PRD 00134: SQL UPDATE syncs auto-junction (old removed, new inserted)"
 
 # 44.K — GraphQL `createDoogat` typed-create populates the auto-junction
@@ -1668,10 +1670,11 @@ pass "PRD 00134: SQL UPDATE syncs auto-junction (old removed, new inserted)"
 J134K_CAT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO j134_cat (label) VALUES ('gamma')\\\") { message } }\"}" | extract_id)
 [ -n "$J134K_CAT" ]
 J134K_RESP=$(gql "{\"query\":\"mutation { createDoogat(input: { type: \\\"j134_bm\\\", title: \\\"K\\\", fields: \\\"{\\\\\\\"url\\\\\\\":\\\\\\\"https://k.example\\\\\\\",\\\\\\\"category\\\\\\\":\\\\\\\"$J134K_CAT\\\\\\\"}\\\" }) { id } }\"}")
-J134K_BM=$(printf '%s' "$J134K_RESP" | extract_id)
+# `createDoogat` returns the id under `data.createDoogat.id`, not `message`.
+J134K_BM=$(printf '%s' "$J134K_RESP" | jq -er '.data.createDoogat.id')
 [ -n "$J134K_BM" ]
 J134K_J=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$J134K_BM' AND category_id = '$J134K_CAT'\\\") { rows } }\"}")
-printf '%s' "$J134K_J" | jq -e '.data.executeSql.rows[0][0] == "1"' >/dev/null
+printf '%s' "$J134K_J" | jq -e '(.data.executeSql.rows[0] | fromjson)[0] == "1"' >/dev/null
 pass "PRD 00134: GraphQL createDoogat populates auto-junction for REFERENCES column (44.K)"
 
 # Cleanup
