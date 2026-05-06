@@ -1570,6 +1570,20 @@ $j134JNew = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM j134_bm_cate
 if ($j134JNew -notmatch '\\"1\\"') { throw "44.J: new junction row to cat_b not inserted after UPDATE: $j134JNew" }
 pass "PRD 00134: SQL UPDATE syncs auto-junction (old removed, new inserted)"
 
+# 44.K - GraphQL createDoogat typed-create populates auto-junction atomically
+# (PRD 00134 cycle-1 review C1 task #4). Mirrors bash section 44.K. Drives
+# the full GraphQL -> service -> indexer pipeline; unit tests cover the
+# service layer in detail (see service::tests::create_doogat_with_extra_*).
+$j134kCat = extractId (gqlq "mutation { executeSql(sql: `"INSERT INTO j134_cat (label) VALUES ('gamma')`") { message } }")
+if (-not $j134kCat) { throw "44.K: failed to capture cat id" }
+$j134kFields = "{\`"url\`":\`"https://k.example\`",\`"category\`":\`"$j134kCat\`"}"
+$j134kResp = gqlq "mutation { createDoogat(input: { type: `"j134_bm`", title: `"K`", fields: `"$j134kFields`" }) { id } }"
+$j134kBm = extractId $j134kResp
+if (-not $j134kBm) { throw "44.K: failed to capture bookmark id from createDoogat: $j134kResp" }
+$j134kJ = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$j134kBm' AND category_id = '$j134kCat'`") { rows } }"
+if ($j134kJ -notmatch '\\"1\\"') { throw "44.K: createDoogat did not populate auto-junction: $j134kJ" }
+pass "PRD 00134: GraphQL createDoogat populates auto-junction for REFERENCES column (44.K)"
+
 # Cleanup
 gqlq 'mutation { executeSql(sql: "DROP TABLE j134_bm CASCADE") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "DROP TABLE j134_cat CASCADE") { message } }' | Out-Null
@@ -2646,6 +2660,27 @@ pass "49: CLI create rejects FK to wrong-type id"
 
 Pop-Location
 Remove-Item -Recurse -Force $TW_DIR
+
+# 44.L - CLI ddb create populates auto-junction atomically (PRD 00134
+# cycle-1 review C1 task #4). Mirrors bash section 44.L through the CLI/FFI
+# entry point so the typed materialization path is exercised end-to-end
+# across surfaces. Unit tests cover the service-layer typed-create.
+$J134L_DIR = New-TempDir
+Push-Location $J134L_DIR
+ddb init | Out-Null
+ddb query "CREATE TABLE j134l_cat (label VARCHAR(64))" | Out-Null
+Start-Sleep -Seconds 1
+$j134lCat = (ddb query "INSERT INTO j134l_cat (title, label) VALUES ('lcat', 'alpha')").Trim()
+if (-not $j134lCat) { throw "44.L: failed to seed j134l_cat" }
+ddb query "CREATE TABLE j134l_bm (url VARCHAR(200), category VARCHAR(64) REFERENCES j134l_cat)" | Out-Null
+Start-Sleep -Seconds 1
+$j134lBm = (ddb create --type j134l_bm --title "L1" --set "url=https://l.example" --set "category=$j134lCat").Trim()
+if (-not $j134lBm) { throw "44.L: ddb create did not return id" }
+$j134lJoin = ddb query "SELECT bm.id FROM j134l_bm bm JOIN j134l_bm_category j ON j.j134l_bm_id = bm.id WHERE j.category_id = '$j134lCat'"
+if ($j134lJoin -notmatch [regex]::Escape($j134lBm)) { throw "44.L: JOIN did not return the bookmark via auto-junction: $j134lJoin" }
+pass "PRD 00134: CLI ddb create populates auto-junction for REFERENCES column (44.L)"
+Pop-Location
+Remove-Item -Recurse -Force $J134L_DIR
 
 Cleanup
 Write-Host "=== all integration tests passed ==="

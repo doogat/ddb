@@ -1656,6 +1656,24 @@ J134_J_NEW=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FR
 printf '%s' "$J134_J_NEW" | grep -qF '\"1\"'
 pass "PRD 00134: SQL UPDATE syncs auto-junction (old removed, new inserted)"
 
+# 44.K — GraphQL `createDoogat` typed-create populates the auto-junction
+# atomically (PRD 00134 cycle-1 review C1 task #4). The unit-test suite
+# already covers the typed-create plumbing in detail (see
+# `service::tests::batch_create_routes_references_to_reference_zone`,
+# `create_doogat_with_extra_routes_references_for_registered_type`, plus
+# the cycle-1 fix in
+# `service::tests::service_update_doogat_syncs_auto_junction_on_references_change`);
+# this section drives the full GraphQL → service → indexer pipeline so a
+# regression in any of those layers surfaces in CI.
+J134K_CAT=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO j134_cat (label) VALUES ('gamma')\\\") { message } }\"}" | extract_id)
+[ -n "$J134K_CAT" ]
+J134K_RESP=$(gql "{\"query\":\"mutation { createDoogat(input: { type: \\\"j134_bm\\\", title: \\\"K\\\", fields: \\\"{\\\\\\\"url\\\\\\\":\\\\\\\"https://k.example\\\\\\\",\\\\\\\"category\\\\\\\":\\\\\\\"$J134K_CAT\\\\\\\"}\\\" }) { id } }\"}")
+J134K_BM=$(printf '%s' "$J134K_RESP" | extract_id)
+[ -n "$J134K_BM" ]
+J134K_J=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM j134_bm_category WHERE j134_bm_id = '$J134K_BM' AND category_id = '$J134K_CAT'\\\") { rows } }\"}")
+printf '%s' "$J134K_J" | grep -qF '\"1\"'
+pass "PRD 00134: GraphQL createDoogat populates auto-junction for REFERENCES column (44.K)"
+
 # Cleanup
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE j134_bm CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE j134_cat CASCADE\") { message } }"}' >/dev/null
@@ -2738,5 +2756,28 @@ pass "49: CLI create rejects FK to wrong-type id"
 
 cd "$TMPDIR"
 rm -rf "$TW_DIR"
+
+# 44.L — CLI `ddb create` populates the auto-junction atomically (PRD 00134
+# cycle-1 review C1 task #4). Mirrors 44.K through the CLI/FFI entry point
+# so the typed materialization path is exercised end-to-end across surfaces
+# (GraphQL, CLI). Unit tests already cover the service-layer typed-create
+# (see `service::tests::create_doogat_with_extra_*`); this section adds the
+# CLI shell-process wrapper so cross-shell regressions surface in CI.
+J134L_DIR="$(mktemp -d)"
+cd "$J134L_DIR"
+$DDB init >/dev/null
+$DDB query "CREATE TABLE j134l_cat (label VARCHAR(64))" >/dev/null
+sleep 1
+J134L_CAT=$($DDB query "INSERT INTO j134l_cat (title, label) VALUES ('lcat', 'alpha')" | tr -d '[:space:]')
+[ -n "$J134L_CAT" ]
+$DDB query "CREATE TABLE j134l_bm (url VARCHAR(200), category VARCHAR(64) REFERENCES j134l_cat)" >/dev/null
+sleep 1
+J134L_BM=$($DDB create --type j134l_bm --title "L1" --set "url=https://l.example" --set "category=$J134L_CAT" 2>&1 | tr -d '[:space:]')
+[ -n "$J134L_BM" ]
+J134L_JOIN=$($DDB query "SELECT bm.id FROM j134l_bm bm JOIN j134l_bm_category j ON j.j134l_bm_id = bm.id WHERE j.category_id = '$J134L_CAT'")
+printf '%s' "$J134L_JOIN" | grep -qF "$J134L_BM"
+pass "PRD 00134: CLI ddb create populates auto-junction for REFERENCES column (44.L)"
+cd "$TMPDIR"
+rm -rf "$J134L_DIR"
 
 echo "=== all integration tests passed ==="
