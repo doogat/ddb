@@ -762,10 +762,10 @@ impl Index {
         schema: &crate::types::TableSchema,
         id: &str,
         doogat: &crate::types::ParsedDoogat,
-        changed_cols: &std::collections::BTreeSet<String>,
+        changed_cols: &[&str],
     ) -> Result<()> {
         for col in &schema.columns {
-            if changed_cols.contains(&col.name) && col.references.is_some() {
+            if changed_cols.iter().any(|c| *c == col.name) && col.references.is_some() {
                 self.conn.execute(
                     &format!(
                         "DELETE FROM \"{t}_{c}\" WHERE \"{t}_id\" = ?1",

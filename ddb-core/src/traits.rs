@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -93,12 +92,16 @@ pub trait SqlBackend: DoogatIndex {
     ) -> Result<()>;
 
     /// Replace junction table rows for changed REFERENCES columns for one doogat.
+    ///
+    /// `changed_cols` is a borrowed slice of column names because the typical
+    /// UPDATE touches 1-3 columns; a `BTreeSet` allocation is wasteful at that
+    /// size. PRD 00134 cycle-1 review C1 task #8.
     fn sync_junction_tables_for_columns(
         &self,
         schema: &TableSchema,
         id: &str,
         parsed: &ParsedDoogat,
-        changed_cols: &BTreeSet<String>,
+        changed_cols: &[&str],
     ) -> Result<()>;
 
     /// Check whether a type uses folder-based storage.

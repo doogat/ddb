@@ -973,7 +973,7 @@ impl<'a> SqlEngine<'a> {
             .execute("SAVEPOINT update_row", [])
             .map_err(|e| DoogatError::SqlEngine(e.to_string()))?;
 
-        let changed_cols: BTreeSet<String> = updates.keys().cloned().collect();
+        let changed_cols: Vec<&str> = updates.keys().map(String::as_str).collect();
         let write_result = self
             .index
             .index_doogat(reparsed)

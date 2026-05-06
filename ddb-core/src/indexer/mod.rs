@@ -609,6 +609,13 @@ impl Index {
     }
 }
 
+/// Pass-through trait impl for `SqlBackend`. Each method body delegates to
+/// the inherent method of the same name on `Index`. Rust's method-resolution
+/// rules pick the inherent method over the trait method when called via
+/// `self.<method>(...)`, so these bodies are not self-recursive. The compiler
+/// also catches accidental recursion via the on-by-default
+/// `unconditional_recursion` lint if an inherent method is ever removed
+/// without updating the trait body. PRD 00134 cycle-1 review C1 task #8.
 impl crate::traits::SqlBackend for Index {
     fn sql_conn(&self) -> &rusqlite::Connection {
         &self.conn
@@ -645,7 +652,7 @@ impl crate::traits::SqlBackend for Index {
         schema: &crate::types::TableSchema,
         id: &str,
         parsed: &crate::types::ParsedDoogat,
-        changed_cols: &std::collections::BTreeSet<String>,
+        changed_cols: &[&str],
     ) -> Result<()> {
         self.sync_junction_tables_for_columns(schema, id, parsed, changed_cols)
     }
@@ -671,6 +678,10 @@ impl crate::traits::SqlBackend for Index {
     }
 }
 
+/// Pass-through trait impl for `DoogatIndex`. Same dispatch contract as the
+/// `SqlBackend` impl above: bodies delegate to inherent methods on `Index`,
+/// recursion would be caught by `unconditional_recursion`. PRD 00134
+/// cycle-1 review C1 task #8.
 impl crate::traits::DoogatIndex for Index {
     fn index_doogat(&self, doogat: &ParsedDoogat) -> Result<()> {
         self.index_doogat(doogat)
