@@ -7311,4 +7311,50 @@ fn set_search_key_rejects_references_column() {
     assert!(msg.contains("REFERENCES"), "{msg}");
 }
 
+#[test]
+fn sql_insert_populates_auto_junction_for_references_column() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Create category typedef first so the REFERENCES target exists.
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    // Create a category row and capture its id.
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('tech')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Insert a bookmark with the category column populated in the same statement.
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // The auto-junction table should be populated atomically with the INSERT.
+    let rows = index
+        .query_raw(&format!(
+            "SELECT category_id FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "auto-junction bookmark_category should have exactly one row after INSERT"
+    );
+    assert_eq!(rows[0][0], cat_id);
+}
 
