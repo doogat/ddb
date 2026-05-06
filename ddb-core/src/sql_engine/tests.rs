@@ -7457,3 +7457,63 @@ fn sql_update_syncs_auto_junction_when_references_changes() {
         "auto-junction must hold exactly one row for the bookmark after UPDATE"
     );
 }
+
+#[test]
+fn sql_delete_referenced_target_clears_auto_junction_rows() {
+    // Regression coverage for T3 / PRD 00134 §"Non-goals" verification:
+    // when the *referenced target* of a REFERENCES column is deleted,
+    // `cascade_junction_cleanup` must remove auto-junction rows that
+    // mention it. The owning-parent direction is handled separately
+    // (it's not the same code path) and is tracked outside this PRD.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('tech')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity: junction populated by T1's INSERT path.
+    let initial = index
+        .query_raw(&format!(
+            "SELECT category_id FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(initial.len(), 1, "junction should be populated post-INSERT");
+
+    // Delete the *category* (referenced target). cascade_junction_cleanup
+    // sweeps every junction column whose `references` equals the deleted
+    // type, so the bookmark_category row mentioning it must disappear.
+    engine
+        .execute(&format!("DELETE FROM category WHERE id = '{cat_id}'"))
+        .unwrap();
+
+    let after_target_delete = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        after_target_delete[0][0], "0",
+        "junction rows must be removed when the referenced typed row is deleted (cascade)"
+    );
+}
