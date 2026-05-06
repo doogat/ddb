@@ -3679,3 +3679,174 @@ fn typed_create_rejects_fk_to_nonexistent_id() {
         other => panic!("expected Structured REFERENCES_VIOLATION, got {other:?}"),
     }
 }
+
+/// PRD 00134 cycle-1 review C1 task #2: pin that a service-path typed UPDATE
+/// of a REFERENCES column on the typed table flushes the OLD junction row
+/// and inserts the NEW one. This is what `update_doogat_parsed` /
+/// `batch_update` route through (via `reindex_and_rematerialize` →
+/// `materialize_single`); the auto-junction must be in sync after the
+/// update, not just additively populated.
+#[test]
+fn service_update_doogat_syncs_auto_junction_on_references_change() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_a = match svc
+        .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let cat_b = match svc
+        .execute_sql("INSERT INTO category (label) VALUES ('beta')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm = match svc
+        .execute_sql(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://x.example.com', '{cat_a}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity: junction has (bm, cat_a).
+    let pre = svc
+        .execute_sql(&format!(
+            "SELECT bookmark_id, category_id FROM bookmark_category WHERE bookmark_id = '{bm}'"
+        ))
+        .unwrap();
+    match pre {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(rows.len(), 1, "expected 1 junction row before update");
+            assert_eq!(rows[0][1], cat_a, "junction must point at cat_a pre-update");
+        }
+        _ => panic!("expected rows"),
+    }
+
+    // Service-path typed UPDATE of the REFERENCES column.
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "category".to_string(),
+        crate::types::Value::String(cat_b.clone()),
+    );
+    svc.update_doogat_parsed(
+        &bm,
+        None,
+        None,
+        None,
+        None,
+        &ExtraFieldUpdates {
+            set: &fields,
+            unset: &[],
+        },
+    )
+    .unwrap();
+
+    // After update: exactly one junction row, pointing at cat_b. Old
+    // (bm, cat_a) row must be gone, not just augmented with a new row.
+    let post = svc
+        .execute_sql(&format!(
+            "SELECT bookmark_id, category_id FROM bookmark_category WHERE bookmark_id = '{bm}'"
+        ))
+        .unwrap();
+    match post {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                1,
+                "service UPDATE on REFERENCES column must DELETE old junction rows, not just INSERT new ones (got {} rows)",
+                rows.len()
+            );
+            assert_eq!(
+                rows[0][1], cat_b,
+                "junction must point at cat_b after service-path UPDATE"
+            );
+        }
+        _ => panic!("expected rows"),
+    }
+}
+
+/// PRD 00134 cycle-1 review C1 task #2: same invariant via `batch_update`,
+/// which goes through `prepare_update` + `reindex_and_rematerialize` for
+/// each row. Pins that the GraphQL `batchUpdate` mutation surface keeps the
+/// junction in sync as well.
+#[test]
+fn service_batch_update_syncs_auto_junction_on_references_change() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE tag (label VARCHAR(100))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE post (title2 VARCHAR(200), tag TEXT REFERENCES tag)")
+        .unwrap();
+
+    let tag_a = match svc
+        .execute_sql("INSERT INTO tag (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let tag_b = match svc
+        .execute_sql("INSERT INTO tag (label) VALUES ('beta')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let post_id = match svc
+        .execute_sql(&format!(
+            "INSERT INTO post (title2, tag) VALUES ('hello', '{tag_a}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "tag".to_string(),
+        crate::types::Value::String(tag_b.clone()),
+    );
+    let inputs = vec![BatchUpdateInput {
+        id: post_id.clone(),
+        title: None,
+        tags: None,
+        doogat_type: None,
+        body: None,
+        fields: Some(fields),
+        unset_fields: None,
+    }];
+    svc.batch_update(&inputs).unwrap();
+
+    let post = svc
+        .execute_sql(&format!(
+            "SELECT post_id, tag_id FROM post_tag WHERE post_id = '{post_id}'"
+        ))
+        .unwrap();
+    match post {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                1,
+                "batch_update on REFERENCES column must DELETE old junction rows (got {} rows)",
+                rows.len()
+            );
+            assert_eq!(
+                rows[0][1], tag_b,
+                "junction must point at tag_b after batch_update"
+            );
+        }
+        _ => panic!("expected rows"),
+    }
+}

@@ -3,7 +3,7 @@ use rusqlite::params;
 use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
-use crate::sql_engine::build_data_doogat;
+use crate::sql_engine::{apply_updates_to_doogat, build_data_doogat};
 use crate::sql_engine::typed_insert::{prepare_typed_insert_validate, TypedInsertCounters};
 use crate::types::{
     BatchCreateInput, BatchUpdateInput, DoogatId, DoogatMeta, ParsedDoogat, TableSchema,
@@ -379,20 +379,35 @@ impl<G: GitBackend> DoogatService<G> {
         let content = self.repo.read_file(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
 
-        apply_field_updates(&mut parsed, title, tags, doogat_type, body, extra);
-
+        // Resolve schemas BEFORE applying field updates so typed-column SETs
+        // route to the correct zone (REFERENCES → reference section, etc.).
+        // PRD 00134 cycle-1 review C1 task #2.
         let schemas = if parsed.meta.doogat_type.is_some() {
             Some(self.list_type_schemas()?)
         } else {
             None
         };
+        let schema = schemas.as_ref().and_then(|all| {
+            parsed
+                .meta
+                .doogat_type
+                .as_deref()
+                .and_then(|t| all.iter().find(|s| s.table_name == t))
+        });
 
+        // Validate the user-supplied SET fields BEFORE routing them. After
+        // routing, REFERENCES values land in the reference zone, hidden
+        // from the `parsed.meta.extra`-based validator. We validate against
+        // the input map directly so FK/allowed_values rejections still
+        // fire on the typed UPDATE path.
         let has_field_changes = !extra.set.is_empty() || !extra.unset.is_empty();
         if has_field_changes {
             if let (Some(ref type_name), Some(ref schemas)) = (&parsed.meta.doogat_type, &schemas) {
-                self.validate_fields_with_schemas(schemas, type_name, &parsed.meta.extra)?;
+                self.validate_fields_with_schemas(schemas, type_name, extra.set)?;
             }
         }
+
+        apply_field_updates(&mut parsed, title, tags, doogat_type, body, extra, schema);
 
         let new_content = parser::serialize(&parsed);
         self.repo
@@ -488,6 +503,11 @@ impl<G: GitBackend> DoogatService<G> {
 
     /// Prepare a single update: read, merge fields, validate, serialize.
     /// Returns `(path, new_content)` without side effects.
+    ///
+    /// Routes typed REFERENCES-column SETs to the reference zone via the
+    /// shared `apply_field_updates` helper so the auto-junction stays in
+    /// sync after a `batch_update` mutation. PRD 00134 cycle-1 review C1
+    /// task #2.
     fn prepare_update(
         &self,
         update: &BatchUpdateInput,
@@ -497,35 +517,40 @@ impl<G: GitBackend> DoogatService<G> {
         let content = self.repo.read_file(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
 
-        if let Some(ref t) = update.title {
-            parsed.meta.title = Some(t.clone());
-        }
-        if let Some(ref t) = update.tags {
-            parsed.meta.tags = t.clone();
-        }
-        if let Some(ref t) = update.doogat_type {
-            parsed.meta.doogat_type = Some(t.clone());
-        }
-        if let Some(ref b) = update.body {
-            parsed.body = b.clone();
-        }
-        if let Some(ref unset) = update.unset_fields {
-            for key in unset {
-                parsed.meta.extra.remove(key);
-            }
-        }
-        if let Some(ref set) = update.fields {
-            for (key, value) in set {
-                parsed.meta.extra.insert(key.clone(), value.clone());
-            }
-        }
+        let schema = parsed
+            .meta
+            .doogat_type
+            .as_deref()
+            .or(update.doogat_type.as_deref())
+            .and_then(|t| schemas.iter().find(|s| s.table_name == t));
 
+        let empty_set: std::collections::BTreeMap<String, crate::types::Value> =
+            std::collections::BTreeMap::new();
+        let empty_unset: Vec<String> = Vec::new();
+        let extra = ExtraFieldUpdates {
+            set: update.fields.as_ref().unwrap_or(&empty_set),
+            unset: update.unset_fields.as_deref().unwrap_or(&empty_unset),
+        };
+
+        // Validate against the input SET map BEFORE routing. See
+        // `update_doogat_parsed` for rationale (REFERENCES values move to
+        // the reference zone, hiding them from the meta.extra validator).
         let has_field_changes = update.fields.is_some() || update.unset_fields.is_some();
         if has_field_changes {
             if let Some(ref type_name) = parsed.meta.doogat_type {
-                self.validate_fields_with_schemas(schemas, type_name, &parsed.meta.extra)?;
+                self.validate_fields_with_schemas(schemas, type_name, extra.set)?;
             }
         }
+
+        apply_field_updates(
+            &mut parsed,
+            update.title.as_deref(),
+            update.tags.as_deref(),
+            update.doogat_type.as_deref(),
+            update.body.as_deref(),
+            &extra,
+            schema,
+        );
 
         let new_content = parser::serialize(&parsed);
         Ok((path, new_content))
@@ -1236,6 +1261,7 @@ fn apply_field_updates(
     doogat_type: Option<&str>,
     body: Option<&str>,
     extra: &ExtraFieldUpdates<'_>,
+    schema: Option<&TableSchema>,
 ) {
     if let Some(t) = title {
         parsed.meta.title = Some(t.to_owned());
@@ -1252,7 +1278,68 @@ fn apply_field_updates(
     for key in extra.unset {
         parsed.meta.extra.remove(key);
     }
-    for (key, value) in extra.set {
-        parsed.meta.extra.insert(key.clone(), value.clone());
+
+    // Schema-aware SET routing for typed doogats: REFERENCES columns must
+    // land in the reference zone (`- col:: [[id]]`) so the materializer's
+    // `extract_multi_reference_values` sees the new value. Falling back to a
+    // frontmatter dump leaves the OLD reference line in place, which causes
+    // `materialize_single` to re-INSERT the stale junction row even after
+    // its DELETE pass — observed as task #2 of PRD 00134 cycle-1 review C1.
+    //
+    // Untyped doogats (no schema available) keep the legacy frontmatter dump
+    // because there is no zone information to route by.
+    if let Some(s) = schema {
+        let stringified = stringify_extra_set_for_schema(extra.set, s);
+        if !stringified.is_empty() {
+            apply_updates_to_doogat(parsed, s, &stringified);
+        }
+        // Frontmatter set for any keys that the schema doesn't know about
+        // (e.g. user-supplied untyped extras alongside typed columns).
+        for (key, value) in extra.set {
+            if !s.columns.iter().any(|c| &c.name == key) {
+                parsed.meta.extra.insert(key.clone(), value.clone());
+            }
+        }
+    } else {
+        for (key, value) in extra.set {
+            parsed.meta.extra.insert(key.clone(), value.clone());
+        }
     }
+}
+
+/// Convert the typed-update `set` map (`Value`-valued) into the
+/// `String`-valued shape `apply_updates_to_doogat` expects, dropping keys
+/// that aren't declared columns on `schema`. Mirrors
+/// `stringify_typed_input_fields` (used for create) but for update; rejects
+/// nothing on List/Map (those keys are silently routed to frontmatter by
+/// the caller, preserving the legacy "extra fields just go to frontmatter"
+/// behavior for non-typed keys).
+fn stringify_extra_set_for_schema(
+    set: &std::collections::BTreeMap<String, crate::types::Value>,
+    schema: &TableSchema,
+) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for (key, value) in set {
+        if !schema.columns.iter().any(|c| &c.name == key) {
+            continue;
+        }
+        match value {
+            crate::types::Value::String(s) => {
+                out.insert(key.clone(), s.clone());
+            }
+            crate::types::Value::Number(n) => {
+                out.insert(key.clone(), n.to_string());
+            }
+            crate::types::Value::Bool(b) => {
+                out.insert(key.clone(), if *b { "1".into() } else { "0".into() });
+            }
+            crate::types::Value::List(_) | crate::types::Value::Map(_) => {
+                // Structured values can't satisfy a typed scalar column; let
+                // the caller surface validation errors via the existing
+                // `validate_fields_with_schemas` pass instead of silently
+                // dropping the update here.
+            }
+        }
+    }
+    out
 }

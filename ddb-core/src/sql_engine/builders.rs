@@ -735,7 +735,16 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
 }
 
 /// Apply UPDATE SET assignments to a ParsedDoogat according to schema zone mapping.
-pub(super) fn apply_updates_to_doogat(
+///
+/// Visibility is `pub(crate)` so the service-layer typed UPDATE path
+/// (`service::crud::update_doogat_parsed` / `prepare_update`) can route
+/// REFERENCES-column updates to the reference zone instead of frontmatter.
+/// PRD 00134 cycle-1 review C1 task #2: keeping this in sync with the
+/// SQL-engine UPDATE path is the only way the auto-junction stays accurate
+/// after a service-path UPDATE — `materialize_single` reads REFERENCES
+/// values from `inline_fields` (reference zone), so a stale reference line
+/// would re-insert the OLD junction row even after the DELETE pass.
+pub(crate) fn apply_updates_to_doogat(
     doogat: &mut ParsedDoogat,
     schema: &TableSchema,
     updates: &BTreeMap<String, String>,

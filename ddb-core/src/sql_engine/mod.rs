@@ -6,7 +6,7 @@ mod junction;
 mod transaction;
 pub(crate) mod typed_insert;
 
-pub(crate) use builders::build_data_doogat;
+pub(crate) use builders::{apply_updates_to_doogat, build_data_doogat};
 
 use rusqlite::params;
 use sqlparser::ast::{ObjectType, Statement};
