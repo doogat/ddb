@@ -254,8 +254,9 @@ $output = ddb query "ALTER TABLE smokerename_src RENAME TO smokerename_dst"
 if ($output -notmatch "renamed to smokerename_dst") { throw "rename to failed: $output" }
 $output = ddb query "SELECT count(*) FROM smokerename_dst"
 if ($output -notmatch "1") { throw "row count after rename failed: $output" }
-# `ddb` exits non-zero on failure; capture both streams without aborting.
-$output = (& ddb query "ALTER TABLE smokerename_dst RENAME TO doogats" 2>&1 | Out-String)
+# Bypass the throwing `ddb` wrapper and call the binary directly so a non-zero
+# exit (the expected reserved-name rejection) doesn't abort the script.
+$output = (& $DDB query "ALTER TABLE smokerename_dst RENAME TO doogats" 2>&1 | Out-String)
 if ($output -notmatch "reserved") { throw "expected reserved-name rejection, got: $output" }
 $output = ddb query "DROP TABLE smokerename_dst CASCADE"
 if ($output -notmatch "dropped") { throw "rename cleanup drop failed" }
