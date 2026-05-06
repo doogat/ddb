@@ -7358,3 +7358,102 @@ fn sql_insert_populates_auto_junction_for_references_column() {
     assert_eq!(rows[0][0], cat_id);
 }
 
+#[test]
+fn sql_update_syncs_auto_junction_when_references_changes() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Create category typedef with a label column.
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    // Create bookmark typedef referencing category.
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    // Insert two distinct category rows.
+    let cat_a_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let cat_b_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('beta')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    assert_ne!(cat_a_id, cat_b_id, "categories must have distinct ids");
+
+    // Insert a bookmark pointing at category A.
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_a_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity-check post-INSERT junction state.
+    let initial = index
+        .query_raw(&format!(
+            "SELECT category_id FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        initial.len(),
+        1,
+        "auto-junction should have exactly one row after INSERT"
+    );
+    assert_eq!(initial[0][0], cat_a_id);
+
+    // UPDATE the bookmark's category to point at B.
+    match engine
+        .execute(&format!(
+            "UPDATE bookmark SET category = '{cat_b_id}' WHERE id = '{bm_id}'"
+        ))
+        .unwrap()
+    {
+        SqlResult::Affected(n) => assert_eq!(n, 1, "expected one row affected"),
+        other => panic!("expected Affected, got {other:?}"),
+    }
+
+    // Old junction row pointing at cat_a_id must be gone.
+    let old_count = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}' AND category_id = '{cat_a_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        old_count[0][0], "0",
+        "stale junction row pointing at previous category must be removed"
+    );
+
+    // New junction row pointing at cat_b_id must be present.
+    let new_count = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}' AND category_id = '{cat_b_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        new_count[0][0], "1",
+        "new junction row pointing at updated category must be inserted"
+    );
+
+    // Total junction rows for this bookmark must be exactly 1.
+    let total = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        total[0][0], "1",
+        "auto-junction must hold exactly one row for the bookmark after UPDATE"
+    );
+}
