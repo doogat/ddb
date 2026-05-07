@@ -3682,6 +3682,87 @@ fn create_doogat_raw_populates_auto_junction_for_typed_references() {
     }
 }
 
+/// PRD 00134 doubt-review: `update_doogat_raw` (the FFI raw-Markdown
+/// update surface) must keep auto-junctions in sync atomically too —
+/// same parity as `create_doogat_raw` (BLIND-T2). Previously the path
+/// called only `index.index_doogat` (metadata-only), so a raw FFI
+/// UPDATE that changed a REFERENCES column left the typed table stale
+/// and the auto-junction stale (old `<col>_id` row hung around) until
+/// the next `ddb query` triggered an implicit `ensure_fresh` reindex.
+/// Symmetric to the cycle-1 fix for the typed-fields service-path
+/// UPDATE; this pins the FFI raw entry point.
+#[test]
+fn update_doogat_raw_syncs_auto_junction_on_references_change() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    let cat_a = match svc
+        .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        crate::sql_engine::SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let cat_b = match svc
+        .execute_sql("INSERT INTO category (label) VALUES ('beta')")
+        .unwrap()
+    {
+        crate::sql_engine::SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
+
+    let raw_id = "20260507130000";
+    let raw_a = format!(
+        "---\nid: {raw_id}\ntitle: Raw Link\ndate: 2026-05-07\ntype: link\n---\nFFI body\n---\n- target:: [[{cat_a}]]\n"
+    );
+    svc.create_doogat_raw(&raw_a, "ffi raw create").unwrap();
+
+    // Sanity: junction starts at cat_a.
+    let pre = svc
+        .execute_sql(&format!(
+            "SELECT link_id, target_id FROM link_target WHERE link_id = '{raw_id}'"
+        ))
+        .unwrap();
+    match pre {
+        crate::sql_engine::SqlResult::Rows { rows, .. } => {
+            assert_eq!(rows.len(), 1, "expected 1 junction row before update");
+            assert_eq!(rows[0][1], cat_a, "junction must point at cat_a pre-update");
+        }
+        other => panic!("expected Rows result, got {other:?}"),
+    }
+
+    // Raw FFI update: swap the REFERENCES line to cat_b.
+    let raw_b = format!(
+        "---\nid: {raw_id}\ntitle: Raw Link\ndate: 2026-05-07\ntype: link\n---\nFFI body\n---\n- target:: [[{cat_b}]]\n"
+    );
+    svc.update_doogat_raw(raw_id, &raw_b, "ffi raw update").unwrap();
+
+    // After update: exactly one junction row, pointing at cat_b. Old
+    // (link, cat_a) row must be cleared atomically with the index update.
+    let post = svc
+        .execute_sql(&format!(
+            "SELECT link_id, target_id FROM link_target WHERE link_id = '{raw_id}'"
+        ))
+        .unwrap();
+    match post {
+        crate::sql_engine::SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                1,
+                "update_doogat_raw on REFERENCES column must DELETE old junction rows, not just INSERT new ones (got {} rows)",
+                rows.len()
+            );
+            assert_eq!(
+                rows[0][1], cat_b,
+                "junction must point at cat_b after FFI raw update"
+            );
+        }
+        other => panic!("expected Rows result, got {other:?}"),
+    }
+}
+
 /// CLI/FFI must reject typed inputs with FK pointing at a row of the wrong
 /// type. PRD 00133 §Behavior changes: CLI used to silently accept; now
 /// rejects with REFERENCES_VIOLATION.

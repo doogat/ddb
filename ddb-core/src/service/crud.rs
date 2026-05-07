@@ -983,6 +983,30 @@ impl<G: GitBackend> DoogatService<G> {
         self.repo.commit_file(&rel_path, content, message)?;
         let parsed = parser::parse(content, &rel_path)?;
         self.index.index_doogat(&parsed)?;
+        // PRD 00134 doubt-review: same atomic-junction parity as
+        // `create_doogat_raw` (BLIND-T2) — when raw Markdown carries a
+        // registered typedef, re-materialize the typed table row +
+        // auto-junctions so a REFERENCES change is reflected in
+        // `<type>_<col>` immediately, not just after the next implicit
+        // `ensure_fresh` reindex. Key on `parsed.meta.id` (same source as
+        // `index_doogat`'s upsert key) so the typed row and the doogats
+        // row stay consistent on the unusual call where the input `id`
+        // arg disagrees with the frontmatter.
+        if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
+            if let Some(schema) = self
+                .list_type_schemas()?
+                .into_iter()
+                .find(|s| s.table_name == type_name)
+            {
+                let id_str = parsed
+                    .meta
+                    .id
+                    .as_ref()
+                    .map(|z| z.0.as_str())
+                    .unwrap_or(id);
+                self.index.materialize_single(&schema, id_str, &parsed)?;
+            }
+        }
         self.nosql_index_doogat(&parsed);
         Ok(())
     }
