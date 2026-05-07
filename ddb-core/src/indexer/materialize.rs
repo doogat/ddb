@@ -671,26 +671,55 @@ impl Index {
 
     /// Re-materialize a single doogat row (main table + junction tables).
     /// Clears old junction rows before inserting fresh ones.
+    ///
+    /// PRD 00134 blind-review I4: the DELETE-old-junctions + INSERT-row +
+    /// INSERT-new-junctions trio runs inside a SAVEPOINT so a failure in
+    /// `materialize_row` (NOT NULL/CHECK violation, etc.) rolls back the
+    /// junction DELETEs. Without the savepoint, junction rows would be
+    /// permanently lost for the failed doogat until the next full rebuild.
+    /// SQLite supports nested savepoints, so callers that already hold one
+    /// (e.g. `update_indexes_atomically`) keep working.
     pub(crate) fn materialize_single(
         &self,
         schema: &crate::types::TableSchema,
         id: &str,
         doogat: &crate::types::ParsedDoogat,
     ) -> Result<()> {
-        // Clear old junction rows for this doogat
-        for col in &schema.columns {
-            if col.references.is_some() {
-                self.conn.execute(
-                    &format!(
-                        "DELETE FROM \"{t}_{c}\" WHERE \"{t}_id\" = ?1",
-                        t = schema.table_name,
-                        c = col.name
-                    ),
-                    params![id],
-                )?;
-            }
+        // PRD 00134 blind-review C1 follow-up: typedefs installed via
+        // `install_bundled_type` (or a not-yet-rebuilt git pull) are
+        // registered as YAML doogats but the materialized SQLite table
+        // doesn't exist until a subsequent `reindex` / `rebuild`. Skip
+        // here in that pre-rebuild state — the next reindex will
+        // populate the table from scratch. This matches the prior
+        // contract of the install-bundled-type path.
+        let table_exists: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master \
+                 WHERE type = 'table' AND name = ?1",
+                rusqlite::params![&schema.table_name],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !table_exists {
+            return Ok(());
         }
-        self.materialize_row(schema, id, doogat)
+        self.with_savepoint("materialize_single", || {
+            // Clear old junction rows for this doogat
+            for col in &schema.columns {
+                if col.references.is_some() {
+                    self.conn.execute(
+                        &format!(
+                            "DELETE FROM \"{t}_{c}\" WHERE \"{t}_id\" = ?1",
+                            t = schema.table_name,
+                            c = col.name
+                        ),
+                        params![id],
+                    )?;
+                }
+            }
+            self.materialize_row(schema, id, doogat)
+        })
     }
 
     /// Insert a single data doogat's values into a materialized table.
