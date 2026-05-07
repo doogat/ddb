@@ -3566,6 +3566,72 @@ fn create_doogat_with_extra_routes_references_for_registered_type() {
     );
 }
 
+/// PRD 00134 blind-review C1: `create_doogat_with_extra` (the CLI/FFI
+/// single-typed-create surface) MUST populate the auto-junction
+/// `<type>_<col>` table atomically with the row write — same parity as
+/// SQL `INSERT` and GraphQL `createDoogat`/`batch_create`. Previously the
+/// path called only `index.index_doogat` (metadata-only), so junction
+/// tables stayed empty until the next `ddb query` triggered an implicit
+/// incremental reindex via `ensure_fresh`. CLI integration test 44.L
+/// passed for the wrong reason; this unit test queries the junction
+/// directly without going through any code path that triggers
+/// `ensure_fresh` so the bug surfaces deterministically.
+#[test]
+fn create_doogat_with_extra_populates_auto_junction_for_references_column() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    let cat_id = match svc
+        .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        crate::sql_engine::SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
+
+    let mut extra = std::collections::BTreeMap::new();
+    extra.insert(
+        "target".to_string(),
+        crate::types::Value::String(cat_id.clone()),
+    );
+    let parsed = svc
+        .create_doogat_with_extra("CLI link", &[], Some("link"), "", extra)
+        .unwrap();
+    let link_id = parsed
+        .meta
+        .id
+        .as_ref()
+        .map(|z| z.0.clone())
+        .expect("created doogat must have an id");
+
+    // Junction must be populated atomically — no rebuild, no reindex,
+    // no `ensure_fresh` between create and this assertion.
+    let post = svc
+        .execute_sql(&format!(
+            "SELECT link_id, target_id FROM link_target WHERE link_id = '{link_id}'"
+        ))
+        .unwrap();
+    match post {
+        crate::sql_engine::SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                1,
+                "create_doogat_with_extra must populate auto-junction \
+                 atomically with the row write; expected 1 row in \
+                 link_target for link_id={link_id}, got {} rows",
+                rows.len()
+            );
+            assert_eq!(
+                rows[0][1], cat_id,
+                "junction row must point at the referenced category"
+            );
+        }
+        other => panic!("expected Rows result, got {other:?}"),
+    }
+}
+
 /// CLI/FFI must reject typed inputs with FK pointing at a row of the wrong
 /// type. PRD 00133 §Behavior changes: CLI used to silently accept; now
 /// rejects with REFERENCES_VIOLATION.
