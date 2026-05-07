@@ -3632,6 +3632,56 @@ fn create_doogat_with_extra_populates_auto_junction_for_references_column() {
     }
 }
 
+/// PRD 00134 blind-review I2: `create_doogat_raw` (the FFI raw-Markdown
+/// surface) must populate auto-junctions atomically too. When the raw
+/// content carries a registered typedef + reference-zone `- col:: [[id]]`
+/// line, the `<type>_<col>` table must be populated alongside
+/// `index_doogat`.
+#[test]
+fn create_doogat_raw_populates_auto_junction_for_typed_references() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    let cat_id = match svc
+        .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        crate::sql_engine::SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
+
+    // Hand-craft a typed doogat with a registered type and a reference-zone
+    // entry. Three zones: frontmatter, body, reference section.
+    let raw_id = "20260507120000";
+    let raw = format!(
+        "---\nid: {raw_id}\ntitle: Raw Link\ndate: 2026-05-07\ntype: link\n---\nFFI body\n---\n- target:: [[{cat_id}]]\n"
+    );
+
+    let returned_id = svc.create_doogat_raw(&raw, "ffi raw create").unwrap();
+    assert_eq!(returned_id, raw_id);
+
+    let post = svc
+        .execute_sql(&format!(
+            "SELECT link_id, target_id FROM link_target WHERE link_id = '{raw_id}'"
+        ))
+        .unwrap();
+    match post {
+        crate::sql_engine::SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                1,
+                "create_doogat_raw must populate auto-junction atomically; \
+                 expected 1 row in link_target for link_id={raw_id}, got {} rows",
+                rows.len()
+            );
+            assert_eq!(rows[0][1], cat_id, "junction row must point at category");
+        }
+        other => panic!("expected Rows result, got {other:?}"),
+    }
+}
+
 /// CLI/FFI must reject typed inputs with FK pointing at a row of the wrong
 /// type. PRD 00133 §Behavior changes: CLI used to silently accept; now
 /// rejects with REFERENCES_VIOLATION.

@@ -213,6 +213,15 @@ impl<G: GitBackend> DoogatService<G> {
         self.repo
             .commit_file(&path, &content, &format!("create doogat {id_str}"))?;
         self.index.index_doogat(&parsed)?;
+        // PRD 00134 blind-review C1: typed creates must populate the
+        // typed-table row + auto-junctions atomically with `index_doogat`.
+        // Without this, `<type>_<col>` junctions stay empty until the next
+        // `ddb query` triggers an implicit `ensure_fresh` reindex — same
+        // parity gap that `batch_create` closed via
+        // `reindex_and_rematerialize` (see PRD 00129 §1).
+        if let Some(schema) = typedef.as_ref() {
+            self.index.materialize_single(schema, &id_str, &parsed)?;
+        }
         self.nosql_index_doogat(&parsed);
         parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
 
@@ -301,6 +310,19 @@ impl<G: GitBackend> DoogatService<G> {
         self.repo.commit_file(&rel_path, content, message)?;
         let parsed = parser::parse(content, &rel_path)?;
         self.index.index_doogat(&parsed)?;
+        // PRD 00134 blind-review I2: same atomic-junction parity as
+        // `create_doogat_with_extra` — when raw Markdown carries a
+        // registered typedef, populate the typed table + auto-junctions
+        // alongside the metadata index update.
+        if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
+            if let Some(schema) = self
+                .list_type_schemas()?
+                .into_iter()
+                .find(|s| s.table_name == type_name)
+            {
+                self.index.materialize_single(&schema, &id, &parsed)?;
+            }
+        }
         self.nosql_index_doogat(&parsed);
 
         Ok(id)
