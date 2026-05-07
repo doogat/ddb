@@ -3850,3 +3850,85 @@ fn service_batch_update_syncs_auto_junction_on_references_change() {
         _ => panic!("expected rows"),
     }
 }
+
+/// PRD 00134 cycle-2 review C2 task #1: pin that a service-path typed UPDATE
+/// with `unsetFields: ["<references_col>"]` clears the auto-junction. Previously
+/// `apply_field_updates` only removed from `parsed.meta.extra` (frontmatter),
+/// leaving the old `- col:: [[id]]` reference-zone line that
+/// `materialize_single → populate_junction_tables` re-INSERTs as a stale
+/// junction row.
+#[test]
+fn service_update_doogat_unset_clears_auto_junction_on_references_column() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat = match svc
+        .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm = match svc
+        .execute_sql(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://x.example.com', '{cat}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity: junction has (bm, cat).
+    let pre = svc
+        .execute_sql(&format!(
+            "SELECT bookmark_id, category_id FROM bookmark_category WHERE bookmark_id = '{bm}'"
+        ))
+        .unwrap();
+    match pre {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(rows.len(), 1, "expected 1 junction row before unset");
+            assert_eq!(rows[0][1], cat, "junction must point at cat pre-unset");
+        }
+        _ => panic!("expected rows"),
+    }
+
+    // Service-path typed UPDATE with unset of the REFERENCES column.
+    let empty: std::collections::BTreeMap<String, crate::types::Value> =
+        std::collections::BTreeMap::new();
+    svc.update_doogat_parsed(
+        &bm,
+        None,
+        None,
+        None,
+        None,
+        &ExtraFieldUpdates {
+            set: &empty,
+            unset: &["category".to_string()],
+        },
+    )
+    .unwrap();
+
+    // After unset: zero junction rows for this bookmark. The reference-zone
+    // line `- category:: [[cat]]` must be cleared too, not just frontmatter.
+    let post = svc
+        .execute_sql(&format!(
+            "SELECT bookmark_id, category_id FROM bookmark_category WHERE bookmark_id = '{bm}'"
+        ))
+        .unwrap();
+    match post {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                0,
+                "service UPDATE with unsetFields on REFERENCES column must clear auto-junction (got {} rows)",
+                rows.len()
+            );
+        }
+        _ => panic!("expected rows"),
+    }
+}
