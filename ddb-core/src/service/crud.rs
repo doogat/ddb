@@ -1289,6 +1289,27 @@ fn apply_field_updates(
     // Untyped doogats (no schema available) keep the legacy frontmatter dump
     // because there is no zone information to route by.
     if let Some(s) = schema {
+        // Schema-aware UNSET routing: typed REFERENCES columns must clear
+        // the reference-zone line too. Removing only from `parsed.meta.extra`
+        // (above) leaves the old `- col:: [[id]]` line, which
+        // `materialize_single → populate_junction_tables` re-INSERTs as a
+        // stale junction row. Route through `apply_updates_to_doogat` with
+        // empty value, which writes `- col:: [[]]` and gets stripped by the
+        // empty-value filter in `extract_multi_reference_values` (PRD 00134
+        // cycle-1 fix `58405f4`). PRD 00134 cycle-2 review C2 task #1.
+        let unset_blanks: std::collections::BTreeMap<String, String> = extra
+            .unset
+            .iter()
+            .filter(|key| {
+                s.columns
+                    .iter()
+                    .any(|c| &c.name == *key && c.references.is_some())
+            })
+            .map(|key| (key.clone(), String::new()))
+            .collect();
+        if !unset_blanks.is_empty() {
+            apply_updates_to_doogat(parsed, s, &unset_blanks);
+        }
         let stringified = stringify_extra_set_for_schema(extra.set, s);
         if !stringified.is_empty() {
             apply_updates_to_doogat(parsed, s, &stringified);
