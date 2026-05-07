@@ -3932,3 +3932,78 @@ fn service_update_doogat_unset_clears_auto_junction_on_references_column() {
         _ => panic!("expected rows"),
     }
 }
+
+/// PRD 00134 cycle-3 review escalation: pin that a service-path typed UPDATE
+/// with `unsetFields: ["<references_col>"]` on a doogat that NEVER had the
+/// REFERENCES column set does NOT append a spurious `- col:: [[]]` line to
+/// the reference section. Functional behavior is already correct (no ghost
+/// junction row); this guards the raw-markdown cosmetics: the cycle-2 fix
+/// routes typed-REFERENCES unsets through `apply_updates_to_doogat` →
+/// `update_reference_line(ref, key, "")`, and the helper's `!found` branch
+/// would otherwise append `- key:: [[]]` even when there is nothing to
+/// clear.
+#[test]
+fn service_update_doogat_unset_on_never_set_references_does_not_dirty_doc() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    // INSERT a bookmark WITHOUT setting the REFERENCES column.
+    let bm = match svc
+        .execute_sql("INSERT INTO bookmark (url) VALUES ('https://x.example.com')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Pre-condition: the doogat's raw markdown has no `- category::` line.
+    let pre = svc.read_doogat(&bm).unwrap();
+    assert!(
+        !pre.contains("- category::"),
+        "pre-condition: never-set REFERENCES col must not appear in raw markdown, got:\n{pre}"
+    );
+
+    // Service-path typed UPDATE with unset of the never-set REFERENCES column.
+    let empty: std::collections::BTreeMap<String, crate::types::Value> =
+        std::collections::BTreeMap::new();
+    svc.update_doogat_parsed(
+        &bm,
+        None,
+        None,
+        None,
+        None,
+        &ExtraFieldUpdates {
+            set: &empty,
+            unset: &["category".to_string()],
+        },
+    )
+    .unwrap();
+
+    // After unset on a never-set REFERENCES col: still no `- category::`
+    // line in raw markdown (cosmetic guard) and still no junction row
+    // (functional guard, already covered pre-fix).
+    let post = svc.read_doogat(&bm).unwrap();
+    assert!(
+        !post.contains("- category::"),
+        "unset on never-set REFERENCES col must not append `- category:: [[]]` line, got:\n{post}"
+    );
+    let junction = svc
+        .execute_sql(&format!(
+            "SELECT bookmark_id, category_id FROM bookmark_category WHERE bookmark_id = '{bm}'"
+        ))
+        .unwrap();
+    match junction {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                0,
+                "no junction row expected for never-set REFERENCES col"
+            );
+        }
+        _ => panic!("expected rows"),
+    }
+}

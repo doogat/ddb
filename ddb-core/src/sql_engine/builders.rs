@@ -843,8 +843,20 @@ fn update_body_section(body: &mut String, section_name: &str, new_val: &str) {
 
 fn update_reference_line(reference: &mut String, key: &str, new_val: &str) {
     let prefix = format!("- {key}::");
-    let new_line = format!("- {key}:: [[{new_val}]]");
     let lines: Vec<&str> = reference.lines().collect();
+    let has_existing = lines.iter().any(|l| l.starts_with(&prefix));
+
+    // PRD 00134 cycle-3 review escalation: clearing a REFERENCES column
+    // that was never set is a no-op. Without this guard, the `!found`
+    // branch below would append `- {key}:: [[]]` to the reference section,
+    // dirtying the raw markdown. `extract_multi_reference_values` already
+    // filters empty values so no ghost junction row is created either way,
+    // but the cosmetic regression matters for human-readable doogats.
+    if !has_existing && new_val.is_empty() {
+        return;
+    }
+
+    let new_line = format!("- {key}:: [[{new_val}]]");
     let mut result = Vec::new();
     let mut found = false;
 
