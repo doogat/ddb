@@ -961,6 +961,15 @@ impl<'a> SqlEngine<'a> {
     /// next index rebuild, but a half-applied SQL state is not, so the
     /// SAVEPOINT scope is exactly the three SQL writes:
     /// `index_doogat` → `update_materialized_row` → `sync_junction_tables_for_columns`.
+    ///
+    /// SAVEPOINT semantics are safe in both call modes: when there is no
+    /// outer transaction (autocommit, the single-row WHERE-id path), SQLite
+    /// implicitly begins one for the SAVEPOINT and commits it on RELEASE;
+    /// when an outer transaction is already open (`update_bulk_rows` may be
+    /// invoked while `self.txn` is `Some` via `commit_or_buffer_writes`), the
+    /// SAVEPOINT nests inside it and RELEASE just merges the inner work into
+    /// the outer transaction without auto-committing. Either way, ROLLBACK TO
+    /// undoes only the three SQL writes scoped above.
     fn update_indexes_atomically(
         &mut self,
         schema: &TableSchema,

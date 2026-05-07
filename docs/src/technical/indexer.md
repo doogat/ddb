@@ -160,6 +160,8 @@ Also creates empty tables for typedef-only types with no data doogats.
 
 `Index::populate_junction_tables(schema, id, doogat)` and `Index::sync_junction_tables_for_columns(schema, id, doogat, changed_cols)` are the two entry points that keep auto-junction `{type}_{ref_col}` tables aligned with a single doogat's REFERENCES values. Both used to be private helpers reachable only from `materialize_single` / `materialize_row`. PRD 00134 promoted them to `pub(crate)` (and exposed them on the `SqlBackend` trait) so the SQL `INSERT` and `UPDATE` paths in `ddb-core/src/sql_engine/dml.rs` share the same implementation as the full-rebuild path. See [`sql-engine.md`](sql-engine.md#auto-junction-sync-on-typed-insert-and-update-prd-00134) for the SQL-side wiring.
 
+Both helpers read REFERENCES values via `extract_multi_reference_values`, which filters empty / whitespace-only entries before the junction `INSERT`. This means `SET col = NULL` (SQL UPDATE) and `unsetFields: ["col"]` (service-path UPDATE) clear the auto-junction row cleanly: both paths end up writing `- col:: [[]]` to the reference zone, the filter strips that empty entry, and no ghost `<col>_id = ''` row lands in `{type}_{col}`.
+
 ### unique_together constraints
 
 Typedefs can declare composite unique constraints via the `unique_together` frontmatter field. The value is a list of column-name lists:
@@ -266,7 +268,7 @@ pub struct PaginatedSearchResult {
    - (b) else if a junction table `{type}_{field}` exists, JOIN through it on referenced doogat title;
    - (c) else direct LIKE on the materialized column.
 
-   Path (a) is preferred because the SQL INSERT path populates the materialized column but does not auto-populate the junction table (only full rebuilds do), so freshly-inserted data with no rebuild never matches via path (b).
+   Path (a) is preferred because it goes through the type table directly, which carries the REFERENCES column value the moment the row lands. Path (b) also works on fresh INSERTs since PRD 00134 — `SqlEngine::insert_materialized_row` and the typed UPDATE path now populate `{type}_{ref_col}` atomically with the row write, so the junction is never empty after a fresh write — but path (a) avoids the JOIN.
 4. **FK routes (no direct column match)**: when no candidate type table has a column literally named `<field>`, the resolver scans the SQLite catalog for routes that reach a referenced typedef via the `<field>_id` convention. Three shapes are tried, all UNIONed when present (see ddb#15 follow-up):
    - **Self-route** — the type table itself carries `<field>_id` (e.g. `link.category_id` REFERENCES `category(id)`).
    - **Auto-junction** — the materializer-generated `{type}_{field}` table with `{type}_id` + `{field}_id`.
