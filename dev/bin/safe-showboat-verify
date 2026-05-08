@@ -77,14 +77,20 @@ mkdir -p "${WORKTREE}/dev/local/walkthroughs"
 PASSED=0
 FAILED=0
 FAILED_PATHS=()
+INDEX=0
 
+# Each input gets its own per-index subdir so two walkthroughs with the same
+# basename (e.g. nested under different parent dirs) don't clobber each other.
 for ABS in "${ABSOLUTE_PATHS[@]}"; do
+  INDEX=$((INDEX + 1))
   BASENAME="$(basename "$ABS")"
-  COPY="${WORKTREE}/dev/local/walkthroughs/${BASENAME}"
+  REL_DIR="dev/local/walkthroughs/in-${INDEX}"
+  mkdir -p "${WORKTREE}/${REL_DIR}"
+  COPY="${WORKTREE}/${REL_DIR}/${BASENAME}"
   cp "$ABS" "$COPY"
 
   # Run verify from inside the worktree so any contamination lands there.
-  if ( cd "$WORKTREE" && showboat verify "dev/local/walkthroughs/${BASENAME}" ); then
+  if ( cd "$WORKTREE" && showboat verify "${REL_DIR}/${BASENAME}" ); then
     PASSED=$((PASSED + 1))
   else
     FAILED=$((FAILED + 1))
