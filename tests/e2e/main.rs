@@ -3,6 +3,7 @@ mod alter_table_rename;
 mod attachments;
 mod cascade_delete;
 mod checkboxes;
+mod cli_create_fk_freshness;
 mod collision;
 mod common;
 mod date_default;
