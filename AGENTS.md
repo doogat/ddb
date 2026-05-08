@@ -144,7 +144,7 @@ Agents **must not** edit walkthrough files directly (no `Edit`, `Write`, `sed`, 
 | `showboat exec <file> <lang> <code>` | Run code, capture real output |
 | `showboat pop <file>` | Remove last entry (undo failed exec) |
 | `showboat image <file> <path>` | Embed an image |
-| `showboat verify <file>` | Re-run all blocks, diff against recorded output |
+| `showboat verify <file>` | Re-run all blocks, diff against recorded output (see "Verifying walkthroughs safely" below — never run directly from project root) |
 | `showboat extract <file>` | Emit commands to recreate file (for rebuilding) |
 
 Output blocks contain real captured output. Direct file editing defeats the purpose — walkthroughs are proof of work.
@@ -179,6 +179,26 @@ showboat exec ... bash "kill \$(cat /tmp/ddb-serve.pid) && rm /tmp/ddb-serve.pid
 ### Maintenance
 
 Walkthroughs are local working documents (`dev/local/` is gitignored). They can be regenerated anytime. When CLI output changes cause `showboat verify` to fail, regenerate using `showboat extract` to get the original commands, then re-execute.
+
+### Verifying walkthroughs safely
+
+Never run `showboat verify <walkthrough>` directly from the project root. Use the wrapper:
+
+```text
+dev/bin/safe-showboat-verify <walkthrough> [<walkthrough>...]
+```
+
+`showboat verify` re-executes the walkthrough's bash blocks in **the caller's cwd**. The original `--workdir` from `showboat exec` is not recorded in the rendered Markdown, so verify has no way to honor it. If the cwd is itself a git repo, blocks that auto-commit (e.g. `ddb create`, `ddb query "INSERT INTO ..."`) write real commits to that repo. PRD 00135 documents two `git reset --hard` cleanups caused by this.
+
+The wrapper runs verify inside a throwaway `git worktree` under `dev/local/worktrees/showboat-verify-<id>/` and removes it on exit, so any contamination lands in the worktree, never on the active checkout.
+
+To confirm the wrapper still works after upgrading showboat or editing the wrapper, run the regression test:
+
+```text
+dev/bin/showboat-verify-no-contamination-test.sh
+```
+
+It runs the wrapper against a known walkthrough and asserts `git log master`, working tree, and project-root data dirs (`ddb/`, `.ddb/`, `.crdt/`, `.nodes/`) are unchanged afterward.
 
 ## Gotchas
 
