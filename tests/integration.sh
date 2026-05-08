@@ -2734,7 +2734,7 @@ pass "49: junction typedef setup with two category rows"
 # resulting doogat must have REFERENCES values in the reference zone.
 $DDB query "CREATE TABLE tw_membership (link VARCHAR(64) REFERENCES tw_category, parent VARCHAR(64) REFERENCES tw_category)" >/dev/null
 sleep 1
-TW_MEM_ID=$($DDB create --type tw_membership --title "M1" --set "link=$TW_CAT1" --set "parent=$TW_CAT2" 2>&1 | tr -d '[:space:]')
+TW_MEM_ID=$($DDB create --type tw_membership --title "M1" --set "link=$TW_CAT1" --set "parent=$TW_CAT2" | tr -d '[:space:]')
 [ -n "$TW_MEM_ID" ]
 pass "49: CLI create on junction-style typedef succeeds"
 
@@ -2775,7 +2775,7 @@ J134L_CAT=$($DDB query "INSERT INTO j134l_cat (title, label) VALUES ('lcat', 'al
 [ -n "$J134L_CAT" ]
 $DDB query "CREATE TABLE j134l_bm (url VARCHAR(200), category VARCHAR(64) REFERENCES j134l_cat)" >/dev/null
 sleep 1
-J134L_BM=$($DDB create --type j134l_bm --title "L1" --set "url=https://l.example" --set "category=$J134L_CAT" 2>&1 | tr -d '[:space:]')
+J134L_BM=$($DDB create --type j134l_bm --title "L1" --set "url=https://l.example" --set "category=$J134L_CAT" | tr -d '[:space:]')
 [ -n "$J134L_BM" ]
 J134L_JOIN=$($DDB query "SELECT bm.id FROM j134l_bm bm JOIN j134l_bm_category j ON j.j134l_bm_id = bm.id WHERE j.category_id = '$J134L_CAT'")
 printf '%s' "$J134L_JOIN" | grep -qF "$J134L_BM"
