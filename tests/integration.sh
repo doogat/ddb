@@ -2783,4 +2783,28 @@ pass "PRD 00134: CLI ddb create populates auto-junction for REFERENCES column (4
 cd "$TMPDIR"
 rm -rf "$J134L_DIR"
 
+# 50. PRD 00136 / #16 — cross-process FK freshness on `ddb create`.
+# The bug shape: process 1 creates a typed parent via `ddb create`, then
+# process 2 (a fresh `DoogatService`) creates a typed child whose FK
+# references the parent. Pre-fix, process 2's stale `SqlEngine` rejected
+# with REFERENCES_VIOLATION even though the parent existed in git and in
+# the global `doogats` index. Distinct from 49 / 44.L (which seed parents
+# via `ddb query "INSERT INTO ..."`); only the back-to-back CLI `ddb
+# create` shape reproduces the pre-PRD-00136 stale-index FK rejection.
+# Each `$DDB` invocation is a fresh process, so the regression lives at
+# the cross-`ddb create` boundary that this section exercises.
+INT136_DIR="$(mktemp -d)"
+cd "$INT136_DIR"
+$DDB init >/dev/null
+$DDB query "CREATE TABLE int136cat (fqn VARCHAR(255))" >/dev/null
+$DDB query "CREATE TABLE int136link (url TEXT, category TEXT REFERENCES int136cat)" >/dev/null
+sleep 1
+INT136_CAT=$($DDB create --type int136cat --title "Cat 136" --set "fqn=test.fqn")
+echo "$INT136_CAT" | grep -qE "^[0-9]{14}$"
+INT136_LINK=$($DDB create --type int136link --title "Link 136" --set "url=https://a" --set "category=$INT136_CAT")
+echo "$INT136_LINK" | grep -qE "^[0-9]{14}$"
+pass "PRD 00136 / #16: cross-process FK freshness on ddb create"
+cd "$TMPDIR"
+rm -rf "$INT136_DIR"
+
 echo "=== all integration tests passed ==="
