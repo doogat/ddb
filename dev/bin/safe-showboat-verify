@@ -16,7 +16,10 @@ Usage: dev/bin/safe-showboat-verify <walkthrough> [<walkthrough>...]
 
 Runs showboat verify against each walkthrough inside a temporary git worktree
 that is removed on exit. Exit code is 0 if all walkthroughs verify cleanly,
-1 if any verify reports diffs, 2 on usage error.
+1 if any verify reports diffs OR the wrapper hits an internal failure during
+verify, 2 on usage / setup error (bad arg, walkthrough not found, worktree
+add failed). Inspect stdout/stderr to disambiguate "verify reports diffs"
+from "wrapper failed during verify".
 
 Walkthrough paths can be absolute or relative to the project root.
 EOF
