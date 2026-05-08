@@ -34,6 +34,21 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
   usage
 fi
 
+# Fail fast if showboat is not on PATH. Without this guard, the wrapper would
+# still set up a worktree, then `showboat verify` would fail with "command
+# not found", and the wrapper would exit 1 (verify failure). The regression
+# test (dev/bin/showboat-verify-no-contamination-test.sh) treats exit 0/1 as
+# "wrapper ran" and only the post-state assertions fire — those pass when
+# nothing executed, so a missing showboat would let the test claim "no
+# contamination" without ever exercising the verify path. Exit 2 routes the
+# regression test into its `>= 2` branch ("wrapper failed before verify ran;
+# test inconclusive") and surfaces the real cause.
+if ! command -v showboat >/dev/null 2>&1; then
+  echo "error: showboat binary not found on PATH" >&2
+  echo "       install with: uv tool install showboat (or pipx install showboat)" >&2
+  exit 2
+fi
+
 # `git rev-parse` exits non-zero when not in a repo. With `set -e` that aborts
 # the script with git's own "fatal: not a git repository" message, so we don't
 # need an extra empty-string check here.
