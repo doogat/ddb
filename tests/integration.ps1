@@ -2685,5 +2685,36 @@ pass "PRD 00134: CLI ddb create populates auto-junction for REFERENCES column (4
 Pop-Location
 Remove-Item -Recurse -Force $J134L_DIR
 
+# 50. PRD 00136 / #16 - cross-process FK freshness on `ddb create`.
+# The bug shape: process 1 creates a typed parent via `ddb create`, then
+# process 2 (a fresh DoogatService) creates a typed child whose FK
+# references the parent. Pre-fix, process 2's stale SqlEngine rejected
+# with REFERENCES_VIOLATION even though the parent existed in git and in
+# the global doogats index. Distinct from 49 / 44.L (which seed parents
+# via ddb query "INSERT INTO ..."); only the back-to-back CLI ddb create
+# shape reproduces the pre-PRD-00136 stale-index FK rejection.
+#
+# PowerShell's $ErrorActionPreference = "Stop" does NOT apply to native
+# executables, so each ddb invocation needs an explicit $LASTEXITCODE
+# check or the test would pass vacuously on a regression.
+$INT136_DIR = New-TempDir
+Push-Location $INT136_DIR
+ddb init | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "50: ddb init failed" }
+ddb query "CREATE TABLE int136cat (fqn VARCHAR(255))" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "50: int136cat create failed" }
+ddb query "CREATE TABLE int136link (url TEXT, category TEXT REFERENCES int136cat)" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "50: int136link create failed" }
+Start-Sleep -Seconds 1
+$int136Cat = (ddb create --type int136cat --title "Cat 136" --set "fqn=test.fqn").Trim()
+if ($LASTEXITCODE -ne 0) { throw "50: ddb create int136cat exited $LASTEXITCODE" }
+if ($int136Cat -notmatch '^\d{14}$') { throw "50: int136cat id malformed: $int136Cat" }
+$int136Link = (ddb create --type int136link --title "Link 136" --set "url=https://a" --set "category=$int136Cat").Trim()
+if ($LASTEXITCODE -ne 0) { throw "50: ddb create int136link exited $LASTEXITCODE (FK validation regression?)" }
+if ($int136Link -notmatch '^\d{14}$') { throw "50: int136link id malformed: $int136Link" }
+pass "PRD 00136 / #16: cross-process FK freshness on ddb create"
+Pop-Location
+Remove-Item -Recurse -Force $INT136_DIR
+
 Cleanup
 Write-Host "=== all integration tests passed ==="
