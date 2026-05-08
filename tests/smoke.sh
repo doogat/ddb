@@ -185,6 +185,17 @@ echo "$SR_RESERVED" | grep -q "reserved"
 $DDB query "DROP TABLE smokerename_dst CASCADE" | grep -q "dropped"
 pass "alter table rename to + reserved-name rejection"
 
+# 11f. Cross-process FK freshness on `ddb create` (PRD 00136, #16).
+# Each `$DDB` invocation is a fresh process. The second `ddb create` must
+# resolve the FK against the category created by the first invocation
+# WITHOUT an intermediate `ddb reindex` — that's the whole point of #16.
+$DDB query "CREATE TABLE smoke136cat (fqn VARCHAR(255))" | grep -q "table smoke136cat created"
+$DDB query "CREATE TABLE smoke136link (url TEXT, category TEXT REFERENCES smoke136cat)" | grep -q "table smoke136link created"
+SMOKE136_CAT=$($DDB create --type smoke136cat --title "Cat 136" --set "fqn=test.fqn")
+echo "$SMOKE136_CAT" | grep -qE "^[0-9]{14}$"
+$DDB create --type smoke136link --title "Link 136" --set "url=https://a" --set "category=$SMOKE136_CAT" >/dev/null
+pass "cross-process FK freshness on ddb create (#16)"
+
 # 12. install bundled type
 $DDB type install contact | grep -q "installed type"
 pass "type install"

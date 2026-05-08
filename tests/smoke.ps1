@@ -262,6 +262,19 @@ $output = ddb query "DROP TABLE smokerename_dst CASCADE"
 if ($output -notmatch "dropped") { throw "rename cleanup drop failed" }
 pass "alter table rename to + reserved-name rejection"
 
+# 11f. Cross-process FK freshness on `ddb create` (PRD 00136, #16).
+# Each `ddb` call here spawns a fresh process. The second `ddb create`
+# must resolve the FK against the category created by the first call
+# WITHOUT an intermediate `ddb reindex` — that's the whole point of #16.
+$output = ddb query "CREATE TABLE smoke136cat (fqn VARCHAR(255))"
+if ($output -notmatch "table smoke136cat created") { throw "smoke136cat create failed" }
+$output = ddb query "CREATE TABLE smoke136link (url TEXT, category TEXT REFERENCES smoke136cat)"
+if ($output -notmatch "table smoke136link created") { throw "smoke136link create failed" }
+$SMOKE136_CAT = (ddb create --type smoke136cat --title "Cat 136" --set "fqn=test.fqn").Trim()
+if ($SMOKE136_CAT -notmatch '^\d{14}$') { throw "category id malformed: $SMOKE136_CAT" }
+ddb create --type smoke136link --title "Link 136" --set "url=https://a" --set "category=$SMOKE136_CAT" | Out-Null
+pass "cross-process FK freshness on ddb create (#16)"
+
 # 12. install bundled type
 $output = ddb type install contact
 if ($output -notmatch "installed type") { throw "type install failed" }
