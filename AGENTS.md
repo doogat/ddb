@@ -77,6 +77,9 @@ dev/bin/             Developer scripts
   release              Version bump, tag, push
   build-xcframework    iOS/macOS XCFramework from UniFFI bindings
   build-android        Android .aar from UniFFI bindings
+  safe-showboat-verify Sandboxed wrapper for `showboat verify` (PRD 00135)
+  showboat-verify-no-contamination-test.sh
+                       Regression test for verify-side contamination
 docs/src/           mdbook documentation (architecture, technical, guide)
 ```
 
