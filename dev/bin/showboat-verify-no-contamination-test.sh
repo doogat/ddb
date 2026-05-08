@@ -69,7 +69,14 @@ PRIMARY="${REPO_ROOT}/dev/local/walkthroughs/00050-alter-table-rename.md"
 if [[ -f "$PRIMARY" ]] && is_contaminating_fixture "$PRIMARY"; then
   FIXTURE="$PRIMARY"
 else
+  # Restrict the fallback scan to 00050+ walkthroughs. AGENTS.md documents this
+  # bound, and walkthroughs 00001-00049 use inline `cd /tmp/...` in every block
+  # so they would not exhibit the contamination pattern anyway — but enforcing
+  # the lower bound here keeps documentation and behavior in lockstep.
   while IFS= read -r -d '' candidate; do
+    base="$(basename "$candidate")"
+    # 00050-style basenames sort lexicographically; anything < "00050-" is older.
+    [[ "$base" < "00050-" ]] && continue
     if is_contaminating_fixture "$candidate"; then
       FIXTURE="$candidate"
       break
