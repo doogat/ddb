@@ -87,7 +87,7 @@ declare -a DATA_DIRS=("ddb" ".ddb" ".crdt" ".nodes")
 declare -A PRE_DATA_HASH=()
 for d in "${DATA_DIRS[@]}"; do
   if [[ -d "${REPO_ROOT}/${d}" ]]; then
-    PRE_DATA_HASH[$d]="$(find "${REPO_ROOT}/${d}" -type f -print0 | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}')"
+    PRE_DATA_HASH[$d]="$(find "${REPO_ROOT}/${d}" -type f -print0 | sort -z | xargs -0 shasum -a 256 2>/dev/null | shasum -a 256 | awk '{print $1}')"
   else
     PRE_DATA_HASH[$d]="MISSING"
   fi
@@ -135,7 +135,7 @@ pass "working tree status unchanged"
 
 for d in "${DATA_DIRS[@]}"; do
   if [[ -d "${REPO_ROOT}/${d}" ]]; then
-    POST_HASH="$(find "${REPO_ROOT}/${d}" -type f -print0 | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}')"
+    POST_HASH="$(find "${REPO_ROOT}/${d}" -type f -print0 | sort -z | xargs -0 shasum -a 256 2>/dev/null | shasum -a 256 | awk '{print $1}')"
   else
     POST_HASH="MISSING"
   fi
