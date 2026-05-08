@@ -23,14 +23,51 @@ if [[ ! -x "$WRAPPER" ]]; then
   exit 2
 fi
 
-# Pick a walkthrough fixture. 00050-alter-table-rename.md is the historically
-# contaminating one (PRD 00135). Fall back to any other walkthrough if missing.
-FIXTURE="${REPO_ROOT}/dev/local/walkthroughs/00050-alter-table-rename.md"
-if [[ ! -f "$FIXTURE" ]]; then
-  FIXTURE="$(find "${REPO_ROOT}/dev/local/walkthroughs" -maxdepth 1 -name '*.md' -print -quit 2>/dev/null || true)"
+# Pick a walkthrough fixture. The test must run on a walkthrough that exhibits
+# the contamination pattern — bash blocks that auto-commit (ddb init/create/
+# query/...) WITHOUT `cd /tmp/...` inside the block. Walkthroughs 00001-00049
+# use inline `cd /tmp/...` and would NOT contaminate even if verify ran in
+# repo cwd, so picking one of those would let the test pass vacuously.
+#
+# Strategy:
+#   1. Prefer 00050-alter-table-rename.md (the historically contaminating one
+#      from PRD 00135) if it qualifies.
+#   2. Otherwise scan walkthroughs for the pattern: contains
+#      `ddb {init|create|query|delete|update}` AND does NOT contain
+#      `cd /tmp` or `cd /var/tmp`.
+#   3. If none qualify, fail fast — running the test against a self-isolating
+#      walkthrough proves nothing.
+is_contaminating_fixture() {
+  local file="$1"
+  # Self-isolating walkthroughs `cd /tmp/...` (or /var/tmp) inside their bash
+  # blocks; they would not contaminate even if verify ran from repo cwd.
+  if grep -qE 'cd (/tmp|/var/tmp)' "$file"; then
+    return 1
+  fi
+  # The contamination risk requires ddb auto-commit commands.
+  if grep -qE 'ddb (init|create|query|delete|update)' "$file"; then
+    return 0
+  fi
+  return 1
+}
+
+FIXTURE=""
+PRIMARY="${REPO_ROOT}/dev/local/walkthroughs/00050-alter-table-rename.md"
+if [[ -f "$PRIMARY" ]] && is_contaminating_fixture "$PRIMARY"; then
+  FIXTURE="$PRIMARY"
+else
+  while IFS= read -r -d '' candidate; do
+    if is_contaminating_fixture "$candidate"; then
+      FIXTURE="$candidate"
+      break
+    fi
+  done < <(find "${REPO_ROOT}/dev/local/walkthroughs" -maxdepth 1 -name '*.md' -print0 | sort -z)
 fi
+
 if [[ -z "$FIXTURE" || ! -f "$FIXTURE" ]]; then
-  echo "error: no walkthrough fixture available under dev/local/walkthroughs/" >&2
+  echo "error: no contaminating walkthrough fixture available under dev/local/walkthroughs/" >&2
+  echo "       a contaminating fixture has bash blocks invoking ddb init/create/query" >&2
+  echo "       WITHOUT a 'cd /tmp/...' inside the block. Walkthroughs 00050+ qualify." >&2
   echo "       this test depends on local walkthroughs (gitignored)." >&2
   exit 2
 fi
