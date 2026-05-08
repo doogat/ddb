@@ -158,6 +158,11 @@ impl<G: GitBackend> DoogatService<G> {
         body: &str,
         extra: std::collections::BTreeMap<String, crate::types::Value>,
     ) -> Result<ParsedDoogat> {
+        // PRD 00136 / #16: align with sibling entry points (`update_doogat`,
+        // `read_doogat`, `delete_doogat`, `search`, `rename_doogat`) so every
+        // public service method that touches the index refreshes on entry.
+        // The actor path opts out via `set_skip_stale_check(true)` already.
+        self.ensure_fresh()?;
         let id = self.unique_id();
         let id_str = id.to_string();
 
