@@ -119,6 +119,14 @@ After `ddb init`, the on-disk layout is:
 
 Six primary paths move data through the system. Each path touches a specific subset of modules.
 
+### Service freshness contract
+
+Every public `DoogatService` method that performs validation against the SQLite index calls `ensure_fresh()` on entry. `ensure_fresh()` is a thin guard around `Index::rebuild_if_stale(&self.repo)`: when the stored HEAD OID in `_ddb_meta` differs from the current Git HEAD, it triggers `incremental_reindex()` for the changed paths only. The actor / server path opts out via `set_skip_stale_check(true)` because it keeps the index hot in-process between requests (see `service/mod.rs`).
+
+The methods bound by this contract: `create_doogat_with_extra`, `update_doogat_parsed`, `read_doogat`, `search`, `rename_doogat`, `delete_doogat`. Adding a new public service method that touches the index requires adding the same call. The CLI `commands/crud.rs` defence-in-depth pattern (`svc.rebuild_if_stale()?` after `DoogatService::open`) is independent of this — it covers the case where an FFI consumer constructs a service with `skip_stale_check = true` for unrelated reasons.
+
+Historical note: issue #16 (PRD 00136) surfaced when `create_doogat_with_extra` was the one entry point missing this call, leading to FK-validation rejections across consecutive `ddb create` invocations in the same shell. The user-visible bug was actually closed first by PRD 00134's `materialize_single` wiring (which keeps the on-disk type table in sync after each create); PRD 00136 codified the freshness call so the symmetry held.
+
 ### Create
 
 1. The CLI or server generates a new `DoogatId` from the current timestamp (see `parser::new_id()`).
