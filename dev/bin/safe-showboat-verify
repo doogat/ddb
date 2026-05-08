@@ -34,11 +34,10 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
   usage
 fi
 
+# `git rev-parse` exits non-zero when not in a repo. With `set -e` that aborts
+# the script with git's own "fatal: not a git repository" message, so we don't
+# need an extra empty-string check here.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-if [[ -z "$REPO_ROOT" ]]; then
-  echo "error: not inside a git repository" >&2
-  exit 2
-fi
 
 # Resolve absolute paths for every input before touching anything.
 ABSOLUTE_PATHS=()

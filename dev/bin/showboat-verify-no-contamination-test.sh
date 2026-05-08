@@ -11,11 +11,10 @@
 
 set -euo pipefail
 
+# `git rev-parse` exits non-zero when not in a repo. With `set -e` that aborts
+# the script with git's own "fatal: not a git repository" message, so we don't
+# need an extra empty-string check here.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-if [[ -z "$REPO_ROOT" ]]; then
-  echo "error: not inside a git repository" >&2
-  exit 2
-fi
 
 WRAPPER="${REPO_ROOT}/dev/bin/safe-showboat-verify"
 if [[ ! -x "$WRAPPER" ]]; then
