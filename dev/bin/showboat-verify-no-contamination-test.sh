@@ -31,9 +31,9 @@ fi
 # Strategy:
 #   1. Prefer 00050-alter-table-rename.md (the historically contaminating one
 #      from PRD 00135) if it qualifies.
-#   2. Otherwise scan walkthroughs for the pattern: any fenced code block
-#      that contains `ddb {init|create|query|delete|update}` AND lacks an
-#      inline `cd /tmp` or `cd /var/tmp` in THAT same block.
+#   2. Otherwise scan walkthroughs for the pattern: any ```bash fenced code
+#      block that contains `ddb {init|create|query|delete|update}` AND lacks
+#      an inline `cd /tmp` or `cd /var/tmp` in THAT same block.
 #   3. If none qualify, fail fast — running the test against a self-isolating
 #      walkthrough proves nothing.
 #
@@ -41,18 +41,26 @@ fi
 # its own shell, so a `cd /tmp` in block N does NOT carry over to block N+1.
 # Whole-file grep would miss this, classifying a walkthrough that has cd in
 # block 1 and a bare `ddb create` in block 2 as self-isolating when it isn't.
-# Restricting the scan to fenced code blocks also avoids prose false-positives
-# (e.g. a comment line "no cd /tmp needed" must not count as self-isolation).
+# Restricting the scan to ```bash fences also avoids prose false-positives
+# (e.g. a comment line "no cd /tmp needed" must not count as self-isolation)
+# AND non-executable ```text output blocks: showboat captures stdout inside
+# ```text fences, and that output can contain literal `ddb create ...`
+# strings (e.g. when a prior block's output mentions a created doogat) with
+# no `cd /tmp` to neutralize them. A scan that opened on any fence would
+# mark such a text block as contaminating and select a non-contaminating
+# walkthrough as the fixture, letting the regression test pass vacuously.
 is_contaminating_fixture() {
   local file="$1"
   awk '
     BEGIN { in_block = 0; has_ddb = 0; has_cd = 0; contaminating = 0 }
-    /^```/ {
+    /^```bash$/ {
+      if (!in_block) { in_block = 1 }
+      next
+    }
+    /^```$/ {
       if (in_block) {
         if (has_ddb && !has_cd) contaminating = 1
         in_block = 0; has_ddb = 0; has_cd = 0
-      } else {
-        in_block = 1
       }
       next
     }
