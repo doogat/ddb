@@ -4213,12 +4213,14 @@ fn service_update_doogat_unset_on_never_set_references_does_not_dirty_doc() {
 /// blind-review C1) is the single chokepoint that makes this work, and
 /// this test fails fast if that wiring ever silently regresses.
 ///
-/// `set_skip_stale_check(true)` on the second service is intentional:
-/// it removes the `ensure_fresh` safety net so the assertion exercises
-/// the on-disk SQLite state directly. Without `materialize_single`, the
-/// type table on disk would still be empty after the first service's
-/// commit landed and the FK validator on the next typed-create would
-/// reject — exactly the #16 reproduction shape.
+/// The test relies on `execute_sql` reading the on-disk SQLite state
+/// directly — it does not call `ensure_fresh` (see `service::sql.rs`),
+/// so a fresh `DoogatService::open` followed by a SELECT shows whatever
+/// `materialize_single` wrote during the first service's commit, no
+/// rebuild required. Without `materialize_single`, the type table on
+/// disk would still be empty after that commit and the FK validator on
+/// the next typed-create would reject — exactly the #16 reproduction
+/// shape.
 #[test]
 fn create_doogat_with_extra_materialised_row_visible_to_fresh_service() {
     let tmp = TempDir::new().unwrap();
@@ -4262,11 +4264,12 @@ fn create_doogat_with_extra_materialised_row_visible_to_fresh_service() {
         // Drop service A by leaving the scope.
     }
 
-    // Service B: a fresh service against the same repo, with stale-check
-    // disabled so we measure the on-disk materialised state without any
-    // implicit rebuild.
+    // Service B: a fresh service against the same repo. `execute_sql`
+    // does not call `ensure_fresh` (see `service::sql.rs`), so the SELECT
+    // measures the on-disk materialised state directly — no implicit
+    // rebuild can mask a regression where `materialize_single` failed to
+    // write the typed row during the first service's commit.
     let mut svc_b = DoogatService::open(tmp.path()).unwrap();
-    svc_b.set_skip_stale_check(true);
     let post_b = svc_b
         .execute_sql("SELECT id, fqn FROM category WHERE fqn = 'work.portals'")
         .unwrap();
