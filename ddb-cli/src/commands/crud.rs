@@ -20,6 +20,12 @@ pub(crate) fn create(
     set: Vec<String>,
 ) -> ddb_core::error::Result<()> {
     let svc = DoogatService::open(repo)?;
+    // PRD 00136 / #16: defence-in-depth, mirroring `attach`/`detach`.
+    // The service-layer `create_doogat_with_extra` already calls
+    // `ensure_fresh`, but a future FFI consumer could construct a
+    // service with `skip_stale_check = true` for unrelated reasons; the
+    // CLI's own freshness check stays cheap and self-consistent.
+    svc.rebuild_if_stale()?;
     let tags_list: Vec<String> = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
