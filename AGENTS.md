@@ -147,7 +147,7 @@ Agents **must not** edit walkthrough files directly (no `Edit`, `Write`, `sed`, 
 | `showboat exec <file> <lang> <code>` | Run code, capture real output |
 | `showboat pop <file>` | Remove last entry (undo failed exec) |
 | `showboat image <file> <path>` | Embed an image |
-| `showboat verify <file>` | Re-run all blocks, diff against recorded output (see "Verifying walkthroughs safely" below — never run directly from project root) |
+| `showboat verify <file>` | Re-run all blocks, diff against recorded output (never run directly from project root — creates real commits on master; see "Verifying walkthroughs safely" below) |
 | `showboat extract <file>` | Emit commands to recreate file (for rebuilding) |
 
 Output blocks contain real captured output. Direct file editing defeats the purpose — walkthroughs are proof of work.
