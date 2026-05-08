@@ -201,7 +201,7 @@ To confirm the wrapper still works after upgrading showboat or editing the wrapp
 dev/bin/showboat-verify-no-contamination-test.sh
 ```
 
-It runs the wrapper against a known walkthrough and asserts `git log master`, working tree, and project-root data dirs (`ddb/`, `.ddb/`, `.crdt/`, `.nodes/`) are unchanged afterward.
+It runs the wrapper against a known walkthrough (a 00050+ fixture exhibiting the contamination pattern) and asserts HEAD, working-tree status, project-root data dirs (`ddb/`, `.ddb/`, `.crdt/`, `.nodes/`), and the worktree list are unchanged afterward. If no contaminating fixture is available, the test fails fast rather than passing vacuously on a self-isolating walkthrough.
 
 ## Gotchas
 
