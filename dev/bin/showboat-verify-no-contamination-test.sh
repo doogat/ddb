@@ -32,23 +32,37 @@ fi
 # Strategy:
 #   1. Prefer 00050-alter-table-rename.md (the historically contaminating one
 #      from PRD 00135) if it qualifies.
-#   2. Otherwise scan walkthroughs for the pattern: contains
-#      `ddb {init|create|query|delete|update}` AND does NOT contain
-#      `cd /tmp` or `cd /var/tmp`.
+#   2. Otherwise scan walkthroughs for the pattern: any fenced code block
+#      that contains `ddb {init|create|query|delete|update}` AND lacks an
+#      inline `cd /tmp` or `cd /var/tmp` in THAT same block.
 #   3. If none qualify, fail fast — running the test against a self-isolating
 #      walkthrough proves nothing.
+#
+# Per-block evaluation matters: per AGENTS.md, each `showboat exec` runs in
+# its own shell, so a `cd /tmp` in block N does NOT carry over to block N+1.
+# Whole-file grep would miss this, classifying a walkthrough that has cd in
+# block 1 and a bare `ddb create` in block 2 as self-isolating when it isn't.
+# Restricting the scan to fenced code blocks also avoids prose false-positives
+# (e.g. a comment line "no cd /tmp needed" must not count as self-isolation).
 is_contaminating_fixture() {
   local file="$1"
-  # Self-isolating walkthroughs `cd /tmp/...` (or /var/tmp) inside their bash
-  # blocks; they would not contaminate even if verify ran from repo cwd.
-  if grep -qE 'cd (/tmp|/var/tmp)' "$file"; then
-    return 1
-  fi
-  # The contamination risk requires ddb auto-commit commands.
-  if grep -qE 'ddb (init|create|query|delete|update)' "$file"; then
-    return 0
-  fi
-  return 1
+  awk '
+    BEGIN { in_block = 0; has_ddb = 0; has_cd = 0; contaminating = 0 }
+    /^```/ {
+      if (in_block) {
+        if (has_ddb && !has_cd) contaminating = 1
+        in_block = 0; has_ddb = 0; has_cd = 0
+      } else {
+        in_block = 1
+      }
+      next
+    }
+    in_block {
+      if ($0 ~ /ddb (init|create|query|delete|update)/) has_ddb = 1
+      if ($0 ~ /cd (\/tmp|\/var\/tmp)/) has_cd = 1
+    }
+    END { exit contaminating ? 0 : 1 }
+  ' "$file"
 }
 
 FIXTURE=""
