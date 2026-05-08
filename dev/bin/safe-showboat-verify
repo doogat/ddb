@@ -64,7 +64,7 @@ cleanup() {
     rm -rf "$WORKTREE" 2>/dev/null || true
   fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 mkdir -p "${REPO_ROOT}/dev/local/worktrees"
 git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" >/dev/null
