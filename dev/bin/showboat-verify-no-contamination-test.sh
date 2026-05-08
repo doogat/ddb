@@ -11,6 +11,16 @@
 
 set -euo pipefail
 
+# Associative arrays (declare -A) require bash 4+. macOS ships /bin/bash 3.2.57
+# by default; running this test through that interpreter aborts later with a
+# confusing "declare: -A: invalid option". Fail fast here with an actionable
+# message instead.
+if (( BASH_VERSINFO[0] < 4 )); then
+  echo "error: this script requires bash 4 or later (got ${BASH_VERSION})" >&2
+  echo "       on macOS: brew install bash; then run via /opt/homebrew/bin/bash" >&2
+  exit 2
+fi
+
 # `git rev-parse` exits non-zero when not in a repo. With `set -e` that aborts
 # the script with git's own "fatal: not a git repository" message, so we don't
 # need an extra empty-string check here.

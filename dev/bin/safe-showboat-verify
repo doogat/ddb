@@ -95,9 +95,14 @@ trap 'cleanup; exit 143' TERM
 mkdir -p "${REPO_ROOT}/dev/local/worktrees"
 git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" >/dev/null
 
-# dev/local/ is gitignored, so the worktree won't have walkthroughs. Copy each
-# input into the worktree under its original relative path so that any other
-# files the walkthrough references (e.g. fixtures) still resolve.
+# dev/local/ is gitignored, so the worktree starts without walkthroughs. Copy
+# each input into the worktree under dev/local/walkthroughs/in-${INDEX}/ so
+# (a) showboat verify can find the file by relative path and (b) two
+# walkthroughs sharing a basename can't clobber each other (see per-index
+# loop below). Sibling files referenced by the walkthrough (e.g. ./fixtures/
+# foo.json relative to the walkthrough) are NOT copied — single-file by design.
+# Walkthroughs that depend on co-located fixtures will report verify failures
+# (exit 1) with the specific path in the failed list.
 mkdir -p "${WORKTREE}/dev/local/walkthroughs"
 
 PASSED=0
