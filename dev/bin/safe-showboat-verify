@@ -62,12 +62,21 @@ WORKTREE="${REPO_ROOT}/dev/local/worktrees/showboat-verify-${SUFFIX}"
 cleanup() {
   # Best-effort cleanup. The worktree may already be partially removed if a
   # previous step failed; ignore errors so the trap never masks the real exit.
+  # Idempotent — safe to call from EXIT and from a signal handler in the same
+  # invocation.
   if [[ -d "$WORKTREE" ]]; then
     git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" 2>/dev/null || true
     rm -rf "$WORKTREE" 2>/dev/null || true
   fi
 }
-trap cleanup EXIT INT TERM
+# EXIT trap covers normal exit (success, failure, set -e abort).
+# INT / TERM traps cleanup AND exit explicitly — without the explicit exit,
+# bash continues past the trap, and the next loop iteration would `mkdir -p`
+# a non-worktree path then run `showboat verify` in a directory whose `.git`
+# walks up to the main repo, defeating this wrapper's whole purpose.
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 mkdir -p "${REPO_ROOT}/dev/local/worktrees"
 git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" >/dev/null
