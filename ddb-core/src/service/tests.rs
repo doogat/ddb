@@ -4204,3 +4204,83 @@ fn service_update_doogat_unset_on_never_set_references_does_not_dirty_doc() {
         _ => panic!("expected rows"),
     }
 }
+
+/// PRD 00136: pins the cross-service materialisation contract that backs
+/// the #16 fix at the unit-test layer. After `create_doogat_with_extra`
+/// for a typed row, a *freshly-opened* `DoogatService` against the same
+/// repo must see the row in its materialised type table without first
+/// triggering a rebuild — `materialize_single` (wired by PRD 00134
+/// blind-review C1) is the single chokepoint that makes this work, and
+/// this test fails fast if that wiring ever silently regresses.
+///
+/// `set_skip_stale_check(true)` on the second service is intentional:
+/// it removes the `ensure_fresh` safety net so the assertion exercises
+/// the on-disk SQLite state directly. Without `materialize_single`, the
+/// type table on disk would still be empty after the first service's
+/// commit landed and the FK validator on the next typed-create would
+/// reject — exactly the #16 reproduction shape.
+#[test]
+fn create_doogat_with_extra_materialised_row_visible_to_fresh_service() {
+    let tmp = TempDir::new().unwrap();
+
+    // Service A: define typedefs and create the parent typed row.
+    {
+        let mut svc_a = DoogatService::init(tmp.path()).unwrap();
+        svc_a.reindex().unwrap();
+        svc_a
+            .execute_sql("CREATE TABLE category (fqn VARCHAR(255))")
+            .unwrap();
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert(
+            "fqn".to_string(),
+            crate::types::Value::String("work.portals".to_string()),
+        );
+        let parsed = svc_a
+            .create_doogat_with_extra("Cat A", &[], Some("category"), "", extra)
+            .unwrap();
+        let cat_id = parsed
+            .meta
+            .id
+            .as_ref()
+            .map(|z| z.0.clone())
+            .expect("created doogat must have an id");
+        // Sanity: visible in service A's view immediately (covers the
+        // already-pinned PRD 00134 atomicity behaviour).
+        let post_a = svc_a
+            .execute_sql(&format!(
+                "SELECT id FROM category WHERE id = '{cat_id}'"
+            ))
+            .unwrap();
+        match post_a {
+            SqlResult::Rows { rows, .. } => assert_eq!(
+                rows.len(),
+                1,
+                "service A must see its own materialised row immediately"
+            ),
+            other => panic!("expected Rows, got {other:?}"),
+        }
+        // Drop service A by leaving the scope.
+    }
+
+    // Service B: a fresh service against the same repo, with stale-check
+    // disabled so we measure the on-disk materialised state without any
+    // implicit rebuild.
+    let mut svc_b = DoogatService::open(tmp.path()).unwrap();
+    svc_b.set_skip_stale_check(true);
+    let post_b = svc_b
+        .execute_sql("SELECT id, fqn FROM category WHERE fqn = 'work.portals'")
+        .unwrap();
+    match post_b {
+        SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                1,
+                "fresh service must see the parent row in the materialised type \
+                 table without triggering a rebuild; otherwise `ddb create` from \
+                 a follow-up process can't FK-validate against it (issue #16)"
+            );
+            assert_eq!(rows[0][1], "work.portals", "row data must round-trip");
+        }
+        other => panic!("expected Rows, got {other:?}"),
+    }
+}
