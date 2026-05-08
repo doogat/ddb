@@ -112,13 +112,16 @@ pass "pre-state captured (HEAD=${PRE_HEAD:0:10})"
 # That is unrelated to contamination — we only care about side effects.
 # Exit ≥ 2 means the wrapper failed before verify ran (usage error, worktree
 # add failure, etc.); the test cannot prove no-contamination in that case.
+# Use mktemp so two parallel runs don't clobber each other's log.
+WRAPPER_LOG="$(mktemp -t safe-showboat-verify-test.XXXXXX)"
+trap 'rm -f "$WRAPPER_LOG"' EXIT
 WRAPPER_EXIT=0
-"$WRAPPER" "$FIXTURE" >/tmp/safe-showboat-verify-test.log 2>&1 || WRAPPER_EXIT=$?
+"$WRAPPER" "$FIXTURE" >"$WRAPPER_LOG" 2>&1 || WRAPPER_EXIT=$?
 pass "wrapper ran (exit=${WRAPPER_EXIT})"
 
 if (( WRAPPER_EXIT >= 2 )); then
   echo "    wrapper log:"
-  sed 's/^/      /' /tmp/safe-showboat-verify-test.log
+  sed 's/^/      /' "$WRAPPER_LOG"
   fail "wrapper failed before verify ran (exit=${WRAPPER_EXIT}); test inconclusive"
 fi
 
