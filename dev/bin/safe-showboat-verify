@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# safe-showboat-verify — run `showboat verify` against one or more walkthroughs
+# inside a throwaway git worktree, so any contamination produced by verify
+# (see PRD 00135) lands in the worktree, not on the active checkout.
+#
+# Background: showboat v0.6.1 `verify` re-executes a walkthrough's bash blocks
+# in the caller's cwd. Walkthroughs that omit `cd /tmp/...` and rely on the
+# original `--workdir` flag (not recorded in the markdown) cause the blocks
+# to run at project root, producing real commits on master.
+
+set -euo pipefail
+
+usage() {
+  cat <<EOF
+Usage: dev/bin/safe-showboat-verify <walkthrough> [<walkthrough>...]
+
+Runs showboat verify against each walkthrough inside a temporary git worktree
+that is removed on exit. Exit code is 0 if all walkthroughs verify cleanly,
+1 if any verify reports diffs, 2 on usage error.
+
+Walkthrough paths can be absolute or relative to the project root.
+EOF
+  exit 2
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+fi
+
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+  usage
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+if [[ -z "$REPO_ROOT" ]]; then
+  echo "error: not inside a git repository" >&2
+  exit 2
+fi
+
+# Resolve absolute paths for every input before touching anything.
+ABSOLUTE_PATHS=()
+for w in "$@"; do
+  if [[ "$w" = /* ]]; then
+    ABS="$w"
+  else
+    ABS="${REPO_ROOT}/${w}"
+  fi
+  if [[ ! -f "$ABS" ]]; then
+    echo "error: walkthrough not found: $ABS" >&2
+    exit 2
+  fi
+  ABSOLUTE_PATHS+=("$ABS")
+done
+
+# Throwaway worktree path. Random suffix keeps parallel invocations safe.
+SUFFIX="$(date +%s)-$$"
+WORKTREE="${REPO_ROOT}/dev/local/worktrees/showboat-verify-${SUFFIX}"
+
+cleanup() {
+  # Best-effort cleanup. The worktree may already be partially removed if a
+  # previous step failed; ignore errors so the trap never masks the real exit.
+  if [[ -d "$WORKTREE" ]]; then
+    git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" 2>/dev/null || true
+    rm -rf "$WORKTREE" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+mkdir -p "${REPO_ROOT}/dev/local/worktrees"
+git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" >/dev/null
+
+# dev/local/ is gitignored, so the worktree won't have walkthroughs. Copy each
+# input into the worktree under its original relative path so that any other
+# files the walkthrough references (e.g. fixtures) still resolve.
+mkdir -p "${WORKTREE}/dev/local/walkthroughs"
+
+PASSED=0
+FAILED=0
+FAILED_PATHS=()
+
+for ABS in "${ABSOLUTE_PATHS[@]}"; do
+  BASENAME="$(basename "$ABS")"
+  COPY="${WORKTREE}/dev/local/walkthroughs/${BASENAME}"
+  cp "$ABS" "$COPY"
+
+  # Run verify from inside the worktree so any contamination lands there.
+  if ( cd "$WORKTREE" && showboat verify "dev/local/walkthroughs/${BASENAME}" ); then
+    PASSED=$((PASSED + 1))
+  else
+    FAILED=$((FAILED + 1))
+    FAILED_PATHS+=("$ABS")
+  fi
+done
+
+TOTAL=$((PASSED + FAILED))
+echo "safe-showboat-verify: ${TOTAL} walkthroughs verified (passed: ${PASSED}, failed: ${FAILED})"
+if [[ $FAILED -gt 0 ]]; then
+  echo "failed walkthroughs:"
+  for p in "${FAILED_PATHS[@]}"; do
+    echo "  - $p"
+  done
+  exit 1
+fi
+exit 0
