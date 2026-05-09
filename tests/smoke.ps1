@@ -266,14 +266,9 @@ pass "alter table rename to + reserved-name rejection"
 # Each `ddb` call here spawns a fresh process. The second `ddb create`
 # must resolve the FK against the category created by the first call
 # WITHOUT an intermediate `ddb reindex` — that's the whole point of #16.
-#
-# PowerShell's $ErrorActionPreference = "Stop" does NOT apply to native
-# executables, so each ddb invocation that doesn't already match against
-# stdout needs an explicit $LASTEXITCODE check or a regression where ddb
-# returns a non-zero exit code (the exact #16 FK rejection) would pass
-# the test vacuously. The output-pattern asserts above (`-notmatch`) and
-# the id-shape assert on $SMOKE136_CAT cover the first three calls; the
-# second `ddb create` pipes to Out-Null and so needs the explicit guard.
+# The `ddb` wrapper at the top of this file checks $LASTEXITCODE and
+# throws on non-zero exit, so a regression where the second `ddb create`
+# rejects with REFERENCES_VIOLATION aborts this script via the wrapper.
 $output = ddb query "CREATE TABLE smoke136cat (fqn VARCHAR(255))"
 if ($output -notmatch "table smoke136cat created") { throw "smoke136cat create failed" }
 $output = ddb query "CREATE TABLE smoke136link (url TEXT, category TEXT REFERENCES smoke136cat)"
@@ -281,7 +276,6 @@ if ($output -notmatch "table smoke136link created") { throw "smoke136link create
 $SMOKE136_CAT = (ddb create --type smoke136cat --title "Cat 136" --set "fqn=test.fqn").Trim()
 if ($SMOKE136_CAT -notmatch '^\d{14}$') { throw "category id malformed: $SMOKE136_CAT" }
 ddb create --type smoke136link --title "Link 136" --set "url=https://a" --set "category=$SMOKE136_CAT" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "ddb create smoke136link exited $LASTEXITCODE (cross-process FK regression?)" }
 pass "cross-process FK freshness on ddb create (#16)"
 
 # 12. install bundled type
