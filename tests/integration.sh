@@ -2798,7 +2798,6 @@ cd "$INT136_DIR"
 $DDB init >/dev/null
 $DDB query "CREATE TABLE int136cat (fqn VARCHAR(255))" >/dev/null
 $DDB query "CREATE TABLE int136link (url TEXT, category TEXT REFERENCES int136cat)" >/dev/null
-sleep 1
 INT136_CAT=$($DDB create --type int136cat --title "Cat 136" --set "fqn=test.fqn")
 echo "$INT136_CAT" | grep -qE "^[0-9]{14}$"
 INT136_LINK=$($DDB create --type int136link --title "Link 136" --set "url=https://a" --set "category=$INT136_CAT")
