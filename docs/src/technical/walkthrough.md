@@ -121,25 +121,29 @@ Six primary paths move data through the system. Each path touches a specific sub
 
 ### Service freshness contract
 
-Every public `DoogatService` method that performs validation against the SQLite index calls `ensure_fresh()` on entry. `ensure_fresh()` is a thin guard around `Index::rebuild_if_stale(&self.repo)`: when the stored HEAD OID in `_ddb_meta` differs from the current Git HEAD, it triggers `incremental_reindex()` for the changed paths only. The actor / server path opts out via `set_skip_stale_check(true)` because it keeps the index hot in-process between requests (see `service/mod.rs`).
+Most public `DoogatService` methods that perform validation against the SQLite index call `ensure_fresh()` on entry. `ensure_fresh()` is a thin guard around `Index::rebuild_if_stale(&self.repo)`: when the stored HEAD OID in `_ddb_meta` differs from the current Git HEAD, it triggers `incremental_reindex()` for the changed paths only. The actor / server path opts out via `set_skip_stale_check(true)` because it keeps the index hot in-process between requests (see `service/mod.rs`). The "Known gaps" subsection below enumerates the public methods that perform index validation but do not call `ensure_fresh()` today.
 
-Methods bound by this contract (call sites in `service/crud.rs`, `service/search.rs`, `service/utility.rs`):
+Methods bound by this contract (call sites in `service/crud.rs`, `service/search.rs`, `service/utility.rs`, `service/discovery.rs`):
 
 - **Reads** — `read_doogat`, `get_doogat_parsed`, `get_doogats_batch`.
 - **Typed writes** — `create_doogat_with_extra`, `update_doogat_parsed`, `delete_doogat`.
 - **Batch typed writes** — `batch_create`, `batch_update`.
 - **Search / list / aggregate** — `search`, `search_paginated`, `search_paginated_filtered`, `list_doogats_filtered`, `count_doogats_filtered`, `list_tags`, `query_tags`, `aggregate_query`, `query_raw_with_params`, `query_raw_with_columns`, `typed_filtered_list`.
 - **Schema introspection** — `infer_schema`.
+- **Discovery / sequence** — `unlinked_mentions`, `suggest_links`, `stale_doogats`, `orphan_doogats`, `recent_doogats`, `link_density`, `sequence_tree`, `sequence_breadcrumb`, `broken_sequences`, `sequence_info`, `sequence_children`, `backlink_ids`, `all_doogat_ids`.
 
-Adding a new public service method that touches the index requires adding the same call. The CLI `commands/crud.rs` defence-in-depth pattern (`svc.rebuild_if_stale()?` after `DoogatService::open`) is independent of this — it provides redundancy against a future refactor that drops the service-layer guard.
+Adding a new public service method that performs index validation requires adding the same call. The CLI `commands/crud.rs` defence-in-depth pattern (`svc.rebuild_if_stale()?` after `DoogatService::open`) is independent of this — it provides redundancy against a future refactor that drops the service-layer guard.
 
 **Methods that intentionally bypass the contract:**
 
-- `create_doogat_raw`, `update_doogat_raw`, `read_doogat_raw` — raw-Markdown paths that do not validate against the SQLite index. They commit directly and let `index_doogat` (and, for `create_doogat_raw`, `materialize_single`) catch up the index after the write. FFI consumers that route typed operations through the raw paths are responsible for their own freshness guarantees.
+- `create_doogat_raw` — raw-Markdown create that derives its file path from the parsed `id` + type metadata rather than querying the index. Commits, then runs `index_doogat` and (for typed payloads) `materialize_single` to catch up the index after the write.
+- `read_doogat_raw` — takes a git-relative `path` directly and does not query the index for path resolution.
 
-**Known gaps (tracked in PRD 00136 review-c1):**
+**Known gaps:**
 
-- `rename_doogat` (`utility.rs`) does not currently call `ensure_fresh()` even though it queries the index via `self.index.resolve_path(id)`. A cross-process rename of a recently-committed doogat could fail with a stale "doogat not found" error. PRD 00136 documented this gap rather than fixing it; a follow-up will land alongside the FFI-create parity work.
+- `rename_doogat` (`utility.rs`) calls `self.index.resolve_path(id)` without `ensure_fresh()`. A cross-process rename of a recently-committed doogat could fail with a stale "doogat not found" error. PRD 00136 documented this gap rather than fixing it; a follow-up will land alongside the FFI-create parity work.
+- `update_doogat_raw` (`crud.rs`) calls `self.index.resolve_path(id)` without `ensure_fresh()` — same staleness shape as `rename_doogat`. A cross-process raw update of a recently-committed doogat can fail with a stale "doogat not found" error.
+- `execute_sql` / `execute_batch` (`sql.rs`) perform FK validation and schema lookup against the index but do not call `ensure_fresh()`. Today's mitigations: the CLI `query` handler calls `svc.rebuild_if_stale()?` on entry (see `commands/crud.rs`), and the actor / GraphQL path keeps the index hot via `set_skip_stale_check(true)`. A direct-FFI consumer that calls `execute_sql` outside both surfaces is responsible for its own freshness guarantees.
 
 Historical note: issue #16 (PRD 00136) surfaced when `create_doogat_with_extra` was the one typed-write entry point missing the `ensure_fresh()` call, leading to FK-validation rejections across consecutive `ddb create` invocations in the same shell. The user-visible bug was actually closed first by PRD 00134's `materialize_single` wiring (which keeps the on-disk type table in sync after each create); PRD 00136 codified the freshness call so the symmetry held across the typed-write surface.
 
