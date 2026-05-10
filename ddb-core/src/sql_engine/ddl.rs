@@ -226,8 +226,8 @@ impl<'a> SqlEngine<'a> {
         let parsed = parser::parse(&typedef_content, &typedef_path)?;
         self.index.index_doogat(&parsed)?;
 
-        // Create materialized SQLite table (also lands the singleton-lock
-        // index from T8 because schema.singleton is true).
+        // Create the materialized SQLite table and any attached indexes,
+        // including the singleton-lock when `schema.singleton` is true.
         self.create_materialized_table(&schema)?;
 
         // Index + materialize the seed row last so the singleton-lock
@@ -366,6 +366,16 @@ impl<'a> SqlEngine<'a> {
                     [],
                 )?;
             }
+        }
+
+        if schema.singleton {
+            self.index.sql_conn().execute(
+                &format!(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS \"{}_singleton_lock\" ON \"{}\" ((1))",
+                    schema.table_name, schema.table_name
+                ),
+                [],
+            )?;
         }
 
         Ok(())

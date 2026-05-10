@@ -989,9 +989,12 @@ columns:
 }
 
 #[test]
-fn singleton_lock_blocks_direct_second_insert() {
-    // PRD 00139 §3 layer 3: a direct INSERT bypassing the service path
-    // is rejected by SQLite's UNIQUE constraint on the second row.
+fn singleton_materialize_second_row_returns_structured_violation() {
+    // PRD 00139 §3 layer 3: the production materialize path must reject a
+    // second row in a SINGLETON typedef with a structured error, not
+    // silently replace the existing row.
+    use crate::error::{codes, DoogatError, ErrorValue};
+    use crate::sql_engine::schema_from_parsed;
     use crate::traits::mock::MockSource;
 
     let typedef_content = "\
@@ -1012,25 +1015,128 @@ columns:
         typedef_content.into(),
     );
 
+    let typedef = crate::parser::parse(typedef_content, "ddb/_typedef/20260510121000.md").unwrap();
+    let schema = schema_from_parsed(&typedef).unwrap();
     let idx = in_memory_index();
     idx.rebuild(&source).unwrap();
 
-    // First insert succeeds.
-    idx.conn
-            .execute(
-                "INSERT INTO app_config (id, title, date, updated_at, theme) VALUES ('1', 'A', NULL, NULL, 'dark')",
-                [],
-            )
-            .expect("first INSERT into singleton typedef should succeed");
+    let first = crate::parser::parse(
+        "\
+---
+id: 20260510121100
+title: First Config
+type: app_config
+theme: dark
+---\n",
+        "ddb/20260510121100.md",
+    )
+    .unwrap();
+    idx.index_doogat(&first).unwrap();
+    idx.materialize_single(&schema, "20260510121100", &first)
+        .expect("first materialize into singleton typedef should succeed");
 
-    // Second direct insert must fail on the singleton lock.
-    let result = idx.conn.execute(
-            "INSERT INTO app_config (id, title, date, updated_at, theme) VALUES ('2', 'B', NULL, NULL, 'light')",
-            [],
-        );
-    assert!(
-        result.is_err(),
-        "second direct INSERT must be rejected by singleton lock"
+    let second = crate::parser::parse(
+        "\
+---
+id: 20260510121200
+title: Second Config
+type: app_config
+theme: light
+---\n",
+        "ddb/20260510121200.md",
+    )
+    .unwrap();
+    idx.index_doogat(&second).unwrap();
+    let err = idx
+        .materialize_single(&schema, "20260510121200", &second)
+        .expect_err("second materialize must reject with singleton violation");
+    match err {
+        DoogatError::Structured { code, context, .. } => {
+            assert_eq!(code, codes::SINGLETON_VIOLATION);
+            let table = context
+                .iter()
+                .find(|(k, _)| k == "table")
+                .map(|(_, v)| v)
+                .expect("table context entry");
+            assert_eq!(table, &ErrorValue::String("app_config".into()));
+            let existing = context
+                .iter()
+                .find(|(k, _)| k == "existing_id")
+                .map(|(_, v)| v)
+                .expect("existing_id context entry");
+            assert_eq!(existing, &ErrorValue::String("20260510121100".into()));
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+}
+
+#[test]
+fn singleton_materialize_same_id_rematerialize_succeeds() {
+    // PRD 00139 §3 layer 3: re-materializing the same row id during a
+    // rebuild/update is still legal; the singleton guard only blocks a
+    // different id from taking a second slot.
+    use crate::sql_engine::schema_from_parsed;
+    use crate::traits::mock::MockSource;
+
+    let typedef_content = "\
+---
+id: 20260510121300
+title: app_config
+type: _typedef
+singleton: true
+columns:
+  - name: theme
+    data_type: TEXT
+    zone: frontmatter
+---\n";
+
+    let mut source = MockSource::new();
+    source.files.insert(
+        "ddb/_typedef/20260510121300.md".into(),
+        typedef_content.into(),
+    );
+
+    let typedef = crate::parser::parse(typedef_content, "ddb/_typedef/20260510121300.md").unwrap();
+    let schema = schema_from_parsed(&typedef).unwrap();
+    let idx = in_memory_index();
+    idx.rebuild(&source).unwrap();
+
+    let original = crate::parser::parse(
+        "\
+---
+id: 20260510121400
+title: App Config
+type: app_config
+theme: dark
+---\n",
+        "ddb/20260510121400.md",
+    )
+    .unwrap();
+    idx.index_doogat(&original).unwrap();
+    idx.materialize_single(&schema, "20260510121400", &original)
+        .expect("first materialize should succeed");
+
+    let updated = crate::parser::parse(
+        "\
+---
+id: 20260510121400
+title: App Config
+type: app_config
+theme: light
+---\n",
+        "ddb/20260510121400.md",
+    )
+    .unwrap();
+    idx.index_doogat(&updated).unwrap();
+    idx.materialize_single(&schema, "20260510121400", &updated)
+        .expect("same-id rematerialize must succeed");
+
+    let rows = idx
+        .query_raw("SELECT id, theme FROM app_config")
+        .expect("query rematerialized singleton row");
+    assert_eq!(
+        rows,
+        vec![vec![String::from("20260510121400"), String::from("light"),]]
     );
 }
 

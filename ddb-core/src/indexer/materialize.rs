@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use crate::error::Result;
+use crate::error::{DoogatError, Result};
 use crate::traits::DoogatSource;
 use crate::types::ParsedDoogat;
 
@@ -757,6 +757,26 @@ impl Index {
         id: &str,
         doogat: &crate::types::ParsedDoogat,
     ) -> Result<()> {
+        if schema.singleton {
+            let existing_id: Option<String> = self
+                .conn
+                .query_row(
+                    &format!(
+                        "SELECT id FROM \"{}\" WHERE id != ?1 LIMIT 1",
+                        schema.table_name
+                    ),
+                    params![id],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(existing_id) = existing_id {
+                return Err(DoogatError::singleton_violation(
+                    schema.table_name.clone(),
+                    existing_id,
+                ));
+            }
+        }
+
         let updated_at: Option<String> = self
             .conn
             .query_row(

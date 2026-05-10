@@ -1425,7 +1425,9 @@ impl<'a> SqlEngine<'a> {
         self.index
             .sql_conn()
             .execute(&sql, params.as_slice())
-            .map_err(|e| classify_materialized_insert_error(e, schema, col_values))?;
+            .map_err(|e| {
+                classify_materialized_insert_error(e, self.index.sql_conn(), schema, col_values)
+            })?;
         Ok(())
     }
 
@@ -1506,6 +1508,7 @@ impl<'a> SqlEngine<'a> {
 /// to the legacy `DoogatError::SqlEngine(message)`.
 fn classify_materialized_insert_error(
     err: rusqlite::Error,
+    conn: &rusqlite::Connection,
     schema: &TableSchema,
     col_values: &BTreeMap<String, String>,
 ) -> DoogatError {
@@ -1513,6 +1516,16 @@ fn classify_materialized_insert_error(
     if let rusqlite::Error::SqliteFailure(ref ffi_err, ref msg) = err {
         if ffi_err.code == ErrorCode::ConstraintViolation {
             if let Some(detail) = msg.as_deref() {
+                if is_singleton_lock_failure(detail, &schema.table_name) {
+                    if let Some(existing_id) =
+                        lookup_singleton_existing_id(conn, &schema.table_name)
+                    {
+                        return DoogatError::singleton_violation(
+                            schema.table_name.clone(),
+                            existing_id,
+                        );
+                    }
+                }
                 if let Some(cols) = parse_unique_failure_columns(detail, &schema.table_name) {
                     let values: Vec<String> = cols
                         .iter()
@@ -1524,6 +1537,27 @@ fn classify_materialized_insert_error(
         }
     }
     DoogatError::SqlEngine(err.to_string())
+}
+
+fn lookup_singleton_existing_id(conn: &rusqlite::Connection, table_name: &str) -> Option<String> {
+    conn.query_row(
+        &format!("SELECT id FROM \"{table_name}\" LIMIT 1"),
+        [],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+fn is_singleton_lock_failure(detail: &str, table_name: &str) -> bool {
+    let prefix = "UNIQUE constraint failed: ";
+    let rest = match detail.strip_prefix(prefix) {
+        Some(rest) => rest,
+        None => return false,
+    };
+    let index_name = format!("{table_name}_singleton_lock");
+    rest == format!("index '{index_name}'")
+        || rest == format!("index \"{index_name}\"")
+        || rest == format!("index `{index_name}`")
 }
 
 /// Pull the conflicting column names out of SQLite's

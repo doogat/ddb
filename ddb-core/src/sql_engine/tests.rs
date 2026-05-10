@@ -1759,6 +1759,57 @@ fn unique_constraint_failure_emits_structured_unique_violation_prd_00129() {
     }
 }
 
+#[test]
+fn singleton_lock_failure_emits_structured_singleton_violation_prd_00139() {
+    use crate::error::{DoogatError, ErrorValue};
+
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE app_config (theme TEXT) SINGLETON")
+        .unwrap();
+    engine
+        .execute("INSERT INTO app_config (theme) VALUES ('dark')")
+        .unwrap();
+
+    let existing_id = index
+        .query_raw("SELECT id FROM app_config LIMIT 1")
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("singleton row exists")
+        .into_iter()
+        .next()
+        .expect("singleton row id");
+
+    let schema = engine.load_schema("app_config").unwrap();
+    let mut col_values = BTreeMap::new();
+    col_values.insert("theme".to_string(), "light".to_string());
+    let err = engine
+        .insert_materialized_row(&schema, "20260510121500", &col_values)
+        .expect_err("singleton lock failure should be classified");
+    match err {
+        DoogatError::Structured {
+            code, ref context, ..
+        } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+            let table = context
+                .iter()
+                .find(|(k, _)| k == "table")
+                .map(|(_, v)| v)
+                .expect("table context entry");
+            assert_eq!(table, &ErrorValue::String("app_config".into()));
+            let existing = context
+                .iter()
+                .find(|(k, _)| k == "existing_id")
+                .map(|(_, v)| v)
+                .expect("existing_id context entry");
+            assert_eq!(existing, &ErrorValue::String(existing_id));
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got: {other:?}"),
+    }
+}
+
 // ── PRD 00129 §2: ON DELETE action parsing ──
 
 #[test]
@@ -2233,6 +2284,23 @@ fn create_table_with_singleton_marker_sets_flag_prd_00139() {
         schema.singleton,
         "SINGLETON marker on CREATE TABLE must set schema.singleton"
     );
+}
+
+#[test]
+fn create_table_singleton_creates_lock_index_immediately_prd_00139() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE app_config (theme TEXT) SINGLETON")
+        .unwrap();
+
+    let rows = index
+        .query_raw(
+            "SELECT name FROM sqlite_master \
+             WHERE type='index' AND tbl_name='app_config' AND name='app_config_singleton_lock'",
+        )
+        .unwrap();
+    assert_eq!(rows, vec![vec![String::from("app_config_singleton_lock")]]);
 }
 
 #[test]
