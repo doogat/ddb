@@ -1,4 +1,5 @@
 mod alter_column_type;
+mod alter_singleton;
 mod alter_table_rename;
 mod attachments;
 mod cascade_delete;
