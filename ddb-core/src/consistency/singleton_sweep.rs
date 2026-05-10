@@ -395,8 +395,7 @@ Body for {id}
         );
         repo.commit_file(
             "ddb/_conflicts/20260601000000.md",
-            &format!(
-                "\
+            "\
 ---
 id: 20260601000000
 title: Config 20260601000000
@@ -409,8 +408,7 @@ singleton_conflict_resolved_at: 9000-0000-sweep001
 Body for 20260601000000
 ---
 - source:: alpha
-"
-            ),
+",
             "already quarantined",
         )
         .unwrap();

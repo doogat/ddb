@@ -424,8 +424,7 @@ mod tests {
         // happy path.
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
-        let mut singleton_schema =
-            make_table_schema("app_config", vec![simple_column("theme")]);
+        let mut singleton_schema = make_table_schema("app_config", vec![simple_column("theme")]);
         singleton_schema.singleton = true;
 
         let schema = build_schema(actor, pool, vec![singleton_schema], None).unwrap();

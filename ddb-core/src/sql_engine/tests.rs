@@ -1970,7 +1970,7 @@ fn singleton_default_values_rejects_missing_required_default_prd_00139() {
     // git write).
     let schemas = index.load_all_typedefs(&repo);
     assert!(
-        schemas.get("app_config").is_none(),
+        !schemas.contains_key("app_config"),
         "rejected CREATE TABLE must not install the typedef"
     );
 }
