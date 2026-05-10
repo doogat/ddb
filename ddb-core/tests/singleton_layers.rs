@@ -134,3 +134,54 @@ Direct git write to trigger materializer enforcement
     assert_eq!(layer2.message, expected_message);
     assert_eq!(layer3.message, expected_message);
 }
+
+#[test]
+fn execute_sql_refreshes_stale_singleton_index_before_dml_precheck_prd_00139() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+
+    svc.execute_sql("CREATE TABLE app_config (theme TEXT) SINGLETON")
+        .unwrap();
+
+    let existing_id = "20260510121500";
+    let existing_path = format!("ddb/{existing_id}.md");
+    let existing_row = format!(
+        "\
+---
+id: {existing_id}
+title: ExternalRow
+type: app_config
+theme: dark
+---
+Direct git write that bypasses service-side INSERT
+"
+    );
+    svc.commit_file(
+        &existing_path,
+        &existing_row,
+        "add singleton row outside service",
+    )
+    .unwrap();
+
+    assert!(
+        svc.is_index_stale().unwrap(),
+        "direct git write must leave the materialized index stale until ensure_fresh runs"
+    );
+
+    let err = svc
+        .execute_sql("INSERT INTO app_config (title, theme) VALUES ('second', 'light')")
+        .expect_err("stale-index second insert must reject after execute_sql refreshes");
+    let structured = extract_singleton_structured(err, "execute_sql freshness");
+
+    assert_eq!(structured.code, codes::SINGLETON_VIOLATION);
+    assert_eq!(structured.table, "app_config");
+    assert_eq!(structured.existing_id, existing_id);
+    assert_eq!(
+        structured.message,
+        format!(
+            "SINGLETON constraint violated: {} already holds row {}",
+            structured.table, structured.existing_id
+        )
+    );
+}
