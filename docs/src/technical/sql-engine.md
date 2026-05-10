@@ -33,6 +33,10 @@ All methods take `&mut self`. The CLI creates `SqlEngine` per invocation; the se
 | `ALTER TABLE foo DROP TITLE TEMPLATE` | Remove title template from typedef |
 | `ALTER TABLE foo SET SEARCH KEY col` | Set the column substring-matched by `field=val` searches |
 | `ALTER TABLE foo DROP SEARCH KEY` | Reset to the default (`title`) |
+| `CREATE TABLE foo (...) SINGLETON` | Typedef holds at most one materialized row (PRD 00139) |
+| `CREATE TABLE foo (...) SINGLETON DEFAULT VALUES` | Same as above; auto-seeds one row using each column's `default_value` at typedef-install time |
+| `ALTER TABLE foo SET SINGLETON` | Flip an existing typedef to singleton (rejects if it already holds >1 rows) |
+| `ALTER TABLE foo DROP SINGLETON` | Clear the singleton flag (existing rows are kept) |
 | `DROP TABLE foo` | Strips `type:` from data doogats, deletes typedef |
 | `DROP TABLE foo CASCADE` | Deletes typedef + all data doogats |
 | `DROP TABLE IF EXISTS foo` | No-op if table doesn't exist |
@@ -61,6 +65,23 @@ CREATE TABLE items (title TEXT, code VARCHAR(255), UNIQUE(code))
 `CREATE INDEX IF NOT EXISTS ...` and `CREATE UNIQUE INDEX IF NOT EXISTS ...` are tolerated as no-ops (info-level log, no error) so apps with legacy startup migrations keep booting after upgrade. Plain `CREATE [UNIQUE] INDEX` (no `IF NOT EXISTS`) continues to reject — that's an intentional declaration the caller should drop. PRD 00129 §3b.
 
 UNIQUE-constraint violations carry `extensions.code = "UNIQUE_VIOLATION"` on the GraphQL surface plus structured `table` / `columns` / `values` fields. The legacy `message` text continues to mirror SQLite's `"UNIQUE constraint failed: <table>.<col>[, <table>.<col>]..."` so callers still string-matching the substring keep working. PRD 00129 §3a + §6.
+
+### SINGLETON Constraints (PRD 00139)
+
+A typedef declared `SINGLETON` may hold at most one materialized row.
+Three independent enforcement layers reject a second row:
+
+1. **Service-layer validator** — `service::validation::check_singleton_constraint` runs from `service::DoogatService::batch_create` before any commit. Wired into every typed-create entry point (CLI `ddb create`, FFI `create_doogat`, GraphQL `createDoogat` / `createMany`).
+2. **SQL DML pre-check** — `sql_engine::dml::handle_insert` queries the materialized table before Pass 1 runs. Catches direct `INSERT INTO singleton_t ...` from `ddb query`, GraphQL `executeSql`, and PgWire.
+3. **Materializer UNIQUE index** — `<table>_singleton_lock` is a SQLite expression index on the constant `1`, created by `indexer::materialize::create_singleton_lock_index`. The bypass safety net: any direct write through the SQLite connection still fails on the second row.
+
+The SINGLETON DDL is ddb-specific — sqlparser doesn't recognize the keyword. `sql_engine::execute_batch` strips the trailing `SINGLETON [DEFAULT VALUES]` marker via `re_create_table_singleton` (`sql_engine::helpers`) before handing the rest to sqlparser, then `handle_create_table` reads the parked flag from `pending_singleton`. ALTER `SET/DROP SINGLETON` use sibling regex matchers (`re_set_singleton`, `re_drop_singleton`) and dispatch to `handle_set_singleton` / `handle_drop_singleton` in `sql_engine::ddl`.
+
+`SET SINGLETON` rejects with a clear error naming the row count when the materialized table already holds >1 rows. `SINGLETON DEFAULT VALUES` rejects at parse time when any non-nullable, non-core column lacks a `default_value`.
+
+Constraint violations surface as `extensions.code = "SINGLETON_VIOLATION"` (with structured `table` and `existing_id` context) and `"SINGLETON_NOT_FOUND"` (typed `update<Type>` against an empty SINGLETON typedef). Both follow the `UNIQUE_VIOLATION` envelope shape from PRD 00129 §6. CLI surfaces the human-readable message `"SINGLETON constraint violated: <table> already holds row <existing_id>"`; GraphQL clients should prefer the `extensions.code` discriminator.
+
+Post-sync conflict resolution (multiple rows arriving from offline nodes) is handled by `consistency::singleton_sweep` outside the SQL engine; see `crdt-resolver.md`.
 
 `BOOLEAN` columns are stored as `INTEGER` (1/0) in SQLite. SQL `SELECT` queries against materialized type tables automatically coerce these values to `"true"`/`"false"` in the response. This coercion applies only to tables with typedefs; queries against raw internal tables (`_ddb_*`, `doogats`) return uncoerced values.
 

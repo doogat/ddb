@@ -255,6 +255,31 @@ PRD 00130 / issue #12: `createMany(onConflict: IGNORE)` returns the surviving ro
 `sync` defaults to `remote: "origin"`, `branch: "master"` (override via arguments for repos using a different default branch). Returns an error if no remote is configured.
 `compact` defaults to `force: false`. When no node is registered, returns a no-op report (zeros).
 
+### SINGLETON typedefs (PRD 00139)
+
+For every typedef declared `singleton: true`, the dynamic schema additionally emits:
+
+```graphql
+type Query {
+  <type_name>: <TypeName>           # singular field, no args; null when typedef is empty
+  # plus the existing plural <type_name>s(where:, orderBy:, limit:, ...)
+}
+
+type Mutation {
+  update_<type_name>(input: String!): <TypeName>!         # no id arg; rejects with SINGLETON_NOT_FOUND when empty
+  upsert_<type_name>(input: String!): UpsertResult!       # returns { id, created }
+  # plus the existing createDoogat / updateDoogat (the latter still requires id and works on the singleton row)
+}
+
+type UpsertResult { id: ID!, created: Boolean! }
+```
+
+Field-name shape mirrors the typedef's snake-case `table_name` (e.g. `app_config` -> `app_config: App_config`, `update_app_config(input:)`, `upsert_app_config(input:)`). When the singular field name collides with another `Query` field generated earlier in the same loop, it falls back to `<table_name>_singleton` and a `tracing::warn!` is emitted at schema-build time. Hyphenated typedef names (e.g. `meeting-minutes`) sanitize to `meeting_minutes` before name generation.
+
+Constraint violations on `createDoogat` / typed `INSERT` against a populated SINGLETON typedef carry `extensions.code = "SINGLETON_VIOLATION"` plus structured `table` and `existing_id` context (mirroring the `UNIQUE_VIOLATION` envelope from PRD 00129 §6). `update_<type>` against an empty typedef returns `SINGLETON_NOT_FOUND` with `table` context.
+
+The plural query field (`<type_name>s`) and `createDoogat` are still generated for SINGLETON typedefs (backward compat); `createDoogat` rejects with `SINGLETON_VIOLATION` once a row exists. ALTER TABLE `SET/DROP SINGLETON` triggers the existing schema reload (any DDL through `executeSql` does so per `mutations.rs::executeSql`); the singular field appears or disappears on the next `schemaVersion` poll.
+
 ### Search query syntax
 
 The `search` query passes the `query` string directly to SQLite FTS5 MATCH. This means FTS5's full query syntax is available:

@@ -317,8 +317,24 @@ pub struct TableSchema {
     pub title_template: Option<String>,  // title pattern for new instances
     pub origin: Option<String>,          // tracking label (e.g. PRD that created this type)
     pub unique_together: Option<Vec<Vec<String>>>, // composite unique constraints
+    pub search_key: Option<String>,      // column for `field=val` substring searches
+    pub singleton: bool,                 // PRD 00139: at-most-one-row constraint
 }
 ```
+
+#### `singleton` flag (PRD 00139)
+
+When `singleton: true`, the typedef holds at most one materialized row.
+Three enforcement layers reject any attempt to insert a second row:
+
+1. Service-layer validator (`service::validation::check_singleton_constraint`) on typed-create paths.
+2. SQL DML pre-check in `sql_engine::dml::handle_insert`.
+3. Materializer-side `<table>_singleton_lock` UNIQUE expression index on the constant `1` — the bypass safety net.
+
+Set the flag via `CREATE TABLE x (...) SINGLETON` or `ALTER TABLE x SET SINGLETON`. Clear it with `ALTER TABLE x DROP SINGLETON`. Add `DEFAULT VALUES` to the CREATE TABLE form to auto-seed one row using each column's `default_value` at typedef-install time (single git commit covering both typedef and seed). The flag round-trips through typedef YAML as `singleton: true` and is omitted (skip-if-false) when not set so existing typedefs stay byte-identical.
+
+Post-sync conflict resolution (multiple rows arriving from offline nodes) lives in `consistency::singleton_sweep` and quarantines losers under `ddb/_conflicts/{loser_id}.md` with frontmatter overlays `singleton_conflict_loser`, `singleton_conflict_table`, `singleton_conflict_resolved_at`. See `crdt-resolver.md` for the sweep mechanism.
+
 
 ### ConsistencyWarning
 
