@@ -10,9 +10,15 @@ interface DdbError {
     Parse(string msg);
     NotFound(string msg);
     Config(string msg);
-    Validation(string msg);
-    SqlEngine(string msg);
+    Validation(string msg, string? code, sequence<DdbErrorContextEntry> context);
+    SqlEngine(string msg, string? code, sequence<DdbErrorContextEntry> context);
     VersionMismatch(string msg);
+};
+
+dictionary DdbErrorContextEntry {
+    string key;
+    string? value;
+    sequence<string> values;
 };
 
 dictionary SearchResult {

@@ -304,6 +304,7 @@ impl<G: GitBackend> DoogatService<G> {
     /// Parses the content to extract/generate an ID, determines storage path,
     /// commits, indexes, and dual-writes. Returns the doogat ID.
     pub fn create_doogat_raw(&self, content: &str, message: &str) -> Result<String> {
+        self.ensure_fresh()?;
         let parsed = parser::parse(content, "new.md")?;
         let id = parsed
             .meta
@@ -319,9 +320,29 @@ impl<G: GitBackend> DoogatService<G> {
             .map(|t| self.index.type_uses_folder(t, &self.repo))
             .unwrap_or(false);
         let rel_path = git_ops::doogat_path(&id, parsed.meta.doogat_type.as_deref(), folder);
+        let schemas = self.list_type_schemas()?;
+        let content = if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
+            let input = build_batch_create_from_parsed(&parsed);
+            Self::validate_typed_create_pre_defaults(&input, &schemas)?;
+            let schema = schemas
+                .iter()
+                .find(|s| s.table_name == type_name)
+                .ok_or_else(|| DoogatError::type_not_registered(type_name.to_string()))?;
+            let _ = self.check_singleton_constraint(&input, &schemas)?;
+            let _ = self.check_unique_constraints(&input, &schemas)?;
+            let normalized = self.build_typed_single_create(
+                &input,
+                &DoogatId(id.clone()),
+                &rel_path,
+                schema,
+            )?;
+            parser::serialize(&normalized)
+        } else {
+            content.to_string()
+        };
 
-        self.repo.commit_file(&rel_path, content, message)?;
-        let parsed = parser::parse(content, &rel_path)?;
+        self.repo.commit_file(&rel_path, &content, message)?;
+        let parsed = parser::parse(&content, &rel_path)?;
         self.index.index_doogat(&parsed)?;
         // PRD 00134 blind-review I2: same atomic-junction parity as
         // `create_doogat_with_extra` — when raw Markdown carries a
@@ -484,6 +505,15 @@ impl<G: GitBackend> DoogatService<G> {
     /// entire batch is aborted. On success a single git commit is created
     /// and each doogat is re-indexed.
     pub fn batch_update(&self, updates: &[BatchUpdateInput]) -> Result<Vec<ParsedDoogat>> {
+        let message = format!("batch update {} doogats", updates.len());
+        self.batch_update_with_message(updates, &message)
+    }
+
+    pub(crate) fn batch_update_with_message(
+        &self,
+        updates: &[BatchUpdateInput],
+        message: &str,
+    ) -> Result<Vec<ParsedDoogat>> {
         if updates.is_empty() {
             return Ok(vec![]);
         }
@@ -506,7 +536,7 @@ impl<G: GitBackend> DoogatService<G> {
         self.repo.commit_batch(
             &write_refs,
             &[],
-            &format!("batch update {} doogats", updates.len()),
+            message,
         )?;
 
         // Phase 3: re-parse, index, rematerialize, return
@@ -551,6 +581,17 @@ impl<G: GitBackend> DoogatService<G> {
         let path = self.index.resolve_path(&update.id)?;
         let content = self.repo.read_file(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
+
+        let final_type = update
+            .doogat_type
+            .as_deref()
+            .or(parsed.meta.doogat_type.as_deref());
+        if let Some(final_type) = final_type {
+            if !schemas.iter().any(|s| s.table_name == final_type) {
+                return Err(DoogatError::type_not_registered(final_type.to_string()));
+            }
+            self.check_singleton_update_constraint(&update.id, final_type, schemas)?;
+        }
 
         let schema = parsed
             .meta
@@ -603,6 +644,15 @@ impl<G: GitBackend> DoogatService<G> {
     /// payload — the rejected ID is discarded. For `Error`, the whole
     /// batch fails.
     pub fn batch_create(&self, inputs: &[BatchCreateInput]) -> Result<Vec<ParsedDoogat>> {
+        let message = format!("batch create {} doogats", inputs.len());
+        self.batch_create_with_message(inputs, &message)
+    }
+
+    pub(crate) fn batch_create_with_message(
+        &self,
+        inputs: &[BatchCreateInput],
+        message: &str,
+    ) -> Result<Vec<ParsedDoogat>> {
         if inputs.is_empty() {
             return Ok(vec![]);
         }
@@ -704,7 +754,7 @@ impl<G: GitBackend> DoogatService<G> {
         }
 
         // Phase 2: atomic commit
-        self.commit_batch_creates(&writes)?;
+        self.commit_batch_creates(&writes, message)?;
 
         // Phase 3: index new writes and fill result slots
         self.index_batch_creates(&writes, &schemas, &mut results)?;
@@ -911,7 +961,7 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// Phase 2: atomic commit for batch creates (no-op when writes is empty).
-    fn commit_batch_creates(&self, writes: &[(usize, String, String)]) -> Result<()> {
+    fn commit_batch_creates(&self, writes: &[(usize, String, String)], message: &str) -> Result<()> {
         if writes.is_empty() {
             return Ok(());
         }
@@ -922,7 +972,7 @@ impl<G: GitBackend> DoogatService<G> {
         self.repo.commit_batch(
             &write_refs,
             &[],
-            &format!("batch create {} doogats", writes.len()),
+            message,
         )?;
         Ok(())
     }
@@ -1040,29 +1090,11 @@ impl<G: GitBackend> DoogatService<G> {
     /// Update a doogat from raw content (for FFI consumers).
     pub fn update_doogat_raw(&self, id: &str, content: &str, message: &str) -> Result<()> {
         let rel_path = self.index.resolve_path(id)?;
-        self.repo.commit_file(&rel_path, content, message)?;
-        let parsed = parser::parse(content, &rel_path)?;
-        self.index.index_doogat(&parsed)?;
-        // PRD 00134 doubt-review: same atomic-junction parity as
-        // `create_doogat_raw` (BLIND-T2) — when raw Markdown carries a
-        // registered typedef, re-materialize the typed table row +
-        // auto-junctions so a REFERENCES change is reflected in
-        // `<type>_<col>` immediately, not just after the next implicit
-        // `ensure_fresh` reindex. Key on `parsed.meta.id` (same source as
-        // `index_doogat`'s upsert key) so the typed row and the doogats
-        // row stay consistent on the unusual call where the input `id`
-        // arg disagrees with the frontmatter.
-        if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
-            if let Some(schema) = self
-                .list_type_schemas()?
-                .into_iter()
-                .find(|s| s.table_name == type_name)
-            {
-                let id_str = parsed.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or(id);
-                self.index.materialize_single(&schema, id_str, &parsed)?;
-            }
-        }
-        self.nosql_index_doogat(&parsed);
+        let current_content = self.repo.read_file(&rel_path)?;
+        let current = parser::parse(&current_content, &rel_path)?;
+        let desired = parser::parse(content, &rel_path)?;
+        let update = build_batch_update_from_replacement(id, &current, &desired);
+        self.batch_update_with_message(&[update], message)?;
         Ok(())
     }
 
@@ -1464,4 +1496,50 @@ fn stringify_extra_set_for_schema(
         }
     }
     out
+}
+
+fn parsed_fields(parsed: &ParsedDoogat) -> std::collections::BTreeMap<String, crate::types::Value> {
+    let mut fields = parsed.meta.extra.clone();
+    for field in &parsed.inline_fields {
+        fields.insert(
+            field.key.clone(),
+            crate::types::Value::String(field.value.clone()),
+        );
+    }
+    fields
+}
+
+fn build_batch_update_from_replacement(
+    id: &str,
+    current: &ParsedDoogat,
+    desired: &ParsedDoogat,
+) -> BatchUpdateInput {
+    let current_fields = parsed_fields(current);
+    let desired_fields = parsed_fields(desired);
+    let unset_fields = current_fields
+        .keys()
+        .filter(|key| !desired_fields.contains_key(*key))
+        .cloned()
+        .collect();
+
+    BatchUpdateInput {
+        id: id.to_string(),
+        title: desired.meta.title.clone(),
+        body: Some(desired.body.clone()),
+        tags: Some(desired.meta.tags.clone()),
+        doogat_type: desired.meta.doogat_type.clone(),
+        fields: Some(desired_fields),
+        unset_fields: Some(unset_fields),
+    }
+}
+
+fn build_batch_create_from_parsed(parsed: &ParsedDoogat) -> BatchCreateInput {
+    BatchCreateInput {
+        title: parsed.meta.title.clone(),
+        body: Some(parsed.body.clone()),
+        tags: parsed.meta.tags.clone(),
+        doogat_type: parsed.meta.doogat_type.clone(),
+        fields: parsed_fields(parsed),
+        on_conflict: crate::types::ConflictAction::Error,
+    }
 }

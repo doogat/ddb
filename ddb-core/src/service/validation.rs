@@ -150,6 +150,42 @@ impl<G: GitBackend> DoogatService<G> {
         }
     }
 
+    /// Pre-UPDATE singleton check. Allows updating the existing singleton row
+    /// in place, but rejects if the target typedef already has some *other*
+    /// row materialized.
+    pub(super) fn check_singleton_update_constraint(
+        &self,
+        current_id: &str,
+        type_name: &str,
+        schemas: &[TableSchema],
+    ) -> Result<()> {
+        let schema = match schemas.iter().find(|s| s.table_name == type_name) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        if !schema.singleton {
+            return Ok(());
+        }
+        if !type_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Ok(());
+        }
+        let sql = format!("SELECT id FROM \"{type_name}\" WHERE id != ?1 LIMIT 1");
+        let rows = self.index.query_raw_with_params(
+            &sql,
+            &[rusqlite::types::Value::Text(current_id.to_string())],
+        )?;
+        if let Some(existing_id) = rows.first().and_then(|r| r.first()) {
+            return Err(DoogatError::singleton_violation(
+                type_name.to_string(),
+                existing_id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Build the SQL query + params for checking one unique_together group.
     /// Returns `None` when not all group columns are present in the input fields.
     fn build_unique_check_sql(

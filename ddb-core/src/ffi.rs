@@ -1,9 +1,38 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::error::DoogatError;
+use crate::error::{DoogatError, ErrorContext, ErrorValue};
 use crate::service::DoogatService;
 use crate::sql_engine::SqlResult;
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct DdbErrorContextEntry {
+    pub key: String,
+    pub value: Option<String>,
+    pub values: Vec<String>,
+}
+
+fn empty_error_context() -> Vec<DdbErrorContextEntry> {
+    Vec::new()
+}
+
+fn ffi_error_context(context: ErrorContext) -> Vec<DdbErrorContextEntry> {
+    context
+        .into_iter()
+        .map(|(key, value)| match value {
+            ErrorValue::String(value) => DdbErrorContextEntry {
+                key,
+                value: Some(value),
+                values: Vec::new(),
+            },
+            ErrorValue::List(values) => DdbErrorContextEntry {
+                key,
+                value: None,
+                values,
+            },
+        })
+        .collect()
+}
 
 /// FFI error enum exposed to Swift/Kotlin via UniFFI.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -25,9 +54,17 @@ pub enum DdbError {
     #[error("Config: {msg}")]
     Config { msg: String },
     #[error("Validation: {msg}")]
-    Validation { msg: String },
+    Validation {
+        msg: String,
+        code: Option<String>,
+        context: Vec<DdbErrorContextEntry>,
+    },
     #[error("SqlEngine: {msg}")]
-    SqlEngine { msg: String },
+    SqlEngine {
+        msg: String,
+        code: Option<String>,
+        context: Vec<DdbErrorContextEntry>,
+    },
     #[error("VersionMismatch: {msg}")]
     VersionMismatch { msg: String },
 }
@@ -43,26 +80,49 @@ impl From<DoogatError> for DdbError {
             DoogatError::Toml(msg) => DdbError::Config { msg },
             DoogatError::Parse(msg) => DdbError::Parse { msg },
             DoogatError::NotFound(msg) => DdbError::NotFound { msg },
-            DoogatError::Validation(msg) => DdbError::Validation { msg },
-            DoogatError::InvalidPath(msg) => DdbError::Validation { msg },
-            DoogatError::SqlEngine(msg) => DdbError::SqlEngine { msg },
+            DoogatError::Validation(msg) => DdbError::Validation {
+                msg,
+                code: None,
+                context: empty_error_context(),
+            },
+            DoogatError::InvalidPath(msg) => DdbError::Validation {
+                msg,
+                code: None,
+                context: empty_error_context(),
+            },
+            DoogatError::SqlEngine(msg) => DdbError::SqlEngine {
+                msg,
+                code: None,
+                context: empty_error_context(),
+            },
             DoogatError::Conflict(msg) => DdbError::Git { msg },
             DoogatError::Sync(msg) => DdbError::Git { msg },
             DoogatError::Index(msg) => DdbError::Sql { msg },
-            DoogatError::BadRequest(msg) => DdbError::Validation { msg },
+            DoogatError::BadRequest(msg) => DdbError::Validation {
+                msg,
+                code: None,
+                context: empty_error_context(),
+            },
             DoogatError::VersionMismatch { repo, driver } => DdbError::VersionMismatch {
                 msg: format!("repo format v{repo}, driver supports up to v{driver}"),
             },
             #[cfg(feature = "nosql")]
             DoogatError::Redb(msg) => DdbError::Io { msg },
-            // Structured errors carry a stable code (e.g. UNIQUE_VIOLATION)
-            // plus a user-safe message. The FFI surface drops the per-code
-            // context and routes by code into the closest legacy bucket so
-            // existing FFI consumers don't need to learn the structured
-            // shape. PRD 00129 §6.
-            DoogatError::Structured { code, message, .. } => match code {
-                "REFERENCES_VIOLATION" | "CASCADE_CYCLE" => DdbError::SqlEngine { msg: message },
-                _ => DdbError::Validation { msg: message },
+            DoogatError::Structured {
+                code,
+                message,
+                context,
+            } => match code {
+                "REFERENCES_VIOLATION" | "CASCADE_CYCLE" => DdbError::SqlEngine {
+                    msg: message,
+                    code: Some(code.to_string()),
+                    context: ffi_error_context(context),
+                },
+                _ => DdbError::Validation {
+                    msg: message,
+                    code: Some(code.to_string()),
+                    context: ffi_error_context(context),
+                },
             },
         }
     }
@@ -367,6 +427,8 @@ impl DoogatDriver {
             .and_then(|n| n.to_str())
             .ok_or_else(|| DdbError::Validation {
                 msg: "invalid filename".into(),
+                code: None,
+                context: empty_error_context(),
             })?
             .to_owned();
         let mime = crate::types::AttachmentInfo::mime_from_filename(&filename).to_owned();
@@ -426,6 +488,28 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let driver = DoogatDriver::create_repo(tmp.path().to_str().unwrap().to_string()).unwrap();
         (tmp, driver)
+    }
+
+    fn setup_app_config_singleton_typedef(driver: &DoogatDriver) {
+        let typedef = "---
+id: 20260510130000
+title: app_config
+type: _typedef
+singleton: true
+columns:
+  - name: theme
+    data_type: TEXT
+    zone: frontmatter
+---
+";
+        let typedef_path = "ddb/_typedef/20260510130000.md";
+        let svc = driver.svc.lock().unwrap();
+        svc.repo
+            .commit_file(typedef_path, typedef, "add app_config singleton typedef")
+            .unwrap();
+        let parsed = crate::parser::parse(typedef, typedef_path).unwrap();
+        svc.index.index_doogat(&parsed).unwrap();
+        svc.index.materialize_all_types(&svc.repo).unwrap();
     }
 
     #[test]
@@ -875,5 +959,47 @@ mod tests {
             delta_size < full_size,
             "delta ({delta_size}B) should be smaller than full ({full_size}B)"
         );
+    }
+
+    #[test]
+    fn ffi_singleton_create_exposes_structured_error_context() {
+        let (_tmp, driver) = fresh_driver();
+        setup_app_config_singleton_typedef(&driver);
+
+        let first_id = driver
+            .create_doogat(
+                "---\ntitle: Config\ntype: app_config\ntheme: dark\n---\n".into(),
+                "add first config".into(),
+            )
+            .expect("first singleton create should succeed");
+        assert!(!first_id.is_empty());
+
+        let err = driver
+            .create_doogat(
+                "---\ntitle: Config 2\ntype: app_config\ntheme: light\n---\n".into(),
+                "add second config".into(),
+            )
+            .expect_err("second singleton create must reject");
+
+        match err {
+            DdbError::Validation {
+                code: Some(code),
+                context,
+                ..
+            } => {
+                assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+                let table = context
+                    .iter()
+                    .find(|entry| entry.key == "table")
+                    .and_then(|entry| entry.value.as_deref());
+                let existing_id = context
+                    .iter()
+                    .find(|entry| entry.key == "existing_id")
+                    .and_then(|entry| entry.value.as_deref());
+                assert_eq!(table, Some("app_config"));
+                assert_eq!(existing_id, Some(first_id.as_str()));
+            }
+            other => panic!("expected Validation with structured code/context, got {other:?}"),
+        }
     }
 }
