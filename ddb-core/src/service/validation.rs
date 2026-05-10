@@ -101,6 +101,57 @@ impl<G: GitBackend> DoogatService<G> {
         Ok(None)
     }
 
+    /// PRD 00139 §3 layer 1: pre-INSERT singleton check. Mirrors the
+    /// `check_unique_constraints` shape so callers see the same Ok/Err
+    /// envelope regardless of which constraint blocked the row.
+    ///
+    /// - Returns `Ok(None)` when the typedef is not registered, not
+    ///   singleton, or empty.
+    /// - Returns `Ok(Some(existing))` when the typedef already holds a row
+    ///   AND `on_conflict == Ignore` — caller treats this as an upsert
+    ///   skip, identical to the unique-constraint Ignore branch.
+    /// - Returns `Err(SINGLETON_VIOLATION)` otherwise.
+    pub(super) fn check_singleton_constraint(
+        &self,
+        input: &BatchCreateInput,
+        schemas: &[TableSchema],
+    ) -> Result<Option<ParsedDoogat>> {
+        let type_name = match input.doogat_type {
+            Some(ref t) => t,
+            None => return Ok(None),
+        };
+        let schema = match schemas.iter().find(|s| s.table_name == *type_name) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        if !schema.singleton {
+            return Ok(None);
+        }
+        // Defensive identifier check before inlining into the SQL string.
+        // Hyphenated typedef names are valid table identifiers when quoted.
+        if !type_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Ok(None);
+        }
+        let sql = format!("SELECT id FROM \"{type_name}\" LIMIT 1");
+        let rows = self.index.query_raw_with_params(&sql, &[])?;
+        let existing_id = match rows.first().and_then(|r| r.first()) {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+        match input.on_conflict {
+            crate::types::ConflictAction::Ignore => {
+                Ok(Some(self.get_doogat_parsed(existing_id)?))
+            }
+            crate::types::ConflictAction::Error => Err(DoogatError::singleton_violation(
+                type_name.clone(),
+                existing_id.clone(),
+            )),
+        }
+    }
+
     /// Build the SQL query + params for checking one unique_together group.
     /// Returns `None` when not all group columns are present in the input fields.
     fn build_unique_check_sql(
