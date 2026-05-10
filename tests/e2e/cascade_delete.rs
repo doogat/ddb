@@ -82,6 +82,97 @@ fn cascade_delete_cleans_junction_table() {
 }
 
 #[test]
+fn cascade_delete_cleans_owned_junction_when_parent_deleted() {
+    // PRD 00137 §AC2: drives the parent-side cascade through the `ddb`
+    // binary (CLI/SQL surface). Mirrors `cascade_delete_cleans_junction_table`
+    // but deletes the bookmark (the junction's *owner*) rather than the
+    // category (the *referenced target*). Pre-fix the junction row stayed
+    // dangling; post-fix it is removed in the same transaction as the
+    // typed-row delete.
+    let repo = DdbTestRepo::init();
+
+    repo.ddb()
+        .args(["query", "CREATE TABLE category (label VARCHAR(100))"])
+        .assert()
+        .success();
+
+    repo.ddb()
+        .args([
+            "query",
+            "CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)",
+        ])
+        .assert()
+        .success();
+
+    let cat_out = repo
+        .ddb()
+        .args(["query", "INSERT INTO category (label) VALUES ('alpha')"])
+        .output()
+        .unwrap();
+    let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    let bm_out = repo
+        .ddb()
+        .args([
+            "query",
+            "INSERT INTO bookmark (url) VALUES ('https://example.com')",
+        ])
+        .output()
+        .unwrap();
+    let bm_id = String::from_utf8_lossy(&bm_out.stdout).trim().to_string();
+
+    // Link bookmark -> category via the auto-junction table.
+    repo.ddb()
+        .args([
+            "query",
+            &format!(
+                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+            ),
+        ])
+        .assert()
+        .success();
+
+    // Sanity: junction row exists keyed by the bookmark (parent) side.
+    repo.ddb()
+        .args([
+            "query",
+            &format!("SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"));
+
+    // Delete the bookmark (parent direction).
+    repo.ddb()
+        .args([
+            "query",
+            &format!("DELETE FROM bookmark WHERE id = '{bm_id}'"),
+        ])
+        .assert()
+        .success();
+
+    // Owner-side junction row must be gone.
+    repo.ddb()
+        .args([
+            "query",
+            &format!("SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0"));
+
+    // Stronger assertion: the only junction row was the deleted parent's,
+    // so the junction table is now empty.
+    repo.ddb()
+        .args(["query", "SELECT COUNT(*) FROM bookmark_category"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0"));
+}
+
+#[test]
 fn cascade_delete_removes_wikilink_from_referencing_file() {
     let repo = DdbTestRepo::init();
 
