@@ -2162,8 +2162,8 @@ pass "54.D: NoSQL HTTP exposes no typed write route for singleton parity; deferr
 # GraphQL `extensions` envelope, so parity here is asserted on the stable
 # message fragment instead of byte-identical structured JSON. PowerShell often
 # runs on Windows CI hosts without `psql`, so skip only the shell-driven PgWire
-# leg here; cargo test -p ddb-e2e --test pgwire_singleton provides the
-# cross-platform PgWire singleton coverage path for Windows CI.
+# leg here; `cargo test -p ddb-e2e --test e2e -- pgwire_singleton` provides
+# the cross-platform PgWire singleton coverage path for Windows CI.
 $psql = Get-Command psql -ErrorAction SilentlyContinue
 if ($psql) {
     $env:PGPASSWORD = $TOKEN
@@ -2174,7 +2174,7 @@ if ($psql) {
     if ($igParityPgOut -notmatch "SINGLETON constraint") { throw "54.D: PgWire duplicate should surface SINGLETON constraint, got: $igParityPgOut" }
     pass "54.D: PgWire duplicate INSERT surfaces the SINGLETON constraint message"
 } else {
-    pass "54.D: PgWire parity covered by cargo test -p ddb-e2e --test pgwire_singleton (no psql on host)"
+    pass "54.D: PgWire parity covered by cargo test -p ddb-e2e --test e2e -- pgwire_singleton (no psql on host)"
 }
 
 $parityCount = ddb query "SELECT COUNT(*) FROM ig_parity_cfg"
