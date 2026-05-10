@@ -2127,6 +2127,37 @@ if (
 }
 pass "54.D: GraphQL executeSql and createDoogat return identical singleton error extensions"
 
+$igParityRestResp = Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `
+    -Headers @{ Authorization = "Bearer $TOKEN" } `
+    -Body '{"title":"x","type":"ig_parity_cfg"}' -SkipHttpErrorCheck
+$igParityRestStatus = [int]$igParityRestResp.StatusCode
+if ($igParityRestStatus -lt 400) { throw "54.D: REST duplicate create should fail, got HTTP $igParityRestStatus" }
+$igParityRestObj = (content $igParityRestResp) | ConvertFrom-Json
+if ($igParityRestObj.error -ne "SINGLETON_VIOLATION") {
+    throw "54.D: REST duplicate create expected SINGLETON_VIOLATION, got: $($igParityRestObj.error)"
+}
+if ($igParityRestObj.message -notmatch "ig_parity_cfg") {
+    throw "54.D: REST duplicate create message should mention table=ig_parity_cfg, got: $($igParityRestObj.message)"
+}
+if ($igParityRestObj.message -notmatch [regex]::Escape($igParityId)) {
+    throw "54.D: REST duplicate create message should mention existing_id=$igParityId, got: $($igParityRestObj.message)"
+}
+pass "54.D: REST POST /doogats duplicate create carries SINGLETON_VIOLATION + table/id in the error envelope"
+
+# NoSQL HTTP is read-only today: ddb-server/src/nosql_api.rs exposes only GET
+# scan/get/backlinks routes, so SINGLETON write parity is N/A until the surface
+# grows a typed write route. The follow-up is tracked in
+# dev/local/autopilot/deferred/00139-cycle-1-deferred.json instead of silently
+# skipping coverage.
+$igParityNosqlResp = Invoke-WebRequest -Uri $NOSQL_URL -Method POST -ContentType "application/json" `
+    -Headers @{ Authorization = "Bearer $TOKEN" } `
+    -Body '{"title":"x","type":"ig_parity_cfg"}' -SkipHttpErrorCheck
+$igParityNosqlStatus = [int]$igParityNosqlResp.StatusCode
+if (($igParityNosqlStatus -ne 404) -and ($igParityNosqlStatus -ne 405)) {
+    throw "54.D: NoSQL HTTP should expose no POST write route, got HTTP $igParityNosqlStatus"
+}
+pass "54.D: NoSQL HTTP exposes no typed write route for singleton parity; deferred gap recorded"
+
 # CLI and PgWire expose human-readable SQL-style messages rather than the
 # GraphQL `extensions` envelope, so parity here is asserted on the stable
 # message fragment instead of byte-identical structured JSON. PowerShell often

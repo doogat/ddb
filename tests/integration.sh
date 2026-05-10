@@ -2225,6 +2225,32 @@ IG_PARITY_GQL_TYPED_TABLE=$(printf '%s' "$IG_PARITY_GQL_TYPED" | jq -r '.errors[
 [ "$IG_PARITY_GQL_SQL_TABLE" = "$IG_PARITY_GQL_TYPED_TABLE" ]
 pass "54.D: GraphQL executeSql and createDoogat return identical singleton error extensions"
 
+IG_PARITY_REST_BODY="$TMPDIR/ig-parity-rest.json"
+IG_PARITY_REST_CODE=$(curl -sS -o "$IG_PARITY_REST_BODY" -w "%{http_code}" "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"x","type":"ig_parity_cfg"}')
+[ "$IG_PARITY_REST_CODE" -ge 400 ]
+jq -e --arg existing_id "$IG_PARITY_ID" \
+  '.error == "SINGLETON_VIOLATION"
+   and (.message | contains("ig_parity_cfg"))
+   and (.message | contains($existing_id))' \
+  "$IG_PARITY_REST_BODY" >/dev/null
+pass "54.D: REST POST /doogats duplicate create carries SINGLETON_VIOLATION + table/id in the error envelope"
+
+# NoSQL HTTP is read-only today: ddb-server/src/nosql_api.rs exposes only GET
+# scan/get/backlinks routes, so SINGLETON write parity is N/A until the surface
+# grows a typed write route. The follow-up is tracked in
+# dev/local/autopilot/deferred/00139-cycle-1-deferred.json instead of silently
+# skipping coverage.
+IG_PARITY_NOSQL_CODE=$(curl -sS -o /dev/null -w "%{http_code}" "$NOSQL_URL" \
+  -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"x","type":"ig_parity_cfg"}')
+[ "$IG_PARITY_NOSQL_CODE" = "404" ] || [ "$IG_PARITY_NOSQL_CODE" = "405" ]
+pass "54.D: NoSQL HTTP exposes no typed write route for singleton parity; deferred gap recorded"
+
 # CLI and PgWire expose human-readable SQL-style messages rather than the
 # GraphQL `extensions` envelope, so parity here is asserted on the stable
 # message fragment instead of byte-identical structured JSON.
