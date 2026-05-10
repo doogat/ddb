@@ -7738,6 +7738,105 @@ fn sql_bulk_delete_parent_clears_owned_auto_junction_rows() {
 }
 
 #[test]
+fn sql_delete_typedef_that_is_both_parent_and_child_cleans_both_directions() {
+    // PRD 00137 cycle-1 review (C1, [1/3] 🟡): the two `if` branches inside
+    // `cascade_junction_cleanup` (parent-owner direction and reverse target
+    // direction) are independent and must both fire on the same delete when a
+    // typedef is simultaneously a parent (owns REFERENCES) and a child
+    // (referenced by another typedef). This pins the contract: deleting a
+    // bookmark row must clean both `bookmark_category` (owner-side, bookmark
+    // owns the junction) and `post_bookmark` (reverse-side, post references
+    // bookmark).
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    // bookmark: parent (REFERENCES category) AND child (referenced by post).
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE post (title TEXT, bookmark TEXT REFERENCES bookmark)")
+        .unwrap();
+
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let _post_id = match engine
+        .execute(&format!(
+            "INSERT INTO post (title, bookmark) VALUES ('hello', '{bm_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity: both junctions populated.
+    let bm_cat_pre = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        bm_cat_pre[0][0], "1",
+        "owner-side junction must hold the bookmark→category row"
+    );
+    let post_bm_pre = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM post_bookmark WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        post_bm_pre[0][0], "1",
+        "reverse-side junction must hold the post→bookmark row"
+    );
+
+    // Delete the bookmark — both branches of cascade_junction_cleanup must
+    // fire on this single delete.
+    engine
+        .execute(&format!("DELETE FROM bookmark WHERE id = '{bm_id}'"))
+        .unwrap();
+
+    // Owner-side (bookmark is parent of bookmark_category) must be cleaned.
+    let bm_cat_post = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        bm_cat_post[0][0], "0",
+        "parent-direction sweep must clean owner-side junction row"
+    );
+    // Reverse-side (bookmark is target of post_bookmark) must also be cleaned
+    // by the same call.
+    let post_bm_post = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM post_bookmark WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        post_bm_post[0][0], "0",
+        "reverse-direction sweep must clean target-side junction row in same delete"
+    );
+}
+
+#[test]
 fn sql_bulk_delete_matching_zero_rows_leaves_junction_untouched() {
     // PRD 00137 cycle-1 review (C1, [2/3] 🟡): `delete_bulk_rows`
     // (sql_engine/dml.rs) short-circuits when `matches.is_empty()`. The
