@@ -119,6 +119,10 @@ impl<'a> SqlEngine<'a> {
         // Extract columns
         let columns = self.extract_columns(&ct.columns)?;
         let unique_together = extract_unique_constraints(&ct.constraints);
+        // PRD 00139 §2: take() the pre-parse SINGLETON marker. `Some(_)`
+        // flips the flag on the typedef; the inner bool drives T7's
+        // auto-seed (filled in once T7 lands).
+        let pending_singleton = self.pending_singleton.take();
         let schema = TableSchema {
             table_name: table_name.clone(),
             columns,
@@ -130,8 +134,12 @@ impl<'a> SqlEngine<'a> {
             origin: Some("ddl".into()),
             unique_together,
             search_key: None,
-            singleton: false,
+            singleton: pending_singleton.is_some(),
         };
+        // T5 keeps the auto-seed flag local; T7 consumes it after the
+        // typedef commit lands. The leading underscore suppresses the
+        // unused-binding warning until T7 wires the seed path.
+        let _auto_seed = pending_singleton.unwrap_or(false);
 
         // Build and commit typedef doogat
         let id = self.unique_id()?;

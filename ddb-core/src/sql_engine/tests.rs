@@ -1896,6 +1896,74 @@ fn on_delete_action_typedef_yaml_roundtrip_prd_00129() {
 }
 
 #[test]
+fn create_table_with_singleton_marker_sets_flag_prd_00139() {
+    // T5: `CREATE TABLE x (...) SINGLETON` flips the typedef's singleton
+    // flag and round-trips through `index.load_all_typedefs`.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE app_config (theme TEXT) SINGLETON")
+        .unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    let schema = schemas
+        .get("app_config")
+        .expect("typedef installed under bare table name");
+    assert!(
+        schema.singleton,
+        "SINGLETON marker on CREATE TABLE must set schema.singleton"
+    );
+}
+
+#[test]
+fn create_table_with_singleton_default_values_marker_sets_flag_prd_00139() {
+    // T5: SINGLETON DEFAULT VALUES still flips the flag. Auto-seed itself
+    // is T7's job; here we only confirm the flag survives the marker.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute(
+            "CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON DEFAULT VALUES",
+        )
+        .unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    let schema = schemas.get("app_config").expect("typedef installed");
+    assert!(schema.singleton, "SINGLETON DEFAULT VALUES sets the flag");
+}
+
+#[test]
+fn create_table_without_singleton_marker_keeps_flag_false_prd_00139() {
+    // T5: regression — plain CREATE TABLE leaves singleton: false.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE plain (a INTEGER)").unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    let schema = schemas.get("plain").expect("typedef installed");
+    assert!(
+        !schema.singleton,
+        "plain CREATE TABLE must not set singleton"
+    );
+}
+
+#[test]
+fn create_table_singleton_clears_pending_state_prd_00139() {
+    // T5: the per-engine pending_singleton flag must be consumed by
+    // handle_create_table so a subsequent non-singleton CREATE TABLE on
+    // the same engine doesn't inherit the flag.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE first (a INTEGER) SINGLETON")
+        .unwrap();
+    engine.execute("CREATE TABLE second (b INTEGER)").unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    assert!(schemas.get("first").unwrap().singleton);
+    assert!(
+        !schemas.get("second").unwrap().singleton,
+        "second CREATE TABLE must not inherit prior singleton flag"
+    );
+}
+
+#[test]
 fn singleton_flag_round_trips_through_typedef_yaml_prd_00139() {
     // PRD 00139 §1: singleton: true → build_typedef_doogat → schema_from_parsed
     // preserves the flag without going through DDL parsing.

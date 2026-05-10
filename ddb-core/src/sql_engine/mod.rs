@@ -23,8 +23,8 @@ pub use builders::{build_typedef_doogat, schema_from_parsed};
 pub(crate) use builders::resolve_insert_title;
 
 use helpers::{
-    normalize_alter_column_type, re_drop_search_key, re_drop_title_template, re_set_search_key,
-    re_set_title_template, re_set_zone,
+    normalize_alter_column_type, re_create_table_singleton, re_drop_search_key,
+    re_drop_title_template, re_set_search_key, re_set_title_template, re_set_zone,
 };
 
 #[derive(Debug)]
@@ -60,6 +60,14 @@ pub struct SqlEngine<'a> {
     pub(super) index: &'a dyn SqlBackend,
     pub(super) repo: &'a dyn DoogatStore,
     pub(super) txn: Option<TransactionBuffer>,
+    /// PRD 00139 §2: pre-parse-detected CREATE TABLE SINGLETON marker.
+    /// `None` means the next CREATE TABLE is not singleton; `Some(false)`
+    /// means `SINGLETON` only; `Some(true)` means `SINGLETON DEFAULT
+    /// VALUES`. Set in `execute_batch` after stripping the marker from the
+    /// source SQL (so sqlparser sees a valid statement) and consumed by
+    /// `handle_create_table`. T7 reads the inner bool to drive the
+    /// post-install auto-seed.
+    pub(super) pending_singleton: Option<bool>,
 }
 
 impl<'a> SqlEngine<'a> {
@@ -68,6 +76,7 @@ impl<'a> SqlEngine<'a> {
             index,
             repo,
             txn: None,
+            pending_singleton: None,
         }
     }
 
@@ -215,7 +224,22 @@ impl<'a> SqlEngine<'a> {
             return Ok(vec![result]);
         }
 
-        let normalized = normalize_alter_column_type(sql);
+        // PRD 00139 §2: detect and strip the trailing CREATE TABLE
+        // SINGLETON [DEFAULT VALUES] marker before sqlparser sees the
+        // statement. The flag is parked on `self.pending_singleton` and
+        // consumed by `handle_create_table` (T5) and `handle_create_table`
+        // auto-seed branch (T7). Single-statement scope: SINGLETON only
+        // applies to one CREATE TABLE per call, so per-engine state is fine.
+        let stripped = if let Some(caps) = re_create_table_singleton().captures(sql) {
+            let default_values = caps.get(1).is_some();
+            self.pending_singleton = Some(default_values);
+            re_create_table_singleton().replace(sql, ")").into_owned()
+        } else {
+            self.pending_singleton = None;
+            sql.to_string()
+        };
+
+        let normalized = normalize_alter_column_type(&stripped);
         let sql_parse = normalized.as_ref();
 
         let dialect = GenericDialect {};
