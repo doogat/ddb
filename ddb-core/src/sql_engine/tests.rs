@@ -1896,6 +1896,52 @@ fn on_delete_action_typedef_yaml_roundtrip_prd_00129() {
 }
 
 #[test]
+fn singleton_flag_round_trips_through_typedef_yaml_prd_00139() {
+    // PRD 00139 §1: singleton: true → build_typedef_doogat → schema_from_parsed
+    // preserves the flag without going through DDL parsing.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE app_config (theme TEXT)")
+        .unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    let mut schema = schemas.get("app_config").unwrap().clone();
+    schema.singleton = true;
+    let doogat = super::builders::build_typedef_doogat(
+        &crate::types::DoogatId("00000000000000".to_string()),
+        &schema,
+    );
+    let roundtripped = super::builders::schema_from_parsed(&doogat).unwrap();
+    assert!(
+        roundtripped.singleton,
+        "singleton flag should round-trip through typedef YAML"
+    );
+}
+
+#[test]
+fn singleton_false_omits_yaml_key_prd_00139() {
+    // PRD 00139 §1: skip-if-false serialization keeps non-singleton typedef
+    // YAML byte-identical to the pre-PRD shape, so existing typedefs on disk
+    // don't churn.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE plain (title TEXT)")
+        .unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    let schema = schemas.get("plain").unwrap().clone();
+    assert!(!schema.singleton, "default constructed schema is non-singleton");
+    let doogat = super::builders::build_typedef_doogat(
+        &crate::types::DoogatId("00000000000000".to_string()),
+        &schema,
+    );
+    assert!(
+        !doogat.meta.extra.contains_key("singleton"),
+        "non-singleton typedef must not emit a `singleton:` YAML key"
+    );
+}
+
+#[test]
 fn plain_create_index_still_rejects_after_prd_00129() {
     // Regression: PRD 00129 §3b only relaxes `IF NOT EXISTS`; the bare
     // form continues to reject so callers learn to drop redundant

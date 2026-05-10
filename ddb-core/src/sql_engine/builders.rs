@@ -102,6 +102,11 @@ fn build_typedef_extra_fields(schema: &TableSchema, extra: &mut BTreeMap<String,
             extra.insert("unique_together".to_string(), outer);
         }
     }
+    // PRD 00139 §1: emit `singleton: true` only when set, so non-singleton
+    // typedef YAMLs remain byte-identical to their pre-PRD shape.
+    if schema.singleton {
+        extra.insert("singleton".to_string(), Value::Bool(true));
+    }
 }
 
 /// Build a _typedef doogat from a TableSchema.
@@ -645,6 +650,13 @@ fn extract_optional_schema_fields(extra: &BTreeMap<String, Value>) -> OptionalSc
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    // PRD 00139 §1: typedef YAMLs without `singleton:` parse as `false`
+    // so legacy typedefs keep their non-singleton semantics.
+    let singleton = extra
+        .get("singleton")
+        .map(|v| matches!(v, Value::Bool(true)) || v.as_str() == Some("true"))
+        .unwrap_or(false);
+
     OptionalSchemaFields {
         crdt_strategy,
         template_sections,
@@ -654,6 +666,7 @@ fn extract_optional_schema_fields(extra: &BTreeMap<String, Value>) -> OptionalSc
         origin,
         unique_together,
         search_key,
+        singleton,
     }
 }
 
@@ -667,6 +680,7 @@ struct OptionalSchemaFields {
     origin: Option<String>,
     unique_together: Option<Vec<Vec<String>>>,
     search_key: Option<String>,
+    singleton: bool,
 }
 
 /// Extract a TableSchema from a parsed _typedef doogat.
@@ -731,7 +745,7 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         origin: opt.origin,
         unique_together: opt.unique_together,
         search_key: opt.search_key,
-        singleton: false,
+        singleton: opt.singleton,
     })
 }
 
