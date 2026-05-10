@@ -1256,6 +1256,22 @@ impl<'a> SqlEngine<'a> {
             let schema = match self.load_schema(table_name) {
                 Ok(s) => s,
                 Err(e) => {
+                    // Asymmetric error handling by direction:
+                    // - Parent/owner direction (`table_name == target_type`):
+                    //   the target's own typedef is required to enumerate
+                    //   REFERENCES columns; failing to load it would silently
+                    //   drop owner-side cleanup, violating PRD 00137 §G2.
+                    //   Propagate as an explicit error.
+                    // - Reverse direction (other typedefs): we sweep every
+                    //   typedef looking for ones that reference the target;
+                    //   one unrelated typedef failing to load shouldn't poison
+                    //   the whole sweep, so warn-and-skip is intentional.
+                    if table_name == target_type {
+                        return Err(DoogatError::SqlEngine(format!(
+                            "cascade junction: failed to load parent typedef \
+                             '{target_type}' for owner-side cleanup: {e}"
+                        )));
+                    }
                     tracing::warn!(type_name = %table_name, error = %e, "cascade junction: failed to load schema");
                     continue;
                 }
