@@ -429,13 +429,15 @@ pass "cascade delete"
 # 17b. cascade delete (parent direction, PRD 00137)
 # Mirrors §17 but deletes the *owner* of the auto-junction row instead of
 # the referenced target. Pre-fix the junction row stayed dangling; post-fix
-# the same DELETE removes it in the same transaction.
+# the same DELETE removes it in the same transaction. Junction is populated
+# end-to-end by setting the parent's REFERENCES column (auto-materialization
+# from PRD 00134) so the CLI surface exercises the same round-trip the unit
+# test pins.
 $DDB query "CREATE TABLE pdc_cat (label VARCHAR(100))" >/dev/null
 $DDB query "CREATE TABLE pdc_bm (url TEXT, pdc_cat TEXT REFERENCES pdc_cat)" >/dev/null
 PDC_CAT_ID=$($DDB query "INSERT INTO pdc_cat (label) VALUES ('alpha')")
 sleep 1
-PDC_BM_ID=$($DDB query "INSERT INTO pdc_bm (url) VALUES ('https://pdc.example.com')")
-$DDB query "INSERT INTO pdc_bm_pdc_cat (pdc_bm_id, pdc_cat_id) VALUES ('$PDC_BM_ID', '$PDC_CAT_ID')" >/dev/null
+PDC_BM_ID=$($DDB query "INSERT INTO pdc_bm (url, pdc_cat) VALUES ('https://pdc.example.com', '$PDC_CAT_ID')")
 # Sanity: junction holds the owner-side row.
 $DDB query "SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM_ID'" | grep -q "1"
 # Delete the bookmark (parent direction).

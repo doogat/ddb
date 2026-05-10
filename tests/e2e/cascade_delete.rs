@@ -113,26 +113,21 @@ fn cascade_delete_cleans_owned_junction_when_parent_deleted() {
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
+    // Drive the auto-junction materializer end-to-end: setting the parent's
+    // REFERENCES column (PRD 00134 path) creates the junction row. Pre-PRD
+    // 00137 the junction stayed dangling on parent delete; post-fix this
+    // round-trip cleans it.
     let bm_out = repo
         .ddb()
         .args([
             "query",
-            "INSERT INTO bookmark (url) VALUES ('https://example.com')",
+            &format!(
+                "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')"
+            ),
         ])
         .output()
         .unwrap();
     let bm_id = String::from_utf8_lossy(&bm_out.stdout).trim().to_string();
-
-    // Link bookmark -> category via the auto-junction table.
-    repo.ddb()
-        .args([
-            "query",
-            &format!(
-                "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
-            ),
-        ])
-        .assert()
-        .success();
 
     // Sanity: junction row exists keyed by the bookmark (parent) side.
     repo.ddb()

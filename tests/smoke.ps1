@@ -534,13 +534,15 @@ pass "cascade delete"
 # 17b. cascade delete (parent direction, PRD 00137)
 # Mirrors §17 but deletes the *owner* of the auto-junction row instead of
 # the referenced target. Pre-fix the junction row stayed dangling; post-fix
-# the same DELETE removes it in the same transaction.
+# the same DELETE removes it in the same transaction. Junction is populated
+# end-to-end by setting the parent's REFERENCES column (auto-materialization
+# from PRD 00134) so the CLI surface exercises the same round-trip the unit
+# test pins.
 ddb query "CREATE TABLE pdc_cat (label VARCHAR(100))" | Out-Null
 ddb query "CREATE TABLE pdc_bm (url TEXT, pdc_cat TEXT REFERENCES pdc_cat)" | Out-Null
 $PDC_CAT_ID = ddb query "INSERT INTO pdc_cat (label) VALUES ('alpha')"
 Start-Sleep -Seconds 1
-$PDC_BM_ID = ddb query "INSERT INTO pdc_bm (url) VALUES ('https://pdc.example.com')"
-ddb query "INSERT INTO pdc_bm_pdc_cat (pdc_bm_id, pdc_cat_id) VALUES ('$PDC_BM_ID', '$PDC_CAT_ID')" | Out-Null
+$PDC_BM_ID = ddb query "INSERT INTO pdc_bm (url, pdc_cat) VALUES ('https://pdc.example.com', '$PDC_CAT_ID')"
 # Sanity: junction holds the owner-side row.
 $output = ddb query "SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM_ID'"
 if ($output -notmatch "1") { throw "PRD 00137: junction row not created: $output" }
