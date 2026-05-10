@@ -150,6 +150,43 @@ impl<'a> SqlEngine<'a> {
             (rows, null_cols_per_row, vec![])
         };
 
+        // PRD 00139 §3 layer 2 + §4: singleton pre-check before Pass 1.
+        // (a) If the table already holds a row, reject any further INSERT
+        //     immediately with the existing row's id in the structured
+        //     context. The materializer-side singleton_lock index from T8
+        //     would also catch this at write time, but failing in Pass 1
+        //     keeps pre-validate-all-then-write semantics intact for
+        //     multi-row INSERTs and surfaces the structured `existing_id`.
+        // (b) Multi-row INSERT into an empty SINGLETON typedef: reject the
+        //     second row before any commit, with the `<intra-batch>`
+        //     marker mirroring the service-layer batch tracker (T10).
+        if schema.singleton && !rows.is_empty() {
+            let existing_id: Option<String> = self
+                .index
+                .sql_conn()
+                .query_row(
+                    &format!("SELECT id FROM \"{table_name}\" LIMIT 1"),
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(id) = existing_id {
+                if !on_conflict_ignore {
+                    return Err(DoogatError::singleton_violation(
+                        table_name.clone(),
+                        id,
+                    ));
+                }
+            } else if rows.len() > 1 {
+                // Empty table + multi-row INSERT: second row collides
+                // with the first within the same statement.
+                return Err(DoogatError::singleton_violation(
+                    table_name.clone(),
+                    "<intra-batch>".to_string(),
+                ));
+            }
+        }
+
         let ids = self.unique_ids(rows.len())?;
         let ref_folder_types = self.ref_folder_types(&schema);
         let mut created_ids = Vec::with_capacity(rows.len());

@@ -1896,6 +1896,103 @@ fn on_delete_action_typedef_yaml_roundtrip_prd_00129() {
 }
 
 #[test]
+fn dml_insert_into_singleton_typedef_succeeds_first_then_rejects_prd_00139() {
+    // PRD 00139 §3 layer 2: raw `ddb query "INSERT ..."` against a
+    // SINGLETON typedef succeeds first, then rejects with
+    // SINGLETON_VIOLATION on the second insert.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE app_config (theme TEXT) SINGLETON")
+        .unwrap();
+    engine
+        .execute("INSERT INTO app_config (theme) VALUES ('dark')")
+        .expect("first INSERT must succeed");
+    let err = engine
+        .execute("INSERT INTO app_config (theme) VALUES ('light')")
+        .expect_err("second INSERT must reject");
+    match err {
+        crate::error::DoogatError::Structured {
+            code, ref context, ..
+        } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+            let table = context
+                .iter()
+                .find(|(k, _)| k == "table")
+                .map(|(_, v)| v)
+                .expect("table context entry");
+            match table {
+                crate::error::ErrorValue::String(s) => assert_eq!(s, "app_config"),
+                other => panic!("expected String for table, got {other:?}"),
+            }
+            let existing = context
+                .iter()
+                .find(|(k, _)| k == "existing_id")
+                .map(|(_, v)| v)
+                .expect("existing_id context entry");
+            match existing {
+                crate::error::ErrorValue::String(s) => assert_eq!(s.len(), 14),
+                other => panic!("expected String for existing_id, got {other:?}"),
+            }
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+}
+
+#[test]
+fn dml_multi_row_insert_into_empty_singleton_typedef_rejects_prd_00139() {
+    // PRD 00139 §4: multi-row INSERT into an empty SINGLETON typedef
+    // rejects the second row before any commit lands.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE app_config (theme TEXT) SINGLETON")
+        .unwrap();
+    let err = engine
+        .execute("INSERT INTO app_config (theme) VALUES ('dark'), ('light')")
+        .expect_err("multi-row INSERT into singleton typedef must reject");
+    match err {
+        crate::error::DoogatError::Structured {
+            code, ref context, ..
+        } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+            let existing = context
+                .iter()
+                .find(|(k, _)| k == "existing_id")
+                .map(|(_, v)| v)
+                .expect("existing_id context entry");
+            match existing {
+                crate::error::ErrorValue::String(s) => assert_eq!(s, "<intra-batch>"),
+                other => panic!("expected intra-batch marker, got {other:?}"),
+            }
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+    // No row should have committed.
+    let result = engine.execute("SELECT COUNT(*) FROM app_config").unwrap();
+    if let SqlResult::Rows { rows, .. } = result {
+        assert_eq!(
+            rows[0][0], "0",
+            "rejected multi-row INSERT must leave the table empty"
+        );
+    } else {
+        panic!("expected Rows result from SELECT COUNT(*)");
+    }
+}
+
+#[test]
+fn dml_multi_row_insert_into_non_singleton_typedef_still_works_prd_00139() {
+    // PRD 00139 §3 layer 2 regression: non-singleton typedefs continue to
+    // accept multi-row INSERTs.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE x (a INTEGER)").unwrap();
+    engine
+        .execute("INSERT INTO x (a) VALUES (1), (2), (3)")
+        .expect("multi-row INSERT into non-singleton must succeed");
+}
+
+#[test]
 fn alter_set_singleton_succeeds_on_empty_typedef_prd_00139() {
     // T6: SET SINGLETON on a typedef that holds 0 rows succeeds.
     let (_dir, repo, index) = setup();
