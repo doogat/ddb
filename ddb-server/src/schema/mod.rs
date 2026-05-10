@@ -411,6 +411,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn singleton_singular_field_uses_bare_name_when_no_collision_prd_00139() {
+        // PRD 00139 §6 / T16: in the common no-collision case, the
+        // singular SINGLETON field uses the bare snake_case name. The
+        // collision-fallback path (`<field_base>_singleton`) lives in
+        // queries.rs and fires when `emitted_query_fields` already
+        // contains the bare name; constructing that case via the public
+        // API is awkward because the type-name sanitizer at queries.rs:392
+        // dedups duplicate `table_name` values before the singleton-field
+        // emission loop runs. The fallback is a pure-code property
+        // documented in the queries.rs comment block; this test pins the
+        // happy path.
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+        let mut singleton_schema =
+            make_table_schema("app_config", vec![simple_column("theme")]);
+        singleton_schema.singleton = true;
+
+        let schema = build_schema(actor, pool, vec![singleton_schema], None).unwrap();
+        let sdl = schema.sdl();
+        // Bare name `app_config` (snake_case mirrors typedef name).
+        assert!(
+            sdl.contains("\tapp_config: App_config\n"),
+            "bare singleton singular field must be present, got:\n{sdl}"
+        );
+        // No `_singleton` suffix should appear (no collision triggered).
+        assert!(
+            !sdl.contains("app_config_singleton"),
+            "fallback name must NOT appear when no collision; got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
     async fn singleton_alter_changes_emit_singular_field_after_rebuild_prd_00139() {
         // PRD 00139 §8 / T15: ALTER TABLE x SET SINGLETON flips the flag
         // on the typedef; the next schema rebuild surfaces the singular

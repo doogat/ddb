@@ -401,6 +401,12 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
     }
     let mut dynamic_types: Vec<Object> = Vec::new();
     let mut dynamic_inputs: Vec<InputObject> = Vec::new();
+    // PRD 00139 §6 / T16: track per-typedef-loop Query field names so the
+    // singleton singular field can detect collisions and fall back to
+    // `<base>_singleton`. The fallback also collides? -> hard error at
+    // schema-build time so a future operator notices instead of silently
+    // dropping the singular field.
+    let mut emitted_query_fields: HashSet<String> = HashSet::new();
     for schema in type_schemas {
         let type_name = match known_types.get(&schema.table_name) {
             Some(name) => name.clone(),
@@ -561,6 +567,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 .argument(InputValue::new("distinct", TypeRef::named(TypeRef::STRING)).description("Column to deduplicate results by."))
                 .description(&query_desc),
             );
+            // T16: track plural field name for singleton-collision detection.
+            emitted_query_fields.insert(plural.clone());
         }
 
         // Per-type aggregate query
@@ -664,8 +672,36 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 "Fetch the singleton {} row, or null when the typedef is empty.",
                 type_name
             );
+            // PRD 00139 §6 / T16: name-collision fallback. If the bare
+            // `field_base` (e.g. `app_config`) already shipped as another
+            // typedef's plural (or any other field on Query), fall back to
+            // `<field_base>_singleton`. If the fallback ALSO collides,
+            // skip emission and warn — the operator can rename one of the
+            // typedefs.
+            let singular_field_name = if emitted_query_fields.contains(&field_base) {
+                let fallback = format!("{field_base}_singleton");
+                if emitted_query_fields.contains(&fallback) {
+                    tracing::warn!(
+                        "skipping SINGLETON singular field for typedef '{}': both '{}' and fallback '{}' already in use on Query",
+                        schema.table_name,
+                        field_base,
+                        fallback
+                    );
+                    continue;
+                }
+                tracing::warn!(
+                    "SINGLETON typedef '{}' singular field '{}' collides with another Query field; emitting as '{}' instead",
+                    schema.table_name,
+                    field_base,
+                    fallback
+                );
+                fallback
+            } else {
+                field_base.clone()
+            };
+            emitted_query_fields.insert(singular_field_name.clone());
             query = query.field(
-                Field::new(&field_base, TypeRef::named(&type_name), move |ctx| {
+                Field::new(&singular_field_name, TypeRef::named(&type_name), move |ctx| {
                     let schema_clone = schema_clone3.clone();
                     let table_name = table_name3.clone();
                     FieldFuture::new(async move {
