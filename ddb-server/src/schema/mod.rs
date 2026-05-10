@@ -411,6 +411,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn singleton_alter_changes_emit_singular_field_after_rebuild_prd_00139() {
+        // PRD 00139 §8 / T15: ALTER TABLE x SET SINGLETON flips the flag
+        // on the typedef; the next schema rebuild surfaces the singular
+        // query field. The reverse holds for DROP SINGLETON. Wired by:
+        //   1. `executeSql` resolver triggers schema reload after any
+        //      `ALTER TABLE` (`mutations.rs:411-418`).
+        //   2. Reload calls `build_schema(...)` with fresh `type_schemas`
+        //      loaded from disk, which now reflect the post-ALTER state.
+        //   3. T12's per-type loop emits the singular field when
+        //      `schema.singleton == true`.
+        // This test pins the third leg by simulating a rebuild manually:
+        // build the schema once with `singleton: false`, then rebuild with
+        // `singleton: true`, and assert the singular field shows up.
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor1, pool1) = test_actor_and_pool(tmp.path());
+
+        // Phase 1: typedef is non-singleton — no singular field.
+        let plain = make_table_schema("app_config", vec![simple_column("theme")]);
+        let schema = build_schema(actor1, pool1, vec![plain], None).unwrap();
+        let sdl_before = schema.sdl();
+        assert!(
+            !sdl_before.contains("Fetch the singleton App_config row"),
+            "non-singleton typedef must not have singular field, got:\n{sdl_before}"
+        );
+
+        // Phase 2: same typedef, singleton flipped on — singular field appears.
+        let tmp2 = tempfile::tempdir().unwrap();
+        let (actor2, pool2) = test_actor_and_pool(tmp2.path());
+        let mut singleton_schema = make_table_schema("app_config", vec![simple_column("theme")]);
+        singleton_schema.singleton = true;
+        let schema = build_schema(actor2, pool2, vec![singleton_schema], None).unwrap();
+        let sdl_after = schema.sdl();
+        assert!(
+            sdl_after.contains("Fetch the singleton App_config row"),
+            "after SET SINGLETON the singular field must appear, got:\n{sdl_after}"
+        );
+    }
+
+    #[tokio::test]
     async fn singleton_typedef_emits_singular_query_field_prd_00139() {
         // PRD 00139 §6: SINGLETON typedef gains a per-type singular query
         // field alongside the existing plural field.
