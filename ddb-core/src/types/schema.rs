@@ -164,13 +164,13 @@ impl fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TitleSource {
     FirstH1(String),
     Filename(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Fix {
     TagsDeduped {
         removed: Vec<String>,
@@ -299,7 +299,7 @@ impl fmt::Display for Fix {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoogatFix {
     pub path: String,
     pub applied: Vec<Fix>,

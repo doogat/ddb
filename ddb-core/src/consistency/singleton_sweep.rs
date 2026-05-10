@@ -1,16 +1,18 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use crate::error::Result;
+use crate::error::{DoogatError, Result};
 use crate::hlc::{append_hlc_trailer, Hlc};
 use crate::indexer::Index;
 use crate::sql_engine::schema_from_parsed;
 use crate::traits::{DoogatStore, GitHistory};
+use crate::types::{DoogatFix, Fix};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SingletonSweepReport {
     pub conflicts_resolved: usize,
     pub details: Vec<(String, String, Vec<String>)>,
+    pub fixes: Vec<DoogatFix>,
 }
 
 #[derive(Debug, Clone)]
@@ -82,9 +84,16 @@ pub fn singleton_sweep(
         }
 
         candidates.sort_by(compare_candidates);
-        let winner = candidates
-            .pop()
-            .expect("singleton candidates length already checked");
+        let Some(winner) = candidates.pop() else {
+            tracing::error!(
+                table = %table_name,
+                "singleton sweep invariant violated: candidates unexpectedly empty after length check"
+            );
+            return Err(DoogatError::Conflict(format!(
+                "singleton sweep invariant violated for table {table_name}: missing winner after candidate sort"
+            )));
+        };
+        let winner_id = winner.id.clone();
         let loser_ids: Vec<String> = candidates
             .iter()
             .map(|candidate| candidate.id.clone())
@@ -93,13 +102,23 @@ pub fn singleton_sweep(
         for loser in candidates {
             writes.push((
                 format!("ddb/_conflicts/{}.md", loser.id),
-                quarantine_content(&loser.content, &winner.id, &table_name, resolved_at)?,
+                quarantine_content(&loser.content, &winner_id, &table_name, resolved_at)?,
             ));
             deletes.push(loser.path);
         }
 
         report.conflicts_resolved += loser_ids.len();
-        report.details.push((table_name, winner.id, loser_ids));
+        report
+            .details
+            .push((table_name.clone(), winner_id.clone(), loser_ids.clone()));
+        report.fixes.push(DoogatFix {
+            path: winner.path,
+            applied: vec![Fix::SingletonConflictResolved {
+                table: table_name,
+                winner: winner_id,
+                losers: loser_ids,
+            }],
+        });
     }
 
     if !writes.is_empty() {
@@ -330,6 +349,78 @@ Body for {id}
             quarantined_zones.reference_section,
             original.reference_section
         );
+        assert!(
+            report.fixes.iter().any(|doogat_fix| {
+                matches!(
+                    doogat_fix.applied.as_slice(),
+                    [Fix::SingletonConflictResolved { table, winner, losers }]
+                        if table == "app_config"
+                            && winner == "20260601000010"
+                            && losers == &vec!["20260601000000".to_string()]
+                )
+            }),
+            "expected singleton conflict warning event: {:?}",
+            report.fixes
+        );
+    }
+
+    #[test]
+    fn singleton_sweep_emits_fix_event_for_materialized_singleton_conflict() {
+        let (_dir, repo) = temp_repo();
+        let index = test_index();
+        repo.commit_file(
+            "ddb/_typedef/20260510120000.md",
+            non_singleton_typedef(),
+            "add non-singleton typedef",
+        )
+        .unwrap();
+        let loser_path = "ddb/20260601000000.md";
+        let loser_content = app_config_row("20260601000000", "dark", "alpha");
+        commit_with_hlc(&repo, loser_path, &loser_content, 1000);
+        commit_with_hlc(
+            &repo,
+            "ddb/20260601000010.md",
+            &app_config_row("20260601000010", "light", "beta"),
+            2000,
+        );
+        index.rebuild(&repo).unwrap();
+        assert_eq!(
+            index
+                .query_raw("SELECT id FROM app_config ORDER BY id")
+                .unwrap(),
+            vec![
+                vec!["20260601000000".to_string()],
+                vec!["20260601000010".to_string()]
+            ]
+        );
+        repo.commit_file(
+            "ddb/_typedef/20260510120000.md",
+            singleton_typedef(),
+            "upgrade typedef to singleton",
+        )
+        .unwrap();
+
+        let resolved_at = test_hlc(9000, 0, "sweep001");
+        let report = singleton_sweep(&repo, &index, &resolved_at).unwrap();
+
+        assert_eq!(report.conflicts_resolved, 1);
+        assert!(repo.read_file(loser_path).is_err());
+        let quarantined = repo.read_file("ddb/_conflicts/20260601000000.md").unwrap();
+        assert!(quarantined.contains("singleton_conflict_loser: 20260601000010"));
+        assert!(quarantined.contains("singleton_conflict_table: app_config"));
+        assert!(matches!(
+            report.fixes.as_slice(),
+            [DoogatFix {
+                applied,
+                ..
+            }] if matches!(
+                applied.as_slice(),
+                [Fix::SingletonConflictResolved { table, winner, losers }]
+                    if table == "app_config"
+                        && winner == "20260601000010"
+                        && losers == &vec!["20260601000000".to_string()]
+            )
+        ));
     }
 
     #[test]
