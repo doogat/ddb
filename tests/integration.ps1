@@ -1968,6 +1968,189 @@ pass "50b: MySQL RENAME TABLE alias rejected with explicit ALTER TABLE hint"
 # Cleanup so subsequent runs start clean.
 ddl 'mutation { executeSql(sql: "DROP TABLE rngql_dst") { message } }'
 
+# 51. SINGLETON GraphQL flow + ALTER + parity (PRD 00139 T20/T22).
+# Reuse the GraphQL server started near the top of the script; it stays up until
+# the existing clean shutdown immediately below.
+
+# 51.A - GraphQL singleton flow (T20 §A)
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+$output = ddb query "CREATE TABLE ig_app_config (theme TEXT) SINGLETON"
+if ($output -notmatch "table ig_app_config created") { throw "51.A: ig_app_config create failed: $output" }
+waitSchemaReload $ver
+
+$igAppEmpty = gqlq '{ ig_app_config { id theme } }'
+assertGqlOk $igAppEmpty "51.A empty singleton query"
+$igAppEmptyObj = $igAppEmpty | ConvertFrom-Json
+if ($null -ne $igAppEmptyObj.data.ig_app_config) { throw "51.A: expected ig_app_config == null before first row, got: $igAppEmpty" }
+pass "51.A: ig_app_config singular query returns null before first row"
+
+$igAppUpdateEmpty = gqlq 'mutation { update_ig_app_config(input: "{\"theme\":\"dark\"}") { id theme } }'
+assertGqlErrors $igAppUpdateEmpty "51.A update on empty singleton"
+$igAppUpdateEmptyObj = $igAppUpdateEmpty | ConvertFrom-Json
+if ($igAppUpdateEmptyObj.errors[0].extensions.code -ne "SINGLETON_NOT_FOUND") {
+    throw "51.A: expected SINGLETON_NOT_FOUND, got: $($igAppUpdateEmptyObj.errors[0].extensions.code)"
+}
+pass "51.A: update_ig_app_config rejects empty table with SINGLETON_NOT_FOUND"
+
+$igAppUpsertCreate = gqlq 'mutation { upsert_ig_app_config(input: "{\"theme\":\"dark\"}") { id created } }'
+assertGqlOk $igAppUpsertCreate "51.A first upsert"
+$igAppUpsertCreateObj = $igAppUpsertCreate | ConvertFrom-Json
+$IG_APP_ID = $igAppUpsertCreateObj.data.upsert_ig_app_config.id
+if (-not $IG_APP_ID) { throw "51.A: first upsert returned empty id" }
+if (-not $igAppUpsertCreateObj.data.upsert_ig_app_config.created) { throw "51.A: first upsert should return created=true" }
+pass "51.A: upsert_ig_app_config creates the first singleton row"
+
+$igAppAfterCreate = gqlq '{ ig_app_config { theme } }'
+assertGqlOk $igAppAfterCreate "51.A singular query after create"
+if ((($igAppAfterCreate | ConvertFrom-Json).data.ig_app_config.theme) -ne "dark") {
+    throw "51.A: expected theme=dark after first upsert, got: $igAppAfterCreate"
+}
+pass "51.A: ig_app_config singular query returns theme dark after upsert"
+
+$igAppUpsertUpdate = gqlq 'mutation { upsert_ig_app_config(input: "{\"theme\":\"light\"}") { id created } }'
+assertGqlOk $igAppUpsertUpdate "51.A second upsert"
+$igAppUpsertUpdateObj = $igAppUpsertUpdate | ConvertFrom-Json
+if ($igAppUpsertUpdateObj.data.upsert_ig_app_config.created) { throw "51.A: second upsert should return created=false" }
+if ($igAppUpsertUpdateObj.data.upsert_ig_app_config.id -ne $IG_APP_ID) {
+    throw "51.A: second upsert should preserve id $IG_APP_ID, got $($igAppUpsertUpdateObj.data.upsert_ig_app_config.id)"
+}
+pass "51.A: upsert_ig_app_config returns created=false once the row exists"
+
+$igAppUpdateOk = gqlq 'mutation { update_ig_app_config(input: "{\"theme\":\"auto\"}") { id theme } }'
+assertGqlOk $igAppUpdateOk "51.A update after create"
+$igAppUpdateOkObj = $igAppUpdateOk | ConvertFrom-Json
+if ($igAppUpdateOkObj.data.update_ig_app_config.id -ne $IG_APP_ID) { throw "51.A: update should preserve id $IG_APP_ID" }
+if ($igAppUpdateOkObj.data.update_ig_app_config.theme -ne "auto") { throw "51.A: update should return theme=auto, got: $igAppUpdateOk" }
+pass "51.A: update_ig_app_config updates the singleton row in place"
+
+$igAppCreateFail = gqlq 'mutation { createDoogat(input: { type: "ig_app_config", title: "x", fields: "{\"theme\":\"system\"}" }) { id } }'
+assertGqlErrors $igAppCreateFail "51.A createDoogat duplicate singleton"
+$igAppCreateFailObj = $igAppCreateFail | ConvertFrom-Json
+if ($igAppCreateFailObj.errors[0].extensions.code -ne "SINGLETON_VIOLATION") {
+    throw "51.A: expected SINGLETON_VIOLATION, got: $($igAppCreateFailObj.errors[0].extensions.code)"
+}
+pass "51.A: createDoogat rejects a second ig_app_config row with SINGLETON_VIOLATION"
+
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+$output = ddb query "DROP TABLE ig_app_config CASCADE"
+if ($output -notmatch "dropped") { throw "51.A: ig_app_config drop failed: $output" }
+waitSchemaReload $ver
+
+# 52.B - ALTER TABLE SET/DROP SINGLETON (T20 §B)
+$output = ddb query "CREATE TABLE ig_alter_cfg (theme TEXT)"
+if ($output -notmatch "table ig_alter_cfg created") { throw "52.B: ig_alter_cfg create failed: $output" }
+$alterIds = ddb query "INSERT INTO ig_alter_cfg (title, theme) VALUES ('cfg-a', 'dark'), ('cfg-b', 'light')"
+if ($alterIds -notmatch "^\d{14},\d{14}$") { throw "52.B: expected 2 ids from ig_alter_cfg seed, got: $alterIds" }
+
+$igAlterSetFail = & $DDB query "ALTER TABLE ig_alter_cfg SET SINGLETON" 2>&1 | Out-String
+if ($LASTEXITCODE -eq 0) { throw "52.B: SET SINGLETON should fail while 2 rows exist" }
+if ($igAlterSetFail -notmatch "typedef holds 2 rows") { throw "52.B: wrong multi-row rejection: $igAlterSetFail" }
+pass "52.B: ALTER TABLE ... SET SINGLETON rejects a typedef holding 2 rows"
+
+$output = ddb query "DELETE FROM ig_alter_cfg WHERE title = 'cfg-b'"
+if ($output -notmatch "1 row") { throw "52.B: delete down to one row failed: $output" }
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+# Route ALTER through GraphQL executeSql so the running server's schema
+# reload triggers (mutations.rs::executeSql fires trigger_reload_and_wait
+# on every "ALTER TABLE"). Going through the CLI mutates the repo but
+# never wakes the server.
+gqlq 'mutation { executeSql(sql: "ALTER TABLE ig_alter_cfg SET SINGLETON") { message } }' | Out-Null
+waitSchemaReload $ver
+$igAlterIntro = gqlq '{ __schema { queryType { fields { name } } } }'
+assertGqlOk $igAlterIntro "52.B introspection after SET SINGLETON"
+$igAlterFields = @((($igAlterIntro | ConvertFrom-Json).data.__schema.queryType.fields) | ForEach-Object { $_.name })
+if ("ig_alter_cfg" -notin $igAlterFields) { throw "52.B: missing ig_alter_cfg singular field after SET SINGLETON" }
+pass "52.B: ALTER TABLE ... SET SINGLETON adds the ig_alter_cfg singular query field"
+
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+gqlq 'mutation { executeSql(sql: "ALTER TABLE ig_alter_cfg DROP SINGLETON") { message } }' | Out-Null
+waitSchemaReload $ver
+$igAlterDropIntro = gqlq '{ __schema { queryType { fields { name } } } }'
+assertGqlOk $igAlterDropIntro "52.B introspection after DROP SINGLETON"
+$igAlterDropFields = @((($igAlterDropIntro | ConvertFrom-Json).data.__schema.queryType.fields) | ForEach-Object { $_.name })
+if ("ig_alter_cfg" -in $igAlterDropFields) { throw "52.B: ig_alter_cfg singular field should disappear after DROP SINGLETON" }
+pass "52.B: ALTER TABLE ... DROP SINGLETON removes the ig_alter_cfg singular query field"
+
+$output = ddb query "DROP TABLE ig_alter_cfg CASCADE"
+if ($output -notmatch "dropped") { throw "52.B: ig_alter_cfg drop failed: $output" }
+
+# 53.C - SINGLETON DEFAULT VALUES auto-seed (T20 §C)
+$output = ddb query "CREATE TABLE ig_seed_cfg (theme TEXT DEFAULT 'system', schema_version INTEGER DEFAULT 1) SINGLETON DEFAULT VALUES"
+if ($output -notmatch "table ig_seed_cfg created") { throw "53.C: ig_seed_cfg create failed: $output" }
+$seedCount = ddb query "SELECT COUNT(*) FROM ig_seed_cfg"
+if ($seedCount -notmatch "^1$") { throw "53.C: expected exactly one ig_seed_cfg row, got: $seedCount" }
+$seedValues = ddb query "SELECT theme, schema_version FROM ig_seed_cfg"
+if ($seedValues -notmatch "system") { throw "53.C: missing theme=system in auto-seeded row: $seedValues" }
+if ($seedValues -notmatch "1") { throw "53.C: missing schema_version=1 in auto-seeded row: $seedValues" }
+pass "53.C: SINGLETON DEFAULT VALUES auto-seeds one ig_seed_cfg row with defaults"
+ddb query "DROP TABLE ig_seed_cfg CASCADE" | Out-Null
+
+# 54.D - Cross-protocol parity (T22)
+$output = ddb query "CREATE TABLE ig_parity_cfg (theme TEXT) SINGLETON"
+if ($output -notmatch "table ig_parity_cfg created") { throw "54.D: ig_parity_cfg create failed: $output" }
+$igParityId = (ddb query "INSERT INTO ig_parity_cfg (title, theme) VALUES ('seed', 'p1')").Trim()
+if ($igParityId -notmatch '^\d{14}$') { throw "54.D: seed insert returned malformed id: $igParityId" }
+
+$igParityCliOut = & $DDB query "INSERT INTO ig_parity_cfg (title, theme) VALUES ('x', 'p2')" 2>&1 | Out-String
+$igParityCliExit = $LASTEXITCODE
+if ($igParityCliExit -eq 0) { throw "54.D: raw ddb query duplicate INSERT should fail" }
+if ($igParityCliOut -notmatch "SINGLETON constraint") { throw "54.D: raw ddb query duplicate should surface SINGLETON constraint, got: $igParityCliOut" }
+pass "54.D: raw ddb query duplicate INSERT surfaces the SINGLETON constraint message"
+
+$igParityGqlSql = gqlq 'mutation { executeSql(sql: "INSERT INTO ig_parity_cfg (title, theme) VALUES (''x'', ''p2'')") { message affected rows } }'
+assertGqlErrors $igParityGqlSql "54.D GraphQL executeSql duplicate"
+$igParityGqlSqlObj = $igParityGqlSql | ConvertFrom-Json
+if ($igParityGqlSqlObj.errors[0].extensions.code -ne "SINGLETON_VIOLATION") {
+    throw "54.D: executeSql expected SINGLETON_VIOLATION, got: $($igParityGqlSqlObj.errors[0].extensions.code)"
+}
+if ($igParityGqlSqlObj.errors[0].extensions.table -ne "ig_parity_cfg") {
+    throw "54.D: executeSql expected table=ig_parity_cfg, got: $($igParityGqlSqlObj.errors[0].extensions.table)"
+}
+pass "54.D: GraphQL executeSql duplicate INSERT carries SINGLETON_VIOLATION + table"
+
+$igParityGqlTyped = gqlq 'mutation { createDoogat(input: { type: "ig_parity_cfg", title: "x", fields: "{\"theme\":\"p3\"}" }) { id } }'
+assertGqlErrors $igParityGqlTyped "54.D GraphQL createDoogat duplicate"
+$igParityGqlTypedObj = $igParityGqlTyped | ConvertFrom-Json
+if ($igParityGqlTypedObj.errors[0].extensions.code -ne "SINGLETON_VIOLATION") {
+    throw "54.D: createDoogat expected SINGLETON_VIOLATION, got: $($igParityGqlTypedObj.errors[0].extensions.code)"
+}
+if ($igParityGqlTypedObj.errors[0].extensions.table -ne "ig_parity_cfg") {
+    throw "54.D: createDoogat expected table=ig_parity_cfg, got: $($igParityGqlTypedObj.errors[0].extensions.table)"
+}
+pass "54.D: GraphQL createDoogat duplicate INSERT carries SINGLETON_VIOLATION + table"
+
+if (
+    $igParityGqlSqlObj.errors[0].extensions.code -ne $igParityGqlTypedObj.errors[0].extensions.code -or
+    $igParityGqlSqlObj.errors[0].extensions.table -ne $igParityGqlTypedObj.errors[0].extensions.table
+) {
+    throw "54.D: GraphQL singleton error extensions diverged between executeSql and createDoogat"
+}
+pass "54.D: GraphQL executeSql and createDoogat return identical singleton error extensions"
+
+# CLI and PgWire expose human-readable SQL-style messages rather than the
+# GraphQL `extensions` envelope, so parity here is asserted on the stable
+# message fragment instead of byte-identical structured JSON. PowerShell often
+# runs on Windows CI hosts without `psql`, so skip only the PgWire leg there.
+$psql = Get-Command psql -ErrorAction SilentlyContinue
+if ($psql) {
+    $env:PGPASSWORD = $TOKEN
+    $igParityPgOut = & psql -h 127.0.0.1 -p $PG_PORT -U ddb -d ddb -c "INSERT INTO ig_parity_cfg (title, theme) VALUES ('x', 'p4')" 2>&1 | Out-String
+    $igParityPgExit = $LASTEXITCODE
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    if ($igParityPgExit -eq 0) { throw "54.D: PgWire duplicate INSERT should fail" }
+    if ($igParityPgOut -notmatch "SINGLETON constraint") { throw "54.D: PgWire duplicate should surface SINGLETON constraint, got: $igParityPgOut" }
+    pass "54.D: PgWire duplicate INSERT surfaces the SINGLETON constraint message"
+} else {
+    pass "54.D: PgWire parity skipped (no psql)"
+}
+
+$parityCount = ddb query "SELECT COUNT(*) FROM ig_parity_cfg"
+if ($parityCount -notmatch "^1$") { throw "54.D: singleton parity count should stay at 1, got: $parityCount" }
+$parityTheme = ddb query "SELECT theme FROM ig_parity_cfg"
+if ($parityTheme -notmatch "p1") { throw "54.D: singleton parity theme should remain p1, got: $parityTheme" }
+pass "54.D: duplicate INSERT parity leaves the singleton end state unchanged"
+ddb query "DROP TABLE ig_parity_cfg CASCADE" | Out-Null
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
