@@ -624,6 +624,49 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 .description(&agg_desc),
             );
         }
+
+        // PRD 00139 §6: SINGLETON typedefs gain a per-type singular query
+        // field. The field returns the single materialized row or null
+        // (when the typedef is not yet auto-seeded). The plural field
+        // already added above stays generated for backward compat.
+        if schema.singleton {
+            let schema_clone3 = schema_clone.clone();
+            let table_name3 = table_name.clone();
+            let singular_desc = format!(
+                "Fetch the singleton {} row, or null when the typedef is empty.",
+                type_name
+            );
+            query = query.field(
+                Field::new(&field_base, TypeRef::named(&type_name), move |ctx| {
+                    let schema_clone = schema_clone3.clone();
+                    let table_name = table_name3.clone();
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let doogats = pool
+                            .filtered_list(ddb_core::types::TypedListQuery {
+                                table_name,
+                                where_sql: String::new(),
+                                params: Vec::new(),
+                                order_sql: None,
+                                tag: None,
+                                limit: Some(1),
+                                offset: None,
+                                distinct: None,
+                            })
+                            .await
+                            .map_err(to_graphql_error)?;
+                        match doogats.first() {
+                            Some(d) => Ok(Some(FieldValue::owned_any(typed_doogat_to_value(
+                                d,
+                                &schema_clone,
+                            )))),
+                            None => Ok(None),
+                        }
+                    })
+                })
+                .description(&singular_desc),
+            );
+        }
     }
 
     // tags

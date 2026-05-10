@@ -416,4 +416,58 @@ mod tests {
             "SDL should contain subscription 'testWidgetChanged', got:\n{sdl}"
         );
     }
+
+    #[tokio::test]
+    async fn singleton_typedef_emits_singular_query_field_prd_00139() {
+        // PRD 00139 §6: SINGLETON typedef gains a per-type singular query
+        // field alongside the existing plural field.
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let mut singleton_schema = make_table_schema(
+            "app_config",
+            vec![simple_column("theme")],
+        );
+        singleton_schema.singleton = true;
+
+        let schema = build_schema(actor, pool, vec![singleton_schema], None)
+            .expect("schema should build with singleton typedef");
+        let sdl = schema.sdl();
+
+        // Singular field: bare snake_case (preserves typedef name shape),
+        // returns nullable typed object. There are TWO occurrences: the
+        // typed accessor on `type Doogat` (PRD 00129) and the singular
+        // SINGLETON query field this PRD adds. Asserting the singular's
+        // description string disambiguates.
+        assert!(
+            sdl.contains("Fetch the singleton App_config row"),
+            "SDL should contain singular SINGLETON field with its description, got:\n{sdl}"
+        );
+        // Plural field still emitted (PRD 00139 §6 backward compat).
+        assert!(
+            sdl.contains("app_configs"),
+            "SDL should also contain plural field 'app_configs', got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_singleton_typedef_does_not_emit_singular_query_field_prd_00139() {
+        // PRD 00139 §6 regression: non-singleton typedefs only emit the
+        // plural field, never the singular.
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let plain = make_table_schema("link", vec![simple_column("url")]);
+        let schema = build_schema(actor, pool, vec![plain], None).unwrap();
+        let sdl = schema.sdl();
+
+        assert!(sdl.contains("links"), "plural field 'links' must exist");
+        // The "Fetch the singleton" description string is unique to the
+        // SINGLETON-emitted singular field. A non-singleton typedef must
+        // not emit it.
+        assert!(
+            !sdl.contains("Fetch the singleton Link row"),
+            "non-singleton typedef must not emit a singular SINGLETON Query field, got:\n{sdl}"
+        );
+    }
 }
