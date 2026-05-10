@@ -115,6 +115,7 @@ impl Index {
 
         self.create_junction_tables(schema)?;
         self.create_unique_indexes(schema)?;
+        self.create_singleton_lock_index(schema)?;
 
         Ok(())
     }
@@ -152,6 +153,29 @@ impl Index {
                 [],
             )?;
         }
+        Ok(())
+    }
+
+    /// PRD 00139 §3 layer 3: hard backstop for SINGLETON typedefs. Creates
+    /// `CREATE UNIQUE INDEX <table>_singleton_lock ON <table> ((1))` — an
+    /// expression index over the literal `1`. SQLite computes `1` for every
+    /// row and the UNIQUE constraint then forbids any second row, regardless
+    /// of how the row was inserted (typed-create, raw SQL, or a direct write
+    /// that bypasses the service path). When `schema.singleton == false`,
+    /// this is a no-op; the recreate path drops the index because the table
+    /// itself was just dropped at the top of `drop_and_create_materialized_table`.
+    fn create_singleton_lock_index(&self, schema: &crate::types::TableSchema) -> Result<()> {
+        if !schema.singleton {
+            return Ok(());
+        }
+        let index_name = format!("{}_singleton_lock", schema.table_name);
+        self.conn.execute(
+            &format!(
+                "CREATE UNIQUE INDEX IF NOT EXISTS \"{}\" ON \"{}\" ((1))",
+                index_name, schema.table_name
+            ),
+            [],
+        )?;
         Ok(())
     }
 

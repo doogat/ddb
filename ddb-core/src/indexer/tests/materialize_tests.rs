@@ -963,6 +963,141 @@ unique_together:
     }
 
     #[test]
+    fn singleton_lock_index_created_for_singleton_typedef() {
+        // PRD 00139 §3 layer 3: rebuild emits the singleton-lock UNIQUE
+        // expression-index for typedefs marked `singleton: true`.
+        use crate::traits::mock::MockSource;
+
+        let typedef_content = "\
+---
+id: 20260510120000
+title: app_config
+type: _typedef
+singleton: true
+columns:
+  - name: theme
+    data_type: TEXT
+    zone: frontmatter
+---\n";
+
+        let mut source = MockSource::new();
+        source.files.insert(
+            "ddb/_typedef/20260510120000.md".into(),
+            typedef_content.into(),
+        );
+
+        let idx = in_memory_index();
+        idx.rebuild(&source).unwrap();
+
+        let mut stmt = idx
+            .conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='app_config' AND name='app_config_singleton_lock'",
+            )
+            .unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["app_config_singleton_lock".to_string()],
+            "expected singleton lock index on 'app_config'"
+        );
+    }
+
+    #[test]
+    fn singleton_lock_blocks_direct_second_insert() {
+        // PRD 00139 §3 layer 3: a direct INSERT bypassing the service path
+        // is rejected by SQLite's UNIQUE constraint on the second row.
+        use crate::traits::mock::MockSource;
+
+        let typedef_content = "\
+---
+id: 20260510121000
+title: app_config
+type: _typedef
+singleton: true
+columns:
+  - name: theme
+    data_type: TEXT
+    zone: frontmatter
+---\n";
+
+        let mut source = MockSource::new();
+        source.files.insert(
+            "ddb/_typedef/20260510121000.md".into(),
+            typedef_content.into(),
+        );
+
+        let idx = in_memory_index();
+        idx.rebuild(&source).unwrap();
+
+        // First insert succeeds.
+        idx.conn
+            .execute(
+                "INSERT INTO app_config (id, title, date, updated_at, theme) VALUES ('1', 'A', NULL, NULL, 'dark')",
+                [],
+            )
+            .expect("first INSERT into singleton typedef should succeed");
+
+        // Second direct insert must fail on the singleton lock.
+        let result = idx.conn.execute(
+            "INSERT INTO app_config (id, title, date, updated_at, theme) VALUES ('2', 'B', NULL, NULL, 'light')",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "second direct INSERT must be rejected by singleton lock"
+        );
+    }
+
+    #[test]
+    fn singleton_lock_index_absent_for_non_singleton_typedef() {
+        // PRD 00139 §3 layer 3: non-singleton typedefs must not get the
+        // lock index — otherwise plain typedefs could only ever hold one
+        // row.
+        use crate::traits::mock::MockSource;
+
+        let typedef_content = "\
+---
+id: 20260510122000
+title: link
+type: _typedef
+columns:
+  - name: url
+    data_type: TEXT
+    zone: frontmatter
+---\n";
+
+        let mut source = MockSource::new();
+        source.files.insert(
+            "ddb/_typedef/20260510122000.md".into(),
+            typedef_content.into(),
+        );
+
+        let idx = in_memory_index();
+        idx.rebuild(&source).unwrap();
+
+        let mut stmt = idx
+            .conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='link' AND name='link_singleton_lock'",
+            )
+            .unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            names.is_empty(),
+            "non-singleton typedef must not have a singleton lock index"
+        );
+    }
+
+    #[test]
     fn no_unique_index_when_unique_together_absent() {
         use crate::traits::mock::MockSource;
 
