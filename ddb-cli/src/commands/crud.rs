@@ -22,14 +22,14 @@ pub(crate) fn create(
     let svc = DoogatService::open(repo)?;
     // PRD 00136 / #16: defence-in-depth, mirroring `attach`/`detach`.
     // The service-layer `create_doogat_with_extra` already calls
-    // `ensure_fresh` (PRD 00136 T2). This CLI-level call is redundant
-    // against a future refactor that drops the service-layer guard:
-    // because `rebuild_if_stale` itself respects `skip_stale_check`,
-    // both layers honour the actor's opt-out, but losing one of the
-    // two layers via an unrelated change would still leave the other
-    // in place. The call is cheap (HEAD-unchanged short-circuit) and
-    // keeps the CLI's freshness behaviour self-consistent across the
-    // create / update / delete / attach / detach surfaces.
+    // `ensure_fresh` (PRD 00136 T2), so this CLI-level call is
+    // redundant today; it exists so a future refactor that drops the
+    // service-layer guard still leaves freshness intact at the CLI
+    // boundary. `rebuild_if_stale` itself respects `skip_stale_check`,
+    // so both layers honour the actor's opt-out. The call is cheap
+    // (HEAD-unchanged short-circuit) and keeps the CLI's freshness
+    // behaviour self-consistent across the create / update / delete /
+    // attach / detach surfaces.
     svc.rebuild_if_stale()?;
     let tags_list: Vec<String> = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
