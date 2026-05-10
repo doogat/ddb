@@ -668,4 +668,21 @@ echo "$SMOKE_AT_ID2" | grep -qE "^[0-9]{14}$"
 $DDB query "SELECT id FROM alter_type_smoke" | grep -q "$SMOKE_AT_ID2"
 pass "ALTER TABLE ALTER COLUMN TYPE widening (VARCHAR -> TEXT)"
 
+# 30. SINGLETON typedef CRUD (PRD 00139)
+$DDB query "CREATE TABLE smoke_singleton (theme TEXT) SINGLETON" | grep -q "table smoke_singleton created"
+SS_ID=$($DDB query "INSERT INTO smoke_singleton (title, theme) VALUES ('cfg', 'dark')")
+echo "$SS_ID" | grep -qE "^[0-9]{14}$"
+# Capture stderr of the failing second INSERT. `|| true` keeps set -e happy;
+# the grep below asserts the structured SINGLETON_VIOLATION code surfaces.
+SS_DUP=$($DDB query "INSERT INTO smoke_singleton (title, theme) VALUES ('cfg2', 'light')" 2>&1 || true)
+# CLI surfaces the human-readable message ("SINGLETON constraint violated: ...");
+# the structured `SINGLETON_VIOLATION` code only appears via GraphQL
+# `extensions.code` (covered by integration.sh §A in T20).
+echo "$SS_DUP" | grep -q "SINGLETON constraint"
+# UPDATE the existing singleton row still works after the rejected duplicate.
+$DDB query "UPDATE smoke_singleton SET theme = 'auto' WHERE id = '$SS_ID'" | grep -q "1 row(s) affected"
+$DDB query "SELECT theme FROM smoke_singleton WHERE id = '$SS_ID'" | grep -q "auto"
+$DDB query "DROP TABLE smoke_singleton CASCADE" | grep -q "dropped"
+pass "SINGLETON typedef: first INSERT, second rejects, UPDATE survives (PRD 00139)"
+
 echo "=== all smoke tests passed ==="

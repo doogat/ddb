@@ -792,5 +792,25 @@ $rows = ddb query "SELECT id FROM alter_type_smoke"
 if ($rows -notmatch $smokeAtId2) { throw "alter-col-type: widened row not visible" }
 pass "ALTER TABLE ALTER COLUMN TYPE widening (VARCHAR -> TEXT)"
 
+# 30. SINGLETON typedef CRUD (PRD 00139)
+$output = ddb query "CREATE TABLE smoke_singleton (theme TEXT) SINGLETON"
+if ($output -notmatch "table smoke_singleton created") { throw "smoke_singleton create failed: $output" }
+$ssId = ddb query "INSERT INTO smoke_singleton (title, theme) VALUES ('cfg', 'dark')"
+if ($ssId -is [array]) { $ssId = $ssId[-1] }
+if ($ssId -notmatch "^\d{14}$") { throw "smoke_singleton first insert returned bad id: [$ssId]" }
+# Capture stderr of the failing second INSERT. CLI surfaces the human-readable
+# message ("SINGLETON constraint violated: ..."); the structured
+# `SINGLETON_VIOLATION` code only appears via GraphQL `extensions.code`
+# (covered by integration.ps1 §A in T20).
+$ssDup = & $DDB query "INSERT INTO smoke_singleton (title, theme) VALUES ('cfg2', 'light')" 2>&1 | Out-String
+if ($LASTEXITCODE -eq 0) { throw "smoke_singleton duplicate INSERT should have failed, got: $ssDup" }
+if ($ssDup -notmatch "SINGLETON constraint") { throw "smoke_singleton duplicate must surface SINGLETON constraint message, got: $ssDup" }
+$output = ddb query "UPDATE smoke_singleton SET theme = 'auto' WHERE id = '$ssId'"
+if ($output -notmatch "1 row\(s\) affected") { throw "smoke_singleton post-failure UPDATE failed: $output" }
+$output = ddb query "SELECT theme FROM smoke_singleton WHERE id = '$ssId'"
+if ($output -notmatch "auto") { throw "smoke_singleton SELECT returned unexpected: $output" }
+ddb query "DROP TABLE smoke_singleton CASCADE" | Out-Null
+pass "SINGLETON typedef: first INSERT, second rejects, UPDATE survives (PRD 00139)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
