@@ -7662,6 +7662,82 @@ fn sql_delete_parent_clears_owned_auto_junction_rows() {
 }
 
 #[test]
+fn sql_bulk_delete_parent_clears_owned_auto_junction_rows() {
+    // PRD 00137 §G2: bulk DELETE (not the WHERE-id fast path) must also
+    // clean owner-side junction rows for every matched id. Drives
+    // `delete_bulk_rows` (dml.rs:693) rather than `delete_single_row`,
+    // confirming the cascade helper is invoked per matched id by the bulk
+    // path and the parent-direction sweep covers it.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    // Two bookmarks, both linked to the same category.
+    let bm1 = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://one.example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm2 = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://two.example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    let initial = index
+        .query_raw("SELECT COUNT(*) FROM bookmark_category")
+        .unwrap();
+    assert_eq!(
+        initial[0][0], "2",
+        "junction must hold both owner-side rows before bulk delete"
+    );
+
+    // Bulk DELETE matching both bookmarks — uses `delete_bulk_rows`, not
+    // the WHERE-id fast path.
+    engine
+        .execute(&format!(
+            "DELETE FROM bookmark WHERE category = '{cat_id}'"
+        ))
+        .unwrap();
+
+    let after_bulk = index
+        .query_raw("SELECT COUNT(*) FROM bookmark_category")
+        .unwrap();
+    assert_eq!(
+        after_bulk[0][0], "0",
+        "bulk parent-delete must clean junction rows for every matched id"
+    );
+    // Sanity: both bookmarks gone from their typed table.
+    let bm_count = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark WHERE id IN ('{bm1}', '{bm2}')"
+        ))
+        .unwrap();
+    assert_eq!(bm_count[0][0], "0", "bulk DELETE removed both bookmark rows");
+}
+
+#[test]
 fn sql_update_single_row_rolls_back_materialized_when_junction_sync_fails() {
     // PRD 00134 cycle-1 review (C1): the WHERE-id fast path in
     // `apply_single_row_update` calls `update_materialized_row` followed by
