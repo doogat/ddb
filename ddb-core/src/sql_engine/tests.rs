@@ -7598,6 +7598,68 @@ fn sql_delete_referenced_target_clears_auto_junction_rows() {
 }
 
 #[test]
+fn sql_delete_parent_clears_owned_auto_junction_rows() {
+    // PRD 00137: when the *owning parent* of an auto-junction row is deleted
+    // (`DELETE FROM bookmark WHERE id = '<bm>'`), the junction rows owned by
+    // that id (`bookmark_category WHERE bookmark_id = '<bm>'`) must be
+    // removed. Complements the reverse-direction sweep covered by
+    // `sql_delete_referenced_target_clears_auto_junction_rows`. Trimmed out
+    // of PRD 00134 (which scoped INSERT/UPDATE atomicity, not DELETE).
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity: the owner-side junction row is in place post-INSERT.
+    let initial = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        initial[0][0], "1",
+        "junction must hold the owner-side row before parent delete"
+    );
+
+    // Delete the *bookmark* (parent of the junction row).
+    engine
+        .execute(&format!("DELETE FROM bookmark WHERE id = '{bm_id}'"))
+        .unwrap();
+
+    let after_parent_delete = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        after_parent_delete[0][0], "0",
+        "junction rows must be removed when their owning parent row is deleted (cascade)"
+    );
+}
+
+#[test]
 fn sql_update_single_row_rolls_back_materialized_when_junction_sync_fails() {
     // PRD 00134 cycle-1 review (C1): the WHERE-id fast path in
     // `apply_single_row_update` calls `update_materialized_row` followed by
