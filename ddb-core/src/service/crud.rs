@@ -330,12 +330,8 @@ impl<G: GitBackend> DoogatService<G> {
                 .ok_or_else(|| DoogatError::type_not_registered(type_name.to_string()))?;
             let _ = self.check_singleton_constraint(&input, &schemas)?;
             let _ = self.check_unique_constraints(&input, &schemas)?;
-            let normalized = self.build_typed_single_create(
-                &input,
-                &DoogatId(id.clone()),
-                &rel_path,
-                schema,
-            )?;
+            let normalized =
+                self.build_typed_single_create(&input, &DoogatId(id.clone()), &rel_path, schema)?;
             parser::serialize(&normalized)
         } else {
             content.to_string()
@@ -533,11 +529,7 @@ impl<G: GitBackend> DoogatService<G> {
             .iter()
             .map(|(p, c)| (p.as_str(), c.as_str()))
             .collect();
-        self.repo.commit_batch(
-            &write_refs,
-            &[],
-            message,
-        )?;
+        self.repo.commit_batch(&write_refs, &[], message)?;
 
         // Phase 3: re-parse, index, rematerialize, return
         let mut results = Vec::with_capacity(updates.len());
@@ -961,7 +953,11 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// Phase 2: atomic commit for batch creates (no-op when writes is empty).
-    fn commit_batch_creates(&self, writes: &[(usize, String, String)], message: &str) -> Result<()> {
+    fn commit_batch_creates(
+        &self,
+        writes: &[(usize, String, String)],
+        message: &str,
+    ) -> Result<()> {
         if writes.is_empty() {
             return Ok(());
         }
@@ -969,11 +965,7 @@ impl<G: GitBackend> DoogatService<G> {
             .iter()
             .map(|(_, p, c)| (p.as_str(), c.as_str()))
             .collect();
-        self.repo.commit_batch(
-            &write_refs,
-            &[],
-            message,
-        )?;
+        self.repo.commit_batch(&write_refs, &[], message)?;
         Ok(())
     }
 

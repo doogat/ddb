@@ -31,6 +31,10 @@ trap 'rm -rf "$TMPDIR" "$REMOTE_DIR" "$NODE1_DIR" "$NODE2_DIR" "$NODE3_DIR"' EXI
 cd "$TMPDIR"
 
 pass() { printf '  ✓ %s\n' "$1"; }
+fail() {
+  printf '  ✗ %s\n' "$1" >&2
+  exit 1
+}
 
 echo "=== integration tests ==="
 
@@ -1086,7 +1090,7 @@ if command -v psql >/dev/null 2>&1; then
   PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -t -A -c "SELECT COUNT(*) FROM _ddb_tags" | grep -qE "^[0-9]+$"
   pass "pgwire: direct access to internal tables works"
 else
-  pass "pgwire: skipped (no psql)"
+  fail "pgwire: psql not on PATH; install psql or rely on cargo test -p ddb-e2e --test pgwire_singleton"
 fi
 
 # NoSQL server endpoints
@@ -2233,7 +2237,7 @@ if command -v psql >/dev/null 2>&1; then
   printf '%s' "$IG_PARITY_PG_OUT" | grep -q "SINGLETON constraint"
   pass "54.D: PgWire duplicate INSERT surfaces the SINGLETON constraint message"
 else
-  pass "54.D: PgWire parity skipped (no psql)"
+  fail "54.D: psql not on PATH; install psql or rely on cargo test -p ddb-e2e --test pgwire_singleton"
 fi
 
 $DDB query "SELECT COUNT(*) FROM ig_parity_cfg" | grep -q "^1$"

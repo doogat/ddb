@@ -10,6 +10,11 @@ name = "e2e"
 path = "e2e/main.rs"
 harness = true
 
+[[test]]
+name = "pgwire_singleton"
+path = "e2e/pgwire_singleton_main.rs"
+harness = true
+
 [dependencies]
 assert_cmd = "2"
 predicates = "3"

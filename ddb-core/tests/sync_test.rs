@@ -425,7 +425,9 @@ fn two_node_singleton_without_default_values_does_not_seed_on_sync_prd_00139() {
         .execute("CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON")
         .unwrap();
     assert_eq!(
-        index_a.query_raw("SELECT COUNT(*) FROM app_config").unwrap(),
+        index_a
+            .query_raw("SELECT COUNT(*) FROM app_config")
+            .unwrap(),
         vec![vec!["0".to_string()]],
         "bare SINGLETON must not auto-seed on A"
     );
@@ -439,7 +441,9 @@ fn two_node_singleton_without_default_values_does_not_seed_on_sync_prd_00139() {
     assert_eq!(report_b.conflicts_resolved, 0);
     assert_eq!(report_b.singleton_conflicts_resolved, 0);
     assert_eq!(
-        index_b.query_raw("SELECT COUNT(*) FROM app_config").unwrap(),
+        index_b
+            .query_raw("SELECT COUNT(*) FROM app_config")
+            .unwrap(),
         vec![vec!["0".to_string()]],
         "bare SINGLETON must not auto-seed on B after sync"
     );
