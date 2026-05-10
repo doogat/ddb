@@ -456,6 +456,7 @@ Widget
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
         let inferred = TableSchema {
             table_name: "foo".to_string(),
@@ -468,6 +469,7 @@ Widget
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -500,6 +502,7 @@ Widget
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
 
         let merged = Index::merge_schemas(None, inferred);
@@ -532,6 +535,7 @@ Widget
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
         let inferred = TableSchema {
             table_name: "baz".to_string(),
@@ -567,6 +571,7 @@ Widget
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -602,6 +607,7 @@ Widget
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
         let inferred = TableSchema {
             table_name: "qux".to_string(),
@@ -637,6 +643,7 @@ Widget
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
 
         let merged = Index::merge_schemas(Some(typedef), inferred);
@@ -1409,4 +1416,3 @@ Task body.
         assert_eq!(rows.len(), 1, "deletion did not propagate to type table");
         assert_eq!(rows[0][0], "20240102000000");
     }
-

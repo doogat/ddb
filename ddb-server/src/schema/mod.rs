@@ -145,6 +145,7 @@ mod tests {
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         }
     }
 
@@ -416,4 +417,3 @@ mod tests {
         );
     }
 }
-

@@ -731,6 +731,7 @@ pub fn schema_from_parsed(doogat: &ParsedDoogat) -> Result<TableSchema> {
         origin: opt.origin,
         unique_together: opt.unique_together,
         search_key: opt.search_key,
+        singleton: false,
     })
 }
 

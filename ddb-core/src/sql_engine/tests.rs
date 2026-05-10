@@ -5321,6 +5321,7 @@ fn schema_with(cols: Vec<ColumnDef>) -> TableSchema {
         origin: None,
         unique_together: None,
         search_key: None,
+        singleton: false,
     }
 }
 

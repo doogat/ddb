@@ -108,6 +108,16 @@ pub struct TableSchema {
     /// categories use `fqn` as the user-facing identifier rather than the
     /// leaf `title`).
     pub search_key: Option<String>,
+    /// PRD 00139 §1: SINGLETON typedef flag. When `true`, the typedef may
+    /// hold at most one materialized row. Enforced by three layers
+    /// (validator + SQL DML pre-check + materializer UNIQUE index) and
+    /// surfaces a per-type singular GraphQL query field plus
+    /// `update<Type>` / `upsert<Type>` mutations. Defaults to `false`;
+    /// set via `CREATE TABLE x (...) SINGLETON` or
+    /// `ALTER TABLE x SET SINGLETON`, cleared via
+    /// `ALTER TABLE x DROP SINGLETON`. Serialized into typedef YAML only
+    /// when `true` so non-singleton typedefs remain byte-identical.
+    pub singleton: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -279,5 +289,24 @@ mod tests {
         assert_eq!(col("VARCHAR(1000)").effective_zone(), Zone::Body);
         assert_eq!(col("INTEGER").effective_zone(), Zone::Frontmatter);
         assert_eq!(col("TEXT").effective_zone(), Zone::Body);
+    }
+
+    #[test]
+    fn singleton_field_defaults_false_on_new_schema() {
+        // PRD 00139 §1: every freshly constructed TableSchema starts non-singleton.
+        let schema = TableSchema {
+            table_name: "x".into(),
+            columns: vec![],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+            unique_together: None,
+            search_key: None,
+            singleton: false,
+        };
+        assert!(!schema.singleton);
     }
 }

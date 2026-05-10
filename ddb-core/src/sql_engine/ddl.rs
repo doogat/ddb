@@ -130,6 +130,7 @@ impl<'a> SqlEngine<'a> {
             origin: Some("ddl".into()),
             unique_together,
             search_key: None,
+            singleton: false,
         };
 
         // Build and commit typedef doogat

@@ -1006,6 +1006,7 @@ fn finalize_schema_columns(
         origin: None,
         unique_together: None,
         search_key: None,
+        singleton: false,
     }
 }
 

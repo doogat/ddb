@@ -361,6 +361,7 @@ fn detect_schema_required_field_with_default() {
         origin: None,
         unique_together: None,
         search_key: None,
+        singleton: false,
     };
     let fixes = detect_fixes(&parsed, Some(&schema));
     assert!(
@@ -399,6 +400,7 @@ fn detect_schema_required_field_present_no_fix() {
         origin: None,
         unique_together: None,
         search_key: None,
+        singleton: false,
     };
     let fixes = detect_fixes(&parsed, Some(&schema));
     assert!(
@@ -768,6 +770,7 @@ fn make_schema_with_template(template: &str, columns: Vec<ColumnDef>) -> TableSc
         origin: Some("ddl".into()),
         unique_together: None,
         search_key: None,
+        singleton: false,
     }
 }
 
@@ -895,6 +898,7 @@ fn title_compliance_no_template_skipped() {
         origin: None,
         unique_together: None,
         search_key: None,
+        singleton: false,
     };
     let fixes = detect_fixes(&parsed, Some(&schema));
     assert!(

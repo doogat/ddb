@@ -819,6 +819,7 @@ mod tests {
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         }
     }
 
@@ -1112,6 +1113,7 @@ mod tests {
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
         let wc = WhereClause::empty();
         let (sql, names) = build_aggregate_sql("note", &schema, &wc);
@@ -1319,6 +1321,7 @@ mod tests {
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         }
     }
 

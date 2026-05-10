@@ -1147,6 +1147,7 @@ mod tests {
             origin: None,
             unique_together: None,
             search_key: None,
+            singleton: false,
         };
 
         let val = typed_doogat_to_value(&z, &schema);
