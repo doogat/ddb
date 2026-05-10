@@ -1234,9 +1234,23 @@ impl<'a> SqlEngine<'a> {
     ///    deleting a `bookmark` row removes `bookmark_category WHERE
     ///    bookmark_id = '<bm>'`).
     ///
-    /// The reverse loop walks every typedef once and handles both branches
-    /// inside the same `for col in &schema.columns`, so the parent-direction
-    /// sweep adds no extra typedef enumeration.
+    /// Both branches share the outer `for table_name in &type_names` loop, but
+    /// they fire on different conditions and at different rates:
+    ///
+    /// - The **reverse** branch fires on every typedef whose schema has a
+    ///   column with `references == Some(target_type)` — generally a sparse
+    ///   set, scaling with how many other types reference this one.
+    /// - The **parent/owner** branch fires *exactly once per call*, on the
+    ///   single iteration where `table_name == target_type`. It then iterates
+    ///   that one schema's REFERENCES columns. Both branches can fire in the
+    ///   same call when the deleted row's typedef is simultaneously a parent
+    ///   and a child of other typedefs.
+    ///
+    /// Error handling is asymmetric to match these semantics: a failure to
+    /// load `target_type`'s own schema is fatal (we can't enumerate the
+    /// REFERENCES columns the parent owns, so silently skipping would drop
+    /// owner-side rows), while failures on unrelated typedefs are warn-and-
+    /// skip (one bad typedef shouldn't poison the whole reverse sweep).
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
         let conn = self.index.sql_conn();
         let mut stmt = conn
