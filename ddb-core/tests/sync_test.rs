@@ -1,5 +1,6 @@
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
+use ddb_core::sql_engine::SqlEngine;
 use ddb_core::sync_manager::{self, SyncManager};
 
 fn setup_two_nodes() -> (
@@ -35,6 +36,89 @@ fn setup_two_nodes() -> (
     repo_a.merge_remote("origin", "master").unwrap();
 
     (dir_a, repo_a, dir_b, repo_b, bare_dir)
+}
+
+fn open_index(dir: &tempfile::TempDir) -> Index {
+    let db = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    Index::open(&db).unwrap()
+}
+
+fn commit_summaries_since(repo: &GitRepo, since: &ddb_core::types::CommitHash) -> Vec<String> {
+    let mut walk = repo.repo.revwalk().unwrap();
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
+        .unwrap();
+    walk.push_head().unwrap();
+    walk.hide(git2::Oid::from_str(&since.0).unwrap()).unwrap();
+    walk.map(|oid| {
+        let commit = repo.repo.find_commit(oid.unwrap()).unwrap();
+        commit.summary().unwrap_or("").to_string()
+    })
+    .collect()
+}
+
+fn assert_singleton_default_values_seed_sync_once() {
+    let (dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_nodes();
+    let index_a = open_index(&dir_a);
+    let mut engine_a = SqlEngine::new(&index_a, &repo_a);
+    engine_a
+        .execute(
+            "CREATE TABLE app_config (theme TEXT DEFAULT 'system', \
+             schema_version INTEGER DEFAULT 1) SINGLETON DEFAULT VALUES",
+        )
+        .unwrap();
+
+    let rows_a = index_a
+        .query_raw("SELECT id, theme, schema_version FROM app_config")
+        .unwrap();
+    assert_eq!(rows_a.len(), 1, "A must materialize exactly one seeded row");
+    let seed_row = rows_a[0].clone();
+
+    let head_b_before_sync = repo_b.head_oid().unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    let index_b = open_index(&dir_b);
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    let report_b = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    assert_eq!(report_b.conflicts_resolved, 0);
+    assert_eq!(
+        report_b.singleton_conflicts_resolved, 0,
+        "B must inherit A's seeded row without running singleton sweep"
+    );
+
+    let rows_b = index_b
+        .query_raw("SELECT id, theme, schema_version FROM app_config")
+        .unwrap();
+    assert_eq!(rows_b, rows_a, "B must inherit A's exact seeded row");
+    assert!(
+        repo_b
+            .list_doogats()
+            .unwrap()
+            .into_iter()
+            .all(|path| !path.starts_with("ddb/_conflicts/")),
+        "B must not create singleton conflict quarantine files"
+    );
+
+    let new_commit_summaries = commit_summaries_since(&repo_b, &head_b_before_sync);
+    assert_eq!(
+        new_commit_summaries
+            .iter()
+            .filter(|summary| summary.as_str() == "create table app_config with default seed")
+            .count(),
+        1,
+        "B history must contain exactly one seed commit, propagated from A"
+    );
+    assert!(
+        new_commit_summaries
+            .iter()
+            .any(|summary| summary == "update sync state"),
+        "B sync should only add its sync-state commit locally"
+    );
+    assert_eq!(
+        rows_b[0], seed_row,
+        "B's inherited row id and defaults must match A exactly"
+    );
 }
 
 #[test]
@@ -323,4 +407,40 @@ Body from B
         vec![vec!["20260601000010".to_string()]]
     );
     assert!(repo_b.read_file("ddb/_conflicts/20260601000000.md").is_ok());
+}
+
+#[test]
+fn two_node_singleton_default_values_seed_originates_only_on_a_prd_00139() {
+    for _ in 0..5 {
+        assert_singleton_default_values_seed_sync_once();
+    }
+}
+
+#[test]
+fn two_node_singleton_without_default_values_does_not_seed_on_sync_prd_00139() {
+    let (dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_nodes();
+    let index_a = open_index(&dir_a);
+    let mut engine_a = SqlEngine::new(&index_a, &repo_a);
+    engine_a
+        .execute("CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON")
+        .unwrap();
+    assert_eq!(
+        index_a.query_raw("SELECT COUNT(*) FROM app_config").unwrap(),
+        vec![vec!["0".to_string()]],
+        "bare SINGLETON must not auto-seed on A"
+    );
+
+    repo_a.push("origin", "master").unwrap();
+
+    let index_b = open_index(&dir_b);
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    let report_b = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    assert_eq!(report_b.conflicts_resolved, 0);
+    assert_eq!(report_b.singleton_conflicts_resolved, 0);
+    assert_eq!(
+        index_b.query_raw("SELECT COUNT(*) FROM app_config").unwrap(),
+        vec![vec!["0".to_string()]],
+        "bare SINGLETON must not auto-seed on B after sync"
+    );
 }
