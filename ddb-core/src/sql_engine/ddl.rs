@@ -779,6 +779,55 @@ impl<'a> SqlEngine<'a> {
         )))
     }
 
+    /// PRD 00139 §8: `ALTER TABLE x SET SINGLETON`. Idempotent when the
+    /// flag is already set. Rejects when the materialized table already
+    /// holds more than one row (the operator has to delete duplicates
+    /// first; v1 ships no `--keep-most-recent` helper). On success, updates
+    /// the typedef YAML and rematerializes the type so the singleton-lock
+    /// UNIQUE index lands. Schema reload is triggered automatically by
+    /// the rematerialize chain through `_ddb_meta` schemaVersion bump
+    /// (PRD 00126).
+    pub(super) fn handle_set_singleton(&mut self, table_name: &str) -> Result<SqlResult> {
+        let mut schema = self.load_schema(table_name)?;
+        if schema.singleton {
+            return Ok(SqlResult::Ok(format!(
+                "singleton already set on {table_name}"
+            )));
+        }
+        // Refuse if the materialized table holds >1 row. Naming the row
+        // count in the error gives the operator something to act on.
+        let count: i64 = self.index.sql_conn().query_row(
+            &format!("SELECT COUNT(*) FROM \"{table_name}\""),
+            [],
+            |row| row.get(0),
+        )?;
+        if count > 1 {
+            return Err(DoogatError::SqlEngine(format!(
+                "ALTER TABLE {table_name} SET SINGLETON: typedef holds {count} rows; delete duplicates and retry"
+            )));
+        }
+        schema.singleton = true;
+        self.update_typedef(table_name, &schema)?;
+        self.index.rematerialize_type(table_name, self.repo)?;
+        Ok(SqlResult::Ok(format!("singleton set on {table_name}")))
+    }
+
+    /// PRD 00139 §8: `ALTER TABLE x DROP SINGLETON`. Idempotent when the
+    /// flag is already cleared. Updates the typedef YAML and
+    /// rematerializes so the singleton-lock UNIQUE index disappears.
+    pub(super) fn handle_drop_singleton(&mut self, table_name: &str) -> Result<SqlResult> {
+        let mut schema = self.load_schema(table_name)?;
+        if !schema.singleton {
+            return Ok(SqlResult::Ok(format!(
+                "singleton already cleared on {table_name}"
+            )));
+        }
+        schema.singleton = false;
+        self.update_typedef(table_name, &schema)?;
+        self.index.rematerialize_type(table_name, self.repo)?;
+        Ok(SqlResult::Ok(format!("singleton dropped on {table_name}")))
+    }
+
     /// Validate a `title_template` against the current typedef and referenced
     /// typedefs. Rejects multi-hop paths, malformed identifiers, and dotted
     /// tokens whose `col` is not a REFERENCES column on this type or whose

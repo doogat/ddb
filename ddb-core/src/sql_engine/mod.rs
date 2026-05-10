@@ -24,7 +24,8 @@ pub(crate) use builders::resolve_insert_title;
 
 use helpers::{
     normalize_alter_column_type, re_create_table_singleton, re_drop_search_key,
-    re_drop_title_template, re_set_search_key, re_set_title_template, re_set_zone,
+    re_drop_singleton, re_drop_title_template, re_set_search_key, re_set_singleton,
+    re_set_title_template, re_set_zone,
 };
 
 #[derive(Debug)]
@@ -214,6 +215,22 @@ impl<'a> SqlEngine<'a> {
                 .expect("regex guarantees group 1 or 2")
                 .as_str();
             return Ok(Some(self.handle_search_key(table, None)?));
+        }
+        if let Some(caps) = re_set_singleton().captures(sql) {
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            return Ok(Some(self.handle_set_singleton(table)?));
+        }
+        if let Some(caps) = re_drop_singleton().captures(sql) {
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            return Ok(Some(self.handle_drop_singleton(table)?));
         }
         Ok(None)
     }

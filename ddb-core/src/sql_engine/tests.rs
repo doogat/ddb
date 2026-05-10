@@ -1896,6 +1896,97 @@ fn on_delete_action_typedef_yaml_roundtrip_prd_00129() {
 }
 
 #[test]
+fn alter_set_singleton_succeeds_on_empty_typedef_prd_00139() {
+    // T6: SET SINGLETON on a typedef that holds 0 rows succeeds.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE x (a INTEGER)").unwrap();
+    engine.execute("ALTER TABLE x SET SINGLETON").unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    assert!(schemas.get("x").unwrap().singleton);
+}
+
+#[test]
+fn alter_set_singleton_succeeds_on_one_row_typedef_prd_00139() {
+    // T6: SET SINGLETON on a typedef that holds exactly 1 row succeeds.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE x (a INTEGER)").unwrap();
+    engine.execute("INSERT INTO x (a) VALUES (1)").unwrap();
+    engine.execute("ALTER TABLE x SET SINGLETON").unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    assert!(schemas.get("x").unwrap().singleton);
+}
+
+#[test]
+fn alter_set_singleton_rejects_multi_row_typedef_prd_00139() {
+    // T6: SET SINGLETON against a typedef with >1 rows rejects with a
+    // clear error naming the row count.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE x (a INTEGER)").unwrap();
+    engine.execute("INSERT INTO x (a) VALUES (1)").unwrap();
+    engine.execute("INSERT INTO x (a) VALUES (2)").unwrap();
+    let err = engine
+        .execute("ALTER TABLE x SET SINGLETON")
+        .expect_err("SET SINGLETON on multi-row typedef must reject");
+    let msg = err.to_string();
+    assert!(msg.contains("typedef holds 2 rows"), "msg = {msg}");
+    assert!(msg.contains("SET SINGLETON"), "msg = {msg}");
+    let schemas = index.load_all_typedefs(&repo);
+    assert!(
+        !schemas.get("x").unwrap().singleton,
+        "rejected ALTER must leave the flag unchanged"
+    );
+}
+
+#[test]
+fn alter_set_singleton_is_idempotent_prd_00139() {
+    // T6: SET SINGLETON twice on the same typedef returns the
+    // already-set message and leaves the flag set.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE x (a INTEGER) SINGLETON")
+        .unwrap();
+    let result = engine.execute("ALTER TABLE x SET SINGLETON").unwrap();
+    let SqlResult::Ok(msg) = result else {
+        panic!("expected Ok variant");
+    };
+    assert!(msg.contains("already"), "expected idempotent message: {msg}");
+}
+
+#[test]
+fn alter_drop_singleton_round_trips_prd_00139() {
+    // T6: SET → DROP → SET round-trips cleanly. Final state has
+    // `singleton: true` again.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE x (a INTEGER)").unwrap();
+    engine.execute("ALTER TABLE x SET SINGLETON").unwrap();
+    engine.execute("ALTER TABLE x DROP SINGLETON").unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    assert!(!schemas.get("x").unwrap().singleton);
+    engine.execute("ALTER TABLE x SET SINGLETON").unwrap();
+    let schemas = index.load_all_typedefs(&repo);
+    assert!(schemas.get("x").unwrap().singleton);
+}
+
+#[test]
+fn alter_drop_singleton_is_idempotent_prd_00139() {
+    // T6: DROP SINGLETON on a non-singleton typedef returns the
+    // already-cleared message.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute("CREATE TABLE x (a INTEGER)").unwrap();
+    let result = engine.execute("ALTER TABLE x DROP SINGLETON").unwrap();
+    let SqlResult::Ok(msg) = result else {
+        panic!("expected Ok variant");
+    };
+    assert!(msg.contains("already"), "expected idempotent message: {msg}");
+}
+
+#[test]
 fn create_table_with_singleton_marker_sets_flag_prd_00139() {
     // T5: `CREATE TABLE x (...) SINGLETON` flips the typedef's singleton
     // flag and round-trips through `index.load_all_typedefs`.
