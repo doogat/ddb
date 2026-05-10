@@ -319,11 +319,15 @@ Removes the matching `- category:: [[id]]` line from the bookmark doogat's refer
 
 When a doogat is deleted via `DELETE FROM`, two cascade operations happen automatically:
 
-1. **Junction cleanup**: all junction table rows where the deleted ID appears as a referenced target are removed. For example, deleting a category removes all `bookmark_category` rows where `category_id` matches.
+1. **Junction cleanup (both directions)**: every auto-junction row whose other end was the deleted id is removed. The cleanup sweeps:
+   - **Reverse**: rows where the deleted id appears as the *referenced target* (e.g. deleting a `category` removes `bookmark_category` rows whose `category_id` matches).
+   - **Parent/owner** (PRD 00137): rows where the deleted id is the *owning parent* (e.g. deleting a `bookmark` removes `bookmark_category` rows whose `bookmark_id` matches). Pre-PRD-00137 the parent-direction rows stayed dangling, so a subsequent `JOIN` against `bookmark_category` returned phantom rows until the next `ddb reindex`. The fix extends `cascade_junction_cleanup` to walk every REFERENCES column on the deleted row's own typedef and `DELETE FROM "<table>_<col>" WHERE "<table>_id" = '<deleted_id>'` in the same transaction. Bulk DELETE invokes the helper per matched id, so it covers the same contract.
 
 2. **Dangling reference removal**: all doogats that link to the deleted doogat via wikilinks in their reference section have those lines removed and are re-committed.
 
-Both operations, plus the original delete, land in a single atomic git commit. Inside a transaction, they are buffered and committed together with other transaction operations.
+All operations, plus the original delete, land in a single atomic git commit. Inside a transaction, they are buffered and committed together with other transaction operations.
+
+Pre-existing orphan junction rows from before PRD 00137 (e.g. owner-direction junction rows whose parent was deleted in older versions) are recovered automatically on the next `ddb reindex`, since junction tables are rebuilt from doogat content.
 
 ### RESTRICT for NOT NULL REFERENCES
 
