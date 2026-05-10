@@ -107,6 +107,10 @@ pub mod codes {
     pub const UNKNOWN_FIELD: &str = "UNKNOWN_FIELD";
     pub const TYPE_NOT_REGISTERED: &str = "TYPE_NOT_REGISTERED";
     pub const CASCADE_CYCLE: &str = "CASCADE_CYCLE";
+    /// PRD 00139 §5: second INSERT into a SINGLETON typedef.
+    pub const SINGLETON_VIOLATION: &str = "SINGLETON_VIOLATION";
+    /// PRD 00139 §5: typed `update<Type>` against an empty SINGLETON typedef.
+    pub const SINGLETON_NOT_FOUND: &str = "SINGLETON_NOT_FOUND";
 }
 
 impl DoogatError {
@@ -255,6 +259,42 @@ impl DoogatError {
             context: vec![("tables".into(), ErrorValue::List(tables))],
         }
     }
+
+    /// PRD 00139 §5: a second INSERT into a SINGLETON typedef. Carries the
+    /// existing row's id so the caller can decide whether to switch to
+    /// `update<Type>` / `upsert<Type>`. Mirrors the `unique_violation` shape
+    /// (`code` + `table` context) but adds `existing_id` since SINGLETON
+    /// always identifies one specific blocker row.
+    pub fn singleton_violation(
+        table: impl Into<String>,
+        existing_id: impl Into<String>,
+    ) -> Self {
+        let table = table.into();
+        let existing_id = existing_id.into();
+        DoogatError::Structured {
+            code: codes::SINGLETON_VIOLATION,
+            message: format!(
+                "SINGLETON constraint violated: {table} already holds row {existing_id}"
+            ),
+            context: vec![
+                ("table".into(), ErrorValue::String(table)),
+                ("existing_id".into(), ErrorValue::String(existing_id)),
+            ],
+        }
+    }
+
+    /// PRD 00139 §5: typed `update<Type>` (no id) hit an empty SINGLETON
+    /// typedef. Caller should switch to `upsert<Type>` or first
+    /// `create<Type>`. Distinct from `NotFound(String)` so GraphQL clients
+    /// can branch on `extensions.code`.
+    pub fn singleton_not_found(table: impl Into<String>) -> Self {
+        let table = table.into();
+        DoogatError::Structured {
+            code: codes::SINGLETON_NOT_FOUND,
+            message: format!("SINGLETON typedef {table} has no row to update"),
+            context: vec![("table".into(), ErrorValue::String(table))],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +411,38 @@ mod tests {
         assert_eq!(
             ctx_get(&err, "tables"),
             &ErrorValue::List(vec!["a".into(), "b".into(), "a".into()])
+        );
+    }
+
+    #[test]
+    fn singleton_violation_carries_table_and_existing_id() {
+        let err = DoogatError::singleton_violation("app_config", "20260510120000");
+        assert_eq!(code_of(&err), "SINGLETON_VIOLATION");
+        assert_eq!(
+            err.to_string(),
+            "SINGLETON constraint violated: app_config already holds row 20260510120000"
+        );
+        assert_eq!(
+            ctx_get(&err, "table"),
+            &ErrorValue::String("app_config".into())
+        );
+        assert_eq!(
+            ctx_get(&err, "existing_id"),
+            &ErrorValue::String("20260510120000".into())
+        );
+    }
+
+    #[test]
+    fn singleton_not_found_carries_table() {
+        let err = DoogatError::singleton_not_found("app_config");
+        assert_eq!(code_of(&err), "SINGLETON_NOT_FOUND");
+        assert_eq!(
+            err.to_string(),
+            "SINGLETON typedef app_config has no row to update"
+        );
+        assert_eq!(
+            ctx_get(&err, "table"),
+            &ErrorValue::String("app_config".into())
         );
     }
 
