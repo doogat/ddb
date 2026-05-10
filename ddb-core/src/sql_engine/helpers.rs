@@ -44,6 +44,40 @@ pub(super) fn re_drop_search_key() -> &'static Regex {
     })
 }
 
+/// PRD 00139 §2: detect the trailing `SINGLETON [DEFAULT VALUES]` marker on
+/// a CREATE TABLE source string. Anchored to the closing paren of the
+/// column list so the marker can only appear after the table body, not
+/// inside a column name.
+///
+/// Match group 1 captures the `DEFAULT VALUES` suffix when present so the
+/// caller can branch on whether to auto-seed (T7).
+pub(super) fn re_create_table_singleton() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)\)\s*SINGLETON(\s+DEFAULT\s+VALUES)?\s*;?\s*$"#)
+            .expect("valid regex")
+    })
+}
+
+/// PRD 00139 §8: `ALTER TABLE x SET SINGLETON` matcher. Mirrors the
+/// quoted/bare table-name capture shape of `re_set_search_key`.
+pub(super) fn re_set_singleton() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+SET\s+SINGLETON\s*;?\s*$"#)
+            .expect("valid regex")
+    })
+}
+
+/// PRD 00139 §8: `ALTER TABLE x DROP SINGLETON` matcher.
+pub(super) fn re_drop_singleton() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+SINGLETON\s*;?\s*$"#)
+            .expect("valid regex")
+    })
+}
+
 pub(super) fn re_unfilled_placeholder() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\{[^}]+\}").expect("valid regex"))
@@ -793,6 +827,91 @@ mod tests {
     fn validate_rename_target_name_rejects_dot_and_space() {
         assert!(validate_rename_target_name("with.dot").is_err());
         assert!(validate_rename_target_name("with space").is_err());
+    }
+
+    #[test]
+    fn re_create_table_singleton_matches_trailing_marker() {
+        let re = re_create_table_singleton();
+        assert!(re.is_match("CREATE TABLE x (a INTEGER) SINGLETON"));
+        assert!(re.is_match("create table x (a integer) singleton"));
+        assert!(re.is_match("CREATE TABLE x (a INTEGER) SINGLETON;"));
+        assert!(re.is_match("CREATE TABLE x (a INTEGER) SINGLETON DEFAULT VALUES"));
+        assert!(re.is_match("CREATE TABLE x (a INTEGER) SINGLETON   DEFAULT   VALUES"));
+        assert!(re.is_match("CREATE TABLE \"x\" (a INTEGER, b TEXT) SINGLETON DEFAULT VALUES;"));
+    }
+
+    #[test]
+    fn re_create_table_singleton_captures_default_values_marker() {
+        let re = re_create_table_singleton();
+        let caps = re
+            .captures("CREATE TABLE x (a INTEGER) SINGLETON DEFAULT VALUES")
+            .unwrap();
+        assert!(caps.get(1).is_some(), "DEFAULT VALUES must be captured");
+        let caps_no_dv = re
+            .captures("CREATE TABLE x (a INTEGER) SINGLETON")
+            .unwrap();
+        assert!(
+            caps_no_dv.get(1).is_none(),
+            "bare SINGLETON must leave group 1 empty"
+        );
+    }
+
+    #[test]
+    fn re_create_table_singleton_rejects_non_marker_uses() {
+        let re = re_create_table_singleton();
+        // Plain CREATE TABLE without SINGLETON.
+        assert!(!re.is_match("CREATE TABLE x (a INTEGER)"));
+        // SINGLETON inside the column list (not a marker).
+        assert!(!re.is_match("CREATE TABLE x (singleton INTEGER)"));
+        // Marker without closing paren preceding (anchored to `)`).
+        assert!(!re.is_match("SELECT 'SINGLETON'"));
+    }
+
+    #[test]
+    fn re_set_singleton_matches_quoted_and_bare_table_names() {
+        let re = re_set_singleton();
+        assert!(re.is_match("ALTER TABLE x SET SINGLETON"));
+        assert!(re.is_match("ALTER TABLE x SET SINGLETON;"));
+        assert!(re.is_match("alter table \"meeting-minutes\" set singleton"));
+        assert!(re.is_match("ALTER TABLE  app_config   SET   SINGLETON   ;"));
+
+        let caps = re.captures("ALTER TABLE app_config SET SINGLETON").unwrap();
+        assert!(caps.get(1).is_none(), "bare name uses group 2");
+        assert_eq!(caps.get(2).unwrap().as_str(), "app_config");
+
+        let caps = re
+            .captures("ALTER TABLE \"meeting-minutes\" SET SINGLETON")
+            .unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "meeting-minutes");
+        assert!(caps.get(2).is_none());
+    }
+
+    #[test]
+    fn re_set_singleton_rejects_unrelated_alter_forms() {
+        let re = re_set_singleton();
+        assert!(!re.is_match("ALTER TABLE x SET SINGLETONS"));
+        assert!(!re.is_match("ALTER TABLE x SET SINGLETON foo"));
+        assert!(!re.is_match("ALTER TABLE x DROP SINGLETON"));
+        assert!(!re.is_match("ALTER TABLE x SET SEARCH KEY foo"));
+    }
+
+    #[test]
+    fn re_drop_singleton_matches_quoted_and_bare_table_names() {
+        let re = re_drop_singleton();
+        assert!(re.is_match("ALTER TABLE x DROP SINGLETON"));
+        assert!(re.is_match("ALTER TABLE x DROP SINGLETON;"));
+        assert!(re.is_match("alter table \"meeting-minutes\" drop singleton"));
+
+        let caps = re.captures("ALTER TABLE app_config DROP SINGLETON").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "app_config");
+    }
+
+    #[test]
+    fn re_drop_singleton_rejects_unrelated_alter_forms() {
+        let re = re_drop_singleton();
+        assert!(!re.is_match("ALTER TABLE x SET SINGLETON"));
+        assert!(!re.is_match("ALTER TABLE x DROP SINGLETONS"));
+        assert!(!re.is_match("ALTER TABLE x DROP SINGLETON foo"));
     }
 
     #[test]
