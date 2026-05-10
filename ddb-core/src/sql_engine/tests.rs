@@ -3204,25 +3204,27 @@ fn test_cascade_junction_no_false_positives() {
             ))
             .unwrap();
 
-    // Delete the bookmark (no REFERENCES point TO bookmark, only FROM it)
+    // Delete the bookmark (the junction's owner-side parent).
     engine
         .execute(&format!("DELETE FROM bookmark WHERE id = '{bm_id}'"))
         .unwrap();
 
-    // Junction row should NOT be cascade-deleted by the bookmark delete,
-    // because the cascade targets the referenced type (category), not the
-    // referencing type (bookmark). The junction row cleanup for the
-    // "owner" side is a separate concern (write-through).
-    // However, the category_id junction entry should remain intact.
+    // PRD 00137 (contract change): cascade now sweeps BOTH directions, so
+    // deleting the bookmark removes the auto-junction row it owns. Pre-fix
+    // this test asserted the row stayed (count == 1), enshrining the
+    // owner-side leak as a "separate concern". That concern is no longer
+    // separate. Querying by `category_id` still picks up the same junction
+    // row that was inserted (`bookmark_id=bm, category_id=cat`), and that
+    // row is now gone with the parent.
     let rows = index
         .query_raw(&format!(
             "SELECT COUNT(*) FROM bookmark_category WHERE category_id = '{cat_id}'"
         ))
         .unwrap();
     assert_eq!(
-            rows[0][0], "1",
-            "junction row should not be affected when deleting a doogat of a type that is not referenced"
-        );
+        rows[0][0], "0",
+        "owner-side junction row must be cleaned when its parent doogat is deleted (PRD 00137)"
+    );
 }
 
 #[test]

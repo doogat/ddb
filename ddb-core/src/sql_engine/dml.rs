@@ -1223,6 +1223,20 @@ impl<'a> SqlEngine<'a> {
         None
     }
 
+    /// Cascade-clean auto-junction rows when a typed row is deleted, in BOTH
+    /// directions:
+    ///
+    /// 1. **Reverse** — junction rows in OTHER typedef tables that pointed at
+    ///    `deleted_id` via `<col>_id` (e.g. deleting a `category` row removes
+    ///    `bookmark_category WHERE category_id = '<cat>'`).
+    /// 2. **Parent/owner** (PRD 00137) — junction rows OWNED by the deleted
+    ///    row's typedef, where `<target_type>_id = '<deleted_id>'` (e.g.
+    ///    deleting a `bookmark` row removes `bookmark_category WHERE
+    ///    bookmark_id = '<bm>'`).
+    ///
+    /// The reverse loop walks every typedef once and handles both branches
+    /// inside the same `for col in &schema.columns`, so the parent-direction
+    /// sweep adds no extra typedef enumeration.
     fn cascade_junction_cleanup(&mut self, target_type: &str, deleted_id: &str) -> Result<()> {
         let conn = self.index.sql_conn();
         let mut stmt = conn
@@ -1247,11 +1261,24 @@ impl<'a> SqlEngine<'a> {
                 }
             };
             for col in &schema.columns {
+                // Reverse direction: another typedef references the deleted
+                // target through this column.
                 if col.references.as_deref() == Some(target_type) {
                     let jt = format!("{table_name}_{}", col.name);
                     let col_id = format!("{}_id", col.name);
                     self.index.sql_conn().execute(
                         &format!("DELETE FROM \"{jt}\" WHERE \"{col_id}\" = ?1"),
+                        params![deleted_id],
+                    )?;
+                }
+                // Parent/owner direction (PRD 00137): the deleted row's own
+                // typedef has REFERENCES columns; remove the auto-junction
+                // rows it owns.
+                if table_name == target_type && col.references.is_some() {
+                    let jt = format!("{target_type}_{}", col.name);
+                    let parent_id_col = format!("{target_type}_id");
+                    self.index.sql_conn().execute(
+                        &format!("DELETE FROM \"{jt}\" WHERE \"{parent_id_col}\" = ?1"),
                         params![deleted_id],
                     )?;
                 }
