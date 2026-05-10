@@ -1615,6 +1615,10 @@ gqlq "mutation { executeSql(sql: `"DELETE FROM pdc_bm WHERE id = '$pdcBm'`") { m
 
 $pdcPost = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$pdcBm'`") { rows } }"
 if ($pdcPost -notmatch '\\"0\\"') { throw "44.M: owner-side junction not cleaned by parent DELETE: $pdcPost" }
+# Stronger assertion (mirrors smoke + e2e): the only row in the junction was
+# the deleted parent's, so the whole junction table must be empty.
+$pdcPostAll = gqlq 'mutation { executeSql(sql: "SELECT COUNT(*) FROM pdc_bm_pdc_cat") { rows } }'
+if ($pdcPostAll -notmatch '\\"0\\"') { throw "44.M: junction table not empty after parent DELETE: $pdcPostAll" }
 pass "PRD 00137: parent-delete clears owned auto-junction rows (44.M)"
 
 # Cleanup

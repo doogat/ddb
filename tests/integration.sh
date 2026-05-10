@@ -1706,6 +1706,10 @@ gql "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM pdc_bm WHERE id = '
 
 PDC_POST=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM'\\\") { rows } }\"}")
 printf '%s' "$PDC_POST" | jq -e '(.data.executeSql.rows[0] | fromjson)[0] == "0"' >/dev/null
+# Stronger assertion (mirrors smoke + e2e): the only row in the junction was
+# the deleted parent's, so the whole junction table must be empty.
+PDC_POST_ALL=$(gql '{"query":"mutation { executeSql(sql: \"SELECT COUNT(*) FROM pdc_bm_pdc_cat\") { rows } }"}')
+printf '%s' "$PDC_POST_ALL" | jq -e '(.data.executeSql.rows[0] | fromjson)[0] == "0"' >/dev/null
 pass "PRD 00137: parent-delete clears owned auto-junction rows (44.M)"
 
 # Cleanup
