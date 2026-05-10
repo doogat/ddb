@@ -1591,6 +1591,36 @@ pass "PRD 00134: GraphQL createDoogat populates auto-junction for REFERENCES col
 gqlq 'mutation { executeSql(sql: "DROP TABLE j134_bm CASCADE") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "DROP TABLE j134_cat CASCADE") { message } }' | Out-Null
 
+# 44.M - Auto-junction parent-direction cleanup on DELETE (PRD 00137).
+# `cascade_junction_cleanup` previously swept only the reverse direction
+# (junctions pointing at the deleted target). The parent-direction sweep
+# (junctions OWNED by the deleted row) is added by PRD 00137 - deleting
+# the bookmark must remove its `pdc_bm_pdc_cat` row in the same transaction.
+$ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+gqlq 'mutation { executeSql(sql: "CREATE TABLE pdc_cat (label VARCHAR(100))") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE pdc_bm (url TEXT, pdc_cat TEXT REFERENCES pdc_cat)") { message } }' | Out-Null
+waitSchemaReload $ver
+
+$pdcCat = extractId (gqlq "mutation { executeSql(sql: `"INSERT INTO pdc_cat (label) VALUES ('alpha')`") { message } }")
+if (-not $pdcCat) { throw "44.M: failed to capture cat id" }
+$pdcBm = extractId (gqlq "mutation { executeSql(sql: `"INSERT INTO pdc_bm (url, pdc_cat) VALUES ('https://pdc.example', '$pdcCat')`") { message } }")
+if (-not $pdcBm) { throw "44.M: failed to capture bookmark id" }
+
+# Sanity: parent-direction junction row exists post-INSERT.
+$pdcPre = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$pdcBm'`") { rows } }"
+if ($pdcPre -notmatch '\\"1\\"') { throw "44.M: parent-direction junction not populated post-INSERT: $pdcPre" }
+
+# Delete the bookmark (parent direction). Junction row must be cleaned.
+gqlq "mutation { executeSql(sql: `"DELETE FROM pdc_bm WHERE id = '$pdcBm'`") { message } }" | Out-Null
+
+$pdcPost = gqlq "mutation { executeSql(sql: `"SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$pdcBm'`") { rows } }"
+if ($pdcPost -notmatch '\\"0\\"') { throw "44.M: owner-side junction not cleaned by parent DELETE: $pdcPost" }
+pass "PRD 00137: parent-delete clears owned auto-junction rows (44.M)"
+
+# Cleanup
+gqlq 'mutation { executeSql(sql: "DROP TABLE pdc_bm CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE pdc_cat CASCADE") { message } }' | Out-Null
+
 # 44. DDL response consistency (no spurious errors)
 $ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 $result = gqlq 'mutation { executeSql(sql: "CREATE TABLE ddltest (name VARCHAR(100))") { columns rows message } }'

@@ -1681,6 +1681,37 @@ pass "PRD 00134: GraphQL createDoogat populates auto-junction for REFERENCES col
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE j134_bm CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE j134_cat CASCADE\") { message } }"}' >/dev/null
 
+# 44.M — Auto-junction parent-direction cleanup on DELETE (PRD 00137).
+# `cascade_junction_cleanup` previously swept only the reverse direction
+# (junctions pointing at the deleted target). The parent-direction sweep
+# (junctions OWNED by the deleted row) is added by PRD 00137 — deleting the
+# bookmark must remove its `pdc_bm_pdc_cat` row in the same transaction.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE pdc_cat (label VARCHAR(100))\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE pdc_bm (url TEXT, pdc_cat TEXT REFERENCES pdc_cat)\") { message } }"}' >/dev/null
+wait_schema_reload "$VER"
+
+PDC_CAT=$(gql '{"query":"mutation { executeSql(sql: \"INSERT INTO pdc_cat (label) VALUES (\\\"alpha\\\")\") { message } }"}' | extract_id)
+[ -n "$PDC_CAT" ]
+PDC_BM=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO pdc_bm (url, pdc_cat) VALUES ('https://pdc.example', '$PDC_CAT')\\\") { message } }\"}" | extract_id)
+[ -n "$PDC_BM" ]
+
+# Sanity: parent-direction junction row exists post-INSERT.
+PDC_PRE=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM'\\\") { rows } }\"}")
+printf '%s' "$PDC_PRE" | jq -e '(.data.executeSql.rows[0] | fromjson)[0] == "1"' >/dev/null
+
+# Delete the bookmark (parent direction). Junction row must be cleaned.
+gql "{\"query\":\"mutation { executeSql(sql: \\\"DELETE FROM pdc_bm WHERE id = '$PDC_BM'\\\") { message } }\"}" >/dev/null
+
+PDC_POST=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM'\\\") { rows } }\"}")
+printf '%s' "$PDC_POST" | jq -e '(.data.executeSql.rows[0] | fromjson)[0] == "0"' >/dev/null
+pass "PRD 00137: parent-delete clears owned auto-junction rows (44.M)"
+
+# Cleanup
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE pdc_bm CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE pdc_cat CASCADE\") { message } }"}' >/dev/null
+
 # 44. DDL response consistency (no spurious errors)
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 VER=${VER:-0}

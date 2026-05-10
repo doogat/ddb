@@ -531,6 +531,31 @@ ddb query "DROP TABLE cdbookmark CASCADE" | Out-Null
 ddb query "DROP TABLE cdcategory CASCADE" | Out-Null
 pass "cascade delete"
 
+# 17b. cascade delete (parent direction, PRD 00137)
+# Mirrors §17 but deletes the *owner* of the auto-junction row instead of
+# the referenced target. Pre-fix the junction row stayed dangling; post-fix
+# the same DELETE removes it in the same transaction.
+ddb query "CREATE TABLE pdc_cat (label VARCHAR(100))" | Out-Null
+ddb query "CREATE TABLE pdc_bm (url TEXT, pdc_cat TEXT REFERENCES pdc_cat)" | Out-Null
+$PDC_CAT_ID = ddb query "INSERT INTO pdc_cat (label) VALUES ('alpha')"
+Start-Sleep -Seconds 1
+$PDC_BM_ID = ddb query "INSERT INTO pdc_bm (url) VALUES ('https://pdc.example.com')"
+ddb query "INSERT INTO pdc_bm_pdc_cat (pdc_bm_id, pdc_cat_id) VALUES ('$PDC_BM_ID', '$PDC_CAT_ID')" | Out-Null
+# Sanity: junction holds the owner-side row.
+$output = ddb query "SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM_ID'"
+if ($output -notmatch "1") { throw "PRD 00137: junction row not created: $output" }
+# Delete the bookmark (parent direction).
+ddb query "DELETE FROM pdc_bm WHERE id = '$PDC_BM_ID'" | Out-Null
+# Owner-side junction row must be gone.
+$output = ddb query "SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM_ID'"
+if ($output -notmatch "0") { throw "PRD 00137: owner-side junction not cascaded: $output" }
+# Whole junction empty (only row was the deleted parent's).
+$output = ddb query "SELECT COUNT(*) FROM pdc_bm_pdc_cat"
+if ($output -notmatch "0") { throw "PRD 00137: junction table not empty after parent delete: $output" }
+ddb query "DROP TABLE pdc_bm CASCADE" | Out-Null
+ddb query "DROP TABLE pdc_cat CASCADE" | Out-Null
+pass "PRD 00137: parent-delete clears owned auto-junction rows"
+
 # 18. cascade delete via ddb delete (service path)
 ddb query "CREATE TABLE cdcat2 (label VARCHAR(100))" | Out-Null
 ddb query "CREATE TABLE cdbm2 (url TEXT, cdcat2 TEXT REFERENCES cdcat2)" | Out-Null

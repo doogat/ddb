@@ -426,6 +426,28 @@ $DDB query "DROP TABLE cdbookmark CASCADE" >/dev/null
 $DDB query "DROP TABLE cdcategory CASCADE" >/dev/null
 pass "cascade delete"
 
+# 17b. cascade delete (parent direction, PRD 00137)
+# Mirrors §17 but deletes the *owner* of the auto-junction row instead of
+# the referenced target. Pre-fix the junction row stayed dangling; post-fix
+# the same DELETE removes it in the same transaction.
+$DDB query "CREATE TABLE pdc_cat (label VARCHAR(100))" >/dev/null
+$DDB query "CREATE TABLE pdc_bm (url TEXT, pdc_cat TEXT REFERENCES pdc_cat)" >/dev/null
+PDC_CAT_ID=$($DDB query "INSERT INTO pdc_cat (label) VALUES ('alpha')")
+sleep 1
+PDC_BM_ID=$($DDB query "INSERT INTO pdc_bm (url) VALUES ('https://pdc.example.com')")
+$DDB query "INSERT INTO pdc_bm_pdc_cat (pdc_bm_id, pdc_cat_id) VALUES ('$PDC_BM_ID', '$PDC_CAT_ID')" >/dev/null
+# Sanity: junction holds the owner-side row.
+$DDB query "SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM_ID'" | grep -q "1"
+# Delete the bookmark (parent direction).
+$DDB query "DELETE FROM pdc_bm WHERE id = '$PDC_BM_ID'" >/dev/null
+# Owner-side junction row must be gone.
+$DDB query "SELECT COUNT(*) FROM pdc_bm_pdc_cat WHERE pdc_bm_id = '$PDC_BM_ID'" | grep -q "0"
+# Whole junction empty (only row was the deleted parent's).
+$DDB query "SELECT COUNT(*) FROM pdc_bm_pdc_cat" | grep -q "0"
+$DDB query "DROP TABLE pdc_bm CASCADE" >/dev/null
+$DDB query "DROP TABLE pdc_cat CASCADE" >/dev/null
+pass "PRD 00137: parent-delete clears owned auto-junction rows"
+
 # 18. cascade delete via ddb delete (service path)
 $DDB query "CREATE TABLE cdcat2 (label VARCHAR(100))" >/dev/null
 $DDB query "CREATE TABLE cdbm2 (url TEXT, cdcat2 TEXT REFERENCES cdcat2)" >/dev/null
