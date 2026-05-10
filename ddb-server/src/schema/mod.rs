@@ -26,7 +26,7 @@ pub fn build_schema(
 ) -> Result<Schema, String> {
     let mut type_defs = type_defs::build_type_defs();
     let q = queries::build_query_fields(&type_schemas);
-    let m = mutations::build_mutation_fields();
+    let m = mutations::build_mutation_fields(&type_schemas);
     let s = subscriptions::build_subscription_fields(&q.known_types, &type_schemas);
 
     // PRD 00129 §4 (Option B): extend the base `Doogat` GraphQL object
@@ -55,6 +55,7 @@ pub fn build_schema(
         .register(m.sync_result_type)
         .register(m.compact_result_type)
         .register(m.git_maintenance_result_type)
+        .register(m.upsert_result_type)
         .register(q.query)
         .register(m.mutation)
         .register(s.subscription)
@@ -468,6 +469,91 @@ mod tests {
         assert!(
             !sdl.contains("Fetch the singleton Link row"),
             "non-singleton typedef must not emit a singular SINGLETON Query field, got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn singleton_typedef_emits_update_mutation_field_prd_00139() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let mut singleton_schema = make_table_schema(
+            "app_config",
+            vec![simple_column("theme")],
+        );
+        singleton_schema.singleton = true;
+
+        let schema = build_schema(actor, pool, vec![singleton_schema], None)
+            .expect("schema should build with singleton typedef");
+        let sdl = schema.sdl();
+
+        assert!(
+            sdl.contains("update_app_config("),
+            "SDL should contain singleton update mutation signature, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("input: String!"),
+            "SDL should use String input for singleton update mutation, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("): App_config!"),
+            "SDL should return the typed singleton object, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("Update the App_config singleton row"),
+            "SDL should contain singleton update mutation description, got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn singleton_typedef_emits_upsert_mutation_field_prd_00139() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let mut singleton_schema = make_table_schema(
+            "app_config",
+            vec![simple_column("theme")],
+        );
+        singleton_schema.singleton = true;
+
+        let schema = build_schema(actor, pool, vec![singleton_schema], None)
+            .expect("schema should build with singleton typedef");
+        let sdl = schema.sdl();
+
+        assert!(
+            sdl.contains("upsert_app_config("),
+            "SDL should contain singleton upsert mutation signature, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("input: String!"),
+            "SDL should use String input for singleton upsert mutation, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("): UpsertResult!"),
+            "SDL should return UpsertResult for singleton upsert mutation, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("Upsert the App_config singleton row"),
+            "SDL should contain singleton upsert mutation description, got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_singleton_typedef_does_not_emit_update_or_upsert_prd_00139() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let plain = make_table_schema("link", vec![simple_column("url")]);
+        let schema = build_schema(actor, pool, vec![plain], None).unwrap();
+        let sdl = schema.sdl();
+
+        assert!(
+            !sdl.contains("Update the Link singleton row"),
+            "non-singleton typedef must not emit singleton update mutation, got:\n{sdl}"
+        );
+        assert!(
+            !sdl.contains("Upsert the Link singleton row"),
+            "non-singleton typedef must not emit singleton upsert mutation, got:\n{sdl}"
         );
     }
 }

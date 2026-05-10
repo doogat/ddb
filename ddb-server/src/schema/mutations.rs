@@ -2,13 +2,15 @@ use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
 use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
+use ddb_core::error::DoogatError;
+use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ConflictAction, TableSchema};
 use indexmap::IndexMap;
-use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ConflictAction};
 
 use std::sync::Arc;
 
-use crate::actor::ActorHandle;
+use crate::actor::{ActorHandle, UpdateDoogatParams};
 use crate::error::to_graphql_error;
+use crate::read_pool::ReadPool;
 use crate::reload::SchemaReloader;
 
 use super::base_types::*;
@@ -20,10 +22,11 @@ pub(crate) struct MutationOutput {
     pub sync_result_type: Object,
     pub compact_result_type: Object,
     pub git_maintenance_result_type: Object,
+    pub upsert_result_type: Object,
     pub attach_input: InputObject,
 }
 
-pub(crate) fn build_mutation_fields() -> MutationOutput {
+pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOutput {
     let mut mutation = Object::new("Mutation");
 
     // createDoogat
@@ -468,6 +471,151 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
         );
     }
 
+    for schema in type_schemas {
+        if !schema.singleton {
+            continue;
+        }
+
+        let type_name = sanitize_type_name(&schema.table_name);
+        let field_base = schema.table_name.replace('-', "_");
+        let update_field_name = format!("update_{field_base}");
+        let upsert_field_name = format!("upsert_{field_base}");
+        let table_name = schema.table_name.clone();
+        let schema_clone = schema.clone();
+        let update_desc = format!(
+            "Update the {} singleton row. Rejects with SINGLETON_NOT_FOUND when the typedef is empty.",
+            type_name
+        );
+        let upsert_desc = format!(
+            "Upsert the {} singleton row. Returns id plus a created flag indicating whether the row was newly created.",
+            type_name
+        );
+
+        mutation = mutation.field(
+            Field::new(&update_field_name, TypeRef::named_nn(&type_name), move |ctx| {
+                let table_name = table_name.clone();
+                let schema = schema_clone.clone();
+                FieldFuture::new(async move {
+                    let a = ctx.data::<ActorHandle>()?;
+                    let pool = ctx.data::<ReadPool>()?;
+                    // Reuse the existing JSON-string fields transport so singleton
+                    // typedef mutations stay aligned with updateDoogat without
+                    // generating per-typedef input objects.
+                    let fields = parse_fields_json(ctx.args.try_get("input")?.string()?)
+                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                    let rows = pool
+                        .aggregate_query_rows(
+                            format!("SELECT id FROM \"{}\" LIMIT 1", table_name.replace('"', "\"\"")),
+                            Vec::new(),
+                        )
+                        .await
+                        .map_err(to_graphql_error)?;
+                    let id = rows
+                        .first()
+                        .and_then(|row| row.first())
+                        .cloned()
+                        .ok_or_else(|| to_graphql_error(DoogatError::singleton_not_found(&table_name)))?;
+                    let z = a
+                        .update_doogat(UpdateDoogatParams {
+                            id,
+                            title: None,
+                            body: None,
+                            tags: None,
+                            doogat_type: None,
+                            fields,
+                            unset_fields: vec![],
+                        })
+                        .await
+                        .map_err(to_graphql_error)?;
+                    Ok(Some(FieldValue::owned_any(typed_doogat_to_value(&z, &schema))))
+                })
+            })
+            .argument(
+                InputValue::new("input", TypeRef::named_nn(TypeRef::STRING))
+                    .description("JSON object of typed field values to update."),
+            )
+            .description(&update_desc),
+        );
+
+        let table_name = schema.table_name.clone();
+        mutation = mutation.field(
+            Field::new(&upsert_field_name, TypeRef::named_nn("UpsertResult"), move |ctx| {
+                let table_name = table_name.clone();
+                FieldFuture::new(async move {
+                    let a = ctx.data::<ActorHandle>()?;
+                    let pool = ctx.data::<ReadPool>()?;
+                    // Reuse the existing JSON-string fields transport so singleton
+                    // typedef mutations stay aligned with updateDoogat without
+                    // generating per-typedef input objects.
+                    let fields = parse_fields_json(ctx.args.try_get("input")?.string()?)
+                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                    let rows = pool
+                        .aggregate_query_rows(
+                            format!("SELECT id FROM \"{}\" LIMIT 1", table_name.replace('"', "\"\"")),
+                            Vec::new(),
+                        )
+                        .await
+                        .map_err(to_graphql_error)?;
+
+                    let (id, created) = match rows.first().and_then(|row| row.first()).cloned() {
+                        Some(id) => {
+                            let updated = a
+                                .update_doogat(UpdateDoogatParams {
+                                    id: id.clone(),
+                                    title: None,
+                                    body: None,
+                                    tags: None,
+                                    doogat_type: None,
+                                    fields,
+                                    unset_fields: vec![],
+                                })
+                                .await
+                                .map_err(to_graphql_error)?;
+                            (updated.meta.id.map(|id| id.0).unwrap_or(id), false)
+                        }
+                        None => {
+                            let created = a
+                                .create_doogat(
+                                    None,
+                                    None,
+                                    vec![],
+                                    Some(table_name.clone()),
+                                    fields,
+                                    ConflictAction::Error,
+                                )
+                                .await
+                                .map_err(to_graphql_error)?;
+                            (
+                                created
+                                    .meta
+                                    .id
+                                    .as_ref()
+                                    .map(|id| id.0.clone())
+                                    .ok_or_else(|| {
+                                        async_graphql::ServerError::new(
+                                            "created singleton missing id",
+                                            None,
+                                        )
+                                    })?,
+                                true,
+                            )
+                        }
+                    };
+
+                    let mut obj = IndexMap::new();
+                    obj.insert(Name::new("id"), GqlValue::String(id));
+                    obj.insert(Name::new("created"), GqlValue::Boolean(created));
+                    Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
+                })
+            })
+            .argument(
+                InputValue::new("input", TypeRef::named_nn(TypeRef::STRING))
+                    .description("JSON object of typed field values to upsert."),
+            )
+            .description(&upsert_desc),
+        );
+    }
+
     // -- SyncResult output type --
     let sync_result_type = Object::new("SyncResult")
         .description("Result of a sync operation with a remote repository.")
@@ -720,11 +868,21 @@ pub(crate) fn build_mutation_fields() -> MutationOutput {
         );
     }
 
+    let upsert_result_type = build_upsert_result_type();
+
     MutationOutput {
         mutation,
         sync_result_type,
         compact_result_type,
         git_maintenance_result_type,
+        upsert_result_type,
         attach_input,
     }
+}
+
+fn build_upsert_result_type() -> Object {
+    Object::new("UpsertResult")
+        .description("Result of a singleton upsert operation.")
+        .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
+        .field(simple_field("created", TypeRef::named_nn(TypeRef::BOOLEAN)))
 }
