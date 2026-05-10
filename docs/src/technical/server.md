@@ -274,7 +274,7 @@ type Mutation {
 type UpsertResult { id: ID!, created: Boolean! }
 ```
 
-Field-name shape mirrors the typedef's snake-case `table_name` (e.g. `app_config` -> `app_config: App_config`, `update_app_config(input:)`, `upsert_app_config(input:)`). When the singular field name collides with another `Query` field generated earlier in the same loop, it falls back to `<table_name>_singleton` and a `tracing::warn!` is emitted at schema-build time. Hyphenated typedef names (e.g. `meeting-minutes`) sanitize to `meeting_minutes` before name generation.
+Field-name shape mirrors the typedef's snake-case `table_name` (e.g. `app_config` -> `app_config: App_config`, `update_app_config(input:)`, `upsert_app_config(input:)`). When the singular field name collides with another `Query` field, it falls back to `<table_name>_singleton` and emits a `tracing::warn!` at schema-build time. If that fallback also collides, schema build fails with a clear error naming the typedef and both colliding field names rather than silently dropping the singular field. Hyphenated typedef names (e.g. `meeting-minutes`) sanitize to `meeting_minutes` before singleton field-name generation.
 
 Constraint violations on `createDoogat` / typed `INSERT` against a populated SINGLETON typedef carry `extensions.code = "SINGLETON_VIOLATION"` plus structured `table` and `existing_id` context (mirroring the `UNIQUE_VIOLATION` envelope from PRD 00129 §6). `update_<type>` against an empty typedef returns `SINGLETON_NOT_FOUND` with `table` context.
 

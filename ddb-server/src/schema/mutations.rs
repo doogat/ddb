@@ -487,7 +487,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
         }
 
         let type_name = sanitize_type_name(&schema.table_name);
-        let field_base = schema.table_name.replace('-', "_");
+        let field_base = singleton_field_base(&schema.table_name);
         let update_field_name = format!("update_{field_base}");
         let upsert_field_name = format!("upsert_{field_base}");
         let table_name = schema.table_name.clone();

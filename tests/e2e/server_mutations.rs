@@ -400,6 +400,103 @@ fn batch_update_atomicity_via_graphql() {
 }
 
 #[test]
+fn hyphenated_singleton_uses_snake_case_query_and_mutation_fields() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let create_type = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": r#"CREATE TABLE "foo-bar" (title TEXT DEFAULT 'Foo Config', theme TEXT) SINGLETON"# }),
+    );
+    assert!(
+        create_type.get("errors").is_none(),
+        "CREATE TABLE foo-bar SINGLETON failed: {create_type}"
+    );
+
+    let seed_row = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": r#"INSERT INTO "foo-bar" (title, theme) VALUES ('Foo Config', 'dark')"# }),
+    );
+    assert!(
+        seed_row.get("errors").is_none(),
+        "singleton seed insert failed: {seed_row}"
+    );
+
+    let query = server.graphql(r#"{ foo_bar { id theme } }"#);
+    assert!(
+        query.get("errors").is_none(),
+        "foo_bar query failed: {query}"
+    );
+    let id = query["data"]["foo_bar"]["id"]
+        .as_str()
+        .expect("singleton query should return id")
+        .to_string();
+    assert_eq!(query["data"]["foo_bar"]["theme"].as_str(), Some("dark"));
+
+    let update = server.graphql(
+        r#"mutation {
+            update_foo_bar(input: "{\"theme\":\"light\"}") {
+                id
+                theme
+            }
+        }"#,
+    );
+    assert!(
+        update.get("errors").is_none(),
+        "update_foo_bar failed: {update}"
+    );
+    assert_eq!(
+        update["data"]["update_foo_bar"]["id"].as_str(),
+        Some(id.as_str()),
+        "update_foo_bar should target the singleton row: {update}"
+    );
+    assert_eq!(
+        update["data"]["update_foo_bar"]["theme"].as_str(),
+        Some("light"),
+        "update_foo_bar should update the singleton row: {update}"
+    );
+
+    let second_upsert = server.graphql(
+        r#"mutation {
+            upsert_foo_bar(input: "{\"theme\":\"blue\"}") {
+                id
+                created
+            }
+        }"#,
+    );
+    assert!(
+        second_upsert.get("errors").is_none(),
+        "upsert_foo_bar failed: {second_upsert}"
+    );
+    assert_eq!(
+        second_upsert["data"]["upsert_foo_bar"]["id"].as_str(),
+        Some(id.as_str()),
+        "upsert should reuse the singleton row id: {second_upsert}"
+    );
+    assert_eq!(
+        second_upsert["data"]["upsert_foo_bar"]["created"].as_bool(),
+        Some(false),
+        "upsert should update the existing singleton row: {second_upsert}"
+    );
+
+    let final_query = server.graphql(r#"{ foo_bar { id theme } }"#);
+    assert!(
+        final_query.get("errors").is_none(),
+        "final foo_bar query failed: {final_query}"
+    );
+    assert_eq!(
+        final_query["data"]["foo_bar"]["id"].as_str(),
+        Some(id.as_str()),
+        "final foo_bar query should still resolve the same singleton row: {final_query}"
+    );
+    assert_eq!(
+        final_query["data"]["foo_bar"]["theme"].as_str(),
+        Some("blue"),
+        "final foo_bar query should reflect the last upsert: {final_query}"
+    );
+}
+
+#[test]
 fn batch_update_empty() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);

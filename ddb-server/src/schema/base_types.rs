@@ -959,6 +959,12 @@ pub(crate) fn sanitize_type_name(s: &str) -> String {
     }
 }
 
+/// Convert a typedef table name into the snake_case field base used by
+/// SINGLETON singular queries and mutations.
+pub(crate) fn singleton_field_base(s: &str) -> String {
+    s.replace('-', "_")
+}
+
 /// Convert a kebab-case field name to camelCase for GraphQL field names.
 /// First segment is lowercased, subsequent segments are capitalized.
 pub(crate) fn sanitize_field_name(s: &str) -> String {

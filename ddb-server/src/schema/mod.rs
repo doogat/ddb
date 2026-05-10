@@ -27,7 +27,7 @@ pub fn build_schema(
     reloader: Option<Arc<SchemaReloader>>,
 ) -> Result<Schema, String> {
     let mut type_defs = type_defs::build_type_defs();
-    let q = queries::build_query_fields(&type_schemas);
+    let q = queries::build_query_fields(&type_schemas)?;
     let m = mutations::build_mutation_fields(&type_schemas);
     let s = subscriptions::build_subscription_fields(&q.known_types, &type_schemas);
 
@@ -438,6 +438,83 @@ mod tests {
         assert!(
             !sdl.contains("app_config_singleton"),
             "fallback name must NOT appear when no collision; got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn singleton_hyphenated_type_uses_snake_case_query_and_mutation_names_prd_00139() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+        let mut singleton_schema = make_table_schema("foo-bar", vec![simple_column("theme")]);
+        singleton_schema.singleton = true;
+
+        let schema = build_schema(actor, pool, vec![singleton_schema], None).unwrap();
+        let sdl = schema.sdl();
+
+        assert!(
+            sdl.contains("\tfoo_bar: FooBar\n"),
+            "hyphenated singleton singular field must use snake_case, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("update_foo_bar("),
+            "hyphenated singleton update mutation must use snake_case, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("upsert_foo_bar("),
+            "hyphenated singleton upsert mutation must use snake_case, got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn singleton_singular_field_falls_back_to_snake_case_singleton_suffix_prd_00139() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+        let mut singleton_schema = make_table_schema("tags", vec![simple_column("label")]);
+        singleton_schema.singleton = true;
+
+        let schema = build_schema(actor, pool, vec![singleton_schema], None)
+            .expect("schema should build with fallback singleton name");
+        let sdl = schema.sdl();
+
+        assert!(
+            sdl.contains("\ttags_singleton: Tags\n"),
+            "singleton singular field must fall back to tags_singleton, got:\n{sdl}"
+        );
+        assert!(
+            !sdl.contains("\ttags: Tags\n"),
+            "colliding bare singleton field must not be emitted, got:\n{sdl}"
+        );
+    }
+
+    #[tokio::test]
+    async fn singleton_double_collision_fails_schema_build_prd_00139() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (actor, pool) = test_actor_and_pool(tmp.path());
+
+        let mut tags = make_table_schema("tags", vec![simple_column("label")]);
+        tags.singleton = true;
+
+        let mut reserved_fallback =
+            make_table_schema("tags_singleton_singleton", vec![simple_column("label")]);
+        reserved_fallback.singleton = true;
+
+        let mut colliding = make_table_schema("tags-singleton", vec![simple_column("label")]);
+        colliding.singleton = true;
+
+        let err = build_schema(actor, pool, vec![tags, reserved_fallback, colliding], None)
+            .expect_err("double singleton-field collision must fail schema build");
+
+        assert!(
+            err.contains("tags-singleton"),
+            "error must name the typedef that failed, got: {err}"
+        );
+        assert!(
+            err.contains("tags_singleton"),
+            "error must mention the bare colliding field, got: {err}"
+        );
+        assert!(
+            err.contains("tags_singleton_singleton"),
+            "error must mention the fallback colliding field, got: {err}"
         );
     }
 

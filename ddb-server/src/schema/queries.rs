@@ -15,6 +15,28 @@ use crate::reload::SchemaReloader;
 
 use super::base_types::*;
 
+const RESERVED_QUERY_FIELD_NAMES: &[&str] = &[
+    "doogat",
+    "doogats",
+    "search",
+    "normalizeSearchQuery",
+    "typeDefs",
+    "sql",
+    "schemaVersion",
+    "checkboxItems",
+    "openActions",
+    "unlinkedMentions",
+    "suggestions",
+    "staleDoogats",
+    "orphanDoogats",
+    "sequenceInfo",
+    "sequenceChildren",
+    "sequenceBreadcrumb",
+    "brokenSequences",
+    "tags",
+    "tagEntries",
+];
+
 /// Auxiliary types and collections produced by the query builder that must be
 /// registered on the schema alongside the Query object itself.
 pub(crate) struct QueryOutput {
@@ -27,7 +49,7 @@ pub(crate) struct QueryOutput {
     pub broken_sequence_type: Object,
 }
 
-pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
+pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOutput, String> {
     let mut query = Object::new("Query");
 
     // doogat(id)
@@ -406,7 +428,10 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
     // `<base>_singleton`. The fallback also collides? -> hard error at
     // schema-build time so a future operator notices instead of silently
     // dropping the singular field.
-    let mut emitted_query_fields: HashSet<String> = HashSet::new();
+    let mut emitted_query_fields: HashSet<String> = RESERVED_QUERY_FIELD_NAMES
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
     for schema in type_schemas {
         let type_name = match known_types.get(&schema.table_name) {
             Some(name) => name.clone(),
@@ -672,32 +697,30 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                 "Fetch the singleton {} row, or null when the typedef is empty.",
                 type_name
             );
+            let singleton_field_base = singleton_field_base(&schema.table_name);
             // PRD 00139 §6 / T16: name-collision fallback. If the bare
-            // `field_base` (e.g. `app_config`) already shipped as another
-            // typedef's plural (or any other field on Query), fall back to
-            // `<field_base>_singleton`. If the fallback ALSO collides,
-            // skip emission and warn — the operator can rename one of the
-            // typedefs.
-            let singular_field_name = if emitted_query_fields.contains(&field_base) {
-                let fallback = format!("{field_base}_singleton");
+            // SINGLETON field base (e.g. `foo_bar`) already shipped as
+            // another Query field, fall back to `<field_base>_singleton`.
+            // If the fallback ALSO collides, fail schema build so the
+            // operator sees the bad schema instead of silently losing the
+            // field.
+            let singular_field_name = if emitted_query_fields.contains(&singleton_field_base) {
+                let fallback = format!("{singleton_field_base}_singleton");
                 if emitted_query_fields.contains(&fallback) {
-                    tracing::warn!(
-                        "skipping SINGLETON singular field for typedef '{}': both '{}' and fallback '{}' already in use on Query",
-                        schema.table_name,
-                        field_base,
-                        fallback
-                    );
-                    continue;
+                    return Err(format!(
+                        "cannot build SINGLETON singular field for typedef '{}': '{}' collides on Query and fallback '{}' is also already in use",
+                        schema.table_name, singleton_field_base, fallback
+                    ));
                 }
                 tracing::warn!(
                     "SINGLETON typedef '{}' singular field '{}' collides with another Query field; emitting as '{}' instead",
                     schema.table_name,
-                    field_base,
+                    singleton_field_base,
                     fallback
                 );
                 fallback
             } else {
-                field_base.clone()
+                singleton_field_base
             };
             emitted_query_fields.insert(singular_field_name.clone());
             query = query.field(
@@ -830,7 +853,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
         );
     }
 
-    QueryOutput {
+    Ok(QueryOutput {
         query,
         known_types,
         dynamic_types,
@@ -838,5 +861,5 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
         sequence_node_type,
         sequence_info_type,
         broken_sequence_type,
-    }
+    })
 }
