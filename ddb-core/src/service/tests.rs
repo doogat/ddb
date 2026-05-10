@@ -4287,3 +4287,211 @@ fn create_doogat_with_extra_materialised_row_visible_to_fresh_service() {
         other => panic!("expected Rows, got {other:?}"),
     }
 }
+
+// ── PRD 00139 SINGLETON typed-write enforcement ──────────────────────────
+
+/// Install a typedef for type "app_config" with `singleton: true`. Mirrors
+/// the `setup_widget_typedef` shape used by PRD 00131 unique tests so the
+/// SINGLETON enforcement tests look familiar.
+fn setup_app_config_singleton_typedef(svc: &DoogatService) {
+    let typedef = "---
+id: 20260510130000
+title: app_config
+type: _typedef
+singleton: true
+columns:
+  - name: theme
+    data_type: TEXT
+    zone: frontmatter
+---
+";
+    let typedef_path = "ddb/_typedef/20260510130000.md";
+    svc.repo
+        .commit_file(typedef_path, typedef, "add app_config singleton typedef")
+        .unwrap();
+    let parsed = crate::parser::parse(typedef, typedef_path).unwrap();
+    svc.index.index_doogat(&parsed).unwrap();
+    svc.index.materialize_all_types(&svc.repo).unwrap();
+}
+
+#[test]
+fn batch_create_first_singleton_insert_succeeds_prd_00139() {
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: Some("Config".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("app_config".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let results = svc.batch_create(&inputs).expect("first insert succeeds");
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn batch_create_second_singleton_insert_rejects_prd_00139() {
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    svc.batch_create(&[crate::types::BatchCreateInput {
+        title: Some("First".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("app_config".to_string()),
+        fields: fields.clone(),
+        on_conflict: crate::types::ConflictAction::Error,
+    }])
+    .unwrap();
+
+    let mut fields2 = std::collections::BTreeMap::new();
+    fields2.insert(
+        "theme".to_string(),
+        crate::types::Value::String("light".to_string()),
+    );
+    let err = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("Second".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("app_config".to_string()),
+            fields: fields2,
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .expect_err("second SINGLETON insert must reject");
+    match err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+}
+
+#[test]
+fn batch_create_singleton_on_conflict_ignore_returns_existing_prd_00139() {
+    // PRD 00139 §3 layer 1: `on_conflict: Ignore` against a populated
+    // SINGLETON typedef returns the existing row instead of erroring,
+    // matching the upsert-skip semantics of UNIQUE.
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    let first = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("First".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("app_config".to_string()),
+            fields: fields.clone(),
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .unwrap();
+    let first_id = first[0].meta.id.as_ref().unwrap().0.clone();
+
+    let mut fields2 = std::collections::BTreeMap::new();
+    fields2.insert(
+        "theme".to_string(),
+        crate::types::Value::String("light".to_string()),
+    );
+    let second = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("Second".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("app_config".to_string()),
+            fields: fields2,
+            on_conflict: crate::types::ConflictAction::Ignore,
+        }])
+        .unwrap();
+    assert_eq!(second.len(), 1);
+    let returned_id = second[0].meta.id.as_ref().unwrap().0.clone();
+    assert_eq!(
+        returned_id, first_id,
+        "Ignore branch must return the existing row's id"
+    );
+}
+
+#[test]
+fn batch_create_intra_batch_singleton_rejects_second_input_prd_00139() {
+    // PRD 00139 §4: two SINGLETON inserts in the same batch reject
+    // before any commit lands. The second input flips the error.
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+
+    let mut fields_a = std::collections::BTreeMap::new();
+    fields_a.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    let mut fields_b = std::collections::BTreeMap::new();
+    fields_b.insert(
+        "theme".to_string(),
+        crate::types::Value::String("light".to_string()),
+    );
+
+    let err = svc
+        .batch_create(&[
+            crate::types::BatchCreateInput {
+                title: Some("A".to_string()),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("app_config".to_string()),
+                fields: fields_a,
+                on_conflict: crate::types::ConflictAction::Error,
+            },
+            crate::types::BatchCreateInput {
+                title: Some("B".to_string()),
+                body: None,
+                tags: vec![],
+                doogat_type: Some("app_config".to_string()),
+                fields: fields_b,
+                on_conflict: crate::types::ConflictAction::Error,
+            },
+        ])
+        .expect_err("intra-batch SINGLETON duplicate must reject");
+    match err {
+        crate::error::DoogatError::Structured {
+            code, ref context, ..
+        } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+            let existing = context
+                .iter()
+                .find(|(k, _)| k == "existing_id")
+                .map(|(_, v)| v)
+                .expect("existing_id context entry");
+            match existing {
+                crate::error::ErrorValue::String(s) => assert_eq!(
+                    s, "<intra-batch>",
+                    "intra-batch placeholder marker must surface in context"
+                ),
+                other => panic!("expected String for existing_id, got {other:?}"),
+            }
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+
+    // Neither row should have committed.
+    let rows = svc.index.query_raw("SELECT id FROM app_config").unwrap();
+    assert_eq!(
+        rows.len(),
+        0,
+        "rejected batch must leave the singleton table empty"
+    );
+}

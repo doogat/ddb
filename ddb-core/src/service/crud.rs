@@ -110,6 +110,19 @@ fn input_unique_keys(input: &BatchCreateInput, schemas: &[TableSchema]) -> Vec<U
         .collect()
 }
 
+/// PRD 00139 §4: returns the typedef's `table_name` when this input
+/// targets a SINGLETON typedef registered in `schemas`. Returns `None`
+/// for untyped inputs, unregistered types, or non-singleton typedefs.
+fn singleton_type_for(input: &BatchCreateInput, schemas: &[TableSchema]) -> Option<String> {
+    let type_name = input.doogat_type.as_deref()?;
+    let schema = schemas.iter().find(|s| s.table_name == type_name)?;
+    if schema.singleton {
+        Some(type_name.to_string())
+    } else {
+        None
+    }
+}
+
 impl<G: GitBackend> DoogatService<G> {
     // ── CRUD ────────────────────────────────────────────────────────────
 
@@ -619,10 +632,49 @@ impl<G: GitBackend> DoogatService<G> {
         let mut intra_dup_links: Vec<Option<usize>> = vec![None; inputs.len()];
         let mut seen_unique: std::collections::HashMap<UniqueKey, usize> =
             std::collections::HashMap::new();
+        // PRD 00139 §4: track singleton inserts within the same batch so a
+        // second INSERT into the same SINGLETON typedef is rejected before
+        // any commit lands. Maps `type_name -> first surviving input idx`.
+        let mut seen_singleton: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for (input_idx, input) in inputs.iter().enumerate() {
+            // PRD 00139 §3 layer 1: pre-check the SINGLETON constraint
+            // before the UNIQUE check so callers see SINGLETON_VIOLATION
+            // (the stronger constraint) when both apply.
+            if let Some(existing) = self.check_singleton_constraint(input, &schemas)? {
+                results[input_idx] = Some(existing);
+                continue;
+            }
+
             if let Some(existing) = self.check_unique_constraints(input, &schemas)? {
                 results[input_idx] = Some(existing);
                 continue;
+            }
+
+            // PRD 00139 §4: intra-batch SINGLETON tracker. A second
+            // SINGLETON insert into the same typedef in this batch must
+            // reject (Error) or skip-to-survivor (Ignore) before commit.
+            if let Some(type_name) = singleton_type_for(input, &schemas) {
+                if let Some(&prior_idx) = seen_singleton.get(&type_name) {
+                    match input.on_conflict {
+                        crate::types::ConflictAction::Ignore => {
+                            intra_dup_links[input_idx] = Some(prior_idx);
+                            continue;
+                        }
+                        crate::types::ConflictAction::Error => {
+                            // The prior row's id isn't materialized yet
+                            // (we're pre-commit), so use the placeholder
+                            // marker `<intra-batch>` to signal the
+                            // collision originated in this batch rather
+                            // than from an existing row.
+                            return Err(DoogatError::singleton_violation(
+                                type_name,
+                                "<intra-batch>".to_string(),
+                            ));
+                        }
+                    }
+                }
+                seen_singleton.insert(type_name, input_idx);
             }
 
             if let Some((prior_idx, conflict_key)) =
