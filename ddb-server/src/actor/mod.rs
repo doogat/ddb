@@ -3,18 +3,17 @@ mod handlers;
 use std::path::PathBuf;
 
 use chrono::Utc;
-use tokio::sync::{mpsc, oneshot};
 use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
-    BatchCreateInput, BatchUpdateInput, BrokenSequence, CompactionReport,
-    ConflictAction, MaintenanceReport, OrphanDoogat, PaginatedSearchResult,
-    ParsedDoogat, SearchFilters, SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport,
-    TableSchema, UnlinkedMention,
+    BatchCreateInput, BatchUpdateInput, BrokenSequence, CompactionReport, ConflictAction,
+    MaintenanceReport, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SearchFilters,
+    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, UnlinkedMention,
 };
+use tokio::sync::{mpsc, oneshot};
 
-use crate::events::{EventBus, EventKind, DoogatEvent};
+use crate::events::{DoogatEvent, EventBus, EventKind};
 
 /// Serializable result from the actor.
 pub type ActorResult<T> = Result<T, DoogatError>;
@@ -321,10 +320,7 @@ impl ActorHandle {
         }
     }
 
-    pub async fn update_doogat(
-        &self,
-        params: UpdateDoogatParams,
-    ) -> ActorResult<ParsedDoogat> {
+    pub async fn update_doogat(&self, params: UpdateDoogatParams) -> ActorResult<ParsedDoogat> {
         match self
             .send(ActorCommand::UpdateDoogat {
                 id: params.id,
@@ -377,10 +373,7 @@ impl ActorHandle {
     }
 
     pub async fn execute_batch(&self, statements: Vec<String>) -> ActorResult<Vec<SqlResult>> {
-        match self
-            .send(ActorCommand::ExecuteBatch { statements })
-            .await
-        {
+        match self.send(ActorCommand::ExecuteBatch { statements }).await {
             ActorReply::SqlResults(r) => r,
             _ => Err(DoogatError::Validation("unexpected reply".into())),
         }
@@ -667,7 +660,12 @@ fn doogat_event(
 ) -> DoogatEvent {
     DoogatEvent {
         kind: kind.clone(),
-        doogat_id: z.meta.id.as_ref().map(ToString::to_string).unwrap_or_default(),
+        doogat_id: z
+            .meta
+            .id
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
         doogat_type: z.meta.doogat_type.clone(),
         timestamp,
     }
@@ -704,7 +702,11 @@ fn emit_mutation_events(
 
     if is_batch_update || is_create_many {
         if let ActorReply::DoogatList(Ok(ref doogats)) = reply {
-            let kind = if is_create_many { EventKind::Created } else { EventKind::Updated };
+            let kind = if is_create_many {
+                EventKind::Created
+            } else {
+                EventKind::Updated
+            };
             let now = Utc::now();
             for z in doogats {
                 event_bus.send(doogat_event(&kind, z, now));

@@ -7,21 +7,13 @@ use super::{ActorCommand, ActorReply};
 
 pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> ActorReply {
     match cmd {
-        ActorCommand::NoSqlGet { id } => {
-            ActorReply::NoSqlDoogat(Box::new(svc.nosql_get(&id)))
-        }
+        ActorCommand::NoSqlGet { id } => ActorReply::NoSqlDoogat(Box::new(svc.nosql_get(&id))),
         ActorCommand::NoSqlScanType { type_name } => {
             ActorReply::NoSqlIds(svc.nosql_scan_type(&type_name))
         }
-        ActorCommand::NoSqlScanTag { tag } => {
-            ActorReply::NoSqlIds(svc.nosql_scan_tag(&tag))
-        }
-        ActorCommand::NoSqlBacklinks { id } => {
-            ActorReply::NoSqlIds(svc.nosql_backlinks(&id))
-        }
-        ActorCommand::GetDoogat { id } => {
-            ActorReply::Doogat(Box::new(svc.get_doogat_parsed(&id)))
-        }
+        ActorCommand::NoSqlScanTag { tag } => ActorReply::NoSqlIds(svc.nosql_scan_tag(&tag)),
+        ActorCommand::NoSqlBacklinks { id } => ActorReply::NoSqlIds(svc.nosql_backlinks(&id)),
+        ActorCommand::GetDoogat { id } => ActorReply::Doogat(Box::new(svc.get_doogat_parsed(&id))),
         ActorCommand::ListDoogats {
             doogat_type,
             tag,
@@ -43,7 +35,9 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
             limit,
             offset,
             filters,
-        } => ActorReply::SearchResults(svc.search_paginated_filtered(&query, limit, offset, &filters)),
+        } => ActorReply::SearchResults(
+            svc.search_paginated_filtered(&query, limit, offset, &filters),
+        ),
         ActorCommand::CreateDoogat {
             title,
             body,
@@ -60,13 +54,11 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
                 fields,
                 on_conflict,
             };
-            let result = svc
-                .batch_create(&[input])
-                .and_then(|mut v| {
-                    v.pop().ok_or_else(|| {
-                        ddb_core::error::DoogatError::Validation("no doogat created".into())
-                    })
-                });
+            let result = svc.batch_create(&[input]).and_then(|mut v| {
+                v.pop().ok_or_else(|| {
+                    ddb_core::error::DoogatError::Validation("no doogat created".into())
+                })
+            });
             ActorReply::Doogat(Box::new(result))
         }
         ActorCommand::UpdateDoogat {
@@ -92,18 +84,12 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
             );
             ActorReply::Doogat(Box::new(result))
         }
-        ActorCommand::BatchUpdate { updates } => {
-            ActorReply::DoogatList(svc.batch_update(&updates))
-        }
-        ActorCommand::CreateMany { inputs } => {
-            ActorReply::DoogatList(svc.batch_create(&inputs))
-        }
-        ActorCommand::DeleteDoogat { id } => {
-            ActorReply::Deleted(
-                svc.delete_doogat(&id, &format!("delete doogat {id}"))
-                    .map(|_broken| ()),
-            )
-        }
+        ActorCommand::BatchUpdate { updates } => ActorReply::DoogatList(svc.batch_update(&updates)),
+        ActorCommand::CreateMany { inputs } => ActorReply::DoogatList(svc.batch_create(&inputs)),
+        ActorCommand::DeleteDoogat { id } => ActorReply::Deleted(
+            svc.delete_doogat(&id, &format!("delete doogat {id}"))
+                .map(|_broken| ()),
+        ),
         ActorCommand::ExecuteSql { sql } => ActorReply::SqlResult(svc.execute_sql(&sql)),
         ActorCommand::ExecuteBatch { statements } => {
             let combined = statements.join(";\n");
@@ -191,9 +177,7 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
         ActorCommand::OrphanDoogats { type_filter } => {
             ActorReply::OrphanDoogats(svc.orphan_doogats(type_filter.as_deref()))
         }
-        ActorCommand::SequenceInfo { id } => {
-            ActorReply::SequenceInfoResult(svc.sequence_info(&id))
-        }
+        ActorCommand::SequenceInfo { id } => ActorReply::SequenceInfoResult(svc.sequence_info(&id)),
         ActorCommand::SequenceChildren { id } => {
             ActorReply::SequenceNodes(svc.sequence_children(&id))
         }

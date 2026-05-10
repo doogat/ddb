@@ -317,15 +317,13 @@ fn navigate_or_create<'a>(
 ) -> std::result::Result<&'a mut Value, PathError> {
     match seg {
         PathSegment::Key(key) => match current {
-            Value::Map(map) => {
-                Ok(map.entry(key.clone()).or_insert_with(|| {
-                    if next_is_index {
-                        Value::List(Vec::new())
-                    } else {
-                        Value::Map(BTreeMap::new())
-                    }
-                }))
-            }
+            Value::Map(map) => Ok(map.entry(key.clone()).or_insert_with(|| {
+                if next_is_index {
+                    Value::List(Vec::new())
+                } else {
+                    Value::Map(BTreeMap::new())
+                }
+            })),
             other => Err(PathError::TypeMismatch {
                 path: path.to_string(),
                 expected: "map",
@@ -378,13 +376,13 @@ fn navigate_to_parent_mut<'a>(
             PathSegment::Index(idx) => match current {
                 Value::List(list) => {
                     let len = list.len();
-                    current =
-                        list.get_mut(*idx)
-                            .ok_or_else(|| PathError::IndexOutOfBounds {
-                                path: path.to_string(),
-                                index: *idx,
-                                length: len,
-                            })?;
+                    current = list
+                        .get_mut(*idx)
+                        .ok_or_else(|| PathError::IndexOutOfBounds {
+                            path: path.to_string(),
+                            index: *idx,
+                            length: len,
+                        })?;
                 }
                 other => {
                     return Err(PathError::TypeMismatch {

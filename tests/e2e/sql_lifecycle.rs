@@ -805,13 +805,19 @@ fn multi_row_insert() {
 fn default_next_auto_increments() {
     let repo = DdbTestRepo::init();
     repo.ddb()
-        .args(["query", "CREATE TABLE nexttest (name TEXT, pos INTEGER DEFAULT NEXT)"])
+        .args([
+            "query",
+            "CREATE TABLE nexttest (name TEXT, pos INTEGER DEFAULT NEXT)",
+        ])
         .assert()
         .success();
 
     // Multi-row insert should assign sequential values
     repo.ddb()
-        .args(["query", "INSERT INTO nexttest (name) VALUES ('a'), ('b'), ('c')"])
+        .args([
+            "query",
+            "INSERT INTO nexttest (name) VALUES ('a'), ('b'), ('c')",
+        ])
         .assert()
         .success();
 
@@ -846,7 +852,10 @@ fn default_next_auto_increments() {
 fn default_next_partitioned() {
     let repo = DdbTestRepo::init();
     repo.ddb()
-        .args(["query", "CREATE TABLE parttest (cat TEXT, pos INTEGER DEFAULT NEXT(cat))"])
+        .args([
+            "query",
+            "CREATE TABLE parttest (cat TEXT, pos INTEGER DEFAULT NEXT(cat))",
+        ])
         .assert()
         .success();
 
@@ -867,7 +876,10 @@ fn default_next_partitioned() {
 
     // cat 'a' should have pos 1 and 2, cat 'b' should have pos 1
     repo.ddb()
-        .args(["query", "SELECT cat, pos FROM parttest WHERE cat = 'a' ORDER BY pos"])
+        .args([
+            "query",
+            "SELECT cat, pos FROM parttest WHERE cat = 'a' ORDER BY pos",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("1"))

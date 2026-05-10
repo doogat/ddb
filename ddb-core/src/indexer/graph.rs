@@ -9,7 +9,14 @@ use crate::types::{
 use super::Index;
 
 /// (id, title, type, date, path, updated_at)
-type StalenessRow = (String, String, String, Option<String>, String, Option<String>);
+type StalenessRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+);
 
 impl Index {
     /// Find all doogats linking to a given target.
@@ -163,11 +170,7 @@ impl Index {
     }
 
     /// Suggest related doogats based on tag overlap and content similarity.
-    pub fn suggest_links(
-        &self,
-        source_id: &str,
-        limit: usize,
-    ) -> Result<Vec<Suggestion>> {
+    pub fn suggest_links(&self, source_id: &str, limit: usize) -> Result<Vec<Suggestion>> {
         let source_tags = self.fetch_tags(source_id)?;
         if source_tags.is_empty() {
             return self.suggest_by_content(source_id, limit);
@@ -194,10 +197,7 @@ impl Index {
         self.build_suggestions(&mut scored, limit)
     }
 
-    fn fetch_tags(
-        &self,
-        doogat_id: &str,
-    ) -> Result<std::collections::HashSet<String>> {
+    fn fetch_tags(&self, doogat_id: &str) -> Result<std::collections::HashSet<String>> {
         let mut stmt = self
             .conn
             .prepare("SELECT tag FROM _ddb_tags WHERE doogat_id = ?1")?;
@@ -411,11 +411,7 @@ impl Index {
     }
 
     /// Content-only suggestion fallback when source has no tags.
-    fn suggest_by_content(
-        &self,
-        source_id: &str,
-        limit: usize,
-    ) -> Result<Vec<Suggestion>> {
+    fn suggest_by_content(&self, source_id: &str, limit: usize) -> Result<Vec<Suggestion>> {
         let source_title = self.fetch_title(source_id);
         if source_title.is_empty() {
             return Ok(vec![]);
@@ -426,8 +422,13 @@ impl Index {
             .conn
             .prepare("SELECT alias FROM _ddb_aliases WHERE doogat_id = ?1")?;
 
-        let results =
-            self.query_content_suggestions(source_id, &source_title, limit, &linked_ids, &mut alias_stmt)?;
+        let results = self.query_content_suggestions(
+            source_id,
+            &source_title,
+            limit,
+            &linked_ids,
+            &mut alias_stmt,
+        )?;
         Ok(normalize_suggestion_scores(results))
     }
 
@@ -538,9 +539,15 @@ impl Index {
                 continue;
             };
 
-            if let Some(entry) =
-                compute_staleness(&id, title, doogat_type, &last_date, source, threshold, today)
-            {
+            if let Some(entry) = compute_staleness(
+                &id,
+                title,
+                doogat_type,
+                &last_date,
+                source,
+                threshold,
+                today,
+            ) {
                 stale.push(entry);
             }
         }
@@ -549,10 +556,7 @@ impl Index {
         Ok(stale)
     }
 
-    fn query_stale_candidates(
-        &self,
-        type_filter: Option<&str>,
-    ) -> Result<Vec<StalenessRow>> {
+    fn query_stale_candidates(&self, type_filter: Option<&str>) -> Result<Vec<StalenessRow>> {
         let (sql, filter_val) = if let Some(t) = type_filter {
             (
                 "SELECT id, title, type, date, path, updated_at FROM doogats \
@@ -596,10 +600,7 @@ impl Index {
     }
 
     /// Find doogats with zero incoming backlinks.
-    pub fn orphan_doogats(
-        &self,
-        type_filter: Option<&str>,
-    ) -> Result<Vec<OrphanDoogat>> {
+    pub fn orphan_doogats(&self, type_filter: Option<&str>) -> Result<Vec<OrphanDoogat>> {
         let base = "\
             SELECT z.id, z.title, z.type, \
                    (SELECT COUNT(*) FROM _ddb_links WHERE source_id = z.id) AS outgoing \
@@ -708,10 +709,7 @@ impl Index {
     }
 
     /// Report inbound/outbound link counts per doogat.
-    pub fn link_density(
-        &self,
-        type_filter: Option<&str>,
-    ) -> Result<Vec<LinkDensityEntry>> {
+    pub fn link_density(&self, type_filter: Option<&str>) -> Result<Vec<LinkDensityEntry>> {
         let base_sql = if type_filter.is_some() {
             "SELECT z.id, z.title, z.type, z.path FROM doogats z \
              WHERE z.path NOT LIKE 'ddb/_typedef/%' AND z.type = ?1"
@@ -748,7 +746,14 @@ impl Index {
 
         let mut entries = Vec::with_capacity(doogats.len());
         for (id, title, doogat_type, path) in &doogats {
-            entries.push(count_links(id, title, doogat_type, path, &mut out_stmt, &mut in_stmt));
+            entries.push(count_links(
+                id,
+                title,
+                doogat_type,
+                path,
+                &mut out_stmt,
+                &mut in_stmt,
+            ));
         }
 
         entries.sort_by_key(|e| std::cmp::Reverse(e.density_score));
@@ -857,11 +862,7 @@ impl Index {
     /// Recursive subtree rooted at `id`. Returns nodes with their depth (0 = root).
     ///
     /// Depth-limited to `max_depth` to guard against cycles or very deep trees.
-    pub fn sequence_tree(
-        &self,
-        id: &str,
-        max_depth: usize,
-    ) -> Result<Vec<(SequenceNode, usize)>> {
+    pub fn sequence_tree(&self, id: &str, max_depth: usize) -> Result<Vec<(SequenceNode, usize)>> {
         let mut result = Vec::new();
         self.sequence_tree_inner(id, 0, max_depth, &mut result)?;
         Ok(result)

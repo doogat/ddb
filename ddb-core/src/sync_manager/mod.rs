@@ -244,14 +244,14 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         // Merge
         let phase_start = std::time::Instant::now();
         let merge_result = self.repo.merge_remote(remote, branch)?;
-        let report = self.apply_merge_result(merge_result, index)?;
+        let mut report = self.apply_merge_result(merge_result, index)?;
         tracing::info!(
             phase = "merge",
             elapsed_ms = phase_start.elapsed().as_millis(),
             "sync_phase"
         );
 
-        self.finalize_sync(remote, branch, index)?;
+        self.finalize_sync(remote, branch, index, &mut report)?;
 
         tracing::info!(total_ms = sync_start.elapsed().as_millis(), "sync_complete");
         Ok(report)
@@ -269,6 +269,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             conflicts_resolved: 0,
             resurrected: 0,
             collisions_reassigned: 0,
+            singleton_conflicts_resolved: 0,
         };
 
         match merge_result {
@@ -342,8 +343,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         theirs_oid: &CommitHash,
     ) -> Result<()> {
         let hlc = self.tick_hlc();
-        let merge_msg =
-            crate::hlc::append_hlc_trailer("resolve merge conflicts via CRDT", &hlc);
+        let merge_msg = crate::hlc::append_hlc_trailer("resolve merge conflicts via CRDT", &hlc);
 
         let files: Vec<(&str, &str)> = resolved
             .iter()
@@ -364,11 +364,24 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         remote: &str,
         branch: &str,
         index: &Index,
+        report: &mut SyncReport,
     ) -> Result<()> {
         let phase_start = std::time::Instant::now();
         self.update_sync_state()?;
         tracing::info!(
             phase = "update_sync_state",
+            elapsed_ms = phase_start.elapsed().as_millis(),
+            "sync_phase"
+        );
+
+        let phase_start = std::time::Instant::now();
+        let sweep_hlc = self.tick_hlc();
+        let sweep =
+            crate::consistency::singleton_sweep::singleton_sweep(self.repo, index, &sweep_hlc)?;
+        report.singleton_conflicts_resolved = sweep.conflicts_resolved;
+        tracing::info!(
+            phase = "singleton_sweep",
+            resolved = sweep.conflicts_resolved,
             elapsed_ms = phase_start.elapsed().as_millis(),
             "sync_phase"
         );
@@ -554,8 +567,12 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                 ancestor: ancestor_oid
                     .as_ref()
                     .and_then(|oid| self.read_file_from_commit(oid, path)),
-                ours: self.read_file_from_commit(ours_oid, path).unwrap_or_default(),
-                theirs: self.read_file_from_commit(theirs_oid, path).unwrap_or_default(),
+                ours: self
+                    .read_file_from_commit(ours_oid, path)
+                    .unwrap_or_default(),
+                theirs: self
+                    .read_file_from_commit(theirs_oid, path)
+                    .unwrap_or_default(),
                 ours_hlc: self.repo.find_hlc_for_path(ours_oid, path),
                 theirs_hlc: self.repo.find_hlc_for_path(theirs_oid, path),
                 ours_blob_oid: None,
@@ -641,11 +658,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     }
 
     /// Generate a new ID for one collision loser, rewrite links, and commit.
-    fn reassign_single_loser(
-        &self,
-        loser: &CollisionLoser,
-        theirs_oid: &CommitHash,
-    ) -> Result<()> {
+    fn reassign_single_loser(&self, loser: &CollisionLoser, theirs_oid: &CommitHash) -> Result<()> {
         let winner_id = loser.old_id.clone();
         let loser_type = loser.type_name.as_deref();
         let loser_folder = loser.folder;
@@ -670,11 +683,16 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         let mut files: Vec<(String, String)> = vec![(new_path.clone(), updated_content)];
         files.extend(rewrites);
 
-        let file_refs: Vec<(&str, &str)> =
-            files.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+        let file_refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(p, c)| (p.as_str(), c.as_str()))
+            .collect();
         self.repo.commit_files(
             &file_refs,
-            &format!("fix: reassign collided doogat ID {} -> {}", loser.old_id, new_id.0),
+            &format!(
+                "fix: reassign collided doogat ID {} -> {}",
+                loser.old_id, new_id.0
+            ),
         )?;
 
         tracing::warn!(
@@ -771,7 +789,8 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                     Err(e) => {
                         tracing::debug!(
                             "node {} has malformed last_sync '{}': {e}",
-                            node.uuid, last_sync
+                            node.uuid,
+                            last_sync
                         );
                     }
                 }

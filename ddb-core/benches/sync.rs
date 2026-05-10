@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use tempfile::TempDir;
 use ddb_core::compaction;
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
 use ddb_core::sync_manager::{register_node, SyncManager};
+use tempfile::TempDir;
 
 const DOOGAT_COUNT_1K: usize = 1000;
 const DOOGAT_COUNT_5K: usize = 5000;

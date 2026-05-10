@@ -641,9 +641,7 @@ fn extract_optional_schema_fields(extra: &BTreeMap<String, Value>) -> OptionalSc
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    let unique_together = extra
-        .get("unique_together")
-        .and_then(parse_unique_together);
+    let unique_together = extra.get("unique_together").and_then(parse_unique_together);
 
     let search_key = extra
         .get("search_key")

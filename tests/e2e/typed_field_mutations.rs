@@ -16,10 +16,7 @@ fn select_objects(server: &ServerGuard, sql: &str) -> Vec<serde_json::Value> {
         r#"mutation($sql: String!, $fmt: String) { executeSql(sql: $sql, format: $fmt) { rows } }"#,
         serde_json::json!({ "sql": sql, "fmt": "objects" }),
     );
-    assert!(
-        r.get("errors").is_none(),
-        "SELECT failed: {r}\nSQL: {sql}"
-    );
+    assert!(r.get("errors").is_none(), "SELECT failed: {r}\nSQL: {sql}");
     r["data"]["executeSql"]["rows"]
         .as_array()
         .unwrap()
@@ -41,10 +38,7 @@ fn update_doogat_with_fields_updates_materialized_row() {
         &server,
         "INSERT INTO bookmark (title, url) VALUES ('My Bookmark', 'https://old.com')",
     );
-    let id = r["data"]["executeSql"]["message"]
-        .as_str()
-        .unwrap()
-        .trim();
+    let id = r["data"]["executeSql"]["message"].as_str().unwrap().trim();
 
     // Verify initial materialized row
     let rows = select_objects(
@@ -94,10 +88,7 @@ fn update_doogat_with_unset_fields_removes_field() {
         &server,
         "INSERT INTO bookmark (title, url) VALUES ('Unset Test', 'https://remove.me')",
     );
-    let id = r["data"]["executeSql"]["message"]
-        .as_str()
-        .unwrap()
-        .trim();
+    let id = r["data"]["executeSql"]["message"].as_str().unwrap().trim();
 
     // Verify field is set
     let rows = select_objects(

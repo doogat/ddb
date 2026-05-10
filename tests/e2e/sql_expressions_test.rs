@@ -37,19 +37,13 @@ fn insert_with_coalesce() {
 fn update_with_ifnull() {
     let repo = DdbTestRepo::init();
     repo.ddb()
-        .args([
-            "query",
-            "CREATE TABLE items (name TEXT, label TEXT)",
-        ])
+        .args(["query", "CREATE TABLE items (name TEXT, label TEXT)"])
         .assert()
         .success();
 
     let out = repo
         .ddb()
-        .args([
-            "query",
-            "INSERT INTO items (name) VALUES ('thing')",
-        ])
+        .args(["query", "INSERT INTO items (name) VALUES ('thing')"])
         .output()
         .unwrap();
     assert!(
@@ -63,9 +57,7 @@ fn update_with_ifnull() {
     repo.ddb()
         .args([
             "query",
-            &format!(
-                "UPDATE items SET label = IFNULL(NULL, 'default') WHERE id = '{id}'"
-            ),
+            &format!("UPDATE items SET label = IFNULL(NULL, 'default') WHERE id = '{id}'"),
         ])
         .assert()
         .success()
@@ -85,18 +77,12 @@ fn update_with_ifnull() {
 fn insert_with_arithmetic() {
     let repo = DdbTestRepo::init();
     repo.ddb()
-        .args([
-            "query",
-            "CREATE TABLE ordered (name TEXT, pos INTEGER)",
-        ])
+        .args(["query", "CREATE TABLE ordered (name TEXT, pos INTEGER)"])
         .assert()
         .success();
 
     repo.ddb()
-        .args([
-            "query",
-            "INSERT INTO ordered (name, pos) VALUES ('a', 5)",
-        ])
+        .args(["query", "INSERT INTO ordered (name, pos) VALUES ('a', 5)"])
         .assert()
         .success();
 
@@ -208,10 +194,7 @@ fn update_with_ifnull_column_ref() {
 fn insert_with_nested_expression() {
     let repo = DdbTestRepo::init();
     repo.ddb()
-        .args([
-            "query",
-            "CREATE TABLE nested (val INTEGER)",
-        ])
+        .args(["query", "CREATE TABLE nested (val INTEGER)"])
         .assert()
         .success();
 
@@ -251,10 +234,7 @@ fn insert_rejects_malformed_expression() {
 
     // COALESCE() with no args is malformed — should fail
     repo.ddb()
-        .args([
-            "query",
-            "INSERT INTO malformed (val) VALUES (COALESCE())",
-        ])
+        .args(["query", "INSERT INTO malformed (val) VALUES (COALESCE())"])
         .assert()
         .failure();
 }

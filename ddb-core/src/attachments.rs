@@ -6,10 +6,10 @@
 use std::collections::BTreeMap;
 
 use crate::error::Result;
-use crate::traits::GitBackend;
 use crate::indexer::Index;
 use crate::parser;
-use crate::types::{AttachmentInfo, Value, DoogatId};
+use crate::traits::GitBackend;
+use crate::types::{AttachmentInfo, DoogatId, Value};
 
 /// Validate that a filename is safe for use in attachment paths.
 /// Rejects path traversal characters: `..`, `/`, `\`.
@@ -146,7 +146,12 @@ pub fn attach_file(
 }
 
 /// Detach a file from a doogat: remove from git, update frontmatter, commit.
-pub fn detach_file(repo: &impl GitBackend, index: &Index, id: &DoogatId, filename: &str) -> Result<()> {
+pub fn detach_file(
+    repo: &impl GitBackend,
+    index: &Index,
+    id: &DoogatId,
+    filename: &str,
+) -> Result<()> {
     validate_doogat_id_format(id)?;
     validate_attachment_filename(filename)?;
     let doogat_path = format!("ddb/{}.md", id.0);

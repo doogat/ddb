@@ -161,10 +161,7 @@ pub(crate) fn sequence(
     Ok(())
 }
 
-pub(crate) fn type_cmd(
-    repo: &std::path::Path,
-    action: TypeAction,
-) -> ddb_core::error::Result<()> {
+pub(crate) fn type_cmd(repo: &std::path::Path, action: TypeAction) -> ddb_core::error::Result<()> {
     match action {
         TypeAction::Suggest { name } => {
             let svc = DoogatService::open(repo)?;

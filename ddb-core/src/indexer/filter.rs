@@ -36,7 +36,10 @@ impl Index {
     /// Returns `None` if no negation handling needed (original behavior).
     /// Returns `Some((positive_fts_query, negation_sql_clauses, negation_params))`
     /// where positive_fts_query is None for all-negative queries.
-    pub(super) fn build_negation_plan(&self, query: &str) -> Option<(Option<String>, Vec<String>, Vec<String>)> {
+    pub(super) fn build_negation_plan(
+        &self,
+        query: &str,
+    ) -> Option<(Option<String>, Vec<String>, Vec<String>)> {
         let ast = search_query::parse(query)?;
         let (positive, negatives) = search_query::extract_negations(ast);
         if negatives.is_empty() {
@@ -255,7 +258,10 @@ impl Index {
         routes
     }
 
-    pub(super) fn build_filter_clauses(&self, filters: &SearchFilters) -> (Vec<String>, Vec<String>) {
+    pub(super) fn build_filter_clauses(
+        &self,
+        filters: &SearchFilters,
+    ) -> (Vec<String>, Vec<String>) {
         use super::materialize::is_core_column;
 
         let mut clauses = Vec::new();
@@ -264,8 +270,14 @@ impl Index {
 
         if let Some(ref types) = filters.types {
             if !types.is_empty() {
-                let placeholders: Vec<String> =
-                    types.iter().map(|_| { let p = format!("?{idx}"); idx += 1; p }).collect();
+                let placeholders: Vec<String> = types
+                    .iter()
+                    .map(|_| {
+                        let p = format!("?{idx}");
+                        idx += 1;
+                        p
+                    })
+                    .collect();
                 clauses.push(format!("AND z.type IN ({})", placeholders.join(", ")));
                 params.extend(types.clone());
             }
@@ -334,11 +346,14 @@ impl Index {
                             if vals.is_empty() {
                                 clauses.push("AND 0".to_string());
                             } else {
-                                let placeholders: Vec<String> = vals.iter().map(|_| {
-                                    let p = format!("?{idx}");
-                                    idx += 1;
-                                    p
-                                }).collect();
+                                let placeholders: Vec<String> = vals
+                                    .iter()
+                                    .map(|_| {
+                                        let p = format!("?{idx}");
+                                        idx += 1;
+                                        p
+                                    })
+                                    .collect();
                                 clauses.push(format!(
                                     "AND z.id IN (SELECT doogat_id FROM _ddb_tags WHERE tag IN ({}))",
                                     placeholders.join(", ")
@@ -355,16 +370,13 @@ impl Index {
                     let safe_col = escape_sql_ident(&wf.field);
                     match &wf.op {
                         SearchFieldOp::Eq(val) => {
-                            clauses.push(format!(
-                                "AND z.\"{}\" = ?{idx}", safe_col
-                            ));
+                            clauses.push(format!("AND z.\"{}\" = ?{idx}", safe_col));
                             params.push(val.clone());
                             idx += 1;
                         }
                         SearchFieldOp::Contains(val) => {
-                            clauses.push(format!(
-                                "AND z.\"{}\" LIKE '%' || ?{idx} || '%'", safe_col
-                            ));
+                            clauses
+                                .push(format!("AND z.\"{}\" LIKE '%' || ?{idx} || '%'", safe_col));
                             params.push(val.clone());
                             idx += 1;
                         }
@@ -372,13 +384,18 @@ impl Index {
                             if vals.is_empty() {
                                 clauses.push("AND 0".to_string());
                             } else {
-                                let placeholders: Vec<String> = vals.iter().map(|_| {
-                                    let p = format!("?{idx}");
-                                    idx += 1;
-                                    p
-                                }).collect();
+                                let placeholders: Vec<String> = vals
+                                    .iter()
+                                    .map(|_| {
+                                        let p = format!("?{idx}");
+                                        idx += 1;
+                                        p
+                                    })
+                                    .collect();
                                 clauses.push(format!(
-                                    "AND z.\"{}\" IN ({})", safe_col, placeholders.join(", ")
+                                    "AND z.\"{}\" IN ({})",
+                                    safe_col,
+                                    placeholders.join(", ")
                                 ));
                                 params.extend(vals.clone());
                             }
@@ -421,10 +438,8 @@ impl Index {
                         //     (set via `ALTER TABLE … SET SEARCH KEY <col>`),
                         //   - or the global `doogats.title` (default).
                         // Default keeps the pre-search-key behaviour intact.
-                        let typedef_has_id = self
-                            .table_columns(&wf.field)
-                            .iter()
-                            .any(|c| c == "id");
+                        let typedef_has_id =
+                            self.table_columns(&wf.field).iter().any(|c| c == "id");
                         let sk_col = self.lookup_search_key(&wf.field);
                         let (contains_join_table, contains_match_col) =
                             match (typedef_has_id, sk_col) {
@@ -495,8 +510,7 @@ impl Index {
                                         .collect();
                                     let in_list = phs.join(", ");
                                     let subs = route_sql(&wf.op, "", Some(&in_list));
-                                    clauses
-                                        .push(format!("AND z.id IN ({})", subs.join(" UNION ")));
+                                    clauses.push(format!("AND z.id IN ({})", subs.join(" UNION ")));
                                     params.extend(vals.clone());
                                 }
                             }
@@ -528,11 +542,14 @@ impl Index {
                                 } else {
                                     let key_idx = idx;
                                     idx += 1;
-                                    let placeholders: Vec<String> = vals.iter().map(|_| {
-                                        let p = format!("?{idx}");
-                                        idx += 1;
-                                        p
-                                    }).collect();
+                                    let placeholders: Vec<String> = vals
+                                        .iter()
+                                        .map(|_| {
+                                            let p = format!("?{idx}");
+                                            idx += 1;
+                                            p
+                                        })
+                                        .collect();
                                     clauses.push(format!(
                                         "AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{} AND value IN ({}))",
                                         key_idx, placeholders.join(", ")
@@ -552,11 +569,14 @@ impl Index {
                             if vals.is_empty() {
                                 clauses.push("AND 0".to_string());
                             } else {
-                                let placeholders: Vec<String> = vals.iter().map(|_| {
-                                    let p = format!("?{idx}");
-                                    idx += 1;
-                                    p
-                                }).collect();
+                                let placeholders: Vec<String> = vals
+                                    .iter()
+                                    .map(|_| {
+                                        let p = format!("?{idx}");
+                                        idx += 1;
+                                        p
+                                    })
+                                    .collect();
                                 let in_list = placeholders.join(", ");
 
                                 let subqueries: Vec<String> = tables_with_field
@@ -651,8 +671,7 @@ impl Index {
                                         )
                                     })
                                     .collect();
-                                clauses
-                                    .push(format!("AND z.id IN ({})", subs.join(" UNION ")));
+                                clauses.push(format!("AND z.id IN ({})", subs.join(" UNION ")));
                                 params.push(val.clone());
                             } else if !jt_tables.is_empty() {
                                 let ph = format!("?{idx}");
@@ -684,7 +703,8 @@ impl Index {
                                         )
                                     })
                                     .collect();
-                                clauses.push(format!("AND z.id IN ({})", subqueries.join(" UNION ")));
+                                clauses
+                                    .push(format!("AND z.id IN ({})", subqueries.join(" UNION ")));
                                 params.push(val.clone());
                             }
                         }

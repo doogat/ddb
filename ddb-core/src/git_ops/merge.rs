@@ -275,11 +275,7 @@ impl GitRepo {
         let mut conflicts = Vec::new();
         for conflict in index.conflicts()? {
             let conflict = conflict?;
-            conflicts.push(self.extract_single_conflict(
-                &conflict,
-                ours_commit,
-                theirs_commit,
-            )?);
+            conflicts.push(self.extract_single_conflict(&conflict, ours_commit, theirs_commit)?);
         }
         Ok(conflicts)
     }

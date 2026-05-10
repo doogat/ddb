@@ -197,6 +197,7 @@ pub struct SyncReport {
     pub conflicts_resolved: usize,
     pub resurrected: usize,
     pub collisions_reassigned: usize,
+    pub singleton_conflicts_resolved: usize,
 }
 
 #[derive(Debug, Clone)]

@@ -7,9 +7,9 @@
 //! a regression in the savepoint setup or junction insert shows up.
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use tempfile::TempDir;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
+use tempfile::TempDir;
 
 const REF_COUNT: usize = 100;
 const ROW_COUNT: usize = 1000;
@@ -18,9 +18,12 @@ const ROW_COUNT: usize = 1000;
 /// `category`) and `REF_COUNT` pre-populated category rows. Returns the
 /// service and the list of category ids the link bench iterations will
 /// reference.
-fn fresh_service_with_refs(dir: &std::path::Path) -> (DoogatService<ddb_core::git_ops::GitRepo>, Vec<String>) {
+fn fresh_service_with_refs(
+    dir: &std::path::Path,
+) -> (DoogatService<ddb_core::git_ops::GitRepo>, Vec<String>) {
     let mut svc = DoogatService::init(dir).unwrap();
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
     svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
         .unwrap();
 

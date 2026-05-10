@@ -107,6 +107,9 @@ pub fn migrate_all(repo: &impl DoogatStore, dry_run: bool) -> Result<FixReport> 
     let mut writes: Vec<(String, String)> = Vec::new();
 
     for path in &paths {
+        if path.starts_with("ddb/_conflicts/") {
+            continue;
+        }
         let content = match repo.read_file(path) {
             Ok(c) => c,
             Err(_) => continue,

@@ -1,4 +1,4 @@
-use crate::common::{ServerGuard, DdbTestRepo};
+use crate::common::{DdbTestRepo, ServerGuard};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_postgres::SimpleQueryMessage;

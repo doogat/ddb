@@ -3,8 +3,8 @@ use rusqlite::params;
 use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
-use crate::sql_engine::{apply_updates_to_doogat, build_data_doogat};
 use crate::sql_engine::typed_insert::{prepare_typed_insert_validate, TypedInsertCounters};
+use crate::sql_engine::{apply_updates_to_doogat, build_data_doogat};
 use crate::types::{
     BatchCreateInput, BatchUpdateInput, DoogatId, DoogatMeta, ParsedDoogat, TableSchema,
 };
@@ -263,12 +263,7 @@ impl<G: GitBackend> DoogatService<G> {
         let mut col_values = stringify_typed_input_fields(input, schema)?;
         let mut counters = TypedInsertCounters::default();
 
-        prepare_typed_insert_validate(
-            schema,
-            &mut col_values,
-            &mut counters,
-            &self.index.conn,
-        )?;
+        prepare_typed_insert_validate(schema, &mut col_values, &mut counters, &self.index.conn)?;
 
         Self::validate_typed_create_post_defaults(input, schema, &col_values)?;
 
@@ -763,7 +758,14 @@ impl<G: GitBackend> DoogatService<G> {
             .and_then(|t| schemas.iter().find(|s| s.table_name == t));
 
         let parsed = match schema {
-            Some(schema) => self.build_typed_create(input, schema, &id, &path, next_counters, partitioned_counters)?,
+            Some(schema) => self.build_typed_create(
+                input,
+                schema,
+                &id,
+                &path,
+                next_counters,
+                partitioned_counters,
+            )?,
             None => self.build_untyped_create(input, &id, &path)?,
         };
 
@@ -845,9 +847,10 @@ impl<G: GitBackend> DoogatService<G> {
         id: &DoogatId,
         path: &str,
     ) -> Result<ParsedDoogat> {
-        let title = input.title.clone().ok_or_else(|| {
-            DoogatError::not_null_violation("doogats", "title".to_string())
-        })?;
+        let title = input
+            .title
+            .clone()
+            .ok_or_else(|| DoogatError::not_null_violation("doogats", "title".to_string()))?;
         let meta = DoogatMeta {
             id: Some(id.clone()),
             title: Some(title),
@@ -1055,12 +1058,7 @@ impl<G: GitBackend> DoogatService<G> {
                 .into_iter()
                 .find(|s| s.table_name == type_name)
             {
-                let id_str = parsed
-                    .meta
-                    .id
-                    .as_ref()
-                    .map(|z| z.0.as_str())
-                    .unwrap_or(id);
+                let id_str = parsed.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or(id);
                 self.index.materialize_single(&schema, id_str, &parsed)?;
             }
         }
@@ -1104,7 +1102,8 @@ impl<G: GitBackend> DoogatService<G> {
             // RESTRICT check applies at every level: if any cascade-deleted
             // child has a RESTRICT-marked back-reference, the whole delete
             // rejects.
-            self.index.check_restrict_blocks_delete(&self.repo, &parent)?;
+            self.index
+                .check_restrict_blocks_delete(&self.repo, &parent)?;
             let children = self.index.collect_cascade_children(&self.repo, &parent)?;
             for (child_table, child_id) in children {
                 if !seen.insert(child_id.clone()) {
@@ -1134,8 +1133,7 @@ impl<G: GitBackend> DoogatService<G> {
         // write edit for them (commit_batch can't both write and delete
         // the same path in one commit; git2 errors on the conflicting
         // index op). Edits to other backlinking files are still emitted.
-        let delete_paths: BTreeSet<&str> =
-            plan.iter().map(|(_, p)| p.as_str()).collect();
+        let delete_paths: BTreeSet<&str> = plan.iter().map(|(_, p)| p.as_str()).collect();
         let mut ref_edits: Vec<(String, String)> = Vec::new();
         for (id, path) in &plan {
             let edits = self.collect_ref_edits(id, path)?;

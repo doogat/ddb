@@ -1,9 +1,9 @@
 use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
-use indexmap::IndexMap;
 use ddb_core::error::DoogatError;
 use ddb_core::search_query;
 use ddb_core::types::{ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
+use indexmap::IndexMap;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -41,7 +41,10 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The 14-digit timestamp ID of the doogat to fetch."))
+            .argument(
+                InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
+                    .description("The 14-digit timestamp ID of the doogat to fetch."),
+            )
             .description("Fetch a single doogat by its 14-digit timestamp ID."),
         );
     }
@@ -87,11 +90,26 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                     )))
                 })
             })
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)).description("Filter by doogat type name."))
-            .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)).description("Filter by tag name."))
-            .argument(InputValue::new("backlinksOf", TypeRef::named(TypeRef::ID)).description("Return doogats that link to this ID."))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
-            .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip for pagination."))
+            .argument(
+                InputValue::new("type", TypeRef::named(TypeRef::STRING))
+                    .description("Filter by doogat type name."),
+            )
+            .argument(
+                InputValue::new("tag", TypeRef::named(TypeRef::STRING))
+                    .description("Filter by tag name."),
+            )
+            .argument(
+                InputValue::new("backlinksOf", TypeRef::named(TypeRef::ID))
+                    .description("Return doogats that link to this ID."),
+            )
+            .argument(
+                InputValue::new("limit", TypeRef::named(TypeRef::INT))
+                    .description("Maximum results to return."),
+            )
+            .argument(
+                InputValue::new("offset", TypeRef::named(TypeRef::INT))
+                    .description("Number of results to skip for pagination."),
+            )
             .description("List doogats with optional type, tag, and backlink filters."),
         );
     }
@@ -233,10 +251,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
 
     // typeDefs
     {
-        query = query.field(Field::new(
-            "typeDefs",
-            TypeRef::named_nn_list_nn("TypeDef"),
-            |ctx| {
+        query = query.field(
+            Field::new("typeDefs", TypeRef::named_nn_list_nn("TypeDef"), |ctx| {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
                     let schemas = pool.get_type_schemas().await.map_err(to_graphql_error)?;
@@ -246,8 +262,9 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                             .map(|s| FieldValue::owned_any(typedef_to_value(s))),
                     )))
                 })
-            },
-        ).description("List all registered type definitions with their column schemas."));
+            })
+            .description("List all registered type definitions with their column schemas."),
+        );
     }
 
     // sql(query, format?)
@@ -348,8 +365,13 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                     })
                 },
             )
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
-            .description("Shorthand for checkboxItems(state: \"open\"). Returns uncompleted action items."),
+            .argument(
+                InputValue::new("limit", TypeRef::named(TypeRef::INT))
+                    .description("Maximum results to return."),
+            )
+            .description(
+                "Shorthand for checkboxItems(state: \"open\"). Returns uncompleted action items.",
+            ),
         );
     }
 
@@ -411,8 +433,14 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
         let connection_type_name = format!("{type_name}Connection");
 
         // Per-type query returning Connection (items + totalCount)
-        let query_desc = format!("List all {} doogats with optional where, orderBy, tag, and pagination filters.", type_name);
-        let agg_desc = format!("Aggregate {} doogats. Returns count with optional groupBy breakdown.", type_name);
+        let query_desc = format!(
+            "List all {} doogats with optional where, orderBy, tag, and pagination filters.",
+            type_name
+        );
+        let agg_desc = format!(
+            "Aggregate {} doogats. Returns count with optional groupBy breakdown.",
+            type_name
+        );
         {
             let schema_clone = schema_clone.clone();
             let table_name = table_name.clone();
@@ -584,43 +612,43 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                                     .map_err(to_graphql_error)?;
                                 let groups: Vec<GqlValue> = rows
                                     .iter()
-                                    .map(|row| {
-                                        crate::filter::aggregate_row_to_value(row, &names)
-                                    })
+                                    .map(|row| crate::filter::aggregate_row_to_value(row, &names))
                                     .collect();
                                 // Sum group counts for top-level count
-                                let total_count: i64 = groups.iter().map(|g| {
-                                    if let GqlValue::Object(map) = g {
-                                        if let Some(GqlValue::Number(n)) = map.get("count") {
-                                            return n.as_i64().unwrap_or(0);
+                                let total_count: i64 = groups
+                                    .iter()
+                                    .map(|g| {
+                                        if let GqlValue::Object(map) = g {
+                                            if let Some(GqlValue::Number(n)) = map.get("count") {
+                                                return n.as_i64().unwrap_or(0);
+                                            }
                                         }
-                                    }
-                                    0
-                                }).sum();
+                                        0
+                                    })
+                                    .sum();
                                 let mut val = IndexMap::new();
-                                val.insert(
-                                    Name::new("count"),
-                                    GqlValue::from(total_count),
-                                );
-                                val.insert(
-                                    Name::new("groups"),
-                                    GqlValue::List(groups),
-                                );
+                                val.insert(Name::new("count"), GqlValue::from(total_count));
+                                val.insert(Name::new("groups"), GqlValue::List(groups));
                                 Ok(Some(FieldValue::owned_any(GqlValue::Object(val))))
                             } else {
                                 let row = pool
                                     .aggregate_query(sql, wc.params)
                                     .await
                                     .map_err(to_graphql_error)?;
-                                let val =
-                                    crate::filter::aggregate_row_to_value(&row, &names);
+                                let val = crate::filter::aggregate_row_to_value(&row, &names);
                                 Ok(Some(FieldValue::owned_any(val)))
                             }
                         })
                     },
                 )
-                .argument(InputValue::new("where", TypeRef::named(&where_type_name)).description("Filter conditions for aggregation."))
-                .argument(InputValue::new("groupBy", TypeRef::named(TypeRef::STRING)).description("Column to group results by."))
+                .argument(
+                    InputValue::new("where", TypeRef::named(&where_type_name))
+                        .description("Filter conditions for aggregation."),
+                )
+                .argument(
+                    InputValue::new("groupBy", TypeRef::named(TypeRef::STRING))
+                        .description("Column to group results by."),
+                )
                 .description(&agg_desc),
             );
         }
@@ -671,20 +699,18 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
 
     // tags
     {
-        query = query.field(Field::new(
-            "tags",
-            TypeRef::named_nn_list_nn("TagInfo"),
-            |ctx| {
+        query = query.field(
+            Field::new("tags", TypeRef::named_nn_list_nn("TagInfo"), |ctx| {
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
                     let tags = pool.list_tags().await.map_err(to_graphql_error)?;
-                    Ok(Some(FieldValue::list(
-                        tags.iter()
-                            .map(|(name, count)| FieldValue::owned_any(tag_info_to_value(name, *count))),
-                    )))
+                    Ok(Some(FieldValue::list(tags.iter().map(|(name, count)| {
+                        FieldValue::owned_any(tag_info_to_value(name, *count))
+                    }))))
                 })
-            },
-        ).description("List all tags with their usage counts."));
+            })
+            .description("List all tags with their usage counts."),
+        );
     }
 
     // tagEntries
@@ -743,27 +769,24 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> QueryOutput {
                             }
                         }
 
-                        let entries =
-                            pool.query_tags(filter).await.map_err(to_graphql_error)?;
+                        let entries = pool.query_tags(filter).await.map_err(to_graphql_error)?;
                         let total_count = entries.len() as i64;
-                        let items = GqlValue::List(
-                            entries.iter().map(tag_entry_to_value).collect(),
-                        );
+                        let items =
+                            GqlValue::List(entries.iter().map(tag_entry_to_value).collect());
                         let mut conn = IndexMap::new();
                         conn.insert(Name::new("items"), items);
-                        conn.insert(
-                            Name::new("totalCount"),
-                            GqlValue::from(total_count),
-                        );
+                        conn.insert(Name::new("totalCount"), GqlValue::from(total_count));
                         Ok(Some(FieldValue::owned_any(GqlValue::Object(conn))))
                     })
                 },
             )
-            .argument(InputValue::new(
-                "where",
-                TypeRef::named("TagEntriesWhere"),
-            ).description("Filter conditions for tag entries."))
-            .description("Query individual tag assignments with where filters on doogatId and tag name."),
+            .argument(
+                InputValue::new("where", TypeRef::named("TagEntriesWhere"))
+                    .description("Filter conditions for tag entries."),
+            )
+            .description(
+                "Query individual tag assignments with where filters on doogatId and tag name.",
+            ),
         );
     }
 

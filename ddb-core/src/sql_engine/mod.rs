@@ -14,18 +14,18 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use crate::error::{DoogatError, Result};
-use crate::traits::SqlBackend;
 use crate::parser;
 use crate::traits::DoogatStore;
+use crate::traits::SqlBackend;
 use crate::types::DoogatId;
 
-pub use builders::{build_typedef_doogat, schema_from_parsed};
 pub(crate) use builders::resolve_insert_title;
+pub use builders::{build_typedef_doogat, schema_from_parsed};
 
 use helpers::{
-    normalize_alter_column_type, re_create_table_singleton, re_drop_search_key,
-    re_drop_singleton, re_drop_title_template, re_set_search_key, re_set_singleton,
-    re_set_title_template, re_set_zone,
+    normalize_alter_column_type, re_create_table_singleton, re_drop_search_key, re_drop_singleton,
+    re_drop_title_template, re_set_search_key, re_set_singleton, re_set_title_template,
+    re_set_zone,
 };
 
 #[derive(Debug)]

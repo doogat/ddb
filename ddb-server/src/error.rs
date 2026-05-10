@@ -76,10 +76,7 @@ pub fn to_server_error(e: DoogatError) -> ServerError {
 
 /// Copy each `(key, value)` pair from a structured-error context into the
 /// GraphQL extensions map, converting `ErrorValue::List` to a JSON array.
-fn attach_context(
-    map: &mut async_graphql::ErrorExtensionValues,
-    context: &ErrorContext,
-) {
+fn attach_context(map: &mut async_graphql::ErrorExtensionValues, context: &ErrorContext) {
     use async_graphql::Value;
     for (key, val) in context {
         let value = match val {
@@ -98,10 +95,7 @@ mod tests {
     use async_graphql::Value;
 
     fn ext(err: &ServerError, key: &str) -> Value {
-        let exts = err
-            .extensions
-            .as_ref()
-            .expect("extensions should be set");
+        let exts = err.extensions.as_ref().expect("extensions should be set");
         exts.get(key).cloned().unwrap_or(Value::Null)
     }
 
@@ -128,8 +122,7 @@ mod tests {
 
     #[test]
     fn sql_engine_passes_through() {
-        let (code, msg) =
-            classify(&DoogatError::SqlEngine("near SELCT: syntax error".into()));
+        let (code, msg) = classify(&DoogatError::SqlEngine("near SELCT: syntax error".into()));
         assert_eq!(code, "SQL_ERROR");
         assert_eq!(msg, "near SELCT: syntax error");
     }
@@ -172,7 +165,9 @@ mod tests {
 
     #[test]
     fn conflict_passes_through() {
-        let (code, msg) = classify(&DoogatError::Conflict("merge conflict in ddb/123.md".into()));
+        let (code, msg) = classify(&DoogatError::Conflict(
+            "merge conflict in ddb/123.md".into(),
+        ));
         assert_eq!(code, "CONFLICT");
         assert_eq!(msg, "merge conflict in ddb/123.md");
     }
@@ -200,7 +195,10 @@ mod tests {
 
     #[test]
     fn version_mismatch_redacted() {
-        let (code, msg) = classify(&DoogatError::VersionMismatch { repo: 99, driver: 1 });
+        let (code, msg) = classify(&DoogatError::VersionMismatch {
+            repo: 99,
+            driver: 1,
+        });
         assert_eq!(code, "INTERNAL_ERROR");
         assert_eq!(msg, "internal error");
     }
@@ -237,7 +235,9 @@ mod tests {
 
     #[test]
     fn graphql_not_found_descriptive() {
-        let err = to_server_error(DoogatError::NotFound("doogat 20260319120000 not found".into()));
+        let err = to_server_error(DoogatError::NotFound(
+            "doogat 20260319120000 not found".into(),
+        ));
         assert_eq!(err.message, "doogat 20260319120000 not found");
     }
 
@@ -247,7 +247,10 @@ mod tests {
     fn structured_not_null_violation_emits_code_and_table_column() {
         let err = to_server_error(DoogatError::not_null_violation("link", "url"));
         assert_eq!(err.message, "NOT NULL constraint violated: link.url");
-        assert_eq!(ext(&err, "code"), Value::String("NOT_NULL_VIOLATION".into()));
+        assert_eq!(
+            ext(&err, "code"),
+            Value::String("NOT_NULL_VIOLATION".into())
+        );
         assert_eq!(ext(&err, "table"), Value::String("link".into()));
         assert_eq!(ext(&err, "column"), Value::String("url".into()));
     }
@@ -309,10 +312,7 @@ mod tests {
     #[test]
     fn structured_type_not_registered_emits_type_field() {
         let err = to_server_error(DoogatError::type_not_registered("widget"));
-        assert_eq!(
-            err.message,
-            "type \"widget\" is not a registered typedef"
-        );
+        assert_eq!(err.message, "type \"widget\" is not a registered typedef");
         assert_eq!(
             ext(&err, "code"),
             Value::String("TYPE_NOT_REGISTERED".into())

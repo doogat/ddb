@@ -1,4 +1,4 @@
-use crate::common::{read_next, ServerGuard, DdbTestRepo};
+use crate::common::{read_next, DdbTestRepo, ServerGuard};
 use tungstenite::connect;
 use tungstenite::http::Request;
 use tungstenite::Message;

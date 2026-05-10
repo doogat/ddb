@@ -361,8 +361,7 @@ impl DoogatDriver {
         doogat_id: String,
         file_path: String,
     ) -> Result<AttachmentInfo, DdbError> {
-        let bytes =
-            std::fs::read(&file_path).map_err(|e| DdbError::from(DoogatError::Io(e)))?;
+        let bytes = std::fs::read(&file_path).map_err(|e| DdbError::from(DoogatError::Io(e)))?;
         let filename = Path::new(&file_path)
             .file_name()
             .and_then(|n| n.to_str())
@@ -386,9 +385,7 @@ impl DoogatDriver {
 
     pub fn list_attachments(&self, doogat_id: String) -> Result<Vec<AttachmentInfo>, DdbError> {
         let svc = self.svc.lock().unwrap();
-        let list = svc
-            .list_attachments(&doogat_id)
-            .map_err(DdbError::from)?;
+        let list = svc.list_attachments(&doogat_id).map_err(DdbError::from)?;
         Ok(list.into_iter().map(AttachmentInfo::from).collect())
     }
 
@@ -780,11 +777,11 @@ mod tests {
         {
             let svc = driver.svc.lock().unwrap();
             svc.commit_file(
-                    &format!(".nodes/{node2_uuid}.toml"),
-                    &node2_config,
-                    "register node2",
-                )
-                .unwrap();
+                &format!(".nodes/{node2_uuid}.toml"),
+                &node2_config,
+                "register node2",
+            )
+            .unwrap();
         }
 
         // Add new content after remote's sync point
@@ -841,11 +838,11 @@ mod tests {
         {
             let svc = driver.svc.lock().unwrap();
             svc.commit_file(
-                    &format!(".nodes/{node2_uuid}.toml"),
-                    &node2_config,
-                    "register node2",
-                )
-                .unwrap();
+                &format!(".nodes/{node2_uuid}.toml"),
+                &node2_config,
+                "register node2",
+            )
+            .unwrap();
         }
 
         // Add more content after sync point

@@ -1,10 +1,10 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use tempfile::TempDir;
 use ddb_core::compaction;
 use ddb_core::git_ops::GitRepo;
 use ddb_core::sync_manager::{register_node, SyncManager};
+use tempfile::TempDir;
 
 include!("helpers.rs");
 

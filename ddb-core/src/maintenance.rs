@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use crate::error::{Result, DoogatError};
+use crate::error::{DoogatError, Result};
 use crate::traits::GitBackend;
 use crate::types::MaintenanceReport;
 

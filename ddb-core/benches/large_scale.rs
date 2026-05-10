@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use tempfile::TempDir;
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
+use tempfile::TempDir;
 
 /// AC-19: query < 50ms at 50K doogats.
 /// Separate benchmark target due to long setup time.

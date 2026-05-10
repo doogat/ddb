@@ -30,7 +30,8 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     FieldFuture::new(async move {
                         let pool = ctx.data::<ReadPool>()?;
                         let id = ctx.args.try_get("id")?.string()?.to_string();
-                        let mentions = pool.unlinked_mentions(id).await.map_err(to_graphql_error)?;
+                        let mentions =
+                            pool.unlinked_mentions(id).await.map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(mentions.iter().map(|m| {
                             let mut obj = IndexMap::new();
                             obj.insert(Name::new("sourceId"), GqlValue::from(m.source_id.as_str()));
@@ -44,8 +45,13 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to find unlinked mentions for."))
-            .description("Find doogats that mention this doogat's title as plain text without a wikilink."),
+            .argument(
+                InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
+                    .description("The doogat ID to find unlinked mentions for."),
+            )
+            .description(
+                "Find doogats that mention this doogat's title as plain text without a wikilink.",
+            ),
         );
     }
 
@@ -80,8 +86,14 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to get link suggestions for."))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum suggestions to return. Default 10."))
+            .argument(
+                InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
+                    .description("The doogat ID to get link suggestions for."),
+            )
+            .argument(
+                InputValue::new("limit", TypeRef::named(TypeRef::INT))
+                    .description("Maximum suggestions to return. Default 10."),
+            )
             .description("Suggest doogats to link based on shared tags and content similarity."),
         );
     }
@@ -130,7 +142,10 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     })
                 },
             )
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)).description("Filter to a specific doogat type."))
+            .argument(
+                InputValue::new("type", TypeRef::named(TypeRef::STRING))
+                    .description("Filter to a specific doogat type."),
+            )
             .description("Find typed doogats not updated within their type's staleness threshold."),
         );
     }
@@ -170,7 +185,10 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     })
                 },
             )
-            .argument(InputValue::new("type", TypeRef::named(TypeRef::STRING)).description("Filter to a specific doogat type."))
+            .argument(
+                InputValue::new("type", TypeRef::named(TypeRef::STRING))
+                    .description("Filter to a specific doogat type."),
+            )
             .description("Find typed doogats with no inbound links from other doogats."),
         );
     }
@@ -276,8 +294,13 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
             })
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to get sequence info for."))
-            .description("Get parent, children, and breadcrumb for a doogat in a sequence hierarchy."),
+            .argument(
+                InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
+                    .description("The doogat ID to get sequence info for."),
+            )
+            .description(
+                "Get parent, children, and breadcrumb for a doogat in a sequence hierarchy.",
+            ),
         );
     }
 
@@ -291,7 +314,8 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     FieldFuture::new(async move {
                         let pool = ctx.data::<ReadPool>()?;
                         let id = ctx.args.try_get("id")?.string()?.to_string();
-                        let children = pool.sequence_children(id).await.map_err(to_graphql_error)?;
+                        let children =
+                            pool.sequence_children(id).await.map_err(to_graphql_error)?;
                         Ok(Some(FieldValue::list(
                             children
                                 .iter()
@@ -300,7 +324,10 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to list children of."))
+            .argument(
+                InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
+                    .description("The doogat ID to list children of."),
+            )
             .description("List direct children of a doogat in a sequence hierarchy."),
         );
     }
@@ -325,32 +352,42 @@ pub(crate) fn register_discovery_fields(mut query: Object) -> DiscoveryOutput {
                     })
                 },
             )
-            .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)).description("The doogat ID to get breadcrumb for."))
-            .description("Get ancestor chain from root to the given doogat in a sequence hierarchy."),
+            .argument(
+                InputValue::new("id", TypeRef::named_nn(TypeRef::ID))
+                    .description("The doogat ID to get breadcrumb for."),
+            )
+            .description(
+                "Get ancestor chain from root to the given doogat in a sequence hierarchy.",
+            ),
         );
     }
 
     // brokenSequences: [BrokenSequence!]!
     {
-        query = query.field(Field::new(
-            "brokenSequences",
-            TypeRef::named_nn_list_nn("BrokenSequence"),
-            |ctx| {
-                FieldFuture::new(async move {
-                    let pool = ctx.data::<ReadPool>()?;
-                    let broken = pool.broken_sequences().await.map_err(to_graphql_error)?;
-                    Ok(Some(FieldValue::list(broken.iter().map(|b| {
-                        let mut obj = IndexMap::new();
-                        obj.insert(Name::new("doogatId"), GqlValue::from(b.doogat_id.as_str()));
-                        obj.insert(
-                            Name::new("brokenParentId"),
-                            GqlValue::from(b.broken_parent_id.as_str()),
-                        );
-                        FieldValue::owned_any(GqlValue::Object(obj))
-                    }))))
-                })
-            },
-        ).description("Find doogats whose sequence parent reference points to a non-existent doogat."));
+        query = query.field(
+            Field::new(
+                "brokenSequences",
+                TypeRef::named_nn_list_nn("BrokenSequence"),
+                |ctx| {
+                    FieldFuture::new(async move {
+                        let pool = ctx.data::<ReadPool>()?;
+                        let broken = pool.broken_sequences().await.map_err(to_graphql_error)?;
+                        Ok(Some(FieldValue::list(broken.iter().map(|b| {
+                            let mut obj = IndexMap::new();
+                            obj.insert(Name::new("doogatId"), GqlValue::from(b.doogat_id.as_str()));
+                            obj.insert(
+                                Name::new("brokenParentId"),
+                                GqlValue::from(b.broken_parent_id.as_str()),
+                            );
+                            FieldValue::owned_any(GqlValue::Object(obj))
+                        }))))
+                    })
+                },
+            )
+            .description(
+                "Find doogats whose sequence parent reference points to a non-existent doogat.",
+            ),
+        );
     }
 
     DiscoveryOutput {

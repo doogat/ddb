@@ -97,9 +97,7 @@ fn update_recomputes_membership_title() {
     repo.ddb()
         .args([
             "query",
-            &format!(
-                "UPDATE membership SET link = '{link_b}' WHERE id = '{mem_id}'"
-            ),
+            &format!("UPDATE membership SET link = '{link_b}' WHERE id = '{mem_id}'"),
         ])
         .assert()
         .success();

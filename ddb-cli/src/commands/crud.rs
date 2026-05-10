@@ -46,17 +46,9 @@ pub(crate) fn create(
             ddb_core::types::Value::String("manual".into()),
         );
     }
-    let parsed = svc.create_doogat_with_extra(
-        &title,
-        &tags_list,
-        r#type.as_deref(),
-        &body_text,
-        extra,
-    )?;
-    outln!(
-        "{}",
-        parsed.meta.id.map(|z| z.0).unwrap_or_default()
-    )?;
+    let parsed =
+        svc.create_doogat_with_extra(&title, &tags_list, r#type.as_deref(), &body_text, extra)?;
+    outln!("{}", parsed.meta.id.map(|z| z.0).unwrap_or_default())?;
     Ok(())
 }
 
@@ -77,13 +69,11 @@ pub(crate) struct UpdateArgs {
     pub unset: Vec<String>,
 }
 
-pub(crate) fn update(
-    repo: &std::path::Path,
-    args: UpdateArgs,
-) -> ddb_core::error::Result<()> {
+pub(crate) fn update(repo: &std::path::Path, args: UpdateArgs) -> ddb_core::error::Result<()> {
     let svc = DoogatService::open(repo)?;
-    let tags_vec: Option<Vec<String>> =
-        args.tags.map(|t| t.split(',').map(|s| s.trim().to_string()).collect());
+    let tags_vec: Option<Vec<String>> = args
+        .tags
+        .map(|t| t.split(',').map(|s| s.trim().to_string()).collect());
     let extra_map = parse_set_pairs(&args.set)?;
     let extra = ddb_core::service::ExtraFieldUpdates {
         set: &extra_map,
@@ -142,9 +132,10 @@ pub(crate) fn attach(
     svc.rebuild_if_stale()?;
 
     let bytes = std::fs::read(file)?;
-    let filename = file.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-        ddb_core::error::DoogatError::Validation("invalid filename".into())
-    })?;
+    let filename = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| ddb_core::error::DoogatError::Validation("invalid filename".into()))?;
     let mime = ddb_core::types::AttachmentInfo::mime_from_filename(filename);
     let info = svc.attach_file(id, filename, &bytes, mime)?;
     outln!(

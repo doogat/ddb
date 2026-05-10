@@ -1,4 +1,4 @@
-use crate::common::{ServerGuard, DdbTestRepo};
+use crate::common::{DdbTestRepo, ServerGuard};
 use std::sync::Arc;
 
 #[test]
@@ -281,10 +281,7 @@ fn commit_count(path: &std::path::Path) -> usize {
         .args(["rev-list", "--count", "HEAD"])
         .output()
         .expect("git rev-list failed");
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse()
-        .unwrap()
+    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
 }
 
 #[test]
@@ -299,7 +296,10 @@ fn batch_update_via_graphql() {
             r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
             serde_json::json!({ "input": { "title": format!("Original {i}") } }),
         );
-        assert!(result.get("errors").is_none(), "create {i} failed: {result}");
+        assert!(
+            result.get("errors").is_none(),
+            "create {i} failed: {result}"
+        );
         ids.push(
             result["data"]["createDoogat"]["id"]
                 .as_str()
@@ -334,10 +334,11 @@ fn batch_update_via_graphql() {
 
     // Re-query each to confirm persistence
     for (i, id) in ids.iter().enumerate() {
-        let result = server.graphql(&format!(
-            r#"{{ doogat(id: "{id}") {{ id title }} }}"#
-        ));
-        assert!(result.get("errors").is_none(), "re-query {id} failed: {result}");
+        let result = server.graphql(&format!(r#"{{ doogat(id: "{id}") {{ id title }} }}"#));
+        assert!(
+            result.get("errors").is_none(),
+            "re-query {id} failed: {result}"
+        );
         assert_eq!(
             result["data"]["doogat"]["title"].as_str().unwrap(),
             format!("Updated {}", i + 1)
@@ -357,7 +358,10 @@ fn batch_update_atomicity_via_graphql() {
             r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
             serde_json::json!({ "input": { "title": format!("Keep {i}") } }),
         );
-        assert!(result.get("errors").is_none(), "create {i} failed: {result}");
+        assert!(
+            result.get("errors").is_none(),
+            "create {i} failed: {result}"
+        );
         ids.push(
             result["data"]["createDoogat"]["id"]
                 .as_str()
@@ -382,10 +386,11 @@ fn batch_update_atomicity_via_graphql() {
 
     // Verify originals unchanged
     for (i, id) in ids.iter().enumerate() {
-        let result = server.graphql(&format!(
-            r#"{{ doogat(id: "{id}") {{ id title }} }}"#
-        ));
-        assert!(result.get("errors").is_none(), "re-query {id} failed: {result}");
+        let result = server.graphql(&format!(r#"{{ doogat(id: "{id}") {{ id title }} }}"#));
+        assert!(
+            result.get("errors").is_none(),
+            "re-query {id} failed: {result}"
+        );
         assert_eq!(
             result["data"]["doogat"]["title"].as_str().unwrap(),
             format!("Keep {}", i + 1),
@@ -420,7 +425,10 @@ fn batch_update_single_commit_via_graphql() {
             r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
             serde_json::json!({ "input": { "title": format!("Item {i}") } }),
         );
-        assert!(result.get("errors").is_none(), "create {i} failed: {result}");
+        assert!(
+            result.get("errors").is_none(),
+            "create {i} failed: {result}"
+        );
         ids.push(
             result["data"]["createDoogat"]["id"]
                 .as_str()

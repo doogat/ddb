@@ -43,7 +43,10 @@ fn search_where_in_tag() {
     assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 2);
 
     let titles: Vec<&str> = hits.iter().map(|h| h["title"].as_str().unwrap()).collect();
-    assert!(titles.contains(&"Rust Note"), "missing Rust Note in {titles:?}");
+    assert!(
+        titles.contains(&"Rust Note"),
+        "missing Rust Note in {titles:?}"
+    );
     assert!(
         titles.contains(&"Svelte Note"),
         "missing Svelte Note in {titles:?}"

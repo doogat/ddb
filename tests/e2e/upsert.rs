@@ -82,9 +82,7 @@ fn create_many_on_conflict_ignore_returns_existing() {
         }"#,
     );
     assert!(r1.get("errors").is_none(), "seed create failed: {r1}");
-    let first_id = r1["data"]["createMany"]
-        .as_array()
-        .unwrap()[0]["id"]
+    let first_id = r1["data"]["createMany"].as_array().unwrap()[0]["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -159,9 +157,7 @@ fn create_many_on_conflict_ignore_mixed_new_and_existing() {
         }"#,
     );
     assert!(r1.get("errors").is_none(), "seed create failed: {r1}");
-    let original_id = r1["data"]["createMany"]
-        .as_array()
-        .unwrap()[0]["id"]
+    let original_id = r1["data"]["createMany"].as_array().unwrap()[0]["id"]
         .as_str()
         .unwrap()
         .to_string();

@@ -58,14 +58,16 @@ fn raw_id_field_available_for_references_column() {
 
     // category_id should return the raw doogat ID as a scalar String
     let r = server.graphql(r#"{ bookmarks { items { category_id } } }"#);
-    assert!(
-        r.get("errors").is_none(),
-        "category_id query failed: {r}"
-    );
+    assert!(r.get("errors").is_none(), "category_id query failed: {r}");
     let items = r["data"]["bookmarks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "expected 1 bookmark: {r}");
-    let raw_id = items[0]["category_id"].as_str().expect("category_id should be a non-null String");
-    assert_eq!(raw_id, cat_id, "category_id should match the category's doogat ID");
+    let raw_id = items[0]["category_id"]
+        .as_str()
+        .expect("category_id should be a non-null String");
+    assert_eq!(
+        raw_id, cat_id,
+        "category_id should match the category's doogat ID"
+    );
 }
 
 #[test]
@@ -113,13 +115,8 @@ fn raw_id_coexists_with_object_resolver() {
     let (_bm_id, cat_id) = setup_linked_bookmark_category(&server);
 
     // Query both the scalar raw ID and the resolved object in the same query
-    let r = server.graphql(
-        r#"{ bookmarks { items { category_id category { id label } } } }"#,
-    );
-    assert!(
-        r.get("errors").is_none(),
-        "coexistence query failed: {r}"
-    );
+    let r = server.graphql(r#"{ bookmarks { items { category_id category { id label } } } }"#);
+    assert!(r.get("errors").is_none(), "coexistence query failed: {r}");
     let items = r["data"]["bookmarks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
 
@@ -133,9 +130,15 @@ fn raw_id_coexists_with_object_resolver() {
         .as_str()
         .expect("category.label should be a non-null String");
 
-    assert_eq!(raw_id, cat_id, "category_id scalar should match category ID");
+    assert_eq!(
+        raw_id, cat_id,
+        "category_id scalar should match category ID"
+    );
     assert_eq!(resolved_id, cat_id, "category.id should match category ID");
-    assert_eq!(raw_id, resolved_id, "category_id and category.id must be identical");
+    assert_eq!(
+        raw_id, resolved_id,
+        "category_id and category.id must be identical"
+    );
     assert_eq!(label, "tech");
 }
 
@@ -197,13 +200,8 @@ fn id_suffix_column_exposes_scalar_and_object() {
     // For column "link_id" with _id suffix:
     // - link_id → raw scalar (original column name, now returns String)
     // - link → resolved object (stripped _id suffix)
-    let r = server.graphql(
-        r#"{ notes { items { link_id link { id title } } } }"#,
-    );
-    assert!(
-        r.get("errors").is_none(),
-        "id_suffix query failed: {r}"
-    );
+    let r = server.graphql(r#"{ notes { items { link_id link { id title } } } }"#);
+    assert!(r.get("errors").is_none(), "id_suffix query failed: {r}");
     let items = r["data"]["notes"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "expected 1 note: {r}");
 
@@ -219,7 +217,10 @@ fn id_suffix_column_exposes_scalar_and_object() {
 
     assert_eq!(scalar_id, link_id, "link_id scalar should match link ID");
     assert_eq!(resolved_id, link_id, "link.id should match link ID");
-    assert_eq!(scalar_id, resolved_id, "link_id and link.id must be identical");
+    assert_eq!(
+        scalar_id, resolved_id,
+        "link_id and link.id must be identical"
+    );
     assert_eq!(title, "Example Link");
 }
 
@@ -248,7 +249,10 @@ fn plural_resolver_with_limit() {
             r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
             serde_json::json!({ "sql": format!("INSERT INTO lcat (label) VALUES ('{label}')") }),
         );
-        assert!(r.get("errors").is_none(), "INSERT lcat '{label}' failed: {r}");
+        assert!(
+            r.get("errors").is_none(),
+            "INSERT lcat '{label}' failed: {r}"
+        );
         cat_ids.push(
             r["data"]["executeSql"]["message"]
                 .as_str()
@@ -324,7 +328,10 @@ fn plural_resolver_with_order_by() {
             r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
             serde_json::json!({ "sql": format!("INSERT INTO ocat (label) VALUES ('{label}')") }),
         );
-        assert!(r.get("errors").is_none(), "INSERT ocat '{label}' failed: {r}");
+        assert!(
+            r.get("errors").is_none(),
+            "INSERT ocat '{label}' failed: {r}"
+        );
         cat_ids.push(
             r["data"]["executeSql"]["message"]
                 .as_str()
@@ -359,9 +366,7 @@ fn plural_resolver_with_order_by() {
     }
 
     // Query with orderBy: "label" (ascending by default)
-    let r = server.graphql(
-        r#"{ obms { items { ocats(orderBy: "label") { label } } } }"#,
-    );
+    let r = server.graphql(r#"{ obms { items { ocats(orderBy: "label") { label } } } }"#);
     assert!(
         r.get("errors").is_none(),
         "plural resolver orderBy query failed: {r}"
@@ -403,7 +408,10 @@ fn plural_resolver_with_order_by_desc() {
             r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
             serde_json::json!({ "sql": format!("INSERT INTO dcat (label) VALUES ('{label}')") }),
         );
-        assert!(r.get("errors").is_none(), "INSERT dcat '{label}' failed: {r}");
+        assert!(
+            r.get("errors").is_none(),
+            "INSERT dcat '{label}' failed: {r}"
+        );
         cat_ids.push(
             r["data"]["executeSql"]["message"]
                 .as_str()
@@ -438,9 +446,8 @@ fn plural_resolver_with_order_by_desc() {
     }
 
     // Query with orderBy: "label", orderDir: "DESC"
-    let r = server.graphql(
-        r#"{ dbms { items { dcats(orderBy: "label", orderDir: "DESC") { label } } } }"#,
-    );
+    let r = server
+        .graphql(r#"{ dbms { items { dcats(orderBy: "label", orderDir: "DESC") { label } } } }"#);
     assert!(
         r.get("errors").is_none(),
         "plural resolver orderBy DESC query failed: {r}"
@@ -482,7 +489,10 @@ fn plural_resolver_with_order_by_and_limit() {
             r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
             serde_json::json!({ "sql": format!("INSERT INTO olcat (label) VALUES ('{label}')") }),
         );
-        assert!(r.get("errors").is_none(), "INSERT olcat '{label}' failed: {r}");
+        assert!(
+            r.get("errors").is_none(),
+            "INSERT olcat '{label}' failed: {r}"
+        );
         cat_ids.push(
             r["data"]["executeSql"]["message"]
                 .as_str()
@@ -517,9 +527,8 @@ fn plural_resolver_with_order_by_and_limit() {
     }
 
     // Query with orderBy: "label" and limit: 2
-    let r = server.graphql(
-        r#"{ olbms { items { olcats(orderBy: "label", limit: 2) { label } } } }"#,
-    );
+    let r =
+        server.graphql(r#"{ olbms { items { olcats(orderBy: "label", limit: 2) { label } } } }"#);
     assert!(
         r.get("errors").is_none(),
         "plural resolver orderBy + limit query failed: {r}"

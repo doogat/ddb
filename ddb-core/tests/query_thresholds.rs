@@ -1,8 +1,8 @@
 use std::time::Instant;
 
-use tempfile::TempDir;
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
+use tempfile::TempDir;
 
 const DOOGAT_COUNT_5K: usize = 5000;
 const DOOGAT_COUNT_50K: usize = 50_000;

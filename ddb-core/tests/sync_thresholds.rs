@@ -1,10 +1,10 @@
 use std::time::Instant;
 
-use tempfile::TempDir;
-use tracing_subscriber::EnvFilter;
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
 use ddb_core::sync_manager::{register_node, SyncManager};
+use tempfile::TempDir;
+use tracing_subscriber::EnvFilter;
 
 const DOOGAT_COUNT: usize = 5000;
 const NFR03_THRESHOLD_MS: u128 = 2000;

@@ -1,4 +1,4 @@
-use crate::common::{ServerGuard, DdbTestRepo};
+use crate::common::{DdbTestRepo, ServerGuard};
 use predicates::prelude::*;
 
 fn create_with_checkboxes(repo: &DdbTestRepo, title: &str, body: &str) {

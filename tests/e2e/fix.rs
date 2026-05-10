@@ -146,7 +146,11 @@ fn fix_verbose_reports_title_noncompliant() {
         ])
         .output()
         .unwrap();
-    assert!(out.status.success(), "insert failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "insert failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     // Verbose dry-run should report title non-compliance
     repo.ddb()
@@ -178,7 +182,11 @@ fn fix_migrate_rewrites_zones() {
         ])
         .output()
         .unwrap();
-    assert!(out.status.success(), "insert failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "insert failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     // Verify notes is currently in body zone (## notes section)
@@ -191,10 +199,7 @@ fn fix_migrate_rewrites_zones() {
 
     // Change zone assignment: move notes to frontmatter
     repo.ddb()
-        .args([
-            "query",
-            "ALTER TABLE gadget SET ZONE frontmatter FOR notes",
-        ])
+        .args(["query", "ALTER TABLE gadget SET ZONE frontmatter FOR notes"])
         .assert()
         .success();
 

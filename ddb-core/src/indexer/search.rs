@@ -50,12 +50,15 @@ impl Index {
         filters: &SearchFilters,
     ) -> Result<PaginatedSearchResult> {
         let compiled = self.compile_search_inputs(query, filters)?;
-        let (filter_clauses, filter_params) = self.build_filter_clauses(&compiled.effective_filters);
-        let boost_type = compiled
-            .effective_filters
-            .types
-            .as_ref()
-            .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
+        let (filter_clauses, filter_params) =
+            self.build_filter_clauses(&compiled.effective_filters);
+        let boost_type = compiled.effective_filters.types.as_ref().and_then(|t| {
+            if t.len() == 1 {
+                Some(t[0].as_str())
+            } else {
+                None
+            }
+        });
         let effective_query = compiled.effective_query.as_deref().unwrap_or("");
         let mut hits = self.search_hits_inner(
             query,
@@ -86,7 +89,8 @@ impl Index {
             }
             Some((None, neg_clauses, neg_params)) => {
                 let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-                let adjusted_filter_sql = Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
+                let adjusted_filter_sql =
+                    Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
                 let neg_sql = self.resolve_negation_clauses(neg_clauses, neg_params, &mut params);
                 let conditions = format!("{adjusted_filter_sql}{neg_sql}");
                 let trimmed = strip_leading_and(&conditions);
@@ -131,8 +135,10 @@ impl Index {
             }
         };
 
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
-        let total_count: usize = self.conn
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            all_params.iter().map(|p| &**p).collect();
+        let total_count: usize = self
+            .conn
             .query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))
             .map_err(|e| Self::classify_search_error(e, query))?;
 
@@ -146,12 +152,15 @@ impl Index {
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>> {
         let compiled = self.compile_search_inputs(query, filters)?;
-        let (filter_clauses, filter_params) = self.build_filter_clauses(&compiled.effective_filters);
-        let boost_type = compiled
-            .effective_filters
-            .types
-            .as_ref()
-            .and_then(|t| if t.len() == 1 { Some(t[0].as_str()) } else { None });
+        let (filter_clauses, filter_params) =
+            self.build_filter_clauses(&compiled.effective_filters);
+        let boost_type = compiled.effective_filters.types.as_ref().and_then(|t| {
+            if t.len() == 1 {
+                Some(t[0].as_str())
+            } else {
+                None
+            }
+        });
         let effective_query = compiled.effective_query.as_deref().unwrap_or("");
         let mut hits = self.search_hits_inner(
             query,
@@ -306,7 +315,8 @@ impl Index {
                 // All-negative query: scan doogats directly, no FTS MATCH
                 let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
                 // Filter params start at ?1 for all-negative (no FTS MATCH param)
-                let adjusted_filter_sql = Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
+                let adjusted_filter_sql =
+                    Self::reindex_filter_sql(&filter_sql, &filter_params, &mut params);
                 let neg_sql = self.resolve_negation_clauses(neg_clauses, neg_params, &mut params);
                 let where_clause = if adjusted_filter_sql.is_empty() && neg_sql.is_empty() {
                     String::new()
@@ -382,8 +392,11 @@ impl Index {
             all_params.push(Box::new(offset as i64));
         }
 
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| &**p).collect();
-        let mut stmt = self.conn.prepare(&sql)
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            all_params.iter().map(|p| &**p).collect();
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
             .map_err(|e| Self::classify_search_error(e, original_query))?;
         let rows = stmt
             .query_map(param_refs.as_slice(), Self::map_search_row)
@@ -463,12 +476,13 @@ impl Index {
 
     /// Batch-fetch tags from `_ddb_tags` and attach to each hit.
     fn enrich_tags(&self, hits: &mut [SearchResult], ids: &[String], placeholders: &str) {
-        let sql = format!(
-            "SELECT doogat_id, tag FROM _ddb_tags WHERE doogat_id IN ({placeholders})"
-        );
+        let sql =
+            format!("SELECT doogat_id, tag FROM _ddb_tags WHERE doogat_id IN ({placeholders})");
         let result = self.conn.prepare(&sql).and_then(|mut stmt| {
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = ids
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
             let rows = stmt.query_map(params.as_slice(), |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?;
@@ -499,8 +513,10 @@ impl Index {
             "SELECT doogat_id, key, value FROM _ddb_fields WHERE doogat_id IN ({placeholders})"
         );
         let result = self.conn.prepare(&sql).and_then(|mut stmt| {
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = ids
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
             let rows = stmt.query_map(params.as_slice(), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -588,11 +604,11 @@ impl Index {
         type_name: &str,
         col_names: &[String],
     ) {
-        let field_map = match self.fetch_materialized_fields(hits, hit_indices, type_name, col_names)
-        {
-            Some(m) => m,
-            None => return,
-        };
+        let field_map =
+            match self.fetch_materialized_fields(hits, hit_indices, type_name, col_names) {
+                Some(m) => m,
+                None => return,
+            };
         apply_fields_to_hits(hits, hit_indices, field_map);
     }
 
@@ -604,10 +620,7 @@ impl Index {
         col_names: &[String],
     ) -> Option<std::collections::HashMap<String, std::collections::BTreeMap<String, String>>> {
         let safe_name = escape_sql_ident(type_name);
-        let type_ids: Vec<&str> = hit_indices
-            .iter()
-            .map(|&i| hits[i].id.as_str())
-            .collect();
+        let type_ids: Vec<&str> = hit_indices.iter().map(|&i| hits[i].id.as_str()).collect();
         let placeholders: String = (1..=type_ids.len())
             .map(|i| format!("?{i}"))
             .collect::<Vec<_>>()
@@ -623,8 +636,10 @@ impl Index {
         );
 
         let mut stmt = self.conn.prepare(&sql).ok()?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            type_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = type_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt
             .query_map(params.as_slice(), |row| {
                 let id: String = row.get(0)?;
@@ -727,8 +742,10 @@ impl Index {
         }
         sql.push_str(" ORDER BY doogat_id, tag");
 
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
+            .iter()
+            .map(|p| p as &dyn rusqlite::types::ToSql)
+            .collect();
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok(TagEntry {

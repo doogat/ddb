@@ -1,4 +1,4 @@
-use crate::common::{MultiNodeSetup, DdbTestRepo};
+use crate::common::{DdbTestRepo, MultiNodeSetup};
 use rand::prelude::*;
 
 /// Round-robin sync: push from one node, pull on all others

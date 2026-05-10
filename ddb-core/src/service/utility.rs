@@ -154,7 +154,9 @@ impl<G: GitBackend> DoogatService<G> {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_get(&self, _id: &str) -> Result<Option<ParsedDoogat>> {
-        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound(
+            "nosql not available".into(),
+        ))
     }
 
     /// Scan by type in the NoSQL index.
@@ -165,7 +167,9 @@ impl<G: GitBackend> DoogatService<G> {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_scan_type(&self, _type_name: &str) -> Result<Vec<String>> {
-        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound(
+            "nosql not available".into(),
+        ))
     }
 
     /// Scan by tag in the NoSQL index.
@@ -176,7 +180,9 @@ impl<G: GitBackend> DoogatService<G> {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_scan_tag(&self, _tag: &str) -> Result<Vec<String>> {
-        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound(
+            "nosql not available".into(),
+        ))
     }
 
     /// Get backlinks from the NoSQL index.
@@ -187,7 +193,9 @@ impl<G: GitBackend> DoogatService<G> {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_backlinks(&self, _id: &str) -> Result<Vec<String>> {
-        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound(
+            "nosql not available".into(),
+        ))
     }
 
     /// Rebuild the NoSQL index from git.
@@ -199,6 +207,8 @@ impl<G: GitBackend> DoogatService<G> {
 
     #[cfg(not(feature = "nosql"))]
     pub fn nosql_rebuild(&self) -> Result<usize> {
-        Err(crate::error::DoogatError::NotFound("nosql not available".into()))
+        Err(crate::error::DoogatError::NotFound(
+            "nosql not available".into(),
+        ))
     }
 }

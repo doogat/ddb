@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
-use indexmap::IndexMap;
-use tokio::sync::broadcast;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{ColumnDef, ParsedDoogat, SearchResult, TableSchema, Value, Zone};
+use indexmap::IndexMap;
+use tokio::sync::broadcast;
 
 use crate::events;
 
@@ -22,9 +22,12 @@ pub(crate) struct TypeSchemaMap(pub Arc<HashMap<String, TableSchema>>);
 pub(crate) fn parse_fields_json(
     json_str: &str,
 ) -> Result<std::collections::BTreeMap<String, Value>, String> {
-    let map: std::collections::BTreeMap<String, String> = serde_json::from_str(json_str)
-        .map_err(|e| format!("invalid fields JSON: {e}"))?;
-    Ok(map.into_iter().map(|(k, v)| (k, Value::String(v))).collect())
+    let map: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(json_str).map_err(|e| format!("invalid fields JSON: {e}"))?;
+    Ok(map
+        .into_iter()
+        .map(|(k, v)| (k, Value::String(v)))
+        .collect())
 }
 
 // -- Value converters --
@@ -132,9 +135,15 @@ pub(crate) fn doogat_to_value(z: &ParsedDoogat) -> GqlValue {
     obj.insert(Name::new("tags"), GqlValue::List(build_tags_list(z)));
     obj.insert(Name::new("body"), GqlValue::from(z.body.as_str()));
     obj.insert(Name::new("path"), GqlValue::from(z.path.as_str()));
-    obj.insert(Name::new("fields"), GqlValue::List(build_inline_fields_list(z)));
+    obj.insert(
+        Name::new("fields"),
+        GqlValue::List(build_inline_fields_list(z)),
+    );
     obj.insert(Name::new("links"), GqlValue::List(build_links_list(z)));
-    obj.insert(Name::new("attachments"), GqlValue::List(build_attachments_list(z)));
+    obj.insert(
+        Name::new("attachments"),
+        GqlValue::List(build_attachments_list(z)),
+    );
     obj.insert(
         Name::new("updated_at"),
         z.updated_at
@@ -249,7 +258,10 @@ pub(crate) fn tag_info_to_value(name: &str, count: i64) -> GqlValue {
 
 pub(crate) fn tag_entry_to_value(entry: &ddb_core::types::TagEntry) -> GqlValue {
     let mut obj = IndexMap::new();
-    obj.insert(Name::new("doogatId"), GqlValue::from(entry.doogat_id.as_str()));
+    obj.insert(
+        Name::new("doogatId"),
+        GqlValue::from(entry.doogat_id.as_str()),
+    );
     obj.insert(Name::new("tag"), GqlValue::from(entry.tag.as_str()));
     obj.insert(Name::new("source"), GqlValue::from(entry.source.as_str()));
     GqlValue::Object(obj)
@@ -325,9 +337,7 @@ fn column_def_to_value(c: &ColumnDef) -> GqlValue {
         Name::new("allowedValues"),
         c.allowed_values
             .as_ref()
-            .map(|vals| {
-                GqlValue::List(vals.iter().map(|v| GqlValue::from(v.as_str())).collect())
-            })
+            .map(|vals| GqlValue::List(vals.iter().map(|v| GqlValue::from(v.as_str())).collect()))
             .unwrap_or(GqlValue::Null),
     );
     obj.insert(
@@ -398,10 +408,7 @@ pub(crate) fn typed_doogat_to_value(z: &ParsedDoogat, schema: &TableSchema) -> G
                 .filter(|f| f.key == col.name && matches!(f.zone, Zone::Reference))
                 .map(|f| GqlValue::from(f.value.clone()))
                 .collect();
-            obj.insert(
-                Name::new(pluralize(&col.name)),
-                GqlValue::List(ref_values),
-            );
+            obj.insert(Name::new(pluralize(&col.name)), GqlValue::List(ref_values));
         }
     }
 
@@ -504,8 +511,18 @@ pub(crate) fn obj_field(obj: &GqlValue, key: &str) -> Option<FieldValue<'static>
 /// Field names already defined by `doogat_object` (base type).
 /// Used to avoid duplicate field registration on typed objects.
 const BASE_DOOGAT_FIELDS: &[&str] = &[
-    "id", "title", "date", "type", "tags", "body", "path", "fields", "links", "attachments",
-    "updated_at", "created_at",
+    "id",
+    "title",
+    "date",
+    "type",
+    "tags",
+    "body",
+    "path",
+    "fields",
+    "links",
+    "attachments",
+    "updated_at",
+    "created_at",
 ];
 
 /// PRD 00129 §4 (Option B): add per-typedef nested accessors to the base
@@ -718,7 +735,11 @@ fn sort_and_limit_values(
             .unwrap_or(false);
         values.sort_by(|a, b| {
             let cmp = extract_sort_key(a, order_field).cmp(&extract_sort_key(b, order_field));
-            if desc { cmp.reverse() } else { cmp }
+            if desc {
+                cmp.reverse()
+            } else {
+                cmp
+            }
         });
     }
     if let Some(limit) = ctx.args.get("limit").and_then(|v| v.i64().ok()) {
@@ -946,7 +967,10 @@ pub(crate) fn sanitize_field_name(s: &str) -> String {
     }
     if s.contains('-') {
         let mut parts = s.split('-');
-        let first = parts.next().expect("split always yields at least one").to_lowercase();
+        let first = parts
+            .next()
+            .expect("split always yields at least one")
+            .to_lowercase();
         let rest: String = parts.map(capitalize).collect();
         format!("{first}{rest}")
     } else {
@@ -1029,7 +1053,9 @@ pub(crate) fn validate_limit(
 ) -> async_graphql::Result<Option<i64>> {
     match ctx.args.get("limit") {
         Some(v) => {
-            let n = v.i64().map_err(|_| async_graphql::Error::new("limit must be an integer"))?;
+            let n = v
+                .i64()
+                .map_err(|_| async_graphql::Error::new("limit must be an integer"))?;
             check_limit(n)?;
             Ok(Some(n))
         }
@@ -1043,7 +1069,9 @@ pub(crate) fn validate_offset(
 ) -> async_graphql::Result<Option<i64>> {
     match ctx.args.get("offset") {
         Some(v) => {
-            let n = v.i64().map_err(|_| async_graphql::Error::new("offset must be an integer"))?;
+            let n = v
+                .i64()
+                .map_err(|_| async_graphql::Error::new("offset must be an integer"))?;
             check_offset(n)?;
             Ok(Some(n))
         }
@@ -1057,9 +1085,9 @@ pub(crate) fn validate_format<'a>(
 ) -> async_graphql::Result<&'a str> {
     match ctx.args.get("format") {
         Some(v) => {
-            let s = v.string().map_err(|_| {
-                async_graphql::Error::new("format must be a string")
-            })?;
+            let s = v
+                .string()
+                .map_err(|_| async_graphql::Error::new("format must be a string"))?;
             check_format(s)?;
             Ok(s)
         }
@@ -1092,8 +1120,8 @@ mod tests {
 
     #[test]
     fn typed_doogat_multi_ref_list_field() {
-        use ddb_core::types::{InlineField, Zone, TableSchema, ColumnDef, DoogatMeta};
         use ddb_core::types::ParsedDoogat;
+        use ddb_core::types::{ColumnDef, DoogatMeta, InlineField, TableSchema, Zone};
 
         let z = ParsedDoogat {
             meta: DoogatMeta {
@@ -1220,10 +1248,7 @@ mod tests {
         };
         assert_eq!(obj.get("columns").unwrap(), &GqlValue::List(vec![]));
         assert_eq!(obj.get("rows").unwrap(), &GqlValue::List(vec![]));
-        assert_eq!(
-            obj.get("message").unwrap(),
-            &GqlValue::from("done")
-        );
+        assert_eq!(obj.get("message").unwrap(), &GqlValue::from("done"));
     }
 
     #[test]
@@ -1316,10 +1341,7 @@ mod tests {
         // After the change, known_types is HashMap<String, String>
         // mapping original table_name → sanitized PascalCase name.
         let mut known_types: HashMap<String, String> = HashMap::new();
-        known_types.insert(
-            "category-membership".into(),
-            "CategoryMembership".into(),
-        );
+        known_types.insert("category-membership".into(), "CategoryMembership".into());
 
         let result = ref_target_gql_type(&col, &known_types);
         assert_eq!(
@@ -1353,7 +1375,10 @@ mod tests {
     #[test]
     fn test_sanitize_type_name() {
         // Kebab-case to PascalCase
-        assert_eq!(sanitize_type_name("category-membership"), "CategoryMembership");
+        assert_eq!(
+            sanitize_type_name("category-membership"),
+            "CategoryMembership"
+        );
         assert_eq!(sanitize_type_name("saved-search"), "SavedSearch");
         assert_eq!(sanitize_type_name("pinned-result"), "PinnedResult");
         assert_eq!(sanitize_type_name("jink-config"), "JinkConfig");
@@ -1378,7 +1403,10 @@ mod tests {
     #[test]
     fn test_sanitize_field_name() {
         // Kebab-case to camelCase
-        assert_eq!(sanitize_field_name("category-membership"), "categoryMembership");
+        assert_eq!(
+            sanitize_field_name("category-membership"),
+            "categoryMembership"
+        );
         assert_eq!(sanitize_field_name("saved-search"), "savedSearch");
         assert_eq!(sanitize_field_name("jink-config"), "jinkConfig");
 
@@ -1403,7 +1431,10 @@ mod tests {
         assert_eq!(pluralize_preserving_case("testClass"), "testClasses");
         assert_eq!(pluralize_preserving_case("testBox"), "testBoxes");
         assert_eq!(pluralize_preserving_case("testBuzz"), "testBuzzes");
-        assert_eq!(pluralize_preserving_case("categoryMembership"), "categoryMemberships");
+        assert_eq!(
+            pluralize_preserving_case("categoryMembership"),
+            "categoryMemberships"
+        );
     }
 
     #[test]
@@ -1464,7 +1495,10 @@ mod tests {
         }
 
         // created_at
-        assert_eq!(obj.get("created_at").unwrap(), &GqlValue::from("2026-03-01"));
+        assert_eq!(
+            obj.get("created_at").unwrap(),
+            &GqlValue::from("2026-03-01")
+        );
     }
 
     #[test]
@@ -1555,7 +1589,10 @@ mod tests {
         // Column name with _id suffix: strip it
         assert_eq!(strip_id_suffix("link_id"), "link");
         // Multi-word with _id suffix
-        assert_eq!(strip_id_suffix("category_membership_id"), "category_membership");
+        assert_eq!(
+            strip_id_suffix("category_membership_id"),
+            "category_membership"
+        );
         // Bare "id" should NOT be stripped (no prefix before _id)
         assert_eq!(strip_id_suffix("id"), "id");
         // No _id suffix: return as-is

@@ -19,9 +19,7 @@ pub(crate) fn compact(
         if no_backup {
             outln!("backup: skipped")?;
         } else {
-            let bp = backup_path
-                .clone()
-                .unwrap_or(info.default_backup_path);
+            let bp = backup_path.clone().unwrap_or(info.default_backup_path);
             outln!("backup would write: {}", bp.display())?;
         }
         outln!("(dry run — no changes made)")?;
@@ -104,8 +102,7 @@ pub(crate) fn fix(
         }
 
         let zone_report = svc.zone_migrate_all(dry_run)?;
-        let zone_fixes: usize =
-            zone_report.fixes.iter().map(|f| f.applied.len()).sum();
+        let zone_fixes: usize = zone_report.fixes.iter().map(|f| f.applied.len()).sum();
         if zone_fixes > 0 {
             if verbose {
                 for zf in &zone_report.fixes {

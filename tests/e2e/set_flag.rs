@@ -91,9 +91,7 @@ fn create_with_multiple_set_flags() {
     let repo = DdbTestRepo::init();
     let out = repo
         .ddb()
-        .args([
-            "create", "--title", "Multi", "--set", "a=1", "--set", "b=2",
-        ])
+        .args(["create", "--title", "Multi", "--set", "a=1", "--set", "b=2"])
         .output()
         .unwrap();
     assert!(out.status.success());

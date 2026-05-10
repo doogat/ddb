@@ -732,7 +732,6 @@ pub(crate) fn parse_set_pairs(
     Ok(map)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::is_broken_pipe;
@@ -768,10 +767,7 @@ mod tests {
 
     #[test]
     fn parse_set_pairs_multiple_pairs() {
-        let pairs = vec![
-            "title=Hello".to_string(),
-            "status=active".to_string(),
-        ];
+        let pairs = vec!["title=Hello".to_string(), "status=active".to_string()];
         let map = super::parse_set_pairs(&pairs).unwrap();
         assert_eq!(map.len(), 2);
         assert_eq!(map["title"], Value::String("Hello".to_string()));

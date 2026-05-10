@@ -42,9 +42,7 @@ fn is_table_listing_query(sql: &str) -> bool {
 
 /// True when the table name is internal and should be hidden from introspection.
 fn is_internal_table(name: &str) -> bool {
-    name == "doogats"
-        || name.starts_with("_ddb_")
-        || name.starts_with("sqlite_")
+    name == "doogats" || name.starts_with("_ddb_") || name.starts_with("sqlite_")
 }
 
 /// True when `sql` is a single pure SELECT statement.
@@ -162,7 +160,13 @@ async fn handle_pg_catalog_query(
         .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
 
     let schema = Arc::new(vec![
-        FieldInfo::new("Schema".into(), None, None, Type::VARCHAR, FieldFormat::Text),
+        FieldInfo::new(
+            "Schema".into(),
+            None,
+            None,
+            Type::VARCHAR,
+            FieldFormat::Text,
+        ),
         FieldInfo::new("Name".into(), None, None, Type::VARCHAR, FieldFormat::Text),
         FieldInfo::new("Type".into(), None, None, Type::VARCHAR, FieldFormat::Text),
         FieldInfo::new("Owner".into(), None, None, Type::VARCHAR, FieldFormat::Text),
@@ -449,9 +453,7 @@ mod tests {
         assert!(is_pg_catalog_query(
             "SELECT c.relname FROM pg_catalog.pg_class c"
         ));
-        assert!(is_pg_catalog_query(
-            "select * from PG_CATALOG.pg_type"
-        ));
+        assert!(is_pg_catalog_query("select * from PG_CATALOG.pg_type"));
         assert!(!is_pg_catalog_query("SELECT * FROM books"));
         assert!(!is_pg_catalog_query("SELECT 1"));
         // Must not match bare "pg_catalog" without dot qualifier
@@ -472,9 +474,7 @@ mod tests {
             "SELECT typname FROM pg_catalog.pg_type"
         ));
         // Must not match user table names containing "pg_class"
-        assert!(!is_table_listing_query(
-            "SELECT * FROM pg_class_archive"
-        ));
+        assert!(!is_table_listing_query("SELECT * FROM pg_class_archive"));
     }
 
     #[test]

@@ -20,10 +20,7 @@ fn cascade_delete_cleans_junction_table() {
 
     let cat_out = repo
         .ddb()
-        .args([
-            "query",
-            "INSERT INTO category (label) VALUES ('tech')",
-        ])
+        .args(["query", "INSERT INTO category (label) VALUES ('tech')"])
         .output()
         .unwrap();
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
@@ -186,10 +183,7 @@ fn cascade_delete_removes_wikilink_from_referencing_file() {
 
     let cat_out = repo
         .ddb()
-        .args([
-            "query",
-            "INSERT INTO category (label) VALUES ('tech')",
-        ])
+        .args(["query", "INSERT INTO category (label) VALUES ('tech')"])
         .output()
         .unwrap();
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
@@ -260,10 +254,7 @@ fn cascade_delete_via_ddb_delete_cleans_junction_and_refs() {
 
     let cat_out = repo
         .ddb()
-        .args([
-            "query",
-            "INSERT INTO category (label) VALUES ('tech')",
-        ])
+        .args(["query", "INSERT INTO category (label) VALUES ('tech')"])
         .output()
         .unwrap();
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
@@ -299,10 +290,7 @@ fn cascade_delete_via_ddb_delete_cleans_junction_and_refs() {
         .stdout(predicate::str::contains(format!("[[{cat_id}]]")));
 
     // Delete via `ddb delete` (service path, not SQL engine)
-    repo.ddb()
-        .args(["delete", &cat_id])
-        .assert()
-        .success();
+    repo.ddb().args(["delete", &cat_id]).assert().success();
 
     // Junction row should be gone
     repo.ddb()
@@ -336,7 +324,10 @@ fn delete_rejected_by_not_null_references_sql_issue_10() {
         .assert()
         .success();
     repo.ddb()
-        .args(["query", "CREATE TABLE category (name VARCHAR(255) NOT NULL)"])
+        .args([
+            "query",
+            "CREATE TABLE category (name VARCHAR(255) NOT NULL)",
+        ])
         .assert()
         .success();
     repo.ddb()
@@ -353,7 +344,10 @@ fn delete_rejected_by_not_null_references_sql_issue_10() {
 
     let link_out = repo
         .ddb()
-        .args(["query", "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')"])
+        .args([
+            "query",
+            "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')",
+        ])
         .output()
         .unwrap();
     let link_id = String::from_utf8_lossy(&link_out.stdout).trim().to_string();
@@ -361,7 +355,10 @@ fn delete_rejected_by_not_null_references_sql_issue_10() {
 
     let cat_out = repo
         .ddb()
-        .args(["query", "INSERT INTO category (title, name) VALUES ('C', 'c')"])
+        .args([
+            "query",
+            "INSERT INTO category (title, name) VALUES ('C', 'c')",
+        ])
         .output()
         .unwrap();
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
@@ -388,16 +385,17 @@ fn delete_rejected_by_not_null_references_sql_issue_10() {
 
     // The link is still there and the child row still holds the FK.
     repo.ddb()
-        .args(["query", &format!("SELECT COUNT(*) FROM link WHERE id = '{link_id}'")])
+        .args([
+            "query",
+            &format!("SELECT COUNT(*) FROM link WHERE id = '{link_id}'"),
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("1"));
     repo.ddb()
         .args([
             "query",
-            &format!(
-                "SELECT COUNT(*) FROM \"category-membership\" WHERE link_id = '{link_id}'"
-            ),
+            &format!("SELECT COUNT(*) FROM \"category-membership\" WHERE link_id = '{link_id}'"),
         ])
         .assert()
         .success()
@@ -413,7 +411,10 @@ fn delete_rejected_by_not_null_references_cli_issue_10() {
         .assert()
         .success();
     repo.ddb()
-        .args(["query", "CREATE TABLE category (name VARCHAR(255) NOT NULL)"])
+        .args([
+            "query",
+            "CREATE TABLE category (name VARCHAR(255) NOT NULL)",
+        ])
         .assert()
         .success();
     repo.ddb()
@@ -430,14 +431,20 @@ fn delete_rejected_by_not_null_references_cli_issue_10() {
 
     let link_out = repo
         .ddb()
-        .args(["query", "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')"])
+        .args([
+            "query",
+            "INSERT INTO link (title, url) VALUES ('L', 'https://a.com')",
+        ])
         .output()
         .unwrap();
     let link_id = String::from_utf8_lossy(&link_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
     let cat_out = repo
         .ddb()
-        .args(["query", "INSERT INTO category (title, name) VALUES ('C', 'c')"])
+        .args([
+            "query",
+            "INSERT INTO category (title, name) VALUES ('C', 'c')",
+        ])
         .output()
         .unwrap();
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();

@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::sql_engine::SqlResult;
 use crate::types::BatchUpdateInput;
@@ -2470,10 +2469,7 @@ fn batch_create_typed_writes_to_type_table_prd_00129() {
     // table with the supplied url. Pre-PRD 00129 this row was never
     // written.
     let res = svc
-        .execute_sql(&format!(
-            "SELECT url FROM link WHERE id = '{}'",
-            id
-        ))
+        .execute_sql(&format!("SELECT url FROM link WHERE id = '{}'", id))
         .unwrap();
     match res {
         SqlResult::Rows { rows, .. } => {
@@ -2585,10 +2581,7 @@ fn batch_create_typed_no_fields_with_only_nullable_columns_succeeds_prd_00129() 
     let id = results[0].meta.id.as_ref().unwrap().0.clone();
 
     let res = svc
-        .execute_sql(&format!(
-            "SELECT title FROM link WHERE id = '{}'",
-            id
-        ))
+        .execute_sql(&format!("SELECT title FROM link WHERE id = '{}'", id))
         .unwrap();
     match res {
         SqlResult::Rows { rows, .. } => {
@@ -2879,10 +2872,7 @@ fn batch_create_omitted_title_renders_via_references_template_issue_13() {
     let cat_id = cat[0].meta.id.as_ref().unwrap().0.clone();
 
     let mut mem_fields = std::collections::BTreeMap::new();
-    mem_fields.insert(
-        "link_id".to_string(),
-        crate::types::Value::String(link_id),
-    );
+    mem_fields.insert("link_id".to_string(), crate::types::Value::String(link_id));
     mem_fields.insert(
         "category_id".to_string(),
         crate::types::Value::String(cat_id),
@@ -3062,10 +3052,7 @@ fn delete_cascades_to_referencing_rows_when_marked_cascade_prd_00129() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(
-        mem_count, 0,
-        "child membership row removed by CASCADE walk"
-    );
+    assert_eq!(mem_count, 0, "child membership row removed by CASCADE walk");
 }
 
 #[test]
@@ -3263,9 +3250,7 @@ fn batch_create_cross_batch_unique_violation_returns_structured_error_prd_00131(
 
     match err {
         crate::error::DoogatError::Structured {
-            code,
-            ref context,
-            ..
+            code, ref context, ..
         } => {
             assert_eq!(code, crate::error::codes::UNIQUE_VIOLATION);
             let columns = context
@@ -3349,9 +3334,7 @@ fn batch_create_not_null_violation_returns_structured_error_prd_00131() {
 
     match err {
         crate::error::DoogatError::Structured {
-            code,
-            ref context,
-            ..
+            code, ref context, ..
         } => {
             assert_eq!(code, crate::error::codes::NOT_NULL_VIOLATION);
             let column = context
@@ -3379,7 +3362,8 @@ fn batch_create_not_null_violation_returns_structured_error_prd_00131() {
 fn batch_create_routes_references_to_reference_zone() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
     let cat_one = svc
         .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
         .unwrap();
@@ -3388,10 +3372,8 @@ fn batch_create_routes_references_to_reference_zone() {
         other => panic!("expected Ok with new id, got {other:?}"),
     };
 
-    svc.execute_sql(
-        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
-    )
-    .unwrap();
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
 
     let mut fields = std::collections::BTreeMap::new();
     fields.insert(
@@ -3438,8 +3420,10 @@ fn batch_create_rejects_fk_to_wrong_type() {
     let (_tmp, mut svc) = fresh_svc();
 
     // Two unrelated typedefs.
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
-    svc.execute_sql("CREATE TABLE note (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE note (label VARCHAR(64))")
+        .unwrap();
     let note_create = svc
         .execute_sql("INSERT INTO note (label) VALUES ('not a category')")
         .unwrap();
@@ -3451,10 +3435,8 @@ fn batch_create_rejects_fk_to_wrong_type() {
     // `link` has a column REFERENCES category. Pointing it at a `note` row
     // must reject — `note_id` exists in the global `doogats` index but not
     // in the `category` table.
-    svc.execute_sql(
-        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
-    )
-    .unwrap();
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
 
     let mut fields = std::collections::BTreeMap::new();
     fields.insert(
@@ -3488,10 +3470,8 @@ fn batch_create_rejects_fk_to_wrong_type() {
 fn batch_create_rejects_invalid_allowed_values() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql(
-        "CREATE TABLE task (status ENUM('open', 'closed'))",
-    )
-    .unwrap();
+    svc.execute_sql("CREATE TABLE task (status ENUM('open', 'closed'))")
+        .unwrap();
 
     let mut fields = std::collections::BTreeMap::new();
     fields.insert(
@@ -3525,7 +3505,8 @@ fn batch_create_rejects_invalid_allowed_values() {
 fn create_doogat_with_extra_routes_references_for_registered_type() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
     let cat_create = svc
         .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
         .unwrap();
@@ -3534,10 +3515,8 @@ fn create_doogat_with_extra_routes_references_for_registered_type() {
         other => panic!("expected Ok with new id, got {other:?}"),
     };
 
-    svc.execute_sql(
-        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
-    )
-    .unwrap();
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
 
     let mut extra = std::collections::BTreeMap::new();
     extra.insert(
@@ -3580,7 +3559,8 @@ fn create_doogat_with_extra_routes_references_for_registered_type() {
 fn create_doogat_with_extra_populates_auto_junction_for_references_column() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
     let cat_id = match svc
         .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
         .unwrap()
@@ -3641,7 +3621,8 @@ fn create_doogat_with_extra_populates_auto_junction_for_references_column() {
 fn create_doogat_raw_populates_auto_junction_for_typed_references() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
     let cat_id = match svc
         .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
         .unwrap()
@@ -3695,7 +3676,8 @@ fn create_doogat_raw_populates_auto_junction_for_typed_references() {
 fn update_doogat_raw_syncs_auto_junction_on_references_change() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
     let cat_a = match svc
         .execute_sql("INSERT INTO category (label) VALUES ('alpha')")
         .unwrap()
@@ -3737,7 +3719,8 @@ fn update_doogat_raw_syncs_auto_junction_on_references_change() {
     let raw_b = format!(
         "---\nid: {raw_id}\ntitle: Raw Link\ndate: 2026-05-07\ntype: link\n---\nFFI body\n---\n- target:: [[{cat_b}]]\n"
     );
-    svc.update_doogat_raw(raw_id, &raw_b, "ffi raw update").unwrap();
+    svc.update_doogat_raw(raw_id, &raw_b, "ffi raw update")
+        .unwrap();
 
     // After update: exactly one junction row, pointing at cat_b. Old
     // (link, cat_a) row must be cleared atomically with the index update.
@@ -3770,8 +3753,10 @@ fn update_doogat_raw_syncs_auto_junction_on_references_change() {
 fn create_doogat_with_extra_rejects_fk_to_wrong_type() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
-    svc.execute_sql("CREATE TABLE note (label VARCHAR(64))").unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE note (label VARCHAR(64))")
+        .unwrap();
     let note_create = svc
         .execute_sql("INSERT INTO note (label) VALUES ('not a category')")
         .unwrap();
@@ -3780,10 +3765,8 @@ fn create_doogat_with_extra_rejects_fk_to_wrong_type() {
         other => panic!("expected Ok with new id, got {other:?}"),
     };
 
-    svc.execute_sql(
-        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
-    )
-    .unwrap();
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
 
     let mut extra = std::collections::BTreeMap::new();
     extra.insert(
@@ -3835,11 +3818,10 @@ fn create_doogat_with_extra_preserves_unregistered_type_silent_create() {
 fn typed_create_rejects_fk_to_nonexistent_id() {
     let (_tmp, mut svc) = fresh_svc();
 
-    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))").unwrap();
-    svc.execute_sql(
-        "CREATE TABLE link (target VARCHAR(64) REFERENCES category)",
-    )
-    .unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
 
     // Bogus id that exists nowhere — neither in `category` nor in `doogats`.
     let mut fields = std::collections::BTreeMap::new();
@@ -4249,9 +4231,7 @@ fn create_doogat_with_extra_materialised_row_visible_to_fresh_service() {
         // Sanity: visible in service A's view immediately (covers the
         // already-pinned PRD 00134 atomicity behaviour).
         let post_a = svc_a
-            .execute_sql(&format!(
-                "SELECT id FROM category WHERE id = '{cat_id}'"
-            ))
+            .execute_sql(&format!("SELECT id FROM category WHERE id = '{cat_id}'"))
             .unwrap();
         match post_a {
             SqlResult::Rows { rows, .. } => assert_eq!(

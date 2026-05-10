@@ -1,4 +1,4 @@
-use crate::common::{ServerGuard, DdbTestRepo};
+use crate::common::{DdbTestRepo, ServerGuard};
 use predicates::prelude::*;
 
 /// Helper: create a doogat, patch its frontmatter to include `sequence: <parent_id>`,

@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::types::{DoogatMeta, InlineField, Section, Severity, TitleSource, Zone};
 use std::collections::BTreeMap;

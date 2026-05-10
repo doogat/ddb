@@ -1,4 +1,4 @@
-use crate::common::{TwoNodeSetup, DdbTestRepo};
+use crate::common::{DdbTestRepo, TwoNodeSetup};
 use predicates::prelude::*;
 
 /// Helper: push node1's master to remote
@@ -407,7 +407,10 @@ fn sync_auto_registers_node_when_none_exists() {
     assert!(!node_file.exists());
 
     node.ddb().arg("sync").assert().success();
-    assert!(node_file.exists(), "auto-register should create .git/ddb-node");
+    assert!(
+        node_file.exists(),
+        "auto-register should create .git/ddb-node"
+    );
 
     // Subsequent sync should reuse registration
     node.ddb().arg("sync").assert().success();

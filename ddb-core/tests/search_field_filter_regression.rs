@@ -63,11 +63,7 @@ fn add_tag(repo: &GitRepo, index: &Index, doogat_id: &str, tag: &str) {
 /// - a `link` typedef with a direct REFERENCES column to `category`
 /// - 3 link rows: 2 in `Development`, 1 in `Portals`, 1 with title containing `Archive`
 fn seed(repo: &GitRepo, index: &Index) -> Vec<String> {
-    exec_ok(
-        repo,
-        index,
-        "CREATE TABLE category (label VARCHAR(100))",
-    );
+    exec_ok(repo, index, "CREATE TABLE category (label VARCHAR(100))");
     exec_ok(
         repo,
         index,

@@ -129,7 +129,11 @@ pub(crate) fn detect_current_zone(parsed: &ParsedDoogat, col_name: &str) -> Opti
 }
 
 /// Extract value from its current zone.
-pub(crate) fn extract_from_zone(parsed: &ParsedDoogat, col_name: &str, zone: &Zone) -> Option<String> {
+pub(crate) fn extract_from_zone(
+    parsed: &ParsedDoogat,
+    col_name: &str,
+    zone: &Zone,
+) -> Option<String> {
     match zone {
         Zone::Frontmatter => parsed.meta.extra.get(col_name).and_then(|v| match v {
             crate::types::Value::String(s) => Some(s.clone()),
@@ -190,7 +194,12 @@ pub(crate) fn remove_from_zone(parsed: &mut ParsedDoogat, col_name: &str, zone: 
 }
 
 /// Insert data into the target zone.
-pub(crate) fn insert_into_zone(parsed: &mut ParsedDoogat, col_name: &str, value: &str, zone: &Zone) {
+pub(crate) fn insert_into_zone(
+    parsed: &mut ParsedDoogat,
+    col_name: &str,
+    value: &str,
+    zone: &Zone,
+) {
     match zone {
         Zone::Frontmatter => {
             parsed.meta.extra.insert(

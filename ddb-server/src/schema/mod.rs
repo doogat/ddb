@@ -4,8 +4,10 @@ mod mutations;
 mod queries;
 mod subscriptions;
 mod type_defs;
-pub(crate) use base_types::{parse_fields_json, resolve_column, sanitize_field_name, sanitize_type_name};
 use base_types::TypeSchemaMap;
+pub(crate) use base_types::{
+    parse_fields_json, resolve_column, sanitize_field_name, sanitize_type_name,
+};
 
 use async_graphql::dynamic::*;
 use ddb_core::types::TableSchema;
@@ -35,8 +37,11 @@ pub fn build_schema(
     // and null otherwise. Available on every mutation response and read
     // path that returns a Doogat — eliminates the round-trip jink does
     // today through `links(where:{id:eq:...})` after every mutation.
-    type_defs.doogat_type =
-        base_types::add_typed_doogat_accessors(type_defs.doogat_type, &type_schemas, &q.known_types);
+    type_defs.doogat_type = base_types::add_typed_doogat_accessors(
+        type_defs.doogat_type,
+        &type_schemas,
+        &q.known_types,
+    );
 
     let mut dynamic_inputs = q.dynamic_inputs;
     dynamic_inputs.push(m.attach_input);
@@ -62,7 +67,10 @@ pub fn build_schema(
         .data(actor)
         .data(read_pool)
         .data(TypeSchemaMap(Arc::new(
-            type_schemas.iter().map(|ts| (ts.table_name.clone(), ts.clone())).collect(),
+            type_schemas
+                .iter()
+                .map(|ts| (ts.table_name.clone(), ts.clone()))
+                .collect(),
         )));
 
     for typed_obj in q.dynamic_types {
@@ -79,10 +87,7 @@ pub fn build_schema(
 }
 
 /// Register core type definitions and shared filter types onto the schema builder.
-fn register_shared_types(
-    builder: SchemaBuilder,
-    td: type_defs::TypeDefs,
-) -> SchemaBuilder {
+fn register_shared_types(builder: SchemaBuilder, td: type_defs::TypeDefs) -> SchemaBuilder {
     builder
         .register(Scalar::new("JSON"))
         .register(td.doogat_type)
@@ -128,8 +133,7 @@ mod tests {
     fn test_actor_and_pool(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
         DoogatService::init(dir).expect("init repo");
         let event_bus = EventBus::new();
-        let actor = ActorHandle::spawn(dir.to_path_buf(), event_bus)
-            .expect("spawn actor");
+        let actor = ActorHandle::spawn(dir.to_path_buf(), event_bus).expect("spawn actor");
         let pool = ReadPool::new(dir.to_path_buf(), 1).expect("read pool");
         (actor, pool)
     }
@@ -174,8 +178,8 @@ mod tests {
             vec![simple_column("status")],
         )];
 
-        let schema = build_schema(actor, pool, schemas, None)
-            .expect("schema should build successfully");
+        let schema =
+            build_schema(actor, pool, schemas, None).expect("schema should build successfully");
         let sdl = schema.sdl();
 
         // Type name: kebab-case → PascalCase
@@ -211,8 +215,8 @@ mod tests {
             make_table_schema("category-membership", vec![simple_column("link")]),
         ];
 
-        let schema = build_schema(actor, pool, schemas, None)
-            .expect("schema should build successfully");
+        let schema =
+            build_schema(actor, pool, schemas, None).expect("schema should build successfully");
         let sdl = schema.sdl();
 
         // Doogat picks up `link: Link` and `categoryMembership: CategoryMembership`.
@@ -261,13 +265,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
 
-        let schemas = vec![make_table_schema(
-            "contact",
-            vec![simple_column("email")],
-        )];
+        let schemas = vec![make_table_schema("contact", vec![simple_column("email")])];
 
-        let schema = build_schema(actor, pool, schemas, None)
-            .expect("schema should build");
+        let schema = build_schema(actor, pool, schemas, None).expect("schema should build");
 
         let res = schema
             .execute(r#"{ __type(name: "Query") { fields { name description } } }"#)
@@ -278,8 +278,7 @@ mod tests {
         let missing: Vec<&str> = fields
             .iter()
             .filter(|f| {
-                f["description"].is_null()
-                    || f["description"].as_str().unwrap_or("").is_empty()
+                f["description"].is_null() || f["description"].as_str().unwrap_or("").is_empty()
             })
             .map(|f| f["name"].as_str().unwrap_or("?"))
             .collect();
@@ -295,13 +294,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
 
-        let schemas = vec![make_table_schema(
-            "contact",
-            vec![simple_column("email")],
-        )];
+        let schemas = vec![make_table_schema("contact", vec![simple_column("email")])];
 
-        let schema = build_schema(actor, pool, schemas, None)
-            .expect("schema should build");
+        let schema = build_schema(actor, pool, schemas, None).expect("schema should build");
 
         let res = schema
             .execute(r#"{ __type(name: "Mutation") { fields { name description } } }"#)
@@ -312,8 +307,7 @@ mod tests {
         let missing: Vec<&str> = fields
             .iter()
             .filter(|f| {
-                f["description"].is_null()
-                    || f["description"].as_str().unwrap_or("").is_empty()
+                f["description"].is_null() || f["description"].as_str().unwrap_or("").is_empty()
             })
             .map(|f| f["name"].as_str().unwrap_or("?"))
             .collect();
@@ -329,8 +323,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
 
-        let schema = build_schema(actor, pool, vec![], None)
-            .expect("schema should build");
+        let schema = build_schema(actor, pool, vec![], None).expect("schema should build");
 
         let res = schema
             .execute(
@@ -343,8 +336,7 @@ mod tests {
         let missing: Vec<&str> = fields
             .iter()
             .filter(|f| {
-                f["description"].is_null()
-                    || f["description"].as_str().unwrap_or("").is_empty()
+                f["description"].is_null() || f["description"].as_str().unwrap_or("").is_empty()
             })
             .map(|f| f["name"].as_str().unwrap_or("?"))
             .collect();
@@ -425,10 +417,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
 
-        let mut singleton_schema = make_table_schema(
-            "app_config",
-            vec![simple_column("theme")],
-        );
+        let mut singleton_schema = make_table_schema("app_config", vec![simple_column("theme")]);
         singleton_schema.singleton = true;
 
         let schema = build_schema(actor, pool, vec![singleton_schema], None)
@@ -477,10 +466,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
 
-        let mut singleton_schema = make_table_schema(
-            "app_config",
-            vec![simple_column("theme")],
-        );
+        let mut singleton_schema = make_table_schema("app_config", vec![simple_column("theme")]);
         singleton_schema.singleton = true;
 
         let schema = build_schema(actor, pool, vec![singleton_schema], None)
@@ -510,10 +496,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (actor, pool) = test_actor_and_pool(tmp.path());
 
-        let mut singleton_schema = make_table_schema(
-            "app_config",
-            vec![simple_column("theme")],
-        );
+        let mut singleton_schema = make_table_schema("app_config", vec![simple_column("theme")]);
         singleton_schema.singleton = true;
 
         let schema = build_schema(actor, pool, vec![singleton_schema], None)

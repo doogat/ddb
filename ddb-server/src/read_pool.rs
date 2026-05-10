@@ -6,7 +6,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
@@ -15,6 +14,7 @@ use ddb_core::types::{
     SequenceInfo, SequenceNode, StaleDoogat, Suggestion, TableSchema, TagEntry, TagQueryFilter,
     TypedListQuery, UnlinkedMention,
 };
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 type Result<T> = std::result::Result<T, DoogatError>;
 
@@ -74,8 +74,7 @@ impl ReadPool {
     }
 
     pub async fn get_type_schemas(&self) -> Result<Vec<TableSchema>> {
-        self.with_service(move |svc| svc.list_type_schemas())
-            .await
+        self.with_service(move |svc| svc.list_type_schemas()).await
     }
 
     pub async fn execute_select(&self, sql: String) -> Result<SqlResult> {
@@ -90,10 +89,8 @@ impl ReadPool {
         offset: usize,
         filters: SearchFilters,
     ) -> Result<PaginatedSearchResult> {
-        self.with_service(move |svc| {
-            svc.search_paginated_filtered(&query, limit, offset, &filters)
-        })
-        .await
+        self.with_service(move |svc| svc.search_paginated_filtered(&query, limit, offset, &filters))
+            .await
     }
 
     pub async fn count_doogats(
@@ -303,7 +300,9 @@ mod tests {
     #[tokio::test]
     async fn read_fails_on_invalid_path() {
         let pool = ReadPool::new(PathBuf::from("/nonexistent/repo"), 2).unwrap();
-        let result = pool.search("anything".to_string(), 10, 0, SearchFilters::default()).await;
+        let result = pool
+            .search("anything".to_string(), 10, 0, SearchFilters::default())
+            .await;
         assert!(result.is_err());
     }
 
@@ -319,7 +318,10 @@ mod tests {
     async fn search_empty_repo() {
         let (_dir, path) = setup_repo();
         let pool = ReadPool::new(path, 2).unwrap();
-        let result = pool.search("anything".to_string(), 10, 0, SearchFilters::default()).await.unwrap();
+        let result = pool
+            .search("anything".to_string(), 10, 0, SearchFilters::default())
+            .await
+            .unwrap();
         assert!(result.hits.is_empty());
         assert_eq!(result.total_count, 0);
     }
@@ -342,7 +344,8 @@ mod tests {
         for i in 0..8 {
             let p = pool.clone();
             handles.push(tokio::spawn(async move {
-                p.search(format!("query{i}"), 10, 0, SearchFilters::default()).await
+                p.search(format!("query{i}"), 10, 0, SearchFilters::default())
+                    .await
             }));
         }
         for h in handles {
@@ -393,7 +396,10 @@ mod tests {
         // Read via ReadPool — should see the write immediately (WAL)
         let pool = ReadPool::new(path, 2).unwrap();
         let result = pool.get_doogat(id.clone()).await.unwrap();
-        assert_eq!(result.meta.id.as_ref().map(|z| z.0.as_str()), Some(id.as_str()));
+        assert_eq!(
+            result.meta.id.as_ref().map(|z| z.0.as_str()),
+            Some(id.as_str())
+        );
         assert_eq!(result.meta.title.as_deref(), Some("ReadAfterWrite"));
     }
 
@@ -420,7 +426,10 @@ mod tests {
 
         // This read should queue (not error) and complete once the slot frees
         let p2 = pool.clone();
-        let queued = tokio::spawn(async move { p2.search("queued".into(), 10, 0, SearchFilters::default()).await });
+        let queued = tokio::spawn(async move {
+            p2.search("queued".into(), 10, 0, SearchFilters::default())
+                .await
+        });
 
         // Release the slow task
         tx.send(()).unwrap();

@@ -40,7 +40,10 @@ pub(super) fn re_set_search_key() -> &'static Regex {
 pub(super) fn re_drop_search_key() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+SEARCH\s+KEY\s*;?\s*$"#).expect("valid regex")
+        Regex::new(
+            r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+SEARCH\s+KEY\s*;?\s*$"#,
+        )
+        .expect("valid regex")
     })
 }
 
@@ -54,8 +57,7 @@ pub(super) fn re_drop_search_key() -> &'static Regex {
 pub(super) fn re_create_table_singleton() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(?i)\)\s*SINGLETON(\s+DEFAULT\s+VALUES)?\s*;?\s*$"#)
-            .expect("valid regex")
+        Regex::new(r#"(?i)\)\s*SINGLETON(\s+DEFAULT\s+VALUES)?\s*;?\s*$"#).expect("valid regex")
     })
 }
 
@@ -73,8 +75,10 @@ pub(super) fn re_set_singleton() -> &'static Regex {
 pub(super) fn re_drop_singleton() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+SINGLETON\s*;?\s*$"#)
-            .expect("valid regex")
+        Regex::new(
+            r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+SINGLETON\s*;?\s*$"#,
+        )
+        .expect("valid regex")
     })
 }
 
@@ -847,9 +851,7 @@ mod tests {
             .captures("CREATE TABLE x (a INTEGER) SINGLETON DEFAULT VALUES")
             .unwrap();
         assert!(caps.get(1).is_some(), "DEFAULT VALUES must be captured");
-        let caps_no_dv = re
-            .captures("CREATE TABLE x (a INTEGER) SINGLETON")
-            .unwrap();
+        let caps_no_dv = re.captures("CREATE TABLE x (a INTEGER) SINGLETON").unwrap();
         assert!(
             caps_no_dv.get(1).is_none(),
             "bare SINGLETON must leave group 1 empty"
@@ -902,7 +904,9 @@ mod tests {
         assert!(re.is_match("ALTER TABLE x DROP SINGLETON;"));
         assert!(re.is_match("alter table \"meeting-minutes\" drop singleton"));
 
-        let caps = re.captures("ALTER TABLE app_config DROP SINGLETON").unwrap();
+        let caps = re
+            .captures("ALTER TABLE app_config DROP SINGLETON")
+            .unwrap();
         assert_eq!(caps.get(2).unwrap().as_str(), "app_config");
     }
 
@@ -934,4 +938,3 @@ mod tests {
             .contains("reserved"));
     }
 }
-

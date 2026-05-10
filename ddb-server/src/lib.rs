@@ -58,7 +58,8 @@ pub async fn run(
 
     let rest_actor = actor.clone();
     let (reloader, shared_schema) = reload::SchemaReloader::new(actor.clone(), read_pool.clone());
-    let gql_schema = build_initial_schema(actor, read_pool.clone(), type_schemas, reloader.clone())?;
+    let gql_schema =
+        build_initial_schema(actor, read_pool.clone(), type_schemas, reloader.clone())?;
     reloader.store_initial(gql_schema);
 
     let app = build_app(
@@ -78,7 +79,14 @@ pub async fn run(
     eprintln!("listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    let pg = pgwire::start(rest_actor, read_pool, token, reloader, &cfg.bind, cfg.pg_port);
+    let pg = pgwire::start(
+        rest_actor,
+        read_pool,
+        token,
+        reloader,
+        &cfg.bind,
+        cfg.pg_port,
+    );
 
     tokio::select! {
         r = axum::serve(listener, app) => r?,
@@ -163,7 +171,10 @@ fn spawn_maintenance(cfg: &ServerConfig, actor: ActorHandle) {
         tokio::spawn(async move {
             maintenance::maintenance_loop(actor, interval).await;
         });
-        tracing::info!(interval_secs = cfg.maintenance_interval_secs, "maintenance enabled");
+        tracing::info!(
+            interval_secs = cfg.maintenance_interval_secs,
+            "maintenance enabled"
+        );
     }
 }
 

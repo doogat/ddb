@@ -111,7 +111,10 @@ impl SchemaReloader {
             };
             this.shared.store(Arc::new(new_schema));
             this.version.fetch_add(1, Ordering::Relaxed);
-            tracing::info!(version = this.version.load(Ordering::Relaxed), "schema reloaded");
+            tracing::info!(
+                version = this.version.load(Ordering::Relaxed),
+                "schema reloaded"
+            );
             this.done.notify_waiters();
         }
     }

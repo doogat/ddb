@@ -143,9 +143,15 @@ impl<G: GitBackend> DoogatService<G> {
         let mut doogats = Vec::new();
         for row in rows {
             let Some(id) = row.first() else { continue };
-            let Ok(path) = self.index.resolve_path(id) else { continue };
-            let Ok(content) = self.repo.read_file(&path) else { continue };
-            let Ok(mut parsed) = parser::parse(&content, &path) else { continue };
+            let Ok(path) = self.index.resolve_path(id) else {
+                continue;
+            };
+            let Ok(content) = self.repo.read_file(&path) else {
+                continue;
+            };
+            let Ok(mut parsed) = parser::parse(&content, &path) else {
+                continue;
+            };
             parsed.updated_at = updated_map.get(id.as_str()).cloned();
             doogats.push(parsed);
         }

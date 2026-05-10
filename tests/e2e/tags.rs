@@ -75,10 +75,7 @@ fn body_hashtag_indexed_with_source() {
 
     // Both frontmatter and body tags should be present with correct source
     repo.ddb()
-        .args([
-            "query",
-            "SELECT tag, source FROM _ddb_tags ORDER BY tag",
-        ])
+        .args(["query", "SELECT tag, source FROM _ddb_tags ORDER BY tag"])
         .assert()
         .success()
         .stdout(predicate::str::contains("body-tag"))
@@ -101,10 +98,7 @@ fn update_replaces_tags() {
         .success();
 
     repo.ddb()
-        .args([
-            "query",
-            "SELECT tag FROM _ddb_tags ORDER BY tag",
-        ])
+        .args(["query", "SELECT tag FROM _ddb_tags ORDER BY tag"])
         .assert()
         .success()
         .stdout(predicate::str::contains("new-tag"))
@@ -126,10 +120,7 @@ fn distinct_tags_across_doogats() {
 
     // DISTINCT tag should return 3 unique tags
     repo.ddb()
-        .args([
-            "query",
-            "SELECT DISTINCT tag FROM _ddb_tags ORDER BY tag",
-        ])
+        .args(["query", "SELECT DISTINCT tag FROM _ddb_tags ORDER BY tag"])
         .assert()
         .success()
         .stdout(predicate::str::contains("shared"))

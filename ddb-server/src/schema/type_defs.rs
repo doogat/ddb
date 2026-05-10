@@ -331,7 +331,9 @@ pub(crate) fn build_type_defs() -> TypeDefs {
         .field(InputValue::new("tag", TypeRef::named("StringFilter")));
 
     let unlinked_mention_type = Object::new("UnlinkedMention")
-        .description("A doogat that mentions another doogat's title as plain text without a wikilink.")
+        .description(
+            "A doogat that mentions another doogat's title as plain text without a wikilink.",
+        )
         .field(simple_field("sourceId", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field(
             "sourceTitle",
@@ -460,8 +462,14 @@ pub(crate) fn build_type_defs() -> TypeDefs {
             TypeRef::named_list(TypeRef::STRING),
         ))
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
-        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)).description("JSON object of type-specific field key-value pairs to set."))
-        .field(InputValue::new("unsetFields", TypeRef::named_list(TypeRef::STRING)).description("Type-specific field names to remove."));
+        .field(
+            InputValue::new("fields", TypeRef::named(TypeRef::STRING))
+                .description("JSON object of type-specific field key-value pairs to set."),
+        )
+        .field(
+            InputValue::new("unsetFields", TypeRef::named_list(TypeRef::STRING))
+                .description("Type-specific field names to remove."),
+        );
 
     let search_field_filter_input = InputObject::new("SearchFieldFilter")
         .description("Filter condition for structured field-based search filtering.")

@@ -157,3 +157,27 @@ After merging all zones, the result is serialized via `parser::serialize()` and 
 - Append-log: concurrent entries survive, dedup, non-log sections use text CRDT, empty log
 - Strategy: non-default crdt_strategy still resolves (with warning)
 - Error: unparseable content correctly returns error (LWW fallback path)
+
+## SINGLETON post-sync sweep
+
+SINGLETON conflict handling finishes **after** git/CRDT merge, not inside
+`crdt_resolver.rs`. The implementation lives in
+`ddb-core/src/consistency/singleton_sweep.rs` and runs from
+`SyncManager::finalize_sync()` after `update_sync_state()` and before `push()`.
+
+The sweep enumerates doogats, groups rows by `meta.doogat_type`, loads the
+typedef schema, and only acts on typedefs marked `singleton: true`.
+
+When more than one row exists for a singleton typedef, the winner is the row
+with the highest commit-trailer HLC. If HLCs tie or are missing, the lexically
+larger 14-digit `DoogatId` wins.
+
+Each losing row keeps its original body and reference content, moves to
+`ddb/_conflicts/{id}.md`, and gains these frontmatter overlays:
+
+- `singleton_conflict_loser`
+- `singleton_conflict_table`
+- `singleton_conflict_resolved_at`
+
+Materialization plus the consistency sweeps skip `ddb/_conflicts/`, so the
+quarantined row stays recoverable on disk without re-entering the typed table.

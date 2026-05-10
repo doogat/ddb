@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use tempfile::TempDir;
 use ddb_core::git_ops::GitRepo;
+use tempfile::TempDir;
 
 const DOOGAT_COUNT: usize = 1000;
 
@@ -38,10 +38,7 @@ fn bench_create(c: &mut Criterion) {
                 (dir, repo)
             },
             |(_dir, repo)| {
-                let path = format!(
-                    "ddb/{:014}.md",
-                    20260101000000u64 + DOOGAT_COUNT as u64
-                );
+                let path = format!("ddb/{:014}.md", 20260101000000u64 + DOOGAT_COUNT as u64);
                 repo.commit_file(&path, &doogat_content(DOOGAT_COUNT), "create")
                     .unwrap();
             },

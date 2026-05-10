@@ -265,10 +265,7 @@ impl DoogatError {
     /// `update<Type>` / `upsert<Type>`. Mirrors the `unique_violation` shape
     /// (`code` + `table` context) but adds `existing_id` since SINGLETON
     /// always identifies one specific blocker row.
-    pub fn singleton_violation(
-        table: impl Into<String>,
-        existing_id: impl Into<String>,
-    ) -> Self {
+    pub fn singleton_violation(table: impl Into<String>, existing_id: impl Into<String>) -> Self {
         let table = table.into();
         let existing_id = existing_id.into();
         DoogatError::Structured {

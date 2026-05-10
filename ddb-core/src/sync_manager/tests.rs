@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn temp_repo() -> (tempfile::TempDir, GitRepo) {

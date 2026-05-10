@@ -32,12 +32,7 @@ const RESERVED_COLUMNS: &[&str] = &[
 /// Type-check a single value against its declared `data_type`. Returns
 /// `DoogatError::Validation` on mismatch using the exact strings documented
 /// in `docs/src/technical/sql-engine.md`.
-fn type_check_value(
-    data_type: &str,
-    table_name: &str,
-    col_name: &str,
-    val: &str,
-) -> Result<()> {
+fn type_check_value(data_type: &str, table_name: &str, col_name: &str, val: &str) -> Result<()> {
     let dt = data_type.to_uppercase();
     if dt == "INTEGER" {
         if val.parse::<i64>().is_err() {
@@ -127,10 +122,7 @@ type PartitionedAssignments = (BTreeMap<String, String>, Vec<(String, String)>);
 type BulkUpdateFiles = (Vec<(String, String)>, Vec<BTreeMap<String, String>>);
 
 impl<'a> SqlEngine<'a> {
-    pub(super) fn handle_insert(
-        &mut self,
-        ins: &sqlparser::ast::Insert,
-    ) -> Result<SqlResult> {
+    pub(super) fn handle_insert(&mut self, ins: &sqlparser::ast::Insert) -> Result<SqlResult> {
         self.reject_insert_variants(ins)?;
         let on_conflict_ignore = self.parse_on_conflict(ins)?;
 
@@ -172,10 +164,7 @@ impl<'a> SqlEngine<'a> {
                 .ok();
             if let Some(id) = existing_id {
                 if !on_conflict_ignore {
-                    return Err(DoogatError::singleton_violation(
-                        table_name.clone(),
-                        id,
-                    ));
+                    return Err(DoogatError::singleton_violation(table_name.clone(), id));
                 }
             } else if rows.len() > 1 {
                 // Empty table + multi-row INSERT: second row collides
@@ -233,18 +222,19 @@ impl<'a> SqlEngine<'a> {
         // happen at write time, not pre-check time), so a single-row
         // failure here still rolls back its own row cleanly.
         for (col_values, id) in prepared_rows.into_iter().zip(ids) {
-            let (path, content) =
-                self.build_and_index_row(&schema, &table_name, &id, &col_values, &ref_folder_types)?;
+            let (path, content) = self.build_and_index_row(
+                &schema,
+                &table_name,
+                &id,
+                &col_values,
+                &ref_folder_types,
+            )?;
             self.buffer_or_collect_write(path, content, &mut files);
             created_ids.push(id.0.clone());
         }
 
         self.commit_insert_files(&files, &table_name, created_ids.len())?;
-        self.merge_insert_results(
-            on_conflict_ignore,
-            on_conflict_existing,
-            created_ids,
-        )
+        self.merge_insert_results(on_conflict_ignore, on_conflict_existing, created_ids)
     }
 
     fn reject_insert_variants(&self, ins: &sqlparser::ast::Insert) -> Result<()> {
@@ -271,13 +261,11 @@ impl<'a> SqlEngine<'a> {
             OnInsert::OnConflict(oc) => match oc.action {
                 OnConflictAction::DoNothing => Ok(true),
                 _ => Err(DoogatError::SqlEngine(
-                    "ON CONFLICT DO UPDATE is not supported; only DO NOTHING is allowed"
-                        .into(),
+                    "ON CONFLICT DO UPDATE is not supported; only DO NOTHING is allowed".into(),
                 )),
             },
             _ => Err(DoogatError::SqlEngine(
-                "INSERT OR REPLACE/UPSERT not supported: bypasses git storage"
-                    .into(),
+                "INSERT OR REPLACE/UPSERT not supported: bypasses git storage".into(),
             )),
         }
     }
@@ -287,9 +275,10 @@ impl<'a> SqlEngine<'a> {
         ins: &sqlparser::ast::Insert,
         col_names: &[String],
     ) -> Result<ExtractedInsertRows> {
-        let query = ins.source.as_ref().ok_or_else(|| {
-            DoogatError::SqlEngine("missing VALUES clause".into())
-        })?;
+        let query = ins
+            .source
+            .as_ref()
+            .ok_or_else(|| DoogatError::SqlEngine("missing VALUES clause".into()))?;
         match query.body.as_ref() {
             SetExpr::Values(v) => {
                 let mut rows = Vec::with_capacity(v.rows.len());
@@ -328,8 +317,13 @@ impl<'a> SqlEngine<'a> {
         col_values: &BTreeMap<String, String>,
         ref_folder_types: &std::collections::HashSet<String>,
     ) -> Result<(String, String)> {
-        let doogat =
-            build_data_doogat(id, schema, col_values, ref_folder_types, Some(self.index.sql_conn()));
+        let doogat = build_data_doogat(
+            id,
+            schema,
+            col_values,
+            ref_folder_types,
+            Some(self.index.sql_conn()),
+        );
         let content = parser::serialize(&doogat);
         let path = if table_name == "doogats" {
             format!("ddb/{}.md", id.0)
@@ -359,11 +353,7 @@ impl<'a> SqlEngine<'a> {
         if let Err(e) = write_result {
             // Best-effort rollback. If these fail the savepoint stack is
             // already in trouble; propagate the original error either way.
-            if let Err(rb_err) = self
-                .index
-                .sql_conn()
-                .execute("ROLLBACK TO insert_row", [])
-            {
+            if let Err(rb_err) = self.index.sql_conn().execute("ROLLBACK TO insert_row", []) {
                 tracing::warn!(error = %rb_err, "failed to rollback insert_row savepoint");
             }
             if let Err(rl_err) = self.index.sql_conn().execute("RELEASE insert_row", []) {
@@ -633,11 +623,7 @@ impl<'a> SqlEngine<'a> {
         Ok((files, per_row_updates))
     }
 
-    fn commit_or_buffer_writes(
-        &mut self,
-        files: &[(String, String)],
-        message: &str,
-    ) -> Result<()> {
+    fn commit_or_buffer_writes(&mut self, files: &[(String, String)], message: &str) -> Result<()> {
         if let Some(ref mut buf) = self.txn {
             for (path, content) in files {
                 buf.writes.push(PendingWrite {
@@ -655,10 +641,7 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
-    pub(super) fn handle_delete(
-        &mut self,
-        del: &sqlparser::ast::Delete,
-    ) -> Result<SqlResult> {
+    pub(super) fn handle_delete(&mut self, del: &sqlparser::ast::Delete) -> Result<SqlResult> {
         let from_tables = match &del.from {
             FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables,
         };
@@ -691,15 +674,12 @@ impl<'a> SqlEngine<'a> {
         self.delete_bulk_rows(&table_name, &del.selection)
     }
 
-    fn delete_single_row(
-        &mut self,
-        table_name: &str,
-        doogat_id: &str,
-    ) -> Result<SqlResult> {
+    fn delete_single_row(&mut self, table_name: &str, doogat_id: &str) -> Result<SqlResult> {
         let path = self.index.resolve_path(doogat_id)?;
         // RESTRICT: block the delete if any typed-table row holds this id in
         // a NOT NULL REFERENCES column (#10).
-        self.index.check_restrict_blocks_delete(self.repo, doogat_id)?;
+        self.index
+            .check_restrict_blocks_delete(self.repo, doogat_id)?;
         self.index.remove_doogat(doogat_id)?;
         self.index.sql_conn().execute(
             &format!("DELETE FROM \"{}\" WHERE id = ?1", table_name),
@@ -1036,11 +1016,7 @@ impl<'a> SqlEngine<'a> {
         if let Err(e) = write_result {
             // Best-effort rollback. If these fail the savepoint stack is
             // already in trouble; propagate the original error either way.
-            if let Err(rb_err) = self
-                .index
-                .sql_conn()
-                .execute("ROLLBACK TO update_row", [])
-            {
+            if let Err(rb_err) = self.index.sql_conn().execute("ROLLBACK TO update_row", []) {
                 tracing::warn!(error = %rb_err, "failed to rollback update_row savepoint");
             }
             if let Err(rl_err) = self.index.sql_conn().execute("RELEASE update_row", []) {
@@ -1102,8 +1078,7 @@ impl<'a> SqlEngine<'a> {
         table_name: &str,
         col_names: &[String],
     ) -> Result<()> {
-        let schema_cols: BTreeSet<&str> =
-            schema.columns.iter().map(|c| c.name.as_str()).collect();
+        let schema_cols: BTreeSet<&str> = schema.columns.iter().map(|c| c.name.as_str()).collect();
         for name in col_names {
             if schema_cols.contains(name.as_str()) {
                 continue;
@@ -1197,11 +1172,7 @@ impl<'a> SqlEngine<'a> {
         let mut filtered = Vec::with_capacity(rows.len());
         let mut filtered_nulls = Vec::with_capacity(rows.len());
 
-        for (row_idx, (row_values, nulls)) in rows
-            .into_iter()
-            .zip(null_cols_per_row)
-            .enumerate()
-        {
+        for (row_idx, (row_values, nulls)) in rows.into_iter().zip(null_cols_per_row).enumerate() {
             if let Some(id) = self.find_conflict_match(schema, constraints, col_names, &row_values)
             {
                 existing[row_idx] = Some(id);
@@ -1297,8 +1268,10 @@ impl<'a> SqlEngine<'a> {
             .query_map([], |row| row.get(0))
             .map_err(|e| DoogatError::SqlEngine(format!("cascade junction query: {e}")))?
             .filter_map(|r| {
-                r.map_err(|e| tracing::warn!(error = %e, "cascade junction: failed to read typedef row"))
-                    .ok()
+                r.map_err(
+                    |e| tracing::warn!(error = %e, "cascade junction: failed to read typedef row"),
+                )
+                .ok()
             })
             .collect();
         drop(stmt);
@@ -1436,10 +1409,8 @@ impl<'a> SqlEngine<'a> {
             )
             .unwrap_or((None, None, None));
 
-        let mut vals: Vec<Option<String>> =
-            vec![Some(id.to_string()), title, date, updated_at];
-        let (col_names, placeholders) =
-            build_insert_columns(schema, col_values, &mut vals);
+        let mut vals: Vec<Option<String>> = vec![Some(id.to_string()), title, date, updated_at];
+        let (col_names, placeholders) = build_insert_columns(schema, col_values, &mut vals);
 
         let sql = format!(
             "INSERT INTO \"{}\" ({}) VALUES ({})",
@@ -1547,11 +1518,7 @@ fn classify_materialized_insert_error(
                         .iter()
                         .map(|c| col_values.get(c).cloned().unwrap_or_default())
                         .collect();
-                    return DoogatError::unique_violation(
-                        schema.table_name.clone(),
-                        cols,
-                        values,
-                    );
+                    return DoogatError::unique_violation(schema.table_name.clone(), cols, values);
                 }
             }
         }

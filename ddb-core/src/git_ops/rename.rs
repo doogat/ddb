@@ -33,8 +33,14 @@ pub fn rename_doogat(
     let old_target_for_path = old_path.trim_end_matches(".md");
     let new_target_for_path = new_path.trim_end_matches(".md");
 
-    report.updated =
-        rewrite_backlinks(repo, &backlinks, old_target_for_path, new_target_for_path, old_id, old_path)?;
+    report.updated = rewrite_backlinks(
+        repo,
+        &backlinks,
+        old_target_for_path,
+        new_target_for_path,
+        old_id,
+        old_path,
+    )?;
 
     report.unresolvable =
         detect_broken_refs(index, repo, &[old_path, old_target_for_path, old_id])?;

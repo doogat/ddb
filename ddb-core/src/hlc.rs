@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::error::{Result, DoogatError};
+use crate::error::{DoogatError, Result};
 
 /// Hybrid Logical Clock — combines wall clock, logical counter, and node ID
 /// for causally-ordered, conflict-free timestamps across distributed nodes.
@@ -285,14 +285,8 @@ mod tests {
 
         // A merges B's result
         let a_merged = Hlc::recv("node-a-1234", &Some(t1.clone()), &b_merged);
-        assert!(
-            a_merged > t1,
-            "A's merged must be > t1: {a_merged} vs {t1}"
-        );
-        assert!(
-            a_merged > t2,
-            "A's merged must be > t2: {a_merged} vs {t2}"
-        );
+        assert!(a_merged > t1, "A's merged must be > t1: {a_merged} vs {t1}");
+        assert!(a_merged > t2, "A's merged must be > t2: {a_merged} vs {t2}");
         assert!(
             a_merged > b_merged,
             "A's merged must be > B's merged: {a_merged} vs {b_merged}"

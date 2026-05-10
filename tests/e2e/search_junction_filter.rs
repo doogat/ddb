@@ -66,10 +66,7 @@ fn search_where_junction_eq() {
             )
         }),
     );
-    assert!(
-        r.get("errors").is_none(),
-        "INSERT junction failed: {r}"
-    );
+    assert!(r.get("errors").is_none(), "INSERT junction failed: {r}");
 
     // Search with where filter on junction field (eq by category ID)
     let q = format!(
@@ -89,12 +86,17 @@ fn search_where_junction_eq() {
     assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
 
     // Without the junction filter, both links should appear
-    let result_all = server.graphql(
-        r#"{ search(query: "juncteq") { hits { id } totalCount } }"#,
+    let result_all = server.graphql(r#"{ search(query: "juncteq") { hits { id } totalCount } }"#);
+    assert!(
+        result_all.get("errors").is_none(),
+        "unfiltered search failed: {result_all}"
     );
-    assert!(result_all.get("errors").is_none(), "unfiltered search failed: {result_all}");
     let all_hits = result_all["data"]["search"]["hits"].as_array().unwrap();
-    assert_eq!(all_hits.len(), 2, "unfiltered search should return both links");
+    assert_eq!(
+        all_hits.len(),
+        2,
+        "unfiltered search should return both links"
+    );
 }
 
 /// Verify that a junction table where-filter using the `contains` operator
@@ -182,7 +184,14 @@ fn search_where_junction_contains() {
 
     // Without the filter both links should appear
     let result_all = server.graphql(r#"{ search(query: "junctcont") { hits { id } totalCount } }"#);
-    assert!(result_all.get("errors").is_none(), "unfiltered search failed: {result_all}");
+    assert!(
+        result_all.get("errors").is_none(),
+        "unfiltered search failed: {result_all}"
+    );
     let all_hits = result_all["data"]["search"]["hits"].as_array().unwrap();
-    assert_eq!(all_hits.len(), 2, "unfiltered search should return both links");
+    assert_eq!(
+        all_hits.len(),
+        2,
+        "unfiltered search should return both links"
+    );
 }

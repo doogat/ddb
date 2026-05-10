@@ -1,14 +1,14 @@
 mod migrations;
+pub mod singleton_sweep;
 mod zone_migrate;
 
+#[cfg(test)]
+pub(crate) use migrations::{built_in_migrations, read_migration_version};
 pub use migrations::{migrate_all, Migration};
 pub use zone_migrate::zone_migrate_all;
 #[cfg(test)]
-pub(crate) use migrations::{built_in_migrations, read_migration_version};
-#[cfg(test)]
 pub(crate) use zone_migrate::{
-    detect_current_zone, extract_from_zone, insert_into_zone, remove_body_section,
-    remove_from_zone,
+    detect_current_zone, extract_from_zone, insert_into_zone, remove_body_section, remove_from_zone,
 };
 
 use std::collections::HashSet;
@@ -58,7 +58,9 @@ pub fn to_kebab_case(s: &str) -> String {
                     .nth(1)
                     .is_some_and(|c| c.is_uppercase())
             {
-                let last = current.pop().expect("current has >= 2 chars per preceding check");
+                let last = current
+                    .pop()
+                    .expect("current has >= 2 chars per preceding check");
                 words.push(current.clone());
                 current.clear();
                 current.push(last);
@@ -532,6 +534,7 @@ pub fn apply_fixes(parsed: &mut ParsedDoogat, fixes: &[Fix]) -> Result<String> {
                 parsed.meta.title = Some(expected.clone());
             }
             Fix::ZoneMigrated { .. } => {} // zone migration applied separately
+            Fix::SingletonConflictResolved { .. } => {} // handled by singleton_sweep
         }
     }
 
@@ -554,6 +557,9 @@ pub fn fix_all(repo: &impl DoogatStore, index: &Index, dry_run: bool) -> Result<
     let mut writes: Vec<(String, String)> = Vec::new();
 
     for path in &paths {
+        if path.starts_with("ddb/_conflicts/") {
+            continue;
+        }
         let content = match repo.read_file(path) {
             Ok(c) => c,
             Err(_) => continue,

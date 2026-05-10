@@ -101,11 +101,7 @@ impl GitRepo {
     /// touched the path and carried an HLC trailer, `Some(None)` if it touched
     /// the path but had no trailer (caller should stop walking), or `None` if
     /// the commit didn't touch the path at all (caller should keep walking).
-    fn check_commit_for_hlc(
-        &self,
-        oid: git2::Oid,
-        path: &str,
-    ) -> Option<Option<crate::hlc::Hlc>> {
+    fn check_commit_for_hlc(&self, oid: git2::Oid, path: &str) -> Option<Option<crate::hlc::Hlc>> {
         let c = match self.repo.find_commit(oid) {
             Ok(c) => c,
             Err(e) => {
@@ -274,8 +270,9 @@ impl GitRepo {
 /// Format a git2 commit time as ISO 8601 (RFC 3339).
 pub(super) fn format_git_time(commit: &git2::Commit) -> String {
     let time = commit.time();
-    let offset = chrono::FixedOffset::east_opt(time.offset_minutes() * 60)
-        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).expect("UTC offset zero is always valid"));
+    let offset = chrono::FixedOffset::east_opt(time.offset_minutes() * 60).unwrap_or_else(|| {
+        chrono::FixedOffset::east_opt(0).expect("UTC offset zero is always valid")
+    });
     chrono::DateTime::from_timestamp(time.seconds(), 0)
         .unwrap_or_default()
         .with_timezone(&offset)

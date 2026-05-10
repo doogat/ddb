@@ -16,10 +16,7 @@ pub(crate) fn sync(
         report.conflicts_resolved
     )?;
     if report.collisions_reassigned > 0 {
-        outln!(
-            "  collisions reassigned: {}",
-            report.collisions_reassigned
-        )?;
+        outln!("  collisions reassigned: {}", report.collisions_reassigned)?;
     }
     Ok(())
 }
@@ -31,10 +28,7 @@ pub(crate) fn register_node(repo: &std::path::Path, name: &str) -> ddb_core::err
     Ok(())
 }
 
-pub(crate) fn node(
-    repo: &std::path::Path,
-    action: NodeAction,
-) -> ddb_core::error::Result<()> {
+pub(crate) fn node(repo: &std::path::Path, action: NodeAction) -> ddb_core::error::Result<()> {
     match action {
         NodeAction::List => {
             let svc = DoogatService::open(repo)?;
@@ -62,10 +56,7 @@ pub(crate) fn node(
     Ok(())
 }
 
-pub(crate) fn bundle(
-    repo: &std::path::Path,
-    action: BundleAction,
-) -> ddb_core::error::Result<()> {
+pub(crate) fn bundle(repo: &std::path::Path, action: BundleAction) -> ddb_core::error::Result<()> {
     match action {
         BundleAction::Export {
             target,

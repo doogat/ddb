@@ -1,4 +1,4 @@
-use crate::common::{ServerGuard, DdbTestRepo};
+use crate::common::{DdbTestRepo, ServerGuard};
 use std::time::Duration;
 
 #[test]
@@ -1100,7 +1100,10 @@ fn sql_columns_aliased() {
     let result = server.graphql(
         r#"{ sql(query: "SELECT id AS doogat_id, title AS name FROM doogats") { columns } }"#,
     );
-    assert!(result.get("errors").is_none(), "aliased query failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "aliased query failed: {result}"
+    );
     let cols = result["data"]["sql"]["columns"].as_array().unwrap();
     assert_eq!(cols[0].as_str().unwrap(), "doogat_id");
     assert_eq!(cols[1].as_str().unwrap(), "name");
@@ -1124,14 +1127,21 @@ fn sql_columns_star_select() {
     assert!(r.get("errors").is_none(), "INSERT failed: {r}");
 
     // SELECT * should return all columns
-    let result = server.graphql(
-        r#"{ sql(query: "SELECT * FROM gadget") { columns rows } }"#,
+    let result = server.graphql(r#"{ sql(query: "SELECT * FROM gadget") { columns rows } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "star select failed: {result}"
     );
-    assert!(result.get("errors").is_none(), "star select failed: {result}");
     let cols = result["data"]["sql"]["columns"].as_array().unwrap();
     let col_names: Vec<&str> = cols.iter().map(|c| c.as_str().unwrap()).collect();
-    assert!(col_names.contains(&"label"), "missing label column: {col_names:?}");
-    assert!(col_names.contains(&"weight"), "missing weight column: {col_names:?}");
+    assert!(
+        col_names.contains(&"label"),
+        "missing label column: {col_names:?}"
+    );
+    assert!(
+        col_names.contains(&"weight"),
+        "missing weight column: {col_names:?}"
+    );
 }
 
 #[test]
@@ -1154,7 +1164,10 @@ fn execute_batch_format_objects() {
         r#"mutation($stmts: [String!]!, $fmt: String) { executeBatch(statements: $stmts, format: $fmt) { columns rows } }"#,
         serde_json::json!({ "stmts": ["SELECT name FROM planet"], "fmt": "objects" }),
     );
-    assert!(result.get("errors").is_none(), "executeBatch format:objects failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "executeBatch format:objects failed: {result}"
+    );
     let batch = result["data"]["executeBatch"].as_array().unwrap();
     assert!(!batch.is_empty());
     let rows = batch[0]["rows"].as_array().unwrap();
@@ -1183,31 +1196,27 @@ fn search_boolean_and_phrase_queries() {
     }
 
     // AND: only the doogat with both terms
-    let result = server.graphql(
-        r#"{ search(query: "rust AND crdt") { totalCount hits { title } } }"#,
-    );
+    let result =
+        server.graphql(r#"{ search(query: "rust AND crdt") { totalCount hits { title } } }"#);
     assert!(result.get("errors").is_none(), "AND query failed: {result}");
     assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
 
     // OR: doogats with either term
-    let result = server.graphql(
-        r#"{ search(query: "rust OR golang") { totalCount } }"#,
-    );
+    let result = server.graphql(r#"{ search(query: "rust OR golang") { totalCount } }"#);
     assert!(result.get("errors").is_none(), "OR query failed: {result}");
     assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 3);
 
     // NOT: rust without crdt
-    let result = server.graphql(
-        r#"{ search(query: "rust NOT crdt") { totalCount } }"#,
-    );
+    let result = server.graphql(r#"{ search(query: "rust NOT crdt") { totalCount } }"#);
     assert!(result.get("errors").is_none(), "NOT query failed: {result}");
     assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
 
     // Quoted phrase
-    let result = server.graphql(
-        r#"{ search(query: "\"rust crdt\"") { totalCount } }"#,
+    let result = server.graphql(r#"{ search(query: "\"rust crdt\"") { totalCount } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "phrase query failed: {result}"
     );
-    assert!(result.get("errors").is_none(), "phrase query failed: {result}");
     assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
 }
 
@@ -1223,12 +1232,16 @@ fn search_malformed_query_returns_bad_request() {
     );
     assert!(r.get("errors").is_none(), "create failed: {r}");
 
-    let result = server.graphql(
-        r#"{ search(query: "AND AND") { totalCount } }"#,
+    let result = server.graphql(r#"{ search(query: "AND AND") { totalCount } }"#);
+    assert!(
+        result["errors"].is_array(),
+        "expected errors for malformed query: {result}"
     );
-    assert!(result["errors"].is_array(), "expected errors for malformed query: {result}");
     let err_msg = result["errors"][0]["message"].as_str().unwrap();
-    assert!(err_msg.contains("invalid search query"), "expected user-facing error, got: {err_msg}");
+    assert!(
+        err_msg.contains("invalid search query"),
+        "expected user-facing error, got: {err_msg}"
+    );
 }
 
 #[test]
@@ -1237,17 +1250,17 @@ fn graphql_introspection_hides_internal_tables() {
     let server = ServerGuard::start(&repo);
 
     // Create a user type so we have something to check for
-    let r = server.graphql(
-        r#"mutation { executeSql(sql: "CREATE TABLE widget (color TEXT)") { message } }"#,
-    );
+    let r = server
+        .graphql(r#"mutation { executeSql(sql: "CREATE TABLE widget (color TEXT)") { message } }"#);
     assert!(r.get("errors").is_none(), "create table failed: {r}");
     std::thread::sleep(Duration::from_secs(1));
 
     // Introspect query type fields
-    let result = server.graphql(
-        r#"{ __schema { queryType { fields { name } } } }"#,
+    let result = server.graphql(r#"{ __schema { queryType { fields { name } } } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "introspection failed: {result}"
     );
-    assert!(result.get("errors").is_none(), "introspection failed: {result}");
 
     let fields: Vec<&str> = result["data"]["__schema"]["queryType"]["fields"]
         .as_array()
@@ -1294,9 +1307,7 @@ fn setup_task_type_with_ids(server: &ServerGuard) -> Vec<String> {
     }
 
     // Fetch all IDs ordered by priority ASC
-    let r = server.graphql(
-        r#"{ tasks(orderBy: { priority: ASC }) { items { id } } }"#,
-    );
+    let r = server.graphql(r#"{ tasks(orderBy: { priority: ASC }) { items { id } } }"#);
     assert!(r.get("errors").is_none(), "list tasks failed: {r}");
     for item in r["data"]["tasks"]["items"].as_array().unwrap() {
         ids.push(item["id"].as_str().unwrap().to_string());
@@ -1315,7 +1326,10 @@ fn filter_base_field_id_eq() {
         ids[0]
     );
     let result = server.graphql(&query);
-    assert!(result.get("errors").is_none(), "filter id eq failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "filter id eq failed: {result}"
+    );
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"].as_str().unwrap(), ids[0]);
@@ -1333,7 +1347,10 @@ fn filter_base_field_id_in() {
         ids[0], ids[1]
     );
     let result = server.graphql(&query);
-    assert!(result.get("errors").is_none(), "filter id in failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "filter id in failed: {result}"
+    );
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(result["data"]["tasks"]["totalCount"].as_i64().unwrap(), 2);
@@ -1366,7 +1383,10 @@ fn filter_base_field_title_eq() {
     let result = server.graphql(
         r#"{ tasks(where: { title: { eq: "Alpha Task" } }) { items { id title } totalCount } }"#,
     );
-    assert!(result.get("errors").is_none(), "filter title eq failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "filter title eq failed: {result}"
+    );
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["title"].as_str().unwrap(), "Alpha Task");
@@ -1398,7 +1418,10 @@ fn filter_base_field_title_contains() {
     let result = server.graphql(
         r#"{ tasks(where: { title: { contains: "needle" } }) { items { id title } totalCount } }"#,
     );
-    assert!(result.get("errors").is_none(), "filter title contains failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "filter title contains failed: {result}"
+    );
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert!(items[0]["title"].as_str().unwrap().contains("needle"));
@@ -1428,9 +1451,8 @@ fn filter_base_field_compound_id_and_title() {
     assert!(r.get("errors").is_none(), "INSERT failed: {r}");
 
     // Get the ID of "Target"
-    let result = server.graphql(
-        r#"{ tasks(where: { title: { eq: "Target" } }) { items { id } } }"#,
-    );
+    let result =
+        server.graphql(r#"{ tasks(where: { title: { eq: "Target" } }) { items { id } } }"#);
     let target_id = result["data"]["tasks"]["items"][0]["id"].as_str().unwrap();
 
     // Compound: id eq AND title contains
@@ -1438,7 +1460,10 @@ fn filter_base_field_compound_id_and_title() {
         r#"{{ tasks(where: {{ _and: [{{ id: {{ eq: "{target_id}" }} }}, {{ title: {{ contains: "Tar" }} }}] }}) {{ items {{ id title }} totalCount }} }}"#,
     );
     let result = server.graphql(&query);
-    assert!(result.get("errors").is_none(), "compound filter failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "compound filter failed: {result}"
+    );
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"].as_str().unwrap(), target_id);
@@ -1453,7 +1478,10 @@ fn filter_base_field_id_nonexistent() {
     let result = server.graphql(
         r#"{ tasks(where: { id: { eq: "99999999999999" } }) { items { id } totalCount } }"#,
     );
-    assert!(result.get("errors").is_none(), "nonexistent id failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "nonexistent id failed: {result}"
+    );
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 0);
     assert_eq!(result["data"]["tasks"]["totalCount"].as_i64().unwrap(), 0);
@@ -1468,7 +1496,10 @@ fn filter_base_field_id_hyphenated_type() {
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "CREATE TABLE \"test-item\" (status TEXT)" }),
     );
-    assert!(r.get("errors").is_none(), "CREATE TABLE test-item failed: {r}");
+    assert!(
+        r.get("errors").is_none(),
+        "CREATE TABLE test-item failed: {r}"
+    );
 
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
@@ -1478,7 +1509,10 @@ fn filter_base_field_id_hyphenated_type() {
 
     // Get the ID via the typed query
     let result = server.graphql(r#"{ testItems { items { id } } }"#);
-    assert!(result.get("errors").is_none(), "list testItems failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "list testItems failed: {result}"
+    );
     let items = result["data"]["testItems"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     let the_id = items[0]["id"].as_str().unwrap();
@@ -1488,11 +1522,17 @@ fn filter_base_field_id_hyphenated_type() {
         r#"{{ testItems(where: {{ id: {{ eq: "{the_id}" }} }}) {{ items {{ id status }} totalCount }} }}"#,
     );
     let result = server.graphql(&query);
-    assert!(result.get("errors").is_none(), "filter id on hyphenated type failed: {result}");
+    assert!(
+        result.get("errors").is_none(),
+        "filter id on hyphenated type failed: {result}"
+    );
     let items = result["data"]["testItems"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"].as_str().unwrap(), the_id);
-    assert_eq!(result["data"]["testItems"]["totalCount"].as_i64().unwrap(), 1);
+    assert_eq!(
+        result["data"]["testItems"]["totalCount"].as_i64().unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -1502,21 +1542,31 @@ fn filter_base_field_introspection() {
     setup_task_type(&server);
 
     // Introspect TaskWhere to verify id and title fields are present
-    let result = server.graphql(
-        r#"{ __type(name: "TaskWhere") { inputFields { name } } }"#,
+    let result = server.graphql(r#"{ __type(name: "TaskWhere") { inputFields { name } } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "introspection failed: {result}"
     );
-    assert!(result.get("errors").is_none(), "introspection failed: {result}");
     let fields = result["data"]["__type"]["inputFields"]
         .as_array()
         .expect("inputFields should be array");
-    let field_names: Vec<&str> = fields
-        .iter()
-        .map(|f| f["name"].as_str().unwrap())
-        .collect();
-    assert!(field_names.contains(&"id"), "TaskWhere must have id field, got: {field_names:?}");
-    assert!(field_names.contains(&"title"), "TaskWhere must have title field, got: {field_names:?}");
-    assert!(field_names.contains(&"status"), "TaskWhere must still have user-defined status field, got: {field_names:?}");
-    assert!(field_names.contains(&"_and"), "TaskWhere must have _and combinator, got: {field_names:?}");
+    let field_names: Vec<&str> = fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert!(
+        field_names.contains(&"id"),
+        "TaskWhere must have id field, got: {field_names:?}"
+    );
+    assert!(
+        field_names.contains(&"title"),
+        "TaskWhere must have title field, got: {field_names:?}"
+    );
+    assert!(
+        field_names.contains(&"status"),
+        "TaskWhere must still have user-defined status field, got: {field_names:?}"
+    );
+    assert!(
+        field_names.contains(&"_and"),
+        "TaskWhere must have _and combinator, got: {field_names:?}"
+    );
 }
 
 #[test]
@@ -1564,20 +1614,32 @@ fn search_returns_enriched_fields() {
     // tags
     let tags = hit["tags"].as_array().unwrap();
     let tag_strs: Vec<&str> = tags.iter().map(|t| t.as_str().unwrap()).collect();
-    assert!(tag_strs.contains(&"rust"), "tags should contain 'rust', got: {tag_strs:?}");
-    assert!(tag_strs.contains(&"testing"), "tags should contain 'testing', got: {tag_strs:?}");
+    assert!(
+        tag_strs.contains(&"rust"),
+        "tags should contain 'rust', got: {tag_strs:?}"
+    );
+    assert!(
+        tag_strs.contains(&"testing"),
+        "tags should contain 'testing', got: {tag_strs:?}"
+    );
 
     // type
     assert_eq!(hit["type"].as_str().unwrap(), "link");
 
     // fields (JSON object with url and description)
     let fields = &hit["fields"];
-    assert!(fields.is_object(), "fields should be a JSON object, got: {fields}");
+    assert!(
+        fields.is_object(),
+        "fields should be a JSON object, got: {fields}"
+    );
     assert_eq!(fields["url"].as_str().unwrap(), "https://example.com");
     assert_eq!(fields["description"].as_str().unwrap(), "Example site");
 
     // created_at (should be non-null since date defaults from ID)
-    assert!(hit["created_at"].is_string(), "created_at should be present");
+    assert!(
+        hit["created_at"].is_string(),
+        "created_at should be present"
+    );
 }
 
 #[test]
@@ -1610,8 +1672,14 @@ fn search_untyped_doogat_has_null_enriched_fields() {
     // Empty tags, null type and fields
     let tags = hit["tags"].as_array().unwrap();
     assert!(tags.is_empty(), "untyped doogat should have empty tags");
-    assert!(hit["type"].is_null(), "untyped doogat should have null type");
-    assert!(hit["fields"].is_null(), "untyped doogat should have null fields");
+    assert!(
+        hit["type"].is_null(),
+        "untyped doogat should have null type"
+    );
+    assert!(
+        hit["fields"].is_null(),
+        "untyped doogat should have null fields"
+    );
 }
 
 #[test]
@@ -1629,12 +1697,12 @@ fn search_returns_query_normalized() {
     assert!(r.get("errors").is_none(), "create failed: {r}");
 
     // Search with unsorted AND query
-    let result = server.graphql(
-        r#"{ search(query: "b AND a") { queryNormalized totalCount } }"#,
-    );
+    let result = server.graphql(r#"{ search(query: "b AND a") { queryNormalized totalCount } }"#);
     assert!(result.get("errors").is_none(), "search failed: {result}");
     assert_eq!(
-        result["data"]["search"]["queryNormalized"].as_str().unwrap(),
+        result["data"]["search"]["queryNormalized"]
+            .as_str()
+            .unwrap(),
         "a and b",
         "queryNormalized should sort AND operands"
     );
@@ -1645,9 +1713,8 @@ fn normalize_search_query_standalone() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    let result = server.graphql(
-        r#"{ normalizeSearchQuery(query: "Tag=svelte AND category=work.portals") }"#,
-    );
+    let result = server
+        .graphql(r#"{ normalizeSearchQuery(query: "Tag=svelte AND category=work.portals") }"#);
     assert!(result.get("errors").is_none(), "normalize failed: {result}");
     assert_eq!(
         result["data"]["normalizeSearchQuery"].as_str().unwrap(),
@@ -1663,7 +1730,10 @@ fn normalize_search_query_rejects_bare_wildcard() {
     for q in ["*", "**", ".*"] {
         let body = format!("{{ normalizeSearchQuery(query: \"{q}\") }}");
         let result = server.graphql(&body);
-        let errors = result.get("errors").cloned().unwrap_or(serde_json::json!([]));
+        let errors = result
+            .get("errors")
+            .cloned()
+            .unwrap_or(serde_json::json!([]));
         let err_text = errors.to_string();
         assert!(
             err_text.contains("invalid search query"),
@@ -1681,10 +1751,11 @@ fn normalize_search_query_rejects_non_tag_negation() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    let result = server.graphql(
-        r#"{ normalizeSearchQuery(query: "NOT url=example.com") }"#,
-    );
-    let errors = result.get("errors").cloned().unwrap_or(serde_json::json!([]));
+    let result = server.graphql(r#"{ normalizeSearchQuery(query: "NOT url=example.com") }"#);
+    let errors = result
+        .get("errors")
+        .cloned()
+        .unwrap_or(serde_json::json!([]));
     let err_text = errors.to_string();
     assert!(
         err_text.contains("invalid search query"),
@@ -1704,7 +1775,10 @@ fn normalize_search_query_rejects_empty_and_bare_operators() {
     for q in ["", "   ", "AND", "OR", "NOT", "(unbalanced"] {
         let body = format!("{{ normalizeSearchQuery(query: \"{q}\") }}");
         let result = server.graphql(&body);
-        let errors = result.get("errors").cloned().unwrap_or(serde_json::json!([]));
+        let errors = result
+            .get("errors")
+            .cloned()
+            .unwrap_or(serde_json::json!([]));
         let err_text = errors.to_string();
         assert!(
             err_text.contains("invalid search query"),
@@ -1850,11 +1924,7 @@ fn search_where_filter_tag() {
         "search where tag failed: {result}"
     );
     let hits = result["data"]["search"]["hits"].as_array().unwrap();
-    assert_eq!(
-        hits.len(),
-        2,
-        "expected 2 hits for tag=rust, got: {hits:?}"
-    );
+    assert_eq!(hits.len(), 2, "expected 2 hits for tag=rust, got: {hits:?}");
     assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 2);
 }
 

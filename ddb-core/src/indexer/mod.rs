@@ -9,7 +9,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection};
 
-use crate::error::{Result, DoogatError};
+use crate::error::{DoogatError, Result};
 use crate::traits::DoogatSource;
 use crate::types::ParsedDoogat;
 
@@ -625,7 +625,11 @@ impl crate::traits::SqlBackend for Index {
         self.query_raw_with_columns(sql)
     }
 
-    fn rematerialize_type(&self, type_name: &str, source: &dyn crate::traits::DoogatSource) -> Result<()> {
+    fn rematerialize_type(
+        &self,
+        type_name: &str,
+        source: &dyn crate::traits::DoogatSource,
+    ) -> Result<()> {
         self.rematerialize_type(type_name, source)
     }
 

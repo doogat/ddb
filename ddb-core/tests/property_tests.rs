@@ -17,15 +17,15 @@
 //! The parser blocks are CPU-only and scale linearly; SQL/CRDT/indexer
 //! blocks do real SQLite/Automerge I/O per case and dominate runtime.
 
-use proptest::prelude::*;
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
 use ddb_core::crdt_resolver;
 use ddb_core::indexer::Index;
 use ddb_core::parser;
 use ddb_core::sql_engine::SqlEngine;
 use ddb_core::traits::{DoogatSource, DoogatStore};
-use ddb_core::types::{CommitHash, ConflictFile, DiffKind, Value, DoogatId, DoogatMeta};
+use ddb_core::types::{CommitHash, ConflictFile, DiffKind, DoogatId, DoogatMeta, Value};
+use proptest::prelude::*;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 
 // ---------------------------------------------------------------------------
 // Generators

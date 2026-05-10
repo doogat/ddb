@@ -142,9 +142,7 @@ impl<G: GitBackend> DoogatService<G> {
             None => return Ok(None),
         };
         match input.on_conflict {
-            crate::types::ConflictAction::Ignore => {
-                Ok(Some(self.get_doogat_parsed(existing_id)?))
-            }
+            crate::types::ConflictAction::Ignore => Ok(Some(self.get_doogat_parsed(existing_id)?)),
             crate::types::ConflictAction::Error => Err(DoogatError::singleton_violation(
                 type_name.clone(),
                 existing_id.clone(),

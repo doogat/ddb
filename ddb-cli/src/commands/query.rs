@@ -13,9 +13,7 @@ pub(crate) fn help(topic: Option<String>) -> ddb_core::error::Result<()> {
         }
         None => {
             outln!("Available guides:")?;
-            outln!(
-                "  create-app    Data modeling, zones, title resolution, and API access"
-            )?;
+            outln!("  create-app    Data modeling, zones, title resolution, and API access")?;
             outln!("")?;
             outln!("Usage: ddb help <topic>")?;
         }

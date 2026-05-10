@@ -24,10 +24,7 @@ fn junction_table_round_trip() {
     // Insert a category
     let cat_out = repo
         .ddb()
-        .args([
-            "query",
-            "INSERT INTO category (label) VALUES ('tech')",
-        ])
+        .args(["query", "INSERT INTO category (label) VALUES ('tech')"])
         .output()
         .unwrap();
     assert!(
@@ -91,10 +88,7 @@ fn junction_table_round_trip() {
 
     // Verify junction table is empty
     repo.ddb()
-        .args([
-            "query",
-            "SELECT COUNT(*) FROM bookmark_category",
-        ])
+        .args(["query", "SELECT COUNT(*) FROM bookmark_category"])
         .assert()
         .success()
         .stdout(predicate::str::contains("0"));
@@ -151,10 +145,7 @@ fn junction_table_survives_reindex() {
 
     let art_out = repo
         .ddb()
-        .args([
-            "query",
-            "INSERT INTO article (title) VALUES ('Rust Guide')",
-        ])
+        .args(["query", "INSERT INTO article (title) VALUES ('Rust Guide')"])
         .output()
         .unwrap();
     let art_id = String::from_utf8_lossy(&art_out.stdout).trim().to_string();
@@ -220,9 +211,7 @@ fn junction_table_multiple_references() {
         .args(["query", "INSERT INTO project (name) VALUES ('alpha')"])
         .output()
         .unwrap();
-    let proj_id = String::from_utf8_lossy(&proj_out.stdout)
-        .trim()
-        .to_string();
+    let proj_id = String::from_utf8_lossy(&proj_out.stdout).trim().to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -234,9 +223,7 @@ fn junction_table_multiple_references() {
         ])
         .output()
         .unwrap();
-    let task_id = String::from_utf8_lossy(&task_out.stdout)
-        .trim()
-        .to_string();
+    let task_id = String::from_utf8_lossy(&task_out.stdout).trim().to_string();
 
     // Insert into both junction tables
     repo.ddb()

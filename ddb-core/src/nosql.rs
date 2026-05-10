@@ -7,7 +7,7 @@ use std::path::Path;
 
 use redb::{Database, ReadableTable, TableDefinition};
 
-use crate::error::{Result, DoogatError};
+use crate::error::{DoogatError, Result};
 use crate::types::ParsedDoogat;
 
 /// Shorthand for mapping any redb/bincode error to DoogatError::Redb.
@@ -225,7 +225,7 @@ impl RedbIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Link, DoogatId, DoogatMeta, Zone};
+    use crate::types::{DoogatId, DoogatMeta, Link, Zone};
 
     fn test_doogat(id: &str, title: &str) -> ParsedDoogat {
         ParsedDoogat {

@@ -58,15 +58,16 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                         .get("type")
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
-                    let fields = match input
-                        .get("fields")
-                        .and_then(|v| v.string().ok())
-                    {
+                    let fields = match input.get("fields").and_then(|v| v.string().ok()) {
                         Some(json_str) => parse_fields_json(json_str)
                             .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
                         None => std::collections::BTreeMap::new(),
                     };
-                    let on_conflict = match ctx.args.get("onConflict").map(|v| v.enum_name().ok().map(|s| s.to_string())) {
+                    let on_conflict = match ctx
+                        .args
+                        .get("onConflict")
+                        .map(|v| v.enum_name().ok().map(|s| s.to_string()))
+                    {
                         Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
                         _ => ConflictAction::Error,
                     };
@@ -77,11 +78,14 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
-            .argument(InputValue::new(
-                "input",
-                TypeRef::named_nn("CreateDoogatInput"),
-            ).description("The doogat to create."))
-            .argument(InputValue::new("onConflict", TypeRef::named("ConflictAction")).description("Action on unique constraint conflict. Defaults to ERROR."))
+            .argument(
+                InputValue::new("input", TypeRef::named_nn("CreateDoogatInput"))
+                    .description("The doogat to create."),
+            )
+            .argument(
+                InputValue::new("onConflict", TypeRef::named("ConflictAction"))
+                    .description("Action on unique constraint conflict. Defaults to ERROR."),
+            )
             .description("Create a new doogat with a title, optional content, tags, and type."),
         );
     }
@@ -112,10 +116,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                         .get("type")
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
-                    let fields = match input
-                        .get("fields")
-                        .and_then(|v| v.string().ok())
-                    {
+                    let fields = match input.get("fields").and_then(|v| v.string().ok()) {
                         Some(json_str) => parse_fields_json(json_str)
                             .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
                         None => std::collections::BTreeMap::new(),
@@ -131,17 +132,23 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                         .unwrap_or_default();
                     let z = a
                         .update_doogat(crate::actor::UpdateDoogatParams {
-                            id, title, body: content, tags, doogat_type, fields, unset_fields,
+                            id,
+                            title,
+                            body: content,
+                            tags,
+                            doogat_type,
+                            fields,
+                            unset_fields,
                         })
                         .await
                         .map_err(to_graphql_error)?;
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
                 })
             })
-            .argument(InputValue::new(
-                "input",
-                TypeRef::named_nn("UpdateDoogatInput"),
-            ).description("Fields to update on the doogat."))
+            .argument(
+                InputValue::new("input", TypeRef::named_nn("UpdateDoogatInput"))
+                    .description("Fields to update on the doogat."),
+            )
             .description("Update an existing doogat. Omitted fields are left unchanged."),
         );
     }
@@ -149,152 +156,144 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
     // batchUpdate
     {
         mutation = mutation.field(
-            Field::new(
-                "batchUpdate",
-                TypeRef::named_nn_list_nn("Doogat"),
-                |ctx| {
-                    FieldFuture::new(async move {
-                        let a = ctx.data::<ActorHandle>()?;
-                        let updates_val = ctx.args.try_get("updates")?.list()?;
-                        let mut updates = Vec::with_capacity(updates_val.len());
-                        for item in updates_val.iter() {
-                            let obj = item.object()?;
-                            let id = obj.try_get("id")?.string()?.to_string();
-                            let title = obj
-                                .get("title")
-                                .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string());
-                            let body = obj
-                                .get("content")
-                                .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string());
-                            let tags =
-                                obj.get("tags").and_then(|v| v.list().ok()).map(|l| {
-                                    l.iter()
-                                        .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                        .collect()
-                                });
-                            let doogat_type = obj
-                                .get("type")
-                                .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string());
-                            let fields = match obj
-                                .get("fields")
-                                .and_then(|v| v.string().ok())
-                            {
-                                Some(json_str) => Some(
-                                    parse_fields_json(json_str)
-                                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
-                                ),
-                                None => None,
-                            };
-                            let unset_fields: Option<Vec<String>> = obj
-                                .get("unsetFields")
-                                .and_then(|v| v.list().ok())
-                                .map(|l| {
-                                    l.iter()
-                                        .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                        .collect()
-                                });
-                            updates.push(BatchUpdateInput {
-                                id,
-                                title,
-                                body,
-                                tags,
-                                doogat_type,
-                                fields,
-                                unset_fields,
+            Field::new("batchUpdate", TypeRef::named_nn_list_nn("Doogat"), |ctx| {
+                FieldFuture::new(async move {
+                    let a = ctx.data::<ActorHandle>()?;
+                    let updates_val = ctx.args.try_get("updates")?.list()?;
+                    let mut updates = Vec::with_capacity(updates_val.len());
+                    for item in updates_val.iter() {
+                        let obj = item.object()?;
+                        let id = obj.try_get("id")?.string()?.to_string();
+                        let title = obj
+                            .get("title")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let body = obj
+                            .get("content")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let tags = obj.get("tags").and_then(|v| v.list().ok()).map(|l| {
+                            l.iter()
+                                .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                .collect()
+                        });
+                        let doogat_type = obj
+                            .get("type")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let fields = match obj.get("fields").and_then(|v| v.string().ok()) {
+                            Some(json_str) => Some(
+                                parse_fields_json(json_str)
+                                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
+                            ),
+                            None => None,
+                        };
+                        let unset_fields: Option<Vec<String>> =
+                            obj.get("unsetFields").and_then(|v| v.list().ok()).map(|l| {
+                                l.iter()
+                                    .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                    .collect()
                             });
-                        }
-                        let results =
-                            a.batch_update(updates).await.map_err(to_graphql_error)?;
-                        Ok(Some(FieldValue::list(
-                            results.iter().map(|z| FieldValue::owned_any(doogat_to_value(z))),
-                        )))
-                    })
-                },
+                        updates.push(BatchUpdateInput {
+                            id,
+                            title,
+                            body,
+                            tags,
+                            doogat_type,
+                            fields,
+                            unset_fields,
+                        });
+                    }
+                    let results = a.batch_update(updates).await.map_err(to_graphql_error)?;
+                    Ok(Some(FieldValue::list(
+                        results
+                            .iter()
+                            .map(|z| FieldValue::owned_any(doogat_to_value(z))),
+                    )))
+                })
+            })
+            .description(
+                "Update multiple doogats atomically in a single git commit. All succeed or none.",
             )
-            .description("Update multiple doogats atomically in a single git commit. All succeed or none.")
-            .argument(InputValue::new(
-                "updates",
-                TypeRef::named_nn_list_nn("UpdateDoogatInput"),
-            ).description("List of doogats to update atomically.")),
+            .argument(
+                InputValue::new("updates", TypeRef::named_nn_list_nn("UpdateDoogatInput"))
+                    .description("List of doogats to update atomically."),
+            ),
         );
     }
 
     // createMany
     {
         mutation = mutation.field(
-            Field::new(
-                "createMany",
-                TypeRef::named_nn_list_nn("Doogat"),
-                |ctx| {
-                    FieldFuture::new(async move {
-                        let a = ctx.data::<ActorHandle>()?;
-                        let on_conflict = match ctx.args.get("onConflict").map(|v| v.enum_name().ok().map(|s| s.to_string())) {
-                            Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
-                            _ => ConflictAction::Error,
+            Field::new("createMany", TypeRef::named_nn_list_nn("Doogat"), |ctx| {
+                FieldFuture::new(async move {
+                    let a = ctx.data::<ActorHandle>()?;
+                    let on_conflict = match ctx
+                        .args
+                        .get("onConflict")
+                        .map(|v| v.enum_name().ok().map(|s| s.to_string()))
+                    {
+                        Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
+                        _ => ConflictAction::Error,
+                    };
+                    let inputs_val = ctx.args.try_get("inputs")?.list()?;
+                    let mut inputs = Vec::with_capacity(inputs_val.len());
+                    for item in inputs_val.iter() {
+                        let obj = item.object()?;
+                        let title = obj
+                            .get("title")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let body = obj
+                            .get("content")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let tags = obj
+                            .get("tags")
+                            .and_then(|v| v.list().ok())
+                            .map(|l| {
+                                l.iter()
+                                    .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let doogat_type = obj
+                            .get("type")
+                            .and_then(|v| v.string().ok())
+                            .map(|s| s.to_string());
+                        let fields = match obj.get("fields").and_then(|v| v.string().ok()) {
+                            Some(json_str) => parse_fields_json(json_str)
+                                .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
+                            None => std::collections::BTreeMap::new(),
                         };
-                        let inputs_val = ctx.args.try_get("inputs")?.list()?;
-                        let mut inputs = Vec::with_capacity(inputs_val.len());
-                        for item in inputs_val.iter() {
-                            let obj = item.object()?;
-                            let title = obj
-                                .get("title")
-                                .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string());
-                            let body = obj
-                                .get("content")
-                                .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string());
-                            let tags = obj
-                                .get("tags")
-                                .and_then(|v| v.list().ok())
-                                .map(|l| {
-                                    l.iter()
-                                        .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-                            let doogat_type = obj
-                                .get("type")
-                                .and_then(|v| v.string().ok())
-                                .map(|s| s.to_string());
-                            let fields = match obj
-                                .get("fields")
-                                .and_then(|v| v.string().ok())
-                            {
-                                Some(json_str) => parse_fields_json(json_str)
-                                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
-                                None => std::collections::BTreeMap::new(),
-                            };
-                            inputs.push(BatchCreateInput {
-                                title,
-                                body,
-                                tags,
-                                doogat_type,
-                                fields,
-                                on_conflict,
-                            });
-                        }
-                        let results =
-                            a.create_many(inputs).await.map_err(to_graphql_error)?;
-                        Ok(Some(FieldValue::list(
-                            results
-                                .iter()
-                                .map(|z| FieldValue::owned_any(doogat_to_value(z))),
-                        )))
-                    })
-                },
-            )
+                        inputs.push(BatchCreateInput {
+                            title,
+                            body,
+                            tags,
+                            doogat_type,
+                            fields,
+                            on_conflict,
+                        });
+                    }
+                    let results = a.create_many(inputs).await.map_err(to_graphql_error)?;
+                    Ok(Some(FieldValue::list(
+                        results
+                            .iter()
+                            .map(|z| FieldValue::owned_any(doogat_to_value(z))),
+                    )))
+                })
+            })
             .description(
                 "Create multiple doogats atomically in a single git commit. All succeed or none.",
             )
-            .argument(InputValue::new(
-                "inputs",
-                TypeRef::named_nn_list_nn("CreateManyItemInput"),
-            ).description("List of doogats to create atomically."))
-            .argument(InputValue::new("onConflict", TypeRef::named("ConflictAction")).description("Action on unique constraint conflict. Defaults to ERROR.")),
+            .argument(
+                InputValue::new("inputs", TypeRef::named_nn_list_nn("CreateManyItemInput"))
+                    .description("List of doogats to create atomically."),
+            )
+            .argument(
+                InputValue::new("onConflict", TypeRef::named("ConflictAction"))
+                    .description("Action on unique constraint conflict. Defaults to ERROR."),
+            ),
         );
     }
 
@@ -385,11 +384,14 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     Ok(Some(FieldValue::value(GqlValue::from(true))))
                 })
             })
-            .argument(InputValue::new("doogatId", TypeRef::named_nn(TypeRef::ID)).description("The doogat to remove the file from."))
-            .argument(InputValue::new(
-                "filename",
-                TypeRef::named_nn(TypeRef::STRING),
-            ).description("Name of the file to detach."))
+            .argument(
+                InputValue::new("doogatId", TypeRef::named_nn(TypeRef::ID))
+                    .description("The doogat to remove the file from."),
+            )
+            .argument(
+                InputValue::new("filename", TypeRef::named_nn(TypeRef::STRING))
+                    .description("Name of the file to detach."),
+            )
             .description("Remove an attached file from a doogat."),
         );
     }
@@ -415,12 +417,20 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                         }
                     }
 
-                    Ok(Some(FieldValue::owned_any(sql_result_to_value(&result, fmt))))
+                    Ok(Some(FieldValue::owned_any(sql_result_to_value(
+                        &result, fmt,
+                    ))))
                 })
             })
             .description("Execute a single SQL statement (DDL or DML). DDL triggers schema reload.")
-            .argument(InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING)).description("SQL statement to execute."))
-            .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING)).description("Response format: 'array' (default) or 'objects'.")),
+            .argument(
+                InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING))
+                    .description("SQL statement to execute."),
+            )
+            .argument(
+                InputValue::new("format", TypeRef::named(TypeRef::STRING))
+                    .description("Response format: 'array' (default) or 'objects'."),
+            ),
         );
     }
 
@@ -492,44 +502,55 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
         );
 
         mutation = mutation.field(
-            Field::new(&update_field_name, TypeRef::named_nn(&type_name), move |ctx| {
-                let table_name = table_name.clone();
-                let schema = schema_clone.clone();
-                FieldFuture::new(async move {
-                    let a = ctx.data::<ActorHandle>()?;
-                    let pool = ctx.data::<ReadPool>()?;
-                    // Reuse the existing JSON-string fields transport so singleton
-                    // typedef mutations stay aligned with updateDoogat without
-                    // generating per-typedef input objects.
-                    let fields = parse_fields_json(ctx.args.try_get("input")?.string()?)
-                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
-                    let rows = pool
-                        .aggregate_query_rows(
-                            format!("SELECT id FROM \"{}\" LIMIT 1", table_name.replace('"', "\"\"")),
-                            Vec::new(),
-                        )
-                        .await
-                        .map_err(to_graphql_error)?;
-                    let id = rows
-                        .first()
-                        .and_then(|row| row.first())
-                        .cloned()
-                        .ok_or_else(|| to_graphql_error(DoogatError::singleton_not_found(&table_name)))?;
-                    let z = a
-                        .update_doogat(UpdateDoogatParams {
-                            id,
-                            title: None,
-                            body: None,
-                            tags: None,
-                            doogat_type: None,
-                            fields,
-                            unset_fields: vec![],
-                        })
-                        .await
-                        .map_err(to_graphql_error)?;
-                    Ok(Some(FieldValue::owned_any(typed_doogat_to_value(&z, &schema))))
-                })
-            })
+            Field::new(
+                &update_field_name,
+                TypeRef::named_nn(&type_name),
+                move |ctx| {
+                    let table_name = table_name.clone();
+                    let schema = schema_clone.clone();
+                    FieldFuture::new(async move {
+                        let a = ctx.data::<ActorHandle>()?;
+                        let pool = ctx.data::<ReadPool>()?;
+                        // Reuse the existing JSON-string fields transport so singleton
+                        // typedef mutations stay aligned with updateDoogat without
+                        // generating per-typedef input objects.
+                        let fields = parse_fields_json(ctx.args.try_get("input")?.string()?)
+                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                        let rows = pool
+                            .aggregate_query_rows(
+                                format!(
+                                    "SELECT id FROM \"{}\" LIMIT 1",
+                                    table_name.replace('"', "\"\"")
+                                ),
+                                Vec::new(),
+                            )
+                            .await
+                            .map_err(to_graphql_error)?;
+                        let id = rows
+                            .first()
+                            .and_then(|row| row.first())
+                            .cloned()
+                            .ok_or_else(|| {
+                                to_graphql_error(DoogatError::singleton_not_found(&table_name))
+                            })?;
+                        let z = a
+                            .update_doogat(UpdateDoogatParams {
+                                id,
+                                title: None,
+                                body: None,
+                                tags: None,
+                                doogat_type: None,
+                                fields,
+                                unset_fields: vec![],
+                            })
+                            .await
+                            .map_err(to_graphql_error)?;
+                        Ok(Some(FieldValue::owned_any(typed_doogat_to_value(
+                            &z, &schema,
+                        ))))
+                    })
+                },
+            )
             .argument(
                 InputValue::new("input", TypeRef::named_nn(TypeRef::STRING))
                     .description("JSON object of typed field values to update."),
@@ -539,75 +560,80 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
 
         let table_name = schema.table_name.clone();
         mutation = mutation.field(
-            Field::new(&upsert_field_name, TypeRef::named_nn("UpsertResult"), move |ctx| {
-                let table_name = table_name.clone();
-                FieldFuture::new(async move {
-                    let a = ctx.data::<ActorHandle>()?;
-                    let pool = ctx.data::<ReadPool>()?;
-                    // Reuse the existing JSON-string fields transport so singleton
-                    // typedef mutations stay aligned with updateDoogat without
-                    // generating per-typedef input objects.
-                    let fields = parse_fields_json(ctx.args.try_get("input")?.string()?)
-                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
-                    let rows = pool
-                        .aggregate_query_rows(
-                            format!("SELECT id FROM \"{}\" LIMIT 1", table_name.replace('"', "\"\"")),
-                            Vec::new(),
-                        )
-                        .await
-                        .map_err(to_graphql_error)?;
-
-                    let (id, created) = match rows.first().and_then(|row| row.first()).cloned() {
-                        Some(id) => {
-                            let updated = a
-                                .update_doogat(UpdateDoogatParams {
-                                    id: id.clone(),
-                                    title: None,
-                                    body: None,
-                                    tags: None,
-                                    doogat_type: None,
-                                    fields,
-                                    unset_fields: vec![],
-                                })
-                                .await
-                                .map_err(to_graphql_error)?;
-                            (updated.meta.id.map(|id| id.0).unwrap_or(id), false)
-                        }
-                        None => {
-                            let created = a
-                                .create_doogat(
-                                    None,
-                                    None,
-                                    vec![],
-                                    Some(table_name.clone()),
-                                    fields,
-                                    ConflictAction::Error,
-                                )
-                                .await
-                                .map_err(to_graphql_error)?;
-                            (
-                                created
-                                    .meta
-                                    .id
-                                    .as_ref()
-                                    .map(|id| id.0.clone())
-                                    .ok_or_else(|| {
-                                        async_graphql::ServerError::new(
-                                            "created singleton missing id",
-                                            None,
-                                        )
-                                    })?,
-                                true,
+            Field::new(
+                &upsert_field_name,
+                TypeRef::named_nn("UpsertResult"),
+                move |ctx| {
+                    let table_name = table_name.clone();
+                    FieldFuture::new(async move {
+                        let a = ctx.data::<ActorHandle>()?;
+                        let pool = ctx.data::<ReadPool>()?;
+                        // Reuse the existing JSON-string fields transport so singleton
+                        // typedef mutations stay aligned with updateDoogat without
+                        // generating per-typedef input objects.
+                        let fields = parse_fields_json(ctx.args.try_get("input")?.string()?)
+                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                        let rows = pool
+                            .aggregate_query_rows(
+                                format!(
+                                    "SELECT id FROM \"{}\" LIMIT 1",
+                                    table_name.replace('"', "\"\"")
+                                ),
+                                Vec::new(),
                             )
-                        }
-                    };
+                            .await
+                            .map_err(to_graphql_error)?;
 
-                    let mut obj = IndexMap::new();
-                    obj.insert(Name::new("id"), GqlValue::String(id));
-                    obj.insert(Name::new("created"), GqlValue::Boolean(created));
-                    Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
-                })
-            })
+                        let (id, created) = match rows.first().and_then(|row| row.first()).cloned()
+                        {
+                            Some(id) => {
+                                let updated = a
+                                    .update_doogat(UpdateDoogatParams {
+                                        id: id.clone(),
+                                        title: None,
+                                        body: None,
+                                        tags: None,
+                                        doogat_type: None,
+                                        fields,
+                                        unset_fields: vec![],
+                                    })
+                                    .await
+                                    .map_err(to_graphql_error)?;
+                                (updated.meta.id.map(|id| id.0).unwrap_or(id), false)
+                            }
+                            None => {
+                                let created = a
+                                    .create_doogat(
+                                        None,
+                                        None,
+                                        vec![],
+                                        Some(table_name.clone()),
+                                        fields,
+                                        ConflictAction::Error,
+                                    )
+                                    .await
+                                    .map_err(to_graphql_error)?;
+                                (
+                                    created.meta.id.as_ref().map(|id| id.0.clone()).ok_or_else(
+                                        || {
+                                            async_graphql::ServerError::new(
+                                                "created singleton missing id",
+                                                None,
+                                            )
+                                        },
+                                    )?,
+                                    true,
+                                )
+                            }
+                        };
+
+                        let mut obj = IndexMap::new();
+                        obj.insert(Name::new("id"), GqlValue::String(id));
+                        obj.insert(Name::new("created"), GqlValue::Boolean(created));
+                        Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
+                    })
+                },
+            )
             .argument(
                 InputValue::new("input", TypeRef::named_nn(TypeRef::STRING))
                     .description("JSON object of typed field values to upsert."),

@@ -177,19 +177,11 @@ pub trait GitHistory {
 
     /// Walk a commit's tree under `prefix`, returning `(path, text_content)` for
     /// each blob that can be decoded as UTF-8. Non-UTF-8 blobs are silently skipped.
-    fn walk_tree_files(
-        &self,
-        commit_oid: &str,
-        prefix: &str,
-    ) -> Result<Vec<(String, String)>>;
+    fn walk_tree_files(&self, commit_oid: &str, prefix: &str) -> Result<Vec<(String, String)>>;
 
     /// Find the HLC timestamp from the most recent commit that touched `path`,
     /// starting from the given commit OID.
-    fn find_hlc_for_path(
-        &self,
-        commit_oid: &str,
-        path: &str,
-    ) -> Option<crate::hlc::Hlc>;
+    fn find_hlc_for_path(&self, commit_oid: &str, path: &str) -> Option<crate::hlc::Hlc>;
 
     /// Return the ISO 8601 date of the most recent commit that touched `rel_path`.
     fn revision_date(&self, rel_path: &str) -> Result<Option<String>>;
@@ -198,12 +190,8 @@ pub trait GitHistory {
 /// Binary file operations (commit binary blobs, read raw blobs).
 pub trait GitBinary {
     /// Write binary content to a file, stage it, and commit.
-    fn commit_binary_file(
-        &self,
-        rel_path: &str,
-        bytes: &[u8],
-        message: &str,
-    ) -> Result<CommitHash>;
+    fn commit_binary_file(&self, rel_path: &str, bytes: &[u8], message: &str)
+        -> Result<CommitHash>;
 
     /// Write a binary file and one or more text files in a single atomic commit.
     fn commit_binary_and_text(
@@ -221,12 +209,7 @@ pub trait GitBinary {
 /// File rename operations.
 pub trait GitRename {
     /// Rename (move) a file in git.
-    fn rename_file(
-        &self,
-        old_path: &str,
-        new_path: &str,
-        message: &str,
-    ) -> Result<CommitHash>;
+    fn rename_file(&self, old_path: &str, new_path: &str, message: &str) -> Result<CommitHash>;
 }
 
 /// Desktop-only hooks with default no-op implementations (commit-graph,
@@ -239,7 +222,9 @@ pub trait GitDesktopHooks {
     fn write_commit_graph(&self) {}
 
     /// Increment session commit counter, return new value.
-    fn increment_session_commits(&self) -> u32 { 0 }
+    fn increment_session_commits(&self) -> u32 {
+        0
+    }
 
     /// Reset session commit counter to zero.
     fn reset_session_commits(&self) {}

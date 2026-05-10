@@ -5,10 +5,7 @@ use predicates::prelude::*;
 fn insert_without_date_derives_from_id() {
     let repo = DdbTestRepo::init();
     repo.ddb()
-        .args([
-            "query",
-            "CREATE TABLE events (name TEXT, priority INTEGER)",
-        ])
+        .args(["query", "CREATE TABLE events (name TEXT, priority INTEGER)"])
         .assert()
         .success();
 
@@ -37,10 +34,7 @@ fn insert_without_date_derives_from_id() {
 fn insert_with_explicit_date_preserves_value() {
     let repo = DdbTestRepo::init();
     repo.ddb()
-        .args([
-            "query",
-            "CREATE TABLE meetings (name TEXT)",
-        ])
+        .args(["query", "CREATE TABLE meetings (name TEXT)"])
         .assert()
         .success();
 

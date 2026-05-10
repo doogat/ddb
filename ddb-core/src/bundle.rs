@@ -191,6 +191,7 @@ pub fn import_bundle(
         conflicts_resolved,
         resurrected: 0,
         collisions_reassigned: 0,
+        singleton_conflicts_resolved: 0,
     })
 }
 
@@ -411,12 +412,8 @@ mod tests {
     #[test]
     fn checksum_verification_catches_tampering() {
         let (_dir, repo) = temp_repo();
-        repo.commit_file(
-            "ddb/20260301000000.md",
-            "---\ntitle: test\n---\n",
-            "add",
-        )
-        .unwrap();
+        repo.commit_file("ddb/20260301000000.md", "---\ntitle: test\n---\n", "add")
+            .unwrap();
         crate::sync_manager::register_node(&repo, "Node1").unwrap();
         let mgr = SyncManager::open(&repo).unwrap();
 
@@ -558,12 +555,8 @@ mod tests {
     #[test]
     fn delta_export_fails_for_unknown_node() {
         let (_dir, repo) = temp_repo();
-        repo.commit_file(
-            "ddb/20260301000000.md",
-            "---\ntitle: test\n---\n",
-            "add",
-        )
-        .unwrap();
+        repo.commit_file("ddb/20260301000000.md", "---\ntitle: test\n---\n", "add")
+            .unwrap();
         crate::sync_manager::register_node(&repo, "Node1").unwrap();
         let mgr = SyncManager::open(&repo).unwrap();
 

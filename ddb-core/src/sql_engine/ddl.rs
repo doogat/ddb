@@ -148,9 +148,7 @@ impl<'a> SqlEngine<'a> {
             let missing: Vec<String> = schema
                 .columns
                 .iter()
-                .filter(|c| {
-                    !is_core_column(&c.name) && c.required && c.default_value.is_none()
-                })
+                .filter(|c| !is_core_column(&c.name) && c.required && c.default_value.is_none())
                 .map(|c| c.name.clone())
                 .collect();
             if !missing.is_empty() {
@@ -359,8 +357,7 @@ impl<'a> SqlEngine<'a> {
                     .map(|c| format!("\"{}\"", c))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let index_name =
-                    format!("{}_unique_{}", schema.table_name, cols.join("_"));
+                let index_name = format!("{}_unique_{}", schema.table_name, cols.join("_"));
                 self.index.sql_conn().execute(
                     &format!(
                         "CREATE UNIQUE INDEX IF NOT EXISTS \"{}\" ON \"{}\" ({})",
@@ -386,17 +383,15 @@ impl<'a> SqlEngine<'a> {
             Some(dv) => dv,
             None => return Ok(()),
         };
-        if (dv == "NEXT" || dv.starts_with("NEXT("))
-            && !data_type.eq_ignore_ascii_case("integer")
-        {
+        if (dv == "NEXT" || dv.starts_with("NEXT(")) && !data_type.eq_ignore_ascii_case("integer") {
             return Err(DoogatError::SqlEngine(format!(
                 "DEFAULT NEXT is only valid on INTEGER columns, not {data_type}"
             )));
         }
         if dv.starts_with("NEXT(") && dv.ends_with(')') {
             let partition_col = &dv[5..dv.len() - 1];
-            let col_exists = schema.columns.iter().any(|c| c.name == partition_col)
-                || partition_col == col_name;
+            let col_exists =
+                schema.columns.iter().any(|c| c.name == partition_col) || partition_col == col_name;
             if !col_exists {
                 return Err(DoogatError::SqlEngine(format!(
                     "DEFAULT NEXT({partition_col}): column '{partition_col}' not found in table"
@@ -427,12 +422,7 @@ impl<'a> SqlEngine<'a> {
                     let dt = data_type_to_string(&column_def.data_type);
                     let refs = extract_references(&column_def.options);
                     let default_value = extract_default(&column_def.options)?;
-                    self.validate_next_default(
-                        default_value.as_deref(),
-                        &dt,
-                        &col_name,
-                        &schema,
-                    )?;
+                    self.validate_next_default(default_value.as_deref(), &dt, &col_name, &schema)?;
                     let zone = if refs.is_some() {
                         Some(Zone::Reference)
                     } else if is_numeric_type(&dt) || is_short_string_type(&column_def.data_type) {
@@ -491,8 +481,12 @@ impl<'a> SqlEngine<'a> {
                 } => {
                     let col_name = column_name.value.to_lowercase();
                     let new_type = data_type_to_string(data_type);
-                    if self.handle_alter_column_type(&table_name, &mut schema, &col_name, &new_type)?
-                    {
+                    if self.handle_alter_column_type(
+                        &table_name,
+                        &mut schema,
+                        &col_name,
+                        &new_type,
+                    )? {
                         // Idempotent no-op: skip persistence and rematerialize.
                         return Ok(SqlResult::Ok(format!("table {table_name} altered")));
                     }
@@ -630,8 +624,7 @@ impl<'a> SqlEngine<'a> {
                 schema.columns[idx].data_type = new_up;
                 Ok(false)
             }
-            (TypeKind::Integer, TypeKind::Real)
-            | (TypeKind::Real, TypeKind::Integer) => {
+            (TypeKind::Integer, TypeKind::Real) | (TypeKind::Real, TypeKind::Integer) => {
                 self.preflight_numeric(table_name, col_name, &new_up)?;
                 schema.columns[idx].data_type = new_up;
                 Ok(false)
@@ -677,15 +670,9 @@ impl<'a> SqlEngine<'a> {
 
     /// Reject an INTEGER↔REAL cross-conversion when any existing value cannot
     /// round-trip through the new type. NULL rows are allowed through.
-    fn preflight_numeric(
-        &self,
-        table_name: &str,
-        col_name: &str,
-        new_type: &str,
-    ) -> Result<()> {
-        let sql = format!(
-            "SELECT \"{col_name}\" FROM \"{table_name}\" WHERE \"{col_name}\" IS NOT NULL"
-        );
+    fn preflight_numeric(&self, table_name: &str, col_name: &str, new_type: &str) -> Result<()> {
+        let sql =
+            format!("SELECT \"{col_name}\" FROM \"{table_name}\" WHERE \"{col_name}\" IS NOT NULL");
         let conn = self.index.sql_conn();
         let mut stmt = conn.prepare(&sql).map_err(|e| {
             DoogatError::SqlEngine(format!(
@@ -916,11 +903,7 @@ impl<'a> SqlEngine<'a> {
     /// typedefs. Rejects multi-hop paths, malformed identifiers, and dotted
     /// tokens whose `col` is not a REFERENCES column on this type or whose
     /// `field` does not exist on the target type.
-    fn validate_title_template(
-        &mut self,
-        schema: &TableSchema,
-        template: &str,
-    ) -> Result<()> {
+    fn validate_title_template(&mut self, schema: &TableSchema, template: &str) -> Result<()> {
         use super::helpers::parse_title_template;
 
         let placeholders = parse_title_template(template)?;
@@ -928,14 +911,18 @@ impl<'a> SqlEngine<'a> {
             let Some(field) = &p.field else {
                 continue;
             };
-            let col_def = schema.columns.iter().find(|c| c.name == p.col).ok_or_else(|| {
-                DoogatError::SqlEngine(format!(
-                    "title_template references {raw}: column '{col}' not found on {table}",
-                    raw = p.raw,
-                    col = p.col,
-                    table = schema.table_name
-                ))
-            })?;
+            let col_def = schema
+                .columns
+                .iter()
+                .find(|c| c.name == p.col)
+                .ok_or_else(|| {
+                    DoogatError::SqlEngine(format!(
+                        "title_template references {raw}: column '{col}' not found on {table}",
+                        raw = p.raw,
+                        col = p.col,
+                        table = schema.table_name
+                    ))
+                })?;
             let target_type = col_def.references.as_deref().ok_or_else(|| {
                 DoogatError::SqlEngine(format!(
                     "title_template references {raw}: column '{col}' is not a REFERENCES column on {table}",
@@ -1052,13 +1039,7 @@ impl<'a> SqlEngine<'a> {
             .map(|(id, old_path)| (old_path.clone(), format!("ddb/{new_name}/{id}.md")))
             .collect();
 
-        self.plan_typedef_rewrite(
-            table_name,
-            typedef_id,
-            typedef_path,
-            new_name,
-            &mut writes,
-        )?;
+        self.plan_typedef_rewrite(table_name, typedef_id, typedef_path, new_name, &mut writes)?;
 
         self.plan_data_doogats_move(
             table_name,
@@ -1086,8 +1067,7 @@ impl<'a> SqlEngine<'a> {
     ) -> Result<()> {
         let mut schema = self.load_schema(table_name)?;
         schema.table_name = new_name.to_string();
-        let typedef =
-            build_typedef_doogat(&DoogatId(typedef_id.to_string()), &schema);
+        let typedef = build_typedef_doogat(&DoogatId(typedef_id.to_string()), &schema);
         writes.push((typedef_path.to_string(), parser::serialize(&typedef)));
         Ok(())
     }
@@ -1127,9 +1107,10 @@ impl<'a> SqlEngine<'a> {
         new_name: &str,
         writes: &mut Vec<(String, String)>,
     ) -> Result<()> {
-        let mut stmt = self.index.sql_conn().prepare(
-            "SELECT id, path FROM doogats WHERE type = '_typedef' AND id != ?1",
-        )?;
+        let mut stmt = self
+            .index
+            .sql_conn()
+            .prepare("SELECT id, path FROM doogats WHERE type = '_typedef' AND id != ?1")?;
         let other_typedefs: Vec<(String, String)> = stmt
             .query_map(params![source_typedef_id], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -1314,19 +1295,9 @@ impl<'a> SqlEngine<'a> {
         let data_doogats = self.find_type_data_doogats(table_name)?;
 
         if cascade {
-            self.cascade_delete_doogats(
-                &typedef_path,
-                &typedef_id,
-                &data_doogats,
-                table_name,
-            )?;
+            self.cascade_delete_doogats(&typedef_path, &typedef_id, &data_doogats, table_name)?;
         } else {
-            self.soft_drop_doogats(
-                &typedef_id,
-                &typedef_path,
-                &data_doogats,
-                table_name,
-            )?;
+            self.soft_drop_doogats(&typedef_id, &typedef_path, &data_doogats, table_name)?;
         }
 
         self.cleanup_materialized_tables(table_name, schema.as_ref())?;
@@ -1429,10 +1400,7 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
-    pub(super) fn load_typedef_location(
-        &mut self,
-        table_name: &str,
-    ) -> Result<(String, String)> {
+    pub(super) fn load_typedef_location(&mut self, table_name: &str) -> Result<(String, String)> {
         self.index
             .sql_conn()
             .query_row(
@@ -1452,15 +1420,12 @@ impl<'a> SqlEngine<'a> {
 }
 
 /// Extract UNIQUE table constraints into the `unique_together` format.
-fn extract_unique_constraints(
-    constraints: &[TableConstraint],
-) -> Option<Vec<Vec<String>>> {
+fn extract_unique_constraints(constraints: &[TableConstraint]) -> Option<Vec<Vec<String>>> {
     let groups: Vec<Vec<String>> = constraints
         .iter()
         .filter_map(|c| match c {
             TableConstraint::Unique { columns, .. } => {
-                let cols: Vec<String> =
-                    columns.iter().map(|id| id.value.to_lowercase()).collect();
+                let cols: Vec<String> = columns.iter().map(|id| id.value.to_lowercase()).collect();
                 if cols.is_empty() {
                     None
                 } else {

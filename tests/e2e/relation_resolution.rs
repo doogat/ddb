@@ -123,16 +123,17 @@ fn null_reference_returns_null() {
     assert!(r.get("errors").is_none(), "INSERT bookmark failed: {r}");
 
     // Singular should be null, plural should be empty list
-    let r = server.graphql(
-        r#"{ bookmarks { items { id category { id } categories { id } } } }"#,
-    );
+    let r = server.graphql(r#"{ bookmarks { items { id category { id } categories { id } } } }"#);
     assert!(
         r.get("errors").is_none(),
         "null reference query failed: {r}"
     );
     let items = r["data"]["bookmarks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
-    assert!(items[0]["category"].is_null(), "category should be null: {r}");
+    assert!(
+        items[0]["category"].is_null(),
+        "category should be null: {r}"
+    );
     let cats = items[0]["categories"].as_array().unwrap();
     assert!(cats.is_empty(), "categories should be empty: {r}");
 }
@@ -295,7 +296,10 @@ fn typed_connection_includes_tags() {
         serde_json::json!({ "sql": "INSERT INTO article (topic) VALUES ('rust')" }),
     );
     assert!(r.get("errors").is_none());
-    let id1 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+    let id1 = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Tag the doogat
     let r = server.graphql_with_vars(
@@ -306,7 +310,10 @@ fn typed_connection_includes_tags() {
 
     // Query via typed connection - tags should be present
     let r = server.graphql(r#"{ articles { items { id topic tags } } }"#);
-    assert!(r.get("errors").is_none(), "tags on typed connection failed: {r}");
+    assert!(
+        r.get("errors").is_none(),
+        "tags on typed connection failed: {r}"
+    );
     let items = r["data"]["articles"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     let tags: Vec<&str> = items[0]["tags"]
@@ -343,7 +350,10 @@ fn batch_plural_references_multiple_items() {
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "INSERT INTO category (label) VALUES ('tech')" }),
     );
-    let cat1 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+    let cat1 = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -351,7 +361,10 @@ fn batch_plural_references_multiple_items() {
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "INSERT INTO category (label) VALUES ('science')" }),
     );
-    let cat2 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+    let cat2 = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -360,7 +373,10 @@ fn batch_plural_references_multiple_items() {
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "INSERT INTO bookmark (url) VALUES ('https://a.com')" }),
     );
-    let bm1 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+    let bm1 = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -368,7 +384,10 @@ fn batch_plural_references_multiple_items() {
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "INSERT INTO bookmark (url) VALUES ('https://b.com')" }),
     );
-    let bm2 = r["data"]["executeSql"]["message"].as_str().unwrap().to_string();
+    let bm2 = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Link bm1 to both categories, bm2 to none
     for cat in [&cat1, &cat2] {
@@ -390,12 +409,21 @@ fn batch_plural_references_multiple_items() {
     assert_eq!(items.len(), 2, "expected 2 bookmarks: {r}");
 
     // Find each bookmark's categories
-    let bm1_item = items.iter().find(|i| i["id"].as_str().unwrap() == bm1).unwrap();
-    let bm2_item = items.iter().find(|i| i["id"].as_str().unwrap() == bm2).unwrap();
+    let bm1_item = items
+        .iter()
+        .find(|i| i["id"].as_str().unwrap() == bm1)
+        .unwrap();
+    let bm2_item = items
+        .iter()
+        .find(|i| i["id"].as_str().unwrap() == bm2)
+        .unwrap();
 
     let bm1_cats = bm1_item["categories"].as_array().unwrap();
     assert_eq!(bm1_cats.len(), 2, "bm1 should have 2 categories: {r}");
-    let labels: Vec<&str> = bm1_cats.iter().map(|c| c["label"].as_str().unwrap()).collect();
+    let labels: Vec<&str> = bm1_cats
+        .iter()
+        .map(|c| c["label"].as_str().unwrap())
+        .collect();
     assert!(labels.contains(&"tech"));
     assert!(labels.contains(&"science"));
 

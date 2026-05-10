@@ -334,7 +334,11 @@ fn serialize_not_child(expr: &SearchExpr) -> String {
 // ── Fallback ────────────────────────────────────────────────────────
 
 fn fallback_normalize(query: &str) -> String {
-    query.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+    query
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ── FTS5 Serializer ────────────────────────────────────────────────
@@ -689,27 +693,18 @@ mod tests {
     #[test]
     fn complex_nested_and_operands_sorted() {
         // AND operands sorted: "(a or b)" < "(c or d)" alphabetically
-        assert_eq!(
-            normalize("(a OR b) AND (c OR d)"),
-            "(a or b) and (c or d)"
-        );
+        assert_eq!(normalize("(a OR b) AND (c OR d)"), "(a or b) and (c or d)");
     }
 
     #[test]
     fn complex_nested_and_operands_sorted_reversed_input() {
         // Even if input order is reversed, AND sort puts them in order
-        assert_eq!(
-            normalize("(c OR d) AND (a OR b)"),
-            "(a or b) and (c or d)"
-        );
+        assert_eq!(normalize("(c OR d) AND (a OR b)"), "(a or b) and (c or d)");
     }
 
     #[test]
     fn deeply_nested_recursive_normalization() {
-        assert_eq!(
-            normalize("NOT (a AND (b OR c))"),
-            "not (a and (b or c))"
-        );
+        assert_eq!(normalize("NOT (a AND (b OR c))"), "not (a and (b or c))");
     }
 
     #[test]
@@ -795,10 +790,7 @@ mod tests {
 
     #[test]
     fn standalone_quoted_string_preserves_quotes() {
-        assert_eq!(
-            normalize("\"meeting minutes\""),
-            "\"meeting minutes\""
-        );
+        assert_eq!(normalize("\"meeting minutes\""), "\"meeting minutes\"");
     }
 
     #[test]
@@ -1194,8 +1186,7 @@ mod tests {
 
     #[test]
     fn compile_dotted_value_preserved() {
-        let plan =
-            compile_search_plan("category=work.dev").expect("dotted value should be Ok");
+        let plan = compile_search_plan("category=work.dev").expect("dotted value should be Ok");
         assert_eq!(plan.fts_query, None);
         assert_eq!(
             plan.extracted_filters,
@@ -1237,8 +1228,8 @@ mod tests {
 
     #[test]
     fn compile_field_equals_and_text() {
-        let plan = compile_search_plan("tag=rust meeting")
-            .expect("field filter + text should be Ok");
+        let plan =
+            compile_search_plan("tag=rust meeting").expect("field filter + text should be Ok");
         assert_eq!(
             plan.extracted_filters,
             vec![("tag".to_string(), "rust".to_string())]
@@ -1275,8 +1266,7 @@ mod tests {
 
     #[test]
     fn compile_not_field_equals_extracted_as_negated() {
-        let plan =
-            compile_search_plan("NOT tag=archive").expect("NOT field filter should be Ok");
+        let plan = compile_search_plan("NOT tag=archive").expect("NOT field filter should be Ok");
         assert_eq!(plan.fts_query, None);
         assert!(plan.extracted_filters.is_empty());
         assert_eq!(
@@ -1401,8 +1391,7 @@ mod tests {
             match err {
                 Err(msg) => {
                     assert!(
-                        msg.starts_with("invalid search query")
-                            || msg.contains("unparseable"),
+                        msg.starts_with("invalid search query") || msg.contains("unparseable"),
                         "bad input {q:?} should produce 'invalid search query' or \
                          'unparseable' error, got: {msg}"
                     );

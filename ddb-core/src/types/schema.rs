@@ -172,21 +172,58 @@ pub enum TitleSource {
 
 #[derive(Debug, Clone)]
 pub enum Fix {
-    TagsDeduped { removed: Vec<String> },
+    TagsDeduped {
+        removed: Vec<String>,
+    },
     TagsSorted,
-    TagsStrippedHash { tags: Vec<String> },
-    DefaultSet { field: String, value: String },
-    TitleDerived { source: TitleSource },
-    KeyNormalized { old: String, new: String },
+    TagsStrippedHash {
+        tags: Vec<String>,
+    },
+    DefaultSet {
+        field: String,
+        value: String,
+    },
+    TitleDerived {
+        source: TitleSource,
+    },
+    KeyNormalized {
+        old: String,
+        new: String,
+    },
     TitleTrimmed,
     TitleCapitalized,
-    H1Aligned { old_h1: String, new_h1: String },
-    CrossZoneResolved { key: String, kept_zone: Zone },
-    FieldRenamed { old: String, new: String },
-    TypeNormalized { old: String, new: String },
-    ManualTypedef { type_name: String },
-    TitleNonCompliant { expected: String },
-    ZoneMigrated { column: String, from: Zone, to: Zone },
+    H1Aligned {
+        old_h1: String,
+        new_h1: String,
+    },
+    CrossZoneResolved {
+        key: String,
+        kept_zone: Zone,
+    },
+    FieldRenamed {
+        old: String,
+        new: String,
+    },
+    TypeNormalized {
+        old: String,
+        new: String,
+    },
+    ManualTypedef {
+        type_name: String,
+    },
+    TitleNonCompliant {
+        expected: String,
+    },
+    ZoneMigrated {
+        column: String,
+        from: Zone,
+        to: Zone,
+    },
+    SingletonConflictResolved {
+        table: String,
+        winner: String,
+        losers: Vec<String>,
+    },
 }
 
 impl Fix {
@@ -197,7 +234,8 @@ impl Fix {
             | Fix::TitleDerived { .. }
             | Fix::FieldRenamed { .. }
             | Fix::TitleNonCompliant { .. }
-            | Fix::ZoneMigrated { .. } => Severity::Warning,
+            | Fix::ZoneMigrated { .. }
+            | Fix::SingletonConflictResolved { .. } => Severity::Warning,
             Fix::TagsDeduped { .. }
             | Fix::TagsSorted
             | Fix::TagsStrippedHash { .. }
@@ -248,6 +286,15 @@ impl fmt::Display for Fix {
             Fix::ZoneMigrated { column, from, to } => {
                 write!(f, "migrated column '{column}' from {from:?} to {to:?}")
             }
+            Fix::SingletonConflictResolved {
+                table,
+                winner,
+                losers,
+            } => write!(
+                f,
+                "resolved singleton conflict in {table}: kept {winner}, quarantined {}",
+                losers.join(", ")
+            ),
         }
     }
 }

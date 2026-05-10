@@ -1,4 +1,4 @@
-use crate::common::{ServerGuard, DdbTestRepo};
+use crate::common::{DdbTestRepo, ServerGuard};
 use std::collections::HashSet;
 use tokio_postgres::SimpleQueryMessage;
 
@@ -295,9 +295,7 @@ fn pgwire_pg_catalog_hides_internal_tables() {
         );
 
         // Direct access to internal tables should still work
-        let direct = client
-            .simple_query("SELECT COUNT(*) FROM _ddb_tags")
-            .await;
+        let direct = client.simple_query("SELECT COUNT(*) FROM _ddb_tags").await;
         assert!(
             direct.is_ok(),
             "direct query on internal table should still work"

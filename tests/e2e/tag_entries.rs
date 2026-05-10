@@ -38,7 +38,10 @@ fn tag_entries_filter_by_doogat_id() {
         r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "A", "tags": ["rust", "cli"] } }),
     );
-    let id_a = r1["data"]["createDoogat"]["id"].as_str().unwrap().to_string();
+    let id_a = r1["data"]["createDoogat"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
     server.graphql_with_vars(
@@ -67,7 +70,10 @@ fn tag_entries_filter_by_doogat_id_in() {
         r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "A", "tags": ["rust"] } }),
     );
-    let id_a = r1["data"]["createDoogat"]["id"].as_str().unwrap().to_string();
+    let id_a = r1["data"]["createDoogat"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
     server.graphql_with_vars(
@@ -80,7 +86,10 @@ fn tag_entries_filter_by_doogat_id_in() {
         r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "C", "tags": ["go"] } }),
     );
-    let id_c = r3["data"]["createDoogat"]["id"].as_str().unwrap().to_string();
+    let id_c = r3["data"]["createDoogat"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let query = format!(
         r#"{{ tagEntries(where: {{ doogatId: {{ in: ["{id_a}", "{id_c}"] }} }}) {{ items {{ doogatId tag }} totalCount }} }}"#
@@ -114,9 +123,8 @@ fn tag_entries_filter_by_tag_eq() {
         serde_json::json!({ "input": { "title": "B", "tags": ["rust"] } }),
     );
 
-    let result = server.graphql(
-        r#"{ tagEntries(where: { tag: { eq: "rust" } }) { items { tag } totalCount } }"#,
-    );
+    let result = server
+        .graphql(r#"{ tagEntries(where: { tag: { eq: "rust" } }) { items { tag } totalCount } }"#);
     assert!(result.get("errors").is_none(), "query failed: {result}");
     let data = &result["data"]["tagEntries"];
     assert_eq!(data["totalCount"].as_i64().unwrap(), 2);
@@ -160,7 +168,10 @@ fn tag_entries_combined_filters() {
         r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id } }"#,
         serde_json::json!({ "input": { "title": "A", "tags": ["rust", "cli"] } }),
     );
-    let id_a = r1["data"]["createDoogat"]["id"].as_str().unwrap().to_string();
+    let id_a = r1["data"]["createDoogat"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
     server.graphql_with_vars(

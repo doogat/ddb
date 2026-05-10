@@ -360,7 +360,14 @@ async fn create_doogat(
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<SingleResponse>), (StatusCode, Json<ErrorBody>)> {
     let z = actor
-        .create_doogat(body.title, body.body, body.tags, body.doogat_type, std::collections::BTreeMap::new(), ConflictAction::Error)
+        .create_doogat(
+            body.title,
+            body.body,
+            body.tags,
+            body.doogat_type,
+            std::collections::BTreeMap::new(),
+            ConflictAction::Error,
+        )
         .await
         .map_err(rest_error)?;
     Ok((
@@ -384,8 +391,13 @@ async fn update_doogat(
     let unset_fields = body.unset_fields.unwrap_or_default();
     let z = actor
         .update_doogat(crate::actor::UpdateDoogatParams {
-            id, title: body.title, body: body.body, tags: body.tags,
-            doogat_type: body.doogat_type, fields, unset_fields,
+            id,
+            title: body.title,
+            body: body.body,
+            tags: body.tags,
+            doogat_type: body.doogat_type,
+            fields,
+            unset_fields,
         })
         .await
         .map_err(rest_error)?;
@@ -405,7 +417,7 @@ async fn delete_doogat(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ddb_core::types::{InlineField, Zone, DoogatId, DoogatMeta};
+    use ddb_core::types::{DoogatId, DoogatMeta, InlineField, Zone};
 
     #[test]
     fn rest_json_reference_arrays() {

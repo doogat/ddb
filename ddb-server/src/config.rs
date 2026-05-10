@@ -140,11 +140,7 @@ mod tests {
     #[test]
     fn read_file_valid_toml_parses() {
         let dir = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            dir.path().join("config.toml"),
-            "[server]\nport = 9999\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("config.toml"), "[server]\nport = 9999\n").unwrap();
         let cfg = ServerConfig::read_file(dir.path());
         assert_eq!(cfg.server.as_ref().and_then(|s| s.port), Some(9999));
     }

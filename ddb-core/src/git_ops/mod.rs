@@ -563,9 +563,7 @@ impl GitRepo {
             .stderr(std::process::Stdio::null())
             .status();
     }
-
 }
-
 
 impl crate::traits::DoogatSource for GitRepo {
     fn list_doogats(&self) -> Result<Vec<String>> {

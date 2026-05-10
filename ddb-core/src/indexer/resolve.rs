@@ -42,8 +42,10 @@ impl Index {
             placeholders.join(", ")
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt.query_map(params.as_slice(), |row| {
             let id: String = row.get(0)?;
             let ts: Option<String> = row.get(1)?;
@@ -61,11 +63,7 @@ impl Index {
 
     /// Check if a type's typedef has `folder: true`.
     /// Returns false if no typedef exists or folder is not set.
-    pub fn type_uses_folder(
-        &self,
-        type_name: &str,
-        repo: &(impl DoogatSource + ?Sized),
-    ) -> bool {
+    pub fn type_uses_folder(&self, type_name: &str, repo: &(impl DoogatSource + ?Sized)) -> bool {
         // Find the typedef doogat for this type
         let sql = "SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1 LIMIT 1";
         let path: Option<String> = self

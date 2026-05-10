@@ -22,10 +22,7 @@ fn hyphenated_type_typed_query() {
 
     // Query via the typed query field (test-widget -> testWidgets)
     let r = server.graphql(r#"{ testWidgets { items { id title status priority } } }"#);
-    assert!(
-        r.get("errors").is_none(),
-        "testWidgets query failed: {r}"
-    );
+    assert!(r.get("errors").is_none(), "testWidgets query failed: {r}");
     let items = r["data"]["testWidgets"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "expected 1 test-widget: {r}");
     assert_eq!(items[0]["status"].as_str().unwrap(), "active");
@@ -69,10 +66,7 @@ fn hyphenated_type_coexists_with_normal() {
 
     // Query both typed queries
     let r = server.graphql(r#"{ testWidgets { items { id } } bookmarks { items { id } } }"#);
-    assert!(
-        r.get("errors").is_none(),
-        "combined query failed: {r}"
-    );
+    assert!(r.get("errors").is_none(), "combined query failed: {r}");
     let widgets = r["data"]["testWidgets"]["items"].as_array().unwrap();
     assert_eq!(widgets.len(), 1, "expected 1 test-widget: {r}");
     let bookmarks = r["data"]["bookmarks"]["items"].as_array().unwrap();

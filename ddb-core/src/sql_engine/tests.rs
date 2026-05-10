@@ -1,4 +1,3 @@
-
 use super::helpers::{
     data_type_to_string, eval_expr, is_literal_expr, parse_title_template, value_to_sql,
     TemplatePlaceholder,
@@ -145,9 +144,7 @@ fn insert_creates_doogat_and_materialized_row() {
         .unwrap();
 
     let result = engine
-        .execute(
-            "INSERT INTO projects (title, status, priority) VALUES ('Alpha', 'active', 1)",
-        )
+        .execute("INSERT INTO projects (title, status, priority) VALUES ('Alpha', 'active', 1)")
         .unwrap();
 
     let doogat_id = match result {
@@ -434,9 +431,7 @@ fn insert_produces_correct_zone_mapping() {
     let mut engine = SqlEngine::new(&index, &repo);
 
     engine
-        .execute(
-            "CREATE TABLE projects (title TEXT, name TEXT, status TEXT, priority INTEGER)",
-        )
+        .execute("CREATE TABLE projects (title TEXT, name TEXT, status TEXT, priority INTEGER)")
         .unwrap();
 
     let id = match engine
@@ -1135,7 +1130,10 @@ fn alter_table_rename_to_renames_empty_typedef() {
         SqlResult::Ok(m) => m.clone(),
         _ => panic!("unexpected result variant: {result:?}"),
     };
-    assert!(msg.contains("renamesrc") && msg.contains("renamedst"), "{msg}");
+    assert!(
+        msg.contains("renamesrc") && msg.contains("renamedst"),
+        "{msg}"
+    );
 
     // Old name no longer resolves; new name does.
     assert!(engine.load_typedef_location("renamesrc").is_err());
@@ -1230,23 +1228,27 @@ fn alter_table_rename_to_rewrites_type_field_and_renames_table() {
     let abs_path = repo.path.join(&path);
     let content = std::fs::read_to_string(&abs_path).expect("read data file");
     assert!(content.contains("type: rmoved"), "{content}");
-    assert!(!content.contains("type: rdata\n"), "stale type in {content}");
+    assert!(
+        !content.contains("type: rdata\n"),
+        "stale type in {content}"
+    );
 }
 
 #[test]
 fn alter_table_rename_to_rejects_target_already_exists() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
-    engine.execute("CREATE TABLE rconflict_a (title TEXT)").unwrap();
-    engine.execute("CREATE TABLE rconflict_b (title TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE rconflict_a (title TEXT)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE rconflict_b (title TEXT)")
+        .unwrap();
 
     let err = engine
         .execute("ALTER TABLE rconflict_a RENAME TO rconflict_b")
         .unwrap_err();
-    assert!(
-        err.to_string().contains("already exists"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("already exists"), "{err}");
 
     // Both typedefs intact.
     assert!(engine.load_typedef_location("rconflict_a").is_ok());
@@ -1261,22 +1263,24 @@ fn alter_table_rename_to_rejects_unknown_source() {
     let err = engine
         .execute("ALTER TABLE rmissing RENAME TO rmissing_new")
         .unwrap_err();
-    assert!(
-        err.to_string().contains("table not found"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("table not found"), "{err}");
 }
 
 #[test]
 fn alter_table_rename_to_rejects_invalid_identifier_shapes() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
-    engine.execute("CREATE TABLE rinvalid (title TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE rinvalid (title TEXT)")
+        .unwrap();
 
     let err_typedef = engine
         .execute("ALTER TABLE rinvalid RENAME TO _typedef")
         .unwrap_err();
-    assert!(err_typedef.to_string().contains("reserved"), "{err_typedef}");
+    assert!(
+        err_typedef.to_string().contains("reserved"),
+        "{err_typedef}"
+    );
 
     let err_ddb = engine
         .execute("ALTER TABLE rinvalid RENAME TO _ddb_links")
@@ -1291,9 +1295,7 @@ fn alter_table_rename_to_rejects_invalid_identifier_shapes() {
 fn mysql_rename_table_alias_rejected_with_clear_message() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
-    engine
-        .execute("CREATE TABLE rmysql (title TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE rmysql (title TEXT)").unwrap();
 
     let err = engine
         .execute("RENAME TABLE rmysql TO rmysql_renamed")
@@ -1307,7 +1309,10 @@ fn mysql_rename_table_alias_rejected_with_clear_message() {
         msg.contains("ALTER TABLE"),
         "rejection should hint at the supported form: {msg}"
     );
-    assert!(!msg.contains("internal"), "should not surface internal error: {msg}");
+    assert!(
+        !msg.contains("internal"),
+        "should not surface internal error: {msg}"
+    );
 }
 
 #[test]
@@ -1700,7 +1705,10 @@ fn create_unique_index_if_not_exists_accepted_as_no_op_prd_00129() {
         )
         .expect("CREATE UNIQUE INDEX IF NOT EXISTS should be tolerated as no-op");
     let msg = format!("{result:?}");
-    assert!(msg.contains("ignored"), "expected no-op message, got: {msg}");
+    assert!(
+        msg.contains("ignored"),
+        "expected no-op message, got: {msg}"
+    );
 }
 
 // ── PRD 00129 §3a + §6: typedef UNIQUE produces UNIQUE_VIOLATION code ──
@@ -1838,8 +1846,7 @@ fn create_table_references_on_delete_set_null_rejected_prd_00129() {
         .expect_err("SET NULL must reject in v1");
     let msg = format!("{err}");
     assert!(
-        msg.contains("SET NULL not supported")
-            && msg.contains("CASCADE | RESTRICT"),
+        msg.contains("SET NULL not supported") && msg.contains("CASCADE | RESTRICT"),
         "expected v1-scope rejection message, got: {msg}"
     );
 }
@@ -1931,10 +1938,7 @@ fn singleton_without_default_values_does_not_seed_prd_00139() {
         .unwrap();
     let result = engine.execute("SELECT COUNT(*) FROM app_config").unwrap();
     if let SqlResult::Rows { rows, .. } = result {
-        assert_eq!(
-            rows[0][0], "0",
-            "bare SINGLETON must not auto-seed any row"
-        );
+        assert_eq!(rows[0][0], "0", "bare SINGLETON must not auto-seed any row");
     } else {
         panic!("expected Rows result from SELECT COUNT(*)");
     }
@@ -1957,7 +1961,10 @@ fn singleton_default_values_rejects_missing_required_default_prd_00139() {
         msg.contains("SINGLETON DEFAULT VALUES requires"),
         "msg: {msg}"
     );
-    assert!(msg.contains("theme") || msg.contains("schema_version"), "msg: {msg}");
+    assert!(
+        msg.contains("theme") || msg.contains("schema_version"),
+        "msg: {msg}"
+    );
 
     // Typedef must NOT have been installed (validation runs before any
     // git write).
@@ -2002,9 +2009,7 @@ fn singleton_default_values_blocks_second_insert_prd_00139() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
     engine
-        .execute(
-            "CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON DEFAULT VALUES",
-        )
+        .execute("CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON DEFAULT VALUES")
         .unwrap();
     let err = engine
         .execute("INSERT INTO app_config (theme) VALUES ('dark')")
@@ -2172,7 +2177,10 @@ fn alter_set_singleton_is_idempotent_prd_00139() {
     let SqlResult::Ok(msg) = result else {
         panic!("expected Ok variant");
     };
-    assert!(msg.contains("already"), "expected idempotent message: {msg}");
+    assert!(
+        msg.contains("already"),
+        "expected idempotent message: {msg}"
+    );
 }
 
 #[test]
@@ -2202,7 +2210,10 @@ fn alter_drop_singleton_is_idempotent_prd_00139() {
     let SqlResult::Ok(msg) = result else {
         panic!("expected Ok variant");
     };
-    assert!(msg.contains("already"), "expected idempotent message: {msg}");
+    assert!(
+        msg.contains("already"),
+        "expected idempotent message: {msg}"
+    );
 }
 
 #[test]
@@ -2231,9 +2242,7 @@ fn create_table_with_singleton_default_values_marker_sets_flag_prd_00139() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
     engine
-        .execute(
-            "CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON DEFAULT VALUES",
-        )
+        .execute("CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON DEFAULT VALUES")
         .unwrap();
     let schemas = index.load_all_typedefs(&repo);
     let schema = schemas.get("app_config").expect("typedef installed");
@@ -2303,12 +2312,13 @@ fn singleton_false_omits_yaml_key_prd_00139() {
     // don't churn.
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
-    engine
-        .execute("CREATE TABLE plain (title TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE plain (title TEXT)").unwrap();
     let schemas = index.load_all_typedefs(&repo);
     let schema = schemas.get("plain").unwrap().clone();
-    assert!(!schema.singleton, "default constructed schema is non-singleton");
+    assert!(
+        !schema.singleton,
+        "default constructed schema is non-singleton"
+    );
     let doogat = super::builders::build_typedef_doogat(
         &crate::types::DoogatId("00000000000000".to_string()),
         &schema,
@@ -2437,9 +2447,7 @@ fn select_join_returns_joined_rows_issue_8_e1() {
 
     // JOIN over the title column must return the joined row.
     let joined = index
-        .query_raw(
-            "SELECT l.title, n.count FROM link_e1 l JOIN num_e1 n ON l.title = n.title",
-        )
+        .query_raw("SELECT l.title, n.count FROM link_e1 l JOIN num_e1 n ON l.title = n.title")
         .unwrap();
     assert_eq!(joined.len(), 1, "JOIN should return 1 row, got {joined:?}");
     assert_eq!(joined[0][0], "a");
@@ -2471,13 +2479,16 @@ fn select_cte_current_behavior_issue_8() {
     engine
         .execute("INSERT INTO cte_probe_t (title, label) VALUES ('row', 'x')")
         .unwrap();
-    let result = index
-        .query_raw("WITH w AS (SELECT label FROM cte_probe_t) SELECT label FROM w");
+    let result = index.query_raw("WITH w AS (SELECT label FROM cte_probe_t) SELECT label FROM w");
     // Whatever the current behavior is, pin it. A regression that flips Ok to
     // Err or changes the row count will fail this test.
     match result {
         Ok(rows) => {
-            assert_eq!(rows.len(), 1, "CTE current behavior: expected 1 row, got {rows:?}");
+            assert_eq!(
+                rows.len(),
+                1,
+                "CTE current behavior: expected 1 row, got {rows:?}"
+            );
             assert_eq!(rows[0][0], "x");
         }
         Err(e) => panic!(
@@ -2498,8 +2509,7 @@ fn select_subquery_in_from_current_behavior_issue_8() {
     engine
         .execute("INSERT INTO subq_probe (title, label) VALUES ('row', 'y')")
         .unwrap();
-    let result =
-        index.query_raw("SELECT t.label FROM (SELECT label FROM subq_probe) t");
+    let result = index.query_raw("SELECT t.label FROM (SELECT label FROM subq_probe) t");
     match result {
         Ok(rows) => {
             assert_eq!(rows.len(), 1);
@@ -2531,7 +2541,11 @@ fn select_union_current_behavior_issue_8() {
     let result = index.query_raw("SELECT label FROM union_a UNION SELECT label FROM union_b");
     match result {
         Ok(rows) => {
-            assert_eq!(rows.len(), 2, "UNION should return 2 distinct rows, got {rows:?}");
+            assert_eq!(
+                rows.len(),
+                2,
+                "UNION should return 2 distinct rows, got {rows:?}"
+            );
         }
         Err(e) => panic!(
             "UNION previously worked; now errors: {e}. If intentionally disabled, \
@@ -2553,11 +2567,14 @@ fn select_window_function_current_behavior_issue_8() {
     engine
         .execute("INSERT INTO win_probe (title, label) VALUES ('two', 'b')")
         .unwrap();
-    let result =
-        index.query_raw("SELECT label, ROW_NUMBER() OVER (ORDER BY label) FROM win_probe");
+    let result = index.query_raw("SELECT label, ROW_NUMBER() OVER (ORDER BY label) FROM win_probe");
     match result {
         Ok(rows) => {
-            assert_eq!(rows.len(), 2, "window fn should return 2 rows, got {rows:?}");
+            assert_eq!(
+                rows.len(),
+                2,
+                "window fn should return 2 rows, got {rows:?}"
+            );
         }
         Err(e) => panic!(
             "window function previously worked; now errors: {e}. If intentionally \
@@ -5070,7 +5087,10 @@ fn duplicate_insert_does_not_leave_ghost_doogats_row() {
 
     // Duplicate insert fails on UNIQUE constraint
     let result = engine.execute("INSERT INTO uqtest (code, label) VALUES ('DUP', 'conflict')");
-    assert!(result.is_err(), "duplicate insert should fail, got: {result:?}");
+    assert!(
+        result.is_err(),
+        "duplicate insert should fail, got: {result:?}"
+    );
 
     // doogats index must still have exactly the original row — no ghost entry
     let after = index
@@ -5121,7 +5141,9 @@ fn update_after_unique_failure_succeeds_issue_4_a1() {
 
     // updateDoogat analogue: update the existing row's label via SQL UPDATE.
     let upd = engine
-        .execute(&format!("UPDATE uqtest SET label = 'updated' WHERE id = '{valid_id}'"))
+        .execute(&format!(
+            "UPDATE uqtest SET label = 'updated' WHERE id = '{valid_id}'"
+        ))
         .unwrap();
     match upd {
         SqlResult::Affected(n) => assert_eq!(n, 1, "UPDATE should affect 1 row, got {n}"),
@@ -5280,9 +5302,7 @@ fn failed_insert_on_table_a_does_not_corrupt_table_b_issue_4_a3() {
     engine
         .execute("INSERT INTO thing (title) VALUES ('t3')")
         .unwrap();
-    let after = index
-        .query_raw("SELECT COUNT(*) FROM thing")
-        .unwrap();
+    let after = index.query_raw("SELECT COUNT(*) FROM thing").unwrap();
     assert_eq!(after[0][0], "2");
 }
 
@@ -5303,8 +5323,8 @@ fn create_table_with_unique_constraint_enforced() {
         .unwrap();
 
     // Duplicate insert must fail due to UNIQUE constraint
-    let result =
-        engine.execute("INSERT INTO membership (title, link_id, cat) VALUES ('b', 'link1', 'cat1')");
+    let result = engine
+        .execute("INSERT INTO membership (title, link_id, cat) VALUES ('b', 'link1', 'cat1')");
     assert!(
         result.is_err(),
         "duplicate insert should fail with UNIQUE constraint, got: {result:?}"
@@ -5329,11 +5349,15 @@ fn composite_unique_duplicate_rejected_with_clear_error_issue_9_f1() {
         .unwrap();
 
     engine
-        .execute("INSERT INTO f1membership (title, link_id, category) VALUES ('a', 'link1', 'cat1')")
+        .execute(
+            "INSERT INTO f1membership (title, link_id, category) VALUES ('a', 'link1', 'cat1')",
+        )
         .unwrap();
 
     let err = engine
-        .execute("INSERT INTO f1membership (title, link_id, category) VALUES ('b', 'link1', 'cat1')")
+        .execute(
+            "INSERT INTO f1membership (title, link_id, category) VALUES ('b', 'link1', 'cat1')",
+        )
         .expect_err("composite UNIQUE duplicate must error");
     let msg = format!("{err}");
     assert!(
@@ -5384,14 +5408,14 @@ fn concurrent_inserts_produce_unique_ids_issue_9_f8() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
-    engine
-        .execute("CREATE TABLE f8rapid (label TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE f8rapid (label TEXT)").unwrap();
 
     let mut ids = Vec::new();
     for i in 0..10 {
         let result = engine
-            .execute(&format!("INSERT INTO f8rapid (title, label) VALUES ('row{i}', 'l{i}')"))
+            .execute(&format!(
+                "INSERT INTO f8rapid (title, label) VALUES ('row{i}', 'l{i}')"
+            ))
             .unwrap();
         match result {
             SqlResult::Ok(id) => ids.push(id),
@@ -5423,8 +5447,13 @@ fn create_table_unique_constraint_persisted_in_typedef() {
 
     // Verify the typedef stored the unique_together constraint
     let schema = engine.load_schema("orders").unwrap();
-    let constraints = schema.unique_together.expect("unique_together should be set");
-    assert_eq!(constraints, vec![vec!["customer".to_string(), "product".to_string()]]);
+    let constraints = schema
+        .unique_together
+        .expect("unique_together should be set");
+    assert_eq!(
+        constraints,
+        vec![vec!["customer".to_string(), "product".to_string()]]
+    );
 }
 
 #[test]
@@ -5439,7 +5468,9 @@ fn create_table_multiple_unique_constraints() {
         .unwrap();
 
     let schema = engine.load_schema("multi").unwrap();
-    let constraints = schema.unique_together.expect("unique_together should be set");
+    let constraints = schema
+        .unique_together
+        .expect("unique_together should be set");
     assert_eq!(constraints.len(), 2);
     assert_eq!(constraints[0], vec!["a".to_string(), "b".to_string()]);
     assert_eq!(constraints[1], vec!["c".to_string()]);
@@ -5451,9 +5482,7 @@ fn create_table_unique_survives_rematerialization() {
     let mut engine = SqlEngine::new(&index, &repo);
 
     engine
-        .execute(
-            "CREATE TABLE remat (title TEXT, code VARCHAR(255), UNIQUE(code))",
-        )
+        .execute("CREATE TABLE remat (title TEXT, code VARCHAR(255), UNIQUE(code))")
         .unwrap();
 
     // Insert first row
@@ -5639,7 +5668,9 @@ fn update_with_id_from_different_table_returns_affected_zero() {
     engine
         .execute("CREATE TABLE projects (name TEXT, priority INTEGER)")
         .unwrap();
-    engine.execute("CREATE TABLE contacts (email TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE contacts (email TEXT)")
+        .unwrap();
 
     let _project_id = engine_exec_id(
         &repo,
@@ -5683,7 +5714,9 @@ fn delete_with_id_from_different_table_returns_affected_zero() {
     let mut engine = SqlEngine::new(&index, &repo);
 
     engine.execute("CREATE TABLE projects (name TEXT)").unwrap();
-    engine.execute("CREATE TABLE contacts (email TEXT)").unwrap();
+    engine
+        .execute("CREATE TABLE contacts (email TEXT)")
+        .unwrap();
 
     let _project_id = engine_exec_id(
         &repo,
@@ -5699,9 +5732,7 @@ fn delete_with_id_from_different_table_returns_affected_zero() {
     // DELETE against `projects` using a contact id must NOT delete the
     // contact — the fast path should fall through to Affected(0).
     let result = engine
-        .execute(&format!(
-            "DELETE FROM projects WHERE id = '{contact_id}'"
-        ))
+        .execute(&format!("DELETE FROM projects WHERE id = '{contact_id}'"))
         .expect("cross-table id should not error");
     match result {
         SqlResult::Affected(n) => assert_eq!(n, 0, "expected 0 rows affected"),
@@ -5750,7 +5781,10 @@ fn schema_with(cols: Vec<ColumnDef>) -> TableSchema {
 }
 
 fn vals(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 fn nulls(names: &[&str]) -> BTreeSet<String> {
@@ -5783,7 +5817,16 @@ fn validate_accepts_reserved_columns() {
     SqlEngine::validate_row_against_schema(
         &schema,
         "t",
-        &names(&["a", "title", "date", "id", "type", "created_at", "updated_at", "tags"]),
+        &names(&[
+            "a",
+            "title",
+            "date",
+            "id",
+            "type",
+            "created_at",
+            "updated_at",
+            "tags",
+        ]),
         &vals(&[("a", "x")]),
         &nulls(&[]),
         true,
@@ -5951,8 +5994,7 @@ fn validate_rejects_varchar_overflow() {
         true,
     )
     .unwrap_err();
-    assert!(format!("{err}")
-        .contains("value too long for t.name: 11 chars exceeds limit 10"));
+    assert!(format!("{err}").contains("value too long for t.name: 11 chars exceeds limit 10"));
 }
 
 #[test]
@@ -6019,7 +6061,11 @@ fn executesql_insert_rejects_not_null_violation() {
         "got: {err}"
     );
 
-    assert_eq!(count_rows(&index, "link"), 0, "no row should be materialized");
+    assert_eq!(
+        count_rows(&index, "link"),
+        0,
+        "no row should be materialized"
+    );
     assert_eq!(count_index_rows(&index, "link"), 0, "no ghost index row");
 }
 
@@ -6033,7 +6079,9 @@ fn executesql_insert_rejects_unknown_column() {
         .unwrap();
 
     let err = engine
-        .execute("INSERT INTO link (title, url, unknown_col) VALUES ('t', 'https://u.com', 'dropped')")
+        .execute(
+            "INSERT INTO link (title, url, unknown_col) VALUES ('t', 'https://u.com', 'dropped')",
+        )
         .unwrap_err();
     assert!(
         format!("{err}").contains("unknown column: link.unknown_col"),
@@ -6217,8 +6265,16 @@ fn executesql_multi_row_insert_validation_failure_writes_no_rows() {
     );
 
     // Neither row should have been committed.
-    assert_eq!(count_rows(&index, "link"), 0, "no row should be materialized");
-    assert_eq!(count_index_rows(&index, "link"), 0, "no doogats index entry");
+    assert_eq!(
+        count_rows(&index, "link"),
+        0,
+        "no row should be materialized"
+    );
+    assert_eq!(
+        count_index_rows(&index, "link"),
+        0,
+        "no doogats index entry"
+    );
 }
 
 #[test]
@@ -6281,9 +6337,7 @@ fn executesql_insert_rejects_coalesce_null_on_not_null() {
         .unwrap();
 
     let err = engine
-        .execute(
-            "INSERT INTO link (title, url) VALUES (COALESCE(NULL, NULL), 'https://x.com')",
-        )
+        .execute("INSERT INTO link (title, url) VALUES (COALESCE(NULL, NULL), 'https://x.com')")
         .unwrap_err();
     assert!(
         format!("{err}").contains("NOT NULL constraint violated: link.title"),
@@ -6328,9 +6382,7 @@ fn executesql_insert_accepts_ifnull_with_value_on_nullable() {
         .execute("INSERT INTO counter (title, count) VALUES ('a', IFNULL(NULL, 42))")
         .expect("non-NULL IFNULL result must succeed");
 
-    let rows = index
-        .query_raw("SELECT count FROM counter")
-        .unwrap();
+    let rows = index.query_raw("SELECT count FROM counter").unwrap();
     assert_eq!(rows[0][0], "42");
 }
 
@@ -6514,9 +6566,7 @@ fn executesql_insert_rejects_varchar_overflow() {
 
     let long = "x".repeat(11);
     let err = engine
-        .execute(&format!(
-            "INSERT INTO shortname (title) VALUES ('{long}')"
-        ))
+        .execute(&format!("INSERT INTO shortname (title) VALUES ('{long}')"))
         .unwrap_err();
     assert!(
         format!("{err}").contains("value too long for shortname.title: 11 chars exceeds limit 10"),
@@ -6681,9 +6731,7 @@ fn delete_allowed_when_reference_is_nullable_issue_10() {
     engine_exec_ok(
         &repo,
         &index,
-        &format!(
-            "INSERT INTO bookmark (title, note, link_id) VALUES ('B', 'n', '{link_id}')"
-        ),
+        &format!("INSERT INTO bookmark (title, note, link_id) VALUES ('B', 'n', '{link_id}')"),
     );
 
     let affected = engine
@@ -6720,9 +6768,7 @@ fn bulk_delete_atomically_rejected_by_restrict_issue_10() {
 
     // Both rows must still be there — bulk delete is atomic.
     assert_eq!(count_rows(&index, "link"), 2);
-    let remaining = index
-        .query_raw("SELECT id FROM link ORDER BY id")
-        .unwrap();
+    let remaining = index.query_raw("SELECT id FROM link ORDER BY id").unwrap();
     let mut ids: Vec<&str> = remaining.iter().map(|r| r[0].as_str()).collect();
     ids.sort();
     let mut want = vec![link_id_blocked.as_str(), link_id_free.as_str()];
@@ -6814,9 +6860,7 @@ fn insert_title_template_dotted_ref_resolves_target_title() {
     let mut engine = SqlEngine::new(&index, &repo);
 
     engine.execute("CREATE TABLE link (url TEXT)").unwrap();
-    engine
-        .execute("CREATE TABLE category (fqn TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE category (fqn TEXT)").unwrap();
     engine
         .execute("CREATE TABLE membership (link TEXT REFERENCES link, category TEXT REFERENCES category)")
         .unwrap();
@@ -6837,9 +6881,7 @@ fn insert_title_template_dotted_ref_resolves_target_title() {
     let mem_id = engine_exec_id(
         &repo,
         &index,
-        &format!(
-            "INSERT INTO membership (link, category) VALUES ('{link_id}', '{cat_id}')"
-        ),
+        &format!("INSERT INTO membership (link, category) VALUES ('{link_id}', '{cat_id}')"),
     );
 
     let path = index.resolve_path(&mem_id).unwrap();
@@ -6928,9 +6970,7 @@ fn set_title_template_rejects_dotted_on_non_ref_column() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
-    engine
-        .execute("CREATE TABLE thing (label TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE thing (label TEXT)").unwrap();
     let err = engine
         .execute("ALTER TABLE thing SET TITLE TEMPLATE '{label.title}'")
         .unwrap_err();
@@ -7080,9 +7120,7 @@ fn update_does_not_recompute_title_when_unrelated_column_changes() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
-    engine
-        .execute("CREATE TABLE link (url TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE link (url TEXT)").unwrap();
     engine
         .execute("CREATE TABLE membership (link TEXT REFERENCES link, note TEXT)")
         .unwrap();
@@ -7441,7 +7479,6 @@ fn alter_column_type_set_data_type_form_also_accepted() {
     assert_eq!(col.data_type, "VARCHAR(100)");
 }
 
-
 #[test]
 fn alter_column_type_in_string_literal_is_not_rewritten() {
     let (_dir, repo, index) = setup();
@@ -7514,8 +7551,14 @@ fn alter_column_type_char_narrowing_uses_char_in_error() {
         .execute("ALTER TABLE charnarrow ALTER COLUMN code TYPE CHAR(5)")
         .unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("CHAR(5)"), "expected CHAR(5) in error, got: {msg}");
-    assert!(!msg.contains("VARCHAR"), "error should not mention VARCHAR: {msg}");
+    assert!(
+        msg.contains("CHAR(5)"),
+        "expected CHAR(5) in error, got: {msg}"
+    );
+    assert!(
+        !msg.contains("VARCHAR"),
+        "error should not mention VARCHAR: {msg}"
+    );
 }
 
 #[test]
@@ -7580,9 +7623,7 @@ fn alter_column_type_shorthand_works_inside_transactional_batch() {
         .unwrap();
 
     engine
-        .execute_batch(
-            "BEGIN; ALTER TABLE txn_alter ALTER COLUMN val TYPE TEXT; COMMIT",
-        )
+        .execute_batch("BEGIN; ALTER TABLE txn_alter ALTER COLUMN val TYPE TEXT; COMMIT")
         .unwrap();
 
     let schema = engine.load_schema("txn_alter").unwrap();
@@ -7712,9 +7753,7 @@ fn set_search_key_rejects_missing_column() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
-    engine
-        .execute("CREATE TABLE category (fqn TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE category (fqn TEXT)").unwrap();
     let err = engine
         .execute("ALTER TABLE category SET SEARCH KEY ghost")
         .unwrap_err();
@@ -8141,9 +8180,7 @@ fn sql_bulk_delete_parent_clears_owned_auto_junction_rows() {
     // Bulk DELETE matching both bookmarks — uses `delete_bulk_rows`, not
     // the WHERE-id fast path.
     engine
-        .execute(&format!(
-            "DELETE FROM bookmark WHERE category = '{cat_id}'"
-        ))
+        .execute(&format!("DELETE FROM bookmark WHERE category = '{cat_id}'"))
         .unwrap();
 
     let after_bulk = index
@@ -8159,7 +8196,10 @@ fn sql_bulk_delete_parent_clears_owned_auto_junction_rows() {
             "SELECT COUNT(*) FROM bookmark WHERE id IN ('{bm1}', '{bm2}')"
         ))
         .unwrap();
-    assert_eq!(bm_count[0][0], "0", "bulk DELETE removed both bookmark rows");
+    assert_eq!(
+        bm_count[0][0], "0",
+        "bulk DELETE removed both bookmark rows"
+    );
 }
 
 #[test]
@@ -8301,7 +8341,10 @@ fn sql_bulk_delete_matching_zero_rows_leaves_junction_untouched() {
     let pre = index
         .query_raw("SELECT COUNT(*) FROM bookmark_category")
         .unwrap();
-    assert_eq!(pre[0][0], "1", "junction must hold one row before bulk delete");
+    assert_eq!(
+        pre[0][0], "1",
+        "junction must hold one row before bulk delete"
+    );
 
     // Bulk DELETE whose WHERE clause matches zero parent rows. This drives
     // `delete_bulk_rows` (not the WHERE-id fast path) and exercises the

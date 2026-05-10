@@ -186,9 +186,9 @@ impl Index {
         type_name: &str,
         repo: &(impl DoogatSource + ?Sized),
     ) -> Result<()> {
-        let mut data_stmt = self
-            .conn
-            .prepare("SELECT id, path FROM doogats WHERE type = ?1")?;
+        let mut data_stmt = self.conn.prepare(
+            "SELECT id, path FROM doogats WHERE type = ?1 AND path NOT LIKE 'ddb/_conflicts/%'",
+        )?;
         let data_doogats: Vec<(String, String)> = data_stmt
             .query_map(params![type_name], |row| Ok((row.get(0)?, row.get(1)?)))?
             .filter_map(|r| r.ok())
@@ -338,6 +338,7 @@ impl Index {
 
         for parsed in doogats
             .iter()
+            .filter(|z| !z.path.starts_with("ddb/_conflicts/"))
             .filter(|z| z.meta.doogat_type.as_deref() == Some(type_name))
         {
             collect_zone_columns(parsed, &mut columns);
@@ -355,6 +356,7 @@ impl Index {
         let type_name = &schema.table_name;
         for doogat in doogats
             .iter()
+            .filter(|z| !z.path.starts_with("ddb/_conflicts/"))
             .filter(|z| z.meta.doogat_type.as_deref() == Some(type_name.as_str()))
         {
             let id = doogat.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
@@ -376,6 +378,7 @@ impl Index {
         // Find distinct types from the pre-parsed data
         let type_names: Vec<String> = doogats
             .iter()
+            .filter(|z| !z.path.starts_with("ddb/_conflicts/"))
             .filter_map(|z| z.meta.doogat_type.as_deref())
             .filter(|t| !t.is_empty() && *t != "_typedef")
             .map(|t| t.to_string())
@@ -424,9 +427,9 @@ impl Index {
     ) -> Result<crate::types::TableSchema> {
         use std::collections::HashMap;
 
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path FROM doogats WHERE type = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT path FROM doogats WHERE type = ?1 AND path NOT LIKE 'ddb/_conflicts/%'",
+        )?;
         let paths: Vec<String> = stmt
             .query_map(params![type_name], |row| row.get(0))?
             .filter_map(|r| r.ok())
@@ -667,10 +670,8 @@ impl Index {
     ) -> Result<()> {
         self.conn.execute("DELETE FROM _ddb_boost", [])?;
         // Wipe stale search_key entries; we re-emit fresh rows below.
-        self.conn.execute(
-            "DELETE FROM _ddb_meta WHERE key LIKE 'search_key:%'",
-            [],
-        )?;
+        self.conn
+            .execute("DELETE FROM _ddb_meta WHERE key LIKE 'search_key:%'", [])?;
         for (type_name, schema) in schemas {
             let max_boost = schema
                 .columns
@@ -709,6 +710,9 @@ impl Index {
         id: &str,
         doogat: &crate::types::ParsedDoogat,
     ) -> Result<()> {
+        if doogat.path.starts_with("ddb/_conflicts/") {
+            return Ok(());
+        }
         // PRD 00134 blind-review C1 follow-up: typedefs installed via
         // `install_bundled_type` (or a not-yet-rebuilt git pull) are
         // registered as YAML doogats but the materialized SQLite table
@@ -762,8 +766,7 @@ impl Index {
             )
             .ok();
 
-        let (col_names, placeholders, vals) =
-            extract_column_values(schema, id, doogat, updated_at);
+        let (col_names, placeholders, vals) = extract_column_values(schema, id, doogat, updated_at);
 
         let sql = format!(
             "INSERT OR REPLACE INTO \"{}\" ({}) VALUES ({})",
@@ -853,8 +856,7 @@ fn check_cross_zone_duplicates(
 ) {
     use crate::types::ConsistencyWarning;
 
-    let mut seen_keys: std::collections::HashMap<String, &str> =
-        std::collections::HashMap::new();
+    let mut seen_keys: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
 
     for key in parsed.meta.extra.keys() {
         seen_keys.insert(key.clone(), "frontmatter");
@@ -902,9 +904,7 @@ fn check_required_fields(
             .unwrap_or(&crate::types::Zone::Frontmatter)
         {
             crate::types::Zone::Frontmatter => parsed.meta.extra.contains_key(&col.name),
-            crate::types::Zone::Reference => {
-                parsed.inline_fields.iter().any(|f| f.key == col.name)
-            }
+            crate::types::Zone::Reference => parsed.inline_fields.iter().any(|f| f.key == col.name),
             crate::types::Zone::Body => parsed.body.contains(&format!("## {}", col.name)),
         };
         if !has_value {
@@ -1069,9 +1069,7 @@ fn extract_column_value(
             let is_bool_col = col.data_type.eq_ignore_ascii_case("BOOLEAN");
             val.map(|v| match v {
                 crate::types::Value::Number(n) => n.to_string(),
-                crate::types::Value::Bool(b) => {
-                    if *b { "1" } else { "0" }.to_string()
-                }
+                crate::types::Value::Bool(b) => if *b { "1" } else { "0" }.to_string(),
                 crate::types::Value::String(s) => {
                     if is_bool_col {
                         normalize_bool_str(s)

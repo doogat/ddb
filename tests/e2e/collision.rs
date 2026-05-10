@@ -1,12 +1,10 @@
-use crate::common::{MultiNodeSetup, DdbTestRepo};
+use crate::common::{DdbTestRepo, MultiNodeSetup};
 use predicates::prelude::*;
 
 /// Helper: directly commit a doogat file to a node's repo (bypasses `ddb create`
 /// so we can force a specific ID).
 fn commit_doogat(node: &std::path::Path, id: &str, title: &str, body: &str) {
-    let content = format!(
-        "---\nid: {id}\ntitle: {title}\ndate: 2026-01-01\n---\n{body}\n"
-    );
+    let content = format!("---\nid: {id}\ntitle: {title}\ndate: 2026-01-01\n---\n{body}\n");
     let path = format!("ddb/{id}.md");
     // Use git directly to commit the file
     let full_path = node.join(&path);
@@ -58,11 +56,21 @@ fn add_add_collision_both_doogats_survive() {
     let colliding_id = "20260101120000";
 
     // Node 0 creates a doogat with the colliding ID via direct file commit
-    commit_doogat(&setup.nodes[0], colliding_id, "From Node 0", "Body from node zero");
+    commit_doogat(
+        &setup.nodes[0],
+        colliding_id,
+        "From Node 0",
+        "Body from node zero",
+    );
     MultiNodeSetup::push(&setup.nodes[0]);
 
     // Node 1 creates a doogat with the SAME ID (before syncing)
-    commit_doogat(&setup.nodes[1], colliding_id, "From Node 1", "Body from node one");
+    commit_doogat(
+        &setup.nodes[1],
+        colliding_id,
+        "From Node 1",
+        "Body from node one",
+    );
 
     // Node 1 syncs — this should detect the add-add collision
     DdbTestRepo::ddb_at(&setup.nodes[1])
@@ -187,9 +195,7 @@ fn add_add_collision_link_rewritten() {
 
     let new_id_file = files
         .iter()
-        .find(|f| {
-            *f != &format!("{colliding_id}.md") && *f != &format!("{linker_id}.md")
-        })
+        .find(|f| *f != &format!("{colliding_id}.md") && *f != &format!("{linker_id}.md"))
         .expect("should have a reassigned doogat file");
     let _new_id = new_id_file.trim_end_matches(".md");
 
@@ -219,21 +225,11 @@ fn add_add_collision_link_rewritten() {
     let setup2 = MultiNodeSetup::new(2);
 
     // Node 0 creates a doogat with the colliding ID
-    commit_doogat(
-        &setup2.nodes[0],
-        colliding_id,
-        "Remote Note",
-        "Remote body",
-    );
+    commit_doogat(&setup2.nodes[0], colliding_id, "Remote Note", "Remote body");
     MultiNodeSetup::push(&setup2.nodes[0]);
 
     // Node 1 creates the same-ID doogat AND a linker to it
-    commit_doogat(
-        &setup2.nodes[1],
-        colliding_id,
-        "Local Note",
-        "Local body",
-    );
+    commit_doogat(&setup2.nodes[1], colliding_id, "Local Note", "Local body");
     let local_linker_id = "20260101120200";
     let local_linker_content = format!(
         "---\nid: {local_linker_id}\ntitle: Local Linker\ndate: 2026-01-01\n---\nRef: [[{colliding_id}]] here.\n"
@@ -263,9 +259,7 @@ fn add_add_collision_link_rewritten() {
     let files2 = list_doogats(&setup2.nodes[1]);
     let new_id_file2 = files2
         .iter()
-        .find(|f| {
-            *f != &format!("{colliding_id}.md") && *f != &format!("{local_linker_id}.md")
-        })
+        .find(|f| *f != &format!("{colliding_id}.md") && *f != &format!("{local_linker_id}.md"))
         .expect("should have reassigned doogat");
     let new_id2 = new_id_file2.trim_end_matches(".md");
 

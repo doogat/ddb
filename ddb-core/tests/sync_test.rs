@@ -127,3 +127,200 @@ fn two_node_sync_with_conflict_resolution() {
     let b_content = repo_b.read_file("ddb/20260226120000.md").unwrap();
     assert_eq!(a_content, b_content);
 }
+
+#[test]
+fn two_node_singleton_post_sync_resolution() {
+    let (dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_nodes();
+
+    let typedef = "\
+---
+id: 20260510130000
+title: app_config
+type: _typedef
+singleton: true
+columns:
+  - name: theme
+    data_type: TEXT
+    zone: frontmatter
+---
+";
+    repo_a
+        .commit_file(
+            "ddb/_typedef/20260510130000.md",
+            typedef,
+            "add app_config singleton typedef",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    let db_b = dir_b.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+    let index_b = Index::open(&db_b).unwrap();
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    repo_a.fetch("origin", "master").unwrap();
+    repo_a.merge_remote("origin", "master").unwrap();
+
+    let row_a = "\
+---
+id: 20260601000000
+title: Config A
+type: app_config
+theme: dark
+---
+Body from A
+";
+    repo_a
+        .commit_file(
+            "ddb/20260601000000.md",
+            row_a,
+            &ddb_core::hlc::append_hlc_trailer(
+                "A creates singleton row",
+                &ddb_core::hlc::Hlc {
+                    wall_ms: 1000,
+                    counter: 0,
+                    node: "aaaaaaaa".into(),
+                },
+            ),
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    let row_b = "\
+---
+id: 20260601000010
+title: Config B
+type: app_config
+theme: light
+---
+Body from B
+";
+    repo_b
+        .commit_file(
+            "ddb/20260601000010.md",
+            row_b,
+            &ddb_core::hlc::append_hlc_trailer(
+                "B creates singleton row",
+                &ddb_core::hlc::Hlc {
+                    wall_ms: 2000,
+                    counter: 0,
+                    node: "bbbbbbbb".into(),
+                },
+            ),
+        )
+        .unwrap();
+
+    let report_b = mgr_b.sync("origin", "master", &index_b).unwrap();
+    assert_eq!(report_b.singleton_conflicts_resolved, 1);
+
+    let rows_b = index_b.query_raw("SELECT id FROM app_config").unwrap();
+    assert_eq!(rows_b, vec![vec!["20260601000010".to_string()]]);
+    let loser_b = repo_b
+        .read_file("ddb/_conflicts/20260601000000.md")
+        .unwrap();
+    assert!(loser_b.contains("singleton_conflict_loser: 20260601000010"));
+    assert!(loser_b.contains("singleton_conflict_table: app_config"));
+
+    let db_a = dir_a.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
+    let index_a = Index::open(&db_a).unwrap();
+    let mut mgr_a = SyncManager::open(&repo_a).unwrap();
+    let report_a = mgr_a.sync("origin", "master", &index_a).unwrap();
+    assert_eq!(report_a.singleton_conflicts_resolved, 0);
+
+    let rows_a = index_a.query_raw("SELECT id FROM app_config").unwrap();
+    assert_eq!(rows_a, vec![vec!["20260601000010".to_string()]]);
+    let loser_a = repo_a
+        .read_file("ddb/_conflicts/20260601000000.md")
+        .unwrap();
+    assert!(loser_a.contains("singleton_conflict_loser: 20260601000010"));
+}
+
+#[test]
+fn singleton_sweep_idempotent_after_full_resolution() {
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_nodes();
+
+    let typedef = "\
+---
+id: 20260510130000
+title: app_config
+type: _typedef
+singleton: true
+columns:
+  - name: theme
+    data_type: TEXT
+    zone: frontmatter
+---
+";
+    repo_a
+        .commit_file(
+            "ddb/_typedef/20260510130000.md",
+            typedef,
+            "add app_config singleton typedef",
+        )
+        .unwrap();
+    repo_a
+        .commit_file(
+            "ddb/20260601000000.md",
+            "\
+---
+id: 20260601000000
+title: Config A
+type: app_config
+theme: dark
+---
+Body from A
+",
+            &ddb_core::hlc::append_hlc_trailer(
+                "A creates singleton row",
+                &ddb_core::hlc::Hlc {
+                    wall_ms: 1000,
+                    counter: 0,
+                    node: "aaaaaaaa".into(),
+                },
+            ),
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    let db_b = dir_b.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+    let index_b = Index::open(&db_b).unwrap();
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    repo_b
+        .commit_file(
+            "ddb/20260601000010.md",
+            "\
+---
+id: 20260601000010
+title: Config B
+type: app_config
+theme: light
+---
+Body from B
+",
+            &ddb_core::hlc::append_hlc_trailer(
+                "B creates singleton row",
+                &ddb_core::hlc::Hlc {
+                    wall_ms: 2000,
+                    counter: 0,
+                    node: "bbbbbbbb".into(),
+                },
+            ),
+        )
+        .unwrap();
+
+    let first = mgr_b.sync("origin", "master", &index_b).unwrap();
+    let second = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    assert_eq!(first.singleton_conflicts_resolved, 1);
+    assert_eq!(second.singleton_conflicts_resolved, 0);
+    assert_eq!(
+        index_b.query_raw("SELECT id FROM app_config").unwrap(),
+        vec![vec!["20260601000010".to_string()]]
+    );
+    assert!(repo_b.read_file("ddb/_conflicts/20260601000000.md").is_ok());
+}

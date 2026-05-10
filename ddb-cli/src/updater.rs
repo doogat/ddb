@@ -312,7 +312,10 @@ pub fn rollback() -> Result<(), String> {
         .unwrap_or_else(|| "unknown".into());
 
     self_replace::self_replace(&backup).map_err(|e| {
-        format!("rollback failed: {e}. manually copy {} over the ddb binary", backup.display())
+        format!(
+            "rollback failed: {e}. manually copy {} over the ddb binary",
+            backup.display()
+        )
     })?;
 
     // Clear update-related state and remove backup to prevent double-rollback
@@ -630,10 +633,7 @@ mod tests {
         // Simulate backup by copying
         fs::copy(&src, &dest).unwrap();
         assert!(dest.exists());
-        assert_eq!(
-            fs::read_to_string(&dest).unwrap(),
-            "fake binary content"
-        );
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "fake binary content");
 
         let _ = fs::remove_dir_all(&dir);
     }

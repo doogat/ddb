@@ -302,13 +302,7 @@ fn discover_recent_type_filter() {
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     repo.ddb()
-        .args([
-            "create",
-            "--title",
-            "Plain Note",
-            "--body",
-            "Not a memo.",
-        ])
+        .args(["create", "--title", "Plain Note", "--body", "Not a memo."])
         .assert()
         .success();
 

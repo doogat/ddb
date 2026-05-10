@@ -1,5 +1,5 @@
-use tempfile::TempDir;
 use ddb_core::git_ops::GitRepo;
+use tempfile::TempDir;
 
 include!("../benches/helpers.rs");
 
@@ -85,14 +85,12 @@ fn nfr02_repo_growth_under_200mb_per_year_at_50k() {
     repo.commit_files(&refs, "seed").unwrap();
 
     // Pack seed objects so size_before reflects packed baseline.
-    assert!(
-        std::process::Command::new("git")
-            .args(["gc"])
-            .current_dir(dir.path())
-            .status()
-            .unwrap()
-            .success()
-    );
+    assert!(std::process::Command::new("git")
+        .args(["gc"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap()
+        .success());
     let size_before = dir_size(dir.path());
 
     for day in 0..DAYS {
@@ -117,14 +115,12 @@ fn nfr02_repo_growth_under_200mb_per_year_at_50k() {
     // Repack before measuring. In production, maintenance runs from multiple
     // triggers (write-threshold, startup, ddb compact). Without packing,
     // loose 50K-entry tree objects dominate disk usage.
-    assert!(
-        std::process::Command::new("git")
-            .args(["gc"])
-            .current_dir(dir.path())
-            .status()
-            .unwrap()
-            .success()
-    );
+    assert!(std::process::Command::new("git")
+        .args(["gc"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap()
+        .success());
 
     let size_after = dir_size(dir.path());
     let growth = size_after - size_before;
