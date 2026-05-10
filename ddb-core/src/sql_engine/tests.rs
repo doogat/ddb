@@ -7738,6 +7738,99 @@ fn sql_bulk_delete_parent_clears_owned_auto_junction_rows() {
 }
 
 #[test]
+fn sql_delete_parent_clears_owned_junction_rows_for_every_references_column() {
+    // PRD 00137 cycle-1 review (C1, [3/3] 🟡): `cascade_junction_cleanup` loops
+    // over `schema.columns` and is meant to clean owner-side junction rows for
+    // *every* REFERENCES column on the parent's typedef. The existing tests
+    // only exercise a single REFERENCES column, so a future refactor that
+    // accidentally `break`s on the first match (or only handles `[0]`) would
+    // pass them silently. This test pins multi-column behavior: a typedef with
+    // two REFERENCES columns must have BOTH owner-side junction tables cleaned
+    // when the parent is deleted.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE author (name VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute(
+            "CREATE TABLE bookmark (\
+                url TEXT, \
+                category TEXT REFERENCES category, \
+                author TEXT REFERENCES author\
+            )",
+        )
+        .unwrap();
+
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let author_id = match engine
+        .execute("INSERT INTO author (name) VALUES ('jane')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category, author) VALUES \
+             ('https://example.com', '{cat_id}', '{author_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity: both owner-side junction rows are in place post-INSERT.
+    let cat_pre = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(cat_pre[0][0], "1", "category junction must hold owner row");
+    let author_pre = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_author WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(author_pre[0][0], "1", "author junction must hold owner row");
+
+    // Delete the bookmark — both owner-side junction tables must be cleaned.
+    engine
+        .execute(&format!("DELETE FROM bookmark WHERE id = '{bm_id}'"))
+        .unwrap();
+
+    let cat_post = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_category WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        cat_post[0][0], "0",
+        "category junction row must be cleaned when parent deleted"
+    );
+    let author_post = index
+        .query_raw(&format!(
+            "SELECT COUNT(*) FROM bookmark_author WHERE bookmark_id = '{bm_id}'"
+        ))
+        .unwrap();
+    assert_eq!(
+        author_post[0][0], "0",
+        "author junction row must be cleaned when parent deleted (second REFERENCES column)"
+    );
+}
+
+#[test]
 fn sql_update_single_row_rolls_back_materialized_when_junction_sync_fails() {
     // PRD 00134 cycle-1 review (C1): the WHERE-id fast path in
     // `apply_single_row_update` calls `update_materialized_row` followed by
