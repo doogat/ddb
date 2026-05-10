@@ -2701,7 +2701,6 @@ Push-Location $INT136_DIR
 ddb init | Out-Null
 ddb query "CREATE TABLE int136cat (fqn VARCHAR(255))" | Out-Null
 ddb query "CREATE TABLE int136link (url TEXT, category TEXT REFERENCES int136cat)" | Out-Null
-Start-Sleep -Seconds 1
 $int136Cat = (ddb create --type int136cat --title "Cat 136" --set "fqn=test.fqn").Trim()
 if ($int136Cat -notmatch '^\d{14}$') { throw "50: int136cat id malformed: $int136Cat" }
 $int136Link = (ddb create --type int136link --title "Link 136" --set "url=https://a" --set "category=$int136Cat").Trim()
