@@ -7738,6 +7738,65 @@ fn sql_bulk_delete_parent_clears_owned_auto_junction_rows() {
 }
 
 #[test]
+fn sql_bulk_delete_matching_zero_rows_leaves_junction_untouched() {
+    // PRD 00137 cycle-1 review (C1, [2/3] 🟡): `delete_bulk_rows`
+    // (sql_engine/dml.rs) short-circuits when `matches.is_empty()`. The
+    // behavior is correct but unpinned by tests, so a future refactor that
+    // reorders the cleanup before the empty-match check could quietly start
+    // sweeping the junction even when no parent row matched. This test pins
+    // the contract: a bulk DELETE whose WHERE matches zero parent rows must
+    // touch no junction rows and must succeed without error.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    engine
+        .execute("CREATE TABLE category (label VARCHAR(100))")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)")
+        .unwrap();
+
+    let cat_id = match engine
+        .execute("INSERT INTO category (label) VALUES ('alpha')")
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+    let _bm_id = match engine
+        .execute(&format!(
+            "INSERT INTO bookmark (url, category) VALUES ('https://kept.example.com', '{cat_id}')"
+        ))
+        .unwrap()
+    {
+        SqlResult::Ok(id) => id,
+        other => panic!("expected Ok, got {other:?}"),
+    };
+
+    // Sanity: junction populated by the INSERT.
+    let pre = index
+        .query_raw("SELECT COUNT(*) FROM bookmark_category")
+        .unwrap();
+    assert_eq!(pre[0][0], "1", "junction must hold one row before bulk delete");
+
+    // Bulk DELETE whose WHERE clause matches zero parent rows. This drives
+    // `delete_bulk_rows` (not the WHERE-id fast path) and exercises the
+    // empty-match short-circuit.
+    engine
+        .execute("DELETE FROM bookmark WHERE url = 'https://nonexistent.example.com'")
+        .unwrap();
+
+    // Junction must be unchanged: the row we kept must still be there.
+    let post = index
+        .query_raw("SELECT COUNT(*) FROM bookmark_category")
+        .unwrap();
+    assert_eq!(
+        post[0][0], "1",
+        "bulk DELETE matching zero rows must leave junction untouched"
+    );
+}
+
+#[test]
 fn sql_delete_parent_clears_owned_junction_rows_for_every_references_column() {
     // PRD 00137 cycle-1 review (C1, [3/3] 🟡): `cascade_junction_cleanup` loops
     // over `schema.columns` and is meant to clean owner-side junction rows for
