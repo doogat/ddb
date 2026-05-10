@@ -1420,7 +1420,7 @@ impl<'a> SqlEngine<'a> {
         }))
     }
 
-    fn insert_materialized_row(
+    pub(super) fn insert_materialized_row(
         &mut self,
         schema: &TableSchema,
         id: &str,

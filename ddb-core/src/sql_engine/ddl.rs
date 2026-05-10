@@ -1,5 +1,6 @@
 use rusqlite::params;
 use sqlparser::ast::{AlterColumnOperation, AlterTableOperation, ObjectType, TableConstraint};
+use std::collections::BTreeMap;
 
 use crate::error::{DoogatError, Result};
 use crate::indexer::materialize::{is_core_column, junction_table_ddl};
@@ -121,7 +122,7 @@ impl<'a> SqlEngine<'a> {
         let unique_together = extract_unique_constraints(&ct.constraints);
         // PRD 00139 §2: take() the pre-parse SINGLETON marker. `Some(_)`
         // flips the flag on the typedef; the inner bool drives T7's
-        // auto-seed (filled in once T7 lands).
+        // auto-seed.
         let pending_singleton = self.pending_singleton.take();
         let schema = TableSchema {
             table_name: table_name.clone(),
@@ -136,25 +137,108 @@ impl<'a> SqlEngine<'a> {
             search_key: None,
             singleton: pending_singleton.is_some(),
         };
-        // T5 keeps the auto-seed flag local; T7 consumes it after the
-        // typedef commit lands. The leading underscore suppresses the
-        // unused-binding warning until T7 wires the seed path.
-        let _auto_seed = pending_singleton.unwrap_or(false);
+        let auto_seed = pending_singleton == Some(true);
 
-        // Build and commit typedef doogat
-        let id = self.unique_id()?;
-        let schema_doogat = build_typedef_doogat(&id, &schema);
-        let content = parser::serialize(&schema_doogat);
-        let path = format!("ddb/_typedef/{}.md", id.0);
-        self.repo
-            .commit_file(&path, &content, &format!("create table {table_name}"))?;
+        // PRD 00139 §7: validate the auto-seed precondition before any
+        // file write. Every non-core, NOT NULL column must have a
+        // column-level `default_value` so the seed row can be built
+        // without user input. Failing here keeps the typedef out of git
+        // entirely on the operator's bad CREATE TABLE.
+        if auto_seed {
+            let missing: Vec<String> = schema
+                .columns
+                .iter()
+                .filter(|c| {
+                    !is_core_column(&c.name) && c.required && c.default_value.is_none()
+                })
+                .map(|c| c.name.clone())
+                .collect();
+            if !missing.is_empty() {
+                return Err(DoogatError::SqlEngine(format!(
+                    "SINGLETON DEFAULT VALUES requires every non-nullable column to have a column-level default; missing: {}",
+                    missing.join(", ")
+                )));
+            }
+        }
 
-        // Index the typedef doogat
-        let parsed = parser::parse(&content, &path)?;
+        // Build the typedef doogat content.
+        let typedef_id = self.unique_id()?;
+        let schema_doogat = build_typedef_doogat(&typedef_id, &schema);
+        let typedef_content = parser::serialize(&schema_doogat);
+        let typedef_path = format!("ddb/_typedef/{}.md", typedef_id.0);
+
+        // PRD 00139 §7: when auto-seeding, build the seed row content
+        // here so typedef + seed land in a single git commit (single
+        // CRDT-sync boundary). Other nodes inherit the seeded row via
+        // normal sync — they do NOT auto-seed locally on typedef receipt.
+        let seed_artifacts = if auto_seed {
+            let seed_id = self.unique_id()?;
+            let mut seed_values: BTreeMap<String, String> = BTreeMap::new();
+            for col in &schema.columns {
+                if is_core_column(&col.name) {
+                    continue;
+                }
+                if let Some(ref dv) = col.default_value {
+                    seed_values.insert(col.name.clone(), dv.clone());
+                }
+            }
+            let ref_folder_types = self.ref_folder_types(&schema);
+            let seed_doogat = super::builders::build_data_doogat(
+                &seed_id,
+                &schema,
+                &seed_values,
+                &ref_folder_types,
+                Some(self.index.sql_conn()),
+            );
+            let seed_content = parser::serialize(&seed_doogat);
+            let seed_path = if schema.folder {
+                format!("ddb/{}/{}.md", schema.table_name, seed_id.0)
+            } else {
+                format!("ddb/{}.md", seed_id.0)
+            };
+            Some((seed_id, seed_path, seed_content, seed_values))
+        } else {
+            None
+        };
+
+        // Atomic commit: typedef + (optional) seed row in one git commit.
+        let commit_msg = if auto_seed {
+            format!("create table {table_name} with default seed")
+        } else {
+            format!("create table {table_name}")
+        };
+        match seed_artifacts {
+            Some((_, ref seed_path, ref seed_content, _)) => {
+                self.repo.commit_files(
+                    &[
+                        (typedef_path.as_str(), typedef_content.as_str()),
+                        (seed_path.as_str(), seed_content.as_str()),
+                    ],
+                    &commit_msg,
+                )?;
+            }
+            None => {
+                self.repo
+                    .commit_file(&typedef_path, &typedef_content, &commit_msg)?;
+            }
+        }
+
+        // Index the typedef doogat first so subsequent materialization
+        // reads it back through the standard chain.
+        let parsed = parser::parse(&typedef_content, &typedef_path)?;
         self.index.index_doogat(&parsed)?;
 
-        // Create materialized SQLite table
+        // Create materialized SQLite table (also lands the singleton-lock
+        // index from T8 because schema.singleton is true).
         self.create_materialized_table(&schema)?;
+
+        // Index + materialize the seed row last so the singleton-lock
+        // index it lives under is already in place.
+        if let Some((seed_id, seed_path, seed_content, seed_values)) = seed_artifacts {
+            let seed_parsed = parser::parse(&seed_content, &seed_path)?;
+            self.index.index_doogat(&seed_parsed)?;
+            self.insert_materialized_row(&schema, &seed_id.0, &seed_values)?;
+        }
 
         Ok(SqlResult::Ok(format!("table {table_name} created")))
     }

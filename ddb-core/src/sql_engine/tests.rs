@@ -1896,6 +1896,128 @@ fn on_delete_action_typedef_yaml_roundtrip_prd_00129() {
 }
 
 #[test]
+fn singleton_default_values_auto_seeds_one_row_prd_00139() {
+    // PRD 00139 §7: SINGLETON DEFAULT VALUES installs the typedef AND
+    // materializes one row using each column's default. Other nodes
+    // inherit the row via CRDT sync.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute(
+            "CREATE TABLE app_config (theme TEXT DEFAULT 'system', \
+             schema_version INTEGER DEFAULT 1) SINGLETON DEFAULT VALUES",
+        )
+        .expect("CREATE TABLE ... SINGLETON DEFAULT VALUES must succeed");
+    let result = engine
+        .execute("SELECT theme, schema_version FROM app_config")
+        .unwrap();
+    if let SqlResult::Rows { rows, .. } = result {
+        assert_eq!(rows.len(), 1, "auto-seed must materialize exactly one row");
+        assert_eq!(rows[0][0], "system", "default theme must seed");
+        assert_eq!(rows[0][1], "1", "default schema_version must seed");
+    } else {
+        panic!("expected Rows result");
+    }
+}
+
+#[test]
+fn singleton_without_default_values_does_not_seed_prd_00139() {
+    // PRD 00139 §7: bare `SINGLETON` (no DEFAULT VALUES) installs the
+    // typedef but materializes ZERO rows.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute("CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON")
+        .unwrap();
+    let result = engine.execute("SELECT COUNT(*) FROM app_config").unwrap();
+    if let SqlResult::Rows { rows, .. } = result {
+        assert_eq!(
+            rows[0][0], "0",
+            "bare SINGLETON must not auto-seed any row"
+        );
+    } else {
+        panic!("expected Rows result from SELECT COUNT(*)");
+    }
+}
+
+#[test]
+fn singleton_default_values_rejects_missing_required_default_prd_00139() {
+    // PRD 00139 §7: every non-nullable column must have a column-level
+    // default. Missing-default columns are listed in the error message.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    let err = engine
+        .execute(
+            "CREATE TABLE app_config (theme TEXT NOT NULL, schema_version INTEGER NOT NULL) \
+             SINGLETON DEFAULT VALUES",
+        )
+        .expect_err("missing required default must reject");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("SINGLETON DEFAULT VALUES requires"),
+        "msg: {msg}"
+    );
+    assert!(msg.contains("theme") || msg.contains("schema_version"), "msg: {msg}");
+
+    // Typedef must NOT have been installed (validation runs before any
+    // git write).
+    let schemas = index.load_all_typedefs(&repo);
+    assert!(
+        schemas.get("app_config").is_none(),
+        "rejected CREATE TABLE must not install the typedef"
+    );
+}
+
+#[test]
+fn singleton_default_values_allows_nullable_columns_without_default_prd_00139() {
+    // PRD 00139 §7: nullable columns without defaults are fine; they
+    // seed as NULL.
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute(
+            "CREATE TABLE app_config (theme TEXT DEFAULT 'system', notes TEXT) \
+             SINGLETON DEFAULT VALUES",
+        )
+        .expect("nullable column without default must be fine");
+    let result = engine
+        .execute("SELECT theme, notes FROM app_config")
+        .unwrap();
+    if let SqlResult::Rows { rows, .. } = result {
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], "system");
+        assert_eq!(
+            rows[0][1], "NULL",
+            "nullable, no-default column surfaces as the literal NULL marker"
+        );
+    } else {
+        panic!("expected Rows");
+    }
+}
+
+#[test]
+fn singleton_default_values_blocks_second_insert_prd_00139() {
+    // PRD 00139 §7 + §3: after auto-seed, a second INSERT must reject
+    // (the seeded row counts as the SINGLETON's one allowed row).
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine
+        .execute(
+            "CREATE TABLE app_config (theme TEXT DEFAULT 'system') SINGLETON DEFAULT VALUES",
+        )
+        .unwrap();
+    let err = engine
+        .execute("INSERT INTO app_config (theme) VALUES ('dark')")
+        .expect_err("INSERT after auto-seed must reject");
+    match err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+        }
+        other => panic!("expected SINGLETON_VIOLATION, got {other:?}"),
+    }
+}
+
+#[test]
 fn dml_insert_into_singleton_typedef_succeeds_first_then_rejects_prd_00139() {
     // PRD 00139 §3 layer 2: raw `ddb query "INSERT ..."` against a
     // SINGLETON typedef succeeds first, then rejects with
