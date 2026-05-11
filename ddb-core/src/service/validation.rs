@@ -127,13 +127,26 @@ impl<G: GitBackend> DoogatService<G> {
         if !schema.singleton {
             return Ok(None);
         }
-        // Defensive identifier check before inlining into the SQL string.
-        // Hyphenated typedef names are valid table identifiers when quoted.
+        // PRD 00139 cycle-3 #6: defensive identifier check before inlining
+        // into the SQL string. Hyphenated typedef names are valid table
+        // identifiers when quoted. Upstream typedef-name validation (DDL
+        // parsing in sql_engine/ddl.rs + typedef YAML deserialization)
+        // already restricts identifiers to this character class, so this
+        // branch should be unreachable in practice. Fail loud in debug
+        // builds and surface a structured validation error in release
+        // builds rather than silently dropping enforcement (AGENTS.md
+        // "no silent drops" guardrail).
         if !type_name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         {
-            return Ok(None);
+            debug_assert!(
+                false,
+                "check_singleton_constraint reached with invalid typedef identifier {type_name:?}; upstream validation should have rejected this"
+            );
+            return Err(DoogatError::Validation(format!(
+                "typedef name {type_name:?} contains characters outside [A-Za-z0-9_-]; singleton enforcement aborted"
+            )));
         }
         let sql = format!("SELECT id FROM \"{type_name}\" LIMIT 1");
         let rows = self.index.query_raw_with_params(&sql, &[])?;
@@ -166,11 +179,20 @@ impl<G: GitBackend> DoogatService<G> {
         if !schema.singleton {
             return Ok(());
         }
+        // PRD 00139 cycle-3 #6: see check_singleton_constraint above for
+        // the same identifier-shape rationale. Fail loud rather than
+        // silently dropping enforcement.
         if !type_name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         {
-            return Ok(());
+            debug_assert!(
+                false,
+                "check_singleton_update_constraint reached with invalid typedef identifier {type_name:?}; upstream validation should have rejected this"
+            );
+            return Err(DoogatError::Validation(format!(
+                "typedef name {type_name:?} contains characters outside [A-Za-z0-9_-]; singleton enforcement aborted"
+            )));
         }
         let sql = format!("SELECT id FROM \"{type_name}\" WHERE id != ?1 LIMIT 1");
         let rows = self.index.query_raw_with_params(
