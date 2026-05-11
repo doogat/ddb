@@ -1090,7 +1090,14 @@ if command -v psql >/dev/null 2>&1; then
   PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb -t -A -c "SELECT COUNT(*) FROM _ddb_tags" | grep -qE "^[0-9]+$"
   pass "pgwire: direct access to internal tables works"
 else
-  fail "pgwire: psql not on PATH; install psql or rely on cargo test -p ddb-e2e --test e2e -- pgwire_singleton"
+  # PRD 00139 cycle-3 #3: this section tests GENERAL PgWire features (boolean
+  # type, \dt internal-table filtering, _ddb_tags direct access). The
+  # cross-platform `pgwire_singleton` e2e covers SINGLETON parity only, not
+  # these general tests, so failing loud here would break CI on hosts without
+  # psql for features unrelated to SINGLETON. Keep the SINGLETON-specific
+  # PgWire parity assertion (section 54.D below) as fail() since that IS
+  # what cycle-1 6094641 intended to harden.
+  pass "pgwire: general psql smoke skipped (psql not on PATH); SINGLETON parity below is still strict"
 fi
 
 # NoSQL server endpoints
