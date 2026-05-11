@@ -58,6 +58,7 @@ pub fn build_schema(
         .register(q.broken_sequence_type)
         .register(s.change_event_type)
         .register(m.sync_result_type)
+        .register(m.singleton_conflict_type)
         .register(m.compact_result_type)
         .register(m.git_maintenance_result_type)
         .register(m.upsert_result_type)

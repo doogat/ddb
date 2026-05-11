@@ -270,6 +270,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             resurrected: 0,
             collisions_reassigned: 0,
             singleton_conflicts_resolved: 0,
+            singleton_conflicts: Vec::new(),
         };
 
         match merge_result {
@@ -379,6 +380,18 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         let sweep =
             crate::consistency::singleton_sweep::singleton_sweep(self.repo, index, &sweep_hlc)?;
         report.singleton_conflicts_resolved = sweep.conflicts_resolved;
+        // PRD 00139 cycle-3 #4: surface the per-conflict detail alongside
+        // the count. `sweep.details` is `(table, winner, losers)` per
+        // resolved conflict, exactly the shape SyncReport now exposes.
+        report.singleton_conflicts = sweep
+            .details
+            .iter()
+            .map(|(table, winner, losers)| crate::types::SingletonConflictResolution {
+                table: table.clone(),
+                winner: winner.clone(),
+                losers: losers.clone(),
+            })
+            .collect();
         tracing::info!(
             phase = "singleton_sweep",
             resolved = sweep.conflicts_resolved,

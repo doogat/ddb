@@ -198,6 +198,24 @@ pub struct SyncReport {
     pub resurrected: usize,
     pub collisions_reassigned: usize,
     pub singleton_conflicts_resolved: usize,
+    /// Per-conflict detail for each SINGLETON conflict resolved during this
+    /// sync's post-merge sweep. PRD 00139 cycle-3 #8: surfaces the
+    /// structured `Fix::SingletonConflictResolved` events that
+    /// `singleton_sweep` emits, so CLI / GraphQL / FFI consumers can name
+    /// each (table, winner, losers) triple instead of only seeing the
+    /// aggregate count. Length equals `singleton_conflicts_resolved`.
+    pub singleton_conflicts: Vec<SingletonConflictResolution>,
+}
+
+/// One row's worth of detail from a SINGLETON post-sync sweep.
+/// `winner` is the row id that materializes in the typed table after
+/// the sweep; `losers` is the set of row ids moved to
+/// `ddb/_conflicts/<id>.md`. PRD 00139 §10.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SingletonConflictResolution {
+    pub table: String,
+    pub winner: String,
+    pub losers: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

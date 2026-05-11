@@ -20,6 +20,8 @@ use super::base_types::*;
 pub(crate) struct MutationOutput {
     pub mutation: Object,
     pub sync_result_type: Object,
+    /// PRD 00139 cycle-3 #4: nested type held by SyncResult.singletonConflicts.
+    pub singleton_conflict_type: Object,
     pub compact_result_type: Object,
     pub git_maintenance_result_type: Object,
     pub upsert_result_type: Object,
@@ -642,6 +644,20 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
         );
     }
 
+    // -- SingletonConflict output type (PRD 00139 cycle-3 #4) --
+    let singleton_conflict_type = Object::new("SingletonConflictResolution")
+        .description(
+            "One SINGLETON conflict resolved by the post-merge sweep. \
+             `winner` materializes in the typed table; each `losers` id \
+             is moved to ddb/_conflicts/<id>.md.",
+        )
+        .field(simple_field("table", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("winner", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field(
+            "losers",
+            TypeRef::List(Box::new(TypeRef::named_nn(TypeRef::STRING))),
+        ));
+
     // -- SyncResult output type --
     let sync_result_type = Object::new("SyncResult")
         .description("Result of a sync operation with a remote repository.")
@@ -661,6 +677,17 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
         .field(simple_field(
             "collisionsReassigned",
             TypeRef::named_nn(TypeRef::INT),
+        ))
+        // PRD 00139 cycle-3 #4: surface SINGLETON post-sync sweep detail.
+        .field(simple_field(
+            "singletonConflictsResolved",
+            TypeRef::named_nn(TypeRef::INT),
+        ))
+        .field(simple_field(
+            "singletonConflicts",
+            TypeRef::List(Box::new(TypeRef::named_nn(
+                "SingletonConflictResolution",
+            ))),
         ));
 
     // -- CompactResult output type --
@@ -743,6 +770,45 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     obj.insert(
                         Name::new("collisionsReassigned"),
                         GqlValue::from(report.collisions_reassigned as i64),
+                    );
+                    // PRD 00139 cycle-3 #4: expose SINGLETON sweep detail
+                    // (count + per-conflict triples) alongside the existing
+                    // count fields so GraphQL clients can audit which
+                    // (table, winner, losers) triples landed during this
+                    // sync, not just the aggregate count.
+                    obj.insert(
+                        Name::new("singletonConflictsResolved"),
+                        GqlValue::from(report.singleton_conflicts_resolved as i64),
+                    );
+                    let singleton_conflicts: Vec<GqlValue> = report
+                        .singleton_conflicts
+                        .iter()
+                        .map(|resolution| {
+                            let mut detail = IndexMap::new();
+                            detail.insert(
+                                Name::new("table"),
+                                GqlValue::from(resolution.table.as_str()),
+                            );
+                            detail.insert(
+                                Name::new("winner"),
+                                GqlValue::from(resolution.winner.as_str()),
+                            );
+                            detail.insert(
+                                Name::new("losers"),
+                                GqlValue::List(
+                                    resolution
+                                        .losers
+                                        .iter()
+                                        .map(|id| GqlValue::from(id.as_str()))
+                                        .collect(),
+                                ),
+                            );
+                            GqlValue::Object(detail)
+                        })
+                        .collect();
+                    obj.insert(
+                        Name::new("singletonConflicts"),
+                        GqlValue::List(singleton_conflicts),
                     );
                     Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
                 })
@@ -899,6 +965,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
     MutationOutput {
         mutation,
         sync_result_type,
+        singleton_conflict_type,
         compact_result_type,
         git_maintenance_result_type,
         upsert_result_type,

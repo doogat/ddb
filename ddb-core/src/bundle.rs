@@ -192,6 +192,7 @@ pub fn import_bundle(
         resurrected: 0,
         collisions_reassigned: 0,
         singleton_conflicts_resolved: 0,
+        singleton_conflicts: Vec::new(),
     })
 }
 

@@ -298,6 +298,15 @@ Body from B
 
     let report_b = mgr_b.sync("origin", "master", &index_b).unwrap();
     assert_eq!(report_b.singleton_conflicts_resolved, 1);
+    // PRD 00139 cycle-3 #4: assert the per-conflict detail surfaces with the
+    // count (winner picked by HLC, loser quarantined). The aggregate count
+    // alone never reached the CLI/GraphQL/FFI surfaces; pin the detail
+    // shape so downstream consumers can render or audit each resolution.
+    assert_eq!(report_b.singleton_conflicts.len(), 1);
+    let resolution = &report_b.singleton_conflicts[0];
+    assert_eq!(resolution.table, "app_config");
+    assert_eq!(resolution.winner, "20260601000010");
+    assert_eq!(resolution.losers, vec!["20260601000000".to_string()]);
 
     let rows_b = index_b.query_raw("SELECT id FROM app_config").unwrap();
     assert_eq!(rows_b, vec![vec!["20260601000010".to_string()]]);

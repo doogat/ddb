@@ -18,6 +18,24 @@ pub(crate) fn sync(
     if report.collisions_reassigned > 0 {
         outln!("  collisions reassigned: {}", report.collisions_reassigned)?;
     }
+    // PRD 00139 cycle-3 #4: surface SINGLETON conflict resolutions per-row,
+    // not just the count. Each line names the table, the surviving winner,
+    // and every quarantined loser so operators can audit what landed in
+    // `ddb/_conflicts/`.
+    if report.singleton_conflicts_resolved > 0 {
+        outln!(
+            "  singleton conflicts resolved: {}",
+            report.singleton_conflicts_resolved
+        )?;
+        for resolution in &report.singleton_conflicts {
+            outln!(
+                "    {}: kept {} (quarantined {})",
+                resolution.table,
+                resolution.winner,
+                resolution.losers.join(", "),
+            )?;
+        }
+    }
     Ok(())
 }
 
