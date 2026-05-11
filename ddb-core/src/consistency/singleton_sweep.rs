@@ -127,9 +127,6 @@ pub fn singleton_sweep(
                 }],
             });
         }
-        // winner.path is intentionally unused — the winner is the row that
-        // survives untouched. Keep the binding extraction for clarity.
-        let _ = winner;
     }
 
     if !writes.is_empty() {
