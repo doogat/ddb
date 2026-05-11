@@ -119,7 +119,7 @@ impl<'a> SqlEngine<'a> {
 
         // Extract columns
         let columns = self.extract_columns(&ct.columns)?;
-        let unique_together = extract_unique_constraints(&ct.constraints);
+        let unique_together = extract_unique_constraints(&ct.constraints, &ct.columns);
         // PRD 00139 §2: take() the pre-parse SINGLETON marker. `Some(_)`
         // flips the flag on the typedef; the inner bool drives T7's
         // auto-seed.
@@ -1430,8 +1430,19 @@ impl<'a> SqlEngine<'a> {
 }
 
 /// Extract UNIQUE table constraints into the `unique_together` format.
-fn extract_unique_constraints(constraints: &[TableConstraint]) -> Option<Vec<Vec<String>>> {
-    let groups: Vec<Vec<String>> = constraints
+///
+/// Walks both forms:
+/// - Table-level `UNIQUE(col1, col2)` (multi-column groups).
+/// - Column-level `col TYPE UNIQUE` (single-column groups). sqlparser
+///   represents this as `ColumnOption::Unique { is_primary: false, .. }`
+///   on the column option list and does not fold it into a TableConstraint,
+///   so without this branch column-level UNIQUE silently disappears at
+///   typedef registration.
+fn extract_unique_constraints(
+    constraints: &[TableConstraint],
+    columns: &[sqlparser::ast::ColumnDef],
+) -> Option<Vec<Vec<String>>> {
+    let mut groups: Vec<Vec<String>> = constraints
         .iter()
         .filter_map(|c| match c {
             TableConstraint::Unique { columns, .. } => {
@@ -1445,6 +1456,27 @@ fn extract_unique_constraints(constraints: &[TableConstraint]) -> Option<Vec<Vec
             _ => None,
         })
         .collect();
+    for col in columns {
+        let col_name = col.name.value.to_lowercase();
+        if col_name == "id" || col_name == "type" {
+            continue;
+        }
+        let is_unique = col.options.iter().any(|opt| {
+            matches!(
+                opt.option,
+                sqlparser::ast::ColumnOption::Unique {
+                    is_primary: false,
+                    ..
+                }
+            )
+        });
+        if is_unique {
+            let group = vec![col_name];
+            if !groups.contains(&group) {
+                groups.push(group);
+            }
+        }
+    }
     if groups.is_empty() {
         None
     } else {

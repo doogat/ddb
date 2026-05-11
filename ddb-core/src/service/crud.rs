@@ -303,6 +303,16 @@ impl<G: GitBackend> DoogatService<G> {
     ///
     /// Parses the content to extract/generate an ID, determines storage path,
     /// commits, indexes, and dual-writes. Returns the doogat ID.
+    ///
+    /// PRD 00139 cycle-3 task #1: raw-frontmatter semantics. The user's
+    /// markdown is written to git verbatim (modulo path computation) so
+    /// arbitrary frontmatter keys round-trip and unregistered `type:` values
+    /// stay as authored. SINGLETON and UNIQUE constraints still fire when
+    /// the type IS a registered typedef — the raw path runs
+    /// `check_singleton_constraint` and `check_unique_constraints` (same
+    /// helpers `batch_create` uses) before any commit. Unknown types are
+    /// accepted (legacy FFI contract): authors can write `type: foo` even
+    /// when `foo` has no typedef, matching pre-cycle-1 behavior.
     pub fn create_doogat_raw(&self, content: &str, message: &str) -> Result<String> {
         self.ensure_fresh()?;
         let parsed = parser::parse(content, "new.md")?;
@@ -321,36 +331,38 @@ impl<G: GitBackend> DoogatService<G> {
             .unwrap_or(false);
         let rel_path = git_ops::doogat_path(&id, parsed.meta.doogat_type.as_deref(), folder);
         let schemas = self.list_type_schemas()?;
-        let content = if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
-            let input = build_batch_create_from_parsed(&parsed);
-            Self::validate_typed_create_pre_defaults(&input, &schemas)?;
-            let schema = schemas
-                .iter()
-                .find(|s| s.table_name == type_name)
-                .ok_or_else(|| DoogatError::type_not_registered(type_name.to_string()))?;
-            let _ = self.check_singleton_constraint(&input, &schemas)?;
-            let _ = self.check_unique_constraints(&input, &schemas)?;
-            let normalized =
-                self.build_typed_single_create(&input, &DoogatId(id.clone()), &rel_path, schema)?;
-            parser::serialize(&normalized)
-        } else {
-            content.to_string()
-        };
 
-        self.repo.commit_file(&rel_path, &content, message)?;
-        let parsed = parser::parse(&content, &rel_path)?;
-        self.index.index_doogat(&parsed)?;
-        // PRD 00134 blind-review I2: same atomic-junction parity as
-        // `create_doogat_with_extra` — when raw Markdown carries a
-        // registered typedef, populate the typed table + auto-junctions
-        // alongside the metadata index update.
+        // Run SINGLETON + UNIQUE checks only when the declared type is
+        // registered. Unregistered types skip validation (raw FFI contract).
         if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
-            if let Some(schema) = self
-                .list_type_schemas()?
-                .into_iter()
-                .find(|s| s.table_name == type_name)
-            {
-                self.index.materialize_single(&schema, &id, &parsed)?;
+            if let Some(schema) = schemas.iter().find(|s| s.table_name == type_name) {
+                let input = build_batch_create_from_parsed(&parsed);
+                let _ = self.check_singleton_constraint(&input, &schemas)?;
+                let _ = self.check_unique_constraints(&input, &schemas)?;
+                // Raw FFI accepts frontmatter values for typedef columns
+                // regardless of declared zone, so a column the typedef
+                // marks Body-zone (e.g. plain `TEXT UNIQUE`) still has its
+                // value in `meta.extra`. The materialized typed table is
+                // populated zone-strictly, so `check_unique_constraints`
+                // misses cross-row duplicates whose values landed in
+                // `_ddb_fields` instead. Fall back to that index here.
+                self.check_unique_via_ddb_fields(&parsed, schema)?;
+            }
+        }
+
+        // Write the user's bytes verbatim — no re-serialize through the
+        // typed-write pipeline, which would drop top-level meta fields
+        // (`date`) and arbitrary custom keys.
+        self.repo.commit_file(&rel_path, content, message)?;
+        let parsed = parser::parse(content, &rel_path)?;
+        self.index.index_doogat(&parsed)?;
+        // PRD 00134 blind-review I2: when raw Markdown carries a registered
+        // typedef, populate the typed table + auto-junctions alongside the
+        // metadata index update so SQLite-level UNIQUE indexes also catch
+        // late conflicts the pre-check couldn't see.
+        if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
+            if let Some(schema) = schemas.iter().find(|s| s.table_name == type_name) {
+                self.index.materialize_single(schema, &id, &parsed)?;
             }
         }
         self.nosql_index_doogat(&parsed);
@@ -1080,13 +1092,31 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// Update a doogat from raw content (for FFI consumers).
+    ///
+    /// PRD 00139 cycle-3 task #1: raw-frontmatter semantics. The desired
+    /// markdown replaces the stored content verbatim — title omitted from
+    /// the new frontmatter clears the stored title, the new `date:` value
+    /// overwrites the old, custom keys round-trip. We do not route through
+    /// `BatchUpdateInput`, which silently drops top-level meta fields and
+    /// re-applies "title omitted = keep old".
+    ///
+    /// When the desired markdown targets a registered SINGLETON typedef,
+    /// `check_singleton_update_constraint` still fires before the commit
+    /// lands so cross-row singleton invariants stay enforced.
     pub fn update_doogat_raw(&self, id: &str, content: &str, message: &str) -> Result<()> {
+        self.ensure_fresh()?;
         let rel_path = self.index.resolve_path(id)?;
-        let current_content = self.repo.read_file(&rel_path)?;
-        let current = parser::parse(&current_content, &rel_path)?;
         let desired = parser::parse(content, &rel_path)?;
-        let update = build_batch_update_from_replacement(id, &current, &desired);
-        self.batch_update_with_message(&[update], message)?;
+        let schemas = self.list_type_schemas()?;
+        if let Some(type_name) = desired.meta.doogat_type.as_deref() {
+            if schemas.iter().any(|s| s.table_name == type_name) {
+                self.check_singleton_update_constraint(id, type_name, &schemas)?;
+            }
+        }
+
+        self.repo.commit_file(&rel_path, content, message)?;
+        let _ = self.reindex_and_rematerialize(content, &rel_path, Some(&schemas))?;
+        self.index.store_head(&self.repo.head_oid()?.0)?;
         Ok(())
     }
 
@@ -1250,6 +1280,82 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     // ── Private helpers ─────────────────────────────────────────────────
+
+    /// PRD 00139 cycle-3 task #1: raw-FFI UNIQUE fallback against
+    /// `_ddb_fields`. `check_unique_constraints` queries the materialized
+    /// typed table, which is populated zone-strictly — a typedef-declared
+    /// Body-zone column stays NULL in the typed table when the author put
+    /// the value in frontmatter via raw markdown. `_ddb_fields` indexes
+    /// every frontmatter value with its `doogat_id`, so a same-typed
+    /// duplicate is detectable here.
+    ///
+    /// Single-column UNIQUE groups (`unique_together: [["url"]]`) are the
+    /// common shape from `CREATE TABLE x (col TEXT UNIQUE)`. Multi-column
+    /// groups still work as long as every column value is in
+    /// `_ddb_fields` (i.e. authored in frontmatter); rows that split a
+    /// composite key across zones fall through to the materialized-table
+    /// check above.
+    fn check_unique_via_ddb_fields(
+        &self,
+        parsed: &ParsedDoogat,
+        schema: &TableSchema,
+    ) -> Result<()> {
+        let groups = match schema.unique_together.as_ref() {
+            Some(g) => g,
+            None => return Ok(()),
+        };
+        let new_id = parsed
+            .meta
+            .id
+            .as_ref()
+            .map(|z| z.0.as_str())
+            .unwrap_or_default();
+        for group in groups {
+            let values: Option<Vec<String>> = group
+                .iter()
+                .map(|col| {
+                    parsed
+                        .meta
+                        .extra
+                        .get(col)
+                        .and_then(Self::value_to_comparable_string)
+                })
+                .collect();
+            let values = match values {
+                Some(v) => v,
+                None => continue,
+            };
+
+            // Find any same-type row that has all these (key, value) pairs
+            // recorded in `_ddb_fields`. The query intersects the matching
+            // doogat_id sets across the group columns and filters out the
+            // row we're about to write.
+            let mut sql = String::from("SELECT z.id FROM doogats z WHERE z.type = ?1 AND z.id != ?2");
+            let mut params: Vec<rusqlite::types::Value> = vec![
+                rusqlite::types::Value::Text(schema.table_name.clone()),
+                rusqlite::types::Value::Text(new_id.to_string()),
+            ];
+            for (col, value) in group.iter().zip(values.iter()) {
+                let key_idx = params.len() + 1;
+                let val_idx = params.len() + 2;
+                sql.push_str(&format!(
+                    " AND z.id IN (SELECT doogat_id FROM _ddb_fields WHERE key = ?{key_idx} AND value = ?{val_idx})"
+                ));
+                params.push(rusqlite::types::Value::Text(col.clone()));
+                params.push(rusqlite::types::Value::Text(value.clone()));
+            }
+            sql.push_str(" LIMIT 1");
+            let rows = self.index.query_raw_with_params(&sql, &params)?;
+            if rows.first().and_then(|r| r.first()).is_some() {
+                return Err(DoogatError::unique_violation(
+                    schema.table_name.clone(),
+                    group.clone(),
+                    values,
+                ));
+            }
+        }
+        Ok(())
+    }
 
     /// Generate a unique doogat ID, checking the filesystem for collisions.
     fn unique_id(&self) -> DoogatId {
@@ -1499,30 +1605,6 @@ fn parsed_fields(parsed: &ParsedDoogat) -> std::collections::BTreeMap<String, cr
         );
     }
     fields
-}
-
-fn build_batch_update_from_replacement(
-    id: &str,
-    current: &ParsedDoogat,
-    desired: &ParsedDoogat,
-) -> BatchUpdateInput {
-    let current_fields = parsed_fields(current);
-    let desired_fields = parsed_fields(desired);
-    let unset_fields = current_fields
-        .keys()
-        .filter(|key| !desired_fields.contains_key(*key))
-        .cloned()
-        .collect();
-
-    BatchUpdateInput {
-        id: id.to_string(),
-        title: desired.meta.title.clone(),
-        body: Some(desired.body.clone()),
-        tags: Some(desired.meta.tags.clone()),
-        doogat_type: desired.meta.doogat_type.clone(),
-        fields: Some(desired_fields),
-        unset_fields: Some(unset_fields),
-    }
 }
 
 fn build_batch_create_from_parsed(parsed: &ParsedDoogat) -> BatchCreateInput {
