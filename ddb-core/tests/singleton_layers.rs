@@ -124,6 +124,21 @@ Direct git write to trigger materializer enforcement
     let layer3 = extract_singleton_structured(err_layer3, "layer 3");
 
     assert_eq!(layer3.code, codes::SINGLETON_VIOLATION);
+    // PRD 00139 cycle-3 #9: this byte-identical equality assertion (including
+    // `existing_id`) depends on a deterministic ordering invariant:
+    //
+    // 1. `list_doogats()` and `populate_materialized_table[_from]()` both
+    //    process doogats in alphabetical-path order. The path ordering is
+    //    pinned by `SELECT ... ORDER BY path ASC` (PRD 00139 cycle-3 #5)
+    //    and by `list_doogats()`'s `BTreeMap`-backed iteration.
+    // 2. With `second_row_id = existing_id + 1`, the alphabetically-earlier
+    //    row (the "first" existing row, id) is what each layer reports as
+    //    `existing_id` in SINGLETON_VIOLATION.
+    //
+    // If a future refactor of `list_doogats` or `populate_materialized_table`
+    // ever returns rows in non-alphabetical order, this assertion will
+    // become non-deterministic — re-pin the invariant before relaxing
+    // either function.
     assert_eq!(layer1, layer3);
 
     let expected_message = format!(
