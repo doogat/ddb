@@ -2230,13 +2230,17 @@ IG_PARITY_REST_CODE=$(curl -sS -o "$IG_PARITY_REST_BODY" -w "%{http_code}" "$RES
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"x","type":"ig_parity_cfg"}')
-[ "$IG_PARITY_REST_CODE" -ge 400 ]
+# PRD 00139 cycle-3 #2: client errors must land in 4xx, not 5xx. Previously
+# this asserted ">= 400" which masked the rest_error catch-all that returned
+# HTTP 500 for every DoogatError::Structured variant. SINGLETON_VIOLATION is
+# specifically a 409 Conflict per the new mapping in ddb-server/src/rest.rs.
+[ "$IG_PARITY_REST_CODE" = "409" ]
 jq -e --arg existing_id "$IG_PARITY_ID" \
   '.error == "SINGLETON_VIOLATION"
    and (.message | contains("ig_parity_cfg"))
    and (.message | contains($existing_id))' \
   "$IG_PARITY_REST_BODY" >/dev/null
-pass "54.D: REST POST /doogats duplicate create carries SINGLETON_VIOLATION + table/id in the error envelope"
+pass "54.D: REST POST /doogats duplicate create returns 409 + SINGLETON_VIOLATION + table/id in the error envelope"
 
 # NoSQL HTTP is read-only today: ddb-server/src/nosql_api.rs exposes only GET
 # scan/get/backlinks routes, so SINGLETON write parity is N/A until the surface

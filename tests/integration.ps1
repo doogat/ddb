@@ -2131,7 +2131,10 @@ $igParityRestResp = Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -Con
     -Headers @{ Authorization = "Bearer $TOKEN" } `
     -Body '{"title":"x","type":"ig_parity_cfg"}' -SkipHttpErrorCheck
 $igParityRestStatus = [int]$igParityRestResp.StatusCode
-if ($igParityRestStatus -lt 400) { throw "54.D: REST duplicate create should fail, got HTTP $igParityRestStatus" }
+# PRD 00139 cycle-3 #2: client errors must land in 4xx, not 5xx. Tighten the
+# assertion from "lt 400" (which passed for 500) to the specific 409 mapping
+# the new rest_error code-to-status mapping produces for SINGLETON_VIOLATION.
+if ($igParityRestStatus -ne 409) { throw "54.D: REST duplicate create should return 409 Conflict, got HTTP $igParityRestStatus" }
 $igParityRestObj = (content $igParityRestResp) | ConvertFrom-Json
 if ($igParityRestObj.error -ne "SINGLETON_VIOLATION") {
     throw "54.D: REST duplicate create expected SINGLETON_VIOLATION, got: $($igParityRestObj.error)"
