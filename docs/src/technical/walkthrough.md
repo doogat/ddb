@@ -734,7 +734,59 @@ For each column with a `REFERENCES` target, the dynamic GraphQL schema adds a pl
 - Otherwise -> add 's' (e.g., `assignee` -> `assignees`)
 
 
-## 16. Help Guides
+## 16. Singleton Typedefs
+
+PRD 00139 adds a `SINGLETON` typedef primitive: a typedef constrained to hold at most one row. Apps modeling app config, schema version, or other state-of-one rows use it to skip the existence-check / seed / update-without-id workaround. Enforcement is defence-in-depth at three layers; a sync-time CRDT sweep resolves the offline-write race.
+
+### Schema flag
+
+`types/schema.rs::TableSchema` carries `pub singleton: bool` alongside the other table-level booleans (`folder`, `unique_together`). Serde skips serializing when `false`, so legacy typedef YAML is byte-identical to pre-PRD output.
+
+### DDL parsing (sql_engine/helpers.rs)
+
+`SINGLETON` and `SINGLETON DEFAULT VALUES` are not ANSI SQL. A regex pre-scan in `helpers.rs` detects the markers on `CREATE TABLE ... SINGLETON [DEFAULT VALUES]`, strips them, and hands the residue to `sqlparser`. `handle_create_table` reads the captured flags into the `TableSchema`. `ALTER TABLE x SET SINGLETON` / `ALTER TABLE x DROP SINGLETON` dispatch to `handle_set_singleton` / `handle_drop_singleton`, modeled on the `handle_rename_table` (PRD 00132) and `handle_alter_column_type` (PRD 00128) patterns.
+
+### Three-layer enforcement
+
+1. **Typed-write validation** -- `service/validation.rs::check_singleton_constraint` queries the materialized table for `COUNT(*) >= 1` before any INSERT through the service layer. On hit, returns `DoogatError::singleton_violation(table, existing_id)`.
+2. **SQL DML pre-check** -- `sql_engine/dml.rs` INSERT Pass 1 runs the same check before any commit lands, including an intra-batch tracker (`seen_singleton`) that rejects two-rows-in-one-batch with `existing_id = "<intra-batch>"`.
+3. **Materializer UNIQUE index** -- `indexer/materialize.rs::create_singleton_lock_index` issues `CREATE UNIQUE INDEX <table>_singleton_lock ON <table> ((1))`. The expression-index trick rejects any second materialized row even when the upstream service path is bypassed (direct git write, manual reindex).
+
+The three layers are integration-tested together in `ddb-core/tests/singleton_layers.rs` and must produce byte-identical structured errors.
+
+### Auto-seed on origin-only
+
+`CREATE TABLE x (...) SINGLETON DEFAULT VALUES` triggers an origin-node-only seed at typedef install time, using each column's `default_value`. Parse-time validation rejects with a clear error listing non-nullable columns without defaults. The seed row and the typedef YAML share one git commit boundary; other nodes inherit the row via normal CRDT sync, not local auto-seed.
+
+### GraphQL surfaces
+
+`schema/queries.rs` and `schema/mutations.rs` branch on `schema.singleton`:
+
+- Singular query field `<typeName> { id, ...fields }` (no args, returns the row or null).
+- `update<TypeName>(input:)` mutation (no id arg; `SINGLETON_NOT_FOUND` when empty).
+- `upsert<TypeName>(input:)` mutation returning `{ id, created: Boolean! }`.
+- `create<TypeName>(input:)` stays generated and rejects with `SINGLETON_VIOLATION` once a row exists.
+
+Field naming uses `pluralize_preserving_case` for the plural and the bare base name for the singular. Hyphenated typedefs that would collide with another generated field fall back to `<typeName>Singleton`; a double-collision fails schema build rather than masking the conflict.
+
+### CRDT post-sync sweep (crdt_resolver/singleton_sweep.rs)
+
+Offline writes on two nodes can each land a row in the same SINGLETON typedef. `singleton_sweep` runs after `finalize_sync`:
+
+1. Group rows by typedef where `schema.singleton == true`.
+2. Pick the winner by highest HLC; tie-break deterministically by `(node_id, doogat_id)`.
+3. Move losers to `ddb/_conflicts/{losing_id}.md` with frontmatter marker `singleton_conflict_loser: <winning_id>`.
+4. Emit a `Fix::SingletonConflictResolved` event into the existing event pipeline; `SyncReport` surfaces the count and detail for the operator.
+
+### Error codes (error.rs)
+
+- `SINGLETON_VIOLATION` -- context carries `table` and `existing_id`.
+- `SINGLETON_NOT_FOUND` -- context carries `table`.
+
+`ddb-server/src/error.rs::to_graphql_error` auto-maps these to `extensions.code`; REST `rest_error` maps to HTTP 409 / 404; FFI surfaces them as structured `DdbError::Validation` / `DdbError::SqlEngine` variants.
+
+
+## 17. Help Guides
 
 The CLI includes an embedded guide system via `ddb help <topic>`. When called without a topic, it lists available guides. Each guide is a prose walkthrough of a workflow (e.g., data modeling, zone configuration, API access).
 
