@@ -186,8 +186,14 @@ impl Index {
         type_name: &str,
         repo: &(impl DoogatSource + ?Sized),
     ) -> Result<()> {
+        // PRD 00139 cycle-3 #5: ORDER BY path so SINGLETON_VIOLATION's
+        // existing_id is deterministic across runs and matches what
+        // populate_materialized_table_from produces (which uses
+        // list_doogats(), alphabetically sorted). The singleton_layers
+        // parity test asserts layer-1/2/3 errors are byte-identical, so
+        // both materialize paths must process doogats in the same order.
         let mut data_stmt = self.conn.prepare(
-            "SELECT id, path FROM doogats WHERE type = ?1 AND path NOT LIKE 'ddb/_conflicts/%'",
+            "SELECT id, path FROM doogats WHERE type = ?1 AND path NOT LIKE 'ddb/_conflicts/%' ORDER BY path ASC",
         )?;
         let data_doogats: Vec<(String, String)> = data_stmt
             .query_map(params![type_name], |row| Ok((row.get(0)?, row.get(1)?)))?
