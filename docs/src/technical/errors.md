@@ -60,6 +60,27 @@ Application-level errors use:
 - `DoogatError::BadRequest(msg)` for invalid API request parameters
 - `DoogatError::VersionMismatch { repo, driver }` for repo format version ahead of driver
 
+## Structured Error Codes
+
+`DoogatError::Structured { code, message, context }` carries a stable `code` plus
+typed `context` entries that propagate to every transport (GraphQL `extensions.code`,
+REST error envelope, FFI `DdbError::{Validation, SqlEngine}::code`). See
+`ddb-core/src/error.rs::codes` for the full list.
+
+### SINGLETON_VIOLATION `existing_id` sentinel
+
+`SINGLETON_VIOLATION` errors carry `context.existing_id` so clients can render a
+link or fetch the blocking row. In the **intra-batch** case — a single
+multi-row `INSERT` (or `batch_create`) into an empty `SINGLETON` typedef — there
+is no committed blocking row yet, so the field uses the literal sentinel
+`<intra-batch>` instead of an id. Clients that resolve `existing_id` to a row
+must treat this value as "no fetchable target" rather than passing it back as an id.
+
+Layer 1 (`service/crud.rs::batch_create`) emits this from the `seen_singleton`
+HashMap tracker; Layer 2 (`sql_engine/dml.rs::handle_insert`) emits it when
+`rows.len() > 1` against an empty SINGLETON table. Both share the same
+`<intra-batch>` literal so the contract is uniform.
+
 ## CLI Error Handling
 
 The CLI's `main()` function calls `run(cli)` which returns `Result<()>`. On error, it prints `"error: {e}"` to stderr and exits with code 1.

@@ -148,7 +148,14 @@ impl<G: GitBackend> DoogatService<G> {
                 "typedef name {type_name:?} contains characters outside [A-Za-z0-9_-]; singleton enforcement aborted"
             )));
         }
-        let sql = format!("SELECT id FROM \"{type_name}\" LIMIT 1");
+        // ORDER BY id keeps `existing_id` deterministic across Layer 1
+        // (this check), Layer 2 (sql_engine/dml.rs SINGLETON pre-check), and
+        // Layer 3 (`lookup_singleton_existing_id` after a UNIQUE-index hit).
+        // Cycle-3 #5 pinned the ordering at `populate_materialized_table`;
+        // pinning it at every consumer of that materialized table keeps the
+        // invariant local rather than relying on SQLite's implicit rowid
+        // order.
+        let sql = format!("SELECT id FROM \"{type_name}\" ORDER BY id ASC LIMIT 1");
         let rows = self.index.query_raw_with_params(&sql, &[])?;
         let existing_id = match rows.first().and_then(|r| r.first()) {
             Some(id) => id,

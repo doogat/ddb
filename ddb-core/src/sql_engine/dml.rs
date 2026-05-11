@@ -153,11 +153,15 @@ impl<'a> SqlEngine<'a> {
         //     second row before any commit, with the `<intra-batch>`
         //     marker mirroring the service-layer batch tracker (T10).
         if schema.singleton && !rows.is_empty() {
+            // ORDER BY id keeps the reported `existing_id` consistent with
+            // Layer 1 (service/validation.rs::check_singleton_constraint) and
+            // Layer 3 (lookup_singleton_existing_id below). Invariant pinned
+            // by singleton_layers.rs:127-141.
             let existing_id: Option<String> = self
                 .index
                 .sql_conn()
                 .query_row(
-                    &format!("SELECT id FROM \"{table_name}\" LIMIT 1"),
+                    &format!("SELECT id FROM \"{table_name}\" ORDER BY id ASC LIMIT 1"),
                     [],
                     |row| row.get(0),
                 )
@@ -1540,8 +1544,11 @@ fn classify_materialized_insert_error(
 }
 
 fn lookup_singleton_existing_id(conn: &rusqlite::Connection, table_name: &str) -> Option<String> {
+    // Match the Layer 1 ORDER BY in service/validation.rs::check_singleton_constraint
+    // so all three enforcement layers report the same `existing_id` for the
+    // same set of rows. See singleton_layers.rs:127-141 for the invariant.
     conn.query_row(
-        &format!("SELECT id FROM \"{table_name}\" LIMIT 1"),
+        &format!("SELECT id FROM \"{table_name}\" ORDER BY id ASC LIMIT 1"),
         [],
         |row| row.get(0),
     )
@@ -1549,6 +1556,10 @@ fn lookup_singleton_existing_id(conn: &rusqlite::Connection, table_name: &str) -
 }
 
 fn is_singleton_lock_failure(detail: &str, table_name: &str) -> bool {
+    // SQLite's UNIQUE-failure message for an expression index always quotes
+    // the index name with single quotes, e.g. `UNIQUE constraint failed:
+    // index 'app_config_singleton_lock'`. Earlier code also matched double-
+    // quoted and backtick variants; SQLite never emits those.
     let prefix = "UNIQUE constraint failed: ";
     let rest = match detail.strip_prefix(prefix) {
         Some(rest) => rest,
@@ -1556,8 +1567,6 @@ fn is_singleton_lock_failure(detail: &str, table_name: &str) -> bool {
     };
     let index_name = format!("{table_name}_singleton_lock");
     rest == format!("index '{index_name}'")
-        || rest == format!("index \"{index_name}\"")
-        || rest == format!("index `{index_name}`")
 }
 
 /// Pull the conflicting column names out of SQLite's

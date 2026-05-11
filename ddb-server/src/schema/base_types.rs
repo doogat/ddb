@@ -961,8 +961,18 @@ pub(crate) fn sanitize_type_name(s: &str) -> String {
 
 /// Convert a typedef table name into the snake_case field base used by
 /// SINGLETON singular queries and mutations.
+///
+/// GraphQL field names must start with `[A-Za-z_]` and continue with
+/// `[A-Za-z0-9_]`. `is_safe_sql_identifier` already enforces both for
+/// typedefs created via `CREATE TABLE`, but typedefs loaded from a
+/// hand-written `ddb/_typedef/*.md` skip that gate. Strip any leading
+/// underscores produced by leading-hyphen typedef names so the emitted
+/// field name is always a valid GraphQL identifier; the collision check
+/// in `queries.rs`/`mutations.rs` will fail schema build if the cleaned
+/// base then collides with another field.
 pub(crate) fn singleton_field_base(s: &str) -> String {
-    s.replace('-', "_")
+    let raw = s.replace('-', "_");
+    raw.trim_start_matches('_').to_string()
 }
 
 /// Convert a kebab-case field name to camelCase for GraphQL field names.
@@ -1122,6 +1132,18 @@ mod tests {
         assert!(!is_valid_graphql_name("has-dash"));
         assert!(!is_valid_graphql_name("has.dot"));
         assert!(!is_valid_graphql_name("special!"));
+    }
+
+    #[test]
+    fn singleton_field_base_strips_leading_hyphens_underscores() {
+        // PRD 00139 blind m2 follow-up: typedef YAML loaded from hand-written
+        // git files can carry leading-hyphen names that bypass DDL validation.
+        // The derived GraphQL field base must remain a valid identifier
+        // (start with [A-Za-z_], not `_` followed by digits etc).
+        assert_eq!(singleton_field_base("app_config"), "app_config");
+        assert_eq!(singleton_field_base("app-config"), "app_config");
+        assert_eq!(singleton_field_base("--foo--"), "foo__");
+        assert_eq!(singleton_field_base("-foo"), "foo");
     }
 
     #[test]
