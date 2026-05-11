@@ -749,7 +749,7 @@ PRD 00139 adds a `SINGLETON` typedef primitive: a typedef constrained to hold at
 ### Three-layer enforcement
 
 1. **Typed-write validation** -- `service/validation.rs::check_singleton_constraint` queries the materialized table for `COUNT(*) >= 1` before any INSERT through the service layer. On hit, returns `DoogatError::singleton_violation(table, existing_id)`.
-2. **SQL DML pre-check** -- `sql_engine/dml.rs` INSERT Pass 1 runs the same check before any commit lands, including an intra-batch tracker (`seen_singleton`) that rejects two-rows-in-one-batch with `existing_id = "<intra-batch>"`.
+2. **SQL DML pre-check** -- `sql_engine/dml.rs` INSERT Pass 1 runs the same check before any commit lands, and rejects two-rows-in-one-batch (`rows.len() > 1` against an empty table) with `existing_id = "<intra-batch>"`. The service-layer batch path in `service/crud.rs` uses a `seen_singleton` HashMap for the same purpose across a multi-row typed write.
 3. **Materializer UNIQUE index** -- `indexer/materialize.rs::create_singleton_lock_index` issues `CREATE UNIQUE INDEX <table>_singleton_lock ON <table> ((1))`. The expression-index trick rejects any second materialized row even when the upstream service path is bypassed (direct git write, manual reindex).
 
 The three layers are integration-tested together in `ddb-core/tests/singleton_layers.rs` and must produce byte-identical structured errors.
@@ -769,7 +769,7 @@ The three layers are integration-tested together in `ddb-core/tests/singleton_la
 
 Field naming uses `pluralize_preserving_case` for the plural and the bare base name for the singular. Hyphenated typedefs that would collide with another generated field fall back to `<typeName>Singleton`; a double-collision fails schema build rather than masking the conflict.
 
-### CRDT post-sync sweep (crdt_resolver/singleton_sweep.rs)
+### CRDT post-sync sweep (consistency/singleton_sweep.rs)
 
 Offline writes on two nodes can each land a row in the same SINGLETON typedef. `singleton_sweep` runs after `finalize_sync`:
 
