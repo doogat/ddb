@@ -111,14 +111,25 @@ pub fn singleton_sweep(
         report
             .details
             .push((table_name.clone(), winner_id.clone(), loser_ids.clone()));
-        report.fixes.push(DoogatFix {
-            path: winner.path,
-            applied: vec![Fix::SingletonConflictResolved {
-                table: table_name,
-                winner: winner_id,
-                losers: loser_ids,
-            }],
-        });
+        // PRD 00139 cycle-3 #7: DoogatFix.path conventionally identifies the
+        // file the fix modified. In SingletonConflictResolved the winner is
+        // untouched and one loser file is moved per resolved conflict, so
+        // emit one DoogatFix per loser keyed at its new _conflicts/ path.
+        // The structured Fix variant still carries winner + losers so
+        // downstream consumers reconstruct the full conflict shape.
+        for loser_id in &loser_ids {
+            report.fixes.push(DoogatFix {
+                path: format!("ddb/_conflicts/{loser_id}.md"),
+                applied: vec![Fix::SingletonConflictResolved {
+                    table: table_name.clone(),
+                    winner: winner_id.clone(),
+                    losers: loser_ids.clone(),
+                }],
+            });
+        }
+        // winner.path is intentionally unused — the winner is the row that
+        // survives untouched. Keep the binding extraction for clarity.
+        let _ = winner;
     }
 
     if !writes.is_empty() {
@@ -411,15 +422,16 @@ Body for {id}
         assert!(matches!(
             report.fixes.as_slice(),
             [DoogatFix {
+                path,
                 applied,
-                ..
-            }] if matches!(
-                applied.as_slice(),
-                [Fix::SingletonConflictResolved { table, winner, losers }]
-                    if table == "app_config"
-                        && winner == "20260601000010"
-                        && losers == &vec!["20260601000000".to_string()]
-            )
+            }] if path == "ddb/_conflicts/20260601000000.md"
+                && matches!(
+                    applied.as_slice(),
+                    [Fix::SingletonConflictResolved { table, winner, losers }]
+                        if table == "app_config"
+                            && winner == "20260601000010"
+                            && losers == &vec!["20260601000000".to_string()]
+                )
         ));
     }
 
