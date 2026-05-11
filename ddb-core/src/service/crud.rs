@@ -332,8 +332,9 @@ impl<G: GitBackend> DoogatService<G> {
         let rel_path = git_ops::doogat_path(&id, parsed.meta.doogat_type.as_deref(), folder);
         let schemas = self.list_type_schemas()?;
 
-        // Run SINGLETON + UNIQUE checks only when the declared type is
-        // registered. Unregistered types skip validation (raw FFI contract).
+        // Run SINGLETON + UNIQUE + FK / allowed_values checks only when the
+        // declared type is registered. Unregistered types skip validation
+        // (raw FFI contract).
         if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
             if let Some(schema) = schemas.iter().find(|s| s.table_name == type_name) {
                 let input = build_batch_create_from_parsed(&parsed);
@@ -347,6 +348,14 @@ impl<G: GitBackend> DoogatService<G> {
                 // misses cross-row duplicates whose values landed in
                 // `_ddb_fields` instead. Fall back to that index here.
                 self.check_unique_via_ddb_fields(&parsed, schema)?;
+                // PRD 00134 batch-end follow-up: parity with the typed
+                // create path for FK + allowed_values. Without this, raw
+                // FFI lets dangling REFERENCES through entirely (no Layer
+                // 3 enforcement on FK in materialized tables) and surfaces
+                // ENUM violations as opaque `DoogatError::Sql("CHECK
+                // constraint failed: ...")` instead of a friendly
+                // validation message.
+                self.validate_fields_with_schemas(&schemas, type_name, &input.fields)?;
             }
         }
 
@@ -1111,6 +1120,11 @@ impl<G: GitBackend> DoogatService<G> {
         if let Some(type_name) = desired.meta.doogat_type.as_deref() {
             if schemas.iter().any(|s| s.table_name == type_name) {
                 self.check_singleton_update_constraint(id, type_name, &schemas)?;
+                // PRD 00134 batch-end follow-up: mirror create_doogat_raw's
+                // FK + allowed_values pre-check so update cannot bypass
+                // validation that create enforces.
+                let fields = parsed_fields(&desired);
+                self.validate_fields_with_schemas(&schemas, type_name, &fields)?;
             }
         }
 

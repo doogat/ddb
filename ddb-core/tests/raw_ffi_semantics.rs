@@ -171,6 +171,111 @@ url: https://example.com/a
     );
 }
 
+#[test]
+fn create_doogat_raw_rejects_disallowed_allowed_values() {
+    // Batch-end follow-up to PRD 00134 doubt review: raw FFI now mirrors the
+    // typed path's allowed_values check so apps cannot quietly land
+    // out-of-enum values via the FFI raw surface.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+    svc.execute_sql("CREATE TABLE color (label TEXT, shade ENUM('light', 'dark'))")
+        .unwrap();
+
+    let bad = "\
+---
+id: 20260101170000
+title: BadShade
+type: color
+shade: neon
+---
+";
+    let err = svc
+        .create_doogat_raw(bad, "bad shade")
+        .expect_err("create_doogat_raw must reject disallowed values for registered typedef");
+    match &err {
+        DoogatError::Validation(msg) => assert!(
+            msg.contains("not in allowed values"),
+            "expected allowed_values rejection wording, got: {msg}"
+        ),
+        other => panic!("expected DoogatError::Validation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn create_doogat_raw_rejects_fk_to_nonexistent_target() {
+    // Batch-end follow-up to PRD 00134 doubt review: raw FFI now checks
+    // REFERENCES targets exist when the declared type is a registered typedef.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+    svc.execute_sql("CREATE TABLE category (label VARCHAR(64))")
+        .unwrap();
+    svc.execute_sql("CREATE TABLE link (target VARCHAR(64) REFERENCES category)")
+        .unwrap();
+
+    let bad = "\
+---
+id: 20260101180000
+title: BogusLink
+type: link
+target: 99999999999999
+---
+";
+    let err = svc
+        .create_doogat_raw(bad, "bogus link")
+        .expect_err("create_doogat_raw must reject FK to non-existent target");
+    match &err {
+        DoogatError::Validation(msg) => assert!(
+            msg.contains("non-existent"),
+            "expected dangling-reference wording, got: {msg}"
+        ),
+        other => panic!("expected DoogatError::Validation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn update_doogat_raw_rejects_disallowed_allowed_values() {
+    // Symmetry guard: update_doogat_raw runs the same field validation as
+    // create_doogat_raw so apps cannot bypass allowed_values via update.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+    svc.execute_sql("CREATE TABLE color (label TEXT, shade ENUM('light', 'dark'))")
+        .unwrap();
+
+    let good = "\
+---
+id: 20260101190000
+title: GoodShade
+type: color
+shade: light
+---
+";
+    let id = svc
+        .create_doogat_raw(good, "good shade")
+        .expect("baseline good create must succeed");
+
+    let bad = "\
+---
+id: 20260101190000
+title: GoodShade
+type: color
+shade: neon
+---
+";
+    let err = svc
+        .update_doogat_raw(&id, bad, "bad shade")
+        .expect_err("update_doogat_raw must reject disallowed values for registered typedef");
+    match &err {
+        DoogatError::Validation(msg) => assert!(
+            msg.contains("not in allowed values"),
+            "expected allowed_values rejection wording, got: {msg}"
+        ),
+        other => panic!("expected DoogatError::Validation, got: {other:?}"),
+    }
+}
+
 // -- update_doogat_raw --------------------------------------------------
 
 #[test]
