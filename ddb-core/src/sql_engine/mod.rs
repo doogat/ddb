@@ -21,6 +21,7 @@ use crate::types::DoogatId;
 
 pub(crate) use builders::resolve_insert_title;
 pub use builders::{build_typedef_doogat, schema_from_parsed};
+pub use ddl::create_table_with_default_seed_commit_msg;
 
 use helpers::{
     normalize_alter_column_type, re_create_table_singleton, re_drop_search_key, re_drop_singleton,

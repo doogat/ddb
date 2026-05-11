@@ -1,6 +1,6 @@
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
-use ddb_core::sql_engine::SqlEngine;
+use ddb_core::sql_engine::{create_table_with_default_seed_commit_msg, SqlEngine};
 use ddb_core::sync_manager::{self, SyncManager};
 
 fn setup_two_nodes() -> (
@@ -101,10 +101,11 @@ fn assert_singleton_default_values_seed_sync_once() {
     );
 
     let new_commit_summaries = commit_summaries_since(&repo_b, &head_b_before_sync);
+    let expected_seed_summary = create_table_with_default_seed_commit_msg("app_config");
     assert_eq!(
         new_commit_summaries
             .iter()
-            .filter(|summary| summary.as_str() == "create table app_config with default seed")
+            .filter(|summary| **summary == expected_seed_summary)
             .count(),
         1,
         "B history must contain exactly one seed commit, propagated from A"

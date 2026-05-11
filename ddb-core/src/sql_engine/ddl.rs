@@ -24,6 +24,15 @@ pub(super) struct RenamePlan {
     pub deletes: Vec<String>,
 }
 
+/// Git commit message emitted when `CREATE TABLE ... SINGLETON DEFAULT
+/// VALUES` runs and the originating node auto-seeds one row in the same
+/// commit as the typedef. Exposed as a function so `sync_test` and other
+/// callers can assert on the message without depending on the format
+/// literal (PRD 00139 cycle-3 #8).
+pub fn create_table_with_default_seed_commit_msg(table_name: &str) -> String {
+    format!("create table {table_name} with default seed")
+}
+
 /// Apply path-based wikilink rewrites for every `(old_path, new_path)` pair.
 /// Each pair is rewritten both with and without the trailing `.md`, covering
 /// the two common wikilink target shapes. ID-based links are left alone.
@@ -201,7 +210,7 @@ impl<'a> SqlEngine<'a> {
 
         // Atomic commit: typedef + (optional) seed row in one git commit.
         let commit_msg = if auto_seed {
-            format!("create table {table_name} with default seed")
+            create_table_with_default_seed_commit_msg(&table_name)
         } else {
             format!("create table {table_name}")
         };
