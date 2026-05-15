@@ -90,6 +90,22 @@ Follow SOLID and Clean Architecture principles as adapted for Rust. These are ma
 - `technical/solid.md` - SOLID principles translated to Rust idioms (traits over inheritance, small focused traits, dependency inversion via generics)
 - `technical/clean-architecture.md` - Layer boundaries, dependency direction, I/O at the edges, no panics in library code
 
+## Architecture Guardrails
+
+- Keep domain/shared types adapter-neutral: no `rusqlite`, `git2`, `redb`, `axum`, or `async_graphql` in `ddb-core/src/types/**`; convert at adapter boundaries.
+- Do not add concrete adapter construction inside `DoogatService` service modules; inject dependencies or document a temporary exception.
+- User-facing read/write/list paths must not silently drop rows, schemas, or parse failures; return errors or structured warnings.
+- No runtime panics in library/FFI code for mutex, database, filesystem, repository, or user-input state.
+- 120% parity is the product posture: public product capabilities ship across every public application interface. If a capability cannot be applied coherently everywhere, prefer deferring/dropping it or making the interface non-public/specialized for that workflow over shipping drift.
+- CRUD is the minimum `Guaranteed` baseline for every public application interface; exceptions require an explicit maintainer decision that the interface is specialized or not public for that workflow.
+- Every feature PRD needs Transport Impact coverage for CLI, GraphQL, REST, PgWire, FFI, and NoSQL HTTP plus a cross-interface implementation/conformance plan.
+- Do not call interfaces equivalent unless the same downstream workflow passes conformance tests on each. Undocumented client scaffolding means the interface contract is incomplete.
+- For cross-interface architecture work, define the downstream workflow contract before refactoring internals that serve those interfaces.
+- New cross-interface behavior belongs in the app contract first; transports should adapt commands/results, not own business policy.
+- Public response/error/warning shape changes need compatibility/deprecation review and updated developer guidance.
+- A `Guaranteed` capability needs a golden workflow and conformance plan before implementation is considered complete.
+- Contract changes must cover support diagnostics, auth/setup expectations, timeout/performance expectations, and release/migration impact when relevant.
+
 ## Setup
 
 ```text
