@@ -228,3 +228,68 @@ fn delete_doogat_cleans_materialized_row() {
         "materialized row should be removed after delete, got: {rows:?}"
     );
 }
+
+// ── PRD 00140 §Phase1: GraphQL rejects structured values on typed scalar columns ──
+
+/// `updateDoogat` with a JSON-array value for a declared scalar column must
+/// return a client-visible error and leave the materialized row unchanged.
+/// The GraphQL transport only accepts string values in the `fields` JSON map;
+/// non-string JSON values are rejected before reaching service validation.
+#[test]
+fn update_doogat_with_json_array_field_returns_error_and_leaves_content_unchanged() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    exec_sql(&server, "CREATE TABLE note (content VARCHAR(500))");
+
+    let r = exec_sql(
+        &server,
+        "INSERT INTO note (content) VALUES ('original content')",
+    );
+    let id = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Verify initial materialized row has the expected content
+    let rows = select_objects(
+        &server,
+        &format!("SELECT content FROM note WHERE id = '{id}'"),
+    );
+    assert_eq!(rows.len(), 1, "initial materialized row must exist");
+    assert_eq!(
+        rows[0]["content"].as_str().unwrap_or(""),
+        "original content",
+        "initial content must match inserted value"
+    );
+
+    // Attempt to update `content` with a JSON array — a structured value that
+    // cannot satisfy a declared scalar column. The transport-layer JSON parse
+    // rejects the non-string array value and returns an error.
+    let r = server.graphql_with_vars(
+        r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id } }"#,
+        serde_json::json!({
+            "input": {
+                "id": id,
+                "fields": "{\"content\":[\"item1\",\"item2\"]}"
+            }
+        }),
+    );
+    assert!(
+        r.get("errors").is_some(),
+        "updateDoogat with a JSON-array field value must return an error; got: {r}"
+    );
+
+    // Content must be unchanged after the rejected update
+    let rows = select_objects(
+        &server,
+        &format!("SELECT content FROM note WHERE id = '{id}'"),
+    );
+    assert_eq!(rows.len(), 1, "row must still exist after failed update");
+    assert_eq!(
+        rows[0]["content"].as_str().unwrap_or(""),
+        "original content",
+        "content must be unchanged after rejected update"
+    );
+}
