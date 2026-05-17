@@ -934,7 +934,7 @@ pub fn generate_unique_id(exists: impl Fn(&str) -> bool) -> DoogatId {
     use std::sync::Mutex;
     static LAST: Mutex<String> = Mutex::new(String::new());
 
-    let mut last = LAST.lock().unwrap();
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     loop {
         let now = chrono::Local::now();
         let candidate = now.format("%Y%m%d%H%M%S").to_string();
