@@ -4643,3 +4643,121 @@ fn typed_batch_update_rejects_structured_value_on_scalar_column() {
         "no commit must be written for a rejected typed batch_update"
     );
 }
+
+// ── PRD 00140 §Phase1: untyped / non-schema-key update behavior unchanged ──
+
+/// Untyped doogat update accepts structured (List) values in extra fields.
+/// Validation only fires for typed doogats with a matching schema; no-schema
+/// updates must keep the legacy "any Value goes to frontmatter" behavior.
+#[test]
+fn untyped_update_accepts_structured_value_for_extra_field() {
+    let (_tmp, svc) = fresh_svc();
+
+    let id = svc.create_doogat("Untyped Note", &[], None, "body").unwrap();
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "notes".to_string(),
+        crate::types::Value::List(vec![
+            crate::types::Value::String("item1".to_string()),
+            crate::types::Value::String("item2".to_string()),
+        ]),
+    );
+
+    let parsed = svc
+        .update_doogat_parsed(
+            &id,
+            None,
+            None,
+            None,
+            None,
+            &ExtraFieldUpdates {
+                set: &fields,
+                unset: &[],
+            },
+        )
+        .expect("untyped update must accept a List value in any extra field");
+
+    match parsed.meta.extra.get("notes") {
+        Some(crate::types::Value::List(items)) => {
+            assert_eq!(items.len(), 2, "List must survive the roundtrip");
+        }
+        other => panic!("expected List in meta.extra['notes'], got {other:?}"),
+    }
+}
+
+/// Typed doogat update accepts structured (List) values for extra keys that
+/// are NOT declared as schema columns. Only declared-column keys are validated;
+/// undeclared extras are forwarded to frontmatter as-is.
+#[test]
+fn typed_update_accepts_structured_value_for_undeclared_extra_field() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE note (content VARCHAR(500))")
+        .unwrap();
+    let ins = svc
+        .execute_sql("INSERT INTO note (content) VALUES ('hello')")
+        .unwrap();
+    let id = match ins {
+        SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+        _ => panic!("expected Ok from INSERT"),
+    };
+
+    // "notes" is not a declared column in the `note` schema → must not be
+    // validated, and must survive as a List in frontmatter.
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "notes".to_string(),
+        crate::types::Value::List(vec![
+            crate::types::Value::String("a".to_string()),
+            crate::types::Value::String("b".to_string()),
+        ]),
+    );
+
+    let parsed = svc
+        .update_doogat_parsed(
+            &id,
+            None,
+            None,
+            None,
+            None,
+            &ExtraFieldUpdates {
+                set: &fields,
+                unset: &[],
+            },
+        )
+        .expect("typed update must accept a List value for a key not in the schema");
+
+    match parsed.meta.extra.get("notes") {
+        Some(crate::types::Value::List(items)) => {
+            assert_eq!(items.len(), 2, "List must survive the roundtrip");
+        }
+        other => panic!("expected List in meta.extra['notes'], got {other:?}"),
+    }
+}
+
+/// `update_doogat_raw` (the FFI / CLI raw-content surface) accepts arbitrary
+/// markdown for an untyped doogat. No typedef schema → no field-level
+/// validation fires.
+#[test]
+fn raw_update_of_untyped_doogat_accepts_arbitrary_content() {
+    let (_tmp, svc) = fresh_svc();
+
+    let id = svc.create_doogat("Original", &[], None, "original body").unwrap();
+
+    let new_content = format!(
+        "---\nid: {id}\ntitle: Updated\ndate: 2026-01-01\n---\nupdated body\n"
+    );
+    svc.update_doogat_raw(&id, &new_content, "raw update")
+        .expect("raw update of an untyped doogat must succeed");
+
+    let read = svc.read_doogat(&id).unwrap();
+    assert!(
+        read.contains("Updated"),
+        "title must reflect raw update, got: {read}"
+    );
+    assert!(
+        read.contains("updated body"),
+        "body must reflect raw update, got: {read}"
+    );
+}
