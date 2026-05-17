@@ -4475,3 +4475,184 @@ fn batch_create_intra_batch_singleton_rejects_second_input_prd_00139() {
         "rejected batch must leave the singleton table empty"
     );
 }
+
+// ── Structured-value rejection on scalar typedef columns ─────────────────────
+
+/// Pins that typed CREATE rejects a `Value::List` supplied for a declared
+/// scalar typedef column. The `stringify_typed_input_fields` path returns
+/// `DoogatError::Validation` in this case, so this test must PASS.
+#[test]
+fn typed_create_rejects_structured_value_on_scalar_column() {
+    let (_tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE note (content VARCHAR(500))")
+        .unwrap();
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "content".to_string(),
+        crate::types::Value::List(vec![
+            crate::types::Value::String("item1".to_string()),
+            crate::types::Value::String("item2".to_string()),
+        ]),
+    );
+
+    let inputs = vec![crate::types::BatchCreateInput {
+        title: Some("Structured Note".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("note".to_string()),
+        fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }];
+
+    let result = svc.batch_create(&inputs);
+    assert!(
+        result.is_err(),
+        "typed create must reject a List value on a declared scalar column"
+    );
+    let err = result.unwrap_err();
+    match err {
+        crate::error::DoogatError::Validation(msg) => {
+            assert!(
+                msg.contains("structured value") || msg.contains("scalar"),
+                "error should describe the structured-vs-scalar mismatch, got: {msg}"
+            );
+        }
+        other => panic!("expected DoogatError::Validation, got {other:?}"),
+    }
+}
+
+/// Pins the GAP: typed UPDATE via `update_doogat_parsed` silently accepts a
+/// `Value::List` on a declared scalar typedef column instead of rejecting it
+/// with `DoogatError::Validation`. This test is RED — it MUST FAIL until the
+/// update path runs the same structured-value guard that CREATE does.
+///
+/// The test also asserts that no mutation side effect occurred (the doogat
+/// content is unchanged after the failed update attempt).
+#[test]
+fn typed_update_rejects_structured_value_on_scalar_column() {
+    let (tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE note (content VARCHAR(500))")
+        .unwrap();
+    let ins = svc
+        .execute_sql("INSERT INTO note (content) VALUES ('original content')")
+        .unwrap();
+    let id = match ins {
+        SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+        _ => panic!("expected Ok from INSERT"),
+    };
+    let commits_before = count_commits(tmp.path());
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "content".to_string(),
+        crate::types::Value::List(vec![
+            crate::types::Value::String("item1".to_string()),
+            crate::types::Value::String("item2".to_string()),
+        ]),
+    );
+
+    let result = svc.update_doogat_parsed(
+        &id,
+        None,
+        None,
+        None,
+        None,
+        &ExtraFieldUpdates {
+            set: &fields,
+            unset: &[],
+        },
+    );
+
+    assert!(
+        result.is_err(),
+        "typed update must reject a List value on a declared scalar column (currently accepts it — this test pins the gap)"
+    );
+    let err = result.unwrap_err();
+    match err {
+        crate::error::DoogatError::Validation(_) => {}
+        other => panic!("expected DoogatError::Validation, got {other:?}"),
+    }
+
+    // Content must be unchanged — no mutation side effect on a rejected update.
+    let parsed = svc.get_doogat_parsed(&id).unwrap();
+    let content_val = parsed.meta.extra.get("content");
+    assert!(
+        matches!(content_val, Some(crate::types::Value::String(s)) if s == "original content"),
+        "doogat content must be unchanged after rejected update, got: {content_val:?}"
+    );
+
+    // No new commit should have been written.
+    let commits_after = count_commits(tmp.path());
+    assert_eq!(
+        commits_before, commits_after,
+        "no commit must be written for a rejected typed update"
+    );
+}
+
+/// Same gap as `typed_update_rejects_structured_value_on_scalar_column` but
+/// exercised through `batch_update`. This test is RED — it MUST FAIL until the
+/// batch-update path runs the structured-value guard.
+///
+/// Also asserts no mutation side effect: the doogat is unchanged after rejection.
+#[test]
+fn typed_batch_update_rejects_structured_value_on_scalar_column() {
+    let (tmp, mut svc) = fresh_svc();
+
+    svc.execute_sql("CREATE TABLE note (content VARCHAR(500))")
+        .unwrap();
+    let ins = svc
+        .execute_sql("INSERT INTO note (content) VALUES ('original content')")
+        .unwrap();
+    let id = match ins {
+        SqlResult::Ok(msg) => msg.split_whitespace().last().unwrap().to_string(),
+        _ => panic!("expected Ok from INSERT"),
+    };
+    let commits_before = count_commits(tmp.path());
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "content".to_string(),
+        crate::types::Value::List(vec![
+            crate::types::Value::String("item1".to_string()),
+            crate::types::Value::String("item2".to_string()),
+        ]),
+    );
+
+    let result = svc.batch_update(&[BatchUpdateInput {
+        id: id.clone(),
+        title: None,
+        body: None,
+        tags: None,
+        doogat_type: None,
+        fields: Some(fields),
+        unset_fields: None,
+    }]);
+
+    assert!(
+        result.is_err(),
+        "typed batch_update must reject a List value on a declared scalar column (currently accepts it — this test pins the gap)"
+    );
+    let err = result.unwrap_err();
+    match err {
+        crate::error::DoogatError::Validation(_) => {}
+        other => panic!("expected DoogatError::Validation, got {other:?}"),
+    }
+
+    // Content must be unchanged — no mutation side effect on a rejected update.
+    let parsed = svc.get_doogat_parsed(&id).unwrap();
+    let content_val = parsed.meta.extra.get("content");
+    assert!(
+        matches!(content_val, Some(crate::types::Value::String(s)) if s == "original content"),
+        "doogat content must be unchanged after rejected batch_update, got: {content_val:?}"
+    );
+
+    // No new commit should have been written.
+    let commits_after = count_commits(tmp.path());
+    assert_eq!(
+        commits_before, commits_after,
+        "no commit must be written for a rejected typed batch_update"
+    );
+}
