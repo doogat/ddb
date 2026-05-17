@@ -284,8 +284,31 @@ pub struct DoogatDriver {
     svc: Mutex<DoogatService>,
 }
 
+impl DoogatDriver {
+    fn with_service<T, F>(&self, f: F) -> Result<T, DdbError>
+    where
+        F: FnOnce(&DoogatService) -> Result<T, DdbError>,
+    {
+        let svc = self.svc.lock().map_err(|e| DdbError::Io {
+            msg: format!("service lock poisoned: {e}"),
+        })?;
+        f(&svc)
+    }
+
+    fn with_service_mut<T, F>(&self, f: F) -> Result<T, DdbError>
+    where
+        F: FnOnce(&mut DoogatService) -> Result<T, DdbError>,
+    {
+        let mut svc = self.svc.lock().map_err(|e| DdbError::Io {
+            msg: format!("service lock poisoned: {e}"),
+        })?;
+        f(&mut svc)
+    }
+}
+
 #[uniffi::export]
 impl DoogatDriver {
+
     /// Open an existing Doogat DB repository.
     #[uniffi::constructor]
     pub fn new(repo_path: String) -> Result<Self, DdbError> {
@@ -305,14 +328,11 @@ impl DoogatDriver {
     }
 
     pub fn create_doogat(&self, content: String, message: String) -> Result<String, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        svc.create_doogat_raw(&content, &message)
-            .map_err(DdbError::from)
+        self.with_service(|svc| svc.create_doogat_raw(&content, &message).map_err(DdbError::from))
     }
 
     pub fn read_doogat(&self, id: String) -> Result<String, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        svc.read_doogat(&id).map_err(DdbError::from)
+        self.with_service(|svc| svc.read_doogat(&id).map_err(DdbError::from))
     }
 
     pub fn update_doogat(
@@ -321,21 +341,24 @@ impl DoogatDriver {
         content: String,
         message: String,
     ) -> Result<(), DdbError> {
-        let svc = self.svc.lock().unwrap();
-        svc.update_doogat_raw(&id, &content, &message)
-            .map_err(DdbError::from)
+        self.with_service(|svc| {
+            svc.update_doogat_raw(&id, &content, &message)
+                .map_err(DdbError::from)
+        })
     }
 
     pub fn delete_doogat(&self, id: String, message: String) -> Result<(), DdbError> {
-        let svc = self.svc.lock().unwrap();
-        svc.delete_doogat(&id, &message).map_err(DdbError::from)?;
-        Ok(())
+        self.with_service(|svc| {
+            svc.delete_doogat(&id, &message).map_err(DdbError::from)?;
+            Ok(())
+        })
     }
 
     pub fn search(&self, query: String) -> Result<Vec<SearchResult>, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let results = svc.search(&query).map_err(DdbError::from)?;
-        Ok(results.into_iter().map(Into::into).collect())
+        self.with_service(|svc| {
+            let results = svc.search(&query).map_err(DdbError::from)?;
+            Ok(results.into_iter().map(Into::into).collect())
+        })
     }
 
     pub fn search_paginated(
@@ -344,76 +367,79 @@ impl DoogatDriver {
         limit: u32,
         offset: u32,
     ) -> Result<PaginatedSearchResult, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let result = svc
-            .search_paginated(&query, limit as usize, offset as usize)
-            .map_err(DdbError::from)?;
-        Ok(result.into())
+        self.with_service(|svc| {
+            let result = svc
+                .search_paginated(&query, limit as usize, offset as usize)
+                .map_err(DdbError::from)?;
+            Ok(result.into())
+        })
     }
 
     pub fn reindex(&self) -> Result<RebuildReport, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let report = svc.reindex().map_err(DdbError::from)?;
-        Ok(RebuildReport {
-            indexed: report.indexed as u64,
-            tables_materialized: report.tables_materialized as u64,
-            types_inferred: report.types_inferred,
+        self.with_service(|svc| {
+            let report = svc.reindex().map_err(DdbError::from)?;
+            Ok(RebuildReport {
+                indexed: report.indexed as u64,
+                tables_materialized: report.tables_materialized as u64,
+                types_inferred: report.types_inferred,
+            })
         })
     }
 
     pub fn register_node(&self, name: String) -> Result<String, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let node = svc.register_node(&name).map_err(DdbError::from)?;
-        Ok(node.uuid)
+        self.with_service(|svc| {
+            let node = svc.register_node(&name).map_err(DdbError::from)?;
+            Ok(node.uuid)
+        })
     }
 
     pub fn compact(&self) -> Result<(), DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let opts = crate::types::CompactOptions {
-            force: true,
-            skip_backup: true,
-            ..Default::default()
-        };
-        svc.compact(&opts).map_err(DdbError::from)?;
-        Ok(())
+        self.with_service(|svc| {
+            let opts = crate::types::CompactOptions {
+                force: true,
+                skip_backup: true,
+                ..Default::default()
+            };
+            svc.compact(&opts).map_err(DdbError::from)?;
+            Ok(())
+        })
     }
 
     pub fn run_maintenance(&self) -> Result<bool, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let report = svc.run_maintenance(None).map_err(DdbError::from)?;
-        Ok(report.success)
+        self.with_service(|svc| {
+            let report = svc.run_maintenance(None).map_err(DdbError::from)?;
+            Ok(report.success)
+        })
     }
 
     pub fn list_doogats(&self) -> Result<Vec<String>, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        svc.list_doogats().map_err(DdbError::from)
+        self.with_service(|svc| svc.list_doogats().map_err(DdbError::from))
     }
 
     pub fn execute_sql(&self, sql: String) -> Result<SqlResultRecord, DdbError> {
-        let mut svc = self.svc.lock().unwrap();
-        let result = svc.execute_sql(&sql).map_err(DdbError::from)?;
-        Ok(result.into())
+        self.with_service_mut(|svc| {
+            let result = svc.execute_sql(&sql).map_err(DdbError::from)?;
+            Ok(result.into())
+        })
     }
 
     pub fn begin_transaction(&self) -> Result<(), DdbError> {
-        let mut svc = self.svc.lock().unwrap();
-        svc.begin_transaction().map_err(DdbError::from)
+        self.with_service_mut(|svc| svc.begin_transaction().map_err(DdbError::from))
     }
 
     pub fn commit_transaction(&self) -> Result<(), DdbError> {
-        let mut svc = self.svc.lock().unwrap();
-        svc.commit_transaction().map_err(DdbError::from)
+        self.with_service_mut(|svc| svc.commit_transaction().map_err(DdbError::from))
     }
 
     pub fn rollback_transaction(&self) -> Result<(), DdbError> {
-        let mut svc = self.svc.lock().unwrap();
-        svc.rollback_transaction().map_err(DdbError::from)
+        self.with_service_mut(|svc| svc.rollback_transaction().map_err(DdbError::from))
     }
 
     pub fn list_type_schemas(&self) -> Result<Vec<TypeSchemaRecord>, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let schemas = svc.list_type_schemas().map_err(DdbError::from)?;
-        Ok(schemas.into_iter().map(Into::into).collect())
+        self.with_service(|svc| {
+            let schemas = svc.list_type_schemas().map_err(DdbError::from)?;
+            Ok(schemas.into_iter().map(Into::into).collect())
+        })
     }
 
     pub fn attach_file(
@@ -432,31 +458,32 @@ impl DoogatDriver {
             })?
             .to_owned();
         let mime = crate::types::AttachmentInfo::mime_from_filename(&filename).to_owned();
-        let svc = self.svc.lock().unwrap();
-        let info = svc
-            .attach_file(&doogat_id, &filename, &bytes, &mime)
-            .map_err(DdbError::from)?;
-        Ok(info.into())
+        self.with_service(|svc| {
+            let info = svc
+                .attach_file(&doogat_id, &filename, &bytes, &mime)
+                .map_err(DdbError::from)?;
+            Ok(info.into())
+        })
     }
 
     pub fn detach_file(&self, doogat_id: String, filename: String) -> Result<(), DdbError> {
-        let svc = self.svc.lock().unwrap();
-        svc.detach_file(&doogat_id, &filename)
-            .map_err(DdbError::from)
+        self.with_service(|svc| svc.detach_file(&doogat_id, &filename).map_err(DdbError::from))
     }
 
     pub fn list_attachments(&self, doogat_id: String) -> Result<Vec<AttachmentInfo>, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let list = svc.list_attachments(&doogat_id).map_err(DdbError::from)?;
-        Ok(list.into_iter().map(AttachmentInfo::from).collect())
+        self.with_service(|svc| {
+            let list = svc.list_attachments(&doogat_id).map_err(DdbError::from)?;
+            Ok(list.into_iter().map(AttachmentInfo::from).collect())
+        })
     }
 
     pub fn export_full_bundle(&self, output_path: String) -> Result<String, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let path = svc
-            .export_full_bundle(Path::new(&output_path))
-            .map_err(DdbError::from)?;
-        Ok(path.to_string_lossy().into_owned())
+        self.with_service(|svc| {
+            let path = svc
+                .export_full_bundle(Path::new(&output_path))
+                .map_err(DdbError::from)?;
+            Ok(path.to_string_lossy().into_owned())
+        })
     }
 
     pub fn export_delta_bundle(
@@ -464,18 +491,20 @@ impl DoogatDriver {
         target_node_uuid: String,
         output_path: String,
     ) -> Result<String, DdbError> {
-        let svc = self.svc.lock().unwrap();
-        let path = svc
-            .export_delta_bundle(&target_node_uuid, Path::new(&output_path))
-            .map_err(DdbError::from)?;
-        Ok(path.to_string_lossy().into_owned())
+        self.with_service(|svc| {
+            let path = svc
+                .export_delta_bundle(&target_node_uuid, Path::new(&output_path))
+                .map_err(DdbError::from)?;
+            Ok(path.to_string_lossy().into_owned())
+        })
     }
 
     pub fn import_bundle(&self, bundle_path: String) -> Result<(), DdbError> {
-        let svc = self.svc.lock().unwrap();
-        svc.import_bundle(Path::new(&bundle_path))
-            .map_err(DdbError::from)?;
-        Ok(())
+        self.with_service(|svc| {
+            svc.import_bundle(Path::new(&bundle_path))
+                .map_err(DdbError::from)?;
+            Ok(())
+        })
     }
 }
 
