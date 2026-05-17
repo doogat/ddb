@@ -4476,11 +4476,9 @@ fn batch_create_intra_batch_singleton_rejects_second_input_prd_00139() {
     );
 }
 
-// ── Structured-value rejection on scalar typedef columns ─────────────────────
+// Structured-value rejection on scalar typedef columns.
 
-/// Pins that typed CREATE rejects a `Value::List` supplied for a declared
-/// scalar typedef column. The `stringify_typed_input_fields` path returns
-/// `DoogatError::Validation` in this case, so this test must PASS.
+/// Typed CREATE rejects a structured value supplied for a scalar typedef column.
 #[test]
 fn typed_create_rejects_structured_value_on_scalar_column() {
     let (_tmp, mut svc) = fresh_svc();
@@ -4506,12 +4504,9 @@ fn typed_create_rejects_structured_value_on_scalar_column() {
         on_conflict: crate::types::ConflictAction::Error,
     }];
 
-    let result = svc.batch_create(&inputs);
-    assert!(
-        result.is_err(),
-        "typed create must reject a List value on a declared scalar column"
-    );
-    let err = result.unwrap_err();
+    let err = svc
+        .batch_create(&inputs)
+        .expect_err("typed create must reject a List value on a declared scalar column");
     match err {
         crate::error::DoogatError::Validation(msg) => {
             assert!(
@@ -4523,13 +4518,8 @@ fn typed_create_rejects_structured_value_on_scalar_column() {
     }
 }
 
-/// Pins the GAP: typed UPDATE via `update_doogat_parsed` silently accepts a
-/// `Value::List` on a declared scalar typedef column instead of rejecting it
-/// with `DoogatError::Validation`. This test is RED — it MUST FAIL until the
-/// update path runs the same structured-value guard that CREATE does.
-///
-/// The test also asserts that no mutation side effect occurred (the doogat
-/// content is unchanged after the failed update attempt).
+/// Typed UPDATE rejects a structured value supplied for a scalar typedef column
+/// without mutating content or creating a commit.
 #[test]
 fn typed_update_rejects_structured_value_on_scalar_column() {
     let (tmp, mut svc) = fresh_svc();
@@ -4554,29 +4544,24 @@ fn typed_update_rejects_structured_value_on_scalar_column() {
         ]),
     );
 
-    let result = svc.update_doogat_parsed(
-        &id,
-        None,
-        None,
-        None,
-        None,
-        &ExtraFieldUpdates {
-            set: &fields,
-            unset: &[],
-        },
-    );
-
-    assert!(
-        result.is_err(),
-        "typed update must reject a List value on a declared scalar column (currently accepts it — this test pins the gap)"
-    );
-    let err = result.unwrap_err();
+    let err = svc
+        .update_doogat_parsed(
+            &id,
+            None,
+            None,
+            None,
+            None,
+            &ExtraFieldUpdates {
+                set: &fields,
+                unset: &[],
+            },
+        )
+        .expect_err("typed update must reject a List value on a declared scalar column");
     match err {
         crate::error::DoogatError::Validation(_) => {}
         other => panic!("expected DoogatError::Validation, got {other:?}"),
     }
 
-    // Content must be unchanged — no mutation side effect on a rejected update.
     let parsed = svc.get_doogat_parsed(&id).unwrap();
     let content_val = parsed.meta.extra.get("content");
     assert!(
@@ -4584,7 +4569,6 @@ fn typed_update_rejects_structured_value_on_scalar_column() {
         "doogat content must be unchanged after rejected update, got: {content_val:?}"
     );
 
-    // No new commit should have been written.
     let commits_after = count_commits(tmp.path());
     assert_eq!(
         commits_before, commits_after,
@@ -4592,11 +4576,8 @@ fn typed_update_rejects_structured_value_on_scalar_column() {
     );
 }
 
-/// Same gap as `typed_update_rejects_structured_value_on_scalar_column` but
-/// exercised through `batch_update`. This test is RED — it MUST FAIL until the
-/// batch-update path runs the structured-value guard.
-///
-/// Also asserts no mutation side effect: the doogat is unchanged after rejection.
+/// Batch UPDATE rejects a structured value supplied for a scalar typedef column
+/// without mutating content or creating a commit.
 #[test]
 fn typed_batch_update_rejects_structured_value_on_scalar_column() {
     let (tmp, mut svc) = fresh_svc();
@@ -4621,27 +4602,22 @@ fn typed_batch_update_rejects_structured_value_on_scalar_column() {
         ]),
     );
 
-    let result = svc.batch_update(&[BatchUpdateInput {
-        id: id.clone(),
-        title: None,
-        body: None,
-        tags: None,
-        doogat_type: None,
-        fields: Some(fields),
-        unset_fields: None,
-    }]);
-
-    assert!(
-        result.is_err(),
-        "typed batch_update must reject a List value on a declared scalar column (currently accepts it — this test pins the gap)"
-    );
-    let err = result.unwrap_err();
+    let err = svc
+        .batch_update(&[BatchUpdateInput {
+            id: id.clone(),
+            title: None,
+            body: None,
+            tags: None,
+            doogat_type: None,
+            fields: Some(fields),
+            unset_fields: None,
+        }])
+        .expect_err("typed batch_update must reject a List value on a declared scalar column");
     match err {
         crate::error::DoogatError::Validation(_) => {}
         other => panic!("expected DoogatError::Validation, got {other:?}"),
     }
 
-    // Content must be unchanged — no mutation side effect on a rejected update.
     let parsed = svc.get_doogat_parsed(&id).unwrap();
     let content_val = parsed.meta.extra.get("content");
     assert!(
@@ -4649,7 +4625,6 @@ fn typed_batch_update_rejects_structured_value_on_scalar_column() {
         "doogat content must be unchanged after rejected batch_update, got: {content_val:?}"
     );
 
-    // No new commit should have been written.
     let commits_after = count_commits(tmp.path());
     assert_eq!(
         commits_before, commits_after,
