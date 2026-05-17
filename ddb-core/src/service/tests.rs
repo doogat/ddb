@@ -4563,9 +4563,15 @@ fn typed_update_rejects_structured_value_on_scalar_column() {
     }
 
     let parsed = svc.get_doogat_parsed(&id).unwrap();
-    let content_val = parsed.meta.extra.get("content");
+    // VARCHAR(500) is body-zone (> 255 length cap); build_data_doogat stores it
+    // as a "## content" section, not in meta.extra or inline_fields.
+    let content_val = parsed
+        .sections
+        .iter()
+        .find(|s| s.heading == "content")
+        .map(|s| s.content.trim());
     assert!(
-        matches!(content_val, Some(crate::types::Value::String(s)) if s == "original content"),
+        content_val == Some("original content"),
         "doogat content must be unchanged after rejected update, got: {content_val:?}"
     );
 
@@ -4619,9 +4625,15 @@ fn typed_batch_update_rejects_structured_value_on_scalar_column() {
     }
 
     let parsed = svc.get_doogat_parsed(&id).unwrap();
-    let content_val = parsed.meta.extra.get("content");
+    // VARCHAR(500) is body-zone (> 255 length cap); build_data_doogat stores it
+    // as a "## content" section, not in meta.extra or inline_fields.
+    let content_val = parsed
+        .sections
+        .iter()
+        .find(|s| s.heading == "content")
+        .map(|s| s.content.trim());
     assert!(
-        matches!(content_val, Some(crate::types::Value::String(s)) if s == "original content"),
+        content_val == Some("original content"),
         "doogat content must be unchanged after rejected batch_update, got: {content_val:?}"
     );
 
