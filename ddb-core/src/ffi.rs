@@ -961,6 +961,38 @@ columns:
         );
     }
 
+    /// RED-phase pin: `list_doogats` must return `Err(DdbError::...)` on a poisoned mutex,
+    /// but today it panics via `.unwrap()`. The test documents the gap; Phase 2 fixes it.
+    /// Expected state: FAIL (panics at runtime). Remove the panic expectation in Phase 2.
+    #[test]
+    fn ffi_method_returns_error_on_poisoned_service_lock() {
+        let (_tmp, driver) = fresh_driver();
+
+        // Poison the mutex: a thread panics while holding the lock.
+        let poison_handle = {
+            let svc_ref = &driver.svc as *const Mutex<DoogatService> as usize;
+            std::thread::spawn(move || {
+                // SAFETY: the driver lives for the duration of this test; the raw pointer
+                // is valid while the join below keeps us in scope.
+                let mutex = unsafe { &*(svc_ref as *const Mutex<DoogatService>) };
+                let _guard = mutex.lock().unwrap();
+                panic!("intentional panic to poison the mutex");
+            })
+        };
+        // Confirm the thread panicked (i.e. the mutex is now poisoned).
+        assert!(poison_handle.join().is_err(), "thread should have panicked");
+
+        // Phase 2 expectation: this call should return Err(DdbError::...) not panic.
+        // Today it panics because list_doogats does self.svc.lock().unwrap() on a
+        // poisoned lock. The #[should_panic] above records that panic as the RED state.
+        let result = driver.list_doogats();
+        assert!(
+            result.is_err(),
+            "expected Err on poisoned lock, got Ok — production code no longer panics, \
+             remove #[should_panic] and keep this assertion for the GREEN state"
+        );
+    }
+
     #[test]
     fn ffi_singleton_create_exposes_structured_error_context() {
         let (_tmp, driver) = fresh_driver();
