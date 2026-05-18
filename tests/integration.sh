@@ -2117,7 +2117,10 @@ fi
 
 # 51.A. GraphQL singleton flow (T20 §A)
 VER=$(gql '{"query":"{ schemaVersion }"}' | jq -r '.data.schemaVersion // 0')
-$DDB query "CREATE TABLE ig_app_config (theme TEXT) SINGLETON" | grep -q "table ig_app_config created"
+# Route DDL through GraphQL executeSql so the running server's schema reload
+# fires; a raw `ddb query` mutates the repo but never wakes the server (see
+# the section 52.B note below).
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_app_config (theme TEXT) SINGLETON\") { message } }"}' | jq -e '.data.executeSql.message | contains("ig_app_config")' >/dev/null
 wait_schema_reload "$VER"
 
 IG_APP_EMPTY=$(gql '{"query":"{ ig_app_config { id theme } }"}')
@@ -2158,7 +2161,8 @@ printf '%s' "$IG_APP_CREATE_FAIL" | jq -e '.errors[0].extensions.code == "SINGLE
 pass "51.A: createDoogat rejects a second ig_app_config row with SINGLETON_VIOLATION"
 
 VER=$(gql '{"query":"{ schemaVersion }"}' | jq -r '.data.schemaVersion // 0')
-$DDB query "DROP TABLE ig_app_config CASCADE" | grep -q "dropped"
+# DROP via GraphQL executeSql so the server reloads its schema (see 51.A note).
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE ig_app_config CASCADE\") { message } }"}' | jq -e '.data.executeSql.message | contains("dropped")' >/dev/null
 wait_schema_reload "$VER"
 
 # 52.B. ALTER TABLE SET/DROP SINGLETON (T20 §B)

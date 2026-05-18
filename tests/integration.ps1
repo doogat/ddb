@@ -1974,7 +1974,9 @@ ddl 'mutation { executeSql(sql: "DROP TABLE rngql_dst") { message } }'
 
 # 51.A - GraphQL singleton flow (T20 §A)
 $ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
-$output = ddb query "CREATE TABLE ig_app_config (theme TEXT) SINGLETON"
+# Route DDL through GraphQL executeSql so the running server's schema reload
+# fires; a raw `ddb query` mutates the repo but never wakes the server.
+$output = gqlq 'mutation { executeSql(sql: "CREATE TABLE ig_app_config (theme TEXT) SINGLETON") { message } }'
 if ($output -notmatch "table ig_app_config created") { throw "51.A: ig_app_config create failed: $output" }
 waitSchemaReload $ver
 
@@ -2032,7 +2034,8 @@ if ($igAppCreateFailObj.errors[0].extensions.code -ne "SINGLETON_VIOLATION") {
 pass "51.A: createDoogat rejects a second ig_app_config row with SINGLETON_VIOLATION"
 
 $ver = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
-$output = ddb query "DROP TABLE ig_app_config CASCADE"
+# DROP via GraphQL executeSql so the server reloads its schema (see 51.A note).
+$output = gqlq 'mutation { executeSql(sql: "DROP TABLE ig_app_config CASCADE") { message } }'
 if ($output -notmatch "dropped") { throw "51.A: ig_app_config drop failed: $output" }
 waitSchemaReload $ver
 

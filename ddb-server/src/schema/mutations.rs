@@ -604,9 +604,14 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                                 (updated.meta.id.map(|id| id.0).unwrap_or(id), false)
                             }
                             None => {
+                                // Singleton upsert input carries fields only, no
+                                // title. The service typed-create path requires a
+                                // title (unlike the SQL INSERT path, which falls
+                                // back to "{type} {id}"), so default it to the
+                                // type name — deterministic for a one-row table.
                                 let created = a
                                     .create_doogat(
-                                        None,
+                                        Some(table_name.clone()),
                                         None,
                                         vec![],
                                         Some(table_name.clone()),

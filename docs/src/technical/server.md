@@ -278,6 +278,8 @@ Field-name shape mirrors the typedef's snake-case `table_name` (e.g. `app_config
 
 Constraint violations on `createDoogat` / typed `INSERT` against a populated SINGLETON typedef carry `extensions.code = "SINGLETON_VIOLATION"` plus structured `table` and `existing_id` context (mirroring the `UNIQUE_VIOLATION` envelope from PRD 00129 §6). `update_<type>` against an empty typedef returns `SINGLETON_NOT_FOUND` with `table` context.
 
+`upsert_<type>` input is a JSON object of typed field values only; it carries no `title`. When the upsert creates the first row, the resolver defaults that row's title to the type name (e.g. `app_config`), since the service typed-create path requires a title.
+
 The plural query field (`<type_name>s`) and `createDoogat` are still generated for SINGLETON typedefs (backward compat); `createDoogat` rejects with `SINGLETON_VIOLATION` once a row exists. ALTER TABLE `SET/DROP SINGLETON` triggers the existing schema reload (any DDL through `executeSql` does so per `mutations.rs::executeSql`); the singular field appears or disappears on the next `schemaVersion` poll.
 
 ### Search query syntax
