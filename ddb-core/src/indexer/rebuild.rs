@@ -210,6 +210,9 @@ impl Index {
                     |row| row.get(0),
                 ) {
                     Ok(p) => p,
+                    // No `_typedef` for this type is the normal case — the
+                    // type's schema is inferred elsewhere. Not a failure.
+                    Err(rusqlite::Error::QueryReturnedNoRows) => return None,
                     Err(e) => {
                         tracing::warn!(error = %e, type_name, "materialize: typedef path query failed, type skipped");
                         return None;
