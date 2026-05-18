@@ -572,6 +572,14 @@ impl Index {
     }
 
     /// Get non-core column names from a materialized type table via PRAGMA.
+    ///
+    /// Returns `None` on any operational failure (PRAGMA prepare or `query_map`
+    /// failure) and `Some(cols)` only on success. Both failure modes are
+    /// best-effort: the sole caller (`enrich_search_hits`) treats `None` and an
+    /// empty column set identically — it skips materialized-column enrichment
+    /// for that type. Enrichment is an additive convenience over the base
+    /// search hit, so a failure here degrades gracefully rather than failing
+    /// the search; the `tracing::warn!` calls below make the degradation visible.
     fn materialized_column_names(&self, type_name: &str) -> Option<Vec<String>> {
         use super::materialize::is_core_column;
 
@@ -594,7 +602,7 @@ impl Index {
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, type_name, "materialized_column_names: query_map failed");
-                    Some(vec![])
+                    None
                 }
             },
             Err(e) => {

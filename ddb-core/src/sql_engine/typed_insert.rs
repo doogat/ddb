@@ -123,6 +123,13 @@ fn parse_next_partition(default: &str) -> Option<&str> {
 }
 
 fn seed_bare_next(conn: &rusqlite::Connection, table: &str, col: &str) -> Result<i64> {
+    // Best-effort guard: `table`/`col` come from a typedef's validated schema,
+    // so an unsafe identifier cannot occur in practice. This is defense-in-depth
+    // against SQL injection — the identifiers are string-formatted into the
+    // query below, so an unsafe one must never reach `query_row`. Seeding `0`
+    // (counter starts at 1) is the safe fallback: the alternative is formatting
+    // the unsafe identifier into SQL, which is the injection vector being
+    // prevented. Identical guard in `seed_partitioned_next` and `check_row_exists`.
     if !is_safe_sql_identifier(table) || !is_safe_sql_identifier(col) {
         return Ok(0);
     }
@@ -141,6 +148,9 @@ fn seed_partitioned_next(
     partition_col: &str,
     partition_val: &str,
 ) -> Result<i64> {
+    // Best-effort guard: see `seed_bare_next` — identifiers come from a
+    // validated typedef schema; `0` is the safe seed when the defense-in-depth
+    // SQL-injection check rejects an identifier that should never occur.
     if !is_safe_sql_identifier(table)
         || !is_safe_sql_identifier(col)
         || !is_safe_sql_identifier(partition_col)
