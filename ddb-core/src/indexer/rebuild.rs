@@ -204,18 +204,38 @@ impl Index {
                 continue;
             }
             let schema_opt = schemas.entry(type_name.to_string()).or_insert_with(|| {
-                let typedef_path: Option<String> = self
-                    .conn
-                    .query_row(
-                        "SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1 LIMIT 1",
-                        rusqlite::params![type_name],
-                        |row| row.get(0),
-                    )
-                    .ok();
-                let typedef_path = typedef_path?;
-                let typedef_content = repo.read_file(&typedef_path).ok()?;
-                let typedef_parsed = crate::parser::parse(&typedef_content, &typedef_path).ok()?;
-                schema_from_parsed(&typedef_parsed).ok()
+                let typedef_path: String = match self.conn.query_row(
+                    "SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1 LIMIT 1",
+                    rusqlite::params![type_name],
+                    |row| row.get(0),
+                ) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, "materialize: typedef path query failed, type skipped");
+                        return None;
+                    }
+                };
+                let typedef_content = match repo.read_file(&typedef_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, path = %typedef_path, "materialize: typedef file read failed, type skipped");
+                        return None;
+                    }
+                };
+                let typedef_parsed = match crate::parser::parse(&typedef_content, &typedef_path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, path = %typedef_path, "materialize: typedef parse failed, type skipped");
+                        return None;
+                    }
+                };
+                match schema_from_parsed(&typedef_parsed) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, "materialize: schema extraction failed, type skipped");
+                        None
+                    }
+                }
             });
             let Some(schema) = schema_opt.as_ref() else {
                 continue;

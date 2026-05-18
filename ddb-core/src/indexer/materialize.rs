@@ -223,11 +223,28 @@ impl Index {
                 .conn
                 .prepare("SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1")?;
             let path: Option<String> = stmt.query_row(params![type_name], |row| row.get(0)).ok();
-            path.and_then(|p| {
-                let content = repo.read_file(&p).ok()?;
-                let parsed = crate::parser::parse(&content, &p).ok()?;
-                schema_from_parsed(&parsed).ok()
-            })
+            match path {
+                None => None,
+                Some(p) => match repo.read_file(&p) {
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, path = %p, "rematerialize_type: typedef file read failed");
+                        None
+                    }
+                    Ok(content) => match crate::parser::parse(&content, &p) {
+                        Err(e) => {
+                            tracing::warn!(error = %e, type_name, path = %p, "rematerialize_type: typedef parse failed");
+                            None
+                        }
+                        Ok(parsed) => match schema_from_parsed(&parsed) {
+                            Err(e) => {
+                                tracing::warn!(error = %e, type_name, "rematerialize_type: schema extraction failed");
+                                None
+                            }
+                            Ok(s) => Some(s),
+                        },
+                    },
+                },
+            }
         };
 
         // Infer schema from data
@@ -537,12 +554,23 @@ impl Index {
             .unwrap_or_default();
 
         for path in &paths {
-            if let Ok(content) = repo.read_file(path) {
-                if let Ok(parsed) = crate::parser::parse(&content, path) {
-                    if let Ok(schema) = schema_from_parsed(&parsed) {
-                        schemas.insert(schema.table_name.clone(), schema);
-                    }
+            match repo.read_file(path) {
+                Err(e) => {
+                    tracing::warn!(error = %e, path, "load_all_typedefs: typedef file read failed, skipped");
                 }
+                Ok(content) => match crate::parser::parse(&content, path) {
+                    Err(e) => {
+                        tracing::warn!(error = %e, path, "load_all_typedefs: typedef parse failed, skipped");
+                    }
+                    Ok(parsed) => match schema_from_parsed(&parsed) {
+                        Err(e) => {
+                            tracing::warn!(error = %e, path, "load_all_typedefs: schema extraction failed, skipped");
+                        }
+                        Ok(schema) => {
+                            schemas.insert(schema.table_name.clone(), schema);
+                        }
+                    },
+                },
             }
         }
 
