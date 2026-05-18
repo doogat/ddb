@@ -195,9 +195,18 @@ impl Index {
         let mut data_stmt = self.conn.prepare(
             "SELECT id, path FROM doogats WHERE type = ?1 AND path NOT LIKE 'ddb/_conflicts/%' ORDER BY path ASC",
         )?;
+        // A row-decode failure here means the SQLite index is corrupt. Warn
+        // rather than silently drop the row (PRD 00140). Triggering this needs
+        // SQLite-level corruption, so the warn arm is covered by inspection.
         let data_doogats: Vec<(String, String)> = data_stmt
             .query_map(params![type_name], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!(error = %e, type_name, "populate_materialized_table: doogat row decode failed; row skipped");
+                    None
+                }
+            })
             .collect();
 
         for (doogat_id, doogat_path) in &data_doogats {
@@ -280,9 +289,17 @@ impl Index {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT type FROM doogats WHERE type != '_typedef' AND type != '' AND type IS NOT NULL",
         )?;
+        // Warn on row-decode failure instead of dropping the type silently
+        // (PRD 00140); the warn arm requires a corrupt index to reach.
         let type_names: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!(error = %e, "materialize_all_types: type-name row decode failed; type skipped");
+                    None
+                }
+            })
             .collect();
 
         for type_name in &type_names {
@@ -342,9 +359,17 @@ impl Index {
              AND name NOT LIKE '\\_ddb\\_%' ESCAPE '\\' \
              AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
         )?;
+        // Warn on row-decode failure instead of dropping the table name
+        // silently (PRD 00140); the warn arm requires a corrupt index to reach.
         let names: Vec<String> = stmt
             .query_map([], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!(error = %e, "drop_orphan_materialized_tables: table-name row decode failed; table skipped");
+                    None
+                }
+            })
             .collect();
         drop(stmt);
 
@@ -460,9 +485,17 @@ impl Index {
         let mut stmt = self.conn.prepare(
             "SELECT path FROM doogats WHERE type = ?1 AND path NOT LIKE 'ddb/_conflicts/%'",
         )?;
+        // Warn on row-decode failure instead of dropping the path silently
+        // (PRD 00140); the warn arm requires a corrupt index to reach.
         let paths: Vec<String> = stmt
             .query_map(params![type_name], |row| row.get(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!(error = %e, type_name, "infer_schema: path row decode failed; row skipped");
+                    None
+                }
+            })
             .collect();
 
         let mut columns: HashMap<String, (crate::types::Zone, Vec<String>)> = HashMap::new();
@@ -691,9 +724,17 @@ impl Index {
                     table_name, col.name
                 );
                 let mut stmt = self.conn.prepare(&sql)?;
+                // Warn on row-decode failure instead of dropping the child id
+                // silently (PRD 00140); the warn arm requires a corrupt index.
                 let rows = stmt
                     .query_map(params![deleted_id], |row| row.get::<_, String>(0))?
-                    .filter_map(|r| r.ok());
+                    .filter_map(|r| match r {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            tracing::warn!(error = %e, table_name, "cascade child scan: child-id row decode failed; row skipped");
+                            None
+                        }
+                    });
                 for child_id in rows {
                     out.push((table_name.clone(), child_id));
                 }

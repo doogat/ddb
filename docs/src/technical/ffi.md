@@ -118,6 +118,16 @@ Returns `SqlResultRecord`:
 | `Toml(msg)` | `Config { msg }` |
 | `VersionMismatch { repo, driver }` | `VersionMismatch { msg: "..." }` |
 
+### Service lock access
+
+`DoogatDriver` holds its `DoogatService` behind a `Mutex`. Every FFI method
+reaches the service through the central helpers `with_service` and
+`with_service_mut`, never `lock().unwrap()`. If an earlier call panicked while
+holding the lock the mutex is poisoned; the helpers map `PoisonError` to
+`DdbError::Io { msg: "service lock poisoned: ..." }` instead of letting the
+panic cross the FFI boundary. Callers therefore always receive a typed error
+after a poisoned lock, never a Rust panic.
+
 ## FFI Records
 
 - `SearchResult` — `{ id, title, path, snippet, rank }` (mirrors `types::SearchResult`)
