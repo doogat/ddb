@@ -16,7 +16,7 @@
 //! index, producing four user-visible defects (see PRD 00133
 //! unify-typed-write-paths-v1).
 
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 
 use crate::error::{DoogatError, Result};
 use crate::types::{ColumnDef, TableSchema};
@@ -84,31 +84,32 @@ fn resolve_default(
     conn: &rusqlite::Connection,
 ) -> Result<String> {
     if default == "NEXT" {
-        if !counters.bare.contains_key(&col_def.name) {
-            let seed = seed_bare_next(conn, &schema.table_name, &col_def.name)?;
-            counters.bare.insert(col_def.name.clone(), seed);
-        }
-        let counter = counters.bare.get_mut(&col_def.name).expect("just inserted");
+        let counter = match counters.bare.entry(col_def.name.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let seed = seed_bare_next(conn, &schema.table_name, &col_def.name)?;
+                entry.insert(seed)
+            }
+        };
         *counter += 1;
         return Ok(counter.to_string());
     }
     if let Some(partition_col) = parse_next_partition(default) {
         let partition_val = col_values.get(partition_col).cloned().unwrap_or_default();
         let key = (col_def.name.clone(), partition_val.clone());
-        if !counters.partitioned.contains_key(&key) {
-            let seed = seed_partitioned_next(
-                conn,
-                &schema.table_name,
-                &col_def.name,
-                partition_col,
-                &partition_val,
-            )?;
-            counters.partitioned.insert(key.clone(), seed);
-        }
-        let counter = counters
-            .partitioned
-            .get_mut(&key)
-            .expect("just inserted");
+        let counter = match counters.partitioned.entry(key) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let seed = seed_partitioned_next(
+                    conn,
+                    &schema.table_name,
+                    &col_def.name,
+                    partition_col,
+                    &partition_val,
+                )?;
+                entry.insert(seed)
+            }
+        };
         *counter += 1;
         return Ok(counter.to_string());
     }

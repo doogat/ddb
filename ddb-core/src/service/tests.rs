@@ -4644,8 +4644,6 @@ fn typed_batch_update_rejects_structured_value_on_scalar_column() {
     );
 }
 
-// ── PRD 00140 §Phase1: untyped / non-schema-key update behavior unchanged ──
-
 /// Untyped doogat update accepts structured (List) values in extra fields.
 /// Validation only fires for typed doogats with a matching schema; no-schema
 /// updates must keep the legacy "any Value goes to frontmatter" behavior.
@@ -4653,7 +4651,9 @@ fn typed_batch_update_rejects_structured_value_on_scalar_column() {
 fn untyped_update_accepts_structured_value_for_extra_field() {
     let (_tmp, svc) = fresh_svc();
 
-    let id = svc.create_doogat("Untyped Note", &[], None, "body").unwrap();
+    let id = svc
+        .create_doogat("Untyped Note", &[], None, "body")
+        .unwrap();
 
     let mut fields = std::collections::BTreeMap::new();
     fields.insert(
@@ -4680,7 +4680,14 @@ fn untyped_update_accepts_structured_value_for_extra_field() {
 
     match parsed.meta.extra.get("notes") {
         Some(crate::types::Value::List(items)) => {
-            assert_eq!(items.len(), 2, "List must survive the roundtrip");
+            assert_eq!(
+                items.as_slice(),
+                &[
+                    crate::types::Value::String("item1".to_string()),
+                    crate::types::Value::String("item2".to_string()),
+                ],
+                "List values must survive the roundtrip"
+            );
         }
         other => panic!("expected List in meta.extra['notes'], got {other:?}"),
     }
@@ -4730,7 +4737,14 @@ fn typed_update_accepts_structured_value_for_undeclared_extra_field() {
 
     match parsed.meta.extra.get("notes") {
         Some(crate::types::Value::List(items)) => {
-            assert_eq!(items.len(), 2, "List must survive the roundtrip");
+            assert_eq!(
+                items.as_slice(),
+                &[
+                    crate::types::Value::String("a".to_string()),
+                    crate::types::Value::String("b".to_string()),
+                ],
+                "List values must survive the roundtrip"
+            );
         }
         other => panic!("expected List in meta.extra['notes'], got {other:?}"),
     }
@@ -4743,11 +4757,12 @@ fn typed_update_accepts_structured_value_for_undeclared_extra_field() {
 fn raw_update_of_untyped_doogat_accepts_arbitrary_content() {
     let (_tmp, svc) = fresh_svc();
 
-    let id = svc.create_doogat("Original", &[], None, "original body").unwrap();
+    let id = svc
+        .create_doogat("Original", &[], None, "original body")
+        .unwrap();
 
-    let new_content = format!(
-        "---\nid: {id}\ntitle: Updated\ndate: 2026-01-01\n---\nupdated body\n"
-    );
+    let new_content =
+        format!("---\nid: {id}\ntitle: Updated\ndate: 2026-01-01\n---\nupdated body\n");
     svc.update_doogat_raw(&id, &new_content, "raw update")
         .expect("raw update of an untyped doogat must succeed");
 

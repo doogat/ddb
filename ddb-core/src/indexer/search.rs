@@ -578,10 +578,9 @@ impl Index {
         let safe_name = escape_sql_ident(type_name);
         let pragma_sql = format!("PRAGMA table_info(\"{}\")", safe_name);
         match self.conn.prepare(&pragma_sql) {
-            Ok(mut stmt) => {
-                match stmt.query_map([], |row| row.get::<_, String>(1)) {
-                    Ok(rows) => {
-                        let cols = rows
+            Ok(mut stmt) => match stmt.query_map([], |row| row.get::<_, String>(1)) {
+                Ok(rows) => {
+                    let cols = rows
                             .filter_map(|r| match r {
                                 Ok(name) => Some(name),
                                 Err(e) => {
@@ -591,14 +590,13 @@ impl Index {
                             })
                             .filter(|name| !is_core_column(name))
                             .collect();
-                        Some(cols)
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, type_name, "materialized_column_names: query_map failed");
-                        Some(vec![])
-                    }
+                    Some(cols)
                 }
-            }
+                Err(e) => {
+                    tracing::warn!(error = %e, type_name, "materialized_column_names: query_map failed");
+                    Some(vec![])
+                }
+            },
             Err(e) => {
                 tracing::warn!(error = %e, type_name, "enrich_search_hits: PRAGMA failed");
                 None

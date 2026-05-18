@@ -308,7 +308,6 @@ impl DoogatDriver {
 
 #[uniffi::export]
 impl DoogatDriver {
-
     /// Open an existing Doogat DB repository.
     #[uniffi::constructor]
     pub fn new(repo_path: String) -> Result<Self, DdbError> {
@@ -328,7 +327,10 @@ impl DoogatDriver {
     }
 
     pub fn create_doogat(&self, content: String, message: String) -> Result<String, DdbError> {
-        self.with_service(|svc| svc.create_doogat_raw(&content, &message).map_err(DdbError::from))
+        self.with_service(|svc| {
+            svc.create_doogat_raw(&content, &message)
+                .map_err(DdbError::from)
+        })
     }
 
     pub fn read_doogat(&self, id: String) -> Result<String, DdbError> {
@@ -467,7 +469,10 @@ impl DoogatDriver {
     }
 
     pub fn detach_file(&self, doogat_id: String, filename: String) -> Result<(), DdbError> {
-        self.with_service(|svc| svc.detach_file(&doogat_id, &filename).map_err(DdbError::from))
+        self.with_service(|svc| {
+            svc.detach_file(&doogat_id, &filename)
+                .map_err(DdbError::from)
+        })
     }
 
     pub fn list_attachments(&self, doogat_id: String) -> Result<Vec<AttachmentInfo>, DdbError> {

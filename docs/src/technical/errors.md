@@ -112,7 +112,7 @@ Uses `tracing` (library) + `tracing-subscriber` (CLI) for structured observabili
 | compaction | `shared_head_computed`, `crdt_temp_cleanup`, `gc_result` | info/debug |
 | indexer | `rebuild_triggered`, `rebuild_complete`, `corruption_detected` | info/warn |
 | indexer | typedef file read / parse / schema extraction failed during materialization | warn |
-| indexer | row dropped in `list_doogats_filtered` due to file read or parse failure | warn |
+| service | row dropped in `list_doogats_filtered` due to file read or parse failure | warn |
 | indexer | row dropped in `fetch_materialized_fields` due to query or deserialization failure | warn |
 | git_ops | `repo_opened`, orphan cleanup | debug/warn |
 

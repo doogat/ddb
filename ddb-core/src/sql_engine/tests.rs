@@ -8615,30 +8615,6 @@ fn sql_update_single_row_rolls_back_materialized_when_junction_sync_fails() {
     );
 }
 
-// ── Phase-0 pinning tests: DEFAULT NEXT counter / FK query-failure propagation ──
-//
-// These tests EXPECT TO FAIL until Phase 3 lands. They pin the current silent
-// failure behavior so Phase 3 has a clear red→green signal.
-//
-// The gap (typed_insert.rs):
-//   • `seed_bare_next` / `seed_partitioned_next` return `i64` and swallow
-//     genuine SQLite errors with `unwrap_or(0)`, silently producing a wrong
-//     counter start (data corruption, no error returned).
-//   • `check_row_exists` returns `bool` and swallows genuine SQLite errors with
-//     `unwrap_or(false)`, silently turning an infrastructure failure into a false
-//     DanglingReference (wrong error kind, masking the real cause).
-//
-// Counter test strategy: call `prepare_typed_insert_validate` directly with an
-// in-memory SQLite connection whose `ranked` table lacks the `pos` column. The
-// seed query `SELECT COALESCE(MAX("pos"), 0) FROM "ranked"` then genuinely fails
-// at the SQLite level. `prepare_typed_insert_validate` returns `Result<()>`, so
-// a propagated error compiles without any API change. Today the error is swallowed
-// and `Ok(())` is returned, so the assert fails.
-//
-// FK test strategy: sabotage the `people` materialized table by renaming its
-// `id` column. `check_row_exists` then hits a genuine query error and
-// `unwrap_or(false)` silently converts it to a false DanglingReference.
-
 /// Helper: build a minimal `TableSchema` with a single DEFAULT NEXT column.
 fn schema_with_bare_next() -> crate::types::TableSchema {
     crate::types::TableSchema {
@@ -8710,23 +8686,14 @@ fn schema_with_partitioned_next() -> crate::types::TableSchema {
 /// error from `prepare_typed_insert_validate` instead of being silently
 /// swallowed (returning `Ok(())` with a wrong counter of 0).
 ///
-/// Setup: an in-memory SQLite connection with a `ranked` table that has only
-/// an `id` column — no `pos` column. The seed query
-/// `SELECT COALESCE(MAX("pos"), 0) FROM "ranked"` genuinely fails.
-///
-/// EXPECTED TO FAIL until Phase 3 changes `seed_bare_next` to return
-/// `Result<i64>` and propagates the error through `fill_column_defaults` →
-/// `prepare_typed_insert_validate`.
+/// Setup: an in-memory SQLite connection with no `ranked` materialized table.
+/// The seed query `SELECT COALESCE(MAX("pos"), 0) FROM "ranked"` genuinely
+/// fails.
 #[test]
-fn counter_seed_query_failure_surfaces_as_error_prd_phase3() {
+fn counter_seed_query_failure_surfaces_as_error() {
     use crate::sql_engine::typed_insert::{prepare_typed_insert_validate, TypedInsertCounters};
 
-    // In-memory SQLite connection with `ranked` having no `pos` column.
-    // This makes the seed query `SELECT COALESCE(MAX("pos"), 0) FROM "ranked"`
-    // fail at the SQLite level with "no such column: pos".
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch("CREATE TABLE ranked (id TEXT PRIMARY KEY, name TEXT)")
-        .unwrap();
 
     let schema = schema_with_bare_next();
     let mut col_values = std::collections::BTreeMap::new();
@@ -8735,33 +8702,20 @@ fn counter_seed_query_failure_surfaces_as_error_prd_phase3() {
 
     let result = prepare_typed_insert_validate(&schema, &mut col_values, &mut counters, &conn);
 
-    // Current behavior: unwrap_or(0) swallows the error; counter starts at 1;
-    // prepare_typed_insert_validate returns Ok(()) -- this assert FAILS.
-    //
-    // Phase 3 behavior: the seed error propagates; returns Err.
     assert!(
         result.is_err(),
         "prepare_typed_insert_validate must return Err when the counter-seeding \
-         query fails (no such column 'pos'); currently returns Ok(()) with counter=1 \
-         -- fix in Phase 3 by changing seed_bare_next to return Result<i64>"
+         query fails"
     );
 }
 
 /// Verifies that a partitioned counter-seeding query failure surfaces as an
 /// operational error from `prepare_typed_insert_validate`.
-///
-/// EXPECTED TO FAIL until Phase 3 changes `seed_partitioned_next` to return
-/// `Result<i64>`.
 #[test]
-fn partitioned_counter_seed_query_failure_surfaces_as_error_prd_phase3() {
+fn partitioned_counter_seed_query_failure_surfaces_as_error() {
     use crate::sql_engine::typed_insert::{prepare_typed_insert_validate, TypedInsertCounters};
 
-    // `items` table with `cat` but no `sort_order` column, so the partition-seed
-    // query `SELECT COALESCE(MAX("sort_order"), 0) FROM "items" WHERE "cat" = ?`
-    // fails at the SQLite level.
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch("CREATE TABLE items (id TEXT PRIMARY KEY, cat TEXT)")
-        .unwrap();
 
     let schema = schema_with_partitioned_next();
     let mut col_values = std::collections::BTreeMap::new();
@@ -8774,9 +8728,7 @@ fn partitioned_counter_seed_query_failure_surfaces_as_error_prd_phase3() {
     assert!(
         result.is_err(),
         "prepare_typed_insert_validate must return Err when the partitioned \
-         counter-seeding query fails (no such column 'sort_order'); currently \
-         returns Ok(()) with counter=1 -- fix in Phase 3 by changing \
-         seed_partitioned_next to return Result<i64>"
+         counter-seeding query fails"
     );
 }
 
@@ -8785,20 +8737,14 @@ fn partitioned_counter_seed_query_failure_surfaces_as_error_prd_phase3() {
 /// `unwrap_or(false)` and misreported as a false DanglingReference.
 ///
 /// When `check_row_exists` cannot execute the query (e.g. `id` column
-/// renamed), the current code returns `false`, `validate_fk_against_target_table`
-/// raises `DanglingReference` -- a false-positive FK violation that masks the
-/// real infrastructure failure.
-///
-/// EXPECTED TO FAIL until Phase 3 changes `check_row_exists` to return
-/// `Result<bool>` and propagates the error.
+/// renamed), the real SQLite error must not be converted into a false-positive
+/// FK violation.
 #[test]
-fn fk_existence_query_failure_surfaces_as_operational_error_prd_phase3() {
+fn fk_existence_query_failure_surfaces_as_operational_error() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
-    engine
-        .execute("CREATE TABLE people (name TEXT)")
-        .unwrap();
+    engine.execute("CREATE TABLE people (name TEXT)").unwrap();
     engine
         .execute("CREATE TABLE tasks (summary TEXT, assignee TEXT REFERENCES people)")
         .unwrap();
@@ -8820,24 +8766,12 @@ fn fk_existence_query_failure_surfaces_as_operational_error_prd_phase3() {
         .execute("ALTER TABLE people RENAME COLUMN id TO id_broken", [])
         .expect("sabotage ALTER should succeed");
 
-    // A task insert referencing Alice's real id should now trigger
-    // check_row_exists, which will hit a genuine query error.
-    //
-    // Current (broken) behavior: unwrap_or(false) swallows the error,
-    // check_row_exists returns false, validate_fk_against_target_table raises
-    // DanglingReference (false-positive -- the record exists but the check failed).
-    //
-    // Expected (Phase 3) behavior: the real SQLite error propagates as
-    // DoogatError::Sql or DoogatError::SqlEngine, NOT as a REFERENCES_VIOLATION.
     let err = engine
         .execute(&format!(
             "INSERT INTO tasks (summary, assignee) VALUES ('Fix it', '{person_id}')"
         ))
         .expect_err("insert must fail when the FK existence query errors");
 
-    // Assert the failure is an operational error (infrastructure), NOT a
-    // false DanglingReference (data-integrity). Currently this assert FAILS
-    // because the broken code returns Structured { code: REFERENCES_VIOLATION }.
     assert!(
         !matches!(
             &err,

@@ -229,8 +229,6 @@ fn delete_doogat_cleans_materialized_row() {
     );
 }
 
-// ── PRD 00140 §Phase1: GraphQL rejects structured values on typed scalar columns ──
-
 /// `updateDoogat` with a JSON-array value for a declared scalar column must
 /// return a client-visible error and leave the materialized row unchanged.
 /// The GraphQL transport only accepts string values in the `fields` JSON map;
@@ -252,7 +250,6 @@ fn update_doogat_with_json_array_field_returns_error_and_leaves_content_unchange
         .trim()
         .to_string();
 
-    // Verify initial materialized row has the expected content
     let rows = select_objects(
         &server,
         &format!("SELECT content FROM note WHERE id = '{id}'"),
@@ -264,9 +261,6 @@ fn update_doogat_with_json_array_field_returns_error_and_leaves_content_unchange
         "initial content must match inserted value"
     );
 
-    // Attempt to update `content` with a JSON array — a structured value that
-    // cannot satisfy a declared scalar column. The transport-layer JSON parse
-    // rejects the non-string array value and returns an error.
     let r = server.graphql_with_vars(
         r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id } }"#,
         serde_json::json!({
@@ -276,12 +270,12 @@ fn update_doogat_with_json_array_field_returns_error_and_leaves_content_unchange
             }
         }),
     );
+    let error_message = r["errors"][0]["message"].as_str().unwrap_or("");
     assert!(
-        r.get("errors").is_some(),
-        "updateDoogat with a JSON-array field value must return an error; got: {r}"
+        error_message.contains("invalid fields JSON"),
+        "updateDoogat with a JSON-array field value must return a fields JSON error; got: {r}"
     );
 
-    // Content must be unchanged after the rejected update
     let rows = select_objects(
         &server,
         &format!("SELECT content FROM note WHERE id = '{id}'"),

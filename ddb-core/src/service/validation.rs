@@ -280,7 +280,10 @@ impl<G: GitBackend> DoogatService<G> {
             // Reject structured values on declared scalar columns. CREATE rejects
             // these via `stringify_typed_input_fields`; UPDATE must match that behavior.
             if let Some(val) = extra.get(&col.name) {
-                if matches!(val, crate::types::Value::List(_) | crate::types::Value::Map(_)) {
+                if matches!(
+                    val,
+                    crate::types::Value::List(_) | crate::types::Value::Map(_)
+                ) {
                     return Err(DoogatError::Validation(format!(
                         "field '{}' has structured value (list/map) but typed column '{}.{}' expects a scalar",
                         col.name, type_name, col.name
