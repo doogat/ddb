@@ -147,18 +147,36 @@ impl<G: GitBackend> DoogatService<G> {
             .iter()
             .filter_map(|r| r.first().map(|s| s.as_str()))
             .collect();
-        let updated_map = self.index.lookup_updated_at_batch(&ids).unwrap_or_default();
+        let updated_map = match self.index.lookup_updated_at_batch(&ids) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(error = %e, "typed_filtered_list: updated_at batch lookup failed, timestamps omitted");
+                Default::default()
+            }
+        };
         let mut doogats = Vec::new();
         for row in rows {
             let Some(id) = row.first() else { continue };
-            let Ok(path) = self.index.resolve_path(id) else {
-                continue;
+            let path = match self.index.resolve_path(id) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(error = %e, id, "typed_filtered_list: path resolution failed, row dropped");
+                    continue;
+                }
             };
-            let Ok(content) = self.repo.read_file(&path) else {
-                continue;
+            let content = match self.repo.read_file(&path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, path, "typed_filtered_list: file read failed, row dropped");
+                    continue;
+                }
             };
-            let Ok(mut parsed) = parser::parse(&content, &path) else {
-                continue;
+            let mut parsed = match parser::parse(&content, &path) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(error = %e, path, "typed_filtered_list: parse failed, row dropped");
+                    continue;
+                }
             };
             parsed.updated_at = updated_map.get(id.as_str()).cloned();
             doogats.push(parsed);
