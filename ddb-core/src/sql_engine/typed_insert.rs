@@ -49,7 +49,7 @@ pub(crate) fn prepare_typed_insert_validate(
     counters: &mut TypedInsertCounters,
     conn: &rusqlite::Connection,
 ) -> Result<()> {
-    fill_column_defaults(schema, col_values, counters, conn);
+    fill_column_defaults(schema, col_values, counters, conn)?;
     validate_allowed_values(schema, col_values)?;
     validate_fk_against_target_table(schema, col_values, conn)?;
     Ok(())
@@ -60,7 +60,7 @@ fn fill_column_defaults(
     col_values: &mut BTreeMap<String, String>,
     counters: &mut TypedInsertCounters,
     conn: &rusqlite::Connection,
-) {
+) -> Result<()> {
     for col_def in &schema.columns {
         if col_values.contains_key(&col_def.name) {
             continue;
@@ -69,9 +69,10 @@ fn fill_column_defaults(
             Some(ref d) => d,
             None => continue,
         };
-        let value = resolve_default(default, col_def, schema, col_values, counters, conn);
+        let value = resolve_default(default, col_def, schema, col_values, counters, conn)?;
         col_values.insert(col_def.name.clone(), value);
     }
+    Ok(())
 }
 
 fn resolve_default(
@@ -81,31 +82,37 @@ fn resolve_default(
     col_values: &BTreeMap<String, String>,
     counters: &mut TypedInsertCounters,
     conn: &rusqlite::Connection,
-) -> String {
+) -> Result<String> {
     if default == "NEXT" {
-        let counter = counters
-            .bare
-            .entry(col_def.name.clone())
-            .or_insert_with(|| seed_bare_next(conn, &schema.table_name, &col_def.name));
+        if !counters.bare.contains_key(&col_def.name) {
+            let seed = seed_bare_next(conn, &schema.table_name, &col_def.name)?;
+            counters.bare.insert(col_def.name.clone(), seed);
+        }
+        let counter = counters.bare.get_mut(&col_def.name).expect("just inserted");
         *counter += 1;
-        return counter.to_string();
+        return Ok(counter.to_string());
     }
     if let Some(partition_col) = parse_next_partition(default) {
         let partition_val = col_values.get(partition_col).cloned().unwrap_or_default();
         let key = (col_def.name.clone(), partition_val.clone());
-        let counter = counters.partitioned.entry(key).or_insert_with(|| {
-            seed_partitioned_next(
+        if !counters.partitioned.contains_key(&key) {
+            let seed = seed_partitioned_next(
                 conn,
                 &schema.table_name,
                 &col_def.name,
                 partition_col,
                 &partition_val,
-            )
-        });
+            )?;
+            counters.partitioned.insert(key.clone(), seed);
+        }
+        let counter = counters
+            .partitioned
+            .get_mut(&key)
+            .expect("just inserted");
         *counter += 1;
-        return counter.to_string();
+        return Ok(counter.to_string());
     }
-    default.to_owned()
+    Ok(default.to_owned())
 }
 
 fn parse_next_partition(default: &str) -> Option<&str> {
@@ -114,16 +121,16 @@ fn parse_next_partition(default: &str) -> Option<&str> {
         .and_then(|s| s.strip_suffix(')'))
 }
 
-fn seed_bare_next(conn: &rusqlite::Connection, table: &str, col: &str) -> i64 {
+fn seed_bare_next(conn: &rusqlite::Connection, table: &str, col: &str) -> Result<i64> {
     if !is_safe_sql_identifier(table) || !is_safe_sql_identifier(col) {
-        return 0;
+        return Ok(0);
     }
     conn.query_row(
         &format!("SELECT COALESCE(MAX(\"{col}\"), 0) FROM \"{table}\""),
         [],
         |row| row.get(0),
     )
-    .unwrap_or(0)
+    .map_err(|e| DoogatError::Sql(e.to_string()))
 }
 
 fn seed_partitioned_next(
@@ -132,12 +139,12 @@ fn seed_partitioned_next(
     col: &str,
     partition_col: &str,
     partition_val: &str,
-) -> i64 {
+) -> Result<i64> {
     if !is_safe_sql_identifier(table)
         || !is_safe_sql_identifier(col)
         || !is_safe_sql_identifier(partition_col)
     {
-        return 0;
+        return Ok(0);
     }
     conn.query_row(
         &format!(
@@ -146,7 +153,7 @@ fn seed_partitioned_next(
         rusqlite::params![partition_val],
         |row| row.get(0),
     )
-    .unwrap_or(0)
+    .map_err(|e| DoogatError::Sql(e.to_string()))
 }
 
 fn validate_allowed_values(
@@ -192,7 +199,7 @@ fn validate_fk_against_target_table(
             Some(v) if !v.is_empty() => v,
             _ => continue,
         };
-        let exists = check_row_exists(conn, target_table, ref_id);
+        let exists = check_row_exists(conn, target_table, ref_id)?;
         if !exists {
             return Err(DoogatError::dangling_reference(
                 schema.table_name.clone(),
@@ -205,9 +212,9 @@ fn validate_fk_against_target_table(
     Ok(())
 }
 
-fn check_row_exists(conn: &rusqlite::Connection, table: &str, id: &str) -> bool {
+fn check_row_exists(conn: &rusqlite::Connection, table: &str, id: &str) -> Result<bool> {
     if !is_safe_sql_identifier(table) {
-        return false;
+        return Ok(false);
     }
     let table_present: bool = conn
         .query_row(
@@ -215,14 +222,14 @@ fn check_row_exists(conn: &rusqlite::Connection, table: &str, id: &str) -> bool 
             rusqlite::params![table],
             |row| row.get(0),
         )
-        .unwrap_or(false);
+        .map_err(|e| DoogatError::Sql(e.to_string()))?;
     if !table_present {
-        return false;
+        return Ok(false);
     }
     conn.query_row(
         &format!("SELECT COUNT(*) > 0 FROM \"{table}\" WHERE id = ?1"),
         rusqlite::params![id],
         |row| row.get(0),
     )
-    .unwrap_or(false)
+    .map_err(|e| DoogatError::Sql(e.to_string()))
 }
