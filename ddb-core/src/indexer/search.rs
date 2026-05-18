@@ -579,16 +579,25 @@ impl Index {
         let pragma_sql = format!("PRAGMA table_info(\"{}\")", safe_name);
         match self.conn.prepare(&pragma_sql) {
             Ok(mut stmt) => {
-                let cols = stmt
-                    .query_map([], |row| row.get::<_, String>(1))
-                    .ok()
-                    .map(|rows| {
-                        rows.flatten()
+                match stmt.query_map([], |row| row.get::<_, String>(1)) {
+                    Ok(rows) => {
+                        let cols = rows
+                            .filter_map(|r| match r {
+                                Ok(name) => Some(name),
+                                Err(e) => {
+                                    tracing::warn!(error = %e, type_name, "materialized_column_names: row dropped");
+                                    None
+                                }
+                            })
                             .filter(|name| !is_core_column(name))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                Some(cols)
+                            .collect();
+                        Some(cols)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, "materialized_column_names: query_map failed");
+                        Some(vec![])
+                    }
+                }
             }
             Err(e) => {
                 tracing::warn!(error = %e, type_name, "enrich_search_hits: PRAGMA failed");
@@ -635,28 +644,44 @@ impl Index {
             col_select, safe_name, placeholders
         );
 
-        let mut stmt = self.conn.prepare(&sql).ok()?;
+        let mut stmt = match self.conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, type_name, "fetch_materialized_fields: prepare failed, enrichment skipped");
+                return None;
+            }
+        };
         let params: Vec<&dyn rusqlite::types::ToSql> = type_ids
             .iter()
             .map(|id| id as &dyn rusqlite::types::ToSql)
             .collect();
-        let rows = stmt
-            .query_map(params.as_slice(), |row| {
-                let id: String = row.get(0)?;
-                let mut fields = std::collections::BTreeMap::new();
-                for (col_idx, col_name) in col_names.iter().enumerate() {
-                    if let Ok(Some(val)) = row.get::<_, Option<String>>(col_idx + 1) {
-                        fields.insert(col_name.clone(), val);
-                    }
+        let rows = match stmt.query_map(params.as_slice(), |row| {
+            let id: String = row.get(0)?;
+            let mut fields = std::collections::BTreeMap::new();
+            for (col_idx, col_name) in col_names.iter().enumerate() {
+                if let Ok(Some(val)) = row.get::<_, Option<String>>(col_idx + 1) {
+                    fields.insert(col_name.clone(), val);
                 }
-                Ok((id, fields))
-            })
-            .ok()?;
+            }
+            Ok((id, fields))
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, type_name, "fetch_materialized_fields: query failed, enrichment skipped");
+                return None;
+            }
+        };
 
         let mut field_map = std::collections::HashMap::new();
-        for row in rows.flatten() {
-            if !row.1.is_empty() {
-                field_map.insert(row.0, row.1);
+        for result in rows {
+            match result {
+                Ok(row) if !row.1.is_empty() => {
+                    field_map.insert(row.0, row.1);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, type_name, "fetch_materialized_fields: row dropped");
+                }
             }
         }
         Some(field_map)

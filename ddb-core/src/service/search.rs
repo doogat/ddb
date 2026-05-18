@@ -60,10 +60,18 @@ impl<G: GitBackend> DoogatService<G> {
             if row.len() >= 2 {
                 let path = &row[1];
                 let updated_at = row.get(2).cloned();
-                if let Ok(content) = self.repo.read_file(path) {
-                    if let Ok(mut parsed) = parser::parse(&content, path) {
-                        parsed.updated_at = updated_at;
-                        doogats.push(parsed);
+                match self.repo.read_file(path) {
+                    Ok(content) => match parser::parse(&content, path) {
+                        Ok(mut parsed) => {
+                            parsed.updated_at = updated_at;
+                            doogats.push(parsed);
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, path, "list_doogats_filtered: parse failed, row dropped");
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!(error = %e, path, "list_doogats_filtered: file read failed, row dropped");
                     }
                 }
             }
