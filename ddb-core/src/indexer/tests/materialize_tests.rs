@@ -699,17 +699,22 @@ fn consistency_warnings_missing_required() {
 /// from the consistency scan. Pins the read-path "surface, don't silently
 /// drop" contract for the one failure branch reachable through the public API.
 ///
-/// Implementation note — why the sibling warn branches are not failure-tested:
-/// `collect_consistency_warnings`' `list_doogats`/`read_file` error arms, and
-/// the `read_file`/`resolve_path` drop arms in `service::search::typed_filtered_list`
-/// and `indexer::materialize::rematerialize_type`/`load_all_typedefs`, fire only
-/// on index/git divergence (a path present in one but absent from the other).
-/// That state is unreachable through the public API — the index reconciles
-/// against git HEAD via staleness detection before any of these paths run — so
-/// direct failure injection would require deliberately-inconsistent test-only
-/// infrastructure. Those arms are verified by inspection against this
-/// already-tested malformed-input path and the shipped `list_doogats_filtered`
-/// sibling pattern; they add `tracing::warn!` diagnostics for latent corruption.
+/// Implementation note — coverage of the sibling warn branches:
+/// `load_all_typedefs`' `read_file` failure arm is failure-tested directly by
+/// `load_all_typedefs_skips_unreadable_typedef_and_keeps_rest` below, which
+/// reaches the branch by passing a source that diverges from the indexed repo.
+/// The remaining warn arms — `collect_consistency_warnings`'
+/// `list_doogats`/`read_file` errors, the `read_file`/`resolve_path` drop arms
+/// in `service::search::typed_filtered_list` and
+/// `indexer::materialize::rematerialize_type`, and the per-row `row.get` decode
+/// `Err` arm in `load_all_typedefs`' `query_map` iterator — fire only on
+/// index/git divergence or SQLite-level row corruption. Those states are not
+/// reachable through the public API (the index reconciles against git HEAD via
+/// staleness detection, and the `path` column is `NOT NULL TEXT`), so direct
+/// failure injection would require corrupting the database. They are verified
+/// by inspection against the tested branches above and the shipped
+/// `list_doogats_filtered` sibling pattern; all add `tracing::warn!`
+/// diagnostics for latent corruption.
 #[test]
 fn consistency_warnings_surface_malformed_yaml() {
     let dir = tempfile::TempDir::new().unwrap();
