@@ -565,7 +565,15 @@ impl Index {
         };
 
         let paths: Vec<String> = match stmt.query_map([], |row| row.get(0)) {
-            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Ok(rows) => rows
+                .filter_map(|r| match r {
+                    Ok(path) => Some(path),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "load_all_typedefs: typedef path row decode failed, skipped");
+                        None
+                    }
+                })
+                .collect(),
             Err(e) => {
                 tracing::warn!(error = %e, "load_all_typedefs: typedef path query failed, no typedefs loaded");
                 Vec::new()

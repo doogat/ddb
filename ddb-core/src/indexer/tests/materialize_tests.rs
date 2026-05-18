@@ -715,13 +715,13 @@ fn consistency_warnings_surface_malformed_yaml() {
     let dir = tempfile::TempDir::new().unwrap();
     let repo = GitRepo::init(dir.path()).unwrap();
 
-    let valid = "---\nid: 20260226260000\ntitle: Valid\ntype: note\n---\nBody.";
-    repo.commit_file("ddb/20260226260000.md", valid, "add valid")
+    let valid = "---\nid: 20260227120000\ntitle: Valid\ntype: note\n---\nBody.";
+    repo.commit_file("ddb/20260227120000.md", valid, "add valid")
         .unwrap();
 
     // Unclosed YAML flow sequence in the frontmatter zone — fails to parse.
-    let malformed = "---\nid: 20260226260100\ntitle: [unclosed\ntype: note\n---\nBody.";
-    repo.commit_file("ddb/20260226260100.md", malformed, "add malformed")
+    let malformed = "---\nid: 20260227120100\ntitle: [unclosed\ntype: note\n---\nBody.";
+    repo.commit_file("ddb/20260227120100.md", malformed, "add malformed")
         .unwrap();
 
     let db_path = dir.path().join(".ddb/index.db");
@@ -733,12 +733,59 @@ fn consistency_warnings_surface_malformed_yaml() {
     let has_malformed = warnings.iter().any(|w| {
         matches!(w,
             crate::types::ConsistencyWarning::MalformedYaml { path, .. }
-                if path == "ddb/20260226260100.md"
+                if path == "ddb/20260227120100.md"
         )
     });
     assert!(
         has_malformed,
         "malformed doogat must surface as a MalformedYaml warning, not be silently dropped; got: {warnings:?}"
+    );
+}
+
+/// PRD 00140 review cycle 2: `load_all_typedefs` reads typedef paths from the
+/// index but each file from the passed source. When the source cannot read a
+/// typedef file, that typedef must be skipped (warn branch) and the remaining
+/// typedefs still loaded — a partial result, never a hard failure. This pins a
+/// `tracing::warn!` drop branch through the public API: `load_all_typedefs`
+/// takes the source as a parameter, so passing a source that diverges from the
+/// indexed repo exercises the read-failure path directly.
+#[test]
+fn load_all_typedefs_skips_unreadable_typedef_and_keeps_rest() {
+    use crate::traits::mock::MockSource;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    let typedef_a = "---\nid: 20260227090000\ntitle: alpha\ntype: _typedef\ncolumns:\n  - name: weight\n    data_type: REAL\n    zone: frontmatter\n---\n";
+    repo.commit_file("ddb/_typedef/20260227090000.md", typedef_a, "add alpha typedef")
+        .unwrap();
+    let typedef_b = "---\nid: 20260227091000\ntitle: beta\ntype: _typedef\ncolumns:\n  - name: color\n    data_type: TEXT\n    zone: frontmatter\n---\n";
+    repo.commit_file("ddb/_typedef/20260227091000.md", typedef_b, "add beta typedef")
+        .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    idx.rebuild(&repo).unwrap();
+
+    // Source diverges from the indexed repo: it holds alpha's typedef file but
+    // not beta's. beta therefore hits the read-failure warn branch.
+    let mut source = MockSource::new();
+    source.files.insert(
+        "ddb/_typedef/20260227090000.md".to_string(),
+        typedef_a.to_string(),
+    );
+
+    let schemas = idx.load_all_typedefs(&source);
+
+    assert!(
+        schemas.contains_key("alpha"),
+        "readable typedef must still load; got keys: {:?}",
+        schemas.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !schemas.contains_key("beta"),
+        "unreadable typedef must be skipped via the warn branch, not loaded or fatal"
     );
 }
 
