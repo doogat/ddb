@@ -111,4 +111,36 @@ Uses `tracing` (library) + `tracing-subscriber` (CLI) for structured observabili
 | sync_manager | CRDT invalid/failed fallback to LWW | warn |
 | compaction | `shared_head_computed`, `crdt_temp_cleanup`, `gc_result` | info/debug |
 | indexer | `rebuild_triggered`, `rebuild_complete`, `corruption_detected` | info/warn |
+| indexer | typedef file read / parse / schema extraction failed during materialization | warn |
+| indexer | row dropped in `list_doogats_filtered` due to file read or parse failure | warn |
+| indexer | row dropped in `fetch_materialized_fields` due to query or deserialization failure | warn |
 | git_ops | `repo_opened`, orphan cleanup | debug/warn |
+
+## Behavior Changes (PRD 00140)
+
+### Typed-update structured-value rejection
+
+`DoogatService::update_doogat` rejects `Value::List` or `Value::Map` in the `fields`
+map when the target column is declared in a typedef schema. Returns
+`DoogatError::Validation`. Untyped doogats and undeclared extra fields are
+unaffected.
+
+### Counter-seed and FK query errors now propagate
+
+`prepare_typed_insert_validate` previously swallowed SQLite errors from counter-seeding
+queries (`NEXT`, `NEXT(partition)`) and FK existence checks via `unwrap_or(0)` /
+`unwrap_or(false)`. These now return `DoogatError::Sql` so callers see the real failure
+instead of a silently wrong counter value or a false-positive `REFERENCES_VIOLATION`.
+
+### FFI mutex poison maps to DdbError instead of panic
+
+All `DoogatDriver` FFI methods acquire the service lock via `with_service` /
+`with_service_mut` helpers. A poisoned mutex (thread panic while lock was held) now
+returns `DdbError::Io { msg: "service lock poisoned: ..." }` instead of unwinding
+through the FFI boundary.
+
+### ID-generation mutex poison recovery
+
+`generate_unique_id` uses `LAST.lock().unwrap_or_else(|e| e.into_inner())` to recover
+from a poisoned static mutex. The inner `String` value is still valid after a poison,
+so ID generation continues rather than panicking.
