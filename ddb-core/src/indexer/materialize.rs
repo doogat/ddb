@@ -222,7 +222,15 @@ impl Index {
             let mut stmt = self
                 .conn
                 .prepare("SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1")?;
-            let path: Option<String> = stmt.query_row(params![type_name], |row| row.get(0)).ok();
+            let path: Option<String> =
+                match stmt.query_row(params![type_name], |row| row.get(0)) {
+                    Ok(p) => Some(p),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(e) => {
+                        tracing::warn!(error = %e, type_name, "rematerialize_type: typedef path lookup failed, falling back to inferred schema");
+                        None
+                    }
+                };
             match path {
                 None => None,
                 Some(p) => match repo.read_file(&p) {
@@ -502,7 +510,10 @@ impl Index {
 
         let paths = match repo.list_doogats() {
             Ok(p) => p,
-            Err(_) => return warnings,
+            Err(e) => {
+                tracing::warn!(error = %e, "collect_consistency_warnings: listing doogats failed, returning partial warnings");
+                return warnings;
+            }
         };
 
         let typedef_schemas = self.load_all_typedefs(repo);
@@ -510,7 +521,10 @@ impl Index {
         for path in &paths {
             let content = match repo.read_file(path) {
                 Ok(c) => c,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(error = %e, path, "collect_consistency_warnings: file read failed, skipped");
+                    continue;
+                }
             };
 
             match crate::parser::parse(&content, path) {
@@ -544,14 +558,19 @@ impl Index {
             .prepare("SELECT path FROM doogats WHERE type = '_typedef'")
         {
             Ok(s) => s,
-            Err(_) => return schemas,
+            Err(e) => {
+                tracing::warn!(error = %e, "load_all_typedefs: typedef path query prepare failed, no typedefs loaded");
+                return schemas;
+            }
         };
 
-        let paths: Vec<String> = stmt
-            .query_map([], |row| row.get(0))
-            .ok()
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default();
+        let paths: Vec<String> = match stmt.query_map([], |row| row.get(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::warn!(error = %e, "load_all_typedefs: typedef path query failed, no typedefs loaded");
+                Vec::new()
+            }
+        };
 
         for path in &paths {
             match repo.read_file(path) {
