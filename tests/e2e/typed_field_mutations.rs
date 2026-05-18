@@ -231,8 +231,15 @@ fn delete_doogat_cleans_materialized_row() {
 
 /// `updateDoogat` with a JSON-array value for a declared scalar column must
 /// return a client-visible error and leave the materialized row unchanged.
-/// The GraphQL transport only accepts string values in the `fields` JSON map;
-/// non-string JSON values are rejected before reaching service validation.
+///
+/// SCOPE NOTE: this test verifies the *GraphQL transport's* JSON rejection, not
+/// the service-layer typed-update structured-value validation. GraphQL/REST
+/// `parse_fields_json` deserializes `fields` into a string-to-string map, so a
+/// `List`/`Map` value fails at JSON-parse time ("invalid fields JSON") and
+/// never reaches `service::validation`. The service-layer structured-value
+/// rejection (PRD 00140 task 4) is exercised directly by the unit test
+/// `service::tests::typed_update_rejects_structured_value_on_scalar_column`.
+/// Do not read this test as GraphQL coverage of `validation.rs`.
 #[test]
 fn update_doogat_with_json_array_field_returns_error_and_leaves_content_unchanged() {
     let repo = DdbTestRepo::init();

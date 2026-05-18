@@ -694,6 +694,54 @@ fn consistency_warnings_missing_required() {
     );
 }
 
+/// PRD 00140 review cycle 1: a doogat with malformed frontmatter must surface
+/// as a structured `MalformedYaml` warning rather than being silently dropped
+/// from the consistency scan. Pins the read-path "surface, don't silently
+/// drop" contract for the one failure branch reachable through the public API.
+///
+/// Implementation note — why the sibling warn branches are not failure-tested:
+/// `collect_consistency_warnings`' `list_doogats`/`read_file` error arms, and
+/// the `read_file`/`resolve_path` drop arms in `service::search::typed_filtered_list`
+/// and `indexer::materialize::rematerialize_type`/`load_all_typedefs`, fire only
+/// on index/git divergence (a path present in one but absent from the other).
+/// That state is unreachable through the public API — the index reconciles
+/// against git HEAD via staleness detection before any of these paths run — so
+/// direct failure injection would require deliberately-inconsistent test-only
+/// infrastructure. Those arms are verified by inspection against this
+/// already-tested malformed-input path and the shipped `list_doogats_filtered`
+/// sibling pattern; they add `tracing::warn!` diagnostics for latent corruption.
+#[test]
+fn consistency_warnings_surface_malformed_yaml() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    let valid = "---\nid: 20260226260000\ntitle: Valid\ntype: note\n---\nBody.";
+    repo.commit_file("ddb/20260226260000.md", valid, "add valid")
+        .unwrap();
+
+    // Unclosed YAML flow sequence in the frontmatter zone — fails to parse.
+    let malformed = "---\nid: 20260226260100\ntitle: [unclosed\ntype: note\n---\nBody.";
+    repo.commit_file("ddb/20260226260100.md", malformed, "add malformed")
+        .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    idx.rebuild(&repo).unwrap();
+
+    let warnings = idx.collect_consistency_warnings(&repo);
+    let has_malformed = warnings.iter().any(|w| {
+        matches!(w,
+            crate::types::ConsistencyWarning::MalformedYaml { path, .. }
+                if path == "ddb/20260226260100.md"
+        )
+    });
+    assert!(
+        has_malformed,
+        "malformed doogat must surface as a MalformedYaml warning, not be silently dropped; got: {warnings:?}"
+    );
+}
+
 #[test]
 fn integration_typedef_plus_inferred_merge() {
     let dir = tempfile::TempDir::new().unwrap();
