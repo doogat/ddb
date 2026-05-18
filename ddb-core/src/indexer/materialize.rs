@@ -222,15 +222,14 @@ impl Index {
             let mut stmt = self
                 .conn
                 .prepare("SELECT path FROM doogats WHERE type = '_typedef' AND title = ?1")?;
-            let path: Option<String> =
-                match stmt.query_row(params![type_name], |row| row.get(0)) {
-                    Ok(p) => Some(p),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
-                    Err(e) => {
-                        tracing::warn!(error = %e, type_name, "rematerialize_type: typedef path lookup failed, falling back to inferred schema");
-                        None
-                    }
-                };
+            let path: Option<String> = match stmt.query_row(params![type_name], |row| row.get(0)) {
+                Ok(p) => Some(p),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => {
+                    tracing::warn!(error = %e, type_name, "rematerialize_type: typedef path lookup failed, falling back to inferred schema");
+                    None
+                }
+            };
             match path {
                 None => None,
                 Some(p) => match repo.read_file(&p) {

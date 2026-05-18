@@ -694,27 +694,8 @@ fn consistency_warnings_missing_required() {
     );
 }
 
-/// PRD 00140 review cycle 1: a doogat with malformed frontmatter must surface
-/// as a structured `MalformedYaml` warning rather than being silently dropped
-/// from the consistency scan. Pins the read-path "surface, don't silently
-/// drop" contract for the one failure branch reachable through the public API.
-///
-/// Implementation note — coverage of the sibling warn branches:
-/// `load_all_typedefs`' `read_file` failure arm is failure-tested directly by
-/// `load_all_typedefs_skips_unreadable_typedef_and_keeps_rest` below, which
-/// reaches the branch by passing a source that diverges from the indexed repo.
-/// The remaining warn arms — `collect_consistency_warnings`'
-/// `list_doogats`/`read_file` errors, the `read_file`/`resolve_path` drop arms
-/// in `service::search::typed_filtered_list` and
-/// `indexer::materialize::rematerialize_type`, and the per-row `row.get` decode
-/// `Err` arm in `load_all_typedefs`' `query_map` iterator — fire only on
-/// index/git divergence or SQLite-level row corruption. Those states are not
-/// reachable through the public API (the index reconciles against git HEAD via
-/// staleness detection, and the `path` column is `NOT NULL TEXT`), so direct
-/// failure injection would require corrupting the database. They are verified
-/// by inspection against the tested branches above and the shipped
-/// `list_doogats_filtered` sibling pattern; all add `tracing::warn!`
-/// diagnostics for latent corruption.
+/// Malformed frontmatter should surface as a consistency warning rather than
+/// being silently dropped from the scan.
 #[test]
 fn consistency_warnings_surface_malformed_yaml() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -747,13 +728,7 @@ fn consistency_warnings_surface_malformed_yaml() {
     );
 }
 
-/// PRD 00140 review cycle 2: `load_all_typedefs` reads typedef paths from the
-/// index but each file from the passed source. When the source cannot read a
-/// typedef file, that typedef must be skipped (warn branch) and the remaining
-/// typedefs still loaded — a partial result, never a hard failure. This pins a
-/// `tracing::warn!` drop branch through the public API: `load_all_typedefs`
-/// takes the source as a parameter, so passing a source that diverges from the
-/// indexed repo exercises the read-failure path directly.
+/// An unreadable typedef should not prevent other typedef schemas from loading.
 #[test]
 fn load_all_typedefs_skips_unreadable_typedef_and_keeps_rest() {
     use crate::traits::mock::MockSource;
@@ -762,19 +737,26 @@ fn load_all_typedefs_skips_unreadable_typedef_and_keeps_rest() {
     let repo = GitRepo::init(dir.path()).unwrap();
 
     let typedef_a = "---\nid: 20260227090000\ntitle: alpha\ntype: _typedef\ncolumns:\n  - name: weight\n    data_type: REAL\n    zone: frontmatter\n---\n";
-    repo.commit_file("ddb/_typedef/20260227090000.md", typedef_a, "add alpha typedef")
-        .unwrap();
+    repo.commit_file(
+        "ddb/_typedef/20260227090000.md",
+        typedef_a,
+        "add alpha typedef",
+    )
+    .unwrap();
     let typedef_b = "---\nid: 20260227091000\ntitle: beta\ntype: _typedef\ncolumns:\n  - name: color\n    data_type: TEXT\n    zone: frontmatter\n---\n";
-    repo.commit_file("ddb/_typedef/20260227091000.md", typedef_b, "add beta typedef")
-        .unwrap();
+    repo.commit_file(
+        "ddb/_typedef/20260227091000.md",
+        typedef_b,
+        "add beta typedef",
+    )
+    .unwrap();
 
     let db_path = dir.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
     let idx = Index::open(&db_path).unwrap();
     idx.rebuild(&repo).unwrap();
 
-    // Source diverges from the indexed repo: it holds alpha's typedef file but
-    // not beta's. beta therefore hits the read-failure warn branch.
+    // Source diverges from the indexed repo: alpha is readable, beta is not.
     let mut source = MockSource::new();
     source.files.insert(
         "ddb/_typedef/20260227090000.md".to_string(),
