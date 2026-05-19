@@ -3919,3 +3919,40 @@ fn with_immediate_transaction_passes_through_return_value() {
         "Ok return value must pass through unchanged"
     );
 }
+
+#[test]
+fn batch_index_joins_an_open_transaction_instead_of_nesting() {
+    // Regression (PRD 00140 review cycle 1): batch_index used a raw
+    // `BEGIN IMMEDIATE`, which SQLite rejects with "cannot start a transaction
+    // within a transaction" when the connection is already in one — the path a
+    // nested `ensure_fresh` (→ rebuild/incremental_reindex → batch_index) hits
+    // inside a SINGLETON write's IMMEDIATE window.
+    let idx = in_memory_index();
+    let doogats = make_sample_doogats(5);
+
+    // Simulate the enclosing SINGLETON-write transaction.
+    idx.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+    assert!(!idx.conn.is_autocommit(), "outer transaction must be open");
+
+    let count = idx
+        .batch_index(&doogats)
+        .expect("batch_index must join the open transaction, not fail on a nested BEGIN");
+    assert_eq!(count, 5, "all 5 doogats indexed inside the joined transaction");
+
+    // batch_index must NOT have committed the enclosing transaction — the
+    // outer SINGLETON write still owns commit/rollback.
+    assert!(
+        !idx.conn.is_autocommit(),
+        "batch_index must leave the enclosing transaction open"
+    );
+    idx.conn.execute_batch("COMMIT").unwrap();
+
+    let rows: i64 = idx
+        .conn
+        .query_row("SELECT COUNT(*) FROM doogats", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        rows, 5,
+        "doogats indexed in the joined transaction must persist after the outer COMMIT"
+    );
+}

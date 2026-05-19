@@ -286,8 +286,11 @@ impl<G: GitBackend> DoogatService<G> {
         type_name: &str,
         fields: std::collections::BTreeMap<String, crate::types::Value>,
     ) -> Result<UpsertOutcome> {
-        // Refresh BEFORE opening the transaction — `ensure_fresh` may itself
-        // open a `BEGIN IMMEDIATE` via `rebuild_if_stale`.
+        // Refresh BEFORE opening the transaction so the IMMEDIATE write lock
+        // is not held across a potentially-long reindex. A nested `ensure_fresh`
+        // reached from inside the transaction below is still safe — its
+        // `rebuild`/`incremental_reindex` → `batch_index` path is
+        // nesting-tolerant — but refreshing up front keeps the lock window tight.
         self.ensure_fresh()?;
 
         let schemas = self.list_type_schemas()?;

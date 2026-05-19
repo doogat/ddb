@@ -229,20 +229,24 @@ impl Index {
     ///
     /// Per-doogat errors are logged and skipped — they don't abort the batch.
     /// Returns the number of successfully indexed doogats.
+    ///
+    /// Routed through `with_immediate_transaction`, so it is nesting-tolerant:
+    /// when the connection is already inside a transaction (e.g. a SINGLETON
+    /// write path opened `BEGIN IMMEDIATE` and a nested `ensure_fresh` then
+    /// reaches `rebuild`/`incremental_reindex` → `batch_index`), it joins the
+    /// enclosing transaction instead of failing on a nested raw `BEGIN`.
     pub fn batch_index(&self, doogats: &[ParsedDoogat]) -> Result<usize> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-
-        let mut count = 0;
-        for doogat in doogats {
-            if let Err(e) = self.upsert_doogat(doogat) {
-                tracing::warn!(path = %doogat.path, error = %e, "batch_index: skipping doogat");
-                continue;
+        with_immediate_transaction(&self.conn, || {
+            let mut count = 0;
+            for doogat in doogats {
+                if let Err(e) = self.upsert_doogat(doogat) {
+                    tracing::warn!(path = %doogat.path, error = %e, "batch_index: skipping doogat");
+                    continue;
+                }
+                count += 1;
             }
-            count += 1;
-        }
-
-        self.conn.execute_batch("COMMIT")?;
-        Ok(count)
+            Ok(count)
+        })
     }
 
     /// Shared upsert logic used by both `index_doogat` (savepoint) and `batch_index` (transaction).
