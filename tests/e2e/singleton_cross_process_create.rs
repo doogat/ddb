@@ -98,10 +98,11 @@ fn two_concurrent_ddb_create_on_singleton_converge_on_one_row() {
         .success()
         .stdout(predicates::str::contains("dark"));
 
-    // Exactly one row — count must be 1, not just "a row with dark exists".
-    repo.ddb()
+    let count = repo
+        .ddb()
         .args(["query", "SELECT COUNT(*) AS n FROM app_config"])
         .assert()
-        .success()
-        .stdout(predicates::str::contains("1"));
+        .success();
+    let stdout = String::from_utf8_lossy(&count.get_output().stdout);
+    assert_eq!(stdout.trim(), "1", "expected exactly one row");
 }

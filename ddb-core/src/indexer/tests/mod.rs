@@ -3937,7 +3937,10 @@ fn batch_index_joins_an_open_transaction_instead_of_nesting() {
     let count = idx
         .batch_index(&doogats)
         .expect("batch_index must join the open transaction, not fail on a nested BEGIN");
-    assert_eq!(count, 5, "all 5 doogats indexed inside the joined transaction");
+    assert_eq!(
+        count, 5,
+        "all 5 doogats indexed inside the joined transaction"
+    );
 
     // batch_index must NOT have committed the enclosing transaction — the
     // outer SINGLETON write still owns commit/rollback.
