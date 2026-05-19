@@ -91,6 +91,23 @@ fn two_concurrent_ddb_create_on_singleton_converge_on_one_row() {
         "raw SQLite UNIQUE error must not leak; got stderr={loser_stderr} stdout={loser_stdout}"
     );
 
+    // PRD 00140 goal 1 existing_id parity: the loser's error must name the
+    // *actual* winning row id, not just some non-empty token. A bug that
+    // zeroed or swapped `context.existing_id` would still produce a message
+    // matching the substring above, so assert the value too.
+    let winner = outputs.iter().find(|o| o.status.success()).unwrap();
+    let winner_id = String::from_utf8_lossy(&winner.stdout).trim().to_string();
+    assert!(
+        !winner_id.is_empty(),
+        "winner stdout must carry the created doogat id; got: {:?}",
+        String::from_utf8_lossy(&winner.stdout)
+    );
+    assert!(
+        loser_stderr.contains(&winner_id) || loser_stdout.contains(&winner_id),
+        "loser error must name the winning row id {winner_id} (existing_id parity); \
+         got stderr={loser_stderr} stdout={loser_stdout}"
+    );
+
     // Exactly one row materialized.
     repo.ddb()
         .args(["query", "SELECT * FROM app_config"])
