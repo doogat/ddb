@@ -68,3 +68,77 @@ impl<G: GitBackend> DoogatService<G> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn fresh_svc() -> (TempDir, DoogatService) {
+        let tmp = TempDir::new().unwrap();
+        let svc = DoogatService::init(tmp.path()).unwrap();
+        svc.reindex().unwrap();
+        (tmp, svc)
+    }
+
+    #[test]
+    fn execute_sql_inside_open_transaction_does_not_refresh_index() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        // Build SQL state so a SELECT will succeed.
+        svc.execute_sql("CREATE TABLE project (name TEXT, status TEXT)")
+            .unwrap();
+        svc.execute_sql("INSERT INTO project (name, status) VALUES ('alpha', 'active')")
+            .unwrap();
+
+        // Force index stale by writing a bogus HEAD.
+        svc.index
+            .store_head("0000000000000000000000000000000000000000")
+            .unwrap();
+        assert!(
+            svc.index.is_stale(&svc.repo).unwrap(),
+            "index must be stale before the test starts"
+        );
+
+        // Open a transaction then run a nested execute_sql.
+        svc.begin_transaction().unwrap();
+        svc.execute_sql("SELECT name, status FROM project").unwrap();
+
+        // Index must still be stale: refresh must not fire inside an open transaction.
+        assert!(
+            svc.index.is_stale(&svc.repo).unwrap(),
+            "index must remain stale: refresh must not run inside an open transaction"
+        );
+
+        svc.rollback_transaction().unwrap();
+    }
+
+    #[test]
+    fn execute_sql_at_top_level_refreshes_stale_index() {
+        let (_tmp, mut svc) = fresh_svc();
+
+        // Build SQL state so a SELECT will succeed.
+        svc.execute_sql("CREATE TABLE project (name TEXT, status TEXT)")
+            .unwrap();
+        svc.execute_sql("INSERT INTO project (name, status) VALUES ('alpha', 'active')")
+            .unwrap();
+
+        // Force index stale.
+        svc.index
+            .store_head("0000000000000000000000000000000000000000")
+            .unwrap();
+        assert!(
+            svc.index.is_stale(&svc.repo).unwrap(),
+            "index must be stale before the test starts"
+        );
+
+        // Top-level call — no open transaction.
+        svc.execute_sql("SELECT name, status FROM project").unwrap();
+
+        // Index must now be fresh: top-level execute_sql must refresh a stale index.
+        assert!(
+            !svc.index.is_stale(&svc.repo).unwrap(),
+            "index must be fresh: top-level execute_sql must refresh a stale index"
+        );
+    }
+}
