@@ -610,7 +610,14 @@ impl Index {
 }
 
 /// Run `f` inside a `BEGIN IMMEDIATE` transaction, committing on `Ok` and
-/// rolling back on `Err`. The closure's error propagates unchanged.
+/// rolling back on `Err`. The closure's error propagates unchanged; a failed
+/// `ROLLBACK` is non-fatal — it is logged at `warn` level and the original
+/// closure error is still returned.
+///
+/// `#[cfg(test)]` is temporary: the helper has no production caller yet, so
+/// without the gate it would warn as dead code (the project forbids
+/// dead-code lint suppression). The task that wires it into the SINGLETON
+/// write paths is its first production caller and must remove this gate.
 #[cfg(test)]
 pub(crate) fn with_immediate_transaction<T>(
     conn: &rusqlite::Connection,
