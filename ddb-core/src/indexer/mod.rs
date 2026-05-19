@@ -609,6 +609,28 @@ impl Index {
     }
 }
 
+/// Run `f` inside a `BEGIN IMMEDIATE` transaction, committing on `Ok` and
+/// rolling back on `Err`. The closure's error propagates unchanged.
+#[cfg(test)]
+pub(crate) fn with_immediate_transaction<T>(
+    conn: &rusqlite::Connection,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    match f() {
+        Ok(value) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(value)
+        }
+        Err(e) => {
+            if let Err(rb_err) = conn.execute_batch("ROLLBACK") {
+                tracing::warn!(error = %rb_err, "transaction rollback failed");
+            }
+            Err(e)
+        }
+    }
+}
+
 /// Pass-through trait impl for `SqlBackend`. Each method body delegates to
 /// the inherent method of the same name on `Index`. Rust's method-resolution
 /// rules pick the inherent method over the trait method when called via

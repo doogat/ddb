@@ -158,9 +158,9 @@ fn rest_error(e: DoogatError) -> (StatusCode, Json<ErrorBody>) {
             | codes::REFERENCES_VIOLATION
             | codes::CASCADE_CYCLE => StatusCode::CONFLICT,
             codes::SINGLETON_NOT_FOUND => StatusCode::NOT_FOUND,
-            codes::NOT_NULL_VIOLATION
-            | codes::UNKNOWN_FIELD
-            | codes::TYPE_NOT_REGISTERED => StatusCode::UNPROCESSABLE_ENTITY,
+            codes::NOT_NULL_VIOLATION | codes::UNKNOWN_FIELD | codes::TYPE_NOT_REGISTERED => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             _ => StatusCode::UNPROCESSABLE_ENTITY,
         },
         _ => StatusCode::INTERNAL_SERVER_ERROR,

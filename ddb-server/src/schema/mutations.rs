@@ -690,9 +690,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
         ))
         .field(simple_field(
             "singletonConflicts",
-            TypeRef::List(Box::new(TypeRef::named_nn(
-                "SingletonConflictResolution",
-            ))),
+            TypeRef::List(Box::new(TypeRef::named_nn("SingletonConflictResolution"))),
         ));
 
     // -- CompactResult output type --

@@ -1344,7 +1344,8 @@ impl<G: GitBackend> DoogatService<G> {
             // recorded in `_ddb_fields`. The query intersects the matching
             // doogat_id sets across the group columns and filters out the
             // row we're about to write.
-            let mut sql = String::from("SELECT z.id FROM doogats z WHERE z.type = ?1 AND z.id != ?2");
+            let mut sql =
+                String::from("SELECT z.id FROM doogats z WHERE z.type = ?1 AND z.id != ?2");
             let mut params: Vec<rusqlite::types::Value> = vec![
                 rusqlite::types::Value::Text(schema.table_name.clone()),
                 rusqlite::types::Value::Text(new_id.to_string()),

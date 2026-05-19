@@ -3893,16 +3893,19 @@ fn with_immediate_transaction_rolls_back_on_err() {
                 "error must propagate unchanged (same variant and payload)"
             );
         }
-        other => panic!(
-            "expected the closure's exact Sql error to propagate unchanged, got {other:?}"
-        ),
+        other => {
+            panic!("expected the closure's exact Sql error to propagate unchanged, got {other:?}")
+        }
     }
 
     let count: i64 = idx
         .conn
         .query_row("SELECT COUNT(*) FROM wit_t", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(count, 0, "row inserted in an Err closure must be rolled back");
+    assert_eq!(
+        count, 0,
+        "row inserted in an Err closure must be rolled back"
+    );
 }
 
 #[test]
@@ -3910,5 +3913,9 @@ fn with_immediate_transaction_passes_through_return_value() {
     let idx = in_memory_index();
 
     let result = with_immediate_transaction(&idx.conn, || Ok(42));
-    assert_eq!(result.unwrap(), 42, "Ok return value must pass through unchanged");
+    assert_eq!(
+        result.unwrap(),
+        42,
+        "Ok return value must pass through unchanged"
+    );
 }

@@ -386,11 +386,13 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         report.singleton_conflicts = sweep
             .details
             .iter()
-            .map(|(table, winner, losers)| crate::types::SingletonConflictResolution {
-                table: table.clone(),
-                winner: winner.clone(),
-                losers: losers.clone(),
-            })
+            .map(
+                |(table, winner, losers)| crate::types::SingletonConflictResolution {
+                    table: table.clone(),
+                    winner: winner.clone(),
+                    losers: losers.clone(),
+                },
+            )
             .collect();
         tracing::info!(
             phase = "singleton_sweep",
