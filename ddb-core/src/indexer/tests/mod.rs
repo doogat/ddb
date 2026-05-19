@@ -3834,3 +3834,81 @@ fn search_filter_user_junction_contains_default_title_when_unset() {
         "default behaviour: title-based match must still hit link0"
     );
 }
+
+#[test]
+fn with_immediate_transaction_commits_on_ok() {
+    let idx = in_memory_index();
+    idx.conn
+        .execute("CREATE TABLE wit_t (x INTEGER)", [])
+        .unwrap();
+
+    let result = with_immediate_transaction(&idx.conn, || {
+        idx.conn
+            .execute("INSERT INTO wit_t (x) VALUES (1)", [])
+            .unwrap();
+        Ok(())
+    });
+    assert!(result.is_ok());
+    assert!(
+        idx.conn.is_autocommit(),
+        "transaction must be properly closed by COMMIT"
+    );
+
+    let count: i64 = idx
+        .conn
+        .query_row("SELECT COUNT(*) FROM wit_t", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1, "row inserted in an Ok closure must be committed");
+}
+
+#[test]
+fn with_immediate_transaction_rolls_back_on_err() {
+    let idx = in_memory_index();
+    idx.conn
+        .execute("CREATE TABLE wit_t (x INTEGER)", [])
+        .unwrap();
+
+    // Use a distinctive `Sql` variant (distinct from `Validation`) with a
+    // unique payload no implementation could plausibly hardcode. This forces
+    // the real closure error to be threaded through unchanged: a
+    // constant-substitution shortcut would return a different variant/message
+    // and fail the match arm below.
+    let result = with_immediate_transaction(&idx.conn, || {
+        idx.conn
+            .execute("INSERT INTO wit_t (x) VALUES (1)", [])
+            .unwrap();
+        assert!(
+            !idx.conn.is_autocommit(),
+            "a real transaction must be open during the closure"
+        );
+        Err::<(), _>(crate::error::DoogatError::Sql(
+            "wit-rollback-probe-9f3c1a sentinel payload".into(),
+        ))
+    });
+
+    match result {
+        Err(crate::error::DoogatError::Sql(msg)) => {
+            assert_eq!(
+                msg, "wit-rollback-probe-9f3c1a sentinel payload",
+                "error must propagate unchanged (same variant and payload)"
+            );
+        }
+        other => panic!(
+            "expected the closure's exact Sql error to propagate unchanged, got {other:?}"
+        ),
+    }
+
+    let count: i64 = idx
+        .conn
+        .query_row("SELECT COUNT(*) FROM wit_t", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "row inserted in an Err closure must be rolled back");
+}
+
+#[test]
+fn with_immediate_transaction_passes_through_return_value() {
+    let idx = in_memory_index();
+
+    let result = with_immediate_transaction(&idx.conn, || Ok(42));
+    assert_eq!(result.unwrap(), 42, "Ok return value must pass through unchanged");
+}
