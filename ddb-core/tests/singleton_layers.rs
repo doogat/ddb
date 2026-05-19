@@ -200,3 +200,135 @@ Direct git write that bypasses service-side INSERT
         )
     );
 }
+
+/// PRD 00139: `create_doogat_with_extra` (the typed CLI/FFI create path)
+/// must reject a second SINGLETON row with the structured
+/// `SINGLETON_VIOLATION` error — not leak a raw SQL UNIQUE-constraint error.
+///
+/// Hardening (PRD 00139 review): the typedef here is `site_settings` (NOT
+/// `app_config`, which the sibling raw test uses), and the two rejected
+/// creates carry two DIFFERENT titles (`another`, `yet-another`), neither
+/// of which is `second`. Together this makes the test impossible to satisfy
+/// by hardcoding `(type, title)` literals — a `type`-keyed branch can't fire
+/// on `site_settings`, and a `title`-keyed branch would let at least one of
+/// the two distinct titles slip through.
+#[test]
+fn create_doogat_with_extra_rejects_second_singleton_row_with_structured_error() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+
+    svc.execute_sql("CREATE TABLE site_settings (theme TEXT) SINGLETON")
+        .unwrap();
+
+    let mut first_extra = BTreeMap::new();
+    first_extra.insert("theme".to_string(), Value::String("dark".to_string()));
+    let first = svc
+        .create_doogat_with_extra("first", &[], Some("site_settings"), "", first_extra)
+        .expect("first singleton row must be created");
+    let first_id = first
+        .meta
+        .id
+        .expect("created singleton row must carry an id")
+        .0;
+
+    let expected_message = format!(
+        "SINGLETON constraint violated: site_settings already holds row {first_id}"
+    );
+
+    // Two further creates with two DISTINCT titles, neither `second`.
+    // BOTH must be rejected with the identical structured error — a
+    // title-keyed hardcode would let one through.
+    for title in ["another", "yet-another"] {
+        let mut extra = BTreeMap::new();
+        extra.insert("theme".to_string(), Value::String("light".to_string()));
+        let err = svc
+            .create_doogat_with_extra(title, &[], Some("site_settings"), "", extra)
+            .expect_err("create_doogat_with_extra must reject the second singleton row");
+        let structured = extract_singleton_structured(err, "create_doogat_with_extra");
+
+        assert_eq!(structured.code, codes::SINGLETON_VIOLATION);
+        assert_eq!(structured.table, "site_settings");
+        assert_eq!(structured.existing_id, first_id);
+        assert_eq!(structured.message, expected_message);
+    }
+}
+
+/// PRD 00139: regression coverage — `create_doogat_raw` must also reject a
+/// second SINGLETON row with the same structured `SINGLETON_VIOLATION`.
+#[test]
+fn create_doogat_raw_rejects_second_singleton_row_with_structured_error() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+
+    svc.execute_sql("CREATE TABLE app_config (theme TEXT) SINGLETON")
+        .unwrap();
+
+    let first_id = svc
+        .create_doogat_raw(
+            "---\ntype: app_config\ntitle: first\ntheme: dark\n---\nbody",
+            "add first singleton row",
+        )
+        .expect("first singleton row must be created");
+
+    let err = svc
+        .create_doogat_raw(
+            "---\ntype: app_config\ntitle: second\ntheme: light\n---\nbody",
+            "add second singleton row",
+        )
+        .expect_err("create_doogat_raw must reject the second singleton row");
+    let structured = extract_singleton_structured(err, "create_doogat_raw");
+
+    assert_eq!(structured.code, codes::SINGLETON_VIOLATION);
+    assert_eq!(structured.table, "app_config");
+    assert_eq!(structured.existing_id, first_id);
+    assert_eq!(
+        structured.message,
+        format!(
+            "SINGLETON constraint violated: {} already holds row {}",
+            structured.table, structured.existing_id
+        )
+    );
+}
+
+/// PRD 00139: a NON-singleton typedef must be unaffected — two successive
+/// `create_doogat_with_extra` calls into a non-singleton typedef both
+/// succeed (no false SINGLETON rejection).
+///
+/// Hardening (PRD 00139 review): the non-singleton control typedef
+/// `plain_config` is now STRUCTURALLY IDENTICAL to the singleton typedefs
+/// `site_settings`/`app_config` — same table-name shape, and the SAME
+/// `theme TEXT` column — differing ONLY in the absence of the `SINGLETON`
+/// keyword. The earlier `notes (body TEXT)` control diverged in both name
+/// and column name, so any column-name or column-shape proxy (e.g.
+/// `columns.any(|c| c.name == "theme")`) could masquerade as real
+/// enforcement. With byte-identical column shapes, no such proxy can tell
+/// `plain_config` from a singleton typedef — only the `singleton` flag on
+/// the typedef does, so a correct implementation MUST consult it to let
+/// these two rows through.
+#[test]
+fn create_doogat_with_extra_allows_two_rows_in_non_singleton_typedef() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+
+    svc.execute_sql("CREATE TABLE plain_config (theme TEXT)")
+        .unwrap();
+
+    let mut first_extra = BTreeMap::new();
+    first_extra.insert("theme".to_string(), Value::String("one".to_string()));
+    let first = svc.create_doogat_with_extra("first", &[], Some("plain_config"), "", first_extra);
+    assert!(
+        first.is_ok(),
+        "first non-singleton row must succeed, got: {first:?}"
+    );
+
+    let mut second_extra = BTreeMap::new();
+    second_extra.insert("theme".to_string(), Value::String("two".to_string()));
+    let second = svc.create_doogat_with_extra("second", &[], Some("plain_config"), "", second_extra);
+    assert!(
+        second.is_ok(),
+        "second non-singleton row must succeed, got: {second:?}"
+    );
+}
