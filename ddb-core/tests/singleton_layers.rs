@@ -232,9 +232,8 @@ fn create_doogat_with_extra_rejects_second_singleton_row_with_structured_error()
         .expect("created singleton row must carry an id")
         .0;
 
-    let expected_message = format!(
-        "SINGLETON constraint violated: site_settings already holds row {first_id}"
-    );
+    let expected_message =
+        format!("SINGLETON constraint violated: site_settings already holds row {first_id}");
 
     // Two further creates with two DISTINCT titles, neither `second`.
     // BOTH must be rejected with the identical structured error — a
@@ -326,7 +325,8 @@ fn create_doogat_with_extra_allows_two_rows_in_non_singleton_typedef() {
 
     let mut second_extra = BTreeMap::new();
     second_extra.insert("theme".to_string(), Value::String("two".to_string()));
-    let second = svc.create_doogat_with_extra("second", &[], Some("plain_config"), "", second_extra);
+    let second =
+        svc.create_doogat_with_extra("second", &[], Some("plain_config"), "", second_extra);
     assert!(
         second.is_ok(),
         "second non-singleton row must succeed, got: {second:?}"
@@ -427,7 +427,10 @@ fn upsert_singleton_updates_existing_row_and_returns_created_false() {
                 BTreeMap::from([("theme".to_string(), Value::String("dark".to_string()))]),
             )
             .expect("first upsert must succeed");
-        assert!(first.created, "first upsert into `{table}` must create the row");
+        assert!(
+            first.created,
+            "first upsert into `{table}` must create the row"
+        );
 
         let second = svc
             .upsert_singleton(

@@ -61,7 +61,10 @@ fn two_concurrent_graphql_upserts_on_singleton_converge_on_one_row() {
         "app_config query failed: {query_resp}"
     );
     let row = &query_resp["data"]["app_config"];
-    assert!(!row.is_null(), "expected exactly one app_config row, got null");
+    assert!(
+        !row.is_null(),
+        "expected exactly one app_config row, got null"
+    );
     assert_eq!(
         row["theme"].as_str().unwrap_or(""),
         "dark",
@@ -110,7 +113,10 @@ fn two_concurrent_pgwire_inserts_on_singleton_one_wins_one_gets_singleton_error(
             client2.simple_query("INSERT INTO pg_cfg (title, theme) VALUES ('b', 'dark')"),
         );
 
-        let ok_count = [res1.is_ok(), res2.is_ok()].iter().filter(|&&ok| ok).count();
+        let ok_count = [res1.is_ok(), res2.is_ok()]
+            .iter()
+            .filter(|&&ok| ok)
+            .count();
         assert_eq!(ok_count, 1, "expected exactly one successful insert");
 
         let err = res1

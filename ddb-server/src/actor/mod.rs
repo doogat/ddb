@@ -600,7 +600,10 @@ impl ActorHandle {
         type_name: String,
         fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
     ) -> ActorResult<UpsertOutcome> {
-        match self.send(ActorCommand::UpsertSingleton { type_name, fields }).await {
+        match self
+            .send(ActorCommand::UpsertSingleton { type_name, fields })
+            .await
+        {
             ActorReply::Upsert(r) => r,
             _ => Err(DoogatError::Validation("unexpected reply".into())),
         }
