@@ -261,6 +261,13 @@ impl<G: GitBackend> DoogatService<G> {
             Ok(parsed)
         };
 
+        // The IMMEDIATE write lock is held across the git `commit_file` inside
+        // `write` — deliberate (PRD 00140): a SINGLETON commit writes one small
+        // markdown file, so the hold is sub-millisecond against the 5000ms
+        // `busy_timeout`. If `index_doogat`/`materialize_single` fail after the
+        // commit, the SQLite side rolls back but the git commit stays; the next
+        // `ensure_fresh` detects the advanced HEAD and re-indexes, and
+        // `consistency::singleton_sweep` (PRD 00139 §10) reconciles any duplicate.
         if is_singleton {
             crate::indexer::with_immediate_transaction(&self.index.conn, write)
         } else {
