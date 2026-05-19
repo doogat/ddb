@@ -332,3 +332,161 @@ fn create_doogat_with_extra_allows_two_rows_in_non_singleton_typedef() {
         "second non-singleton row must succeed, got: {second:?}"
     );
 }
+
+/// Read the single `theme` cell out of `SELECT theme FROM <table>`,
+/// asserting there is exactly `expected_rows` rows materialized.
+fn read_theme(
+    svc: &mut DoogatService<impl ddb_core::traits::GitBackend>,
+    table: &str,
+    expected_rows: usize,
+) -> Option<String> {
+    match svc
+        .execute_sql(&format!("SELECT theme FROM {table}"))
+        .expect("SELECT must succeed")
+    {
+        ddb_core::sql_engine::SqlResult::Rows { rows, .. } => {
+            assert_eq!(
+                rows.len(),
+                expected_rows,
+                "{table} must hold exactly {expected_rows} row(s), got {}",
+                rows.len()
+            );
+            rows.into_iter().next().map(|mut r| r.remove(0))
+        }
+        other => panic!("SELECT must produce Rows, got: {other:?}"),
+    }
+}
+
+/// AC1: `upsert_singleton` on an EMPTY SINGLETON typedef creates the row,
+/// returns `created == true` with a non-empty `id`, and the supplied field
+/// value is materialized.
+///
+/// Hardening (PRD 00139 review): this test loops over TWO distinct singleton
+/// typedef names — `site_settings` and `app_config` — symmetric to AC3's
+/// three-way non-singleton loop. A wrong implementation with a single-name
+/// accept-list (e.g. `if doogat_type != "site_settings" { return Err(...) }`)
+/// passes on the `site_settings` iteration but fails on `app_config`; only
+/// reading the typedef's actual `singleton` flag satisfies both.
+#[test]
+fn upsert_singleton_creates_row_when_typedef_empty() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+
+    for table in ["site_settings", "app_config"] {
+        svc.execute_sql(&format!("CREATE TABLE {table} (theme TEXT) SINGLETON"))
+            .unwrap();
+
+        let fields = BTreeMap::from([("theme".to_string(), Value::String("dark".to_string()))]);
+        let outcome = svc
+            .upsert_singleton(table, fields)
+            .expect("upsert into empty singleton typedef must succeed");
+
+        assert!(
+            outcome.created,
+            "first upsert into an empty typedef `{table}` must report created == true"
+        );
+        assert!(
+            !outcome.id.is_empty(),
+            "created row in `{table}` must carry a non-empty id"
+        );
+
+        assert_eq!(
+            read_theme(&mut svc, table, 1).as_deref(),
+            Some("dark"),
+            "supplied field value must be materialized in `{table}`"
+        );
+    }
+}
+
+/// AC2: a SECOND `upsert_singleton` on the now-populated typedef updates the
+/// existing row in place: `created == false`, the SAME id as the first call,
+/// the typedef still holds exactly ONE row, and the new field value is
+/// reflected. This rejects an implementation that always inserts (duplicate
+/// row) or always reports `created == true`.
+///
+/// Hardening (PRD 00139 review): this test loops over TWO distinct singleton
+/// typedef names — `site_settings` and `app_config` — symmetric to AC3's
+/// three-way non-singleton loop. A wrong implementation with a single-name
+/// accept-list (e.g. `if doogat_type != "site_settings" { return Err(...) }`)
+/// passes on the `site_settings` iteration but fails on `app_config`; only
+/// reading the typedef's actual `singleton` flag satisfies both.
+#[test]
+fn upsert_singleton_updates_existing_row_and_returns_created_false() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+
+    for table in ["site_settings", "app_config"] {
+        svc.execute_sql(&format!("CREATE TABLE {table} (theme TEXT) SINGLETON"))
+            .unwrap();
+
+        let first = svc
+            .upsert_singleton(
+                table,
+                BTreeMap::from([("theme".to_string(), Value::String("dark".to_string()))]),
+            )
+            .expect("first upsert must succeed");
+        assert!(first.created, "first upsert into `{table}` must create the row");
+
+        let second = svc
+            .upsert_singleton(
+                table,
+                BTreeMap::from([("theme".to_string(), Value::String("light".to_string()))]),
+            )
+            .expect("second upsert must succeed");
+
+        assert!(
+            !second.created,
+            "second upsert into `{table}` must update the existing row, not create one"
+        );
+        assert_eq!(
+            second.id, first.id,
+            "second upsert into `{table}` must target the SAME row id as the first"
+        );
+
+        // Still exactly one row, and it carries the second call's value.
+        assert_eq!(
+            read_theme(&mut svc, table, 1).as_deref(),
+            Some("light"),
+            "second upsert's field value must be reflected in the single row of `{table}`"
+        );
+    }
+}
+
+/// AC3: `upsert_singleton` on a NON-singleton typedef must return `Err`.
+///
+/// Hardening (PRD 00139 review): each non-singleton typedef here is
+/// STRUCTURALLY IDENTICAL to the singleton typedef `site_settings` exercised
+/// by AC1/AC2 — same `theme TEXT` column shape — differing ONLY in the
+/// absence of the `SINGLETON` keyword. No type-name or column-shape proxy
+/// can distinguish them from `site_settings`, so a correct implementation
+/// MUST consult the typedef's actual `singleton` flag to reject this call.
+///
+/// Parametrization (this review cycle): the test loops over THREE distinct
+/// non-singleton typedef names — `plain_config`, `misc_config`, `user_prefs`
+/// — mirroring how `upsert_singleton_updates_existing_row_and_returns_created_false`
+/// loops over two distinct titles. A wrong implementation that hardcodes a
+/// single literal type name (e.g. `if doogat_type == "plain_config"`) would
+/// reject only that one name and let `misc_config` and `user_prefs` slip
+/// through, failing the test. Only reading the typedef's `singleton` flag
+/// rejects all three.
+#[test]
+fn upsert_singleton_rejects_non_singleton_typedef() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut svc = DoogatService::init(tmp.path()).unwrap();
+    svc.reindex().unwrap();
+
+    for table in ["plain_config", "misc_config", "user_prefs"] {
+        svc.execute_sql(&format!("CREATE TABLE {table} (theme TEXT)"))
+            .unwrap();
+        let result = svc.upsert_singleton(
+            table,
+            BTreeMap::from([("theme".to_string(), Value::String("dark".to_string()))]),
+        );
+        assert!(
+            result.is_err(),
+            "upsert_singleton on non-singleton typedef `{table}` must return Err, got: {result:?}"
+        );
+    }
+}
