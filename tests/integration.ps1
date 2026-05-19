@@ -2190,6 +2190,161 @@ if ($parityTheme -notmatch "p1") { throw "54.D: singleton parity theme should re
 pass "54.D: duplicate INSERT parity leaves the singleton end state unchanged"
 ddb query "DROP TABLE ig_parity_cfg CASCADE" | Out-Null
 
+# 55. Cross-process SINGLETON write race + structured-error parity (PRD 00140).
+
+# 55.A - CLI `ddb create` race
+# Each job returns a hashtable with output (string) and exit (int) so both are
+# recoverable from Receive-Job without inspecting internal job streams.
+ddl 'mutation { executeSql(sql: "CREATE TABLE ig_race_cli (theme TEXT) SINGLETON") { message } }'
+$job55A1 = Start-Job -ScriptBlock {
+    param($ddb)
+    $out = & $ddb create --type ig_race_cli --title x --set theme=dark 2>&1 | Out-String
+    @{ out = $out; exit = $LASTEXITCODE }
+} -ArgumentList $DDB
+$job55A2 = Start-Job -ScriptBlock {
+    param($ddb)
+    $out = & $ddb create --type ig_race_cli --title x --set theme=dark 2>&1 | Out-String
+    @{ out = $out; exit = $LASTEXITCODE }
+} -ArgumentList $DDB
+$res55A1 = Receive-Job -Job $job55A1 -Wait
+$res55A2 = Receive-Job -Job $job55A2 -Wait
+Remove-Job $job55A1
+Remove-Job $job55A2
+$exit55A1 = [int]$res55A1.exit; $out55A1 = [string]$res55A1.out
+$exit55A2 = [int]$res55A2.exit; $out55A2 = [string]$res55A2.out
+$cliOk = (($exit55A1 -eq 0) ? 1 : 0) + (($exit55A2 -eq 0) ? 1 : 0)
+$cliFail = (($exit55A1 -ne 0) ? 1 : 0) + (($exit55A2 -ne 0) ? 1 : 0)
+if ($cliOk -ne 1) { throw "55.A: expected exactly 1 CLI winner, got $cliOk" }
+if ($cliFail -ne 1) { throw "55.A: expected exactly 1 CLI loser, got $cliFail" }
+$cliLoserOut = if ($exit55A1 -ne 0) { $out55A1 } else { $out55A2 }
+if ($cliLoserOut -notmatch "SINGLETON constraint violated: ig_race_cli already holds row") {
+    throw "55.A: loser output missing SINGLETON constraint message: $cliLoserOut"
+}
+if ($cliLoserOut -match "UNIQUE constraint failed") { throw "55.A: loser output leaked raw UNIQUE constraint failed" }
+$count55A = ddb query "SELECT COUNT(*) FROM ig_race_cli"
+if ($count55A -notmatch "^1$") { throw "55.A: ig_race_cli did not converge on exactly one row, got: $count55A" }
+pass "55.A: concurrent ddb create on a SINGLETON typedef converges on one row; loser carries the structured SINGLETON message"
+
+# 55.B - GraphQL `executeSql` INSERT race
+# Jobs use Invoke-WebRequest directly (gql helper is not visible in job runspace).
+# The server returns 200 even for GraphQL errors, so we detect winner/loser by
+# response content rather than HTTP status.
+ddl 'mutation { executeSql(sql: "CREATE TABLE ig_race_sql (theme TEXT) SINGLETON") { message } }'
+$gqlBody55B = '{"query":"mutation { executeSql(sql: \"INSERT INTO ig_race_sql (title, theme) VALUES (\\\"x\\\", \\\"dark\\\")\") { message } }"}'
+$job55B1 = Start-Job -ScriptBlock {
+    param($url, $token, $body)
+    $r = Invoke-WebRequest -Uri $url -Method POST -ContentType "application/json" `
+        -Headers @{ Authorization = "Bearer $token" } -Body $body -SkipHttpErrorCheck
+    if ($r.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($r.Content) } else { $r.Content }
+} -ArgumentList $GQL_URL, $TOKEN, $gqlBody55B
+$job55B2 = Start-Job -ScriptBlock {
+    param($url, $token, $body)
+    $r = Invoke-WebRequest -Uri $url -Method POST -ContentType "application/json" `
+        -Headers @{ Authorization = "Bearer $token" } -Body $body -SkipHttpErrorCheck
+    if ($r.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($r.Content) } else { $r.Content }
+} -ArgumentList $GQL_URL, $TOKEN, $gqlBody55B
+$resp55B1 = [string](Receive-Job -Job $job55B1 -Wait)
+$resp55B2 = [string](Receive-Job -Job $job55B2 -Wait)
+Remove-Job $job55B1
+Remove-Job $job55B2
+$sqlViolations = @($resp55B1, $resp55B2 | Where-Object { $_ -match "SINGLETON_VIOLATION" }).Count
+$sqlErrors = @($resp55B1, $resp55B2 | Where-Object { $_ -match '"errors"' }).Count
+if ($sqlViolations -ne 1) { throw "55.B: expected exactly 1 SINGLETON_VIOLATION, got $sqlViolations" }
+if ($sqlErrors -ne 1) { throw "55.B: expected exactly 1 errors response, got $sqlErrors" }
+if ($resp55B1 -match "UNIQUE constraint failed") { throw "55.B: race_sql_1 leaked raw UNIQUE constraint failed" }
+if ($resp55B2 -match "UNIQUE constraint failed") { throw "55.B: race_sql_2 leaked raw UNIQUE constraint failed" }
+$count55B = ddb query "SELECT COUNT(*) FROM ig_race_sql"
+if ($count55B -notmatch "^1$") { throw "55.B: ig_race_sql did not converge on exactly one row, got: $count55B" }
+pass "55.B: concurrent executeSql INSERT race - loser carries SINGLETON_VIOLATION"
+
+# 55.C - GraphQL typed `createDoogat` race
+ddl 'mutation { executeSql(sql: "CREATE TABLE ig_race_typed (theme TEXT) SINGLETON") { message } }'
+$gqlBody55C = '{"query":"mutation { createDoogat(input: { type: \"ig_race_typed\", title: \"x\", fields: \"{\\\"theme\\\":\\\"dark\\\"}\" }) { id } }"}'
+$job55C1 = Start-Job -ScriptBlock {
+    param($url, $token, $body)
+    $r = Invoke-WebRequest -Uri $url -Method POST -ContentType "application/json" `
+        -Headers @{ Authorization = "Bearer $token" } -Body $body -SkipHttpErrorCheck
+    if ($r.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($r.Content) } else { $r.Content }
+} -ArgumentList $GQL_URL, $TOKEN, $gqlBody55C
+$job55C2 = Start-Job -ScriptBlock {
+    param($url, $token, $body)
+    $r = Invoke-WebRequest -Uri $url -Method POST -ContentType "application/json" `
+        -Headers @{ Authorization = "Bearer $token" } -Body $body -SkipHttpErrorCheck
+    if ($r.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($r.Content) } else { $r.Content }
+} -ArgumentList $GQL_URL, $TOKEN, $gqlBody55C
+$resp55C1 = [string](Receive-Job -Job $job55C1 -Wait)
+$resp55C2 = [string](Receive-Job -Job $job55C2 -Wait)
+Remove-Job $job55C1
+Remove-Job $job55C2
+$typedViolations = @($resp55C1, $resp55C2 | Where-Object { $_ -match "SINGLETON_VIOLATION" }).Count
+$typedErrors = @($resp55C1, $resp55C2 | Where-Object { $_ -match '"errors"' }).Count
+if ($typedViolations -ne 1) { throw "55.C: expected exactly 1 SINGLETON_VIOLATION, got $typedViolations" }
+if ($typedErrors -ne 1) { throw "55.C: expected exactly 1 errors response, got $typedErrors" }
+if ($resp55C1 -match "UNIQUE constraint failed") { throw "55.C: race_typed_1 leaked raw UNIQUE constraint failed" }
+if ($resp55C2 -match "UNIQUE constraint failed") { throw "55.C: race_typed_2 leaked raw UNIQUE constraint failed" }
+$count55C = ddb query "SELECT COUNT(*) FROM ig_race_typed"
+if ($count55C -notmatch "^1$") { throw "55.C: ig_race_typed did not converge on exactly one row, got: $count55C" }
+pass "55.C: concurrent createDoogat race - loser carries SINGLETON_VIOLATION"
+
+# 55.D - CLI-vs-PgWire concurrent INSERT race
+# Follow .ps1 section 54.D convention: skip (pass) when psql is absent; only
+# create/assert ig_race_pg when psql is present.
+$pgRan = $false
+$psql55 = Get-Command psql -ErrorAction SilentlyContinue
+if ($psql55) {
+    ddl 'mutation { executeSql(sql: "CREATE TABLE ig_race_pg (theme TEXT) SINGLETON") { message } }'
+    $job55D1 = Start-Job -ScriptBlock {
+        param($ddb)
+        $out = & $ddb create --type ig_race_pg --title x --set theme=dark 2>&1 | Out-String
+        @{ out = $out; exit = $LASTEXITCODE }
+    } -ArgumentList $DDB
+    $job55D2 = Start-Job -ScriptBlock {
+        param($pgPort, $token)
+        $env:PGPASSWORD = $token
+        $out = & psql -h 127.0.0.1 -p $pgPort -U ddb -d ddb `
+            -c "INSERT INTO ig_race_pg (title, theme) VALUES ('x', 'dark')" 2>&1 | Out-String
+        @{ out = $out; exit = $LASTEXITCODE }
+    } -ArgumentList $PG_PORT, $TOKEN
+    $res55D1 = Receive-Job -Job $job55D1 -Wait
+    $res55D2 = Receive-Job -Job $job55D2 -Wait
+    Remove-Job $job55D1
+    Remove-Job $job55D2
+    $exit55D1 = [int]$res55D1.exit; $out55D1 = [string]$res55D1.out
+    $exit55D2 = [int]$res55D2.exit; $out55D2 = [string]$res55D2.out
+    $pgOk = (($exit55D1 -eq 0) ? 1 : 0) + (($exit55D2 -eq 0) ? 1 : 0)
+    $pgFail = (($exit55D1 -ne 0) ? 1 : 0) + (($exit55D2 -ne 0) ? 1 : 0)
+    if ($pgOk -ne 1) { throw "55.D: expected exactly 1 winner, got $pgOk" }
+    if ($pgFail -ne 1) { throw "55.D: expected exactly 1 loser, got $pgFail" }
+    $pgLoserOut = if ($exit55D1 -ne 0) { $out55D1 } else { $out55D2 }
+    if ($pgLoserOut -notmatch "SINGLETON constraint") {
+        throw "55.D: loser missing SINGLETON constraint message: $pgLoserOut"
+    }
+    if ($pgLoserOut -match "UNIQUE constraint failed") { throw "55.D: loser leaked raw UNIQUE constraint failed" }
+    $count55D = ddb query "SELECT COUNT(*) FROM ig_race_pg"
+    if ($count55D -notmatch "^1$") { throw "55.D: ig_race_pg did not converge on exactly one row, got: $count55D" }
+    pass "55.D: concurrent CLI-vs-PgWire INSERT race on a SINGLETON typedef - loser carries the SINGLETON constraint message"
+    $pgRan = $true
+} else {
+    pass "55.D: PgWire race covered by cargo test -p ddb-e2e --test e2e -- pgwire_singleton (no psql on host)"
+}
+
+# 55.E - convergence parity: every race left exactly one row.
+foreach ($t in @("ig_race_cli", "ig_race_sql", "ig_race_typed")) {
+    $c = ddb query "SELECT COUNT(*) FROM $t"
+    if ($c -notmatch "^1$") { throw "55.E: $t did not converge on exactly one row, got: $c" }
+}
+if ($pgRan) {
+    $c = ddb query "SELECT COUNT(*) FROM ig_race_pg"
+    if ($c -notmatch "^1$") { throw "55.E: ig_race_pg did not converge on exactly one row, got: $c" }
+}
+pass "55.E: CLI, executeSql, createDoogat, and PgWire races each converged on exactly one row with a structured SINGLETON-violation loser"
+
+# Cleanup
+ddb query "DROP TABLE ig_race_cli CASCADE" | Out-Null
+ddb query "DROP TABLE ig_race_sql CASCADE" | Out-Null
+ddb query "DROP TABLE ig_race_typed CASCADE" | Out-Null
+if ($pgRan) { ddb query "DROP TABLE ig_race_pg CASCADE" | Out-Null }
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
