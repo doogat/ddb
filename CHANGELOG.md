@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **service**: `execute_sql` / `execute_batch` no longer run `ensure_fresh()` mid-transaction, so a SQL call nested inside a caller-opened transaction keeps read-consistency. (PRD 00140)
 - **server**: GraphQL `upsert_<type>` mutation now routes through the atomic `DoogatService::upsert_singleton`, so two concurrent upserts on a SINGLETON typedef converge on one row instead of racing the SELECT against an INSERT. (PRD 00140)
 - **service**: `DoogatService::upsert_singleton` now performs the existing-row check and the create-or-update under a single `BEGIN IMMEDIATE` window, so concurrent upserts on a SINGLETON typedef converge on one row. (PRD 00140)
 - **service**: a cross-process race between two concurrent writes into the same SINGLETON typedef now produces the structured `SINGLETON_VIOLATION` error on the losing writer instead of leaking a raw SQL `UNIQUE constraint failed` error. Each service write path that targets a registered SINGLETON typedef (`create_doogat_raw`, `create_doogat_with_extra`, `batch_create`, `update_doogat_raw`) now runs its constraint-check → git-write → index window inside a `BEGIN IMMEDIATE` transaction, closing the TOCTOU window. `create_doogat_with_extra` additionally now runs the SINGLETON pre-check it previously skipped entirely. Non-SINGLETON writes are unaffected. (PRD 00140)

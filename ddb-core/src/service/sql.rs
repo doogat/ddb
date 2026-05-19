@@ -9,7 +9,11 @@ impl<G: GitBackend> DoogatService<G> {
     // ── SQL ─────────────────────────────────────────────────────────────
 
     pub fn execute_sql(&mut self, sql: &str) -> Result<SqlResult> {
-        self.ensure_fresh()?;
+        if self.txn.is_none() {
+            self.ensure_fresh()?;
+        } else {
+            tracing::trace!("execute_sql: mid-transaction, skipping ensure_fresh");
+        }
         let mut engine = SqlEngine::new(&self.index, &self.repo);
         if let Some(buf) = self.txn.take() {
             engine.resume_transaction(buf);
@@ -22,7 +26,11 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     pub fn execute_batch(&mut self, sql: &str) -> Result<Vec<SqlResult>> {
-        self.ensure_fresh()?;
+        if self.txn.is_none() {
+            self.ensure_fresh()?;
+        } else {
+            tracing::trace!("execute_batch: mid-transaction, skipping ensure_fresh");
+        }
         let mut engine = SqlEngine::new(&self.index, &self.repo);
         if let Some(buf) = self.txn.take() {
             engine.resume_transaction(buf);

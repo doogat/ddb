@@ -276,6 +276,10 @@ COMMIT;
 -- Single git commit with message "transaction"
 ```
 
+### Freshness contract for nested `execute_sql`
+
+`execute_sql` / `execute_batch` refresh the derived index on entry (`ensure_fresh`) **only when the service is not already inside a transaction**. When a caller has opened its own transaction (`begin_transaction`, or a raw `BEGIN`) and then nests an `execute_sql` / `execute_batch` call, the refresh is skipped: running a reindex mid-transaction would break read-consistency for the rest of the transaction. The nested call therefore sees whatever the index held when the transaction opened, not a fresh reindex. A caller that opens its own transaction owns the freshness contract — refresh before `begin_transaction` if fresh data is required inside the transaction.
+
 ## Junction Tables (Multi-Value References)
 
 Columns declared with `REFERENCES` produce junction tables that enable many-to-many relationships between doogat types. A single doogat can reference multiple targets for the same column, stored as multiple `- col:: [[target]]` lines in the reference section.
