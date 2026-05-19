@@ -754,6 +754,14 @@ PRD 00139 adds a `SINGLETON` typedef primitive: a typedef constrained to hold at
 
 The three layers are integration-tested together in `ddb-core/tests/singleton_layers.rs` and must produce byte-identical structured errors.
 
+### Cross-process write safety (PRD 00140)
+
+The three layers keep the database correct under contention, but Layer 1's check-then-write is a TOCTOU window across processes: a second process holding the same repo (a CLI invocation alongside a running server, two servers, or two `ddb create` invocations) can land its own row between the first process's pre-check and its materialize. PRD 00140 closes that window by wrapping each service write path that targets a registered SINGLETON typedef -- `create_doogat_raw`, `create_doogat_with_extra`, `batch_create`, `update_doogat_raw` -- so its constraint-check, git write, and index update run inside a single `BEGIN IMMEDIATE` SQLite transaction. `BEGIN IMMEDIATE` takes the database write lock up front, serializing concurrent writers at the file-lock level: the second process blocks on the lock, and when it acquires the lock its Layer 1 pre-check sees the first writer's already-committed row and fires the structured `SINGLETON_VIOLATION` -- never a raw `UNIQUE constraint failed` SQL-error leak.
+
+`upsert<TypeName>` runs its existence check and the create-or-update branch under one `BEGIN IMMEDIATE` window via `DoogatService::upsert_singleton`, so two concurrent upserts on an empty SINGLETON typedef converge on one row: one call returns `created: true`, the loser takes the UPDATE branch and returns `created: false` against the same id.
+
+Trade-off: every SINGLETON write serializes through the SQLite write lock. This is acceptable by definition -- a SINGLETON typedef holds one row, so write throughput is irrelevant. Cross-process behavior is exercised by the e2e tests `singleton_cross_process_create` / `singleton_cross_process_upsert` and `tests/integration.{sh,ps1}` section 55.
+
 ### Auto-seed on origin-only
 
 `CREATE TABLE x (...) SINGLETON DEFAULT VALUES` triggers an origin-node-only seed at typedef install time, using each column's `default_value`. Parse-time validation rejects with a clear error listing non-nullable columns without defaults. The seed row and the typedef YAML share one git commit boundary; other nodes inherit the row via normal CRDT sync, not local auto-seed.
