@@ -2314,6 +2314,10 @@ pass "55.A: concurrent ddb create on a SINGLETON typedef converges on one row; l
 
 # 55.B — GraphQL `executeSql` INSERT race
 ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_race_sql (theme TEXT) SINGLETON\") { message } }"}'
+# `set +e` so a backgrounded `gql` (curl -sf) that hits a transport-level
+# non-200 does not abort the script via `wait`; winner/loser is detected by
+# response content below, exit codes are unused.
+set +e
 gql '{"query":"mutation { executeSql(sql: \"INSERT INTO ig_race_sql (title, theme) VALUES (\\\"x\\\", \\\"dark\\\")\") { message } }"}' \
   >/tmp/ig_race_sql_1 2>&1 &
 PID_SQL_1=$!
@@ -2322,6 +2326,7 @@ gql '{"query":"mutation { executeSql(sql: \"INSERT INTO ig_race_sql (title, them
 PID_SQL_2=$!
 wait "$PID_SQL_1"
 wait "$PID_SQL_2"
+set -e
 SQL_VIOLATIONS=$(grep -l "SINGLETON_VIOLATION" /tmp/ig_race_sql_1 /tmp/ig_race_sql_2 | wc -l | tr -d ' ')
 SQL_ERRORS=$(grep -l '"errors"' /tmp/ig_race_sql_1 /tmp/ig_race_sql_2 | wc -l | tr -d ' ')
 [ "$SQL_VIOLATIONS" -eq 1 ] || fail "55.B: expected exactly 1 SINGLETON_VIOLATION, got $SQL_VIOLATIONS"
@@ -2337,6 +2342,10 @@ pass "55.B: concurrent executeSql INSERT race — loser carries SINGLETON_VIOLAT
 
 # 55.C — GraphQL typed `createDoogat` race
 ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_race_typed (theme TEXT) SINGLETON\") { message } }"}'
+# `set +e` so a backgrounded `gql` (curl -sf) that hits a transport-level
+# non-200 does not abort the script via `wait`; winner/loser is detected by
+# response content below, exit codes are unused.
+set +e
 gql '{"query":"mutation { createDoogat(input: { type: \"ig_race_typed\", title: \"x\", fields: \"{\\\"theme\\\":\\\"dark\\\"}\" }) { id } }"}' \
   >/tmp/ig_race_typed_1 2>&1 &
 PID_TYPED_1=$!
@@ -2345,6 +2354,7 @@ gql '{"query":"mutation { createDoogat(input: { type: \"ig_race_typed\", title: 
 PID_TYPED_2=$!
 wait "$PID_TYPED_1"
 wait "$PID_TYPED_2"
+set -e
 TYPED_VIOLATIONS=$(grep -l "SINGLETON_VIOLATION" /tmp/ig_race_typed_1 /tmp/ig_race_typed_2 | wc -l | tr -d ' ')
 TYPED_ERRORS=$(grep -l '"errors"' /tmp/ig_race_typed_1 /tmp/ig_race_typed_2 | wc -l | tr -d ' ')
 [ "$TYPED_VIOLATIONS" -eq 1 ] || fail "55.C: expected exactly 1 SINGLETON_VIOLATION, got $TYPED_VIOLATIONS"
