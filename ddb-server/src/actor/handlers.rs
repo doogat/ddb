@@ -186,5 +186,8 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
         }
         ActorCommand::BrokenSequences => ActorReply::BrokenSequences(svc.broken_sequences()),
         ActorCommand::HealthCheck => ActorReply::HealthStatus(svc.health_check()),
+        ActorCommand::UpsertSingleton { type_name, fields } => {
+            ActorReply::Upsert(svc.upsert_singleton(&type_name, fields))
+        }
     }
 }

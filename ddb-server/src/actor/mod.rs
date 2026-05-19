@@ -13,6 +13,8 @@ use ddb_core::types::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+use ddb_core::service::UpsertOutcome;
+
 use crate::events::{DoogatEvent, EventBus, EventKind};
 
 /// Serializable result from the actor.
@@ -156,6 +158,10 @@ pub enum ActorCommand {
     },
     BrokenSequences,
     HealthCheck,
+    UpsertSingleton {
+        type_name: String,
+        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
+    },
 }
 
 /// Replies from the actor.
@@ -186,6 +192,7 @@ pub enum ActorReply {
     SequenceNodes(ActorResult<Vec<SequenceNode>>),
     BrokenSequences(ActorResult<Vec<BrokenSequence>>),
     HealthStatus(ActorResult<bool>),
+    Upsert(ActorResult<UpsertOutcome>),
 }
 
 struct ActorMsg {
@@ -588,6 +595,17 @@ impl ActorHandle {
         }
     }
 
+    pub async fn upsert_singleton(
+        &self,
+        type_name: String,
+        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
+    ) -> ActorResult<UpsertOutcome> {
+        match self.send(ActorCommand::UpsertSingleton { type_name, fields }).await {
+            ActorReply::Upsert(r) => r,
+            _ => Err(DoogatError::Validation("unexpected reply".into())),
+        }
+    }
+
     async fn send(&self, cmd: ActorCommand) -> ActorReply {
         let (reply_tx, reply_rx) = oneshot::channel();
         let msg = ActorMsg {
@@ -632,6 +650,10 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
         };
         let is_batch_update = matches!(&msg.cmd, ActorCommand::BatchUpdate { .. });
         let is_create_many = matches!(&msg.cmd, ActorCommand::CreateMany { .. });
+        let upsert_type = match &msg.cmd {
+            ActorCommand::UpsertSingleton { type_name, .. } => Some(type_name.clone()),
+            _ => None,
+        };
         let mutation_kind = match &msg.cmd {
             ActorCommand::CreateDoogat { .. } => Some(EventKind::Created),
             ActorCommand::UpdateDoogat { .. } => Some(EventKind::Updated),
@@ -649,6 +671,18 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: E
             is_batch_update,
             is_create_many,
         );
+        if let (Some(t), ActorReply::Upsert(Ok(outcome))) = (&upsert_type, &reply) {
+            event_bus.send(DoogatEvent {
+                kind: if outcome.created {
+                    EventKind::Created
+                } else {
+                    EventKind::Updated
+                },
+                doogat_id: outcome.id.clone(),
+                doogat_type: Some(t.clone()),
+                timestamp: Utc::now(),
+            });
+        }
         let _ = msg.reply.send(reply);
     }
 }
