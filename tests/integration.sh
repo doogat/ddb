@@ -2286,6 +2286,119 @@ $DDB query "SELECT theme FROM ig_parity_cfg" | grep -q "p1"
 pass "54.D: duplicate INSERT parity leaves the singleton end state unchanged"
 $DDB query "DROP TABLE ig_parity_cfg CASCADE" | grep -q "dropped"
 
+# 55. Cross-process SINGLETON write race + structured-error parity (PRD 00140).
+
+# 55.A — CLI `ddb create` race
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_race_cli (theme TEXT) SINGLETON\") { message } }"}'
+set +e
+$DDB create --type ig_race_cli --title x --set theme=dark >/tmp/ig_race_cli_1 2>&1 &
+PID_CLI_1=$!
+$DDB create --type ig_race_cli --title x --set theme=dark >/tmp/ig_race_cli_2 2>&1 &
+PID_CLI_2=$!
+wait "$PID_CLI_1"; EXIT_CLI_1=$?
+wait "$PID_CLI_2"; EXIT_CLI_2=$?
+set -e
+# Exactly one must succeed and one must fail
+CLI_OK=$(( (EXIT_CLI_1 == 0 ? 1 : 0) + (EXIT_CLI_2 == 0 ? 1 : 0) ))
+CLI_FAIL=$(( (EXIT_CLI_1 != 0 ? 1 : 0) + (EXIT_CLI_2 != 0 ? 1 : 0) ))
+[ "$CLI_OK" -eq 1 ] || fail "55.A: expected exactly 1 CLI winner, got $CLI_OK"
+[ "$CLI_FAIL" -eq 1 ] || fail "55.A: expected exactly 1 CLI loser, got $CLI_FAIL"
+# Pick the loser's temp file
+if [ "$EXIT_CLI_1" -ne 0 ]; then CLI_LOSER_FILE=/tmp/ig_race_cli_1; else CLI_LOSER_FILE=/tmp/ig_race_cli_2; fi
+grep -q "SINGLETON constraint violated: ig_race_cli already holds row " "$CLI_LOSER_FILE" \
+  || fail "55.A: loser output missing SINGLETON constraint message"
+grep -q "UNIQUE constraint failed" "$CLI_LOSER_FILE" \
+  && fail "55.A: loser output leaked raw UNIQUE constraint failed" || true
+$DDB query "SELECT COUNT(*) FROM ig_race_cli" | grep -q "^1$"
+pass "55.A: concurrent ddb create on a SINGLETON typedef converges on one row; loser carries the structured SINGLETON message"
+
+# 55.B — GraphQL `executeSql` INSERT race
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_race_sql (theme TEXT) SINGLETON\") { message } }"}'
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO ig_race_sql (title, theme) VALUES (\\\"x\\\", \\\"dark\\\")\") { message } }"}' \
+  >/tmp/ig_race_sql_1 2>&1 &
+PID_SQL_1=$!
+gql '{"query":"mutation { executeSql(sql: \"INSERT INTO ig_race_sql (title, theme) VALUES (\\\"x\\\", \\\"dark\\\")\") { message } }"}' \
+  >/tmp/ig_race_sql_2 2>&1 &
+PID_SQL_2=$!
+wait "$PID_SQL_1"
+wait "$PID_SQL_2"
+SQL_VIOLATIONS=$(grep -l "SINGLETON_VIOLATION" /tmp/ig_race_sql_1 /tmp/ig_race_sql_2 | wc -l | tr -d ' ')
+SQL_ERRORS=$(grep -l '"errors"' /tmp/ig_race_sql_1 /tmp/ig_race_sql_2 | wc -l | tr -d ' ')
+[ "$SQL_VIOLATIONS" -eq 1 ] || fail "55.B: expected exactly 1 SINGLETON_VIOLATION, got $SQL_VIOLATIONS"
+[ "$SQL_ERRORS" -eq 1 ] || fail "55.B: expected exactly 1 errors response, got $SQL_ERRORS"
+grep -q "UNIQUE constraint failed" /tmp/ig_race_sql_1 \
+  && fail "55.B: race_sql_1 leaked raw UNIQUE constraint failed" || true
+grep -q "UNIQUE constraint failed" /tmp/ig_race_sql_2 \
+  && fail "55.B: race_sql_2 leaked raw UNIQUE constraint failed" || true
+gql '{"query":"{ ig_race_sql { theme } }"}' \
+  | jq -e '.data.ig_race_sql != null' >/dev/null
+$DDB query "SELECT COUNT(*) FROM ig_race_sql" | grep -q "^1$"
+pass "55.B: concurrent executeSql INSERT race — loser carries SINGLETON_VIOLATION"
+
+# 55.C — GraphQL typed `createDoogat` race
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_race_typed (theme TEXT) SINGLETON\") { message } }"}'
+gql '{"query":"mutation { createDoogat(input: { type: \"ig_race_typed\", title: \"x\", fields: \"{\\\"theme\\\":\\\"dark\\\"}\" }) { id } }"}' \
+  >/tmp/ig_race_typed_1 2>&1 &
+PID_TYPED_1=$!
+gql '{"query":"mutation { createDoogat(input: { type: \"ig_race_typed\", title: \"x\", fields: \"{\\\"theme\\\":\\\"dark\\\"}\" }) { id } }"}' \
+  >/tmp/ig_race_typed_2 2>&1 &
+PID_TYPED_2=$!
+wait "$PID_TYPED_1"
+wait "$PID_TYPED_2"
+TYPED_VIOLATIONS=$(grep -l "SINGLETON_VIOLATION" /tmp/ig_race_typed_1 /tmp/ig_race_typed_2 | wc -l | tr -d ' ')
+TYPED_ERRORS=$(grep -l '"errors"' /tmp/ig_race_typed_1 /tmp/ig_race_typed_2 | wc -l | tr -d ' ')
+[ "$TYPED_VIOLATIONS" -eq 1 ] || fail "55.C: expected exactly 1 SINGLETON_VIOLATION, got $TYPED_VIOLATIONS"
+[ "$TYPED_ERRORS" -eq 1 ] || fail "55.C: expected exactly 1 errors response, got $TYPED_ERRORS"
+grep -q "UNIQUE constraint failed" /tmp/ig_race_typed_1 \
+  && fail "55.C: race_typed_1 leaked raw UNIQUE constraint failed" || true
+grep -q "UNIQUE constraint failed" /tmp/ig_race_typed_2 \
+  && fail "55.C: race_typed_2 leaked raw UNIQUE constraint failed" || true
+$DDB query "SELECT COUNT(*) FROM ig_race_typed" | grep -q "^1$"
+pass "55.C: concurrent createDoogat race — loser carries SINGLETON_VIOLATION"
+
+# 55.D — CLI-vs-PgWire concurrent INSERT race
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_race_pg (theme TEXT) SINGLETON\") { message } }"}'
+if command -v psql >/dev/null 2>&1; then
+  set +e
+  $DDB create --type ig_race_pg --title x --set theme=dark >/tmp/ig_race_pg_cli 2>&1 &
+  PID_PG_CLI=$!
+  PGPASSWORD="$TOKEN" psql -h 127.0.0.1 -p "$PG_PORT" -U ddb -d ddb \
+    -c "INSERT INTO ig_race_pg (title, theme) VALUES ('x', 'dark')" \
+    >/tmp/ig_race_pg_sql 2>&1 &
+  PID_PG_SQL=$!
+  wait "$PID_PG_CLI"; EXIT_PG_CLI=$?
+  wait "$PID_PG_SQL"; EXIT_PG_SQL=$?
+  set -e
+  PG_OK=$(( (EXIT_PG_CLI == 0 ? 1 : 0) + (EXIT_PG_SQL == 0 ? 1 : 0) ))
+  PG_FAIL=$(( (EXIT_PG_CLI != 0 ? 1 : 0) + (EXIT_PG_SQL != 0 ? 1 : 0) ))
+  [ "$PG_OK" -eq 1 ] || fail "55.D: expected exactly 1 winner, got $PG_OK"
+  [ "$PG_FAIL" -eq 1 ] || fail "55.D: expected exactly 1 loser, got $PG_FAIL"
+  if [ "$EXIT_PG_CLI" -ne 0 ]; then PG_LOSER_FILE=/tmp/ig_race_pg_cli; else PG_LOSER_FILE=/tmp/ig_race_pg_sql; fi
+  grep -q "SINGLETON constraint" "$PG_LOSER_FILE" \
+    || fail "55.D: loser missing SINGLETON constraint message"
+  grep -q "UNIQUE constraint failed" "$PG_LOSER_FILE" \
+    && fail "55.D: loser leaked raw UNIQUE constraint failed" || true
+  $DDB query "SELECT COUNT(*) FROM ig_race_pg" | grep -q "^1$"
+  pass "55.D: concurrent CLI-vs-PgWire INSERT race on a SINGLETON typedef — loser carries the SINGLETON constraint message"
+else
+  fail "55.D: psql not on PATH; install psql or rely on cargo test -p ddb-e2e --test e2e -- pgwire_singleton"
+fi
+
+# 55.E — convergence parity: every protocol's race left exactly one row.
+for t in ig_race_cli ig_race_sql ig_race_typed ig_race_pg; do
+  $DDB query "SELECT COUNT(*) FROM $t" | grep -q "^1$" \
+    || fail "55.E: $t did not converge on exactly one row"
+done
+pass "55.E: CLI, executeSql, createDoogat, and PgWire races each converged on exactly one row with a structured SINGLETON-violation loser"
+
+# Cleanup
+$DDB query "DROP TABLE ig_race_cli CASCADE" | grep -q "dropped"
+$DDB query "DROP TABLE ig_race_sql CASCADE" | grep -q "dropped"
+$DDB query "DROP TABLE ig_race_typed CASCADE" | grep -q "dropped"
+$DDB query "DROP TABLE ig_race_pg CASCADE" | grep -q "dropped"
+rm -f /tmp/ig_race_cli_1 /tmp/ig_race_cli_2 /tmp/ig_race_sql_1 /tmp/ig_race_sql_2 \
+       /tmp/ig_race_typed_1 /tmp/ig_race_typed_2 /tmp/ig_race_pg_cli /tmp/ig_race_pg_sql
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
