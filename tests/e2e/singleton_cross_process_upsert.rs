@@ -114,7 +114,6 @@ fn two_concurrent_pgwire_inserts_on_singleton_one_wins_one_gets_singleton_error(
         let res2_ok = res2.is_ok();
         let ok_count = [res1_ok, res2_ok].iter().filter(|&&ok| ok).count();
         assert_eq!(ok_count, 1, "expected exactly one successful insert");
-        assert_eq!(2 - ok_count, 1, "expected exactly one failed insert");
 
         let err = if res1.is_err() {
             res1.unwrap_err()
