@@ -202,7 +202,7 @@ impl<G: GitBackend> DoogatService<G> {
             on_conflict: crate::types::ConflictAction::Error,
         };
 
-        // PRD 00139 §4: when the type is a registered SINGLETON typedef, run
+        // PRD 00140: when the type is a registered SINGLETON typedef, run
         // the SINGLETON pre-check → commit → index window inside a
         // `BEGIN IMMEDIATE` transaction so a cross-process race surfaces a
         // structured SINGLETON_VIOLATION on the losing writer.
@@ -220,7 +220,7 @@ impl<G: GitBackend> DoogatService<G> {
                         date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
                         doogat_type: doogat_type.map(str::to_owned),
                         tags: tags.to_vec(),
-                        extra: extra.clone(),
+                        extra,
                     },
                     body: body.to_owned(),
                     sections: vec![],
@@ -345,7 +345,7 @@ impl<G: GitBackend> DoogatService<G> {
         let rel_path = git_ops::doogat_path(&id, parsed.meta.doogat_type.as_deref(), folder);
         let schemas = self.list_type_schemas()?;
 
-        // PRD 00139 §4: a write into a registered SINGLETON typedef runs its
+        // PRD 00140: a write into a registered SINGLETON typedef runs its
         // constraint-check → commit → index window inside a `BEGIN IMMEDIATE`
         // transaction so a cross-process race surfaces a structured
         // SINGLETON_VIOLATION on the losing writer, not a raw SQL error.
@@ -715,7 +715,7 @@ impl<G: GitBackend> DoogatService<G> {
         let mut next_counters = BareNextCounters::new();
         let mut partitioned_counters = PartitionedNextCounters::new();
 
-        // PRD 00139 §4: when any input targets a registered SINGLETON
+        // PRD 00140: when any input targets a registered SINGLETON
         // typedef, run Phases 1+2+3 inside a `BEGIN IMMEDIATE` transaction so
         // a cross-process race surfaces a structured SINGLETON_VIOLATION on
         // the losing writer instead of a raw SQL error.
@@ -1184,7 +1184,7 @@ impl<G: GitBackend> DoogatService<G> {
         let desired = parser::parse(content, &rel_path)?;
         let schemas = self.list_type_schemas()?;
 
-        // PRD 00139 §4: an update into a registered SINGLETON typedef runs
+        // PRD 00140: an update into a registered SINGLETON typedef runs
         // its constraint-check → commit → index window inside a
         // `BEGIN IMMEDIATE` transaction so a cross-process race surfaces a
         // structured SINGLETON_VIOLATION on the losing writer.
