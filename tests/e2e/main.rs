@@ -31,6 +31,7 @@ mod sequence;
 mod serve;
 mod server_mutations;
 mod set_flag;
+mod singleton_cross_process_create;
 mod sql_expressions_test;
 mod sql_lifecycle;
 mod subscriptions;
