@@ -14,6 +14,7 @@ mod sql;
 mod utility;
 mod validation;
 
+pub use crud::UpsertOutcome;
 pub use search::SORTABLE_COLUMNS;
 
 /// Extra frontmatter fields to set or remove during an update.

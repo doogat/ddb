@@ -613,10 +613,19 @@ impl Index {
 /// rolling back on `Err`. The closure's error propagates unchanged; a failed
 /// `ROLLBACK` is non-fatal — it is logged at `warn` level and the original
 /// closure error is still returned.
+///
+/// Nesting-tolerant: if `conn` is already inside a transaction (not in
+/// autocommit mode), this skips `BEGIN`/`COMMIT`/`ROLLBACK` and just runs
+/// `f` directly — the enclosing transaction owns commit/rollback. This lets
+/// callers that themselves wrap SINGLETON writes in a transaction compose
+/// without SQLite rejecting a nested `BEGIN IMMEDIATE`.
 pub(crate) fn with_immediate_transaction<T>(
     conn: &rusqlite::Connection,
     f: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
+    if !conn.is_autocommit() {
+        return f();
+    }
     conn.execute_batch("BEGIN IMMEDIATE")?;
     match f() {
         Ok(value) => {

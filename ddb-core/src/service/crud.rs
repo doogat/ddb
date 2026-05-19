@@ -123,6 +123,15 @@ fn singleton_type_for(input: &BatchCreateInput, schemas: &[TableSchema]) -> Opti
     }
 }
 
+/// Outcome of `DoogatService::upsert_singleton`: the affected row id and
+/// whether the row was newly created (`true`) or an existing row was
+/// updated in place (`false`).
+#[derive(Debug)]
+pub struct UpsertOutcome {
+    pub id: String,
+    pub created: bool,
+}
+
 impl<G: GitBackend> DoogatService<G> {
     // ── CRUD ────────────────────────────────────────────────────────────
 
@@ -257,6 +266,61 @@ impl<G: GitBackend> DoogatService<G> {
         } else {
             write()
         }
+    }
+
+    /// Create-or-update the single row of a SINGLETON typedef.
+    ///
+    /// PRD 00140 (Approach C): the existing-row check and the create-or-update
+    /// run under one `ensure_fresh()` + `BEGIN IMMEDIATE` window so concurrent
+    /// upserts on a SINGLETON typedef converge on one row. Rejects
+    /// non-SINGLETON typedefs — this method is SINGLETON-only.
+    pub fn upsert_singleton(
+        &self,
+        type_name: &str,
+        fields: std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<UpsertOutcome> {
+        // Refresh BEFORE opening the transaction — `ensure_fresh` may itself
+        // open a `BEGIN IMMEDIATE` via `rebuild_if_stale`.
+        self.ensure_fresh()?;
+
+        let schemas = self.list_type_schemas()?;
+        let is_singleton = schemas
+            .iter()
+            .find(|s| s.table_name == type_name)
+            .map(|s| s.singleton)
+            .unwrap_or(false);
+        if !is_singleton {
+            return Err(DoogatError::Validation(format!(
+                "{type_name} is not a SINGLETON typedef"
+            )));
+        }
+
+        crate::indexer::with_immediate_transaction(&self.index.conn, || {
+            let escaped = type_name.replace('"', "\"\"");
+            let sql = format!("SELECT id FROM \"{escaped}\" ORDER BY id ASC LIMIT 1");
+            let rows = self.index.query_raw_with_params(&sql, &[])?;
+            let existing_id = rows.first().and_then(|r| r.first()).cloned();
+
+            match existing_id {
+                Some(existing_id) => {
+                    let extra = ExtraFieldUpdates {
+                        set: &fields,
+                        unset: &[],
+                    };
+                    self.update_doogat(&existing_id, None, None, None, None, &extra)?;
+                    Ok(UpsertOutcome {
+                        id: existing_id,
+                        created: false,
+                    })
+                }
+                None => {
+                    let parsed =
+                        self.create_doogat_with_extra(type_name, &[], Some(type_name), "", fields)?;
+                    let id = parsed.meta.id.map(|z| z.0).unwrap_or_default();
+                    Ok(UpsertOutcome { id, created: true })
+                }
+            }
+        })
     }
 
     /// Single-row typed-create branch of `create_doogat_with_extra`. Mirrors
