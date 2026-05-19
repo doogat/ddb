@@ -184,11 +184,9 @@ impl<G: GitBackend> DoogatService<G> {
             .unwrap_or(false);
         let path = git_ops::doogat_path(&id_str, doogat_type, folder);
 
+        let schemas = self.list_type_schemas()?;
         let typedef = match doogat_type {
-            Some(t) => self
-                .list_type_schemas()?
-                .into_iter()
-                .find(|s| s.table_name == t),
+            Some(t) => schemas.iter().find(|s| s.table_name == t).cloned(),
             None => None,
         };
 
@@ -204,46 +202,61 @@ impl<G: GitBackend> DoogatService<G> {
             on_conflict: crate::types::ConflictAction::Error,
         };
 
-        let mut parsed = match typedef.as_ref() {
-            Some(schema) => self.build_typed_single_create(&synth_input, &id, &path, schema)?,
-            None => ParsedDoogat {
-                meta: DoogatMeta {
-                    id: Some(id.clone()),
-                    title: Some(title.to_owned()),
-                    date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
-                    doogat_type: doogat_type.map(str::to_owned),
-                    tags: tags.to_vec(),
-                    extra,
+        // PRD 00139 §4: when the type is a registered SINGLETON typedef, run
+        // the SINGLETON pre-check → commit → index window inside a
+        // `BEGIN IMMEDIATE` transaction so a cross-process race surfaces a
+        // structured SINGLETON_VIOLATION on the losing writer.
+        let is_singleton = typedef.as_ref().map(|s| s.singleton).unwrap_or(false);
+
+        let write = || -> Result<ParsedDoogat> {
+            let _ = self.check_singleton_constraint(&synth_input, &schemas)?;
+
+            let mut parsed = match typedef.as_ref() {
+                Some(schema) => self.build_typed_single_create(&synth_input, &id, &path, schema)?,
+                None => ParsedDoogat {
+                    meta: DoogatMeta {
+                        id: Some(id.clone()),
+                        title: Some(title.to_owned()),
+                        date: Some(chrono::Local::now().format("%Y-%m-%d").to_string()),
+                        doogat_type: doogat_type.map(str::to_owned),
+                        tags: tags.to_vec(),
+                        extra: extra.clone(),
+                    },
+                    body: body.to_owned(),
+                    sections: vec![],
+                    reference_section: String::new(),
+                    inline_fields: vec![],
+                    links: vec![],
+                    body_tags: vec![],
+                    checkboxes: vec![],
+                    path: path.clone(),
+                    updated_at: None,
                 },
-                body: body.to_owned(),
-                sections: vec![],
-                reference_section: String::new(),
-                inline_fields: vec![],
-                links: vec![],
-                body_tags: vec![],
-                checkboxes: vec![],
-                path: path.clone(),
-                updated_at: None,
-            },
+            };
+
+            let content = parser::serialize(&parsed);
+            self.repo
+                .commit_file(&path, &content, &format!("create doogat {id_str}"))?;
+            self.index.index_doogat(&parsed)?;
+            // PRD 00134 blind-review C1: typed creates must populate the
+            // typed-table row + auto-junctions atomically with `index_doogat`.
+            // Without this, `<type>_<col>` junctions stay empty until the next
+            // `ddb query` triggers an implicit `ensure_fresh` reindex — same
+            // parity gap that `batch_create` closed via
+            // `reindex_and_rematerialize` (see PRD 00129 §1).
+            if let Some(schema) = typedef.as_ref() {
+                self.index.materialize_single(schema, &id_str, &parsed)?;
+            }
+            self.nosql_index_doogat(&parsed);
+            parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
+            Ok(parsed)
         };
 
-        let content = parser::serialize(&parsed);
-        self.repo
-            .commit_file(&path, &content, &format!("create doogat {id_str}"))?;
-        self.index.index_doogat(&parsed)?;
-        // PRD 00134 blind-review C1: typed creates must populate the
-        // typed-table row + auto-junctions atomically with `index_doogat`.
-        // Without this, `<type>_<col>` junctions stay empty until the next
-        // `ddb query` triggers an implicit `ensure_fresh` reindex — same
-        // parity gap that `batch_create` closed via
-        // `reindex_and_rematerialize` (see PRD 00129 §1).
-        if let Some(schema) = typedef.as_ref() {
-            self.index.materialize_single(schema, &id_str, &parsed)?;
+        if is_singleton {
+            crate::indexer::with_immediate_transaction(&self.index.conn, write)
+        } else {
+            write()
         }
-        self.nosql_index_doogat(&parsed);
-        parsed.updated_at = self.index.lookup_updated_at(&id_str).unwrap_or(None);
-
-        Ok(parsed)
     }
 
     /// Single-row typed-create branch of `create_doogat_with_extra`. Mirrors
@@ -332,49 +345,70 @@ impl<G: GitBackend> DoogatService<G> {
         let rel_path = git_ops::doogat_path(&id, parsed.meta.doogat_type.as_deref(), folder);
         let schemas = self.list_type_schemas()?;
 
-        // Run SINGLETON + UNIQUE + FK / allowed_values checks only when the
-        // declared type is registered. Unregistered types skip validation
-        // (raw FFI contract).
-        if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
-            if let Some(schema) = schemas.iter().find(|s| s.table_name == type_name) {
-                let input = build_batch_create_from_parsed(&parsed);
-                let _ = self.check_singleton_constraint(&input, &schemas)?;
-                let _ = self.check_unique_constraints(&input, &schemas)?;
-                // Raw FFI accepts frontmatter values for typedef columns
-                // regardless of declared zone, so a column the typedef
-                // marks Body-zone (e.g. plain `TEXT UNIQUE`) still has its
-                // value in `meta.extra`. The materialized typed table is
-                // populated zone-strictly, so `check_unique_constraints`
-                // misses cross-row duplicates whose values landed in
-                // `_ddb_fields` instead. Fall back to that index here.
-                self.check_unique_via_ddb_fields(&parsed, schema)?;
-                // PRD 00134 batch-end follow-up: parity with the typed
-                // create path for FK + allowed_values. Without this, raw
-                // FFI lets dangling REFERENCES through entirely (no Layer
-                // 3 enforcement on FK in materialized tables) and surfaces
-                // ENUM violations as opaque `DoogatError::Sql("CHECK
-                // constraint failed: ...")` instead of a friendly
-                // validation message.
-                self.validate_fields_with_schemas(&schemas, type_name, &input.fields)?;
-            }
-        }
+        // PRD 00139 §4: a write into a registered SINGLETON typedef runs its
+        // constraint-check → commit → index window inside a `BEGIN IMMEDIATE`
+        // transaction so a cross-process race surfaces a structured
+        // SINGLETON_VIOLATION on the losing writer, not a raw SQL error.
+        let is_singleton = parsed
+            .meta
+            .doogat_type
+            .as_deref()
+            .and_then(|t| schemas.iter().find(|s| s.table_name == t))
+            .map(|s| s.singleton)
+            .unwrap_or(false);
 
-        // Write the user's bytes verbatim — no re-serialize through the
-        // typed-write pipeline, which would drop top-level meta fields
-        // (`date`) and arbitrary custom keys.
-        self.repo.commit_file(&rel_path, content, message)?;
-        let parsed = parser::parse(content, &rel_path)?;
-        self.index.index_doogat(&parsed)?;
-        // PRD 00134 blind-review I2: when raw Markdown carries a registered
-        // typedef, populate the typed table + auto-junctions alongside the
-        // metadata index update so SQLite-level UNIQUE indexes also catch
-        // late conflicts the pre-check couldn't see.
-        if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
-            if let Some(schema) = schemas.iter().find(|s| s.table_name == type_name) {
-                self.index.materialize_single(schema, &id, &parsed)?;
+        let write = || -> Result<()> {
+            // Run SINGLETON + UNIQUE + FK / allowed_values checks only when
+            // the declared type is registered. Unregistered types skip
+            // validation (raw FFI contract).
+            if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
+                if let Some(schema) = schemas.iter().find(|s| s.table_name == type_name) {
+                    let input = build_batch_create_from_parsed(&parsed);
+                    let _ = self.check_singleton_constraint(&input, &schemas)?;
+                    let _ = self.check_unique_constraints(&input, &schemas)?;
+                    // Raw FFI accepts frontmatter values for typedef columns
+                    // regardless of declared zone, so a column the typedef
+                    // marks Body-zone (e.g. plain `TEXT UNIQUE`) still has its
+                    // value in `meta.extra`. The materialized typed table is
+                    // populated zone-strictly, so `check_unique_constraints`
+                    // misses cross-row duplicates whose values landed in
+                    // `_ddb_fields` instead. Fall back to that index here.
+                    self.check_unique_via_ddb_fields(&parsed, schema)?;
+                    // PRD 00134 batch-end follow-up: parity with the typed
+                    // create path for FK + allowed_values. Without this, raw
+                    // FFI lets dangling REFERENCES through entirely (no Layer
+                    // 3 enforcement on FK in materialized tables) and surfaces
+                    // ENUM violations as opaque `DoogatError::Sql("CHECK
+                    // constraint failed: ...")` instead of a friendly
+                    // validation message.
+                    self.validate_fields_with_schemas(&schemas, type_name, &input.fields)?;
+                }
             }
+
+            // Write the user's bytes verbatim — no re-serialize through the
+            // typed-write pipeline, which would drop top-level meta fields
+            // (`date`) and arbitrary custom keys.
+            self.repo.commit_file(&rel_path, content, message)?;
+            let parsed = parser::parse(content, &rel_path)?;
+            self.index.index_doogat(&parsed)?;
+            // PRD 00134 blind-review I2: when raw Markdown carries a registered
+            // typedef, populate the typed table + auto-junctions alongside the
+            // metadata index update so SQLite-level UNIQUE indexes also catch
+            // late conflicts the pre-check couldn't see.
+            if let Some(type_name) = parsed.meta.doogat_type.as_deref() {
+                if let Some(schema) = schemas.iter().find(|s| s.table_name == type_name) {
+                    self.index.materialize_single(schema, &id, &parsed)?;
+                }
+            }
+            self.nosql_index_doogat(&parsed);
+            Ok(())
+        };
+
+        if is_singleton {
+            crate::indexer::with_immediate_transaction(&self.index.conn, write)?;
+        } else {
+            write()?;
         }
-        self.nosql_index_doogat(&parsed);
 
         Ok(id)
     }
@@ -681,6 +715,42 @@ impl<G: GitBackend> DoogatService<G> {
         let mut next_counters = BareNextCounters::new();
         let mut partitioned_counters = PartitionedNextCounters::new();
 
+        // PRD 00139 §4: when any input targets a registered SINGLETON
+        // typedef, run Phases 1+2+3 inside a `BEGIN IMMEDIATE` transaction so
+        // a cross-process race surfaces a structured SINGLETON_VIOLATION on
+        // the losing writer instead of a raw SQL error.
+        let any_singleton = inputs
+            .iter()
+            .any(|input| singleton_type_for(input, &schemas).is_some());
+
+        let mut body = || -> Result<Vec<ParsedDoogat>> {
+            self.batch_create_body(
+                inputs,
+                message,
+                &schemas,
+                &mut next_counters,
+                &mut partitioned_counters,
+            )
+        };
+
+        if any_singleton {
+            crate::indexer::with_immediate_transaction(&self.index.conn, body)
+        } else {
+            body()
+        }
+    }
+
+    /// Phases 1-3 of `batch_create_with_message`, factored out so the
+    /// SINGLETON-typedef path can wrap them in a `BEGIN IMMEDIATE`
+    /// transaction (PRD 00139 §4).
+    fn batch_create_body(
+        &self,
+        inputs: &[BatchCreateInput],
+        message: &str,
+        schemas: &[TableSchema],
+        next_counters: &mut BareNextCounters,
+        partitioned_counters: &mut PartitionedNextCounters,
+    ) -> Result<Vec<ParsedDoogat>> {
         // Phase 1: prepare all writes.
         // `intra_dup_links[i] = Some(j)` means input i is an intra-batch
         // duplicate of input j; resolve `results[i] = results[j]` after
@@ -699,12 +769,12 @@ impl<G: GitBackend> DoogatService<G> {
             // PRD 00139 §3 layer 1: pre-check the SINGLETON constraint
             // before the UNIQUE check so callers see SINGLETON_VIOLATION
             // (the stronger constraint) when both apply.
-            if let Some(existing) = self.check_singleton_constraint(input, &schemas)? {
+            if let Some(existing) = self.check_singleton_constraint(input, schemas)? {
                 results[input_idx] = Some(existing);
                 continue;
             }
 
-            if let Some(existing) = self.check_unique_constraints(input, &schemas)? {
+            if let Some(existing) = self.check_unique_constraints(input, schemas)? {
                 results[input_idx] = Some(existing);
                 continue;
             }
@@ -712,7 +782,7 @@ impl<G: GitBackend> DoogatService<G> {
             // PRD 00139 §4: intra-batch SINGLETON tracker. A second
             // SINGLETON insert into the same typedef in this batch must
             // reject (Error) or skip-to-survivor (Ignore) before commit.
-            if let Some(type_name) = singleton_type_for(input, &schemas) {
+            if let Some(type_name) = singleton_type_for(input, schemas) {
                 if let Some(&prior_idx) = seen_singleton.get(&type_name) {
                     match input.on_conflict {
                         crate::types::ConflictAction::Ignore => {
@@ -736,7 +806,7 @@ impl<G: GitBackend> DoogatService<G> {
             }
 
             if let Some((prior_idx, conflict_key)) =
-                find_intra_batch_duplicate(input, &schemas, &seen_unique)
+                find_intra_batch_duplicate(input, schemas, &seen_unique)
             {
                 match input.on_conflict {
                     crate::types::ConflictAction::Ignore => {
@@ -755,14 +825,10 @@ impl<G: GitBackend> DoogatService<G> {
                 }
             }
 
-            record_intra_batch_unique(input, &schemas, &mut seen_unique, input_idx);
+            record_intra_batch_unique(input, schemas, &mut seen_unique, input_idx);
 
-            let (path, content) = self.prepare_create(
-                input,
-                &schemas,
-                &mut next_counters,
-                &mut partitioned_counters,
-            )?;
+            let (path, content) =
+                self.prepare_create(input, schemas, next_counters, partitioned_counters)?;
             writes.push((input_idx, path, content));
         }
 
@@ -770,7 +836,7 @@ impl<G: GitBackend> DoogatService<G> {
         self.commit_batch_creates(&writes, message)?;
 
         // Phase 3: index new writes and fill result slots
-        self.index_batch_creates(&writes, &schemas, &mut results)?;
+        self.index_batch_creates(&writes, schemas, &mut results)?;
 
         // Resolve intra-batch duplicate links to the surviving row's payload.
         for (i, link) in intra_dup_links.iter().enumerate() {
@@ -1117,21 +1183,42 @@ impl<G: GitBackend> DoogatService<G> {
         let rel_path = self.index.resolve_path(id)?;
         let desired = parser::parse(content, &rel_path)?;
         let schemas = self.list_type_schemas()?;
-        if let Some(type_name) = desired.meta.doogat_type.as_deref() {
-            if schemas.iter().any(|s| s.table_name == type_name) {
-                self.check_singleton_update_constraint(id, type_name, &schemas)?;
-                // PRD 00134 batch-end follow-up: mirror create_doogat_raw's
-                // FK + allowed_values pre-check so update cannot bypass
-                // validation that create enforces.
-                let fields = parsed_fields(&desired);
-                self.validate_fields_with_schemas(&schemas, type_name, &fields)?;
-            }
-        }
 
-        self.repo.commit_file(&rel_path, content, message)?;
-        let _ = self.reindex_and_rematerialize(content, &rel_path, Some(&schemas))?;
-        self.index.store_head(&self.repo.head_oid()?.0)?;
-        Ok(())
+        // PRD 00139 §4: an update into a registered SINGLETON typedef runs
+        // its constraint-check → commit → index window inside a
+        // `BEGIN IMMEDIATE` transaction so a cross-process race surfaces a
+        // structured SINGLETON_VIOLATION on the losing writer.
+        let is_singleton = desired
+            .meta
+            .doogat_type
+            .as_deref()
+            .and_then(|t| schemas.iter().find(|s| s.table_name == t))
+            .map(|s| s.singleton)
+            .unwrap_or(false);
+
+        let write = || -> Result<()> {
+            if let Some(type_name) = desired.meta.doogat_type.as_deref() {
+                if schemas.iter().any(|s| s.table_name == type_name) {
+                    self.check_singleton_update_constraint(id, type_name, &schemas)?;
+                    // PRD 00134 batch-end follow-up: mirror create_doogat_raw's
+                    // FK + allowed_values pre-check so update cannot bypass
+                    // validation that create enforces.
+                    let fields = parsed_fields(&desired);
+                    self.validate_fields_with_schemas(&schemas, type_name, &fields)?;
+                }
+            }
+
+            self.repo.commit_file(&rel_path, content, message)?;
+            let _ = self.reindex_and_rematerialize(content, &rel_path, Some(&schemas))?;
+            self.index.store_head(&self.repo.head_oid()?.0)?;
+            Ok(())
+        };
+
+        if is_singleton {
+            crate::indexer::with_immediate_transaction(&self.index.conn, write)
+        } else {
+            write()
+        }
     }
 
     /// Delete a doogat by ID. Returns broken backlinks `(source_id, source_path)`.
