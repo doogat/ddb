@@ -59,14 +59,14 @@ fn two_concurrent_ddb_create_on_singleton_converge_on_one_row() {
     let loser = outputs.iter().find(|o| !o.status.success()).unwrap();
     let loser_stderr = String::from_utf8_lossy(&loser.stderr);
     let loser_stdout = String::from_utf8_lossy(&loser.stdout);
-    let loser_combined = format!("{loser_stderr}{loser_stdout}");
-
     assert!(
-        loser_combined.contains("SINGLETON constraint violated: app_config already holds row "),
+        loser_stderr.contains("SINGLETON constraint violated: app_config already holds row ")
+            || loser_stdout.contains("SINGLETON constraint violated: app_config already holds row "),
         "expected structured SINGLETON error; got stderr={loser_stderr} stdout={loser_stdout}"
     );
     assert!(
-        !loser_combined.contains("UNIQUE constraint failed"),
+        !loser_stderr.contains("UNIQUE constraint failed")
+            && !loser_stdout.contains("UNIQUE constraint failed"),
         "raw SQLite UNIQUE error must not leak; got stderr={loser_stderr} stdout={loser_stdout}"
     );
 
@@ -76,4 +76,11 @@ fn two_concurrent_ddb_create_on_singleton_converge_on_one_row() {
         .assert()
         .success()
         .stdout(predicates::str::contains("dark"));
+
+    // Exactly one row — count must be 1, not just "a row with dark exists".
+    repo.ddb()
+        .args(["query", "SELECT COUNT(*) AS n FROM app_config"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("1"));
 }
