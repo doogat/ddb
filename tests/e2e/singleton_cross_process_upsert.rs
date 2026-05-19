@@ -110,16 +110,13 @@ fn two_concurrent_pgwire_inserts_on_singleton_one_wins_one_gets_singleton_error(
             client2.simple_query("INSERT INTO pg_cfg (title, theme) VALUES ('b', 'dark')"),
         );
 
-        let res1_ok = res1.is_ok();
-        let res2_ok = res2.is_ok();
-        let ok_count = [res1_ok, res2_ok].iter().filter(|&&ok| ok).count();
+        let ok_count = [res1.is_ok(), res2.is_ok()].iter().filter(|&&ok| ok).count();
         assert_eq!(ok_count, 1, "expected exactly one successful insert");
 
-        let err = if res1.is_err() {
-            res1.unwrap_err()
-        } else {
-            res2.unwrap_err()
-        };
+        let err = res1
+            .err()
+            .or_else(|| res2.err())
+            .expect("exactly one insert must fail");
         let err_msg = err
             .as_db_error()
             .map(|e| e.message().to_string())
