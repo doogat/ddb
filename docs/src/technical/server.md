@@ -777,7 +777,9 @@ Uses PostgreSQL MD5 password authentication. The password is the same bearer tok
 
 ### DDL propagation
 
-`CREATE TABLE` and `DROP TABLE` statements sent over pgwire trigger the same hot schema reload as the GraphQL `executeSql` mutation. New types become immediately available via GraphQL after creation.
+`CREATE TABLE`, `ALTER TABLE`, and `DROP TABLE` statements sent over pgwire fire the same hot schema reload signal as the GraphQL `executeSql` mutation. Both paths return success as soon as the typedef commit lands in Git, **before** the schema reload has been observed by the GraphQL layer.
+
+Reload is asynchronous: the new type becomes addressable over GraphQL on the next `schemaVersion` increment, which typically lands within a few hundred milliseconds but can take up to several seconds under contention. Consumers that need to issue a GraphQL request against a freshly-created type should poll `query { schemaVersion }` until it advances past the value observed before the DDL, instead of assuming immediate availability. See the schema-reload polling pattern below for the canonical wait shape.
 
 ### Type encoding
 
