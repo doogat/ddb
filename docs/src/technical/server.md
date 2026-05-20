@@ -758,7 +758,9 @@ A vocabulary of stable machine-readable codes is attached to specific error clas
 
 ## PostgreSQL Wire Protocol
 
-PgWire is the `Guaranteed` interface for SQL/reporting workflows. It exposes SELECT queries and DDL (CREATE/DROP/ALTER TABLE) to any PostgreSQL client — `psql`, DBeaver, BI tools, or Postgres client libraries — without requiring DDB-specific code. It is not a general CRUD equivalent to GraphQL: DML mutations (INSERT, UPDATE, DELETE) are not supported over pgwire. For full CRUD, use GraphQL.
+PgWire is the `Guaranteed` interface for SQL/reporting workflows. It exposes SELECT queries, DDL (CREATE/DROP/ALTER TABLE), and DML (INSERT/UPDATE/DELETE) to any PostgreSQL client — `psql`, DBeaver, BI tools, or Postgres client libraries — without requiring DDB-specific code.
+
+DML over pgwire produces standard PostgreSQL command tags (`INSERT 0 1`, `UPDATE`, `DELETE`) on success. Errors surface as PostgreSQL error messages, **not** the GraphQL `extensions.code` envelope — structured error codes over pgwire are tracked separately (PRD 00139 §T22). For consumers that need machine-readable error codes alongside SQL mutations, prefer GraphQL `executeSql`, which uses the same `SqlEngine` and emits `extensions.code` per the GraphQL error mapping.
 
 ### Usage
 
@@ -857,7 +859,7 @@ ddb-server/src/
 ├── filter.rs        # Filter/sort/aggregate: input types, SQL builders, Connection wrapper
 ├── events.rs        # DoogatEvent, EventKind, EventBus (broadcast channel)
 ├── ws.rs            # WebSocket upgrade handler for graphql-ws subscriptions
-├── pgwire.rs        # PostgreSQL wire protocol (simple query, MD5 auth, SELECT routing)
+├── pgwire.rs        # PostgreSQL wire protocol (simple query, MD5 auth, SELECT + DML/DDL routing)
 ├── reload.rs        # Hot schema reload orchestration (ArcSwap + Notify)
 ├── rest.rs          # REST API handlers (/rest/doogats CRUD)
 ├── nosql_api.rs     # NoSQL REST handlers (/nosql/ key-value queries)
