@@ -49,7 +49,7 @@ Features are classified as **stable** or **experimental**:
 
 Stable APIs follow semver. Experimental APIs may change in any release.
 
-Stability tier (semver) is separate from interface capability promises. GraphQL, REST, PgWire, and NoSQL HTTP are all in the Stable tier but they are not equivalent: they guarantee different operations and workflows. See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the promise matrix.
+Stability tier (semver) is separate from interface capability promises. GraphQL, REST, PgWire, and NoSQL HTTP are not equivalent: they guarantee different operations and workflows. Stable interfaces can still have narrower promises than GraphQL, and experimental interfaces can document intentional boundaries. See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the promise matrix.
 
 ## Hybrid Git-CRDT Strategy
 
@@ -70,7 +70,7 @@ Git handles >99% of merges (non-overlapping edits). When Git detects a conflict,
 
 ## Deployment Modes
 
-Doogat DB supports three deployment modes. All three run the same backend (storage, types, sync, queries). The transport interfaces — GraphQL, REST, PgWire, FFI — expose different capability subsets and are not interchangeable. See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the promise matrix.
+Doogat DB supports three deployment modes. All three run the same backend (storage, types, sync, queries). The public application interfaces — GraphQL, REST, PgWire, NoSQL HTTP, and FFI — expose different capability subsets and are not interchangeable. See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the promise matrix.
 
 ### Mode 1: Server
 
@@ -85,7 +85,7 @@ ddb serve (HTTP :2891)
       └── SqlEngine (DDL/DML)
 ```
 
-Target: web apps, remote desktop apps, shared local desktops, admin tools. Transports: GraphQL (primary, CRUD `Guaranteed`), REST (specialized CRUD), PgWire (SQL/reporting). Not equivalent — see [interface selection](../guide/building-apps.md#choosing-an-interface).
+Target: web apps, remote desktop apps, shared local desktops, admin tools. Transports: GraphQL (primary, CRUD `Guaranteed`), REST (specialized CRUD), PgWire (SQL/reporting), NoSQL HTTP (read-only document access). Not equivalent — see [interface selection](../guide/building-apps.md#choosing-an-interface).
 
 ### Mode 2: Embedded native
 
