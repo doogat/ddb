@@ -44,7 +44,7 @@ The embedded interface makes the following promises, consistent with the product
 | Attachments (attach, detach, list) | `Specialized` | Attachments feature is Experimental per the stability tier table; methods exist and work, but the capability promise is narrower than core CRUD until Attachments moves Stable |
 | Maintenance (reindex, compact) | `Guaranteed` | Local in-process operations |
 | Bundle export/import | `Specialized` | Available via `export_full_bundle` / `export_delta_bundle` / `import_bundle`; CLI is the canonical bundle workflow (`ddb bundle export/import`) — FFI exposes the same engine for in-process orchestration |
-| Remote sync (push/pull/fetch) | `Specialized` | Bundle export/import only; no Git remote push/pull/fetch method on `DoogatDriver`. Ongoing Git remote sync uses CLI `ddb sync` or the GraphQL maintenance mutation |
+| Remote sync (push/pull/fetch) | `Specialized` | Bundle export/import only; no Git remote push/pull/fetch method on `DoogatDriver`. Ongoing Git remote sync uses CLI `ddb sync` or the GraphQL `sync` mutation |
 | Real-time subscriptions / change streaming | `Intentionally absent` | No GraphQL-subscription equivalent; poll or call `reindex()` after writes |
 | Cross-process or concurrent drivers | `Intentionally absent` | One `DoogatDriver` per process; do not share a repo between concurrently running drivers |
 | Auth / token management | `Intentionally absent` | Host app owns the repo path; no server auth needed or supported |
@@ -58,7 +58,7 @@ The embedded interface makes the following promises, consistent with the product
 | FTS5 search | `Guaranteed` | `Guaranteed` | `Guaranteed` |
 | Multi-statement transactions | implicit per-command | `executeBatch` (atomic batch) | `begin_transaction` / `commit_transaction` |
 | Real-time push / subscriptions | `Intentionally absent` | `Guaranteed` (WebSocket) | `Intentionally absent` |
-| Remote sync (push/pull/fetch) | `Guaranteed` (`ddb sync`) | `Guaranteed` (via maintenance mutation) | `Specialized` (bundles only) |
+| Remote sync (push/pull/fetch) | `Guaranteed` (`ddb sync`) | `Guaranteed` (via `sync` mutation) | `Specialized` (bundles only) |
 | API surface stability | Stable | Stable | **Experimental** - signatures may change |
 
 See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the top-level recommendation matrix.

@@ -685,7 +685,7 @@ The host-shell model relies on the embedded API covering the workflows host modu
 - CRUD, typed SQL (DDL/DML/SELECT), FTS5 search, type discovery, transactions, and local maintenance (reindex, compact) are `Guaranteed` on both — within the FFI Experimental stability envelope on the embedded side.
 - Bundle export/import is exposed on FFI but the canonical workflow shape is CLI-primary (`ddb bundle export/import`); FFI is `Specialized`.
 - Attachments are `Specialized` on FFI because the Attachments feature itself is `Experimental` per the stability tier table.
-- Ongoing Git remote sync (push/pull/fetch) is **not** exposed on `DoogatDriver` — only bundle export/import is. Continuous remote sync runs through CLI `ddb sync` or the GraphQL maintenance mutation; FFI's remote-sync promise is `Specialized` (bundle-shaped).
+- Ongoing Git remote sync (push/pull/fetch) is **not** exposed on `DoogatDriver` — only bundle export/import is. Continuous remote sync runs through CLI `ddb sync` or the GraphQL `sync` mutation; FFI's remote-sync promise is `Specialized` (bundle-shaped).
 - Real-time subscriptions and Auth are `Intentionally absent` on FFI — there is no GraphQL-subscription equivalent on the embedded surface, and the host app owns the repo (no server auth needed).
 
 See the [FFI Promise Boundaries table](../technical/ffi.md#promise-boundaries) for the canonical per-capability promise on `DoogatDriver`. Host modules that need real-time push, remote sync orchestration, or server auth must compose with `ddb serve` directly.
