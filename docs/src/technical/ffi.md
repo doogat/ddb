@@ -36,14 +36,14 @@ The embedded interface makes the following promises, consistent with the product
 
 | Capability | Promise | Notes |
 |-----------|---------|-------|
-| Create / read / update / delete (typed CRUD methods or `execute_sql`) | `Guaranteed` | Same Git-backed semantics as CLI and GraphQL |
+| Create / read / update / delete (base CRUD methods or typed SQL via `execute_sql`) | `Guaranteed` | Same Git-backed semantics as CLI and GraphQL |
 | FTS5 search (`search`, `search_paginated`) | `Guaranteed` | Same `Index` path as the server |
 | SQL (DDL, DML, SELECT via `execute_sql`) | `Guaranteed` | Delegates to the same `SqlEngine` as `ddb serve` |
 | Transactions (`begin_transaction`, `commit_transaction`, `rollback_transaction`) | `Guaranteed` | Multi-statement atomicity; not available per-call over GraphQL - use `executeBatch` there |
 | Type discovery (`list_type_schemas`) | `Guaranteed` | Returns typedef doogats with column metadata |
 | Attachments (attach, detach, list) | `Guaranteed` | Blob storage; updates frontmatter |
 | Maintenance (reindex, compact, bundle export/import) | `Guaranteed` | Local in-process operations |
-| Remote sync via server (push/pull over HTTP) | `Specialized` | Bundle export/import works; ongoing remote sync uses CLI `ddb sync`, not FFI |
+| Remote sync | `Specialized` | Bundle export/import works; ongoing Git remote sync uses CLI `ddb sync`, not FFI |
 | Real-time subscriptions / change streaming | `Intentionally absent` | No GraphQL-subscription equivalent; poll or call `reindex()` after writes |
 | Cross-process or concurrent drivers | `Intentionally absent` | One `DoogatDriver` per process; do not share a repo between concurrently running drivers |
 | Auth / token management | `Intentionally absent` | Host app owns the repo path; no server auth needed or supported |
