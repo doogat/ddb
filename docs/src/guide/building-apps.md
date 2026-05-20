@@ -44,6 +44,37 @@ Frontend (React, Swift, Kotlin, etc.)
 **Mobile mini-apps**: one host app embedding DoogatDriver with multiple feature modules — see [Mobile mini-apps](#mobile-mini-apps) below.
 **CLI scripts**: use `ddb query` and `ddb create` directly.
 
+## Choosing an interface
+
+Doogat DB exposes several network and embedded interfaces. They are not equivalent. The table below tells you which one to use for each integration class. Full capability details are in `dev/local/notes/downstream-promise-matrix.md`.
+
+| Integration class | Use this | Fallback | Notes |
+|-------------------|----------|----------|-------|
+| **Network app** (web, desktop frontend) | **GraphQL** | REST | GraphQL is the flagship network API. Every CRUD baseline capability is `Guaranteed`. Structured error codes (`extensions.code`), typed mutations, subscriptions via WebSocket. |
+| **Embedded / mobile app** | **FFI (`DoogatDriver` via UniFFI)** | GraphQL over local HTTP | In-process Swift/Kotlin bindings; no server process needed. CRUD baseline `Guaranteed` within the Experimental stability envelope. Use the host-shell model for mobile (see below). |
+| **CLI automation / scripting** | **CLI (`ddb` binary)** | GraphQL via `curl` + Bearer token | Shell-first: `ddb create`, `ddb query`, `ddb search`, `ddb sync`. Falls back to GraphQL when scripts need machine-readable error codes or structured warnings (CLI emits text/exit-code only). |
+| **SQL / reporting** (BI tools, psql, DBeaver) | **PgWire** (port 2892) | GraphQL `executeSql` | Any PostgreSQL client works without DDB-specific code. SELECT against materialized type tables; DDL triggers the same hot schema reload as GraphQL. |
+| **REST CRUD/search** | **REST (`/rest/*`)** | GraphQL | Base-doogat CRUD and list/search over standard HTTP. No GraphQL library needed. Typed create/update is `Specialized` (not `Guaranteed`) until per-type REST routes land — use GraphQL when you need typed mutations. |
+| **NoSQL document access** | **NoSQL HTTP (`/nosql/*`)** | REST `GET /rest/doogats/:id` | Read-only by design. O(1) document fetch and prefix scan by type or tag. All write/mutate operations are `Intentionally absent` — route writes through GraphQL or REST. |
+
+### What "Specialized" means
+
+`Specialized` means the capability exists but with constraints: a narrower shape, no structured error envelope, or a workflow that differs from the `Guaranteed` form on the primary interface. It is not the same as absent, but it is not a full promise either. When a cell in the table above is `Specialized`, the note explains the gap and points to the recommended alternative.
+
+### Auth and setup
+
+**Server-mode interfaces** (GraphQL, REST, PgWire, NoSQL HTTP) share one setup chain:
+
+1. `ddb init` in the data directory — see [Getting started](getting-started.md).
+2. `ddb serve [--port 2891] [--pg-port 2892]` — see [Server docs](../technical/server.md).
+3. The server writes a UUID v4 Bearer token to `~/.config/ddb/token` on first start.
+4. Pass `Authorization: Bearer <token>` on every HTTP/WebSocket request (GraphQL, REST, NoSQL HTTP).
+5. For **PgWire**: connect as user `ddb` with the token as the password (MD5 password auth) — see [Server docs](../technical/server.md).
+
+**Embedded-mode (FFI)**: standard documented setup in [FFI docs](../technical/ffi.md). Link the platform binding (XCFramework on iOS, `.aar` on Android), construct a `DoogatDriver` with the local repo path, and call `executeSql`. No auth — the host app owns the repo in-process.
+
+**CLI**: install `ddb`, run `ddb init`. No auth required — direct repo access.
+
 ## Data modeling
 
 > **Always use `CREATE TABLE` via `ddb query` to define types.** Do not create `_typedef` doogats manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
