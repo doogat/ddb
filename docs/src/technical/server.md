@@ -31,6 +31,19 @@ Read and write operations follow different paths. **Reads** (GraphQL queries, RE
 
 The `sql` query field uses `sqlparser` to classify queries: pure `SELECT` statements route through `ReadPool`, everything else goes to the actor.
 
+## Interface Promises
+
+`ddb serve` exposes four network interfaces. They are not equivalent:
+
+| Interface | Promise level | Primary use case |
+|-----------|--------------|-----------------|
+| GraphQL (`/graphql`, `/ws`) | CRUD `Guaranteed` | Primary API for web and desktop apps |
+| REST (`/rest/*`) | `Specialized` | Base CRUD and list/search; typed mutations not `Guaranteed` |
+| PgWire (port 2892) | `Guaranteed` for SQL/reporting | BI tools, `psql`, DBeaver; SELECT and DDL |
+| NoSQL HTTP (`/nosql/*`) | Read-only; writes `Intentionally absent` | O(1) document fetch and prefix scans |
+
+See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the full promise matrix and auth/setup requirements.
+
 ## Shared Application Contract
 
 Both the server and embedded (`DoogatDriver`) paths delegate typed SQL execution to the same `SqlEngine` in `ddb-core`. The server actor constructs `SqlEngine::new(index, repo)` per command; `DoogatDriver` does the same per `execute_sql` call. This ensures identical semantics for single statements: DDL creates typedef doogats via Git, DML reads/writes Git-backed doogats.
@@ -745,7 +758,7 @@ A vocabulary of stable machine-readable codes is attached to specific error clas
 
 ## PostgreSQL Wire Protocol
 
-The server also speaks the PostgreSQL wire protocol (simple query mode), so standard tools like `psql`, DBeaver, or any Postgres client library can query Doogat DB directly.
+PgWire is the `Guaranteed` interface for SQL/reporting workflows. It exposes SELECT queries and DDL (CREATE/DROP/ALTER TABLE) to any PostgreSQL client — `psql`, DBeaver, BI tools, or Postgres client libraries — without requiring DDB-specific code. It is not a general CRUD equivalent to GraphQL: DML mutations (INSERT, UPDATE, DELETE) are not supported over pgwire. For full CRUD, use GraphQL.
 
 ### Usage
 
@@ -807,6 +820,8 @@ Set `enabled = false` to disable. CLI flags don't override maintenance config �
 
 ## NoSQL REST API
 
+The NoSQL HTTP interface is read-only. All write and mutate operations are `Intentionally absent` — route writes through GraphQL or REST.
+
 When built with the `nosql` feature (enabled by default), the server exposes key-value endpoints at `/nosql/`:
 
 | Method | Path | Description |
@@ -820,7 +835,7 @@ The actor holds an `Option<RedbIndex>` alongside `Index`. Every create/update/de
 
 ## REST API
 
-In addition to GraphQL, the server exposes a REST API at `/rest/*`. Both interfaces share the same actor backend and auth middleware. See [REST API](./rest-api.md) for endpoint details.
+The REST interface is `Specialized` — it covers base-doogat CRUD and list/search, but typed mutations (column writes with `allowed_values` enforcement, FK validation, per-type routes) are not `Guaranteed` until per-type REST routes land. Use GraphQL when you need typed mutations or structured error codes. The REST API is backed by the same actor and auth middleware as GraphQL. See [REST API](./rest-api.md) for endpoint details.
 
 ## Crate Structure
 
