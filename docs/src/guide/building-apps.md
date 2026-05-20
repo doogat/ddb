@@ -46,7 +46,7 @@ Frontend (React, Swift, Kotlin, etc.)
 
 ## Choosing an interface
 
-Doogat DB exposes several network and embedded interfaces. They are not equivalent. The table below tells you which one to use for each integration class. Full capability details are in `dev/local/notes/downstream-promise-matrix.md`.
+Doogat DB exposes several network and embedded interfaces. They are not equivalent. The table below tells you which one to use for each integration class.
 
 | Integration class | Use this | Fallback | Notes |
 |-------------------|----------|----------|-------|
