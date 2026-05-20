@@ -3,22 +3,23 @@ use std::path::Path;
 use walkdir::WalkDir;
 
 const FORBIDDEN_CRATES: &[&str] = &[
-    "use rusqlite::",
-    "use git2::",
-    "use redb::",
-    "use axum::",
-    "use async_graphql::",
+    "rusqlite::",
+    "git2::",
+    "redb::",
+    "axum::",
+    "async_graphql::",
+    "extern crate rusqlite",
+    "extern crate git2",
+    "extern crate redb",
+    "extern crate axum",
+    "extern crate async_graphql",
 ];
-
-fn app_contract_dir() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("app_contract")
-}
 
 #[test]
 fn no_forbidden_adapter_imports_in_app_contract_sources() {
-    let dir = app_contract_dir();
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("app_contract");
     assert!(
         dir.exists(),
         "ddb-core/src/app_contract/ does not exist; scaffold the module first"
