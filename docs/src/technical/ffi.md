@@ -28,6 +28,40 @@ DoogatDriver (ffi.rs)       ← UniFFI proc-macro boundary
 
 Widgets and extensions (iOS WidgetKit, Android AppWidgetProvider) access the same shared repository via App Group storage (iOS) or app-private storage (Android). Whether extensions get their own read-only `DoogatDriver` instance or consume snapshots exported by the host app depends on the coordination strategy — see the [Building Apps guide](../guide/building-apps.md#mobile-mini-apps) for architecture details.
 
+## Promise Boundaries
+
+> **Stability note**: The **Experimental** label at the top of this page refers to API surface stability - method signatures and record shapes may change before a stable release. It does not mean CRUD operations are unreliable. Behavioral promises are tracked independently.
+
+The embedded interface makes the following promises, consistent with the product's 120% parity posture:
+
+| Capability | Promise | Notes |
+|-----------|---------|-------|
+| Create / read / update / delete (typed CRUD methods or `execute_sql`) | `Guaranteed` | Same Git-backed semantics as CLI and GraphQL |
+| FTS5 search (`search`, `search_paginated`) | `Guaranteed` | Same `Index` path as the server |
+| SQL (DDL, DML, SELECT via `execute_sql`) | `Guaranteed` | Delegates to the same `SqlEngine` as `ddb serve` |
+| Transactions (`begin_transaction`, `commit_transaction`, `rollback_transaction`) | `Guaranteed` | Multi-statement atomicity; not available per-call over GraphQL - use `executeBatch` there |
+| Type discovery (`list_type_schemas`) | `Guaranteed` | Returns typedef doogats with column metadata |
+| Attachments (attach, detach, list) | `Guaranteed` | Blob storage; updates frontmatter |
+| Maintenance (reindex, compact, bundle export/import) | `Guaranteed` | Local in-process operations |
+| Remote sync via server (push/pull over HTTP) | `Specialized` | Bundle export/import works; ongoing remote sync uses CLI `ddb sync`, not FFI |
+| Real-time subscriptions / change streaming | `Intentionally absent` | No GraphQL-subscription equivalent; poll or call `reindex()` after writes |
+| Cross-process or concurrent drivers | `Intentionally absent` | One `DoogatDriver` per process; do not share a repo between concurrently running drivers |
+| Auth / token management | `Intentionally absent` | Host app owns the repo path; no server auth needed or supported |
+
+### Capability gaps vs CLI and GraphQL
+
+| Feature | CLI | GraphQL | FFI (embedded) |
+|---------|-----|---------|----------------|
+| CRUD baseline | `Guaranteed` | `Guaranteed` | `Guaranteed` |
+| Typed SQL (DDL, DML, SELECT) | `Guaranteed` | `Guaranteed` | `Guaranteed` |
+| FTS5 search | `Guaranteed` | `Guaranteed` | `Guaranteed` |
+| Multi-statement transactions | implicit per-command | `executeBatch` (atomic batch) | `begin_transaction` / `commit_transaction` |
+| Real-time push / subscriptions | `Intentionally absent` | `Guaranteed` (WebSocket) | `Intentionally absent` |
+| Remote sync | `Guaranteed` (`ddb sync`) | n/a (server-side) | `Specialized` (bundles only) |
+| API surface stability | Stable | Stable | **Experimental** - signatures may change |
+
+See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the top-level recommendation matrix.
+
 ## Interface
 
 ### Constructors
