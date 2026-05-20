@@ -59,7 +59,9 @@ Doogat DB exposes several network and embedded interfaces. They are not equivale
 
 ### What "Specialized" means
 
-`Specialized` means the capability exists but with constraints: a narrower shape, no structured error envelope, or a workflow that differs from the `Guaranteed` form on the primary interface. It is not the same as absent, but it is not a full promise either. When a cell in the table above is `Specialized`, the note explains the gap and points to the recommended alternative.
+`Specialized` is a narrower but still binding promise. The capability is present and supported, but with explicit constraints: a different response or error shape than the `Guaranteed` form, a workflow that differs from the primary interface, or coverage of a subset of the operations the capability spans elsewhere. The four matrix labels (`Guaranteed`, `Specialized`, `Intentionally absent`, `Deprecated`) are all real, maintainer-decided promises — `Specialized` is **not** a soft "partial" placeholder.
+
+When a cell in the table above is `Specialized`, the note explains the specific constraint and points to the recommended alternative if you need the `Guaranteed` shape.
 
 ### Auth and setup
 
@@ -678,7 +680,15 @@ driver.executeSql("CREATE TABLE IF NOT EXISTS contact (name TEXT NOT NULL, email
 
 ### Relationship to embedded parity
 
-The host-shell model depends on full embedded API parity between `DoogatDriver` and `ddb serve`.
+The host-shell model relies on the embedded API covering the workflows host modules need — but `DoogatDriver` and `ddb serve` are **not** unqualified equivalents. The shared core (`ddb-core`) gives both surfaces the same Git storage, types, sync semantics, SQL engine, and FTS5 search. What differs is at the surface boundary:
+
+- CRUD, typed SQL (DDL/DML/SELECT), FTS5 search, type discovery, transactions, and local maintenance (reindex, compact) are `Guaranteed` on both — within the FFI Experimental stability envelope on the embedded side.
+- Bundle export/import is exposed on FFI but the canonical workflow shape is CLI-primary (`ddb bundle export/import`); FFI is `Specialized`.
+- Attachments are `Specialized` on FFI because the Attachments feature itself is `Experimental` per the stability tier table.
+- Ongoing Git remote sync (push/pull/fetch) is **not** exposed on `DoogatDriver` — only bundle export/import is. Continuous remote sync runs through CLI `ddb sync` or the GraphQL maintenance mutation; FFI's remote-sync promise is `Specialized` (bundle-shaped).
+- Real-time subscriptions and Auth are `Intentionally absent` on FFI — there is no GraphQL-subscription equivalent on the embedded surface, and the host app owns the repo (no server auth needed).
+
+See the [FFI Promise Boundaries table](../technical/ffi.md#promise-boundaries) for the canonical per-capability promise on `DoogatDriver`. Host modules that need real-time push, remote sync orchestration, or server auth must compose with `ddb serve` directly.
 
 ## Worked example: link dashboard
 
