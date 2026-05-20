@@ -44,10 +44,12 @@ Features are classified as **stable** or **experimental**:
 
 | Tier | Scope |
 |------|-------|
-| Stable | CLI CRUD, search, query, sync, type management; Git storage format; FTS5; SQL DDL/DML; `ddb-core` public API; GraphQL server, REST, PgWire, WebSocket, ReadPool, background maintenance |
+| Stable | CLI CRUD, search, query, sync, type management; Git storage format; FTS5; SQL DDL/DML; `ddb-core` public API; GraphQL server (incl. subscriptions over graphql-ws), REST, PgWire, ReadPool, background maintenance |
 | Experimental | NoSQL API, UniFFI bindings, bundles, attachments, auto-update |
 
 Stable APIs follow semver. Experimental APIs may change in any release.
+
+There is no standalone "WebSocket interface". The WebSocket transport implemented in `ws.rs` is exclusively the graphql-ws upgrade path for GraphQL subscriptions — it is not a separate public interface with its own contract.
 
 Stability tier (semver) is separate from interface capability promises. GraphQL, REST, PgWire, and NoSQL HTTP are not equivalent: they guarantee different operations and workflows. Stable interfaces can still have narrower promises than GraphQL, and experimental interfaces can document intentional boundaries. See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the promise matrix.
 
