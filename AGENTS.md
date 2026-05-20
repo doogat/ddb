@@ -122,17 +122,44 @@ git config core.hooksPath dev/hooks
 - Product Requirement Documents (PRDs) go in `dev/local/prds/` (gitignored), NOT in `docs/`
 - Git worktrees go in `dev/local/worktrees/` (gitignored), nowhere else
 - Releases: use `dev/bin/release` only. Never `gh release create` manually - CI creates the GitHub release with binary artifacts on tag push
+- Push `master` at the end of each PRD (after the PRD's commits land). This overrides the global autopilot "don't push" default and applies to this repository only — nightly CI (`full-validation.yml`) needs the new commits on `origin/master` to exercise the heavy Tier 2 battery against the latest work.
 
 ## Definition of Done
 
-A task is NOT complete unless ALL of these pass:
+Validation is two-tiered: a fast per-task gate runs locally; the heavy battery is delegated to CI. Test/scenario authoring stays a per-PRD deliverable — only local *execution* of the heavy battery is dropped.
 
-1. **Tests** — unit tests in the module AND integration/e2e tests in `tests/` (not just unit tests; use `cargo test --workspace` for the full cargo suite)
-2. **Smoke/integration test** — if the change adds a CLI command or user-facing behavior, add a scenario to `tests/smoke.sh` and `tests/smoke.ps1`. If it adds a server endpoint, sync behavior, or CRDT logic, add it to `tests/integration.sh` and `tests/integration.ps1`. All four files follow the numbered-section + `pass` helper pattern. Upstream jink-feedback repros for the SQL regression suite live at `dev/local/specs/jink-feedback/ddb-repros/` (gitignored); run `bash dev/local/specs/jink-feedback/ddb-repros/run-all.sh` for an independent verification channel
-3. **Docs** — update relevant files in `docs/src/` to reflect any behavioral or API changes
-4. **Build** — `cargo clippy --workspace`, fast-tier `cargo test`, and full-suite `cargo test --workspace` all pass
-5. **Walkthrough** — if the task adds a CLI command, server endpoint, or user-facing behavior, create an executable showboat walkthrough in `dev/local/walkthroughs/` (see Showboat Walkthroughs below)
-6. **Architecture doc** — if the task changes module boundaries, data flow, or key types, update `docs/src/technical/walkthrough.md`
+### Tier 1 — per-task local gate (runs after every task)
+
+A task is NOT complete unless ALL of these pass locally:
+
+1. **Build** — `cargo build` succeeds.
+2. **Lint** — `cargo clippy --workspace` is clean.
+3. **Fast tests** — `cargo test-ci` passes.
+4. **TDD unit tests** — unit tests for the change live alongside the module being touched and pass under `cargo test-ci`.
+
+Do NOT run `cargo test --workspace`, the e2e suite, `tests/integration.sh`, the `.ps1` ports, property tests, cross-platform jobs, coverage, or `showboat verify` per task. Those belong to Tier 2.
+
+One narrow exception: `CLAUDE.md` instructs Claude-routed sessions to run `cargo test -p ddb-e2e` after any task that deletes or replaces existing code paths (skipped for purely additive tasks). That conditional, scope-limited e2e run is intentional — it is a deletion safety net, not a relaxation of Tier 1. See `CLAUDE.md` for the exact wording.
+
+### Tier 2 — delegated to CI (runs automatically, not per task)
+
+The heavy battery is owned by the GitHub Actions workflows:
+
+- `test.yml` runs on every push: full workspace tests, cross-platform jobs, and the matrix that catches regressions the fast tier can miss.
+- `full-validation.yml` runs nightly: full `cargo test --workspace`, the e2e suite, `tests/integration.sh`, property tests, cross-platform validation, and coverage.
+
+Do not duplicate these locally. If a CI failure is reproducible only locally, run the specific failing command in isolation rather than the full battery.
+
+### Per-PRD deliverables (created once per PRD, not per task)
+
+These are authoring obligations, not local execution gates:
+
+- **Smoke/integration scenario authoring** — if the PRD adds a CLI command or user-facing behavior, add a scenario to `tests/smoke.sh` and `tests/smoke.ps1`. If it adds a server endpoint, sync behavior, or CRDT logic, add it to `tests/integration.sh` and `tests/integration.ps1`. All four files follow the numbered-section + `pass` helper pattern. Execution of these scripts is delegated to CI (Tier 2). Upstream jink-feedback repros for the SQL regression suite live at `dev/local/specs/jink-feedback/ddb-repros/` (gitignored); run `bash dev/local/specs/jink-feedback/ddb-repros/run-all.sh` for an independent verification channel when investigating.
+- **E2E test authoring** — new user-facing behavior still requires its e2e test written under `tests/e2e/`. The test is authored as part of the PRD; execution happens in CI.
+- **Docs** — update relevant files in `docs/src/` to reflect any behavioral or API changes.
+- **Walkthrough** — if the PRD adds a CLI command, server endpoint, or user-facing behavior, create an executable showboat walkthrough in `dev/local/walkthroughs/` (see Showboat Walkthroughs below).
+- **Architecture doc** — if the PRD changes module boundaries, data flow, or key types, update `docs/src/technical/walkthrough.md`.
+- **Push `master`** — after the PRD's commits land, push `master` so nightly Tier 2 CI exercises the new work. This overrides the global autopilot "don't push" default for this repo only (see Conventions above for the full rule).
 
 ## Showboat Walkthroughs
 
@@ -231,9 +258,9 @@ It runs the wrapper against a known walkthrough (a 00050+ fixture exhibiting the
 ```text
 cargo build                           Build default workspace members (fast local loop)
 cargo build --workspace               Build all crates
-cargo test                            Run fast local test tier
-cargo test-ci                         Run bounded CI matrix tier (unit/bin targets only)
-cargo test-full                       Run full cargo test suite (workspace + e2e)
+cargo test                            Run cargo's default workspace test selection
+cargo test-ci                         Run the fast local test tier (bounded CI matrix; unit/bin targets only)
+cargo test-full                       Run full cargo test suite (Tier 2; delegate to CI, not per-task)
 cargo test -p ddb-e2e                 Run e2e tests only
 cargo bench                           Run criterion benchmarks (CRUD + search)
 cargo bench --no-run                  Compile benchmarks without running
