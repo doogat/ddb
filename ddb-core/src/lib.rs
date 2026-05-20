@@ -4,6 +4,7 @@
 //!
 //! ## Modules
 //!
+//! - [`app_contract`] — Adapter-neutral application command/result contract
 //! - [`attachments`] — File attachment CRUD on `reference/{id}/`
 //! - [`bundle`] — Bundle export/import for air-gapped sync
 //! - [`bundled_types`] — Built-in type definition templates (project, contact)
@@ -31,6 +32,7 @@
 
 uniffi::setup_scaffolding!();
 
+pub mod app_contract;
 pub mod attachments;
 pub mod bundle;
 pub mod bundled_types;
