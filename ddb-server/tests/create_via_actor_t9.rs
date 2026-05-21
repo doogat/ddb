@@ -1,5 +1,6 @@
+use ddb_core::app_contract::AppOutput;
 use ddb_core::error::{codes, DoogatError};
-use ddb_core::types::{ConflictAction, Value};
+use ddb_core::types::{ConflictAction, ParsedDoogat, Value};
 use ddb_server::actor::ActorHandle;
 use ddb_server::events::EventBus;
 use std::collections::BTreeMap;
@@ -214,6 +215,37 @@ async fn actor_create_conflict_ignore_returns_existing_singleton() {
     assert_eq!(
         first_id, second_id,
         "Ignore on SINGLETON must return the existing row, not create a new one"
+    );
+}
+
+// ── Group B: actor create exposes AppOutput so warnings are not discarded ─────
+
+#[tokio::test]
+async fn actor_create_returns_app_output_with_warnings_vector() {
+    // The actor's create_doogat must return Result<AppOutput<ParsedDoogat>, DoogatError>
+    // so that warnings produced by DoogatService::create are not silently dropped.
+    // Today the return type is Result<ParsedDoogat, DoogatError> — this test will
+    // fail to compile until Ivan changes the return type.
+    let tmp = tempfile::tempdir().unwrap();
+    let actor = spawn_actor(tmp.path()).await;
+    let output: AppOutput<ParsedDoogat> = actor
+        .create_doogat(
+            Some("Warning Test".to_string()),
+            None,
+            vec![],
+            None,
+            BTreeMap::new(),
+            ConflictAction::Error,
+        )
+        .await
+        .unwrap();
+    // On a plain create the warnings list may be empty, but the TYPE must be
+    // AppOutput<ParsedDoogat> — not bare ParsedDoogat. Accessing .warnings here
+    // proves the envelope is present.
+    let _ = output.warnings; // must compile: field exists on AppOutput
+    assert!(
+        output.value.meta.id.is_some(),
+        "created doogat must have an id"
     );
 }
 
