@@ -1,5 +1,6 @@
 use rusqlite::params;
 
+use crate::app_contract::{AppOutput, CreateCommand};
 use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
@@ -160,6 +161,21 @@ impl<G: GitBackend> DoogatService<G> {
         body: &str,
     ) -> Result<ParsedDoogat> {
         self.create_doogat_with_extra(title, tags, doogat_type, body, Default::default())
+    }
+
+    /// App facade entrypoint: create a doogat from a `CreateCommand`.
+    pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
+        let value = self.create_doogat_with_extra(
+            &cmd.title,
+            &cmd.tags,
+            cmd.doogat_type.as_deref(),
+            &cmd.body,
+            cmd.fields,
+        )?;
+        Ok(AppOutput {
+            value,
+            warnings: vec![],
+        })
     }
 
     /// Create a new doogat with optional extra frontmatter fields.
