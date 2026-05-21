@@ -1,4 +1,4 @@
-use ddb_core::app_contract::{AppOutput, CreateCommand};
+use ddb_core::app_contract::CreateCommand;
 use ddb_core::service::DoogatService;
 use ddb_core::types::Value;
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ fn basic_cmd(title: &str) -> CreateCommand {
 fn create_returns_parsed_doogat_with_correct_title() {
     let tmp = tempfile::TempDir::new().unwrap();
     let svc = DoogatService::init(tmp.path()).unwrap();
-    let output: AppOutput<_> = svc.create(basic_cmd("Hello World")).unwrap();
+    let output = svc.create(basic_cmd("Hello World")).unwrap();
     assert_eq!(output.value.meta.title.as_deref(), Some("Hello World"));
 }
 
@@ -63,7 +63,8 @@ fn create_returns_parsed_doogat_with_body() {
 fn create_with_doogat_type_succeeds() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut svc = DoogatService::init(tmp.path()).unwrap();
-    svc.execute_sql("CREATE TABLE project (title TEXT)").unwrap();
+    svc.execute_sql("CREATE TABLE project (title TEXT)")
+        .unwrap();
     let cmd = CreateCommand {
         title: "My Project".to_string(),
         tags: vec![],
@@ -71,12 +72,8 @@ fn create_with_doogat_type_succeeds() {
         body: String::new(),
         fields: BTreeMap::new(),
     };
-    let result = svc.create(cmd);
-    assert!(result.is_ok());
-    assert_eq!(
-        result.unwrap().value.meta.doogat_type.as_deref(),
-        Some("project")
-    );
+    let output = svc.create(cmd).unwrap();
+    assert_eq!(output.value.meta.doogat_type.as_deref(), Some("project"));
 }
 
 #[test]

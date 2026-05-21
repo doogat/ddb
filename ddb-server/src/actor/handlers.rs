@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use ddb_core::service::DoogatService;
 use ddb_core::app_contract::CreateCommand;
+use ddb_core::service::DoogatService;
 use ddb_core::types::{CompactOptions, ListFilter};
 
 use super::{ActorCommand, ActorReply};

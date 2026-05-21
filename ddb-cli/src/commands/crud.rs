@@ -55,10 +55,7 @@ pub(crate) fn create(
         fields: extra,
     };
     let output = svc.create(cmd)?;
-    outln!(
-        "{}",
-        output.value.meta.id.map(|z| z.0).unwrap_or_default()
-    )?;
+    outln!("{}", output.value.meta.id.map(|z| z.0).unwrap_or_default())?;
     Ok(())
 }
 
@@ -194,7 +191,15 @@ mod tests {
     fn cli_create_stores_doogat_with_title() {
         let tmp = tempfile::TempDir::new().unwrap();
         init_repo(tmp.path());
-        create(tmp.path(), "CLI Title".to_string(), None, None, None, vec![]).unwrap();
+        create(
+            tmp.path(),
+            "CLI Title".to_string(),
+            None,
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
         let svc = DoogatService::open(tmp.path()).unwrap();
         let results = svc.search("CLI Title").unwrap();
         assert!(!results.is_empty(), "doogat not found after CLI create");
@@ -239,9 +244,9 @@ mod tests {
         let results = svc.search("Fields CLI").unwrap();
         assert!(!results.is_empty());
         let parsed = svc.get_doogat_parsed(&results[0].id).unwrap();
-        assert!(
-            parsed.meta.extra.contains_key("priority"),
-            "priority field missing"
+        assert_eq!(
+            parsed.meta.extra.get("priority"),
+            Some(&ddb_core::types::Value::String("high".to_string()))
         );
     }
 }

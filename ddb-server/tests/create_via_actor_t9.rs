@@ -1,3 +1,4 @@
+use ddb_core::error::{codes, DoogatError};
 use ddb_core::types::{ConflictAction, Value};
 use ddb_server::actor::ActorHandle;
 use ddb_server::events::EventBus;
@@ -68,10 +69,16 @@ async fn actor_create_with_none_title_uses_empty_string() {
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     let result = actor
-        .create_doogat(None, None, vec![], None, BTreeMap::new(), ConflictAction::Error)
+        .create_doogat(
+            None,
+            None,
+            vec![],
+            None,
+            BTreeMap::new(),
+            ConflictAction::Error,
+        )
         .await
         .unwrap();
-    // title: None maps to "" in CreateCommand
     assert_eq!(result.meta.title.as_deref(), Some(""));
 }
 
@@ -79,7 +86,6 @@ async fn actor_create_with_none_title_uses_empty_string() {
 async fn actor_create_routes_doogat_type_correctly() {
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
-    // Register a typedef so the type is recognized
     actor
         .execute_sql("CREATE TABLE note (title TEXT)".to_string())
         .await
@@ -115,23 +121,17 @@ async fn actor_create_routes_extra_fields_correctly() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        result.meta.extra.get("priority"),
-        Some(&Value::Number(5.0))
-    );
+    assert_eq!(result.meta.extra.get("priority"), Some(&Value::Number(5.0)));
 }
 
 #[tokio::test]
 async fn actor_create_conflict_ignore_now_errors_on_constraint_violation() {
-    // Documents new behavior: on_conflict is ignored; svc.create() always errors.
-    // Create a SINGLETON typedef, create one row, then attempt a second with IGNORE.
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     actor
         .execute_sql("CREATE TABLE cfg (theme TEXT) SINGLETON".to_string())
         .await
         .unwrap();
-    // First create succeeds
     actor
         .create_doogat(
             Some("Config".to_string()),
@@ -143,7 +143,6 @@ async fn actor_create_conflict_ignore_now_errors_on_constraint_violation() {
         )
         .await
         .unwrap();
-    // Second create with IGNORE now returns an error (SINGLETON constraint)
     let result = actor
         .create_doogat(
             Some("Config2".to_string()),
@@ -154,5 +153,11 @@ async fn actor_create_conflict_ignore_now_errors_on_constraint_violation() {
             ConflictAction::Ignore,
         )
         .await;
-    assert!(result.is_err(), "expected error on second SINGLETON create");
+    match result.expect_err("expected error on second SINGLETON create") {
+        DoogatError::Structured {
+            code: codes::SINGLETON_VIOLATION,
+            ..
+        } => {}
+        other => panic!("expected SINGLETON_VIOLATION, got {other:?}"),
+    }
 }
