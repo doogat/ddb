@@ -164,6 +164,7 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// App facade entrypoint: create a doogat from a `CreateCommand`.
+    /// Errors from the underlying create propagate unchanged as `DoogatError`.
     pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
         let value = self.create_doogat_with_extra(
             &cmd.title,

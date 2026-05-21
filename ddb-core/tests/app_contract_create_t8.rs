@@ -45,11 +45,18 @@ fn create_returns_parsed_doogat_with_tags() {
 }
 
 #[test]
-fn create_without_doogat_type_succeeds() {
+fn create_returns_parsed_doogat_with_body() {
     let tmp = tempfile::TempDir::new().unwrap();
     let svc = DoogatService::init(tmp.path()).unwrap();
-    let result = svc.create(basic_cmd("Untyped"));
-    assert!(result.is_ok());
+    let cmd = CreateCommand {
+        title: "Body Test".to_string(),
+        tags: vec![],
+        doogat_type: None,
+        body: "some body text".to_string(),
+        fields: BTreeMap::new(),
+    };
+    let output = svc.create(cmd).unwrap();
+    assert_eq!(output.value.body, "some body text");
 }
 
 #[test]
