@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ddb-cli**, **ddb-server**: surface AppOutput warnings via CLI stderr and GraphQL response; preserve DoogatError Structured context in AppError envelope (PRD 00147).
 - **ddb-server**: restore createDoogat behavior parity (onConflict, title/body Option, TYPE_NOT_REGISTERED) after PRD 00147 routing through DoogatService::create.
 
 ### Added

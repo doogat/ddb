@@ -26,7 +26,7 @@ async fn actor_create_routes_title_correctly() {
         )
         .await
         .unwrap();
-    assert_eq!(result.meta.title.as_deref(), Some("My Title"));
+    assert_eq!(result.value.meta.title.as_deref(), Some("My Title"));
 }
 
 #[tokio::test]
@@ -44,7 +44,7 @@ async fn actor_create_routes_body_correctly() {
         )
         .await
         .unwrap();
-    assert_eq!(result.body, "hello body");
+    assert_eq!(result.value.body, "hello body");
 }
 
 #[tokio::test]
@@ -62,7 +62,7 @@ async fn actor_create_routes_tags_correctly() {
         )
         .await
         .unwrap();
-    assert_eq!(result.meta.tags, vec!["alpha", "beta"]);
+    assert_eq!(result.value.meta.tags, vec!["alpha", "beta"]);
 }
 
 #[tokio::test]
@@ -93,7 +93,7 @@ async fn actor_create_none_title_renders_title_template() {
         .await
         .unwrap();
     // The title must be rendered from the template, not empty.
-    let title = result.meta.title.as_deref().unwrap_or("");
+    let title = result.value.meta.title.as_deref().unwrap_or("");
     assert!(
         !title.is_empty(),
         "expected title rendered from title_template, got empty string"
@@ -128,7 +128,7 @@ async fn actor_create_none_title_untyped_returns_error_or_empty() {
         Err(other) => panic!("expected NOT_NULL_VIOLATION, got {other:?}"),
         Ok(d) => panic!(
             "expected error for untyped title: None, got doogat with title {:?}",
-            d.meta.title
+            d.value.meta.title
         ),
     }
 }
@@ -152,7 +152,7 @@ async fn actor_create_routes_doogat_type_correctly() {
         )
         .await
         .unwrap();
-    assert_eq!(result.meta.doogat_type.as_deref(), Some("note"));
+    assert_eq!(result.value.meta.doogat_type.as_deref(), Some("note"));
 }
 
 #[tokio::test]
@@ -172,7 +172,7 @@ async fn actor_create_routes_extra_fields_correctly() {
         )
         .await
         .unwrap();
-    assert_eq!(result.meta.extra.get("priority"), Some(&Value::Number(5.0)));
+    assert_eq!(result.value.meta.extra.get("priority"), Some(&Value::Number(5.0)));
 }
 
 #[tokio::test]
@@ -197,7 +197,7 @@ async fn actor_create_conflict_ignore_returns_existing_singleton() {
         )
         .await
         .unwrap();
-    let first_id = first.meta.id.as_ref().unwrap().0.clone();
+    let first_id = first.value.meta.id.as_ref().unwrap().0.clone();
 
     let second = actor
         .create_doogat(
@@ -211,7 +211,7 @@ async fn actor_create_conflict_ignore_returns_existing_singleton() {
         .await
         .expect("second SINGLETON create with Ignore must not error");
 
-    let second_id = second.meta.id.as_ref().unwrap().0.clone();
+    let second_id = second.value.meta.id.as_ref().unwrap().0.clone();
     assert_eq!(
         first_id, second_id,
         "Ignore on SINGLETON must return the existing row, not create a new one"

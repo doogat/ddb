@@ -8,7 +8,7 @@
 //! `ddb-core/tests/app_contract_adapter_guard.rs`.
 
 mod error;
-pub use error::{AppError, AppErrorCategory};
+pub use error::{AppError, AppErrorCategory, AppErrorDetail};
 
 mod output;
 pub use output::{AppOutput, AppWarning};

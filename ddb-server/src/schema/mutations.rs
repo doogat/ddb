@@ -73,11 +73,11 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                         Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
                         _ => ConflictAction::Error,
                     };
-                    let z = a
+                    let output = a
                         .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
                         .await
                         .map_err(to_graphql_error)?;
-                    Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
+                    Ok(Some(FieldValue::owned_any(doogat_to_value(&output.value))))
                 })
             })
             .argument(

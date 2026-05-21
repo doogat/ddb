@@ -14,6 +14,7 @@ fn assert_app_error(
             message: message.to_string(),
             category,
             field: None,
+            details: vec![],
         }
     );
 }

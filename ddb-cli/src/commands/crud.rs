@@ -57,6 +57,8 @@ pub(crate) fn create(
         on_conflict: ConflictAction::Error,
     };
     let output = svc.create(cmd)?;
+    crate::warnings::write_warnings(&output.warnings, &mut std::io::stderr())
+        .unwrap_or_else(|e| eprintln!("warning write failed: {e}"));
     outln!("{}", output.value.meta.id.map(|z| z.0).unwrap_or_default())?;
     Ok(())
 }

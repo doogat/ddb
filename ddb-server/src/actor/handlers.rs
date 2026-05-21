@@ -55,8 +55,7 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
                 fields,
                 on_conflict,
             };
-            let result = svc.create(cmd).map(|o| o.value);
-            ActorReply::Doogat(Box::new(result))
+            ActorReply::CreateOutput(Box::new(svc.create(cmd)))
         }
         ActorCommand::UpdateDoogat {
             id,

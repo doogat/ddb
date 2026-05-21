@@ -375,7 +375,7 @@ async fn create_doogat(
     Extension(actor): Extension<ActorHandle>,
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<SingleResponse>), (StatusCode, Json<ErrorBody>)> {
-    let z = actor
+    let output = actor
         .create_doogat(
             body.title,
             body.body,
@@ -389,7 +389,7 @@ async fn create_doogat(
     Ok((
         StatusCode::CREATED,
         Json(SingleResponse {
-            data: doogat_to_json(&z),
+            data: doogat_to_json(&output.value),
         }),
     ))
 }

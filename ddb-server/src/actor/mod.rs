@@ -3,6 +3,7 @@ mod handlers;
 use std::path::PathBuf;
 
 use chrono::Utc;
+use ddb_core::app_contract::AppOutput;
 use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
@@ -167,6 +168,7 @@ pub enum ActorCommand {
 /// Replies from the actor.
 pub enum ActorReply {
     Doogat(Box<ActorResult<ParsedDoogat>>),
+    CreateOutput(Box<ActorResult<AppOutput<ParsedDoogat>>>),
     DoogatList(ActorResult<Vec<ParsedDoogat>>),
     SearchResults(ActorResult<PaginatedSearchResult>),
     SqlResult(ActorResult<SqlResult>),
@@ -310,7 +312,7 @@ impl ActorHandle {
         doogat_type: Option<String>,
         fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
         on_conflict: ConflictAction,
-    ) -> ActorResult<ParsedDoogat> {
+    ) -> ActorResult<AppOutput<ParsedDoogat>> {
         match self
             .send(ActorCommand::CreateDoogat {
                 title,
@@ -322,7 +324,7 @@ impl ActorHandle {
             })
             .await
         {
-            ActorReply::Doogat(r) => *r,
+            ActorReply::CreateOutput(r) => *r,
             _ => Err(DoogatError::Validation("unexpected reply".into())),
         }
     }
@@ -720,7 +722,12 @@ fn emit_mutation_events(
 ) {
     if let Some(kind) = mutation_kind {
         match (kind, reply) {
-            (EventKind::Created | EventKind::Updated, ActorReply::Doogat(r)) => {
+            (EventKind::Created, ActorReply::CreateOutput(r)) => {
+                if let Ok(output) = r.as_ref() {
+                    event_bus.send(doogat_event(kind, &output.value, Utc::now()));
+                }
+            }
+            (EventKind::Updated, ActorReply::Doogat(r)) => {
                 if let Ok(z) = r.as_ref() {
                     event_bus.send(doogat_event(kind, z, Utc::now()));
                 }

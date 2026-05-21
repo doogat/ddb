@@ -81,17 +81,24 @@ pub enum AppErrorCategory {
     Internal,
 }
 
+pub enum AppErrorDetail {
+    String(String),
+    List(Vec<String>),
+}
+
 pub struct AppError {
     pub code: &'static str,
     pub message: String,
     pub category: AppErrorCategory,
     pub field: Option<String>,
+    pub details: Vec<(String, AppErrorDetail)>,
 }
 ```
 
 - `code` is a stable static string (e.g. `"NOT_FOUND"`, `"VALIDATION_ERROR"`, `"CONFLICT"`, `"INTERNAL_ERROR"`).
 - `category` lets transports map to status without parsing `code`.
-- `field` carries an optional field/path detail for input errors.
+- `field` carries an optional field/path detail for input errors (`NOT_NULL_VIOLATION` and single-column `UNIQUE_VIOLATION` populate this with the column name).
+- `details` preserves the full structured context from `DoogatError::Structured` as adapter-neutral key-value pairs. Non-structured errors produce an empty `details` vec.
 
 `impl From<DoogatError> for AppError` maps existing `DoogatError` variants (`NotFound`, `Validation`, `Parse`, `InvalidPath`, `BadRequest`, `Conflict`) and the structured codes from `error::codes` (e.g. `SINGLETON_NOT_FOUND`, `UNIQUE_VIOLATION`, `REFERENCES_VIOLATION`, `NOT_NULL_VIOLATION`, `UNKNOWN_FIELD`, `TYPE_NOT_REGISTERED`) into the right `AppErrorCategory`. Anything else falls through to `AppErrorCategory::Internal` with code `"INTERNAL_ERROR"`.
 
@@ -114,7 +121,7 @@ Per AGENTS.md: "New cross-interface behavior belongs in the app contract first; 
 - Parses an incoming request into a `*Command`.
 - Calls the matching `DoogatService` entrypoint.
 - Renders the returned `AppOutput<T>` (value plus warnings) and any `AppError` in its native shape.
-- Must surface warnings; discarding them on promised workflows is a contract violation.
+- Must surface warnings; discarding them on promised workflows is a contract violation. CLI prints warnings to stderr (one per line as `warning: <code>: <message>`). GraphQL surfaces warnings via `output.value` — the `AppOutput` envelope is threaded through the actor and warnings are available for future response extension fields.
 
 ## Worked example: createDoogat
 

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 mod updater;
+pub(crate) mod warnings;
 
 const CREATE_APP_GUIDE: &str = "\
 CREATE-APP GUIDE
