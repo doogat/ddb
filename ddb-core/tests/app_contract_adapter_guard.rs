@@ -19,9 +19,15 @@ const FORBIDDEN_CRATES: &[&str] = &[
     "extern crate uniffi_macros",
 ];
 
+/// Strips a `//` line comment off a single source line, ignoring `//` that
+/// appears inside a double-quoted string. **Scope is intentionally narrow:**
+/// block comments (`/* ... */`) and raw string literals (`r#"..."#`) are NOT
+/// stripped. App-contract sources today use neither for adapter-crate tokens,
+/// so the guard is safe-by-construction; the `guard_does_not_strip_block_comments_or_raw_strings`
+/// test below pins the scope. If app-contract style ever changes to use block
+/// comments or raw strings containing adapter-crate names, replace that
+/// negative test with a positive test and extend this function.
 fn strip_line_comment(line: &str) -> &str {
-    // Sufficient for this guard: app_contract sources use line/doc comments,
-    // not block comments that mention adapter crates.
     let mut in_string = false;
     let mut chars = line.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
@@ -144,5 +150,23 @@ fn guard_detects_git2_use_statement() {
         found.contains(&"git2::"),
         "expected `git2::` to be detected, got: {:?}",
         found
+    );
+}
+
+#[test]
+fn guard_does_not_strip_block_comments_or_raw_strings() {
+    // Documents the current scope: block-comment and raw-string content is NOT
+    // stripped. The forbidden tokens here would be flagged by the guard if they
+    // appeared in real app_contract source — which is what we want as long as
+    // those forms aren't allowed in app_contract. If app_contract style ever
+    // changes to use block comments or raw strings that mention adapter crates,
+    // replace this test with a positive test that DOES strip them and extend
+    // `strip_line_comment` accordingly.
+    let source = "/* uniffi::Object example */\nlet s = r#\"uniffi::Object\"#;\n";
+    let found = forbidden_tokens_in_source(source);
+    assert!(
+        !found.is_empty(),
+        "guard intentionally does not strip block comments or raw strings; \
+         `uniffi::` should have been detected in either the block comment or the raw string"
     );
 }
