@@ -1,4 +1,4 @@
-use crate::error::DoogatError;
+use crate::error::{codes, DoogatError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppErrorCategory {
@@ -58,14 +58,14 @@ impl From<DoogatError> for AppError {
             },
             DoogatError::Structured { code, .. } => {
                 let category = match code {
-                    "SINGLETON_NOT_FOUND" => AppErrorCategory::NotFound,
-                    "UNIQUE_VIOLATION"
-                    | "SINGLETON_VIOLATION"
-                    | "REFERENCES_VIOLATION"
-                    | "CASCADE_CYCLE" => AppErrorCategory::Conflict,
-                    "NOT_NULL_VIOLATION" | "UNKNOWN_FIELD" | "TYPE_NOT_REGISTERED" => {
-                        AppErrorCategory::InvalidInput
-                    }
+                    codes::SINGLETON_NOT_FOUND => AppErrorCategory::NotFound,
+                    codes::UNIQUE_VIOLATION
+                    | codes::SINGLETON_VIOLATION
+                    | codes::REFERENCES_VIOLATION
+                    | codes::CASCADE_CYCLE => AppErrorCategory::Conflict,
+                    codes::NOT_NULL_VIOLATION
+                    | codes::UNKNOWN_FIELD
+                    | codes::TYPE_NOT_REGISTERED => AppErrorCategory::InvalidInput,
                     _ => AppErrorCategory::Internal,
                 };
                 AppError {
