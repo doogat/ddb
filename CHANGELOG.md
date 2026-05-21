@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **ddb-server**: restore createDoogat behavior parity (onConflict, title/body Option, TYPE_NOT_REGISTERED) after PRD 00147 routing through DoogatService::create.
+
 ### Added
 
 - **app_contract**: add `AppError` envelope and `From<DoogatError>` mapping

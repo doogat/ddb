@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use ddb_core::app_contract::CreateCommand;
 use ddb_core::service::DoogatService;
+use ddb_core::types::ConflictAction;
 
 use crate::parse_set_pairs;
 
@@ -35,7 +36,7 @@ pub(crate) fn create(
     let tags_list: Vec<String> = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
-    let body_text = body.unwrap_or_default();
+    let body_text = body;
     let mut extra = parse_set_pairs(&set)?;
 
     if r#type.as_deref() == Some("_typedef") {
@@ -48,11 +49,12 @@ pub(crate) fn create(
         );
     }
     let cmd = CreateCommand {
-        title,
+        title: Some(title),
         tags: tags_list,
         doogat_type: r#type,
         body: body_text,
         fields: extra,
+        on_conflict: ConflictAction::Error,
     };
     let output = svc.create(cmd)?;
     outln!("{}", output.value.meta.id.map(|z| z.0).unwrap_or_default())?;

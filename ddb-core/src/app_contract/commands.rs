@@ -1,15 +1,16 @@
 //! Command types for the application contract layer.
 
-use crate::types::Value;
+use crate::types::{ConflictAction, Value};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub struct CreateCommand {
-    pub title: String,
+    pub title: Option<String>,
     pub tags: Vec<String>,
     pub doogat_type: Option<String>,
-    pub body: String,
+    pub body: Option<String>,
     pub fields: BTreeMap<String, Value>,
+    pub on_conflict: ConflictAction,
 }
 
 #[derive(Debug, Clone)]

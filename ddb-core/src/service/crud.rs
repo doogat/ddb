@@ -164,15 +164,22 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// App facade entrypoint: create a doogat from a `CreateCommand`.
-    /// Errors from the underlying create propagate unchanged as `DoogatError`.
+    /// Routes through `batch_create_with_message` for full behavior parity:
+    /// title_template rendering, SINGLETON Ignore semantics, NOT_NULL_VIOLATION,
+    /// TYPE_NOT_REGISTERED, and field validation.
     pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
-        let value = self.create_doogat_with_extra(
-            &cmd.title,
-            &cmd.tags,
-            cmd.doogat_type.as_deref(),
-            &cmd.body,
-            cmd.fields,
-        )?;
+        let input = crate::types::BatchCreateInput {
+            title: cmd.title,
+            body: cmd.body,
+            tags: cmd.tags,
+            doogat_type: cmd.doogat_type,
+            fields: cmd.fields,
+            on_conflict: cmd.on_conflict,
+        };
+        let mut results = self.batch_create_with_message(&[input], "create doogat")?;
+        let value = results
+            .pop()
+            .ok_or_else(|| DoogatError::Validation("batch_create returned empty".into()))?;
         Ok(AppOutput {
             value,
             warnings: vec![],
