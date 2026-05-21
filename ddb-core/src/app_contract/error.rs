@@ -88,11 +88,7 @@ impl From<DoogatError> for AppError {
                 field: None,
                 details: vec![],
             },
-            DoogatError::Structured {
-                code,
-                context,
-                ..
-            } => {
+            DoogatError::Structured { code, context, .. } => {
                 let category = match code {
                     codes::SINGLETON_NOT_FOUND => AppErrorCategory::NotFound,
                     codes::UNIQUE_VIOLATION
@@ -124,7 +120,11 @@ impl From<DoogatError> for AppError {
                         .find(|(k, _)| k == "columns")
                         .and_then(|(_, v)| {
                             if let AppErrorDetail::List(cols) = v {
-                                if cols.len() == 1 { Some(cols[0].clone()) } else { None }
+                                if cols.len() == 1 {
+                                    Some(cols[0].clone())
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }

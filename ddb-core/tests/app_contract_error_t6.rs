@@ -142,9 +142,6 @@ fn maps_structured_error_codes_to_app_categories() {
     }
 }
 
-// ── Group A: AppError preserves Structured.context in details ─────────────────
-
-/// Helper: find a detail entry by key in AppError.details.
 fn detail<'a>(err: &'a AppError, key: &str) -> &'a AppErrorDetail {
     err.details
         .iter()
@@ -159,9 +156,7 @@ fn app_error_from_unique_violation_preserves_table_columns_values() {
     let err = AppError::from(source);
     assert_eq!(err.code, codes::UNIQUE_VIOLATION);
     assert_eq!(err.category, AppErrorCategory::Conflict);
-    // Single column → field populated with the column name.
     assert_eq!(err.field, Some("name".to_string()));
-    // details carries the full context.
     assert_eq!(
         detail(&err, "table"),
         &AppErrorDetail::String("widgets".to_string())
@@ -181,9 +176,7 @@ fn app_error_from_unique_violation_multi_column_leaves_field_none() {
     let source = DoogatError::unique_violation("widgets", ["name", "version"], ["a", "b"]);
     let err = AppError::from(source);
     assert_eq!(err.code, codes::UNIQUE_VIOLATION);
-    // Multiple columns → no single column to point at.
     assert_eq!(err.field, None);
-    // details still carries columns and values.
     assert_eq!(
         detail(&err, "columns"),
         &AppErrorDetail::List(vec!["name".to_string(), "version".to_string()])
@@ -200,7 +193,6 @@ fn app_error_from_singleton_violation_preserves_table_and_existing_id() {
     let err = AppError::from(source);
     assert_eq!(err.code, codes::SINGLETON_VIOLATION);
     assert_eq!(err.category, AppErrorCategory::Conflict);
-    // No single column involved → field is None.
     assert_eq!(err.field, None);
     assert_eq!(
         detail(&err, "table"),

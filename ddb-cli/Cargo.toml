@@ -10,10 +10,6 @@ description = "CLI for Doogat DB — a hybrid Git-CRDT database"
 name = "ddb"
 path = "src/main.rs"
 
-[lib]
-name = "ddb_cli"
-path = "src/lib.rs"
-
 [dependencies]
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }

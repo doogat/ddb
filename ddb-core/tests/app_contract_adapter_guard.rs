@@ -19,14 +19,9 @@ const FORBIDDEN_CRATES: &[&str] = &[
     "extern crate uniffi_macros",
 ];
 
-/// Strip line comments from a single source line.
-/// Everything after the first `//` is removed, provided the `//` is not
-/// inside a string literal. For the app_contract guard this is sufficient:
-/// the directory contains no block comments and no string literals
-/// containing `//`. Returns the code portion only.
 fn strip_line_comment(line: &str) -> &str {
-    // Walk through characters; track whether we're inside a double-quoted
-    // string so we don't mistake `"//"` for a comment start.
+    // Sufficient for this guard: app_contract sources use line/doc comments,
+    // not block comments that mention adapter crates.
     let mut in_string = false;
     let mut chars = line.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
@@ -38,7 +33,6 @@ fn strip_line_comment(line: &str) -> &str {
                 }
             }
             '\\' if in_string => {
-                // Skip escaped character inside string.
                 chars.next();
             }
             _ => {}
@@ -47,8 +41,6 @@ fn strip_line_comment(line: &str) -> &str {
     line
 }
 
-/// Check `source` for forbidden adapter tokens, ignoring line comments.
-/// Returns a list of forbidden tokens found in the code (not in comments).
 fn forbidden_tokens_in_source(source: &str) -> Vec<&'static str> {
     let mut found = Vec::new();
     for &token in FORBIDDEN_CRATES {
@@ -76,8 +68,7 @@ fn no_forbidden_adapter_imports_in_app_contract_sources() {
     let mut violations: Vec<String> = Vec::new();
 
     for entry in WalkDir::new(&dir).into_iter() {
-        let entry =
-            entry.unwrap_or_else(|err| panic!("failed to walk {}: {}", dir.display(), err));
+        let entry = entry.unwrap_or_else(|err| panic!("failed to walk {}: {}", dir.display(), err));
         if !entry
             .path()
             .extension()
@@ -109,7 +100,6 @@ fn no_forbidden_adapter_imports_in_app_contract_sources() {
 
 #[test]
 fn guard_ignores_forbidden_tokens_in_line_comments() {
-    // All forbidden tokens appear only in comments; guard must report nothing.
     let source = "\
 // uniffi::Object is documented here
 // git2::Repository is also just a reference

@@ -67,8 +67,6 @@ async fn actor_create_routes_tags_correctly() {
 
 #[tokio::test]
 async fn actor_create_none_title_renders_title_template() {
-    // A typed table with a TITLE TEMPLATE must render the template when
-    // title: None is passed — NOT return "".
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     actor
@@ -80,7 +78,10 @@ async fn actor_create_none_title_renders_title_template() {
         .await
         .unwrap();
     let mut fields = BTreeMap::new();
-    fields.insert("url".to_string(), Value::String("https://example.com".to_string()));
+    fields.insert(
+        "url".to_string(),
+        Value::String("https://example.com".to_string()),
+    );
     let result = actor
         .create_doogat(
             None,
@@ -92,7 +93,6 @@ async fn actor_create_none_title_renders_title_template() {
         )
         .await
         .unwrap();
-    // The title must be rendered from the template, not empty.
     let title = result.value.meta.title.as_deref().unwrap_or("");
     assert!(
         !title.is_empty(),
@@ -105,9 +105,7 @@ async fn actor_create_none_title_renders_title_template() {
 }
 
 #[tokio::test]
-async fn actor_create_none_title_untyped_returns_error_or_empty() {
-    // Prior batch_create behavior: untyped create with title: None yields
-    // NOT_NULL_VIOLATION (no template to fall back on).
+async fn actor_create_none_title_untyped_returns_not_null_error() {
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     let result = actor
@@ -172,14 +170,14 @@ async fn actor_create_routes_extra_fields_correctly() {
         )
         .await
         .unwrap();
-    assert_eq!(result.value.meta.extra.get("priority"), Some(&Value::Number(5.0)));
+    assert_eq!(
+        result.value.meta.extra.get("priority"),
+        Some(&Value::Number(5.0))
+    );
 }
 
 #[tokio::test]
 async fn actor_create_conflict_ignore_returns_existing_singleton() {
-    // When on_conflict: Ignore and a SINGLETON already exists, the second
-    // create must NOT error — it must return the existing singleton row
-    // (same id as the first create). This matches the prior batch_create path.
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     actor
@@ -218,14 +216,8 @@ async fn actor_create_conflict_ignore_returns_existing_singleton() {
     );
 }
 
-// ── Group B: actor create exposes AppOutput so warnings are not discarded ─────
-
 #[tokio::test]
-async fn actor_create_returns_app_output_with_warnings_vector() {
-    // The actor's create_doogat must return Result<AppOutput<ParsedDoogat>, DoogatError>
-    // so that warnings produced by DoogatService::create are not silently dropped.
-    // Today the return type is Result<ParsedDoogat, DoogatError> — this test will
-    // fail to compile until Ivan changes the return type.
+async fn actor_create_returns_app_output_envelope() {
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     let output: AppOutput<ParsedDoogat> = actor
@@ -239,10 +231,7 @@ async fn actor_create_returns_app_output_with_warnings_vector() {
         )
         .await
         .unwrap();
-    // On a plain create the warnings list may be empty, but the TYPE must be
-    // AppOutput<ParsedDoogat> — not bare ParsedDoogat. Accessing .warnings here
-    // proves the envelope is present.
-    let _ = output.warnings; // must compile: field exists on AppOutput
+    assert!(output.warnings.is_empty());
     assert!(
         output.value.meta.id.is_some(),
         "created doogat must have an id"
@@ -251,8 +240,6 @@ async fn actor_create_returns_app_output_with_warnings_vector() {
 
 #[tokio::test]
 async fn actor_create_with_unregistered_type_returns_type_not_registered() {
-    // An unregistered doogat_type must fail with TYPE_NOT_REGISTERED,
-    // matching the prior batch_create path behavior.
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     let result = actor
