@@ -121,7 +121,7 @@ Per AGENTS.md: "New cross-interface behavior belongs in the app contract first; 
 - Parses an incoming request into a `*Command`.
 - Calls the matching `DoogatService` entrypoint.
 - Renders the returned `AppOutput<T>` (value plus warnings) and any `AppError` in its native shape.
-- Must surface warnings; discarding them on promised workflows is a contract violation. CLI prints warnings to stderr (one per line as `warning: <code>: <message>`). GraphQL surfaces warnings via `output.value` — the `AppOutput` envelope is threaded through the actor and warnings are available for future response extension fields.
+- Must surface warnings; discarding them on promised workflows is a contract violation. CLI prints warnings to stderr (one per line as `warning: <code>: <message>`). REST surfaces warnings in the `warnings` response field (always present, empty array when none). GraphQL warning forwarding is deferred — see PRD 00154 (graphql-response-extension-warnings-v1).
 
 ## Worked example: createDoogat
 
@@ -130,7 +130,7 @@ A `CreateCommand` flows uniformly through both transports:
 1. **GraphQL**: `ddb-server/src/actor/handlers.rs` parses the `createDoogat` mutation input, builds a `CreateCommand`, and forwards it to the actor.
 2. **CLI**: `ddb-cli/src/commands/crud.rs` parses `ddb create` flags into a `CreateCommand`.
 3. Both call `DoogatService::create(cmd)` and receive `Result<AppOutput<ParsedDoogat>, DoogatError>`.
-4. On `Ok(AppOutput { value, warnings })`, each transport renders `value` in its native format (GraphQL object, CLI text) and emits `warnings` (GraphQL response extension, CLI stderr).
+4. On `Ok(AppOutput { value, warnings })`, each transport renders `value` in its native format (GraphQL object, CLI text, REST JSON) and emits `warnings`: CLI prints to stderr; REST includes a `warnings` array in the response body (always present). GraphQL warning forwarding is deferred to PRD 00154.
 5. On `Err(e)`, each transport maps via `AppError::from(e)` to the right status/exit code and message.
 
 The business policy (typedef routing, validation, ID generation, git commit) lives in `DoogatService::create`; both transports stay thin.

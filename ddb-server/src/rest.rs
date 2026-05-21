@@ -52,9 +52,43 @@ struct ListResponse {
     pagination: Pagination,
 }
 
+/// A single warning entry in a REST response. `code` is a stable identifier;
+/// `message` is human-readable. Always present in `SingleResponse.warnings`
+/// (never skipped when empty) so REST clients can rely on the field.
 #[derive(Serialize)]
-struct SingleResponse {
-    data: DoogatJson,
+pub struct WarningJson {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct SingleResponse {
+    pub data: DoogatJson,
+    pub warnings: Vec<WarningJson>,
+}
+
+impl SingleResponse {
+    fn new(data: DoogatJson, warnings: Vec<WarningJson>) -> Self {
+        Self { data, warnings }
+    }
+
+    /// Build a `SingleResponse` with an empty warnings list. Used by tests
+    /// to verify the `warnings` key is always present in serialized output.
+    pub fn new_empty_warnings() -> Self {
+        Self::new(DoogatJson::default_empty(), vec![])
+    }
+
+    /// Build a `SingleResponse` with a single warning entry. Used by tests
+    /// to verify the warnings array shape.
+    pub fn new_with_warning(code: &str, message: &str) -> Self {
+        Self::new(
+            DoogatJson::default_empty(),
+            vec![WarningJson {
+                code: code.to_string(),
+                message: message.to_string(),
+            }],
+        )
+    }
 }
 
 #[derive(Serialize)]
@@ -65,17 +99,34 @@ struct SearchResponse {
 
 #[derive(Serialize)]
 pub struct DoogatJson {
-    id: String,
-    title: String,
-    body: String,
-    tags: Vec<String>,
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub tags: Vec<String>,
     #[serde(rename = "type")]
-    doogat_type: Option<String>,
+    pub doogat_type: Option<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    frontmatter: BTreeMap<String, serde_json::Value>,
+    pub frontmatter: BTreeMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    references: BTreeMap<String, Vec<String>>,
-    reference_section: String,
+    pub references: BTreeMap<String, Vec<String>>,
+    pub reference_section: String,
+}
+
+impl DoogatJson {
+    /// Construct a minimal empty `DoogatJson` for use in test helpers that
+    /// only assert on the `warnings` field and do not inspect `data`.
+    fn default_empty() -> Self {
+        Self {
+            id: String::new(),
+            title: String::new(),
+            body: String::new(),
+            tags: vec![],
+            doogat_type: None,
+            frontmatter: BTreeMap::new(),
+            references: BTreeMap::new(),
+            reference_section: String::new(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -366,9 +417,7 @@ async fn get_doogat(
     Path(id): Path<String>,
 ) -> Result<Json<SingleResponse>, (StatusCode, Json<ErrorBody>)> {
     let z = read_pool.get_doogat(id).await.map_err(rest_error)?;
-    Ok(Json(SingleResponse {
-        data: doogat_to_json(&z),
-    }))
+    Ok(Json(SingleResponse::new(doogat_to_json(&z), vec![])))
 }
 
 async fn create_doogat(
@@ -386,11 +435,17 @@ async fn create_doogat(
         )
         .await
         .map_err(rest_error)?;
+    let warnings: Vec<WarningJson> = output
+        .warnings
+        .into_iter()
+        .map(|w| WarningJson {
+            code: w.code.to_string(),
+            message: w.message,
+        })
+        .collect();
     Ok((
         StatusCode::CREATED,
-        Json(SingleResponse {
-            data: doogat_to_json(&output.value),
-        }),
+        Json(SingleResponse::new(doogat_to_json(&output.value), warnings)),
     ))
 }
 
@@ -417,9 +472,7 @@ async fn update_doogat(
         })
         .await
         .map_err(rest_error)?;
-    Ok(Json(SingleResponse {
-        data: doogat_to_json(&z),
-    }))
+    Ok(Json(SingleResponse::new(doogat_to_json(&z), vec![])))
 }
 
 async fn delete_doogat(

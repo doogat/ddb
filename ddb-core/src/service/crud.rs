@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use crate::app_contract::{AppOutput, CreateCommand};
+use crate::app_contract::{AppOutput, AppWarning, CreateCommand};
 use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
@@ -168,6 +168,7 @@ impl<G: GitBackend> DoogatService<G> {
     /// title_template rendering, SINGLETON Ignore semantics, NOT_NULL_VIOLATION,
     /// TYPE_NOT_REGISTERED, and field validation.
     pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
+        let caller_title = cmd.title.clone();
         let input = crate::types::BatchCreateInput {
             title: cmd.title,
             body: cmd.body,
@@ -180,10 +181,23 @@ impl<G: GitBackend> DoogatService<G> {
         let value = results
             .pop()
             .ok_or_else(|| DoogatError::Validation("batch_create returned empty".into()))?;
-        Ok(AppOutput {
-            value,
-            warnings: vec![],
-        })
+
+        // Emit TITLE_FROM_TEMPLATE when the caller omitted a title but the
+        // typedef's title_template rendered one. The heuristic: caller supplied
+        // no title AND the returned doogat has a non-empty title.
+        let mut warnings = vec![];
+        if caller_title.is_none() {
+            if let Some(ref t) = value.meta.title {
+                if !t.is_empty() {
+                    warnings.push(AppWarning {
+                        code: "TITLE_FROM_TEMPLATE",
+                        message: "title was rendered from typedef title_template".into(),
+                    });
+                }
+            }
+        }
+
+        Ok(AppOutput { value, warnings })
     }
 
     /// Create a new doogat with optional extra frontmatter fields.

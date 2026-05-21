@@ -77,6 +77,12 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                         .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
                         .await
                         .map_err(to_graphql_error)?;
+                    // output.warnings is intentionally not forwarded here.
+                    // GraphQL response extensions require a custom
+                    // async_graphql::Extension trait impl with per-request
+                    // warning collection and response-level extensions.warnings
+                    // routing — that architecture work is tracked in PRD 00154
+                    // (graphql-response-extension-warnings-v1).
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&output.value))))
                 })
             })
