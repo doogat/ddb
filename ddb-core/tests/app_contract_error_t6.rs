@@ -6,7 +6,7 @@ use ddb_core::error::DoogatError;
 #[test]
 fn apperror_exposes_code_message_category_and_field() {
     let err = AppError {
-        code: String::from("NOT_FOUND"),
+        code: "NOT_FOUND",
         message: String::from("not found: item"),
         category: AppErrorCategory::NotFound,
         field: None,
@@ -20,7 +20,7 @@ fn apperror_exposes_code_message_category_and_field() {
 #[test]
 fn apperror_field_can_hold_a_value() {
     let err = AppError {
-        code: String::from("VALIDATION_ERROR"),
+        code: "VALIDATION_ERROR",
         message: String::from("validation: bad value"),
         category: AppErrorCategory::InvalidInput,
         field: Some(String::from("email")),
@@ -31,22 +31,19 @@ fn apperror_field_can_hold_a_value() {
 #[test]
 fn apperror_is_cloneable() {
     let err = AppError {
-        code: String::from("CONFLICT"),
+        code: "CONFLICT",
         message: String::from("conflict: duplicate"),
         category: AppErrorCategory::Conflict,
         field: None,
     };
     let cloned = err.clone();
-    assert_eq!(cloned.code, err.code);
-    assert_eq!(cloned.message, err.message);
-    assert_eq!(cloned.category, err.category);
-    assert_eq!(cloned.field, err.field);
+    assert_eq!(cloned, err);
 }
 
 #[test]
 fn apperror_is_debuggable() {
     let err = AppError {
-        code: String::from("INTERNAL_ERROR"),
+        code: "INTERNAL_ERROR",
         message: String::from("io: some io failure"),
         category: AppErrorCategory::Internal,
         field: None,
