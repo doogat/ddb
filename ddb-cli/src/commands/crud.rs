@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use ddb_core::app_contract::CreateCommand;
 use ddb_core::service::DoogatService;
 
 use crate::parse_set_pairs;
@@ -46,9 +47,18 @@ pub(crate) fn create(
             ddb_core::types::Value::String("manual".into()),
         );
     }
-    let parsed =
-        svc.create_doogat_with_extra(&title, &tags_list, r#type.as_deref(), &body_text, extra)?;
-    outln!("{}", parsed.meta.id.map(|z| z.0).unwrap_or_default())?;
+    let cmd = CreateCommand {
+        title,
+        tags: tags_list,
+        doogat_type: r#type,
+        body: body_text,
+        fields: extra,
+    };
+    let output = svc.create(cmd)?;
+    outln!(
+        "{}",
+        output.value.meta.id.map(|z| z.0).unwrap_or_default()
+    )?;
     Ok(())
 }
 
