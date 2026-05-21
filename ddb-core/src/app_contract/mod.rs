@@ -17,4 +17,6 @@ mod commands;
 pub use commands::{CreateCommand, DeleteCommand, ReadCommand, SearchCommand, UpdateCommand};
 
 mod results;
-pub use results::{BrokenBacklink, DeleteResult};
+pub use results::{
+    BrokenBacklink, CreateResult, DeleteResult, ListResult, ReadResult, SearchResult, UpdateResult,
+};

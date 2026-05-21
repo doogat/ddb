@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **app_contract**: baseline CRUD result DTOs (CreateResult, ReadResult, UpdateResult, ListResult, SearchResult) for PRD 00148 conformance fixtures.
 - **app_contract**: add `AppError` envelope and `From<DoogatError>` mapping
 - **core**: `AppOutput<T>` and `AppWarning` types in `app_contract`. `AppOutput<T>` wraps a value with zero or more structured warnings; `AppWarning` carries a stable SCREAMING_SNAKE `code` and human-readable `message`. Both are adapter-neutral. (PRD 00147)
 - **core**: `app_contract` module scaffold — adapter-neutral application command/result layer. Types in this module must not depend on `rusqlite`, `git2`, `redb`, `axum`, or `async_graphql`; enforced by automated integration test. (PRD 00147)
