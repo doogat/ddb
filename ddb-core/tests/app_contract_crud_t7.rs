@@ -2,7 +2,7 @@ use ddb_core::app_contract::{
     BrokenBacklink, CreateCommand, DeleteCommand, DeleteResult, ReadCommand, SearchCommand,
     UpdateCommand,
 };
-use ddb_core::types::value::Value;
+use ddb_core::types::Value;
 use std::collections::BTreeMap;
 
 // --- CreateCommand ---

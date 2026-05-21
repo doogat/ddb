@@ -1,3 +1,5 @@
+//! Command types for the application contract layer.
+
 use crate::types::Value;
 use std::collections::BTreeMap;
 
@@ -22,6 +24,7 @@ pub struct UpdateCommand {
     pub tags: Option<Vec<String>>,
     pub doogat_type: Option<String>,
     pub body: Option<String>,
+    /// Fields to set or update. An empty map means no field changes.
     pub fields: BTreeMap<String, Value>,
 }
 
