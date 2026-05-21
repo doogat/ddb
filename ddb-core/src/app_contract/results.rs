@@ -1,4 +1,9 @@
 //! Result types for the application contract layer.
+//!
+//! These DTOs are the canonical shapes that PRD 00148's cross-interface
+//! conformance harness will assert against once it lands. They have no
+//! in-tree consumer yet by design — adding the shapes first lets the
+//! harness be written against a stable contract.
 
 use crate::types::ParsedDoogat;
 
@@ -44,8 +49,12 @@ pub struct ListResult {
 }
 
 /// Returned by a search operation; carries the query string for round-trip diagnostics.
+///
+/// Named `AppSearchResult` (not `SearchResult`) because `crate::types::SearchResult`
+/// is the long-standing indexer-level type and the bare name is already taken in
+/// `ddb_core`. The `App` prefix mirrors `AppOutput`/`AppError`/`AppWarning`.
 #[derive(Debug, Clone)]
-pub struct SearchResult {
+pub struct AppSearchResult {
     pub items: Vec<ParsedDoogat>,
     pub total: usize,
     pub query: String,

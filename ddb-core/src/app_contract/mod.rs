@@ -18,5 +18,6 @@ pub use commands::{CreateCommand, DeleteCommand, ReadCommand, SearchCommand, Upd
 
 mod results;
 pub use results::{
-    BrokenBacklink, CreateResult, DeleteResult, ListResult, ReadResult, SearchResult, UpdateResult,
+    AppSearchResult, BrokenBacklink, CreateResult, DeleteResult, ListResult, ReadResult,
+    UpdateResult,
 };
