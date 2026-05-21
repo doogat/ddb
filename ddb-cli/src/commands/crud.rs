@@ -171,3 +171,67 @@ pub(crate) fn attachments(repo: &std::path::Path, id: &str) -> ddb_core::error::
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_repo(dir: &std::path::Path) {
+        DoogatService::init(dir).unwrap();
+    }
+
+    #[test]
+    fn cli_create_stores_doogat_with_title() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        init_repo(tmp.path());
+        create(tmp.path(), "CLI Title".to_string(), None, None, None, vec![]).unwrap();
+        let svc = DoogatService::open(tmp.path()).unwrap();
+        let results = svc.search("CLI Title").unwrap();
+        assert!(!results.is_empty(), "doogat not found after CLI create");
+        assert_eq!(results[0].title.as_str(), "CLI Title");
+    }
+
+    #[test]
+    fn cli_create_stores_doogat_with_tags() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        init_repo(tmp.path());
+        create(
+            tmp.path(),
+            "Tagged CLI".to_string(),
+            Some("foo,bar".to_string()),
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
+        let svc = DoogatService::open(tmp.path()).unwrap();
+        let results = svc.search("Tagged CLI").unwrap();
+        assert!(!results.is_empty());
+        let parsed = svc.get_doogat_parsed(&results[0].id).unwrap();
+        assert!(parsed.meta.tags.contains(&"foo".to_string()));
+        assert!(parsed.meta.tags.contains(&"bar".to_string()));
+    }
+
+    #[test]
+    fn cli_create_stores_doogat_with_set_field() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        init_repo(tmp.path());
+        create(
+            tmp.path(),
+            "Fields CLI".to_string(),
+            None,
+            None,
+            None,
+            vec!["priority=high".to_string()],
+        )
+        .unwrap();
+        let svc = DoogatService::open(tmp.path()).unwrap();
+        let results = svc.search("Fields CLI").unwrap();
+        assert!(!results.is_empty());
+        let parsed = svc.get_doogat_parsed(&results[0].id).unwrap();
+        assert!(
+            parsed.meta.extra.contains_key("priority"),
+            "priority field missing"
+        );
+    }
+}

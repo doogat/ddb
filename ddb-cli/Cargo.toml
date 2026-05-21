@@ -27,3 +27,6 @@ sha2 = "0.10"
 tar = "0.4"
 ddb-core = { path = "../ddb-core", features = ["nosql"] }
 ddb-server = { path = "../ddb-server" }
+
+[dev-dependencies]
+tempfile = "3"
