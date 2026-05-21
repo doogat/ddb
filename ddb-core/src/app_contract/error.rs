@@ -1,5 +1,9 @@
 use crate::error::{codes, DoogatError, ErrorValue};
 
+/// Broad classification of an application-layer error, transport-agnostic.
+///
+/// Transports map these categories to their own status codes or error kinds
+/// (e.g. HTTP 404 for `NotFound`, 409 for `Conflict`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppErrorCategory {
     NotFound,
@@ -24,6 +28,11 @@ impl From<ErrorValue> for AppErrorDetail {
     }
 }
 
+/// Adapter-neutral application error returned when a command fails.
+///
+/// `code` is a stable static string for programmatic handling; `category`
+/// lets transports map to their own status conventions without inspecting
+/// `code`; `field` and `details` carry structured context when available.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppError {
     pub code: &'static str,
