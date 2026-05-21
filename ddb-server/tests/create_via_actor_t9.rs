@@ -65,7 +65,48 @@ async fn actor_create_routes_tags_correctly() {
 }
 
 #[tokio::test]
-async fn actor_create_with_none_title_uses_empty_string() {
+async fn actor_create_none_title_renders_title_template() {
+    // A typed table with a TITLE TEMPLATE must render the template when
+    // title: None is passed — NOT return "".
+    let tmp = tempfile::tempdir().unwrap();
+    let actor = spawn_actor(tmp.path()).await;
+    actor
+        .execute_sql("CREATE TABLE bookmark (url TEXT NOT NULL)".to_string())
+        .await
+        .unwrap();
+    actor
+        .execute_sql("ALTER TABLE bookmark SET TITLE TEMPLATE '{url}'".to_string())
+        .await
+        .unwrap();
+    let mut fields = BTreeMap::new();
+    fields.insert("url".to_string(), Value::String("https://example.com".to_string()));
+    let result = actor
+        .create_doogat(
+            None,
+            None,
+            vec![],
+            Some("bookmark".to_string()),
+            fields,
+            ConflictAction::Error,
+        )
+        .await
+        .unwrap();
+    // The title must be rendered from the template, not empty.
+    let title = result.meta.title.as_deref().unwrap_or("");
+    assert!(
+        !title.is_empty(),
+        "expected title rendered from title_template, got empty string"
+    );
+    assert!(
+        title.contains("example.com"),
+        "expected title to contain template value, got {title:?}"
+    );
+}
+
+#[tokio::test]
+async fn actor_create_none_title_untyped_returns_error_or_empty() {
+    // Prior batch_create behavior: untyped create with title: None yields
+    // NOT_NULL_VIOLATION (no template to fall back on).
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     let result = actor
@@ -77,9 +118,18 @@ async fn actor_create_with_none_title_uses_empty_string() {
             BTreeMap::new(),
             ConflictAction::Error,
         )
-        .await
-        .unwrap();
-    assert_eq!(result.meta.title.as_deref(), Some(""));
+        .await;
+    match result {
+        Err(DoogatError::Structured {
+            code: codes::NOT_NULL_VIOLATION,
+            ..
+        }) => {}
+        Err(other) => panic!("expected NOT_NULL_VIOLATION, got {other:?}"),
+        Ok(d) => panic!(
+            "expected error for untyped title: None, got doogat with title {:?}",
+            d.meta.title
+        ),
+    }
 }
 
 #[tokio::test]
@@ -125,14 +175,17 @@ async fn actor_create_routes_extra_fields_correctly() {
 }
 
 #[tokio::test]
-async fn actor_create_conflict_ignore_now_errors_on_constraint_violation() {
+async fn actor_create_conflict_ignore_returns_existing_singleton() {
+    // When on_conflict: Ignore and a SINGLETON already exists, the second
+    // create must NOT error — it must return the existing singleton row
+    // (same id as the first create). This matches the prior batch_create path.
     let tmp = tempfile::tempdir().unwrap();
     let actor = spawn_actor(tmp.path()).await;
     actor
         .execute_sql("CREATE TABLE cfg (theme TEXT) SINGLETON".to_string())
         .await
         .unwrap();
-    actor
+    let first = actor
         .create_doogat(
             Some("Config".to_string()),
             None,
@@ -143,7 +196,9 @@ async fn actor_create_conflict_ignore_now_errors_on_constraint_violation() {
         )
         .await
         .unwrap();
-    let result = actor
+    let first_id = first.meta.id.as_ref().unwrap().0.clone();
+
+    let second = actor
         .create_doogat(
             Some("Config2".to_string()),
             None,
@@ -152,12 +207,38 @@ async fn actor_create_conflict_ignore_now_errors_on_constraint_violation() {
             BTreeMap::new(),
             ConflictAction::Ignore,
         )
+        .await
+        .expect("second SINGLETON create with Ignore must not error");
+
+    let second_id = second.meta.id.as_ref().unwrap().0.clone();
+    assert_eq!(
+        first_id, second_id,
+        "Ignore on SINGLETON must return the existing row, not create a new one"
+    );
+}
+
+#[tokio::test]
+async fn actor_create_with_unregistered_type_returns_type_not_registered() {
+    // An unregistered doogat_type must fail with TYPE_NOT_REGISTERED,
+    // matching the prior batch_create path behavior.
+    let tmp = tempfile::tempdir().unwrap();
+    let actor = spawn_actor(tmp.path()).await;
+    let result = actor
+        .create_doogat(
+            Some("Ghost".to_string()),
+            None,
+            vec![],
+            Some("nonexistent_type".to_string()),
+            BTreeMap::new(),
+            ConflictAction::Error,
+        )
         .await;
-    match result.expect_err("expected error on second SINGLETON create") {
-        DoogatError::Structured {
-            code: codes::SINGLETON_VIOLATION,
+    match result {
+        Err(DoogatError::Structured {
+            code: codes::TYPE_NOT_REGISTERED,
             ..
-        } => {}
-        other => panic!("expected SINGLETON_VIOLATION, got {other:?}"),
+        }) => {}
+        Err(other) => panic!("expected TYPE_NOT_REGISTERED, got {other:?}"),
+        Ok(_) => panic!("expected error for unregistered type, got Ok"),
     }
 }
