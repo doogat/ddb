@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use ddb_core::service::DoogatService;
-use ddb_core::types::{BatchCreateInput, CompactOptions, ListFilter};
+use ddb_core::app_contract::CreateCommand;
+use ddb_core::types::{CompactOptions, ListFilter};
 
 use super::{ActorCommand, ActorReply};
 
@@ -44,21 +45,16 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
             tags,
             doogat_type,
             fields,
-            on_conflict,
+            on_conflict: _,
         } => {
-            let input = BatchCreateInput {
-                title,
-                body,
+            let cmd = CreateCommand {
+                title: title.unwrap_or_default(),
+                body: body.unwrap_or_default(),
                 tags,
                 doogat_type,
                 fields,
-                on_conflict,
             };
-            let result = svc.batch_create(&[input]).and_then(|mut v| {
-                v.pop().ok_or_else(|| {
-                    ddb_core::error::DoogatError::Validation("no doogat created".into())
-                })
-            });
+            let result = svc.create(cmd).map(|o| o.value);
             ActorReply::Doogat(Box::new(result))
         }
         ActorCommand::UpdateDoogat {
