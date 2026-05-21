@@ -27,11 +27,17 @@ fn no_forbidden_adapter_imports_in_app_contract_sources() {
 
     let mut violations: Vec<String> = Vec::new();
 
-    for entry in WalkDir::new(&dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "rs").unwrap_or(false))
-    {
+    for entry in WalkDir::new(&dir).into_iter() {
+        let entry = entry.unwrap_or_else(|err| panic!("failed to walk {}: {}", dir.display(), err));
+        if !entry
+            .path()
+            .extension()
+            .map(|ext| ext == "rs")
+            .unwrap_or(false)
+        {
+            continue;
+        }
+
         let path = entry.path();
         let source = fs::read_to_string(path)
             .unwrap_or_else(|err| panic!("failed to read {}: {}", path.display(), err));
@@ -53,4 +59,3 @@ fn no_forbidden_adapter_imports_in_app_contract_sources() {
         violations.join("\n  ")
     );
 }
-
