@@ -20,6 +20,7 @@
 - [Sync & Compaction](./technical/sync.md)
 - [FFI Bindings](./technical/ffi.md)
 - [Error Handling](./technical/errors.md)
+- [Application Contract](./technical/app-contract.md)
 - [GraphQL Server](./technical/server.md)
 - [REST API](./technical/rest-api.md)
 - [SOLID Principles](./technical/solid.md)
