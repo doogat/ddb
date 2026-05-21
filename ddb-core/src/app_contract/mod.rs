@@ -6,3 +6,6 @@
 //!
 //! The adapter-neutrality invariant is enforced by the integration test
 //! `ddb-core/tests/app_contract_adapter_guard.rs`.
+
+mod output;
+pub use output::{AppOutput, AppWarning};
