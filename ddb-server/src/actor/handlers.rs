@@ -45,6 +45,9 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
             tags,
             doogat_type,
             fields,
+            // on_conflict is intentionally ignored: CreateCommand has no conflict
+            // semantics yet. All creates go through svc.create() which always
+            // errors on constraint violations regardless of the requested action.
             on_conflict: _,
         } => {
             let cmd = CreateCommand {
