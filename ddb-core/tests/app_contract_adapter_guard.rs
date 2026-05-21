@@ -8,12 +8,60 @@ const FORBIDDEN_CRATES: &[&str] = &[
     "redb::",
     "axum::",
     "async_graphql::",
+    "uniffi::",
+    "uniffi_macros::",
     "extern crate rusqlite",
     "extern crate git2",
     "extern crate redb",
     "extern crate axum",
     "extern crate async_graphql",
+    "extern crate uniffi",
+    "extern crate uniffi_macros",
 ];
+
+/// Strip line comments from a single source line.
+/// Everything after the first `//` is removed, provided the `//` is not
+/// inside a string literal. For the app_contract guard this is sufficient:
+/// the directory contains no block comments and no string literals
+/// containing `//`. Returns the code portion only.
+fn strip_line_comment(line: &str) -> &str {
+    // Walk through characters; track whether we're inside a double-quoted
+    // string so we don't mistake `"//"` for a comment start.
+    let mut in_string = false;
+    let mut chars = line.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        match ch {
+            '"' => in_string = !in_string,
+            '/' if !in_string => {
+                if let Some(&(_, '/')) = chars.peek() {
+                    return &line[..i];
+                }
+            }
+            '\\' if in_string => {
+                // Skip escaped character inside string.
+                chars.next();
+            }
+            _ => {}
+        }
+    }
+    line
+}
+
+/// Check `source` for forbidden adapter tokens, ignoring line comments.
+/// Returns a list of forbidden tokens found in the code (not in comments).
+fn forbidden_tokens_in_source(source: &str) -> Vec<&'static str> {
+    let mut found = Vec::new();
+    for &token in FORBIDDEN_CRATES {
+        let token_present = source.lines().any(|line| {
+            let code = strip_line_comment(line);
+            code.contains(token)
+        });
+        if token_present {
+            found.push(token);
+        }
+    }
+    found
+}
 
 #[test]
 fn no_forbidden_adapter_imports_in_app_contract_sources() {
@@ -28,7 +76,8 @@ fn no_forbidden_adapter_imports_in_app_contract_sources() {
     let mut violations: Vec<String> = Vec::new();
 
     for entry in WalkDir::new(&dir).into_iter() {
-        let entry = entry.unwrap_or_else(|err| panic!("failed to walk {}: {}", dir.display(), err));
+        let entry =
+            entry.unwrap_or_else(|err| panic!("failed to walk {}: {}", dir.display(), err));
         if !entry
             .path()
             .extension()
@@ -42,14 +91,12 @@ fn no_forbidden_adapter_imports_in_app_contract_sources() {
         let source = fs::read_to_string(path)
             .unwrap_or_else(|err| panic!("failed to read {}: {}", path.display(), err));
 
-        for &forbidden in FORBIDDEN_CRATES {
-            if source.contains(forbidden) {
-                violations.push(format!(
-                    "{}: contains forbidden import `{}`",
-                    path.display(),
-                    forbidden
-                ));
-            }
+        for token in forbidden_tokens_in_source(&source) {
+            violations.push(format!(
+                "{}: contains forbidden import `{}`",
+                path.display(),
+                token
+            ));
         }
     }
 
@@ -57,5 +104,55 @@ fn no_forbidden_adapter_imports_in_app_contract_sources() {
         violations.is_empty(),
         "adapter-neutrality violated in ddb-core/src/app_contract/:\n  {}",
         violations.join("\n  ")
+    );
+}
+
+#[test]
+fn guard_ignores_forbidden_tokens_in_line_comments() {
+    // All forbidden tokens appear only in comments; guard must report nothing.
+    let source = "\
+// uniffi::Object is documented here
+// git2::Repository is also just a reference
+// uniffi_macros::export is a decorator
+// rusqlite::Connection example
+// axum::Router example
+fn real_code() {}
+";
+    assert!(
+        forbidden_tokens_in_source(source).is_empty(),
+        "guard falsely flagged tokens inside line comments"
+    );
+}
+
+#[test]
+fn guard_detects_uniffi_use_statement() {
+    let source = "use uniffi::Object;\n";
+    let found = forbidden_tokens_in_source(source);
+    assert!(
+        found.contains(&"uniffi::"),
+        "expected `uniffi::` to be detected, got: {:?}",
+        found
+    );
+}
+
+#[test]
+fn guard_detects_uniffi_macros_use_statement() {
+    let source = "use uniffi_macros::Object;\n";
+    let found = forbidden_tokens_in_source(source);
+    assert!(
+        found.contains(&"uniffi_macros::"),
+        "expected `uniffi_macros::` to be detected, got: {:?}",
+        found
+    );
+}
+
+#[test]
+fn guard_detects_git2_use_statement() {
+    let source = "use git2::Repository;\n";
+    let found = forbidden_tokens_in_source(source);
+    assert!(
+        found.contains(&"git2::"),
+        "expected `git2::` to be detected, got: {:?}",
+        found
     );
 }
