@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **app_contract**: add `AppError` envelope and `From<DoogatError>` mapping
 - **core**: `AppOutput<T>` and `AppWarning` types in `app_contract`. `AppOutput<T>` wraps a value with zero or more structured warnings; `AppWarning` carries a stable SCREAMING_SNAKE `code` and human-readable `message`. Both are adapter-neutral. (PRD 00147)
 - **core**: `app_contract` module scaffold — adapter-neutral application command/result layer. Types in this module must not depend on `rusqlite`, `git2`, `redb`, `axum`, or `async_graphql`; enforced by automated integration test. (PRD 00147)
 - **sql**: `SINGLETON` typedef primitive. `CREATE TABLE foo (...) SINGLETON` declares a typedef that holds at most one materialized row, enforced by three layers (service-layer validator, SQL DML pre-check, materializer `<table>_singleton_lock` UNIQUE expression-index). `CREATE TABLE foo (...) SINGLETON DEFAULT VALUES` additionally auto-seeds one row using each column's `default_value` at typedef-install time (single git commit covering both typedef and seed; other nodes inherit the row via CRDT sync). `ALTER TABLE foo SET SINGLETON` flips the flag on an existing typedef (rejects when the typedef holds >1 rows, naming the count); `ALTER TABLE foo DROP SINGLETON` clears it without touching existing rows. (PRD 00139)

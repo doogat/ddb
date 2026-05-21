@@ -7,5 +7,8 @@
 //! The adapter-neutrality invariant is enforced by the integration test
 //! `ddb-core/tests/app_contract_adapter_guard.rs`.
 
+mod error;
+pub use error::{AppError, AppErrorCategory};
+
 mod output;
 pub use output::{AppOutput, AppWarning};
