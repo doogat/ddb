@@ -1,6 +1,6 @@
 mod doogat;
 mod schema;
-mod value;
+pub mod value;
 
 pub use doogat::*;
 pub use schema::*;

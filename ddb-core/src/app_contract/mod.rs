@@ -12,3 +12,9 @@ pub use error::{AppError, AppErrorCategory};
 
 mod output;
 pub use output::{AppOutput, AppWarning};
+
+mod commands;
+pub use commands::{CreateCommand, DeleteCommand, ReadCommand, SearchCommand, UpdateCommand};
+
+mod results;
+pub use results::{BrokenBacklink, DeleteResult};
