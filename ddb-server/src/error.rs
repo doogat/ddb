@@ -372,4 +372,175 @@ mod tests {
             Value::String("url".into())
         );
     }
+
+    // --- to_graphql_error_from_app tests ---
+
+    fn ext_err(err: &Error, key: &str) -> Value {
+        let exts = err.extensions.as_ref().expect("extensions should be set");
+        exts.get(key).cloned().unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn app_err_not_found_preserves_message_and_code() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::NotFound("doogat 123 not found".into()));
+        let err = to_graphql_error_from_app(app);
+        assert_eq!(err.message, "doogat 123 not found");
+        assert_eq!(ext_err(&err, "code"), Value::String("NOT_FOUND".into()));
+    }
+
+    #[test]
+    fn app_err_validation_preserves_message_and_code() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::Validation("title required".into()));
+        let err = to_graphql_error_from_app(app);
+        assert_eq!(err.message, "title required");
+        assert_eq!(ext_err(&err, "code"), Value::String("VALIDATION_ERROR".into()));
+    }
+
+    #[test]
+    fn app_err_invalid_path_preserves_message_and_code() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::InvalidPath("../escape".into()));
+        let err = to_graphql_error_from_app(app);
+        assert_eq!(err.message, "../escape");
+        assert_eq!(ext_err(&err, "code"), Value::String("INVALID_PATH".into()));
+    }
+
+    #[test]
+    fn app_err_conflict_preserves_message_and_code() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::Conflict("merge conflict".into()));
+        let err = to_graphql_error_from_app(app);
+        assert_eq!(err.message, "merge conflict");
+        assert_eq!(ext_err(&err, "code"), Value::String("CONFLICT".into()));
+    }
+
+    #[test]
+    fn app_err_bad_request_preserves_message_and_code() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::BadRequest("missing title".into()));
+        let err = to_graphql_error_from_app(app);
+        assert_eq!(err.message, "missing title");
+        assert_eq!(ext_err(&err, "code"), Value::String("BAD_REQUEST".into()));
+    }
+
+    #[test]
+    fn app_err_internal_variants_redact_to_internal_error() {
+        use ddb_core::app_contract::AppError;
+        // DoogatError is not Clone, so each variant is constructed inline.
+        for (app, label) in [
+            (
+                AppError::from(DoogatError::Git("/secret/path".into())),
+                "Git",
+            ),
+            (
+                AppError::from(DoogatError::Io(std::io::Error::other("filesystem broke"))),
+                "Io",
+            ),
+            (
+                AppError::from(DoogatError::Yaml("bad yaml at line 3".into())),
+                "Yaml",
+            ),
+        ] {
+            let err = to_graphql_error_from_app(app);
+            assert_eq!(
+                err.message, "internal error",
+                "{label}: message should be redacted"
+            );
+            assert_eq!(
+                ext_err(&err, "code"),
+                Value::String("INTERNAL_ERROR".into()),
+                "{label}: code should be INTERNAL_ERROR"
+            );
+        }
+    }
+
+    #[test]
+    fn app_err_internal_variants_do_not_leak_secrets() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::Git(
+            "/Users/secret/.ddb/objects/ab/cdef".into(),
+        ));
+        let err = to_graphql_error_from_app(app);
+        assert!(!err.message.contains("secret"), "message leaked 'secret'");
+        assert!(!err.message.contains(".ddb"), "message leaked '.ddb'");
+    }
+
+    #[test]
+    fn app_err_structured_unique_violation_preserves_code_and_lists() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::unique_violation(
+            "category-membership",
+            ["link", "category"],
+            ["20260416120000", "20260416120001"],
+        ));
+        let err = to_graphql_error_from_app(app);
+        assert_eq!(
+            ext_err(&err, "code"),
+            Value::String("UNIQUE_VIOLATION".into())
+        );
+        assert_eq!(
+            ext_err(&err, "columns"),
+            Value::List(vec![
+                Value::String("link".into()),
+                Value::String("category".into()),
+            ])
+        );
+        assert_eq!(
+            ext_err(&err, "values"),
+            Value::List(vec![
+                Value::String("20260416120000".into()),
+                Value::String("20260416120001".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn app_err_structured_not_null_violation_preserves_code_and_column() {
+        use ddb_core::app_contract::AppError;
+        let app = AppError::from(DoogatError::not_null_violation("link", "url"));
+        let err = to_graphql_error_from_app(app);
+        assert_eq!(
+            ext_err(&err, "code"),
+            Value::String("NOT_NULL_VIOLATION".into())
+        );
+        assert_eq!(ext_err(&err, "table"), Value::String("link".into()));
+        assert_eq!(ext_err(&err, "column"), Value::String("url".into()));
+    }
+
+    #[test]
+    fn app_err_message_matches_legacy_for_safe_variants() {
+        use ddb_core::app_contract::AppError;
+        // Check each safe variant: new helper message == legacy helper message.
+        // DoogatError is not Clone, so we pass two separate expressions per check.
+        macro_rules! check_parity {
+            ($legacy:expr, $for_app:expr) => {{
+                let legacy_msg = to_graphql_error($legacy).message;
+                let app = AppError::from($for_app);
+                let new_msg = to_graphql_error_from_app(app).message;
+                assert_eq!(new_msg, legacy_msg, "message parity failed");
+            }};
+        }
+        check_parity!(
+            DoogatError::NotFound("doogat 42 not found".into()),
+            DoogatError::NotFound("doogat 42 not found".into())
+        );
+        check_parity!(
+            DoogatError::Validation("title required".into()),
+            DoogatError::Validation("title required".into())
+        );
+        check_parity!(
+            DoogatError::InvalidPath("../escape".into()),
+            DoogatError::InvalidPath("../escape".into())
+        );
+        check_parity!(
+            DoogatError::BadRequest("missing title".into()),
+            DoogatError::BadRequest("missing title".into())
+        );
+        check_parity!(
+            DoogatError::Conflict("merge conflict".into()),
+            DoogatError::Conflict("merge conflict".into())
+        );
+    }
 }
