@@ -81,19 +81,28 @@ pub fn to_server_error(e: DoogatError) -> ServerError {
 /// Internal-category errors have their message redacted to `"internal error"`
 /// for the network surface and logged via `tracing` — this preserves the
 /// PRD 00129 §6 / PRD 00131 redaction behavior at the new AppError boundary.
-/// All other categories pass `app.message` through unchanged. Extensions are
-/// populated from `app.code`, optional `app.field`, and all `app.details`
-/// entries.
+/// Non-internal categories expose their safe message plus `app.code`, optional
+/// `app.field`, and all `app.details` entries. Internal errors expose only the
+/// redacted message and stable code.
 pub fn to_graphql_error_from_app(app: AppError) -> Error {
-    let message = if matches!(app.category, AppErrorCategory::Internal) {
-        tracing::error!(code = %app.code, message = %app.message, "internal error");
+    let AppError {
+        code,
+        message: raw_message,
+        category,
+        field,
+        details,
+    } = app;
+    let is_internal = matches!(category, AppErrorCategory::Internal);
+
+    let message = if is_internal {
+        tracing::error!(code = %code, message = %raw_message, "internal error");
         "internal error".to_string()
     } else {
         // DoogatError::from uses err.to_string() which adds a thiserror Display
         // prefix (e.g. "not found: ") for simple variants. Structured variants
         // use #[error("{message}")] so they have no prefix. Strip for parity
         // with the legacy classify() behavior used by to_graphql_error.
-        let prefix = match app.code {
+        let prefix = match code {
             "NOT_FOUND" => Some("not found: "),
             "VALIDATION_ERROR" => Some("validation: "),
             "INVALID_PATH" => Some("invalid path: "),
@@ -104,24 +113,32 @@ pub fn to_graphql_error_from_app(app: AppError) -> Error {
             _ => None,
         };
         match prefix {
-            Some(p) => app.message.strip_prefix(p).unwrap_or(&app.message).to_string(),
-            None => app.message,
+            Some(p) => raw_message
+                .strip_prefix(p)
+                .unwrap_or(&raw_message)
+                .to_string(),
+            None => raw_message,
         }
     };
     let mut err = Error::new(message);
     let mut map = async_graphql::ErrorExtensionValues::default();
-    map.set("code", app.code);
-    if let Some(field) = app.field {
-        map.set("field", field);
-    }
-    for (key, val) in app.details {
-        let value = match val {
-            AppErrorDetail::String(s) => async_graphql::Value::String(s),
-            AppErrorDetail::List(items) => async_graphql::Value::List(
-                items.into_iter().map(async_graphql::Value::String).collect(),
-            ),
-        };
-        map.set(key, value);
+    map.set("code", code);
+    if !is_internal {
+        if let Some(field) = field {
+            map.set("field", field);
+        }
+        for (key, val) in details {
+            let value = match val {
+                AppErrorDetail::String(s) => async_graphql::Value::String(s),
+                AppErrorDetail::List(items) => async_graphql::Value::List(
+                    items
+                        .into_iter()
+                        .map(async_graphql::Value::String)
+                        .collect(),
+                ),
+            };
+            map.set(key, value);
+        }
     }
     err.extensions = Some(map);
     err
@@ -426,62 +443,53 @@ mod tests {
         );
     }
 
-    // --- to_graphql_error_from_app tests ---
-
     fn ext_err(err: &Error, key: &str) -> Value {
         let exts = err.extensions.as_ref().expect("extensions should be set");
         exts.get(key).cloned().unwrap_or(Value::Null)
     }
 
-    #[test]
-    fn app_err_not_found_preserves_message_and_code() {
-        use ddb_core::app_contract::AppError;
-        let app = AppError::from(DoogatError::NotFound("doogat 123 not found".into()));
-        let err = to_graphql_error_from_app(app);
-        assert_eq!(err.message, "doogat 123 not found");
-        assert_eq!(ext_err(&err, "code"), Value::String("NOT_FOUND".into()));
+    fn assert_app_err_matches_legacy(
+        legacy: DoogatError,
+        for_app: DoogatError,
+        expected_code: &str,
+    ) {
+        let legacy_msg = to_graphql_error(legacy).message;
+        let err = to_graphql_error_from_app(AppError::from(for_app));
+        assert_eq!(err.message, legacy_msg);
+        assert_eq!(ext_err(&err, "code"), Value::String(expected_code.into()));
     }
 
     #[test]
-    fn app_err_validation_preserves_message_and_code() {
-        use ddb_core::app_contract::AppError;
-        let app = AppError::from(DoogatError::Validation("title required".into()));
-        let err = to_graphql_error_from_app(app);
-        assert_eq!(err.message, "title required");
-        assert_eq!(ext_err(&err, "code"), Value::String("VALIDATION_ERROR".into()));
-    }
-
-    #[test]
-    fn app_err_invalid_path_preserves_message_and_code() {
-        use ddb_core::app_contract::AppError;
-        let app = AppError::from(DoogatError::InvalidPath("../escape".into()));
-        let err = to_graphql_error_from_app(app);
-        assert_eq!(err.message, "../escape");
-        assert_eq!(ext_err(&err, "code"), Value::String("INVALID_PATH".into()));
-    }
-
-    #[test]
-    fn app_err_conflict_preserves_message_and_code() {
-        use ddb_core::app_contract::AppError;
-        let app = AppError::from(DoogatError::Conflict("merge conflict".into()));
-        let err = to_graphql_error_from_app(app);
-        assert_eq!(err.message, "merge conflict");
-        assert_eq!(ext_err(&err, "code"), Value::String("CONFLICT".into()));
-    }
-
-    #[test]
-    fn app_err_bad_request_preserves_message_and_code() {
-        use ddb_core::app_contract::AppError;
-        let app = AppError::from(DoogatError::BadRequest("missing title".into()));
-        let err = to_graphql_error_from_app(app);
-        assert_eq!(err.message, "missing title");
-        assert_eq!(ext_err(&err, "code"), Value::String("BAD_REQUEST".into()));
+    fn app_err_safe_variants_match_legacy_message_and_code() {
+        assert_app_err_matches_legacy(
+            DoogatError::NotFound("doogat 42 not found".into()),
+            DoogatError::NotFound("doogat 42 not found".into()),
+            "NOT_FOUND",
+        );
+        assert_app_err_matches_legacy(
+            DoogatError::Validation("title required".into()),
+            DoogatError::Validation("title required".into()),
+            "VALIDATION_ERROR",
+        );
+        assert_app_err_matches_legacy(
+            DoogatError::InvalidPath("../escape".into()),
+            DoogatError::InvalidPath("../escape".into()),
+            "INVALID_PATH",
+        );
+        assert_app_err_matches_legacy(
+            DoogatError::BadRequest("missing title".into()),
+            DoogatError::BadRequest("missing title".into()),
+            "BAD_REQUEST",
+        );
+        assert_app_err_matches_legacy(
+            DoogatError::Conflict("merge conflict".into()),
+            DoogatError::Conflict("merge conflict".into()),
+            "CONFLICT",
+        );
     }
 
     #[test]
     fn app_err_internal_variants_redact_to_internal_error() {
-        use ddb_core::app_contract::AppError;
-        // DoogatError is not Clone, so each variant is constructed inline.
         for (app, label) in [
             (
                 AppError::from(DoogatError::Git("/secret/path".into())),
@@ -510,19 +518,30 @@ mod tests {
     }
 
     #[test]
-    fn app_err_internal_variants_do_not_leak_secrets() {
-        use ddb_core::app_contract::AppError;
-        let app = AppError::from(DoogatError::Git(
-            "/Users/secret/.ddb/objects/ab/cdef".into(),
-        ));
+    fn app_err_internal_category_exposes_only_code_extension() {
+        let app = AppError {
+            code: "INTERNAL_ERROR",
+            message: "/Users/secret/.ddb/objects/ab/cdef".into(),
+            category: AppErrorCategory::Internal,
+            field: Some("path".into()),
+            details: vec![(
+                "path".into(),
+                AppErrorDetail::String("/Users/secret/.ddb/objects/ab/cdef".into()),
+            )],
+        };
         let err = to_graphql_error_from_app(app);
-        assert!(!err.message.contains("secret"), "message leaked 'secret'");
-        assert!(!err.message.contains(".ddb"), "message leaked '.ddb'");
+        let exts = err.extensions.as_ref().expect("extensions should be set");
+        assert_eq!(err.message, "internal error");
+        assert_eq!(
+            exts.get("code").cloned().unwrap_or(Value::Null),
+            Value::String("INTERNAL_ERROR".into())
+        );
+        assert!(exts.get("field").is_none());
+        assert!(exts.get("path").is_none());
     }
 
     #[test]
     fn app_err_structured_unique_violation_preserves_code_and_lists() {
-        use ddb_core::app_contract::AppError;
         let app = AppError::from(DoogatError::unique_violation(
             "category-membership",
             ["link", "category"],
@@ -551,7 +570,6 @@ mod tests {
 
     #[test]
     fn app_err_structured_not_null_violation_preserves_code_and_column() {
-        use ddb_core::app_contract::AppError;
         let app = AppError::from(DoogatError::not_null_violation("link", "url"));
         let err = to_graphql_error_from_app(app);
         assert_eq!(
@@ -560,40 +578,5 @@ mod tests {
         );
         assert_eq!(ext_err(&err, "table"), Value::String("link".into()));
         assert_eq!(ext_err(&err, "column"), Value::String("url".into()));
-    }
-
-    #[test]
-    fn app_err_message_matches_legacy_for_safe_variants() {
-        use ddb_core::app_contract::AppError;
-        // Check each safe variant: new helper message == legacy helper message.
-        // DoogatError is not Clone, so we pass two separate expressions per check.
-        macro_rules! check_parity {
-            ($legacy:expr, $for_app:expr) => {{
-                let legacy_msg = to_graphql_error($legacy).message;
-                let app = AppError::from($for_app);
-                let new_msg = to_graphql_error_from_app(app).message;
-                assert_eq!(new_msg, legacy_msg, "message parity failed");
-            }};
-        }
-        check_parity!(
-            DoogatError::NotFound("doogat 42 not found".into()),
-            DoogatError::NotFound("doogat 42 not found".into())
-        );
-        check_parity!(
-            DoogatError::Validation("title required".into()),
-            DoogatError::Validation("title required".into())
-        );
-        check_parity!(
-            DoogatError::InvalidPath("../escape".into()),
-            DoogatError::InvalidPath("../escape".into())
-        );
-        check_parity!(
-            DoogatError::BadRequest("missing title".into()),
-            DoogatError::BadRequest("missing title".into())
-        );
-        check_parity!(
-            DoogatError::Conflict("merge conflict".into()),
-            DoogatError::Conflict("merge conflict".into())
-        );
     }
 }
