@@ -1,3 +1,42 @@
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConformanceResult {
+    Ok {
+        value: ConformanceValue,
+        warnings: Vec<ConformanceWarning>,
+    },
+    Err(ConformanceError),
+    Unsupported {
+        reason: String,
+    },
+    SetupFailed {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConformanceValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<ConformanceValue>),
+    Object(std::collections::BTreeMap<String, ConformanceValue>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConformanceWarning {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConformanceError {
+    pub code: String,
+    pub message: String,
+    pub context: serde_json::Map<String, serde_json::Value>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
