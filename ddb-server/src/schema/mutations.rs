@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use std::sync::Arc;
 
 use crate::actor::{ActorHandle, UpdateDoogatParams};
-use crate::error::to_graphql_error;
+use crate::error::{to_graphql_error, to_graphql_error_from_app};
 use crate::read_pool::ReadPool;
 use crate::reload::SchemaReloader;
 
@@ -76,7 +76,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     let output = a
                         .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
                         .await
-                        .map_err(to_graphql_error)?;
+                        .map_err(|e| to_graphql_error_from_app(e.into()))?;
                     // output.warnings is intentionally not forwarded here.
                     // GraphQL response extensions require a custom
                     // async_graphql::Extension trait impl with per-request

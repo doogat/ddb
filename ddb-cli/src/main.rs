@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+mod app_err;
 mod updater;
 pub(crate) mod warnings;
 

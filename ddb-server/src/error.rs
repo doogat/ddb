@@ -1,4 +1,5 @@
 use async_graphql::{Error, ServerError};
+use ddb_core::app_contract::{AppError, AppErrorCategory, AppErrorDetail};
 use ddb_core::error::{DoogatError, ErrorContext, ErrorValue};
 
 /// Classify a DoogatError for external exposure.
@@ -72,6 +73,58 @@ pub fn to_server_error(e: DoogatError) -> ServerError {
         path: Vec::new(),
         extensions: err.extensions,
     }
+}
+
+/// Convert an adapter-neutral `AppError` (the application contract envelope
+/// from PRD 00147) into an `async_graphql::Error`.
+///
+/// Internal-category errors have their message redacted to `"internal error"`
+/// for the network surface and logged via `tracing` — this preserves the
+/// PRD 00129 §6 / PRD 00131 redaction behavior at the new AppError boundary.
+/// All other categories pass `app.message` through unchanged. Extensions are
+/// populated from `app.code`, optional `app.field`, and all `app.details`
+/// entries.
+pub fn to_graphql_error_from_app(app: AppError) -> Error {
+    let message = if matches!(app.category, AppErrorCategory::Internal) {
+        tracing::error!(code = %app.code, message = %app.message, "internal error");
+        "internal error".to_string()
+    } else {
+        // DoogatError::from uses err.to_string() which adds a thiserror Display
+        // prefix (e.g. "not found: ") for simple variants. Structured variants
+        // use #[error("{message}")] so they have no prefix. Strip for parity
+        // with the legacy classify() behavior used by to_graphql_error.
+        let prefix = match app.code {
+            "NOT_FOUND" => Some("not found: "),
+            "VALIDATION_ERROR" => Some("validation: "),
+            "INVALID_PATH" => Some("invalid path: "),
+            "CONFLICT" => Some("conflict: "),
+            "BAD_REQUEST" => Some("bad request: "),
+            "SQL_ERROR" => Some("sql engine: "),
+            "PARSE_ERROR" => Some("parse: "),
+            _ => None,
+        };
+        match prefix {
+            Some(p) => app.message.strip_prefix(p).unwrap_or(&app.message).to_string(),
+            None => app.message,
+        }
+    };
+    let mut err = Error::new(message);
+    let mut map = async_graphql::ErrorExtensionValues::default();
+    map.set("code", app.code);
+    if let Some(field) = app.field {
+        map.set("field", field);
+    }
+    for (key, val) in app.details {
+        let value = match val {
+            AppErrorDetail::String(s) => async_graphql::Value::String(s),
+            AppErrorDetail::List(items) => async_graphql::Value::List(
+                items.into_iter().map(async_graphql::Value::String).collect(),
+            ),
+        };
+        map.set(key, value);
+    }
+    err.extensions = Some(map);
+    err
 }
 
 /// Copy each `(key, value)` pair from a structured-error context into the

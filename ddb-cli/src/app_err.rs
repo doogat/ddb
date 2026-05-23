@@ -1,6 +1,5 @@
-// IMPLEMENTOR: replace this stub with the real implementation
 pub fn format_app_error(app: &ddb_core::app_contract::AppError) -> String {
-    unimplemented!()
+    format!("error: {}", app.message)
 }
 
 #[cfg(test)]

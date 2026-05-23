@@ -56,7 +56,18 @@ pub(crate) fn create(
         fields: extra,
         on_conflict: ConflictAction::Error,
     };
-    let output = svc.create(cmd)?;
+    let output = match svc.create(cmd) {
+        Ok(o) => o,
+        Err(e) => {
+            // PRD 00147: route the migrated `create` workflow's error through
+            // the adapter-neutral AppError envelope before transport formatting.
+            // CLI is a local-user surface — no redaction, matches the legacy
+            // `eprintln!("error: {e}")` from main.rs.
+            let app: ddb_core::app_contract::AppError = e.into();
+            eprintln!("{}", crate::app_err::format_app_error(&app));
+            std::process::exit(1);
+        }
+    };
     crate::warnings::write_warnings(&output.warnings, &mut std::io::stderr())
         .unwrap_or_else(|e| eprintln!("warning write failed: {e}"));
     outln!("{}", output.value.meta.id.map(|z| z.0).unwrap_or_default())?;
