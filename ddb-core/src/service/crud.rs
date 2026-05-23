@@ -184,7 +184,7 @@ impl<G: GitBackend> DoogatService<G> {
             .ok_or_else(|| DoogatError::Validation("batch_create returned empty".into()))?;
 
         // Emit TITLE_FROM_TEMPLATE only when the caller omitted a title AND the
-        // doogat's resolved type has a `title_template` declared on its typedef.
+        // requested type has a `title_template` declared on its typedef.
         // Binding to `title_template` (rather than "result has a non-empty
         // title") narrows the heuristic so future auto-title mechanisms don't
         // trigger this code, and it makes the warning's message ("title was

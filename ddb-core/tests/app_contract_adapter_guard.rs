@@ -23,10 +23,10 @@ const FORBIDDEN_CRATES: &[&str] = &[
 /// appears inside a double-quoted string. **Scope is intentionally narrow:**
 /// block comments (`/* ... */`) and raw string literals (`r#"..."#`) are NOT
 /// stripped. App-contract sources today use neither for adapter-crate tokens,
-/// so the guard is safe-by-construction; the `guard_does_not_strip_block_comments_or_raw_strings`
-/// test below pins the scope. If app-contract style ever changes to use block
-/// comments or raw strings containing adapter-crate names, replace that
-/// negative test with a positive test and extend this function.
+/// so the guard is safe-by-construction; the block-comment and raw-string
+/// tests below pin the scope. If app-contract style ever changes to use block
+/// comments or raw strings containing adapter-crate names, replace those
+/// negative tests with positive tests and extend this function.
 fn strip_line_comment(line: &str) -> &str {
     let mut in_string = false;
     let mut chars = line.char_indices().peekable();
