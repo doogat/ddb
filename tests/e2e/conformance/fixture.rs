@@ -1,3 +1,60 @@
+#[derive(Debug, Clone)]
+pub struct WorkflowFixture {
+    pub id: String,
+    pub title: String,
+    pub setup: SetupExpectation,
+    pub steps: Vec<Step>,
+    pub expected: ExpectedBehavior,
+    pub interfaces: Vec<InterfaceId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupExpectation {
+    pub auth_mode: AuthMode,
+    pub timeout_ms: u64,
+    pub setup_steps: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthMode {
+    None,
+    Token { env_var: String },
+    Embedded,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Step {
+    pub op: StepOp,
+    pub args: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StepOp {
+    CreateDoogat,
+    ReadDoogat,
+    UpdateDoogat,
+    DeleteDoogat,
+    ListDoogats,
+    Search,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExpectedBehavior {
+    pub value: Option<super::result::ConformanceValue>,
+    pub warnings: Vec<super::result::ConformanceWarning>,
+    pub error: Option<super::result::ConformanceError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InterfaceId {
+    Cli,
+    Graphql,
+    Rest,
+    PgWire,
+    Ffi,
+    NosqlHttp,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
