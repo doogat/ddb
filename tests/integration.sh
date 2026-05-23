@@ -2422,6 +2422,48 @@ $DDB query "DROP TABLE ig_race_pg CASCADE" | grep -q "dropped"
 rm -f "$RACE_CLI_1" "$RACE_CLI_2" "$RACE_SQL_1" "$RACE_SQL_2" \
        "$RACE_TYPED_1" "$RACE_TYPED_2" "$RACE_PG_CLI" "$RACE_PG_SQL"
 
+# 56. REST warnings envelope (PRD 00147 doubt-review follow-up). Pins the
+# AppOutput.warnings surface that ddb-server/src/rest.rs:create_doogat exposes:
+# the response body always carries a `warnings` array (empty when none) and a
+# template-rendered title fires a TITLE_FROM_TEMPLATE entry. Unit tests cover
+# the JSON shape directly; this scenario exercises the live REST endpoint so
+# AGENTS.md's per-PRD integration-deliverable requirement for server-endpoint
+# behavior changes is satisfied.
+$DDB query "CREATE TABLE ig_warn_demo (note TEXT)" | grep -q "table ig_warn_demo created"
+$DDB query "ALTER TABLE ig_warn_demo SET TITLE TEMPLATE 'auto-warn'" | grep -q "title template"
+
+# 56.A — caller-supplied title yields warnings: [] (still present, never skipped).
+IG_WARN_TITLED_BODY="$TMPDIR/ig-warn-titled.json"
+IG_WARN_TITLED_CODE=$(curl -sS -o "$IG_WARN_TITLED_BODY" -w "%{http_code}" "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"explicit","type":"ig_warn_demo"}')
+[ "$IG_WARN_TITLED_CODE" = "201" ]
+jq -e '.warnings == []' "$IG_WARN_TITLED_BODY" >/dev/null
+pass "56.A: REST POST /doogats with title returns 201 + warnings: []"
+
+# 56.B — omitted title with a title_template typedef yields a TITLE_FROM_TEMPLATE
+# warning entry carrying code + message.
+IG_WARN_AUTO_BODY="$TMPDIR/ig-warn-auto.json"
+IG_WARN_AUTO_CODE=$(curl -sS -o "$IG_WARN_AUTO_BODY" -w "%{http_code}" "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"ig_warn_demo"}')
+[ "$IG_WARN_AUTO_CODE" = "201" ]
+jq -e '.warnings | length == 1
+       and (.[0].code == "TITLE_FROM_TEMPLATE")
+       and (.[0].message | test("title_template"))' \
+  "$IG_WARN_AUTO_BODY" >/dev/null
+pass "56.B: REST POST /doogats with omitted title surfaces TITLE_FROM_TEMPLATE warning"
+
+# Cleanup
+IG_WARN_TITLED_ID=$(jq -r '.data.id' "$IG_WARN_TITLED_BODY")
+IG_WARN_AUTO_ID=$(jq -r '.data.id' "$IG_WARN_AUTO_BODY")
+curl -sf "$REST_URL/doogats/$IG_WARN_TITLED_ID" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+curl -sf "$REST_URL/doogats/$IG_WARN_AUTO_ID" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+$DDB query "DROP TABLE ig_warn_demo CASCADE" | grep -q "dropped"
+rm -f "$IG_WARN_TITLED_BODY" "$IG_WARN_AUTO_BODY"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"

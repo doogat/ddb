@@ -169,6 +169,7 @@ impl<G: GitBackend> DoogatService<G> {
     /// TYPE_NOT_REGISTERED, and field validation.
     pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
         let caller_title = cmd.title.clone();
+        let doogat_type = cmd.doogat_type.clone();
         let input = crate::types::BatchCreateInput {
             title: cmd.title,
             body: cmd.body,
@@ -182,17 +183,34 @@ impl<G: GitBackend> DoogatService<G> {
             .pop()
             .ok_or_else(|| DoogatError::Validation("batch_create returned empty".into()))?;
 
-        // Emit TITLE_FROM_TEMPLATE when the caller omitted a title but the
-        // typedef's title_template rendered one. The heuristic: caller supplied
-        // no title AND the returned doogat has a non-empty title.
+        // Emit TITLE_FROM_TEMPLATE only when the caller omitted a title AND the
+        // doogat's resolved type has a `title_template` declared on its typedef.
+        // Binding to `title_template` (rather than "result has a non-empty
+        // title") narrows the heuristic so future auto-title mechanisms don't
+        // trigger this code, and it makes the warning's message ("title was
+        // rendered from typedef title_template") accurate by construction for
+        // the common path. The `on_conflict=Ignore` skip path is a known
+        // residual false positive: when an existing row is returned unchanged
+        // the warning still fires even though no rendering happened on this
+        // call. Eliminating that case requires plumbing a "title rendered"
+        // signal out of `batch_create` and is left for a follow-up.
         let mut warnings = vec![];
         if caller_title.is_none() {
-            if let Some(ref t) = value.meta.title {
-                if !t.is_empty() {
-                    warnings.push(AppWarning {
-                        code: "TITLE_FROM_TEMPLATE",
-                        message: "title was rendered from typedef title_template".into(),
-                    });
+            if let Some(ref ty) = doogat_type {
+                let schemas = self.index.load_all_typedefs(&self.repo);
+                let template_present = schemas
+                    .get(ty.as_str())
+                    .and_then(|s| s.title_template.as_ref())
+                    .is_some();
+                if template_present {
+                    if let Some(ref t) = value.meta.title {
+                        if !t.is_empty() {
+                            warnings.push(AppWarning {
+                                code: "TITLE_FROM_TEMPLATE",
+                                message: "title was rendered from typedef title_template".into(),
+                            });
+                        }
+                    }
                 }
             }
         }

@@ -1,13 +1,33 @@
-// SingleResponse must be pub for this test; Ivan adds the pub keyword as part of T19.
-// The warnings field (Vec<WarningJson> or equivalent) must also be pub and always serialized
-// (no skip_serializing_if), so REST clients can rely on its presence. Ivan chooses the exact
-// struct/field names; this test only binds to the JSON shape.
+// `SingleResponse` and `WarningJson` are pub for serialization; their fields
+// are pub for serde derive. This test binds to the JSON shape that REST
+// clients consume — `warnings` must always serialize (no skip_serializing_if)
+// and each entry must carry `code` + `message`. The structs are built
+// directly with their public fields so no test-only constructors leak into
+// the production surface.
 
-use ddb_server::rest::SingleResponse;
+use std::collections::BTreeMap;
+
+use ddb_server::rest::{DoogatJson, SingleResponse, WarningJson};
+
+fn empty_doogat() -> DoogatJson {
+    DoogatJson {
+        id: String::new(),
+        title: String::new(),
+        body: String::new(),
+        tags: vec![],
+        doogat_type: None,
+        frontmatter: BTreeMap::new(),
+        references: BTreeMap::new(),
+        reference_section: String::new(),
+    }
+}
 
 #[test]
 fn rest_single_response_serializes_warnings_field_when_empty() {
-    let response = SingleResponse::new_empty_warnings();
+    let response = SingleResponse {
+        data: empty_doogat(),
+        warnings: vec![],
+    };
     let json = serde_json::to_value(&response).expect("serialization must not fail");
     let warnings = json
         .get("warnings")
@@ -21,10 +41,13 @@ fn rest_single_response_serializes_warnings_field_when_empty() {
 
 #[test]
 fn rest_single_response_serializes_warnings_with_code_and_message() {
-    let response = SingleResponse::new_with_warning(
-        "TITLE_FROM_TEMPLATE",
-        "title was rendered from typedef title_template",
-    );
+    let response = SingleResponse {
+        data: empty_doogat(),
+        warnings: vec![WarningJson {
+            code: "TITLE_FROM_TEMPLATE".into(),
+            message: "title was rendered from typedef title_template".into(),
+        }],
+    };
     let json = serde_json::to_value(&response).expect("serialization must not fail");
     let warnings = json
         .get("warnings")

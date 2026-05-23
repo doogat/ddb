@@ -121,7 +121,7 @@ Per AGENTS.md: "New cross-interface behavior belongs in the app contract first; 
 - Parses an incoming request into a `*Command`.
 - Calls the matching `DoogatService` entrypoint.
 - Renders the returned `AppOutput<T>` (value plus warnings) and any `AppError` in its native shape.
-- Must surface warnings; discarding them on promised workflows is a contract violation. CLI prints warnings to stderr (one per line as `warning: <code>: <message>`). REST surfaces warnings in the `warnings` response field (always present, empty array when none). GraphQL warning forwarding is deferred — see PRD 00154 (graphql-response-extension-warnings-v1).
+- Must surface warnings; discarding them on promised workflows is a contract violation. CLI prints warnings to stderr (one per line as `warning: <code>: <message>`). REST surfaces warnings in the `warnings` response field (always present, empty array when none). GraphQL warning forwarding is deferred (see PRD 00154, graphql-response-extension-warnings-v1).
 
 ## Worked example: createDoogat
 

@@ -154,19 +154,39 @@ fn guard_detects_git2_use_statement() {
 }
 
 #[test]
-fn guard_does_not_strip_block_comments_or_raw_strings() {
-    // Documents the current scope: block-comment and raw-string content is NOT
-    // stripped. The forbidden tokens here would be flagged by the guard if they
-    // appeared in real app_contract source — which is what we want as long as
-    // those forms aren't allowed in app_contract. If app_contract style ever
-    // changes to use block comments or raw strings that mention adapter crates,
-    // replace this test with a positive test that DOES strip them and extend
-    // `strip_line_comment` accordingly.
-    let source = "/* uniffi::Object example */\nlet s = r#\"uniffi::Object\"#;\n";
+fn guard_does_not_strip_block_comment_adapter_tokens() {
+    // Documents the current scope: block-comment content is NOT stripped. The
+    // forbidden token here would be flagged by the guard if it appeared in
+    // real app_contract source — which is what we want as long as block
+    // comments mentioning adapter crates aren't allowed in app_contract. If
+    // app_contract style ever changes to use block comments that mention
+    // adapter crates, replace this test with a positive test that DOES strip
+    // them and extend `strip_line_comment` accordingly. Uses `uniffi::` alone
+    // (no raw string in the source) so the assertion fires only on
+    // block-comment behavior.
+    let source = "/* uniffi::Object example */\nfn placeholder() {}\n";
     let found = forbidden_tokens_in_source(source);
     assert!(
-        !found.is_empty(),
-        "guard intentionally does not strip block comments or raw strings; \
-         `uniffi::` should have been detected in either the block comment or the raw string"
+        found.contains(&"uniffi::"),
+        "guard intentionally does not strip block comments; \
+         `uniffi::` inside `/* ... */` should have been detected, got: {found:?}"
+    );
+}
+
+#[test]
+fn guard_does_not_strip_raw_string_adapter_tokens() {
+    // Documents the current scope: raw-string content is NOT stripped. The
+    // forbidden token here would be flagged by the guard if it appeared in
+    // real app_contract source. Uses `git2::` alone (no block comment in the
+    // source) so the assertion fires only on raw-string behavior. Different
+    // token from the block-comment test so the two cases are independently
+    // observable — stripping either form alone would still flip exactly one
+    // of these two assertions.
+    let source = "fn placeholder() { let s = r#\"git2::Repository\"#; let _ = s; }\n";
+    let found = forbidden_tokens_in_source(source);
+    assert!(
+        found.contains(&"git2::"),
+        "guard intentionally does not strip raw strings; \
+         `git2::` inside `r#\"...\"#` should have been detected, got: {found:?}"
     );
 }

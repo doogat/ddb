@@ -71,24 +71,6 @@ impl SingleResponse {
     fn new(data: DoogatJson, warnings: Vec<WarningJson>) -> Self {
         Self { data, warnings }
     }
-
-    /// Build a `SingleResponse` with an empty warnings list. Used by tests
-    /// to verify the `warnings` key is always present in serialized output.
-    pub fn new_empty_warnings() -> Self {
-        Self::new(DoogatJson::default_empty(), vec![])
-    }
-
-    /// Build a `SingleResponse` with a single warning entry. Used by tests
-    /// to verify the warnings array shape.
-    pub fn new_with_warning(code: &str, message: &str) -> Self {
-        Self::new(
-            DoogatJson::default_empty(),
-            vec![WarningJson {
-                code: code.to_string(),
-                message: message.to_string(),
-            }],
-        )
-    }
 }
 
 #[derive(Serialize)]
@@ -110,23 +92,6 @@ pub struct DoogatJson {
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub references: BTreeMap<String, Vec<String>>,
     pub reference_section: String,
-}
-
-impl DoogatJson {
-    /// Construct a minimal empty `DoogatJson` for use in test helpers that
-    /// only assert on the `warnings` field and do not inspect `data`.
-    fn default_empty() -> Self {
-        Self {
-            id: String::new(),
-            title: String::new(),
-            body: String::new(),
-            tags: vec![],
-            doogat_type: None,
-            frontmatter: BTreeMap::new(),
-            references: BTreeMap::new(),
-            reference_section: String::new(),
-        }
-    }
 }
 
 #[derive(Serialize)]

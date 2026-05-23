@@ -2345,6 +2345,47 @@ ddb query "DROP TABLE ig_race_sql CASCADE" | Out-Null
 ddb query "DROP TABLE ig_race_typed CASCADE" | Out-Null
 if ($pgRan) { ddb query "DROP TABLE ig_race_pg CASCADE" | Out-Null }
 
+# 56. REST warnings envelope (PRD 00147 doubt-review follow-up). Pins the
+# AppOutput.warnings surface that ddb-server/src/rest.rs:create_doogat exposes:
+# the response body always carries a `warnings` array (empty when none) and a
+# template-rendered title fires a TITLE_FROM_TEMPLATE entry. Mirrors the bash
+# scenario added at the same time so cross-platform CI exercises the same
+# contract.
+$warnCreate = ddb query "CREATE TABLE ig_warn_demo (note TEXT)"
+if ($warnCreate -notmatch "table ig_warn_demo created") { throw "56: ig_warn_demo create failed: $warnCreate" }
+$warnAlter = ddb query "ALTER TABLE ig_warn_demo SET TITLE TEMPLATE 'auto-warn'"
+if ($warnAlter -notmatch "title template") { throw "56: ig_warn_demo alter failed: $warnAlter" }
+
+# 56.A - caller-supplied title yields warnings: [] (still present, never skipped).
+$warnTitledResp = rest "/doogats" "POST" '{"title":"explicit","type":"ig_warn_demo"}'
+if ($warnTitledResp.StatusCode -ne 201) { throw "56.A: expected 201, got $($warnTitledResp.StatusCode)" }
+$warnTitledObj = (content $warnTitledResp) | ConvertFrom-Json
+if ($warnTitledObj.warnings.Count -ne 0) {
+    throw "56.A: expected warnings: [], got: $($warnTitledObj.warnings | ConvertTo-Json -Compress)"
+}
+pass "56.A: REST POST /doogats with title returns 201 + warnings: []"
+
+# 56.B - omitted title with a title_template typedef yields a TITLE_FROM_TEMPLATE
+# warning entry carrying code + message.
+$warnAutoResp = rest "/doogats" "POST" '{"type":"ig_warn_demo"}'
+if ($warnAutoResp.StatusCode -ne 201) { throw "56.B: expected 201, got $($warnAutoResp.StatusCode)" }
+$warnAutoObj = (content $warnAutoResp) | ConvertFrom-Json
+if ($warnAutoObj.warnings.Count -ne 1) {
+    throw "56.B: expected one warning, got: $($warnAutoObj.warnings | ConvertTo-Json -Compress)"
+}
+if ($warnAutoObj.warnings[0].code -ne "TITLE_FROM_TEMPLATE") {
+    throw "56.B: expected code TITLE_FROM_TEMPLATE, got: $($warnAutoObj.warnings[0].code)"
+}
+if ($warnAutoObj.warnings[0].message -notmatch "title_template") {
+    throw "56.B: expected message to mention 'title_template', got: $($warnAutoObj.warnings[0].message)"
+}
+pass "56.B: REST POST /doogats with omitted title surfaces TITLE_FROM_TEMPLATE warning"
+
+# Cleanup
+rest "/doogats/$($warnTitledObj.data.id)" "DELETE" | Out-Null
+rest "/doogats/$($warnAutoObj.data.id)" "DELETE" | Out-Null
+ddb query "DROP TABLE ig_warn_demo CASCADE" | Out-Null
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"
