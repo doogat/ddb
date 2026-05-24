@@ -327,6 +327,183 @@ mod tests {
         }
     }
 
+    /// Build a minimal multi-step fixture for driver tests.
+    fn fx_multi(steps: Vec<Step>, timeout_ms: u64) -> WorkflowFixture {
+        WorkflowFixture {
+            id: "test".into(),
+            title: "Test".into(),
+            setup: SetupExpectation {
+                auth_mode: AuthMode::None,
+                timeout_ms,
+                setup_steps: vec![],
+            },
+            steps,
+            expected: ExpectedBehavior {
+                value: None,
+                warnings: vec![],
+                error: None,
+            },
+            interfaces: vec![InterfaceId::Cli],
+        }
+    }
+
+    #[test]
+    fn resolves_dollar_zero_id_in_second_step_arg() {
+        // AC1: $0.id in step 1's args is replaced with the id returned by step 0.
+        // A wrong implementation that ignores refs would pass "$0.id" literally to
+        // ddb read, which is not a 14-digit id, so ddb would return an error instead
+        // of Ok. That distinguishes a correct implementation from a no-op one.
+        let driver = CliDriver::new();
+        let fixture = fx_multi(
+            vec![
+                Step {
+                    op: StepOp::CreateDoogat,
+                    args: serde_json::json!({"title": "T8 test"}),
+                },
+                Step {
+                    op: StepOp::ReadDoogat,
+                    args: serde_json::json!({"id": "$0.id"}),
+                },
+            ],
+            30_000,
+        );
+        let results = driver.run_workflow(&fixture);
+        assert_eq!(results.len(), 2, "expected 2 results, got {}", results.len());
+
+        // step 0: create must succeed and return a 14-digit id
+        let created_id = match &results[0] {
+            ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => {
+                assert_eq!(
+                    id.len(), 14,
+                    "step 0: expected 14-digit id, got {} chars: {id}", id.len()
+                );
+                assert!(
+                    id.chars().all(|c| c.is_ascii_digit()),
+                    "step 0: expected all-digit id, got: {id}"
+                );
+                id.clone()
+            }
+            other => panic!("step 0: expected Ok(String(id)), got: {other:?}"),
+        };
+
+        // step 1: read must succeed and its output must reference the created doogat
+        match &results[1] {
+            ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+                assert!(
+                    text.contains("T8 test"),
+                    "step 1: expected read output to contain title 'T8 test', got: {text}"
+                );
+                // Confirm the resolved id appears in the output, ruling out an
+                // implementation that passes a different id.
+                assert!(
+                    text.contains(&created_id),
+                    "step 1: expected output to reference created id {created_id}, got: {text}"
+                );
+            }
+            other => panic!("step 1: expected Ok(String(text)), got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unresolvable_ref_passes_literal_and_causes_err() {
+        // AC2: $99.id refers to step 99 which does not exist. The literal string
+        // "$99.id" must be passed unchanged to ddb read, which rejects it as an
+        // invalid id (non-zero exit). A wrong implementation that silently swallows
+        // the unresolvable ref and passes an empty string would also produce Err,
+        // but step 0 returning Ok still confirms the workflow itself ran correctly.
+        let driver = CliDriver::new();
+        let fixture = fx_multi(
+            vec![
+                Step {
+                    op: StepOp::CreateDoogat,
+                    args: serde_json::json!({"title": "T8 unresolvable"}),
+                },
+                Step {
+                    op: StepOp::ReadDoogat,
+                    args: serde_json::json!({"id": "$99.id"}),
+                },
+            ],
+            30_000,
+        );
+        let results = driver.run_workflow(&fixture);
+        assert_eq!(results.len(), 2, "expected 2 results, got {}", results.len());
+
+        // step 0 must succeed - the workflow itself is sound
+        match &results[0] {
+            ConformanceResult::Ok { .. } => {}
+            other => panic!("step 0: expected Ok, got: {other:?}"),
+        }
+
+        // step 1 must fail because "$99.id" is not a valid doogat id
+        match &results[1] {
+            ConformanceResult::Err(ConformanceError { code, .. }) => {
+                assert_eq!(code, "CLI_ERROR", "step 1: expected CLI_ERROR, got: {code}");
+            }
+            other => panic!("step 1: expected Err(ConformanceError), got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn three_step_workflow_resolves_step_zero_id_in_step_two() {
+        // AC3: prior-result tracking accumulates correctly across 3 steps.
+        // step 0: create, step 1: list (no refs, intermediate), step 2: read $0.id.
+        // A wrong implementation that only tracks the immediately preceding result
+        // would resolve $0.id as step 1's list output (a non-id string), causing
+        // step 2 to fail. Correct tracking keeps ALL prior results indexed by step.
+        let driver = CliDriver::new();
+        let fixture = fx_multi(
+            vec![
+                Step {
+                    op: StepOp::CreateDoogat,
+                    args: serde_json::json!({"title": "T8 three step"}),
+                },
+                Step {
+                    op: StepOp::ListDoogats,
+                    args: serde_json::json!({}),
+                },
+                Step {
+                    op: StepOp::ReadDoogat,
+                    args: serde_json::json!({"id": "$0.id"}),
+                },
+            ],
+            30_000,
+        );
+        let results = driver.run_workflow(&fixture);
+        assert_eq!(results.len(), 3, "expected 3 results, got {}", results.len());
+
+        // step 0: create must return a 14-digit id
+        match &results[0] {
+            ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => {
+                assert_eq!(
+                    id.len(), 14,
+                    "step 0: expected 14-digit id, got {} chars: {id}", id.len()
+                );
+                assert!(
+                    id.chars().all(|c| c.is_ascii_digit()),
+                    "step 0: expected all-digit id, got: {id}"
+                );
+            }
+            other => panic!("step 0: expected Ok(String(id)), got: {other:?}"),
+        }
+
+        // step 1: list must return Ok with some string output
+        match &results[1] {
+            ConformanceResult::Ok { value: ConformanceValue::String(_), .. } => {}
+            other => panic!("step 1: expected Ok(String(...)), got: {other:?}"),
+        }
+
+        // step 2: read via $0.id must succeed and contain the original title
+        match &results[2] {
+            ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+                assert!(
+                    text.contains("T8 three step"),
+                    "step 2: expected read output to contain 'T8 three step', got: {text}"
+                );
+            }
+            other => panic!("step 2: expected Ok(String(text)), got: {other:?}"),
+        }
+    }
+
     // TODO: Ivan — if this test is flaky on very fast machines, mark `#[ignore]`
     // and document the timing assumption. 1ms is intentionally tight so that
     // even a no-op `ddb list` against a fresh repo cannot complete in time.
