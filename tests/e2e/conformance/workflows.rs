@@ -3,7 +3,31 @@ use super::fixture::{
 };
 
 pub fn crud_baseline() -> WorkflowFixture {
-    todo!()
+    WorkflowFixture {
+        id: "crud_baseline".into(),
+        title: "CRUD baseline".into(),
+        setup: SetupExpectation {
+            auth_mode: AuthMode::None,
+            timeout_ms: 30_000,
+            setup_steps: vec![],
+        },
+        steps: vec![
+            Step {
+                op: StepOp::CreateDoogat,
+                args: serde_json::json!({"title": "Test doogat"}),
+            },
+            Step {
+                op: StepOp::ListDoogats,
+                args: serde_json::json!({}),
+            },
+        ],
+        expected: ExpectedBehavior {
+            value: None,
+            warnings: vec![],
+            error: None,
+        },
+        interfaces: vec![InterfaceId::Cli, InterfaceId::Graphql],
+    }
 }
 
 #[cfg(test)]
