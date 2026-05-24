@@ -37,6 +37,13 @@ impl GraphqlDriver {
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
+                if id.is_empty() {
+                    return ConformanceResult::Err(ConformanceError {
+                        code: "GRAPHQL_ERROR".into(),
+                        message: "createDoogat returned no id".into(),
+                        context: serde_json::Map::new(),
+                    });
+                }
                 ConformanceResult::Ok {
                     value: ConformanceValue::String(id),
                     warnings: vec![],
