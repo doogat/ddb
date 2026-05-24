@@ -3,8 +3,36 @@
 
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue, ConformanceWarning};
 
-pub fn resolve_refs(_args: &serde_json::Value, _prior: &[ConformanceResult]) -> serde_json::Value {
-    unimplemented!("Ivan implements this")
+pub fn resolve_refs(args: &serde_json::Value, prior: &[ConformanceResult]) -> serde_json::Value {
+    match args {
+        serde_json::Value::String(s) => {
+            if let Some(idx) = parse_ref(s) {
+                if let Some(ConformanceResult::Ok { value: ConformanceValue::String(id), .. }) =
+                    prior.get(idx)
+                {
+                    return serde_json::Value::String(id.clone());
+                }
+            }
+            args.clone()
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(|v| resolve_refs(v, prior)).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let resolved: serde_json::Map<String, serde_json::Value> =
+                map.iter().map(|(k, v)| (k.clone(), resolve_refs(v, prior))).collect();
+            serde_json::Value::Object(resolved)
+        }
+        _ => args.clone(),
+    }
+}
+
+fn parse_ref(s: &str) -> Option<usize> {
+    let inner = s.strip_prefix('$')?.strip_suffix(".id")?;
+    if inner.is_empty() {
+        return None;
+    }
+    inner.parse::<usize>().ok()
 }
 
 #[cfg(test)]
