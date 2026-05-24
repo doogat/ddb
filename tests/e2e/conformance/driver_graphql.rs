@@ -1,3 +1,176 @@
+use super::super::common::{DdbTestRepo, ServerGuard};
+use super::fixture::{Step, StepOp, WorkflowFixture};
+use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
+
+pub struct GraphqlDriver {
+    _repo: DdbTestRepo,
+    server: ServerGuard,
+}
+
+impl GraphqlDriver {
+    pub fn new() -> Self {
+        let repo = DdbTestRepo::init();
+        let server = ServerGuard::start(&repo);
+        Self { _repo: repo, server }
+    }
+
+    pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
+        fixture.steps.iter().map(|step| self.run_step(step)).collect()
+    }
+
+    fn run_step(&self, step: &Step) -> ConformanceResult {
+        match step.op {
+            StepOp::CreateDoogat => {
+                let title = match require_string(&step.args, "title") {
+                    Ok(v) => v,
+                    Err(field) => return setup_failed_missing(field),
+                };
+                let body = optional_string(&step.args, "body").unwrap_or_default();
+                let result = self.server.graphql_with_vars(
+                    r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title body } }"#,
+                    serde_json::json!({ "input": { "title": title, "content": body } }),
+                );
+                if let Some(errors) = non_empty_errors(&result) {
+                    return graphql_err(&errors[0]);
+                }
+                let id = result["data"]["createDoogat"]["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                ConformanceResult::Ok {
+                    value: ConformanceValue::String(id),
+                    warnings: vec![],
+                }
+            }
+            StepOp::ReadDoogat => {
+                let id = match require_string(&step.args, "id") {
+                    Ok(v) => v,
+                    Err(field) => return setup_failed_missing(field),
+                };
+                let result = self.server.graphql(&format!(
+                    r#"{{ doogat(id: "{id}") {{ id title body tags }} }}"#
+                ));
+                if let Some(errors) = non_empty_errors(&result) {
+                    return graphql_err(&errors[0]);
+                }
+                let doogat = &result["data"]["doogat"];
+                let text = serde_json::to_string(doogat).unwrap_or_default();
+                ConformanceResult::Ok {
+                    value: ConformanceValue::String(text),
+                    warnings: vec![],
+                }
+            }
+            StepOp::UpdateDoogat => {
+                let id = match require_string(&step.args, "id") {
+                    Ok(v) => v,
+                    Err(field) => return setup_failed_missing(field),
+                };
+                let title = match require_string(&step.args, "title") {
+                    Ok(v) => v,
+                    Err(field) => return setup_failed_missing(field),
+                };
+                let result = self.server.graphql_with_vars(
+                    r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id title } }"#,
+                    serde_json::json!({ "input": { "id": id, "title": title } }),
+                );
+                if let Some(errors) = non_empty_errors(&result) {
+                    return graphql_err(&errors[0]);
+                }
+                ConformanceResult::Ok {
+                    value: ConformanceValue::Null,
+                    warnings: vec![],
+                }
+            }
+            StepOp::DeleteDoogat => {
+                let id = match require_string(&step.args, "id") {
+                    Ok(v) => v,
+                    Err(field) => return setup_failed_missing(field),
+                };
+                let result = self.server.graphql(&format!(
+                    r#"mutation {{ deleteDoogat(id: "{id}") }}"#
+                ));
+                if let Some(errors) = non_empty_errors(&result) {
+                    return graphql_err(&errors[0]);
+                }
+                ConformanceResult::Ok {
+                    value: ConformanceValue::Null,
+                    warnings: vec![],
+                }
+            }
+            StepOp::ListDoogats => {
+                let result = self.server.graphql(r#"{ doogats { id title } }"#);
+                if let Some(errors) = non_empty_errors(&result) {
+                    return graphql_err(&errors[0]);
+                }
+                let array = &result["data"]["doogats"];
+                let text = serde_json::to_string(array).unwrap_or_default();
+                ConformanceResult::Ok {
+                    value: ConformanceValue::String(text),
+                    warnings: vec![],
+                }
+            }
+            StepOp::Search => {
+                let query = match require_string(&step.args, "query") {
+                    Ok(v) => v,
+                    Err(field) => return setup_failed_missing(field),
+                };
+                let result = self.server.graphql(&format!(
+                    r#"{{ search(query: "{query}") {{ hits {{ id title }} totalCount }} }}"#
+                ));
+                if let Some(errors) = non_empty_errors(&result) {
+                    return graphql_err(&errors[0]);
+                }
+                let hits = &result["data"]["search"]["hits"];
+                let text = serde_json::to_string(hits).unwrap_or_default();
+                ConformanceResult::Ok {
+                    value: ConformanceValue::String(text),
+                    warnings: vec![],
+                }
+            }
+        }
+    }
+}
+
+impl Default for GraphqlDriver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn require_string(args: &serde_json::Value, name: &'static str) -> Result<String, &'static str> {
+    args.get(name)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or(name)
+}
+
+fn optional_string(args: &serde_json::Value, name: &str) -> Option<String> {
+    args.get(name).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+fn setup_failed_missing(field: &str) -> ConformanceResult {
+    ConformanceResult::SetupFailed {
+        reason: format!("missing arg: {field}"),
+    }
+}
+
+fn non_empty_errors(result: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    result.get("errors").and_then(|e| e.as_array()).filter(|arr| !arr.is_empty())
+}
+
+fn graphql_err(error: &serde_json::Value) -> ConformanceResult {
+    let code = error["extensions"]["code"]
+        .as_str()
+        .unwrap_or("GRAPHQL_ERROR")
+        .to_string();
+    let message = error["message"].as_str().unwrap_or_default().to_string();
+    let context = error["extensions"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    ConformanceResult::Err(ConformanceError { code, message, context })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::fixture::{

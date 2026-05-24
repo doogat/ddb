@@ -18,6 +18,7 @@ pub enum ConformanceValue {
     Null,
     Bool(bool),
     Int(i64),
+    #[expect(dead_code, reason = "reserved for future drivers")]
     Float(f64),
     String(String),
     Array(Vec<ConformanceValue>),
