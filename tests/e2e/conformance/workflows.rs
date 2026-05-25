@@ -102,4 +102,71 @@ mod tests {
         let fixture = crud_baseline();
         assert!(fixture.expected.warnings.is_empty());
     }
+
+    #[test]
+    fn returns_validation_error_id() {
+        let fixture = validation_error();
+        assert_eq!(fixture.id, "validation_error");
+    }
+
+    #[test]
+    fn validation_error_title_is_non_empty() {
+        let fixture = validation_error();
+        assert!(!fixture.title.is_empty());
+    }
+
+    #[test]
+    fn validation_error_includes_cli_interface() {
+        let fixture = validation_error();
+        assert!(fixture.interfaces.contains(&InterfaceId::Cli));
+    }
+
+    #[test]
+    fn validation_error_includes_graphql_interface() {
+        let fixture = validation_error();
+        assert!(fixture.interfaces.contains(&InterfaceId::Graphql));
+    }
+
+    #[test]
+    fn validation_error_steps_is_non_empty() {
+        let fixture = validation_error();
+        assert!(!fixture.steps.is_empty());
+    }
+
+    #[test]
+    fn validation_error_steps_contains_create_doogat() {
+        let fixture = validation_error();
+        let has_create = fixture.steps.iter().any(|s| s.op == StepOp::CreateDoogat);
+        assert!(has_create);
+    }
+
+    #[test]
+    fn validation_error_expected_error_is_some() {
+        let fixture = validation_error();
+        assert!(fixture.expected.error.is_some());
+    }
+
+    #[test]
+    fn validation_error_error_code_is_non_empty() {
+        let fixture = validation_error();
+        assert!(!fixture.expected.error.as_ref().unwrap().code.is_empty());
+    }
+
+    #[test]
+    fn validation_error_setup_auth_mode_is_none() {
+        let fixture = validation_error();
+        assert_eq!(fixture.setup.auth_mode, AuthMode::None);
+    }
+
+    #[test]
+    fn validation_error_has_exactly_one_step() {
+        let fixture = validation_error();
+        assert_eq!(fixture.steps.len(), 1);
+    }
+
+    #[test]
+    fn validation_error_interfaces_has_exactly_two() {
+        let fixture = validation_error();
+        assert_eq!(fixture.interfaces.len(), 2);
+    }
 }
