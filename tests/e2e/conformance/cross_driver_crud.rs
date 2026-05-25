@@ -39,10 +39,11 @@ fn crud_baseline_no_step_has_variant_mismatch() {
 }
 
 // ListDoogats output formats diverge: CLI returns "ID | Title" text;
-// GraphQL returns a JSON array. This is a known contract gap documented
-// here as ContentDiff. Strict output equivalence is deferred to a later PRD.
-// Looks up the List step by StepOp rather than positional index so the
-// assertion survives crud_baseline gaining new steps (PRD 00148 cycle-2 F15).
+// GraphQL returns a JSON array. This is a known contract gap classified
+// as ValueMismatch (both Ok, value fields differ). Strict output
+// equivalence is deferred to a later PRD. Looks up the List step by
+// StepOp rather than positional index so the assertion survives
+// crud_baseline gaining new steps (PRD 00148 cycle-2 F15).
 #[test]
 fn crud_baseline_list_doogats_format_diverges_across_cli_and_graphql() {
     let fixture = workflows::crud_baseline();
@@ -55,7 +56,7 @@ fn crud_baseline_list_doogats_format_diverges_across_cli_and_graphql() {
     let diffs = compare_per_step(&cli_results, &graphql_results);
     assert_eq!(
         diffs[list_idx],
-        DiffClass::ContentDiff,
+        DiffClass::ValueMismatch,
         "ListDoogats format gap no longer present — update or remove this test"
     );
 }
