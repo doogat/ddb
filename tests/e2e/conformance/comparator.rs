@@ -1,3 +1,57 @@
+use super::result::ConformanceResult;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffClass {
+    /// ConformanceResult PartialEq holds — results are identical.
+    Match,
+    /// The ConformanceResult enum discriminants differ (e.g., Ok vs Err).
+    VariantMismatch,
+    /// Same enum discriminant but content differs.
+    ContentDiff,
+}
+
+pub fn compare(left: &ConformanceResult, right: &ConformanceResult) -> DiffClass {
+    if left == right {
+        DiffClass::Match
+    } else {
+        // Check if the variants are different
+        match (left, right) {
+            (ConformanceResult::Ok { .. }, ConformanceResult::Err(_))
+            | (ConformanceResult::Ok { .. }, ConformanceResult::Unsupported { .. })
+            | (ConformanceResult::Ok { .. }, ConformanceResult::SetupFailed { .. })
+            | (ConformanceResult::Err(_), ConformanceResult::Ok { .. })
+            | (ConformanceResult::Err(_), ConformanceResult::Unsupported { .. })
+            | (ConformanceResult::Err(_), ConformanceResult::SetupFailed { .. })
+            | (ConformanceResult::Unsupported { .. }, ConformanceResult::Ok { .. })
+            | (ConformanceResult::Unsupported { .. }, ConformanceResult::Err(_))
+            | (ConformanceResult::Unsupported { .. }, ConformanceResult::SetupFailed { .. })
+            | (ConformanceResult::SetupFailed { .. }, ConformanceResult::Ok { .. })
+            | (ConformanceResult::SetupFailed { .. }, ConformanceResult::Err(_))
+            | (ConformanceResult::SetupFailed { .. }, ConformanceResult::Unsupported { .. }) => {
+                DiffClass::VariantMismatch
+            }
+            _ => {
+                // Same variant but different content
+                DiffClass::ContentDiff
+            }
+        }
+    }
+}
+
+pub fn compare_per_step(
+    left: &[ConformanceResult],
+    right: &[ConformanceResult],
+) -> Vec<DiffClass> {
+    let mut result = Vec::new();
+    let min_len = left.len().min(right.len());
+    
+    for i in 0..min_len {
+        result.push(compare(&left[i], &right[i]));
+    }
+    
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
