@@ -67,8 +67,16 @@ impl GraphqlDriver {
                 });
             }
         };
-        response.json().map_err(|e| ConformanceResult::SetupFailed {
-            reason: format!("graphql response not valid json: {e}"),
+        response.json().map_err(|e| {
+            if e.is_timeout() {
+                ConformanceResult::SetupFailed {
+                    reason: format!("graphql request timed out after {}ms", timeout.as_millis()),
+                }
+            } else {
+                ConformanceResult::SetupFailed {
+                    reason: format!("graphql response not valid json: {e}"),
+                }
+            }
         })
     }
 
