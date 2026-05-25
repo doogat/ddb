@@ -14,7 +14,10 @@ impl GraphqlDriver {
     pub fn new() -> Self {
         let repo = DdbTestRepo::init();
         let server = ServerGuard::start(&repo);
-        Self { _repo: repo, server }
+        Self {
+            _repo: repo,
+            server,
+        }
     }
 
     pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
@@ -33,16 +36,41 @@ impl GraphqlDriver {
     /// Post a GraphQL request to the running test server with the given
     /// per-request timeout. Used in place of `ServerGuard::graphql*` so the
     /// driver honors `fixture.setup.timeout_ms` (PRD 00148 cycle-2 F4).
-    fn post_graphql(&self, body: serde_json::Value, timeout: Duration) -> serde_json::Value {
-        reqwest::blocking::Client::new()
+    ///
+    /// Returns `Err(ConformanceResult::SetupFailed { reason })` on transport
+    /// failures: request timeout, connection error, or malformed JSON
+    /// response. Callers propagate the `SetupFailed` directly. This mirrors
+    /// `CliDriver`, which maps `RunError::Timeout` to `SetupFailed` with a
+    /// `"timeout"` reason. GraphQL application errors (HTTP 200 with a
+    /// non-empty `errors` array) flow through the regular `Ok` result and
+    /// are handled by callers via `non_empty_errors` + `graphql_err`.
+    fn post_graphql(
+        &self,
+        body: serde_json::Value,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, ConformanceResult> {
+        let response = match reqwest::blocking::Client::new()
             .post(self.server.url())
             .header("Authorization", format!("Bearer {}", self.server.token))
             .json(&body)
             .timeout(timeout)
             .send()
-            .expect("request failed")
-            .json()
-            .expect("invalid json")
+        {
+            Ok(r) => r,
+            Err(e) if e.is_timeout() => {
+                return Err(ConformanceResult::SetupFailed {
+                    reason: format!("graphql request timed out after {}ms", timeout.as_millis()),
+                });
+            }
+            Err(e) => {
+                return Err(ConformanceResult::SetupFailed {
+                    reason: format!("graphql request failed: {e}"),
+                });
+            }
+        };
+        response.json().map_err(|e| ConformanceResult::SetupFailed {
+            reason: format!("graphql response not valid json: {e}"),
+        })
     }
 
     fn run_step(&self, step: &Step, timeout: Duration) -> ConformanceResult {
@@ -62,13 +90,16 @@ impl GraphqlDriver {
             Err(field) => return setup_failed_missing(field),
         };
         let body = optional_string(args, "body").unwrap_or_default();
-        let result = self.post_graphql(
+        let result = match self.post_graphql(
             serde_json::json!({
                 "query": r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title body } }"#,
                 "variables": { "input": { "title": title, "content": body } },
             }),
             timeout,
-        );
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
@@ -94,13 +125,16 @@ impl GraphqlDriver {
             Ok(v) => v,
             Err(field) => return setup_failed_missing(field),
         };
-        let result = self.post_graphql(
+        let result = match self.post_graphql(
             serde_json::json!({
                 "query": r#"query($id: ID!) { doogat(id: $id) { id title body tags } }"#,
                 "variables": { "id": id },
             }),
             timeout,
-        );
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
@@ -121,13 +155,16 @@ impl GraphqlDriver {
             Ok(v) => v,
             Err(field) => return setup_failed_missing(field),
         };
-        let result = self.post_graphql(
+        let result = match self.post_graphql(
             serde_json::json!({
                 "query": r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id title } }"#,
                 "variables": { "input": { "id": id, "title": title } },
             }),
             timeout,
-        );
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
@@ -142,13 +179,16 @@ impl GraphqlDriver {
             Ok(v) => v,
             Err(field) => return setup_failed_missing(field),
         };
-        let result = self.post_graphql(
+        let result = match self.post_graphql(
             serde_json::json!({
                 "query": r#"mutation($id: ID!) { deleteDoogat(id: $id) }"#,
                 "variables": { "id": id },
             }),
             timeout,
-        );
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
@@ -159,10 +199,13 @@ impl GraphqlDriver {
     }
 
     fn run_list(&self, timeout: Duration) -> ConformanceResult {
-        let result = self.post_graphql(
+        let result = match self.post_graphql(
             serde_json::json!({"query": r#"{ doogats { id title } }"#}),
             timeout,
-        );
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
@@ -179,13 +222,16 @@ impl GraphqlDriver {
             Ok(v) => v,
             Err(field) => return setup_failed_missing(field),
         };
-        let result = self.post_graphql(
+        let result = match self.post_graphql(
             serde_json::json!({
                 "query": r#"query($q: String!) { search(query: $q) { hits { id title } totalCount } }"#,
                 "variables": { "q": query },
             }),
             timeout,
-        );
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
@@ -211,7 +257,10 @@ fn setup_failed_missing(field: &str) -> ConformanceResult {
 }
 
 fn non_empty_errors(result: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
-    result.get("errors").and_then(|e| e.as_array()).filter(|arr| !arr.is_empty())
+    result
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .filter(|arr| !arr.is_empty())
 }
 
 fn graphql_err(error: &serde_json::Value) -> ConformanceResult {
@@ -220,9 +269,10 @@ fn graphql_err(error: &serde_json::Value) -> ConformanceResult {
         .unwrap_or("GRAPHQL_ERROR")
         .to_string();
     let message = error["message"].as_str().unwrap_or_default().to_string();
-    let context = error["extensions"]
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    ConformanceResult::Err(ConformanceError { code, message, context })
+    let context = error["extensions"].as_object().cloned().unwrap_or_default();
+    ConformanceResult::Err(ConformanceError {
+        code,
+        message,
+        context,
+    })
 }
