@@ -15,7 +15,16 @@ impl GraphqlDriver {
     }
 
     pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
-        fixture.steps.iter().map(|step| self.run_step(step)).collect()
+        let mut results: Vec<ConformanceResult> = Vec::new();
+        for step in &fixture.steps {
+            let resolved_args = super::step_refs::resolve_refs(&step.args, &results);
+            let resolved_step = Step {
+                args: resolved_args,
+                op: step.op,
+            };
+            results.push(self.run_step(&resolved_step));
+        }
+        results
     }
 
     fn run_step(&self, step: &Step) -> ConformanceResult {
