@@ -1,4 +1,15 @@
+use super::fixture::Step;
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue, ConformanceWarning};
+
+/// Resolve a single step's args against the prior results and return a new
+/// `Step` with the same op and substituted args. Used identically by both
+/// drivers' `run_workflow` loops — kept here to avoid duplication.
+pub fn resolve_step(step: &Step, prior: &[ConformanceResult]) -> Step {
+    Step {
+        op: step.op,
+        args: resolve_refs(&step.args, prior),
+    }
+}
 
 pub fn resolve_refs(args: &serde_json::Value, prior: &[ConformanceResult]) -> serde_json::Value {
     match args {

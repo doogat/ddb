@@ -5,6 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::super::common::{ddb_bin, DdbTestRepo};
+use super::args::{optional_string, require_string};
 use super::fixture::{Step, StepOp, WorkflowFixture};
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
 
@@ -26,11 +27,7 @@ impl CliDriver {
         let timeout = Duration::from_millis(fixture.setup.timeout_ms);
         let mut results: Vec<ConformanceResult> = Vec::new();
         for step in &fixture.steps {
-            let resolved_args = super::step_refs::resolve_refs(&step.args, &results);
-            let resolved_step = Step {
-                args: resolved_args,
-                op: step.op,
-            };
+            let resolved_step = super::step_refs::resolve_step(step, &results);
             results.push(self.run_step(&resolved_step, timeout));
         }
         results
@@ -124,17 +121,6 @@ fn build_args(step: &Step) -> Result<Vec<String>, &'static str> {
             Ok(vec!["search".into(), query])
         }
     }
-}
-
-fn require_string(args: &serde_json::Value, name: &'static str) -> Result<String, &'static str> {
-    args.get(name)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or(name)
-}
-
-fn optional_string(args: &serde_json::Value, name: &str) -> Option<String> {
-    args.get(name).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
 enum RunError {
