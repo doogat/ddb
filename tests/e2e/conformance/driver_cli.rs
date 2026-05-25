@@ -119,7 +119,7 @@ fn build_args(step: &Step) -> Result<Vec<String>, &'static str> {
             let id = require_string(&step.args, "id")?;
             Ok(vec!["delete".into(), id])
         }
-        StepOp::ListDoogats => Ok(vec!["status".into()]),
+        StepOp::ListDoogats => Ok(vec!["query".into(), "SELECT id, title FROM doogats".into()]),
         StepOp::Search => {
             let query = require_string(&step.args, "query")?;
             Ok(vec!["search".into(), query])
