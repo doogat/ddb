@@ -1,6 +1,35 @@
 use super::fixture::{
     AuthMode, ExpectedBehavior, InterfaceId, SetupExpectation, Step, StepOp, WorkflowFixture,
 };
+use super::result::ConformanceError;
+
+pub fn validation_error() -> WorkflowFixture {
+    WorkflowFixture {
+        id: "validation_error".into(),
+        title: "Validation error scenario".into(),
+        setup: SetupExpectation {
+            auth_mode: AuthMode::None,
+            timeout_ms: 30_000,
+            setup_steps: vec![],
+        },
+        steps: vec![
+            Step {
+                op: StepOp::CreateDoogat,
+                args: serde_json::json!({"title": ""}),
+            },
+        ],
+        expected: ExpectedBehavior {
+            value: None,
+            warnings: vec![],
+            error: Some(ConformanceError {
+                code: "VALIDATION_ERROR".into(),
+                message: "Title cannot be empty".into(),
+                context: serde_json::Map::new(),
+            }),
+        },
+        interfaces: vec![InterfaceId::Cli, InterfaceId::Graphql],
+    }
+}
 
 pub fn crud_baseline() -> WorkflowFixture {
     WorkflowFixture {
