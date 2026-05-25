@@ -2,7 +2,7 @@
 
 The conformance harness proves that interfaces described as equivalent behave identically from a downstream developer's perspective. It runs the same golden workflows against multiple interfaces and classifies any differences using a structured result model.
 
-This is the proof layer for PRD 00143: an equivalence claim is only valid if the same workflow passes against every interface listed in the promise matrix.
+This is the proof layer for the PRD 00143 application contract: an equivalence claim is only valid if the same workflow passes against every interface listed in the promise matrix.
 
 ## Module structure
 
@@ -26,8 +26,8 @@ A `WorkflowFixture` declares what a workflow does and what it expects:
 
 ```rust
 WorkflowFixture {
-    id: "crud_baseline",          // stable identifier
-    title: "CRUD baseline",       // human-readable name
+    id: "crud_baseline".into(),
+    title: "CRUD baseline".into(),
     setup: SetupExpectation {
         auth_mode: AuthMode::None,
         timeout_ms: 30_000,
@@ -46,7 +46,7 @@ WorkflowFixture {
 }
 ```
 
-`AuthMode` variants: `None`, `Token { env_var }`, `Embedded`.
+`AuthMode` variants: `None`, `Token { env_var: String }`, `Embedded`.
 
 `StepOp` variants: `CreateDoogat`, `ReadDoogat`, `UpdateDoogat`, `DeleteDoogat`, `ListDoogats`, `Search`.
 
@@ -54,7 +54,7 @@ WorkflowFixture {
 
 Steps can reference the string output of an earlier step using `$N.id` syntax. For example, `args: json!({"id": "$0.id"})` in step 1 is resolved to the id string returned by step 0's `Ok` result. This lets multi-step workflows chain operations (create then read) without hardcoded ids.
 
-References to non-existent or non-Ok steps pass through as literal strings, which causes the downstream operation to fail with an application error rather than silently succeeding.
+References to non-existent or non-Ok steps pass through as literal strings, so id-consuming operations surface the unresolved value through the driver instead of the resolver inventing one.
 
 ## Result model and comparison
 
@@ -63,7 +63,7 @@ Each step produces a `ConformanceResult`:
 | Variant | Meaning |
 |---------|---------|
 | `Ok { value, warnings }` | Step succeeded; value is the normalized output |
-| `Err(code, message, context)` | Step failed with an application error |
+| `Err(ConformanceError)` | Step failed with an application error |
 | `Unsupported { reason }` | Driver does not implement this operation |
 | `SetupFailed { reason }` | Driver could not execute the step (timeout, binary missing, missing arg) |
 
@@ -93,7 +93,7 @@ cargo build -p ddb-cli
 cargo test -p ddb-e2e conformance
 ```
 
-The GraphQL driver starts `ddb serve` internally and connects on a random port. No external server is required.
+The GraphQL driver starts `ddb serve` internally and connects on an available local port. No external server is required.
 
 Tests run with `AuthMode::None`; no environment variables need to be set for the current workflows.
 
@@ -103,13 +103,13 @@ Tests run with `AuthMode::None`; no environment variables need to be set for the
 
 **`ContentDiff`** — same outcome type but different content. This is expected for known format differences (e.g., CLI returns plain text where GraphQL returns JSON). The cross-driver tests assert only on `VariantMismatch` for gaps not covered by the current promise matrix.
 
-**`SetupFailed`** — the driver could not execute the step. Common causes: `ddb` binary not built (`cargo build -p ddb-cli`), GraphQL server failed to start, or a step's `$N.id` reference could not be resolved.
+**`SetupFailed`** — the driver could not execute the step. Common causes: `ddb` binary not built (`cargo build -p ddb-cli`), GraphQL server failed to start, timeout, or missing fixture arguments.
 
-**`Unsupported`** — the driver does not implement the requested `StepOp`. Add a `ConformanceResult::Unsupported` return in the driver's step dispatcher.
+**`Unsupported`** — the driver does not implement the requested `StepOp`. New drivers that cannot support an operation should return `ConformanceResult::Unsupported`.
 
 ## Adding a workflow
 
 1. Define the fixture in `workflows.rs` as a `pub fn` returning `WorkflowFixture`.
-2. Add cross-driver tests in a new `cross_driver_<name>.rs` file. Pair each fixture step with `validation_error_result_count_matches_step_count`-style count assertions and a `no_step_has_variant_mismatch` assertion.
+2. Add cross-driver tests in a new `cross_driver_<name>.rs` file. Assert each driver returns one result per fixture step and no step has a `VariantMismatch`.
 3. Register the new module in `mod.rs`.
 4. Do not assert `ContentDiff` vs `Match` for fields where the promise matrix does not say `Guaranteed` — this hides legitimate transport-format differences behind fragile equality checks.
