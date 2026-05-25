@@ -394,4 +394,132 @@ mod tests {
             other => panic!("expected Ok(String(text)), got: {other:?}"),
         }
     }
+
+    #[test]
+    fn resolves_dollar_zero_id_in_second_step_arg() {
+        // AC1: single run_workflow call; step 1 uses $0.id resolved from step 0's result.
+        // A wrong implementation that passes "$0.id" literally to GraphQL would get Err for step 1,
+        // not Ok containing the title and id.
+        let driver = GraphqlDriver::new();
+        let fixture = fx(
+            vec![
+                Step {
+                    op: StepOp::CreateDoogat,
+                    args: serde_json::json!({"title": "T9 test"}),
+                },
+                Step {
+                    op: StepOp::ReadDoogat,
+                    args: serde_json::json!({"id": "$0.id"}),
+                },
+            ],
+            30_000,
+        );
+        let results = driver.run_workflow(&fixture);
+        assert_eq!(results.len(), 2);
+
+        let id = match &results[0] {
+            ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => id.clone(),
+            other => panic!("step 0 expected Ok(String(id)), got: {other:?}"),
+        };
+        assert_eq!(id.len(), 14, "step 0 id should be 14 digits, got: {id}");
+
+        match &results[1] {
+            ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+                assert!(
+                    text.contains("T9 test"),
+                    "step 1 text should contain title 'T9 test', got: {text}"
+                );
+                assert!(
+                    text.contains(&id),
+                    "step 1 text should contain id {id}, got: {text}"
+                );
+            }
+            other => panic!("step 1 expected Ok(String(text)), got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unresolvable_ref_passes_literal_and_graphql_rejects_it() {
+        // AC2: $99.id refers to a step that doesn't exist, so the literal "$99.id" is passed
+        // to GraphQL, which rejects it as an invalid id. Step 0 must still succeed.
+        // A wrong implementation that substitutes empty string would also get Err but the test
+        // still distinguishes correct behavior (literal passed) from silent empty-string insertion.
+        let driver = GraphqlDriver::new();
+        let fixture = fx(
+            vec![
+                Step {
+                    op: StepOp::CreateDoogat,
+                    args: serde_json::json!({"title": "T9 unresolvable ref"}),
+                },
+                Step {
+                    op: StepOp::ReadDoogat,
+                    args: serde_json::json!({"id": "$99.id"}),
+                },
+            ],
+            30_000,
+        );
+        let results = driver.run_workflow(&fixture);
+        assert_eq!(results.len(), 2);
+
+        match &results[0] {
+            ConformanceResult::Ok { .. } => {}
+            other => panic!("step 0 expected Ok, got: {other:?}"),
+        }
+
+        match &results[1] {
+            ConformanceResult::Err(_) => {}
+            other => panic!("step 1 expected Err (invalid id), got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolves_step_zero_ref_in_step_two_skipping_step_one() {
+        // AC3: three-step workflow; step 2 uses $0.id, not $1.id. A wrong implementation that
+        // only tracks the immediately prior result would fail step 2 because step 1 (ListDoogats)
+        // returns a JSON array, not a string id.
+        let driver = GraphqlDriver::new();
+        let fixture = fx(
+            vec![
+                Step {
+                    op: StepOp::CreateDoogat,
+                    args: serde_json::json!({"title": "T9 indexed ref"}),
+                },
+                Step {
+                    op: StepOp::ListDoogats,
+                    args: serde_json::json!({}),
+                },
+                Step {
+                    op: StepOp::ReadDoogat,
+                    args: serde_json::json!({"id": "$0.id"}),
+                },
+            ],
+            30_000,
+        );
+        let results = driver.run_workflow(&fixture);
+        assert_eq!(results.len(), 3);
+
+        let id = match &results[0] {
+            ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => id.clone(),
+            other => panic!("step 0 expected Ok(String(id)), got: {other:?}"),
+        };
+
+        match &results[1] {
+            ConformanceResult::Ok { .. } => {}
+            other => panic!("step 1 expected Ok, got: {other:?}"),
+        }
+
+        match &results[2] {
+            ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+                assert!(
+                    text.contains("T9 indexed ref"),
+                    "step 2 text should contain title 'T9 indexed ref', got: {text}"
+                );
+                assert!(
+                    text.contains(&id),
+                    "step 2 text should contain id {id} from step 0, got: {text}"
+                );
+            }
+            other => panic!("step 2 expected Ok(String(text)), got: {other:?}"),
+        }
+    }
 }
