@@ -318,6 +318,16 @@ impl ServerGuard {
     }
 }
 
+impl ServerGuard {
+    /// Kill the child server process. After this returns, the port stops
+    /// accepting connections. Used by conformance tests that need to
+    /// verify transport-error handling in clients.
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 impl Drop for ServerGuard {
     fn drop(&mut self) {
         let _ = self.child.kill();

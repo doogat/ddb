@@ -20,6 +20,14 @@ impl GraphqlDriver {
         }
     }
 
+    /// Test-only: kill the underlying server so subsequent `run_workflow`
+    /// calls hit transport errors and return `ConformanceResult::SetupFailed`.
+    /// Used to verify the transport-error mapping in `post_graphql`.
+    pub fn kill_server_for_test(&mut self) {
+        self.server.kill();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
     pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
         if let Some(failure) = super::setup::check_setup_supported(&fixture.setup) {
             return vec![failure; fixture.steps.len()];

@@ -46,6 +46,41 @@ fn missing_required_arg_returns_setup_failed() {
     }
 }
 
+/// Transport-level failure (server unreachable) must surface as
+/// `SetupFailed` with a `reason` that names the transport error class,
+/// not panic and not return `Ok` or `Err`. Mirrors `CliDriver`'s
+/// `RunError::Timeout -> SetupFailed` contract and covers the
+/// `post_graphql` `.send()` arm added in c4b9d4e plus the `.json()`
+/// timeout arm added in b9699dd (PRD 00148 C3-F1/F2).
+#[test]
+fn transport_error_returns_setup_failed() {
+    let mut driver = GraphqlDriver::new();
+    driver.kill_server_for_test();
+    let fixture = fx(
+        vec![Step {
+            op: StepOp::ListDoogats,
+            args: serde_json::json!({}),
+        }],
+        5_000,
+    );
+    let results = driver.run_workflow(&fixture);
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        ConformanceResult::SetupFailed { reason } => {
+            let expected_prefixes = [
+                "graphql request failed",
+                "graphql request timed out",
+                "graphql response not valid json",
+            ];
+            assert!(
+                expected_prefixes.iter().any(|p| reason.starts_with(p)),
+                "expected transport-error reason prefix, got: {reason}"
+            );
+        }
+        other => panic!("expected SetupFailed, got: {other:?}"),
+    }
+}
+
 #[test]
 fn create_returns_id_in_value() {
     let driver = GraphqlDriver::new();
