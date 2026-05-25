@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::super::common::{DdbTestRepo, ServerGuard};
 use super::fixture::{Step, StepOp, WorkflowFixture};
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
@@ -15,6 +17,10 @@ impl GraphqlDriver {
     }
 
     pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
+        if let Some(failure) = super::setup::check_setup_supported(&fixture.setup) {
+            return vec![failure; fixture.steps.len()];
+        }
+        let timeout = Duration::from_millis(fixture.setup.timeout_ms);
         let mut results: Vec<ConformanceResult> = Vec::new();
         for step in &fixture.steps {
             let resolved_args = super::step_refs::resolve_refs(&step.args, &results);
@@ -22,12 +28,27 @@ impl GraphqlDriver {
                 args: resolved_args,
                 op: step.op,
             };
-            results.push(self.run_step(&resolved_step));
+            results.push(self.run_step(&resolved_step, timeout));
         }
         results
     }
 
-    fn run_step(&self, step: &Step) -> ConformanceResult {
+    /// Post a GraphQL request to the running test server with the given
+    /// per-request timeout. Used in place of `ServerGuard::graphql*` so the
+    /// driver honors `fixture.setup.timeout_ms` (PRD 00148 cycle-2 F4).
+    fn post_graphql(&self, body: serde_json::Value, timeout: Duration) -> serde_json::Value {
+        reqwest::blocking::Client::new()
+            .post(self.server.url())
+            .header("Authorization", format!("Bearer {}", self.server.token))
+            .json(&body)
+            .timeout(timeout)
+            .send()
+            .expect("request failed")
+            .json()
+            .expect("invalid json")
+    }
+
+    fn run_step(&self, step: &Step, timeout: Duration) -> ConformanceResult {
         match step.op {
             StepOp::CreateDoogat => {
                 let title = match require_string(&step.args, "title") {
@@ -35,9 +56,12 @@ impl GraphqlDriver {
                     Err(field) => return setup_failed_missing(field),
                 };
                 let body = optional_string(&step.args, "body").unwrap_or_default();
-                let result = self.server.graphql_with_vars(
-                    r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title body } }"#,
-                    serde_json::json!({ "input": { "title": title, "content": body } }),
+                let result = self.post_graphql(
+                    serde_json::json!({
+                        "query": r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title body } }"#,
+                        "variables": { "input": { "title": title, "content": body } },
+                    }),
+                    timeout,
                 );
                 if let Some(errors) = non_empty_errors(&result) {
                     return graphql_err(&errors[0]);
@@ -63,9 +87,14 @@ impl GraphqlDriver {
                     Ok(v) => v,
                     Err(field) => return setup_failed_missing(field),
                 };
-                let result = self.server.graphql(&format!(
-                    r#"{{ doogat(id: "{id}") {{ id title body tags }} }}"#
-                ));
+                let result = self.post_graphql(
+                    serde_json::json!({
+                        "query": &format!(
+                            r#"{{ doogat(id: "{id}") {{ id title body tags }} }}"#
+                        ),
+                    }),
+                    timeout,
+                );
                 if let Some(errors) = non_empty_errors(&result) {
                     return graphql_err(&errors[0]);
                 }
@@ -85,9 +114,12 @@ impl GraphqlDriver {
                     Ok(v) => v,
                     Err(field) => return setup_failed_missing(field),
                 };
-                let result = self.server.graphql_with_vars(
-                    r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id title } }"#,
-                    serde_json::json!({ "input": { "id": id, "title": title } }),
+                let result = self.post_graphql(
+                    serde_json::json!({
+                        "query": r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id title } }"#,
+                        "variables": { "input": { "id": id, "title": title } },
+                    }),
+                    timeout,
                 );
                 if let Some(errors) = non_empty_errors(&result) {
                     return graphql_err(&errors[0]);
@@ -102,9 +134,12 @@ impl GraphqlDriver {
                     Ok(v) => v,
                     Err(field) => return setup_failed_missing(field),
                 };
-                let result = self.server.graphql(&format!(
-                    r#"mutation {{ deleteDoogat(id: "{id}") }}"#
-                ));
+                let result = self.post_graphql(
+                    serde_json::json!({
+                        "query": &format!(r#"mutation {{ deleteDoogat(id: "{id}") }}"#),
+                    }),
+                    timeout,
+                );
                 if let Some(errors) = non_empty_errors(&result) {
                     return graphql_err(&errors[0]);
                 }
@@ -114,7 +149,10 @@ impl GraphqlDriver {
                 }
             }
             StepOp::ListDoogats => {
-                let result = self.server.graphql(r#"{ doogats { id title } }"#);
+                let result = self.post_graphql(
+                    serde_json::json!({"query": r#"{ doogats { id title } }"#}),
+                    timeout,
+                );
                 if let Some(errors) = non_empty_errors(&result) {
                     return graphql_err(&errors[0]);
                 }
@@ -130,9 +168,14 @@ impl GraphqlDriver {
                     Ok(v) => v,
                     Err(field) => return setup_failed_missing(field),
                 };
-                let result = self.server.graphql(&format!(
-                    r#"{{ search(query: "{query}") {{ hits {{ id title }} totalCount }} }}"#
-                ));
+                let result = self.post_graphql(
+                    serde_json::json!({
+                        "query": &format!(
+                            r#"{{ search(query: "{query}") {{ hits {{ id title }} totalCount }} }}"#
+                        ),
+                    }),
+                    timeout,
+                );
                 if let Some(errors) = non_empty_errors(&result) {
                     return graphql_err(&errors[0]);
                 }

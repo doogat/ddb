@@ -10,15 +10,35 @@ pub struct WorkflowFixture {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupExpectation {
+    /// Auth mode the workflow expects the driver to set up.
+    ///
+    /// Currently only `AuthMode::None` is honored by drivers. Drivers fail
+    /// loud on `Token` / `Embedded` (PRD 00148 Success Criterion 7;
+    /// conformance-harness deferred-scope section). Adding a fixture that
+    /// requires non-None auth requires teaching the corresponding driver(s)
+    /// to satisfy it.
     pub auth_mode: AuthMode,
+    /// Per-step timeout in milliseconds. `CliDriver` wraps each subprocess
+    /// in this timeout; `GraphqlDriver` applies it to each HTTP request via
+    /// reqwest client configuration.
     pub timeout_ms: u64,
+    /// Named setup actions to perform before operation steps (e.g.
+    /// "create_baseline_typedef"). Currently no driver interprets these — a
+    /// non-empty `setup_steps` causes drivers to fail loud (`SetupFailed`).
+    /// Adding fixtures that need setup actions requires wiring an interpreter
+    /// into the relevant driver(s); see deferred-scope.
     pub setup_steps: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthMode {
+    /// No auth required for the workflow. The only mode current drivers honor.
     None,
+    /// Bearer-token auth read from the named env var. Not yet enforced by
+    /// drivers; see deferred-scope.
     Token { env_var: String },
+    /// Embedded / FFI auth (no network). Not yet enforced by drivers; see
+    /// deferred-scope.
     Embedded,
 }
 

@@ -20,6 +20,9 @@ impl CliDriver {
     }
 
     pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
+        if let Some(failure) = super::setup::check_setup_supported(&fixture.setup) {
+            return vec![failure; fixture.steps.len()];
+        }
         let timeout = Duration::from_millis(fixture.setup.timeout_ms);
         let mut results: Vec<ConformanceResult> = Vec::new();
         for step in &fixture.steps {
