@@ -16,7 +16,9 @@ All conformance code lives under `tests/e2e/conformance/`:
 | `comparator.rs` | `DiffClass`, `compare()`, `compare_per_step()` |
 | `driver_cli.rs` | `CliDriver` — executes steps via the `ddb` binary |
 | `driver_graphql.rs` | `GraphqlDriver` — executes steps via `ddb serve` GraphQL API |
-| `step_refs.rs` | `resolve_refs()` — cross-step `$N.id` reference resolution |
+| `step_refs.rs` | `resolve_refs()` and `resolve_step()` — cross-step `$N.id` reference resolution |
+| `args.rs` | `require_string()` / `optional_string()` — shared arg-extraction helpers |
+| `setup.rs` | `check_setup_supported()` — shared driver gate for `auth_mode` / `setup_steps` enforcement |
 | `cross_driver_crud.rs` | Cross-driver tests for the `crud_baseline` workflow |
 | `cross_driver_validation.rs` | Cross-driver tests for the `validation_error` workflow |
 
@@ -72,10 +74,15 @@ Each step produces a `ConformanceResult`:
 | `DiffClass` | Meaning |
 |-------------|---------|
 | `Match` | Results are identical |
-| `VariantMismatch` | Enum discriminants differ — one driver returned `Ok` where another returned `Err` |
-| `ContentDiff` | Same discriminant but content differs (different value, error code, etc.) |
+| `ValueMismatch` | Both `Ok`; the `value` fields differ (warnings may also differ; the value diff dominates) |
+| `WarningMismatch` | Both `Ok`; `value` matches but `warnings` differ |
+| `ErrorMismatch` | Both `Err`; the `ConformanceError` shapes differ (code / message / context) |
+| `UnsupportedOperation` | At least one driver returned `Unsupported` and the results do not match |
+| `SetupFailure` | At least one driver returned `SetupFailed` and the results do not match |
+| `MissingField` | `compare_per_step` only: one slice ran out of results before the other (length divergence) |
+| `VariantMismatch` | Catch-all for incompatible variant pairs not covered above (most commonly `Ok` vs `Err`) |
 
-`VariantMismatch` is the real contract gap: the two interfaces disagree on whether the operation succeeded. `ContentDiff` records known format differences that do not constitute a conformance failure under the current promise matrix.
+`VariantMismatch` is the real contract gap: the two interfaces disagree on whether the operation succeeded. The other categories let downstream readers distinguish "two drivers returned `Ok` but the values differ" from "both errored differently" or "one timed out". Known format differences (e.g. CLI returns text where GraphQL returns JSON) surface as `ValueMismatch` and the cross-driver tests assert only on `VariantMismatch` for gaps not covered by the current promise matrix.
 
 ## Running conformance tests
 
@@ -101,15 +108,36 @@ Tests run with `AuthMode::None`; no environment variables need to be set for the
 
 **`VariantMismatch`** — one driver returned `Ok` where another returned `Err`. This is a contract gap. Check whether the operation is `Guaranteed` on both interfaces in the promise matrix (PRD 00143). If it is, the gap must be fixed. If it is not, update the fixture's `interfaces` list to exclude the non-guaranteeing interface.
 
-**`ContentDiff`** — same outcome type but different content. This is expected for known format differences (e.g., CLI returns plain text where GraphQL returns JSON). The cross-driver tests assert only on `VariantMismatch` for gaps not covered by the current promise matrix.
+**`ValueMismatch`** — both drivers reported `Ok` but the `value` fields differ. Expected for known format differences (e.g. CLI returns plain text where GraphQL returns JSON). Strict cross-interface equality is deferred; see "Deferred scope" below.
 
-**`SetupFailed`** — the driver could not execute the step. Common causes: `ddb` binary not built (`cargo build -p ddb-cli`), GraphQL server failed to start, timeout, or missing fixture arguments.
+**`WarningMismatch`** — both drivers reported `Ok`, values match, but warnings differ. Typically a contract gap when warnings are part of the promise.
 
-**`Unsupported`** — the driver does not implement the requested `StepOp`. New drivers that cannot support an operation should return `ConformanceResult::Unsupported`.
+**`ErrorMismatch`** — both drivers reported `Err` but the `code` / `message` / `context` differ. Today the cross-driver tests do not assert error-code equivalence (deferred; see below); a `ErrorMismatch` only indicates the drivers' error shapes are not byte-identical.
+
+**`SetupFailure`** — at least one driver returned `SetupFailed`. Common causes: `ddb` binary not built (`cargo build -p ddb-cli`), GraphQL server failed to start, request timeout, missing fixture arguments, or the fixture's setup expectation names a capability the driver does not yet implement (see "Deferred scope").
+
+**`UnsupportedOperation`** — at least one driver returned `Unsupported`. New drivers that cannot support a `StepOp` should return `ConformanceResult::Unsupported`.
+
+**`MissingField`** — `compare_per_step` saw a length divergence between the two driver result slices. The unmatched trailing entries are reported as `MissingField` so a driver returning fewer (or more) results than the other is surfaced rather than silently truncated.
 
 ## Adding a workflow
 
 1. Define the fixture in `workflows.rs` as a `pub fn` returning `WorkflowFixture`.
 2. Add cross-driver tests in a new `cross_driver_<name>.rs` file. Assert each driver returns one result per fixture step and no step has a `VariantMismatch`.
 3. Register the new module in `mod.rs`.
-4. Do not assert `ContentDiff` vs `Match` for fields where the promise matrix does not say `Guaranteed` — this hides legitimate transport-format differences behind fragile equality checks.
+4. Do not assert byte-equality on values where the promise matrix does not say `Guaranteed` — that hides legitimate transport-format differences behind fragile checks.
+
+## Deferred scope
+
+The v1 harness intentionally defers the following items. Future PRDs pick each up.
+
+- **FFI driver** — deferred. The intended landing spot is the `uniffi` `DoogatDriver` facade in `ddb-core::ffi`. Will follow the same `Driver::run_workflow(&fixture) -> Vec<ConformanceResult>` shape as `CliDriver` / `GraphqlDriver`.
+- **PgWire driver** — deferred. Targets the `ddb serve --pg-port` Postgres-wire endpoint. Belongs in the same `tests/e2e/conformance/` tree.
+- **REST driver** — deferred. Targets the `/rest/*` endpoints already served by `ddb serve`.
+- **NoSQL HTTP driver** — deferred. Targets the document-style HTTP API.
+- **Cross-interface error-code equality** — deferred. The `validation_error` cross-driver tests currently assert only that no step has a `VariantMismatch`; they do *not* assert that the two drivers returned the same `code` / `message` / `context`. The autopilot autonomous-decisions log records that strict equality across transports awaits the application contract model work in PRD 00147. When that contract is ready, the `validation_error` cross-driver tests should re-assert `DiffClass::Match` (not just "no `VariantMismatch`") for each step.
+- **`validation_error` fixture trigger** — deferred. The fixture's `CreateDoogat { title: "" }` step does not actually trigger validation in ddb today; both drivers accept the empty title and return `Ok`. Two `#[ignore]`'d tests in `cross_driver_validation.rs` (`validation_error_cli_returns_err_for_each_step` and `validation_error_graphql_returns_err_for_each_step`) encode the contract the fixture *claims* to enforce. Either the fixture should switch to input ddb genuinely rejects (e.g. a non-existent type reference) or ddb should add validation that rejects empty titles when no template is set.
+- **CLI timeout-conformance test** — deferred. A previous `#[ignore]`'d `timeout_yields_setup_failed` test tried to exceed a 1ms timeout via `ddb list`, but clap exits in ~2ms before the timer fires. No always-fast no-op subcommand exists that reliably exceeds short timeouts on every machine. When such a fixture lands, add a test under `driver_cli` asserting `SetupFailed { reason: contains "timeout" }`.
+- **`SetupExpectation.auth_mode` enforcement beyond `None`** — deferred. Drivers reject `Token` / `Embedded` via `setup::check_setup_supported`; honoring them requires teaching each driver to source the relevant credentials before running steps.
+- **`SetupExpectation.setup_steps` interpreter** — deferred. Drivers reject any non-empty `setup_steps` via the same gate; honoring them requires defining the string-action vocabulary (e.g. `create_baseline_typedef`) and wiring an interpreter into each driver.
+- **`ExpectedBehavior` enforcement against driver results** — deferred. `WorkflowFixture::expected.{value,warnings,error}` are present in the fixture model but not yet enforced by the comparator. Today the cross-driver tests compare driver outputs against each other, not against the fixture's expected shape. When enforcement lands, the comparator should fold `ExpectedBehavior` into per-step classification.
