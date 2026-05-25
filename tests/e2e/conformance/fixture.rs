@@ -1,5 +1,4 @@
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "fields read by future multi-driver runner")]
 pub struct WorkflowFixture {
     pub id: String,
     pub title: String,
