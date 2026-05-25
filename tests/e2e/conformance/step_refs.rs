@@ -1,6 +1,3 @@
-// Tess: this module's `pub fn resolve_refs` is unimplemented yet — Ivan will add
-// it next. Tests below must compile and FAIL (RED phase of TDD).
-
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue, ConformanceWarning};
 
 pub fn resolve_refs(args: &serde_json::Value, prior: &[ConformanceResult]) -> serde_json::Value {

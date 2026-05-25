@@ -1,8 +1,4 @@
 // CLI conformance driver.
-//
-// Ivan: define `pub struct CliDriver` and its `new()` + `run_workflow()`
-// methods ABOVE the `#[cfg(test)] mod tests` block below. The tests in
-// `mod tests` pin the contract; no implementation lives in this file yet.
 
 use std::process::Stdio;
 use std::thread;
@@ -509,9 +505,6 @@ mod tests {
         }
     }
 
-    // TODO: Ivan — if this test is flaky on very fast machines, mark `#[ignore]`
-    // and document the timing assumption. 1ms is intentionally tight so that
-    // even a no-op `ddb list` against a fresh repo cannot complete in time.
     // Ignored: `ddb list` is not a real subcommand on this build, so clap exits
     // in ~2ms with an "unrecognized subcommand" error before the 1ms timeout
     // can fire. Re-enable once a real always-fast no-op command exists, or once
