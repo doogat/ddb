@@ -86,8 +86,8 @@ pub enum InterfaceId {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::result::{ConformanceValue, ConformanceWarning};
+    use super::*;
 
     #[test]
     fn workflow_fixture_constructs_with_all_fields() {

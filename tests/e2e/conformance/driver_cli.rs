@@ -69,10 +69,9 @@ impl CliDriver {
 
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let value = match step.op {
-            StepOp::CreateDoogat
-            | StepOp::ReadDoogat
-            | StepOp::ListDoogats
-            | StepOp::Search => ConformanceValue::String(stdout),
+            StepOp::CreateDoogat | StepOp::ReadDoogat | StepOp::ListDoogats | StepOp::Search => {
+                ConformanceValue::String(stdout)
+            }
             StepOp::UpdateDoogat | StepOp::DeleteDoogat => ConformanceValue::Null,
         };
 

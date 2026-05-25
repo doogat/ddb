@@ -236,13 +236,19 @@ fn resolves_dollar_zero_id_in_second_step_arg() {
     assert_eq!(results.len(), 2);
 
     let id = match &results[0] {
-        ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => id.clone(),
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(id),
+            ..
+        } => id.clone(),
         other => panic!("step 0 expected Ok(String(id)), got: {other:?}"),
     };
     assert_eq!(id.len(), 14, "step 0 id should be 14 digits, got: {id}");
 
     match &results[1] {
-        ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(text),
+            ..
+        } => {
             assert!(
                 text.contains("T9 test"),
                 "step 1 text should contain title 'T9 test', got: {text}"
@@ -310,7 +316,10 @@ fn resolves_step_zero_ref_in_step_two_skipping_step_one() {
     assert_eq!(results.len(), 3);
 
     let id = match &results[0] {
-        ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => id.clone(),
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(id),
+            ..
+        } => id.clone(),
         other => panic!("step 0 expected Ok(String(id)), got: {other:?}"),
     };
 
@@ -320,7 +329,10 @@ fn resolves_step_zero_ref_in_step_two_skipping_step_one() {
     }
 
     match &results[2] {
-        ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(text),
+            ..
+        } => {
             assert!(
                 text.contains("T9 indexed ref"),
                 "step 2 text should contain title 'T9 indexed ref', got: {text}"

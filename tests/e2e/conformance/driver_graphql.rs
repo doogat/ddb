@@ -34,8 +34,7 @@ impl GraphqlDriver {
     }
 
     /// Post a GraphQL request to the running test server with the given
-    /// per-request timeout. Used in place of `ServerGuard::graphql*` so the
-    /// driver honors `fixture.setup.timeout_ms` (PRD 00148 cycle-2 F4).
+    /// per-request timeout so the driver honors `fixture.setup.timeout_ms`.
     ///
     /// Returns `Err(ConformanceResult::SetupFailed { reason })` on transport
     /// failures: request timeout, connection error, or malformed JSON

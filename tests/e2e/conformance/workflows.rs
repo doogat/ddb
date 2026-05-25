@@ -12,12 +12,10 @@ pub fn validation_error() -> WorkflowFixture {
             timeout_ms: 30_000,
             setup_steps: vec![],
         },
-        steps: vec![
-            Step {
-                op: StepOp::CreateDoogat,
-                args: serde_json::json!({"title": ""}),
-            },
-        ],
+        steps: vec![Step {
+            op: StepOp::CreateDoogat,
+            args: serde_json::json!({"title": ""}),
+        }],
         expected: ExpectedBehavior {
             value: None,
             warnings: vec![],

@@ -15,8 +15,10 @@ pub fn resolve_refs(args: &serde_json::Value, prior: &[ConformanceResult]) -> se
     match args {
         serde_json::Value::String(s) => {
             if let Some(idx) = parse_ref(s) {
-                if let Some(ConformanceResult::Ok { value: ConformanceValue::String(id), .. }) =
-                    prior.get(idx)
+                if let Some(ConformanceResult::Ok {
+                    value: ConformanceValue::String(id),
+                    ..
+                }) = prior.get(idx)
                 {
                     return serde_json::Value::String(id.clone());
                 }
@@ -27,8 +29,10 @@ pub fn resolve_refs(args: &serde_json::Value, prior: &[ConformanceResult]) -> se
             serde_json::Value::Array(items.iter().map(|v| resolve_refs(v, prior)).collect())
         }
         serde_json::Value::Object(map) => {
-            let resolved: serde_json::Map<String, serde_json::Value> =
-                map.iter().map(|(k, v)| (k.clone(), resolve_refs(v, prior))).collect();
+            let resolved: serde_json::Map<String, serde_json::Value> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), resolve_refs(v, prior)))
+                .collect();
             serde_json::Value::Object(resolved)
         }
         _ => args.clone(),

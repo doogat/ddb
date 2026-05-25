@@ -70,10 +70,7 @@ pub fn compare(left: &ConformanceResult, right: &ConformanceResult) -> DiffClass
     }
 }
 
-pub fn compare_per_step(
-    left: &[ConformanceResult],
-    right: &[ConformanceResult],
-) -> Vec<DiffClass> {
+pub fn compare_per_step(left: &[ConformanceResult], right: &[ConformanceResult]) -> Vec<DiffClass> {
     let max_len = left.len().max(right.len());
     let mut result = Vec::with_capacity(max_len);
     for i in 0..max_len {
@@ -309,7 +306,11 @@ mod tests {
         let result = compare_per_step(&left, &right);
         assert_eq!(
             result,
-            vec![DiffClass::Match, DiffClass::MissingField, DiffClass::MissingField]
+            vec![
+                DiffClass::Match,
+                DiffClass::MissingField,
+                DiffClass::MissingField
+            ]
         );
     }
 

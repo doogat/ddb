@@ -29,8 +29,14 @@ fn appoutput_with_one_warning_holds_warning() {
 #[test]
 fn appoutput_with_multiple_warnings_preserves_all() {
     let warnings = vec![
-        AppWarning { code: "FIRST", message: String::from("first") },
-        AppWarning { code: "SECOND", message: String::from("second") },
+        AppWarning {
+            code: "FIRST",
+            message: String::from("first"),
+        },
+        AppWarning {
+            code: "SECOND",
+            message: String::from("second"),
+        },
     ];
     let out = AppOutput {
         value: 0u64,

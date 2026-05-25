@@ -3,7 +3,10 @@
 /// Returns the field's static name on miss so the caller can craft a
 /// `SetupFailed { reason: format!("missing arg: {field}") }`. Used by both
 /// `CliDriver` and `GraphqlDriver`.
-pub fn require_string(args: &serde_json::Value, name: &'static str) -> Result<String, &'static str> {
+pub fn require_string(
+    args: &serde_json::Value,
+    name: &'static str,
+) -> Result<String, &'static str> {
     args.get(name)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
@@ -12,7 +15,9 @@ pub fn require_string(args: &serde_json::Value, name: &'static str) -> Result<St
 
 /// Pull an optional string field out of a step's JSON args.
 pub fn optional_string(args: &serde_json::Value, name: &str) -> Option<String> {
-    args.get(name).and_then(|v| v.as_str()).map(|s| s.to_string())
+    args.get(name)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 #[cfg(test)]

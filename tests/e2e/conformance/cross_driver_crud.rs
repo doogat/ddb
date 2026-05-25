@@ -3,7 +3,10 @@ use super::driver_cli::CliDriver;
 use super::driver_graphql::GraphqlDriver;
 use super::workflows;
 
-fn run_crud_baseline() -> (Vec<super::result::ConformanceResult>, Vec<super::result::ConformanceResult>) {
+fn run_crud_baseline() -> (
+    Vec<super::result::ConformanceResult>,
+    Vec<super::result::ConformanceResult>,
+) {
     let fixture = workflows::crud_baseline();
     let cli = CliDriver::new();
     let graphql = GraphqlDriver::new();

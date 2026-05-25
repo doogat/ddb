@@ -194,14 +194,24 @@ fn resolves_dollar_zero_id_in_second_step_arg() {
         30_000,
     );
     let results = driver.run_workflow(&fixture);
-    assert_eq!(results.len(), 2, "expected 2 results, got {}", results.len());
+    assert_eq!(
+        results.len(),
+        2,
+        "expected 2 results, got {}",
+        results.len()
+    );
 
     // step 0: create must succeed and return a 14-digit id
     let created_id = match &results[0] {
-        ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => {
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(id),
+            ..
+        } => {
             assert_eq!(
-                id.len(), 14,
-                "step 0: expected 14-digit id, got {} chars: {id}", id.len()
+                id.len(),
+                14,
+                "step 0: expected 14-digit id, got {} chars: {id}",
+                id.len()
             );
             assert!(
                 id.chars().all(|c| c.is_ascii_digit()),
@@ -214,7 +224,10 @@ fn resolves_dollar_zero_id_in_second_step_arg() {
 
     // step 1: read must succeed and its output must reference the created doogat
     match &results[1] {
-        ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(text),
+            ..
+        } => {
             assert!(
                 text.contains("T8 test"),
                 "step 1: expected read output to contain title 'T8 test', got: {text}"
@@ -252,7 +265,12 @@ fn unresolvable_ref_passes_literal_and_causes_err() {
         30_000,
     );
     let results = driver.run_workflow(&fixture);
-    assert_eq!(results.len(), 2, "expected 2 results, got {}", results.len());
+    assert_eq!(
+        results.len(),
+        2,
+        "expected 2 results, got {}",
+        results.len()
+    );
 
     // step 0 must succeed - the workflow itself is sound
     match &results[0] {
@@ -295,14 +313,24 @@ fn three_step_workflow_resolves_step_zero_id_in_step_two() {
         30_000,
     );
     let results = driver.run_workflow(&fixture);
-    assert_eq!(results.len(), 3, "expected 3 results, got {}", results.len());
+    assert_eq!(
+        results.len(),
+        3,
+        "expected 3 results, got {}",
+        results.len()
+    );
 
     // step 0: create must return a 14-digit id
     match &results[0] {
-        ConformanceResult::Ok { value: ConformanceValue::String(id), .. } => {
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(id),
+            ..
+        } => {
             assert_eq!(
-                id.len(), 14,
-                "step 0: expected 14-digit id, got {} chars: {id}", id.len()
+                id.len(),
+                14,
+                "step 0: expected 14-digit id, got {} chars: {id}",
+                id.len()
             );
             assert!(
                 id.chars().all(|c| c.is_ascii_digit()),
@@ -314,13 +342,19 @@ fn three_step_workflow_resolves_step_zero_id_in_step_two() {
 
     // step 1: list must return Ok with some string output
     match &results[1] {
-        ConformanceResult::Ok { value: ConformanceValue::String(_), .. } => {}
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(_),
+            ..
+        } => {}
         other => panic!("step 1: expected Ok(String(...)), got: {other:?}"),
     }
 
     // step 2: read via $0.id must succeed and contain the original title
     match &results[2] {
-        ConformanceResult::Ok { value: ConformanceValue::String(text), .. } => {
+        ConformanceResult::Ok {
+            value: ConformanceValue::String(text),
+            ..
+        } => {
             assert!(
                 text.contains("T8 three step"),
                 "step 2: expected read output to contain 'T8 three step', got: {text}"
