@@ -13,28 +13,10 @@ pub enum DiffClass {
 pub fn compare(left: &ConformanceResult, right: &ConformanceResult) -> DiffClass {
     if left == right {
         DiffClass::Match
+    } else if std::mem::discriminant(left) != std::mem::discriminant(right) {
+        DiffClass::VariantMismatch
     } else {
-        // Check if the variants are different
-        match (left, right) {
-            (ConformanceResult::Ok { .. }, ConformanceResult::Err(_))
-            | (ConformanceResult::Ok { .. }, ConformanceResult::Unsupported { .. })
-            | (ConformanceResult::Ok { .. }, ConformanceResult::SetupFailed { .. })
-            | (ConformanceResult::Err(_), ConformanceResult::Ok { .. })
-            | (ConformanceResult::Err(_), ConformanceResult::Unsupported { .. })
-            | (ConformanceResult::Err(_), ConformanceResult::SetupFailed { .. })
-            | (ConformanceResult::Unsupported { .. }, ConformanceResult::Ok { .. })
-            | (ConformanceResult::Unsupported { .. }, ConformanceResult::Err(_))
-            | (ConformanceResult::Unsupported { .. }, ConformanceResult::SetupFailed { .. })
-            | (ConformanceResult::SetupFailed { .. }, ConformanceResult::Ok { .. })
-            | (ConformanceResult::SetupFailed { .. }, ConformanceResult::Err(_))
-            | (ConformanceResult::SetupFailed { .. }, ConformanceResult::Unsupported { .. }) => {
-                DiffClass::VariantMismatch
-            }
-            _ => {
-                // Same variant but different content
-                DiffClass::ContentDiff
-            }
-        }
+        DiffClass::ContentDiff
     }
 }
 
