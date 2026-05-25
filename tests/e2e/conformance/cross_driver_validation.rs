@@ -10,7 +10,6 @@ fn run_validation_error() -> (Vec<super::result::ConformanceResult>, Vec<super::
     (cli.run_workflow(&fixture), graphql.run_workflow(&fixture))
 }
 
-// Test 1: result count from both drivers equals fixture.steps.len().
 #[test]
 fn validation_error_result_count_matches_step_count() {
     let fixture = workflows::validation_error();
@@ -19,7 +18,6 @@ fn validation_error_result_count_matches_step_count() {
     assert_eq!(diffs.len(), fixture.steps.len());
 }
 
-// Test 2: no step has VariantMismatch — both drivers must agree on Err outcome.
 // VariantMismatch here would mean one driver succeeded where the other failed,
 // which is the real conformance gap (PRD 00148 success criterion 5).
 #[test]
