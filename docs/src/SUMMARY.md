@@ -33,6 +33,7 @@
 - [Storage Budget](./technical/storage-budget.md)
 - [Server Read-Path Decision](./technical/server-read-path.md)
 - [Phase 1 & 2 Exit Gate](./technical/phase-2-exit.md)
+- [Conformance Harness](./technical/conformance-harness.md)
 
 # User Guide
 
