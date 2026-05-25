@@ -508,31 +508,11 @@ mod tests {
         }
     }
 
-    // Ignored: `ddb list` is not a real subcommand on this build, so clap exits
-    // in ~2ms with an "unrecognized subcommand" error before the 1ms timeout
-    // can fire. Re-enable once a real always-fast no-op command exists, or once
-    // the fixture switches to a subcommand that does meaningful I/O.
-    #[ignore]
-    #[test]
-    fn timeout_yields_setup_failed() {
-        let driver = CliDriver::new();
-        let fixture = fx(
-            Step {
-                op: StepOp::ListDoogats,
-                args: serde_json::json!({}),
-            },
-            1,
-        );
-        let results = driver.run_workflow(&fixture);
-        assert_eq!(results.len(), 1);
-        match &results[0] {
-            ConformanceResult::SetupFailed { reason } => {
-                assert!(
-                    reason.contains("timeout"),
-                    "expected reason to contain 'timeout', got: {reason}"
-                );
-            }
-            other => panic!("expected SetupFailed, got: {other:?}"),
-        }
-    }
+    // Note: a previous `#[ignore]`'d `timeout_yields_setup_failed` test was
+    // removed in PRD 00148 cycle-2 (F8). It tried to make `ddb list` exceed a
+    // 1ms timeout, but clap exits in ~2ms before the timer fires. No always-fast
+    // no-op subcommand exists that reliably exceeds short timeouts on every
+    // machine, so the timeout-conformance gap is documented in
+    // docs/src/technical/conformance-harness.md "Deferred scope" until a
+    // suitable fixture lands.
 }
