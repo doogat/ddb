@@ -60,8 +60,17 @@ pub enum StepOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpectedBehavior {
+    /// The fixture's declared expected value/warnings/error. Currently
+    /// **metadata-only** — the comparator compares driver outputs against each
+    /// other (cross-driver equivalence) rather than against this expectation.
+    /// Enforcement is deferred; see the conformance-harness deferred-scope
+    /// section. When wired, the comparator will fold this into per-step
+    /// classification using the new `DiffClass` categories (value/error/
+    /// warning mismatch).
     pub value: Option<super::result::ConformanceValue>,
+    /// See `ExpectedBehavior::value` — currently metadata-only.
     pub warnings: Vec<super::result::ConformanceWarning>,
+    /// See `ExpectedBehavior::value` — currently metadata-only.
     pub error: Option<super::result::ConformanceError>,
 }
 
