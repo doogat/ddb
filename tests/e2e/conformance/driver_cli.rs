@@ -25,11 +25,16 @@ impl CliDriver {
 
     pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
         let timeout = Duration::from_millis(fixture.setup.timeout_ms);
-        fixture
-            .steps
-            .iter()
-            .map(|step| self.run_step(step, timeout))
-            .collect()
+        let mut results: Vec<ConformanceResult> = Vec::new();
+        for step in &fixture.steps {
+            let resolved_args = super::step_refs::resolve_refs(&step.args, &results);
+            let resolved_step = Step {
+                args: resolved_args,
+                op: step.op,
+            };
+            results.push(self.run_step(&resolved_step, timeout));
+        }
+        results
     }
 
     fn run_step(&self, step: &Step, timeout: Duration) -> ConformanceResult {
@@ -114,7 +119,7 @@ fn build_args(step: &Step) -> Result<Vec<String>, &'static str> {
             let id = require_string(&step.args, "id")?;
             Ok(vec!["delete".into(), id])
         }
-        StepOp::ListDoogats => Ok(vec!["list".into()]),
+        StepOp::ListDoogats => Ok(vec!["status".into()]),
         StepOp::Search => {
             let query = require_string(&step.args, "query")?;
             Ok(vec!["search".into(), query])
