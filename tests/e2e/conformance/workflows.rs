@@ -39,9 +39,20 @@ pub fn crud_baseline() -> WorkflowFixture {
             setup_steps: vec![],
         },
         // Full CRUD cycle on a single doogat created in step 0, plus a
+        // stable search probe (GW-2 high-risk reachable rows: response
+        // shape and field names for CLI and GraphQL search) and a
         // stable not-found id for the CRUD baseline error-path contract.
         // Step indices: 0=Create, 1=Read, 2=Update, 3=Delete, 4=List,
-        // 5=ReadDoogat(nonexistent).
+        // 5=Search, 6=ReadDoogat(nonexistent).
+        //
+        // PRD 00150 T8: the Search step pins the promised search surface
+        // for both drivers via existing harness `StepOp::Search`. Per the
+        // metadata-only ExpectedBehavior contract documented in
+        // `docs/src/technical/conformance-harness.md` (Deferred scope),
+        // value-level pinning is not enforced by the comparator yet, so
+        // the workflow's overall `expected` stays empty; the Step's mere
+        // presence pins the cross-driver shape via per-step variant
+        // comparison (`crud_baseline_no_step_has_variant_mismatch`).
         steps: vec![
             Step {
                 op: StepOp::CreateDoogat,
@@ -62,6 +73,10 @@ pub fn crud_baseline() -> WorkflowFixture {
             Step {
                 op: StepOp::ListDoogats,
                 args: serde_json::json!({}),
+            },
+            Step {
+                op: StepOp::Search,
+                args: serde_json::json!({"query": "Test"}),
             },
             Step {
                 op: StepOp::ReadDoogat,
@@ -124,6 +139,17 @@ mod tests {
         let fixture = crud_baseline();
         let has_list = fixture.steps.iter().any(|s| s.op == StepOp::ListDoogats);
         assert!(has_list);
+    }
+
+    // PRD 00150 T8: pins the Search step in crud_baseline so the
+    // GW-2 high-risk reachable rows (CLI/GraphQL search response shape
+    // + field names) cannot regress out of the fixture without this
+    // test failing first.
+    #[test]
+    fn steps_contains_search() {
+        let fixture = crud_baseline();
+        let has_search = fixture.steps.iter().any(|s| s.op == StepOp::Search);
+        assert!(has_search);
     }
 
     #[test]
