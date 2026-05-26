@@ -38,21 +38,10 @@ pub fn crud_baseline() -> WorkflowFixture {
             timeout_ms: 30_000,
             setup_steps: vec![],
         },
-        // Full CRUD cycle on a single doogat created in step 0, plus a
-        // stable search probe (GW-2 high-risk reachable rows: response
-        // shape and field names for CLI and GraphQL search) and a
-        // stable not-found id for the CRUD baseline error-path contract.
-        // Step indices: 0=Create, 1=Read, 2=Update, 3=Delete, 4=List,
-        // 5=Search, 6=ReadDoogat(nonexistent).
-        //
-        // PRD 00150 T8: the Search step pins the promised search surface
-        // for both drivers via existing harness `StepOp::Search`. Per the
-        // metadata-only ExpectedBehavior contract documented in
-        // `docs/src/technical/conformance-harness.md` (Deferred scope),
-        // value-level pinning is not enforced by the comparator yet, so
-        // the workflow's overall `expected` stays empty; the Step's mere
-        // presence pins the cross-driver shape via per-step variant
-        // comparison (`crud_baseline_no_step_has_variant_mismatch`).
+        // Full CRUD cycle on a single doogat, plus a live search probe and a
+        // stable not-found id for the baseline error-path contract. Value-level
+        // ExpectedBehavior enforcement is still deferred, so search is pinned
+        // by the cross-driver variant comparison in `cross_driver_crud.rs`.
         steps: vec![
             Step {
                 op: StepOp::CreateDoogat,
@@ -61,6 +50,10 @@ pub fn crud_baseline() -> WorkflowFixture {
             Step {
                 op: StepOp::ReadDoogat,
                 args: serde_json::json!({"id": "$0.id"}),
+            },
+            Step {
+                op: StepOp::Search,
+                args: serde_json::json!({"query": "Test"}),
             },
             Step {
                 op: StepOp::UpdateDoogat,
@@ -73,10 +66,6 @@ pub fn crud_baseline() -> WorkflowFixture {
             Step {
                 op: StepOp::ListDoogats,
                 args: serde_json::json!({}),
-            },
-            Step {
-                op: StepOp::Search,
-                args: serde_json::json!({"query": "Test"}),
             },
             Step {
                 op: StepOp::ReadDoogat,
@@ -141,15 +130,28 @@ mod tests {
         assert!(has_list);
     }
 
-    // PRD 00150 T8: pins the Search step in crud_baseline so the
-    // GW-2 high-risk reachable rows (CLI/GraphQL search response shape
-    // + field names) cannot regress out of the fixture without this
-    // test failing first.
     #[test]
-    fn steps_contains_search() {
+    fn steps_contains_live_search_probe() {
         let fixture = crud_baseline();
-        let has_search = fixture.steps.iter().any(|s| s.op == StepOp::Search);
-        assert!(has_search);
+        let search_idx = fixture
+            .steps
+            .iter()
+            .position(|s| s.op == StepOp::Search)
+            .expect("crud_baseline has a Search step");
+        let delete_idx = fixture
+            .steps
+            .iter()
+            .position(|s| s.op == StepOp::DeleteDoogat)
+            .expect("crud_baseline has a DeleteDoogat step");
+
+        assert!(search_idx < delete_idx);
+        assert_eq!(
+            fixture.steps[search_idx]
+                .args
+                .get("query")
+                .and_then(|v| v.as_str()),
+            Some("Test")
+        );
     }
 
     #[test]
