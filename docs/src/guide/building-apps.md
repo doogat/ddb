@@ -167,7 +167,7 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 
 - **Old behavior**: REST warnings surface as text embedded in the HTTP response body; no structured channel.
 - **New behavior**: REST `warnings` array shipped by PRD 00147 carries structured `AppWarning` entries alongside `data`.
-- **Replacement interface**: REST `extensions.warnings` (or equivalent) array on the response envelope.
+- **Replacement interface**: REST top-level `warnings` array on the response envelope.
 - **Required client changes**: parse the structured `warnings` array on REST responses; the legacy text-in-body emission remains until PRD 00149 removes it.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-11.
 
