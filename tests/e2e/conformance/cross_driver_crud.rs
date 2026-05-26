@@ -64,6 +64,38 @@ fn crud_baseline_list_doogats_format_diverges_across_cli_and_graphql() {
     );
 }
 
+// PRD 00150 D1 #17: pin the Search step in crud_baseline at the
+// cross-driver variant level. The Search step probes the live row
+// created in step 0; both CLI and GraphQL drivers must return Ok.
+// Value-level ExpectedBehavior enforcement on Search content is
+// deferred until the comparator gains value-level support.
+#[test]
+fn crud_baseline_search_returns_ok_on_both_drivers() {
+    let fixture = workflows::crud_baseline();
+    let search_idx = fixture
+        .steps
+        .iter()
+        .position(|s| s.op == super::fixture::StepOp::Search)
+        .expect("crud_baseline fixture has a Search step");
+    let (cli_results, graphql_results) = run_crud_baseline();
+    assert!(
+        matches!(
+            cli_results[search_idx],
+            super::result::ConformanceResult::Ok { .. }
+        ),
+        "CLI search should return Ok, got: {:?}",
+        cli_results[search_idx]
+    );
+    assert!(
+        matches!(
+            graphql_results[search_idx],
+            super::result::ConformanceResult::Ok { .. }
+        ),
+        "GraphQL search should return Ok, got: {:?}",
+        graphql_results[search_idx]
+    );
+}
+
 // The not-found contract is shape-level for now: both drivers must
 // return Err, even though their error codes still differ.
 #[test]

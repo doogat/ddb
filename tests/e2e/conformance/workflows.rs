@@ -40,8 +40,10 @@ pub fn crud_baseline() -> WorkflowFixture {
         },
         // Full CRUD cycle on a single doogat, plus a live search probe and a
         // stable not-found id for the baseline error-path contract. Value-level
-        // ExpectedBehavior enforcement is still deferred, so search is pinned
-        // by the cross-driver variant comparison in `cross_driver_crud.rs`.
+        // ExpectedBehavior enforcement is still deferred, so search is pinned at
+        // the variant level by `crud_baseline_no_step_has_variant_mismatch` (all
+        // steps) plus the dedicated `crud_baseline_search_returns_ok_on_both_drivers`
+        // in `cross_driver_crud.rs`.
         steps: vec![
             Step {
                 op: StepOp::CreateDoogat,
