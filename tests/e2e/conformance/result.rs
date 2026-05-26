@@ -23,10 +23,11 @@ pub enum ConformanceValue {
     Object(std::collections::BTreeMap<String, ConformanceValue>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConformanceWarning {
     pub code: String,
     pub message: String,
+    pub fields: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +49,7 @@ mod tests {
             warnings: vec![ConformanceWarning {
                 code: "TITLE_FROM_TEMPLATE".into(),
                 message: "title was templated".into(),
+                fields: serde_json::Map::new(),
             }],
         };
         let cloned = original.clone();
@@ -122,17 +124,50 @@ mod tests {
         let base = ConformanceWarning {
             code: "W1".into(),
             message: "first".into(),
+            fields: serde_json::Map::new(),
         };
         let same = ConformanceWarning {
             code: "W1".into(),
             message: "first".into(),
+            fields: serde_json::Map::new(),
         };
         let diff_code = ConformanceWarning {
             code: "W2".into(),
             message: "first".into(),
+            fields: serde_json::Map::new(),
         };
         assert_eq!(base, same);
         assert_ne!(base, diff_code);
+    }
+
+    #[test]
+    fn conformance_warning_eq_compares_structured_fields() {
+        let a = ConformanceWarning {
+            code: "LIST_ROW_DROPPED".into(),
+            message: "row dropped".into(),
+            fields: serde_json::Map::from_iter([(
+                "path".to_string(),
+                serde_json::Value::String("ddb/20260101000000.md".into()),
+            )]),
+        };
+        let same = ConformanceWarning {
+            code: "LIST_ROW_DROPPED".into(),
+            message: "row dropped".into(),
+            fields: serde_json::Map::from_iter([(
+                "path".to_string(),
+                serde_json::Value::String("ddb/20260101000000.md".into()),
+            )]),
+        };
+        let diff_fields = ConformanceWarning {
+            code: "LIST_ROW_DROPPED".into(),
+            message: "row dropped".into(),
+            fields: serde_json::Map::from_iter([(
+                "path".to_string(),
+                serde_json::Value::String("ddb/different.md".into()),
+            )]),
+        };
+        assert_eq!(a, same);
+        assert_ne!(a, diff_fields);
     }
 
     #[test]

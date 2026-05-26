@@ -290,6 +290,7 @@ mod tests {
             warnings: vec![ConformanceWarning {
                 code: "WARN".into(),
                 message: "minor warning".into(),
+                fields: serde_json::Map::new(),
             }],
         }];
         let result = resolve_refs(&args, &prior);

@@ -1,7 +1,7 @@
 use super::fixture::{
     AuthMode, ExpectedBehavior, InterfaceId, SetupExpectation, Step, StepOp, WorkflowFixture,
 };
-use super::result::ConformanceError;
+use super::result::{ConformanceError, ConformanceWarning};
 
 pub fn validation_error() -> WorkflowFixture {
     WorkflowFixture {
@@ -80,6 +80,61 @@ pub fn crud_baseline() -> WorkflowFixture {
             error: None,
         },
         interfaces: vec![InterfaceId::Cli, InterfaceId::Graphql],
+    }
+}
+
+// PRD 00150 blind-review I-1: pin the GraphQL WarningEntry shape contract.
+//
+// The release-readiness §3.3 checklist in
+// `dev/local/notes/interface-deprecations.md` requires a conformance fixture
+// that asserts the `WarningEntry` shape (code + message + structured fields)
+// returned on GraphQL for the workflow where a warning fires (inventory
+// entry GW-12). This fixture declares that shape contract at the metadata
+// level: any future change to the warning shape must be reflected in this
+// fixture's `expected.warnings`, and the structural tests below will fail
+// if any of the three dimensions (code, message, structured fields) is
+// dropped.
+//
+// Driver execution: deferred. GraphQL warning forwarding is tracked by PRD
+// 00154 (graphql-response-extension-warnings-v1); until that lands, drivers
+// return empty warnings on this fixture. When PRD 00154 ships and the
+// comparator gains value-level enforcement (see deferred-scope in PRD
+// 00148), the same fixture activates without modification — the trigger
+// `Step` will be replaced with a real warning-emitting mutation and the
+// driver output will be compared against `expected.warnings`.
+pub fn warnings_shape_contract() -> WorkflowFixture {
+    WorkflowFixture {
+        id: "warnings_shape_contract".into(),
+        title: "Warning shape contract: WarningEntry carries code + message + structured fields"
+            .into(),
+        setup: SetupExpectation {
+            auth_mode: AuthMode::None,
+            timeout_ms: 30_000,
+            setup_steps: vec![],
+        },
+        // Placeholder mutation. The fixture is currently read by the
+        // structural shape tests, not executed against drivers. When PRD
+        // 00154 lands GraphQL warning forwarding, this step is replaced
+        // with a real trigger (e.g. typed update with singleton conflict,
+        // backlink cascade) and the driver-output comparator will fold
+        // `expected.warnings` into per-step classification.
+        steps: vec![Step {
+            op: StepOp::CreateDoogat,
+            args: serde_json::json!({"title": "Placeholder for warning-trigger mutation"}),
+        }],
+        expected: ExpectedBehavior {
+            value: None,
+            warnings: vec![ConformanceWarning {
+                code: "LIST_ROW_DROPPED".into(),
+                message: "list: row decode failed; row skipped".into(),
+                fields: serde_json::Map::from_iter([(
+                    "path".to_string(),
+                    serde_json::Value::String("ddb/20260101000000.md".into()),
+                )]),
+            }],
+            error: None,
+        },
+        interfaces: vec![InterfaceId::Graphql],
     }
 }
 
@@ -245,5 +300,66 @@ mod tests {
     fn validation_error_interfaces_has_exactly_two() {
         let fixture = validation_error();
         assert_eq!(fixture.interfaces.len(), 2);
+    }
+
+    // PRD 00150 blind-review I-1: assert the warnings_shape_contract fixture
+    // pins the WarningEntry shape on all three dimensions required by the
+    // release-readiness §3.3 checklist: code, message, structured fields.
+
+    #[test]
+    fn warnings_shape_contract_declares_exactly_one_warning() {
+        let fixture = warnings_shape_contract();
+        assert_eq!(
+            fixture.expected.warnings.len(),
+            1,
+            "shape contract pins a single WarningEntry exemplar"
+        );
+    }
+
+    #[test]
+    fn warnings_shape_contract_warning_has_non_empty_code() {
+        let fixture = warnings_shape_contract();
+        let warning = &fixture.expected.warnings[0];
+        assert!(
+            !warning.code.is_empty(),
+            "WarningEntry must carry a non-empty stable code (release-readiness §3.3)"
+        );
+    }
+
+    #[test]
+    fn warnings_shape_contract_warning_has_non_empty_message() {
+        let fixture = warnings_shape_contract();
+        let warning = &fixture.expected.warnings[0];
+        assert!(
+            !warning.message.is_empty(),
+            "WarningEntry must carry a non-empty human-readable message (release-readiness §3.3)"
+        );
+    }
+
+    #[test]
+    fn warnings_shape_contract_warning_has_non_empty_structured_fields() {
+        let fixture = warnings_shape_contract();
+        let warning = &fixture.expected.warnings[0];
+        assert!(
+            !warning.fields.is_empty(),
+            "WarningEntry must carry structured fields (release-readiness §3.3); empty fields \
+             would silently allow the shape to regress to code+message-only"
+        );
+    }
+
+    #[test]
+    fn warnings_shape_contract_targets_graphql_interface() {
+        let fixture = warnings_shape_contract();
+        assert!(
+            fixture.interfaces.contains(&InterfaceId::Graphql),
+            "release-readiness §3.3 names GraphQL extensions.warnings as the only Guaranteed \
+             warning channel; the shape contract must target GraphQL"
+        );
+    }
+
+    #[test]
+    fn warnings_shape_contract_id_is_stable() {
+        let fixture = warnings_shape_contract();
+        assert_eq!(fixture.id, "warnings_shape_contract");
     }
 }

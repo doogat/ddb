@@ -215,6 +215,7 @@ mod tests {
             warnings: vec![ConformanceWarning {
                 code: "TITLE_FROM_TEMPLATE".into(),
                 message: "templated".into(),
+                fields: serde_json::Map::new(),
             }],
             error: None,
         };

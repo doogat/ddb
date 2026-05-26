@@ -111,6 +111,7 @@ mod tests {
             warnings: vec![ConformanceWarning {
                 code: "W001".into(),
                 message: "deprecated".into(),
+                fields: serde_json::Map::new(),
             }],
         };
         let b = a.clone();
@@ -172,6 +173,7 @@ mod tests {
             warnings: vec![ConformanceWarning {
                 code: "W001".into(),
                 message: "something deprecated".into(),
+                fields: serde_json::Map::new(),
             }],
         };
         assert_eq!(compare(&a, &b), DiffClass::WarningMismatch);
