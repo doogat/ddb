@@ -316,9 +316,7 @@ impl ServerGuard {
 
         ws
     }
-}
 
-impl ServerGuard {
     /// Kill the child server process. After this returns, the port stops
     /// accepting connections. Used by conformance tests that need to
     /// verify transport-error handling in clients.
