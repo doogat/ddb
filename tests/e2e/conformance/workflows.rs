@@ -38,10 +38,8 @@ pub fn crud_baseline() -> WorkflowFixture {
             timeout_ms: 30_000,
             setup_steps: vec![],
         },
-        // Full CRUD cycle on a single doogat created in step 0, then a
-        // not-found read against a stable literal id to exercise the
-        // not-found error path (PRD 00148 Phase 1 explicit requirement,
-        // surfaced by the blind-review I4 gap).
+        // Full CRUD cycle on a single doogat created in step 0, plus a
+        // stable not-found id for the CRUD baseline error-path contract.
         // Step indices: 0=Create, 1=Read, 2=Update, 3=Delete, 4=List,
         // 5=ReadDoogat(nonexistent).
         steps: vec![
