@@ -841,6 +841,39 @@ The actor holds an `Option<RedbIndex>` alongside `Index`. Every create/update/de
 
 The REST interface is `Specialized` — it covers base-doogat CRUD and list/search, but typed mutations (column writes with `allowed_values` enforcement, FK validation, per-type routes) are not `Guaranteed` until per-type REST routes land. Use GraphQL when you need typed mutations or structured error codes. The REST API is backed by the same actor and auth middleware as GraphQL. See [REST API](./rest-api.md) for endpoint details.
 
+## Compatibility and Deprecation
+
+Promise labels (`Guaranteed`, `Specialized`, `Intentionally absent`, `Deprecated`) are defined in [Compatibility and Deprecation](../guide/building-apps.md#compatibility-and-deprecation) in the building-apps guide. Every deprecated behavior below names a replacement; entries flagged "Status: planned, not yet implemented" reference candidate follow-up PRD slugs that have not shipped yet.
+
+### GraphQL
+
+No deprecated behavior. `Specialized` capabilities for GraphQL: bundle export/import (CLI is the canonical workflow; GraphQL exposes the engine for orchestration).
+
+### REST
+
+Deprecated behavior on `/rest/*`:
+
+- **Search error envelope** (`GET /rest/doogats?q=...`): HTTP 4xx + `{ error, message }` JSON. Replacement: AppError envelope shipped by PRD 00147 — REST adapters now map service-layer `AppError` into the unified `extensions.code` vocabulary; branch on the structured code field instead of the legacy `error` string.
+- **CRUD mutation error envelope** (`POST/PUT /rest/doogats[/:id]`): HTTP 4xx + `{ error, message }`. Replacement: AppError envelope shipped by PRD 00147 — the same service-layer error type now feeds both GraphQL `extensions.code` and the REST envelope.
+- **Validation error envelope** (`POST /rest/doogats` invalid): HTTP 400/422 with `error` carrying a short REST-local code string (500 on server errors). Replacement: AppError envelope shipped by PRD 00147 — REST validation errors flow through the same AppError mapping as GraphQL `extensions.code`.
+- **Typed create/update writes base shape only** (`POST/PUT /rest/doogats` typed payload): request accepted but only base-doogat shape is written; type-specific tables not populated atomically. Replacement: typed-write paths shipped by PRD 00147 — REST adapters now route typed create/update through the unified AppCommand, populating typed tables atomically.
+- **No per-type REST route** (`POST/PUT /rest/doogats` typed): typed payloads route through the base endpoint without atomic typed-column population. Replacement: typed-write paths shipped by PRD 00147 — typed REST create/update now lands typed columns atomically through the unified AppCommand.
+- **Warnings in HTTP response body**: warnings surfaced as text embedded in the response body, no structured channel. Replacement: REST `warnings` array shipped by PRD 00147 — REST responses now carry an `extensions.warnings` (or equivalent) array of structured `AppWarning` entries alongside `data`.
+
+`Specialized` capabilities for REST (not deprecated, still binding promise): `Create (typed)`, `Update (typed)`, `Validation errors`, and `Warnings` remain `Specialized` per the promise matrix until PRD 00149 transport thinning removes the legacy code paths and conformance fixtures assert only the AppError shape.
+
+### PgWire
+
+Deprecated behavior on the PostgreSQL wire protocol:
+
+- **No structured warning channel**: warnings are not surfaced over the PgWire protocol; no notice-emission path today. Replacement: candidate `pgwire-structured-errors-v1` follow-up PRD will extend the deferred PRD 00139 §T22 work to map AppError codes and AppWarning entries onto PostgreSQL `ErrorResponse`/`NoticeResponse` messages. Status: planned, not yet implemented.
+
+`Specialized` capabilities for PgWire: `Validation errors` (PostgreSQL error message strings, not `extensions.code`; structured-code envelope deferred per PRD 00139 §T22), `FTS5 search` and `Backlinks` (reachable only via raw SELECT against the FTS5 virtual table / `_ddb_*` tables, not a curated workflow shape).
+
+### NoSQL HTTP
+
+No deprecated behavior. `Specialized` capabilities for NoSQL HTTP: `List / search basics` and `FTS5 search` are limited to prefix scan by `type=` / `tag=`; free-text search is not supported. All write/mutate capabilities are `Intentionally absent` by design (read-only interface). The `GET /nosql/:id` not-found error shape is currently undocumented (G-13 in the inventory); shape will be standardized as part of the documentation pass for the NoSQL HTTP error contract.
+
 ## Crate Structure
 
 ```

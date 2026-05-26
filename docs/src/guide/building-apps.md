@@ -63,6 +63,24 @@ Doogat DB exposes several network and embedded interfaces. They are not equivale
 
 When a cell in the table above is `Specialized`, the note explains the specific constraint and points to the recommended alternative if you need the `Guaranteed` shape.
 
+### Compatibility and Deprecation
+
+The four promise labels carry distinct meanings:
+
+- **`Guaranteed`**: the capability is present on the interface in its canonical shape; conformance tests pin response, error, and field-name shape.
+- **`Specialized`**: the capability is present with documented constraints (narrower workflow, different response/error shape, or subset of operations).
+- **`Intentionally absent`**: the capability is not exposed on this interface by design; consumers must use a different interface.
+- **`Deprecated`**: the capability is still reachable but a replacement exists and consumers should migrate. Each deprecated behavior names its replacement in the interface docs.
+
+Per-interface deprecation lists live in the interface docs:
+
+- Network interfaces (GraphQL, REST, PgWire, NoSQL HTTP): [Compatibility and Deprecation](../technical/server.md#compatibility-and-deprecation) in the server docs.
+- Embedded interface (FFI / `DoogatDriver`): [Compatibility and Deprecation](../technical/ffi.md#compatibility-and-deprecation) in the FFI docs.
+
+For CLI consumers, one deprecation applies: warnings currently surface as unstructured stderr text. The candidate `cli-json-errors-v1` follow-up PRD will add a `--json-errors` / `--json-output` mode that serializes `AppWarning` entries as structured JSON. Status: planned, not yet implemented. Until then, scripted consumers parse stderr text or fall back to GraphQL for machine-readable warnings.
+
+_Migration Notes_ — see T10 deliverable for old-shape → new-shape diffs and consumer-side code changes per deprecated behavior.
+
 ### Auth and setup
 
 **Server-mode interfaces** (GraphQL, REST, PgWire, NoSQL HTTP) share one setup chain:

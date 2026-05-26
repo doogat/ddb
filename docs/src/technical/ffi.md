@@ -173,6 +173,27 @@ after a poisoned lock, never a Rust panic.
 - `TypeSchemaRecord` — `{ table_name, columns, crdt_strategy, template_sections }`
 - `ColumnDefRecord` — `{ name, data_type, references, required }`
 
+## Compatibility and Deprecation
+
+Promise labels (`Guaranteed`, `Specialized`, `Intentionally absent`, `Deprecated`) are defined in [Compatibility and Deprecation](../guide/building-apps.md#compatibility-and-deprecation) in the building-apps guide. Every deprecated behavior below names a replacement; entries flagged "Status: planned, not yet implemented" reference candidate follow-up PRD slugs that have not shipped yet.
+
+### Deprecated behavior
+
+- **`DoogatDriver.search` wraps engine errors as `DdbError::Sql(msg)`**: throws the SQL variant carrying engine error text in the string payload; no per-code typed variant, so Swift/Kotlin consumers substring-match `msg` to branch on failure kind. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD will expose AppError codes as typed FFI enum variants on `DoogatError`, mirroring the AppError envelope PRD 00147 shipped for the network transports. Status: planned, not yet implemented.
+- **`DoogatDriver.get` throws `DdbError::Io(msg)` on not-found**: error message carries the substring `"not found"`; consumers detect missing-id failures via `msg.contains("not found")`. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds `DdbError::NotFound { id }` as a typed variant, mirroring AppError's `NOT_FOUND` code shipped by PRD 00147. Status: planned, not yet implemented.
+- **`DoogatDriver.delete` followed by `get` returns the same untyped not-found shape**: the post-delete read inherits the `DdbError::Io(msg)` "not found" shape; consumers cannot distinguish delete-then-get from any other IO failure without substring matching. Replacement: same typed `NotFound` variant under candidate `ffi-typed-errors-v1`. Status: planned, not yet implemented.
+- **`DoogatDriver.create` invalid-type error embeds code in `DdbError::Sql(msg)`**: throws the SQL variant whose message contains `TYPE_NOT_REGISTERED`; the structured code AppError already carries internally is recoverable only by parsing the message string. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD exposes AppError validation codes (including `TYPE_NOT_REGISTERED`) as typed FFI enum variants. Status: planned, not yet implemented.
+- **FFI return types omit the structured warning channel**: `RebuildReport` explicitly omits warnings and other FFI return types do not carry a structured warning channel; AppWarning entries are dropped at the UniFFI boundary. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds a structured-warnings surface to FFI return types (e.g. `AppOutput<T>`-equivalent UniFFI record carrying `warnings: Vec<WarningEntry>`), mirroring the AppOutput shape PRD 00147 established for the network transports. Status: planned, not yet implemented.
+
+### Specialized capabilities
+
+Not deprecated, still binding promises:
+
+- **Attachments** — Attachments feature is Experimental per the stability tier table; methods exist and work, but the capability promise is narrower than core CRUD until Attachments moves Stable.
+- **Bundle export/import** — CLI is the canonical bundle workflow (`ddb bundle export/import`); FFI exposes the same engine for in-process orchestration.
+- **Remote sync (push/pull/fetch)** — bundle-shaped only; no Git remote push/pull/fetch method on `DoogatDriver`. Continuous remote sync runs through CLI `ddb sync` or the GraphQL `sync` mutation.
+- **Warnings (structured)** — see the deprecated entry above; tracked as `Specialized` in the promise matrix until `ffi-typed-errors-v1` adds the structured-warnings channel.
+
 ## Binding Generation
 
 Uses UniFFI proc-macro approach (`uniffi::setup_scaffolding!()` in `lib.rs`). No UDL-based code generation; `src/ddb.udl` is kept as interface documentation.
