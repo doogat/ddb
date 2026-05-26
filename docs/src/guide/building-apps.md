@@ -85,10 +85,10 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 
 ##### REST search error envelope (D-01)
 
-- **Old behavior**: REST `GET /rest/doogats?q=...` returns HTTP 4xx + `{ error, message }` JSON envelope.
-- **New behavior**: AppError envelope shipped by PRD 00147 maps service-layer errors into the unified `extensions.code` vocabulary on REST.
-- **Replacement interface**: REST AppError envelope (`docs/src/technical/server.md` REST error section); same code vocabulary as GraphQL `extensions.code`.
-- **Required client changes**: branch on the structured AppError code field instead of the legacy `error` short-string; the legacy field stays populated until PRD 00149 removes it.
+- **Old behavior**: REST `GET /rest/doogats?q=...` returns HTTP 4xx + `{ error, message }` JSON envelope. The `error` field carries a REST-local short-string code.
+- **New behavior**: AppError envelope shipped by PRD 00147 routes REST errors through the same code vocabulary as GraphQL. The `{ error, message }` envelope shape is unchanged; the `error` field now carries the unified code (e.g. `NOT_FOUND`, `VALIDATION_ERROR`, `UNIQUE_VIOLATION`) instead of REST-local short-strings.
+- **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`. See `docs/src/technical/server.md` REST error section. (REST has no `extensions` object — that path is GraphQL-only.)
+- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. Until PRD 00149 removes the legacy short-strings, both vocabularies can appear; prefer the unified codes.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-01.
 
 ##### FFI search error variant (D-02)
@@ -101,10 +101,10 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 
 ##### REST CRUD mutation error envelope (D-03)
 
-- **Old behavior**: REST `POST/PUT /rest/doogats[/:id]` returns HTTP 4xx + `{ error, message }` envelope on validation failure.
-- **New behavior**: AppError envelope shipped by PRD 00147 feeds the same code vocabulary into REST mutations.
-- **Replacement interface**: REST AppError envelope; same `extensions.code` vocabulary as GraphQL mutations.
-- **Required client changes**: branch on the AppError code field on 4xx responses; keep reading the legacy `error` field as a fallback until PRD 00149 removes it.
+- **Old behavior**: REST `POST/PUT /rest/doogats[/:id]` returns HTTP 4xx + `{ error, message }` envelope on validation failure. The `error` field carries a REST-local short-string code.
+- **New behavior**: AppError envelope shipped by PRD 00147 feeds the same unified code vocabulary into REST mutations. Envelope shape is unchanged; the `error` field now carries the unified code.
+- **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`.
+- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. Until PRD 00149 removes the legacy short-strings, both vocabularies can appear; prefer the unified codes.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-03.
 
 ##### REST typed create/update (D-04)
@@ -142,9 +142,9 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 ##### REST validation error vocabulary (D-08)
 
 - **Old behavior**: REST `POST /rest/doogats` (invalid) returns HTTP 400/422 with the `error` field carrying a short REST-local code string (and 500 on server errors).
-- **New behavior**: AppError envelope shipped by PRD 00147 routes REST validation errors through the same code vocabulary as GraphQL.
-- **Replacement interface**: REST AppError envelope; same `extensions.code` vocabulary as GraphQL validation errors.
-- **Required client changes**: branch on the AppError code field instead of the REST-local short-code; legacy `error` field stays populated until PRD 00149 removes it.
+- **New behavior**: AppError envelope shipped by PRD 00147 routes REST validation errors through the unified code vocabulary. The `error` field now carries the same codes GraphQL validation errors expose under `extensions.code`.
+- **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`.
+- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. Until PRD 00149 removes the legacy short-strings, both vocabularies can appear; prefer the unified codes.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-08.
 
 ##### REST typed create/update route (D-09)
