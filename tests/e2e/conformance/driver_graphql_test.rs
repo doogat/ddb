@@ -46,12 +46,21 @@ fn missing_required_arg_returns_setup_failed() {
     }
 }
 
-/// Transport-level failure (server unreachable) must surface as
-/// `SetupFailed` with a `reason` that names the transport error class,
-/// not panic and not return `Ok` or `Err`. Mirrors `CliDriver`'s
-/// `RunError::Timeout -> SetupFailed` contract and covers the
-/// `post_graphql` `.send()` arm added in c4b9d4e plus the `.json()`
-/// timeout arm added in b9699dd (PRD 00148 C3-F1/F2).
+/// Transport-level failure (server unreachable before request is issued)
+/// must surface as `SetupFailed` with a `reason` that names the transport
+/// error class, not panic and not return `Ok` or `Err`. Mirrors
+/// `CliDriver`'s `RunError::Timeout -> SetupFailed` contract.
+///
+/// Scenario coverage: this test kills the server before `.send()`, so it
+/// exercises only the `post_graphql` `.send()` connection-refused arm
+/// (added in c4b9d4e). The `.send()` timeout arm and the `.json()`
+/// body-read timeout arm (added in b9699dd, PRD 00148 C3-F1) are NOT
+/// exercised by this scenario — both require a slow-handler fixture that
+/// is deferred per `docs/src/technical/conformance-harness.md`. The
+/// `expected_prefixes` array below still lists all three arms as
+/// defense-in-depth: a regression that mis-routes a transport error
+/// through the wrong arm still passes the assertion, so the test guards
+/// the broader `SetupFailed` contract even though the trigger is narrow.
 #[test]
 fn transport_error_returns_setup_failed() {
     let mut driver = GraphqlDriver::new();
