@@ -63,3 +63,48 @@ fn crud_baseline_list_doogats_format_diverges_across_cli_and_graphql() {
         "ListDoogats format gap no longer present — update or remove this test"
     );
 }
+
+// Read of a nonexistent doogat must return Err on BOTH drivers —
+// PRD 00148 Phase 1 explicitly requires not-found behavior in the
+// CRUD baseline (surfaced as the blind-review I4 gap). The not-found
+// step is identified by its literal id "99999999999999" so the
+// lookup survives further fixture growth. The asserted contract is
+// shape-level (both drivers return Err), not code-level: CLI returns
+// CLI_ERROR while GraphQL returns a GraphQL-shaped error code; the
+// resulting ErrorMismatch is documented as a contract gap deferred to
+// PRD 00149 (cross-interface error-code equality).
+#[test]
+fn crud_baseline_not_found_read_returns_err_on_both_drivers() {
+    let fixture = workflows::crud_baseline();
+    let nf_idx = fixture
+        .steps
+        .iter()
+        .position(|s| {
+            s.op == super::fixture::StepOp::ReadDoogat
+                && s.args.get("id").and_then(|v| v.as_str()) == Some("99999999999999")
+        })
+        .expect("crud_baseline fixture has a not-found ReadDoogat step");
+    let (cli_results, graphql_results) = run_crud_baseline();
+    assert!(
+        matches!(
+            cli_results[nf_idx],
+            super::result::ConformanceResult::Err(_)
+        ),
+        "CLI not-found read should return Err, got: {:?}",
+        cli_results[nf_idx]
+    );
+    assert!(
+        matches!(
+            graphql_results[nf_idx],
+            super::result::ConformanceResult::Err(_)
+        ),
+        "GraphQL not-found read should return Err, got: {:?}",
+        graphql_results[nf_idx]
+    );
+    let diffs = compare_per_step(&cli_results, &graphql_results);
+    assert_ne!(
+        diffs[nf_idx],
+        DiffClass::VariantMismatch,
+        "not-found step: one driver succeeded where the other failed"
+    );
+}

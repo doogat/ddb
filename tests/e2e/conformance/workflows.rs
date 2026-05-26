@@ -38,10 +38,12 @@ pub fn crud_baseline() -> WorkflowFixture {
             timeout_ms: 30_000,
             setup_steps: vec![],
         },
-        // Full CRUD cycle on a single doogat created in step 0.
-        // Step indices: 0=Create, 1=Read, 2=Update, 3=Delete, 4=List.
-        // PRD 00148 Phase 1 requires "create/read/update/delete/list-or-search
-        // basics" — Read/Update/Delete added in cycle-2 rework (F10).
+        // Full CRUD cycle on a single doogat created in step 0, then a
+        // not-found read against a stable literal id to exercise the
+        // not-found error path (PRD 00148 Phase 1 explicit requirement,
+        // surfaced by the blind-review I4 gap).
+        // Step indices: 0=Create, 1=Read, 2=Update, 3=Delete, 4=List,
+        // 5=ReadDoogat(nonexistent).
         steps: vec![
             Step {
                 op: StepOp::CreateDoogat,
@@ -62,6 +64,10 @@ pub fn crud_baseline() -> WorkflowFixture {
             Step {
                 op: StepOp::ListDoogats,
                 args: serde_json::json!({}),
+            },
+            Step {
+                op: StepOp::ReadDoogat,
+                args: serde_json::json!({"id": "99999999999999"}),
             },
         ],
         expected: ExpectedBehavior {
