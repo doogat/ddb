@@ -259,7 +259,7 @@ Every public application interface supports the CRUD baseline operations listed 
 - **List**: `Specialized` — `GET /nosql?type=<type>` and `GET /nosql?tag=<tag>` return prefix-scan results; no pagination or field filtering. Use GraphQL or REST for full list/filter semantics.
 - **Search (basics)**: `Intentionally absent` — FTS5 free-text search is not supported on the NoSQL HTTP surface; use GraphQL `search` for full-text search.
 - **Validation error handling**: `Intentionally absent` — NoSQL HTTP has no write path; validation errors do not apply. `POST`/`PUT`/`DELETE` return HTTP 405 Method Not Allowed.
-- **Not-found behavior**: `Guaranteed` — `GET /nosql/:id` on a missing id returns HTTP 404 + JSON error.
+- **Not-found behavior**: `Specialized` — `GET /nosql/:id` on a missing id returns HTTP 404; the body uses a provisional `{ "error": "not_found", "message": "..." }` shape that is not yet pinned by the error contract (G-13 in the inventory). For a `Guaranteed` not-found shape, use GraphQL or `GET /rest/doogats/:id`. The shape will be standardized in a follow-up documentation pass.
 
 ### Specialized and intentionally absent capabilities
 
@@ -293,6 +293,7 @@ NoSQL HTTP is a read-only document fetch and prefix-scan surface. Use it for O(1
 
 **Specialized:**
 - *List* - `GET /nosql?type=<type>` and `GET /nosql?tag=<tag>` return prefix-scan results with no pagination or field filtering. Use GraphQL or REST for full list/filter semantics.
+- *Not-found error shape* - HTTP 404 is `Guaranteed`, but the JSON body shape is provisional (`{ "error": "not_found", "message": "..." }`) and not yet pinned by the error contract (G-13 in the inventory). Use GraphQL or REST when your client needs a stable not-found body shape.
 
 **Intentionally absent:**
 - *All write operations* - Create, Update, and Delete are absent by design. `POST`, `PUT`, and `DELETE` return HTTP 405 Method Not Allowed. Route all writes through GraphQL or REST.
