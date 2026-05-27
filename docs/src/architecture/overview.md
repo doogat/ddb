@@ -72,7 +72,7 @@ Git handles >99% of merges (non-overlapping edits). When Git detects a conflict,
 
 ## Deployment Modes
 
-Doogat DB supports three deployment modes. All three run the same backend (storage, types, sync, queries). The public application interfaces — GraphQL, REST, PgWire, NoSQL HTTP, and FFI — expose different capability subsets and are not interchangeable. See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the promise matrix.
+Doogat DB supports three deployment modes. All three run the same backend (storage, types, and sync). The public application interfaces — GraphQL, REST, PgWire, NoSQL HTTP, and FFI — expose different capability subsets and are not interchangeable. See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for the promise matrix.
 
 ### Mode 1: Server
 
