@@ -36,8 +36,8 @@ async fn graphql_create_doogat_surfaces_title_from_template_warning() {
         .await
         .unwrap();
 
-    let schema = ddb_server::schema::build_schema(actor, pool, vec![], None)
-        .expect("schema must build");
+    let schema =
+        ddb_server::schema::build_schema(actor, pool, vec![], None).expect("schema must build");
 
     // Omit `title` to trigger TITLE_FROM_TEMPLATE; `fields` carries url.
     let query = r#"
@@ -67,22 +67,17 @@ async fn graphql_create_doogat_surfaces_title_from_template_warning() {
     );
 
     // extensions.warnings must be present.
-    let warnings_value = response
-        .extensions
-        .get("warnings")
-        .unwrap_or_else(|| {
-            panic!(
-                "extensions.warnings must be present; got extensions: {:?}",
-                response.extensions
-            )
-        });
+    let warnings_value = response.extensions.get("warnings").unwrap_or_else(|| {
+        panic!(
+            "extensions.warnings must be present; got extensions: {:?}",
+            response.extensions
+        )
+    });
 
     // Convert to serde_json for ergonomic assertions.
     let warnings_json = warnings_value.clone().into_json().unwrap();
     let warnings = warnings_json.as_array().unwrap_or_else(|| {
-        panic!(
-            "extensions.warnings must be a JSON array; got: {warnings_json}"
-        )
+        panic!("extensions.warnings must be a JSON array; got: {warnings_json}")
     });
 
     assert_eq!(
@@ -114,8 +109,8 @@ async fn graphql_create_doogat_emits_empty_warnings_extension_when_none() {
     let (actor, pool) = setup(tmp.path()).await;
 
     // No typedef with title_template — no warnings should be collected.
-    let schema = ddb_server::schema::build_schema(actor, pool, vec![], None)
-        .expect("schema must build");
+    let schema =
+        ddb_server::schema::build_schema(actor, pool, vec![], None).expect("schema must build");
 
     let query = r#"
         mutation {
@@ -141,15 +136,12 @@ async fn graphql_create_doogat_emits_empty_warnings_extension_when_none() {
     );
 
     // extensions.warnings must be present even when empty.
-    let warnings_value = response
-        .extensions
-        .get("warnings")
-        .unwrap_or_else(|| {
-            panic!(
-                "extensions.warnings must always be present; got extensions: {:?}",
-                response.extensions
-            )
-        });
+    let warnings_value = response.extensions.get("warnings").unwrap_or_else(|| {
+        panic!(
+            "extensions.warnings must always be present; got extensions: {:?}",
+            response.extensions
+        )
+    });
 
     let warnings_json = warnings_value.clone().into_json().unwrap();
     assert_eq!(
