@@ -434,6 +434,42 @@ let id = try driver.createDoogat(content: "---\ntitle: Baseline test\ntype: note
 
 **Not-found behavior differs by interface** — see the [CRUD baseline table](#crud-baseline) for the exact response shape on each. GraphQL returns `extensions.code == "NOT_FOUND"`; CLI exits non-zero; PgWire returns zero rows; REST returns HTTP 404; FFI throws `DdbError::NotFound`.
 
+### GW-4: PgWire SQL/reporting with DDL and schema-reload
+
+**Interface:** PgWire (port 2892) — SQL/reporting surface. Any PostgreSQL-compatible client works without DDB-specific code.
+
+**Connect** using MD5 password auth (username `ddb`, password = Bearer token from `~/.config/ddb/token`):
+
+```bash
+psql "host=127.0.0.1 port=2892 user=ddb password=$(cat ~/.config/ddb/token) dbname=ddb"
+```
+
+**Define a type via DDL:**
+
+```sql
+CREATE TABLE report (title TEXT NOT NULL, status TEXT, period TEXT);
+```
+
+DDL triggers a hot schema reload. The reload is asynchronous — a subsequent `SELECT * FROM report` over PgWire works immediately, but a GraphQL request against the new type may lag by up to a few seconds. Wait for `SELECT * FROM pg_class WHERE relname = 'report'` to return a row before issuing GraphQL queries against the new type, or poll `query { schemaVersion }` until it advances.
+
+**DML (SELECT, INSERT, UPDATE, DELETE):**
+
+```sql
+-- Insert a typed row
+INSERT INTO report (title, status, period) VALUES ('Q3 Summary', 'draft', '2026-Q3');
+
+-- Query with filter and ordering (typed columns, not TEXT blobs)
+SELECT title, status, period FROM report WHERE status = 'draft' ORDER BY period;
+
+-- Update in place
+UPDATE report SET status = 'final' WHERE title = 'Q3 Summary';
+
+-- Delete
+DELETE FROM report WHERE status = 'final';
+```
+
+**Error shape:** Constraint violations return PostgreSQL error message strings (e.g. `ERROR: UNIQUE_VIOLATION`), not the GraphQL `extensions.code` envelope. Use GraphQL `executeSql` when structured error codes alongside DML are required — same engine, different transport.
+
 ## Data modeling
 
 > **Always use `CREATE TABLE` via `ddb query` to define types.** Do not create `_typedef` doogats manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
