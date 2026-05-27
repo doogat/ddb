@@ -65,14 +65,16 @@ Each row corresponds to a golden workflow defined in `dev/local/notes/downstream
 
 When a cell in the table above is `Specialized`, the note explains the specific constraint and points to the recommended alternative if you need the `Guaranteed` shape.
 
+### Promise labels
+
+The interface table and the CRUD baseline section use four promise labels:
+
+- **`Guaranteed`**: present in canonical shape; conformance tests pin response, error, and field-name shape.
+- **`Specialized`**: present with constraints — narrower workflow, different response/error shape, or subset of operations.
+- **`Intentionally absent`**: not on this interface by design; use a different interface for this capability.
+- **`Deprecated`**: reachable but has a named replacement; see [Compatibility and Deprecation](#compatibility-and-deprecation) for the migration timeline.
+
 ### Compatibility and Deprecation
-
-The four promise labels carry distinct meanings:
-
-- **`Guaranteed`**: the capability is present on the interface in its canonical shape; conformance tests pin response, error, and field-name shape.
-- **`Specialized`**: the capability is present with documented constraints (narrower workflow, different response/error shape, or subset of operations).
-- **`Intentionally absent`**: the capability is not exposed on this interface by design; consumers must use a different interface.
-- **`Deprecated`**: the capability is still reachable but a replacement exists and consumers should migrate. Each deprecated behavior names its replacement in the interface docs.
 
 Per-interface deprecation lists live in the interface docs:
 
