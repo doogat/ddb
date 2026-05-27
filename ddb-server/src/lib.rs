@@ -11,6 +11,7 @@ pub mod read_pool;
 pub mod reload;
 pub mod rest;
 pub mod schema;
+pub mod warning_extension;
 pub mod ws;
 
 use std::path::PathBuf;

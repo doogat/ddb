@@ -1,3 +1,37 @@
+use std::sync::Mutex;
+
+/// A warning entry with a code and message.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarningEntry {
+    pub code: &'static str,
+    pub message: String,
+}
+
+/// Collects warnings for a single request.
+#[derive(Debug, Default)]
+pub struct WarningCollector {
+    warnings: Mutex<Vec<WarningEntry>>,
+}
+
+impl WarningCollector {
+    /// Push a warning to the collector.
+    pub fn push_warning(&self, code: &'static str, message: String) {
+        self.warnings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(WarningEntry { code, message });
+    }
+
+    /// Drain all warnings from the collector.
+    pub fn drain_warnings(&self) -> Vec<WarningEntry> {
+        self.warnings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
