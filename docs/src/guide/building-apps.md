@@ -191,6 +191,76 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; FFI consumers needing warnings today must read them through GraphQL.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-13.
 
+### CRUD baseline
+
+Every public application interface supports the CRUD baseline operations listed below. Labels use the [promise vocabulary](#promise-labels). Source of truth for per-interface evidence: `dev/local/notes/interface-compatibility-inventory.md`.
+
+#### GraphQL
+
+- **Create**: `Guaranteed` — `createDoogat` mutation and `executeSql(INSERT ...)` both return the created object with typed fields.
+- **Read (single by id)**: `Guaranteed` — `doogat(id: ...)` query returns the full object or a `NOT_FOUND` error envelope.
+- **Update**: `Guaranteed` — `updateDoogat` mutation and `executeSql(UPDATE ...)` return the updated object.
+- **Delete**: `Guaranteed` — `deleteDoogat` mutation returns confirmation; cascade cleans child rows atomically.
+- **List**: `Guaranteed` — typed `<type>s(limit, offset)` queries and `executeSql(SELECT ...)` return paginated results.
+- **Search (basics)**: `Guaranteed` — `search(query: ...)` returns `SearchHitConnection` with `id`, `title`, `snippet`, `rank`.
+- **Validation error handling**: `Guaranteed` — errors return HTTP 200 with `{ errors: [{ message, extensions: { code } }] }`; codes include `VALIDATION_ERROR`, `NOT_NULL_VIOLATION`, `UNIQUE_VIOLATION`, `REFERENCES_VIOLATION`, `TYPE_NOT_REGISTERED`.
+- **Not-found behavior**: `Guaranteed` — `doogat` query and mutations on missing ids return `extensions.code == "NOT_FOUND"` in the error envelope.
+
+#### CLI
+
+- **Create**: `Guaranteed` — `ddb create` prints the new doogat id on stdout; exits 0 on success.
+- **Read (single by id)**: `Guaranteed` — `ddb query "SELECT ... WHERE id = '...'"` returns the row; not-found returns non-zero exit and stderr message.
+- **Update**: `Guaranteed` — `ddb query "UPDATE ..."` prints affected-row count on stdout.
+- **Delete**: `Guaranteed` — `ddb query "DELETE ..."` removes the doogat; not-found returns non-zero exit.
+- **List**: `Guaranteed` — `ddb query "SELECT ..."` returns tabular results on stdout.
+- **Search (basics)**: `Guaranteed` — `ddb search "<query>"` returns matching doogats in tabular format.
+- **Validation error handling**: `Specialized` — validation failures exit non-zero with human-readable stderr text; no machine-readable error code. Use GraphQL via `curl` when structured codes are required.
+- **Not-found behavior**: `Guaranteed` — not-found on get, update, and delete returns non-zero exit and stderr message; never a silent empty result.
+
+#### FFI (`DoogatDriver` via UniFFI)
+
+- **Create**: `Guaranteed` — `DoogatDriver.create(...)` returns the new doogat as a typed UniFFI value; within the Experimental stability envelope.
+- **Read (single by id)**: `Guaranteed` — `DoogatDriver.get(id)` returns the typed doogat; throws `DdbError` on missing id.
+- **Update**: `Guaranteed` — `DoogatDriver.update(...)` returns the updated doogat as a typed UniFFI value.
+- **Delete**: `Guaranteed` — `DoogatDriver.delete(id)` removes the doogat; throws `DdbError` on missing id.
+- **List**: `Guaranteed` — `DoogatDriver.executeSql("SELECT ...")` returns a `SqlResultRecord` with columns and rows.
+- **Search (basics)**: `Guaranteed` — `DoogatDriver.search(query)` returns `Vec<SearchHit>` with `id`, `title`, `snippet`, `rank`.
+- **Validation error handling**: `Specialized` — validation failures throw `DdbError.sql(msg)` carrying engine error text in the message string; typed per-code variants (`TYPE_NOT_REGISTERED`, `UNIQUE_VIOLATION`, etc.) are deferred to the `ffi-typed-errors-v1` follow-up PRD. Use GraphQL when structured error codes are required.
+- **Not-found behavior**: `Specialized` — missing id throws `DdbError.io(msg)` with `"not found"` in the message string; a typed `DdbError::NotFound { id }` variant is deferred to the `ffi-typed-errors-v1` follow-up PRD.
+
+#### PgWire (port 2892)
+
+- **Create**: `Guaranteed` — `INSERT INTO <type> (...)` via any PostgreSQL client populates the materialized type table and the Git-backed doogat.
+- **Read (single by id)**: `Guaranteed` — `SELECT * FROM <type> WHERE id = '...'` returns the typed row.
+- **Update**: `Guaranteed` — `UPDATE <type> SET ... WHERE id = '...'` modifies the doogat and updates the index.
+- **Delete**: `Guaranteed` — `DELETE FROM <type> WHERE id = '...'` removes the doogat.
+- **List**: `Guaranteed` — `SELECT ... FROM <type>` with standard PostgreSQL filtering and ordering returns typed rows.
+- **Search (basics)**: `Specialized` — FTS5 free-text search is reachable only via raw `SELECT` against internal `_ddb_*` tables, not through a curated PgWire workflow shape. Use GraphQL `search` for the `Guaranteed` FTS5 surface.
+- **Validation error handling**: `Specialized` — constraint violations return PostgreSQL error message strings (e.g. `UNIQUE_VIOLATION` text); no `extensions.code` envelope. Use GraphQL `executeSql` when structured error codes alongside DML are required.
+- **Not-found behavior**: `Guaranteed` — `SELECT` on a missing id returns zero rows (standard PostgreSQL semantics); `UPDATE`/`DELETE` on a missing id returns zero affected rows.
+
+#### REST (`/rest/*`)
+
+- **Create**: `Guaranteed` — `POST /rest/doogats` creates a base-doogat and returns the created object JSON.
+- **Read (single by id)**: `Guaranteed` — `GET /rest/doogats/:id` returns the base-doogat JSON object.
+- **Update**: `Guaranteed` — `PUT /rest/doogats/:id` updates the doogat and returns the updated object JSON.
+- **Delete**: `Guaranteed` — `DELETE /rest/doogats/:id` removes the doogat and returns HTTP 204 or `{ "ok": true }`.
+- **List**: `Guaranteed` — `GET /rest/doogats` returns `{ data: [...], pagination: {...} }`.
+- **Search (basics)**: `Guaranteed` — `GET /rest/doogats?q=...` returns `{ data: [...], pagination: {...} }`.
+- **Validation error handling**: `Specialized` — validation failures return HTTP 4xx + `{ error, message }` JSON envelope; the `error` field carries a short code string, not the `extensions.code` vocabulary. Use GraphQL for the `Guaranteed` structured-code surface. Typed create/update is `Specialized` until per-type REST routes land — use GraphQL for typed mutations.
+- **Not-found behavior**: `Guaranteed` — `GET /rest/doogats/:id` on a missing id returns HTTP 404 + `{ "error": "not_found", "message": "..." }`.
+
+#### NoSQL HTTP (`/nosql/*`)
+
+- **Create**: `Intentionally absent` — NoSQL HTTP is read-only by design; route writes through GraphQL or REST.
+- **Read (single by id)**: `Guaranteed` — `GET /nosql/:id` returns the raw doogat JSON from the redb index.
+- **Update**: `Intentionally absent` — NoSQL HTTP is read-only by design; route writes through GraphQL or REST.
+- **Delete**: `Intentionally absent` — NoSQL HTTP is read-only by design; route writes through GraphQL or REST.
+- **List**: `Specialized` — `GET /nosql?type=<type>` and `GET /nosql?tag=<tag>` return prefix-scan results; no pagination or field filtering. Use GraphQL or REST for full list/filter semantics.
+- **Search (basics)**: `Intentionally absent` — FTS5 free-text search is not supported on the NoSQL HTTP surface; use GraphQL `search` for full-text search.
+- **Validation error handling**: `Intentionally absent` — NoSQL HTTP has no write path; validation errors do not apply. `POST`/`PUT`/`DELETE` return HTTP 405 Method Not Allowed.
+- **Not-found behavior**: `Guaranteed` — `GET /nosql/:id` on a missing id returns HTTP 404 + JSON error.
+
 ### Auth and setup
 
 **Server-mode interfaces** (GraphQL, REST, PgWire, NoSQL HTTP) share one setup chain:
