@@ -1,5 +1,7 @@
 # Getting Started
 
+If you are building an application on top of ddb, see [Choosing an interface](./building-apps.md#choosing-an-interface) to pick the right API (GraphQL, CLI, FFI, PgWire, REST, or NoSQL HTTP) for your workflow.
+
 ## Prerequisites
 
 - Rust toolchain (rustup, cargo)
