@@ -395,6 +395,45 @@ mutation {
 
 Error codes returned on the GraphQL surface: `VALIDATION_ERROR`, `NOT_NULL_VIOLATION`, `UNIQUE_VIOLATION`, `REFERENCES_VIOLATION`, `TYPE_NOT_REGISTERED`, `SINGLETON_VIOLATION`. Read-side not-found returns `extensions.code == "NOT_FOUND"`.
 
+### GW-3: Cross-interface CRUD baseline
+
+**Interfaces:** GraphQL, CLI, FFI, PgWire, REST — all five independently support the full CRUD baseline. NoSQL HTTP is excluded from this workflow (write operations intentionally absent).
+
+This is the conformance baseline: the same doogat lifecycle (create / read / update / delete / list / search) verified on each interface. The conformance harness (`crud_baseline` fixture) exercises CLI and GraphQL. Use GW-1, GW-4, GW-5, GW-7 for interface-specific examples.
+
+**Canonical create across interfaces** (all create a base doogat titled "Baseline test"):
+
+```bash
+# CLI
+ddb create --title "Baseline test" --type note
+```
+
+```graphql
+# GraphQL
+mutation { createDoogat(input: { title: "Baseline test", type: "note" }) { id } }
+```
+
+```sql
+-- PgWire (psql / any PostgreSQL client)
+INSERT INTO note (title) VALUES ('Baseline test');
+```
+
+```http
+# REST
+POST /rest/doogats
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "title": "Baseline test", "type": "note" }
+```
+
+```swift
+// FFI (Swift)
+let id = try driver.createDoogat(content: "---\ntitle: Baseline test\ntype: note\n---\n", message: "create")
+```
+
+**Not-found behavior differs by interface** — see the [CRUD baseline table](#crud-baseline) for the exact response shape on each. GraphQL returns `extensions.code == "NOT_FOUND"`; CLI exits non-zero; PgWire returns zero rows; REST returns HTTP 404; FFI throws `DdbError::NotFound`.
+
 ## Data modeling
 
 > **Always use `CREATE TABLE` via `ddb query` to define types.** Do not create `_typedef` doogats manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
