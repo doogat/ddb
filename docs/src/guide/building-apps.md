@@ -522,6 +522,46 @@ do {
 
 **Kotlin** uses the same API shape with `throws` replaced by `try/catch` on `DdbException` subclasses.
 
+### GW-7: REST CRUD/search
+
+**Interface:** REST (`/rest/*`) — base-doogat CRUD `Guaranteed`; typed create/update `Specialized` (no per-type routes yet).
+
+All requests require `Authorization: Bearer <token>` (from `~/.config/ddb/token`).
+
+**Create:**
+
+```http
+POST /rest/doogats
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{ "title": "Meeting notes", "type": "note", "tags": ["work"] }
+```
+
+Response: `{ "data": { "id": "20260301130000", "title": "Meeting notes", ... }, "warnings": [] }`
+
+Typed fields are not populated in the REST create path. Use GraphQL `executeSql(INSERT INTO ...)` when you need typed-column values in the response.
+
+**Read, update, delete:**
+
+```http
+GET    /rest/doogats/20260301130000
+PUT    /rest/doogats/20260301130000   body: { "title": "Updated notes" }
+DELETE /rest/doogats/20260301130000
+```
+
+DELETE returns HTTP 204. Not-found returns HTTP 404 + `{ "error": "NOT_FOUND", "message": "..." }`.
+
+**List and search:**
+
+```http
+GET /rest/doogats?type=note&q=meeting&tag=work
+```
+
+Response: `{ "data": [...], "pagination": { "total": 12, "limit": 20, "offset": 0 } }`
+
+**Error shape:** HTTP 4xx/5xx + JSON `{ "error": "<code>", "message": "<detail>" }`. The `error` field uses the unified code vocabulary but there is no `extensions` envelope — use GraphQL for the `Guaranteed` structured-error surface.
+
 ## Data modeling
 
 > **Always use `CREATE TABLE` via `ddb query` to define types.** Do not create `_typedef` doogats manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
