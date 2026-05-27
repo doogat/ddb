@@ -363,6 +363,19 @@ The remaining interfaces defer structured warnings:
 - **FFI**: warning fields omitted at the UniFFI boundary — see [FFI warnings (D-13)](#ffi-warnings-d-13). Use GraphQL in the interim.
 - **CLI**: human-readable stderr text only; no machine-readable envelope — see [CLI warnings (D-10)](#cli-warnings-d-10).
 
+### Support diagnostics
+
+When reporting an interface issue, include the following so the problem can be reproduced without additional back-and-forth:
+
+- **Interface**: which interface you used (GraphQL, CLI, FFI, PgWire, REST, or NoSQL HTTP).
+- **Workflow**: the operation being performed (create, read, update, delete, search, or a named golden workflow such as GW-1).
+- **Command or request shape**: the exact query, mutation, CLI command, or HTTP request (redact any sensitive data).
+- **Error or warning code**: the AppError code from the response (e.g., `NOT_FOUND`, `VALIDATION_ERROR`). See [Error and warning handling](#error-and-warning-handling) for the stable code vocabulary.
+- **Version**: output of `ddb --version`.
+- **Minimal reproduction**: the smallest set of steps that triggers the issue.
+
+This set of fields is sufficient to identify which interface path failed and whether the behavior is a regression in a `Guaranteed` capability, a `Specialized` behavior, or a known limitation. Reports lacking an interface and error code typically require at least one round of clarification before investigation can begin.
+
 ## Golden workflow examples
 
 These examples cover the five primary golden workflows (GW-1, GW-3, GW-4, GW-5, GW-7). Each example matches conformance-tested behavior and uses only documented API surfaces — no hidden project-specific adapters.
