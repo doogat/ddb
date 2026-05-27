@@ -470,6 +470,58 @@ DELETE FROM report WHERE status = 'final';
 
 **Error shape:** Constraint violations return PostgreSQL error message strings (e.g. `ERROR: UNIQUE_VIOLATION`), not the GraphQL `extensions.code` envelope. Use GraphQL `executeSql` when structured error codes alongside DML are required — same engine, different transport.
 
+### GW-5: FFI embedded CRUD/search with typed errors
+
+**Interface:** FFI (`DoogatDriver` via UniFFI) — CRUD baseline `Guaranteed` within the Experimental stability envelope. No server process required.
+
+**macOS note:** After linking `libddb_core.dylib`, codesign it before loading or `syspolicyd` will silently kill the import: `codesign -f -s - path/to/libddb_core.dylib`.
+
+**Construct** the driver (initializes the repo if empty — no manual `ddb init`):
+
+```swift
+// Swift
+let driver = try DoogatDriver(repoPath: "/path/to/repo")
+```
+
+**Typed create and read** via SQL passthrough:
+
+```swift
+// Create a typed doogat
+let result = try driver.executeSql(sql: "INSERT INTO project (title, status) VALUES ('My Project', 'active')")
+// result.message contains the created doogat id
+
+// Read back
+let id = "20260301130000"
+let markdown = try driver.readDoogat(id: id)   // raw Markdown or throws DdbError.notFound
+
+// Search
+let hits = try driver.search(query: "My Project")
+// hits: [SearchResult] with .id, .title, .snippet, .rank
+```
+
+**Delete:**
+
+```swift
+try driver.deleteDoogat(id: id, message: "remove project")
+```
+
+**Error handling:**
+
+```swift
+do {
+    let markdown = try driver.readDoogat(id: "nonexistent")
+} catch DdbError.notFound(let msg) {
+    // id not in repo
+} catch DdbError.validation(let msg) {
+    // constraint violation — code embedded in msg (e.g. "UNIQUE_VIOLATION: ...")
+    // per-code typed variants deferred to ffi-typed-errors-v1
+} catch DdbError.sql(let msg) {
+    // SQL-engine error
+}
+```
+
+**Kotlin** uses the same API shape with `throws` replaced by `try/catch` on `DdbException` subclasses.
+
 ## Data modeling
 
 > **Always use `CREATE TABLE` via `ddb query` to define types.** Do not create `_typedef` doogats manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.
