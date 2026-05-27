@@ -332,12 +332,20 @@ AppError codes (from PRD 00147) are the stable cross-interface vocabulary. The c
 
 #### Stable error codes
 
+These codes come from two sources: the Structured violation codes in `ddb-core::error::codes` and the AppError envelope mappings in `ddb-core::app_contract::error`. All codes in this list are stable across transports.
+
 - `VALIDATION_ERROR` — a field value fails schema validation (missing required field, wrong format).
 - `NOT_NULL_VIOLATION` — a non-nullable column received a null value.
 - `UNIQUE_VIOLATION` — duplicate value for a `UNIQUE` constraint.
 - `REFERENCES_VIOLATION` — a foreign-key or reference constraint was violated.
 - `TYPE_NOT_REGISTERED` — the requested doogat type has no registered `_typedef`.
+- `UNKNOWN_FIELD` — a typed insert/update referenced a field that the typedef does not declare.
+- `CASCADE_CYCLE` — a delete cascade would form a cycle in the reference graph.
 - `NOT_FOUND` — no doogat exists with the given id.
+- `PARSE_ERROR` — input could not be parsed (malformed JSON, invalid frontmatter, etc.).
+- `INVALID_PATH` — a doogat path argument is invalid (empty, malformed, or out of scope).
+- `BAD_REQUEST` — the request was structurally valid but rejected by the application contract.
+- `CONFLICT` — the operation conflicts with current state (e.g., a concurrent write).
 - `SINGLETON_VIOLATION` — a create was attempted for a type that allows only one instance.
 - `SINGLETON_NOT_FOUND` — a singleton read was attempted but no instance exists yet.
 
