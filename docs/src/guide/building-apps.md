@@ -225,8 +225,8 @@ Every public application interface supports the CRUD baseline operations listed 
 - **Delete**: `Guaranteed` — `DoogatDriver.delete_doogat(id, message)` removes the doogat; throws `DdbError` on missing id.
 - **List**: `Guaranteed` — `DoogatDriver.list_doogats()` returns ids; `execute_sql("SELECT ...")` returns a `SqlResultRecord` with columns and rows.
 - **Search (basics)**: `Guaranteed` — `DoogatDriver.search(query)` returns `Vec<SearchResult>` with `id`, `title`, `snippet`, `rank`.
-- **Validation error handling**: `Specialized` — validation failures throw `DdbError.sql(msg)` carrying engine error text in the message string; typed per-code variants (`TYPE_NOT_REGISTERED`, `UNIQUE_VIOLATION`, etc.) are deferred to the `ffi-typed-errors-v1` follow-up PRD. Use GraphQL when structured error codes are required.
-- **Not-found behavior**: `Specialized` — missing id throws `DdbError.io(msg)` with `"not found"` in the message string; a typed `DdbError::NotFound { id }` variant is deferred to the `ffi-typed-errors-v1` follow-up PRD.
+- **Validation error handling**: `Specialized` — validation failures throw `DdbError::Validation` or `DdbError::SqlEngine` with structured code/context when available; per-code enum variants (`TYPE_NOT_REGISTERED`, `UNIQUE_VIOLATION`, etc.) are deferred to the `ffi-typed-errors-v1` follow-up PRD. Use GraphQL when structured error codes are required.
+- **Not-found behavior**: `Specialized` — missing id throws `DdbError::NotFound { msg }`; an id-specific not-found payload is deferred to the `ffi-typed-errors-v1` follow-up PRD.
 
 #### PgWire (port 2892)
 
@@ -304,8 +304,8 @@ NoSQL HTTP is a read-only document fetch and prefix-scan surface. Use it for O(1
 FFI is the embedded/mobile surface. It runs in-process with no server needed and gives Swift and Kotlin apps direct access to the Git-backed repo, SQL engine, and FTS5 search. Use it for iOS/Android apps or any context where running a server process is not acceptable.
 
 **Specialized:**
-- *Validation error handling* - validation failures throw `DdbError.sql(msg)` carrying engine error text; typed per-code variants are deferred to `ffi-typed-errors-v1`. Use GraphQL when structured error codes are required.
-- *Not-found behavior* - missing id on `get` and `delete` throws `DdbError.io(msg)` with `"not found"` in the message string. A typed `DdbError::NotFound { id }` variant is deferred to `ffi-typed-errors-v1`.
+- *Validation error handling* - validation failures throw `DdbError::Validation` or `DdbError::SqlEngine` with structured code/context when available; per-code enum variants are deferred to `ffi-typed-errors-v1`. Use GraphQL when structured error codes are required.
+- *Not-found behavior* - missing id on `read_doogat` and `delete_doogat` throws `DdbError::NotFound { msg }`. An id-specific not-found payload is deferred to `ffi-typed-errors-v1`.
 
 **Intentionally absent:**
 - *Real-time subscriptions* - no GraphQL subscription equivalent on the embedded surface. Mobile apps that need real-time push must compose with `ddb serve`.
@@ -325,6 +325,75 @@ FFI is the embedded/mobile surface. It runs in-process with no server needed and
 **Embedded-mode (FFI)**: standard documented setup in [FFI docs](../technical/ffi.md). Link the platform binding (XCFramework on iOS, `.aar` on Android), construct a `DoogatDriver` with the local repo path, and call `executeSql`. No auth — the host app owns the repo in-process.
 
 **CLI**: install `ddb`, run `ddb init`. No auth required — direct repo access.
+
+## Golden workflow examples
+
+These examples cover the five primary golden workflows (GW-1, GW-3, GW-4, GW-5, GW-7). Each example matches conformance-tested behavior and uses only documented API surfaces — no hidden project-specific adapters.
+
+See [Choosing an interface](#choosing-an-interface) for the full promise matrix and [Error and warning handling](#error-and-warning-handling) for how each interface surfaces errors.
+
+### GW-1: GraphQL typed create/update
+
+**Interface:** GraphQL — all CRUD baseline operations `Guaranteed`.
+
+Assumes a `project` typedef exists (`ddb type install project` or via `CREATE TABLE`).
+
+**Typed create** (use `executeSql` for explicit column control):
+
+```graphql
+mutation {
+  executeSql(sql: "INSERT INTO project (title, status, priority) VALUES ('Q3 Planning', 'active', 'high')") {
+    message
+  }
+}
+```
+
+Or via the generic mutation (returns typed fields on the response):
+
+```graphql
+mutation {
+  createDoogat(input: { title: "Q3 Planning", type: "project" }) {
+    id
+    title
+    type
+  }
+}
+```
+
+**Typed update** (patch — unspecified columns are unchanged):
+
+```graphql
+mutation {
+  executeSql(sql: "UPDATE project SET status = 'done' WHERE id = '20260301130000'") {
+    message
+  }
+}
+```
+
+**Delete:**
+
+```graphql
+mutation {
+  deleteDoogat(id: "20260301130000")
+}
+```
+
+**Validation error response shape** (all GraphQL errors follow this envelope):
+
+```json
+{
+  "data": null,
+  "errors": [{
+    "message": "UNIQUE_VIOLATION: title already exists for type project",
+    "extensions": {
+      "code": "UNIQUE_VIOLATION",
+      "context": { "field": "title", "existing_id": "20260101120000" }
+    }
+  }]
+}
+```
+
+Error codes returned on the GraphQL surface: `VALIDATION_ERROR`, `NOT_NULL_VIOLATION`, `UNIQUE_VIOLATION`, `REFERENCES_VIOLATION`, `TYPE_NOT_REGISTERED`, `SINGLETON_VIOLATION`. Read-side not-found returns `extensions.code == "NOT_FOUND"`.
 
 ## Data modeling
 
