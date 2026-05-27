@@ -387,7 +387,7 @@ This set of fields is sufficient to identify which interface path failed and whe
 
 ## Golden workflow examples
 
-These examples cover the five primary golden workflows (GW-1, GW-3, GW-4, GW-5, GW-7). Each example matches conformance-tested behavior and uses only documented API surfaces — no hidden project-specific adapters.
+These examples cover the five primary golden workflows (GW-1, GW-3, GW-4, GW-5, GW-7). The CLI and GraphQL examples (GW-1, GW-3) are pinned by the `crud_baseline` conformance harness. The PgWire (GW-4), FFI (GW-5), and REST (GW-7) examples match the documented contract; harness coverage for those interfaces is tracked under PRD 00148. All examples use only documented API surfaces — no hidden project-specific adapters.
 
 See [Choosing an interface](#choosing-an-interface) for the full promise matrix and [Error and warning handling](#error-and-warning-handling) for how each interface surfaces errors.
 
