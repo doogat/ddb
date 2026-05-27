@@ -57,6 +57,8 @@ Doogat DB exposes several network and embedded interfaces. They are not equivale
 | **REST CRUD/search** | **REST (`/rest/*`)** | GraphQL | Base-doogat CRUD and list/search over standard HTTP. No GraphQL library needed. Typed create/update is `Specialized` (not `Guaranteed`) until per-type REST routes land — use GraphQL when you need typed mutations. |
 | **NoSQL document access** | **NoSQL HTTP (`/nosql/*`)** | REST `GET /rest/doogats/:id` | Read-only by design. O(1) document fetch and prefix scan by type or tag. All write/mutate operations are `Intentionally absent` — route writes through GraphQL or REST. |
 
+Each row corresponds to a golden workflow defined in `dev/local/notes/downstream-golden-workflows.md` (GW-1 through GW-12). The conformance harness exercises the cross-interface CRUD baseline (GW-3, `crud_baseline` fixture) against CLI and GraphQL. Golden workflow examples for GW-1, GW-3, GW-4, GW-5, and GW-7 appear in [Golden workflow examples](#golden-workflow-examples) below.
+
 ### What "Specialized" means
 
 `Specialized` is a narrower but still binding promise. The capability is present and supported, but with explicit constraints: a different response or error shape than the `Guaranteed` form, a workflow that differs from the primary interface, or coverage of a subset of the operations the capability spans elsewhere. The four matrix labels (`Guaranteed`, `Specialized`, `Intentionally absent`, `Deprecated`) are all real, maintainer-decided promises — `Specialized` is **not** a soft "partial" placeholder.
