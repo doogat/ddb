@@ -326,6 +326,43 @@ FFI is the embedded/mobile surface. It runs in-process with no server needed and
 
 **CLI**: install `ddb`, run `ddb init`. No auth required — direct repo access.
 
+### Error and warning handling
+
+AppError codes (from PRD 00147) are the stable cross-interface vocabulary. The code values are stable across transports; only the envelope that wraps them is transport-specific. See [Promise labels](#promise-labels) for label definitions and [CRUD baseline](#crud-baseline) for per-interface behavior.
+
+#### Stable error codes
+
+- `VALIDATION_ERROR` — a field value fails schema validation (missing required field, wrong format).
+- `NOT_NULL_VIOLATION` — a non-nullable column received a null value.
+- `UNIQUE_VIOLATION` — duplicate value for a `UNIQUE` constraint.
+- `REFERENCES_VIOLATION` — a foreign-key or reference constraint was violated.
+- `TYPE_NOT_REGISTERED` — the requested doogat type has no registered `_typedef`.
+- `NOT_FOUND` — no doogat exists with the given id.
+- `SINGLETON_VIOLATION` — a create was attempted for a type that allows only one instance.
+- `SINGLETON_NOT_FOUND` — a singleton read was attempted but no instance exists yet.
+
+#### Per-interface error framing
+
+- **GraphQL**: `errors[].extensions.code` carries the AppError code. See [CRUD baseline](#crud-baseline).
+- **REST**: `{ error, message }` JSON body; `error` carries the AppError code. See [CRUD baseline](#crud-baseline).
+- **PgWire**: PostgreSQL `ERROR` message string (structured per-code mapping is planned; see [PgWire warnings (D-12)](#pgwire-warnings-d-12)). See [CRUD baseline](#crud-baseline).
+- **NoSQL HTTP**: `{ error, message }` JSON body; `error` carries the AppError code. See [CRUD baseline](#crud-baseline).
+- **FFI**: `DdbError::*` enum variant (typed variants per code are planned; see [FFI search error variant (D-02)](#ffi-search-error-variant-d-02)). See [CRUD baseline](#crud-baseline).
+- **CLI**: stderr text with a non-zero exit code. See [CRUD baseline](#crud-baseline).
+
+#### Warnings
+
+Structured warnings use the `AppWarning` type (PRD 00147). Two interfaces surface the `warnings` channel today:
+
+- **GraphQL**: top-level `warnings` array on the response.
+- **REST**: top-level `warnings` array in the `{ data, warnings }` response envelope (see [REST warnings (D-11)](#rest-warnings-d-11)).
+
+The remaining interfaces defer structured warnings:
+
+- **PgWire**: not yet surfaced over the wire protocol — see [PgWire warnings (D-12)](#pgwire-warnings-d-12). Use GraphQL in the interim.
+- **FFI**: warning fields omitted at the UniFFI boundary — see [FFI warnings (D-13)](#ffi-warnings-d-13). Use GraphQL in the interim.
+- **CLI**: human-readable stderr text only; no machine-readable envelope — see [CLI warnings (D-10)](#cli-warnings-d-10).
+
 ## Golden workflow examples
 
 These examples cover the five primary golden workflows (GW-1, GW-3, GW-4, GW-5, GW-7). Each example matches conformance-tested behavior and uses only documented API surfaces — no hidden project-specific adapters.
