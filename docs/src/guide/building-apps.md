@@ -349,6 +349,7 @@ These codes come from two sources: the Structured violation codes in `ddb-core::
 - `CONFLICT` — the operation conflicts with current state (e.g., a concurrent write).
 - `SINGLETON_VIOLATION` — a create was attempted for a type that allows only one instance.
 - `SINGLETON_NOT_FOUND` — a singleton read was attempted but no instance exists yet.
+- `INTERNAL_ERROR` — a catch-all for unexpected internal errors that do not map to a specific code above. Clients should treat this as "report and retry"; downstream code should not pattern-match on it as part of normal flow.
 
 #### Per-interface error framing
 
