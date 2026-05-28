@@ -37,9 +37,22 @@ impl WarningCollector {
 }
 
 pub fn forward_warnings(ctx: &ResolverContext<'_>, warnings: &[AppWarning]) {
-    if let Ok(collector) = ctx.data::<Arc<WarningCollector>>() {
-        for w in warnings {
-            collector.push_warning(w.code, w.message.clone());
+    match ctx.data::<Arc<WarningCollector>>() {
+        Ok(collector) => {
+            for w in warnings {
+                collector.push_warning(w.code, w.message.clone());
+            }
+        }
+        Err(_) => {
+            // build_schema installs WarningExtensionFactory unconditionally, so
+            // a missing collector means the schema was assembled without it —
+            // a configuration bug that would silently drop warnings. Surface
+            // it loudly so it's debuggable instead of swallowed.
+            tracing::warn!(
+                target: "ddb_server::warnings",
+                "WarningCollector missing from request data; {} warning(s) dropped",
+                warnings.len(),
+            );
         }
     }
 }
