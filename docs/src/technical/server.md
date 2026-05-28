@@ -268,6 +268,10 @@ PRD 00130 / issue #12: `createMany(onConflict: IGNORE)` returns the surviving ro
 `sync` defaults to `remote: "origin"`, `branch: "master"` (override via arguments for repos using a different default branch). Returns an error if no remote is configured.
 `compact` defaults to `force: false`. When no node is registered, returns a no-op report (zeros).
 
+### Response warnings (PRD 00154)
+
+Every GraphQL response carries an `extensions.warnings` array alongside the existing `data` / `errors` keys. The array is always present (`[]` when no warnings were collected) so clients can read it unconditionally. Each entry has `code` (stable SCREAMING_SNAKE string) and `message` (human-readable). The structure parallels the REST `warnings` array surfaced by PRD 00147 — same vocabulary across transports. `createDoogat` drains `AppOutput::warnings` from `DoogatService::create` into the response (e.g. omitting `title` on a typedef with a `title_template` surfaces `TITLE_FROM_TEMPLATE`). Other mutations do not yet forward warnings; the infrastructure is in place for incremental rollout. Client handling is advisory.
+
 ### SINGLETON typedefs (PRD 00139)
 
 For every typedef declared `singleton: true`, the dynamic schema additionally emits:
