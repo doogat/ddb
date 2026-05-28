@@ -1,10 +1,3 @@
-//! PRD 00154 — graphql-response-extension-warnings-v1
-//!
-//! Both tests are expected to be RED until the WarningExtension is wired
-//! into the schema (T3). The contract: every GraphQL response carries
-//! `extensions.warnings` as a JSON array (empty when no warnings). Each
-//! entry has `code` (string) and `message` (string).
-
 use ddb_server::actor::ActorHandle;
 use ddb_server::events::EventBus;
 use ddb_server::read_pool::ReadPool;
