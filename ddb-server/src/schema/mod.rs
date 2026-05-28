@@ -12,6 +12,8 @@ pub(crate) use base_types::{
 use async_graphql::dynamic::*;
 use ddb_core::types::TableSchema;
 
+use crate::warning_extension::WarningExtensionFactory;
+
 use std::sync::Arc;
 
 use crate::actor::ActorHandle;
@@ -84,7 +86,10 @@ pub fn build_schema(
         builder = builder.data(reloader);
     }
 
-    builder.finish().map_err(|e| e.to_string())
+    builder
+        .extension(WarningExtensionFactory)
+        .finish()
+        .map_err(|e| e.to_string())
 }
 
 /// Register core type definitions and shared filter types onto the schema builder.

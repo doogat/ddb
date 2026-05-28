@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **graphql**: GraphQL responses now include an `extensions.warnings` array carrying structured `AppOutput::warnings` entries from `createDoogat`. Each entry has `code` (stable string) and `message` (human-readable). The key is always present, an empty array when no warnings were collected. Client handling is advisory; existing `data`/`errors` response shape is unchanged. (PRD 00154)
+
 ### Fixed
 
 - **service**: `DoogatService::create` now binds the `TITLE_FROM_TEMPLATE` warning to the resolved typedef actually carrying a `title_template`, instead of the looser "caller omitted title AND result has a title" heuristic. Future auto-title mechanisms won't trip the warning, and the warning's message is accurate by construction for the common path. (PRD 00147 doubt-review)

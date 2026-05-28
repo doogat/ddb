@@ -1,4 +1,10 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use async_graphql::extensions::{
+    Extension, ExtensionContext, ExtensionFactory, NextPrepareRequest, NextRequest,
+};
+use async_graphql::{Request, Response, ServerResult};
+use async_trait::async_trait;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WarningEntry {
@@ -25,6 +31,49 @@ impl WarningCollector {
             .unwrap_or_else(|e| e.into_inner())
             .drain(..)
             .collect()
+    }
+}
+
+pub struct WarningExtensionFactory;
+
+impl ExtensionFactory for WarningExtensionFactory {
+    fn create(&self) -> Arc<dyn Extension> {
+        Arc::new(WarningExtension {
+            collector: Arc::new(WarningCollector::default()),
+        })
+    }
+}
+
+pub struct WarningExtension {
+    collector: Arc<WarningCollector>,
+}
+
+#[async_trait]
+impl Extension for WarningExtension {
+    async fn prepare_request(
+        &self,
+        ctx: &ExtensionContext<'_>,
+        request: Request,
+        next: NextPrepareRequest<'_>,
+    ) -> ServerResult<Request> {
+        let request = request.data(self.collector.clone());
+        next.run(ctx, request).await
+    }
+
+    async fn request(&self, ctx: &ExtensionContext<'_>, next: NextRequest<'_>) -> Response {
+        let mut response = next.run(ctx).await;
+        let entries = self.collector.drain_warnings();
+        let arr: Vec<serde_json::Value> = entries
+            .into_iter()
+            .map(|e| serde_json::json!({"code": e.code, "message": e.message}))
+            .collect();
+        let value: async_graphql::Value =
+            async_graphql::Value::from_json(serde_json::Value::Array(arr))
+                .unwrap_or(async_graphql::Value::Null);
+        response
+            .extensions
+            .insert("warnings".to_string(), value);
+        response
     }
 }
 
