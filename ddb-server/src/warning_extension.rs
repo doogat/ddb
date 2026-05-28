@@ -63,13 +63,12 @@ impl Extension for WarningExtension {
     async fn request(&self, ctx: &ExtensionContext<'_>, next: NextRequest<'_>) -> Response {
         let mut response = next.run(ctx).await;
         let entries = self.collector.drain_warnings();
-        let arr: Vec<serde_json::Value> = entries
+        let arr: Vec<_> = entries
             .into_iter()
             .map(|e| serde_json::json!({"code": e.code, "message": e.message}))
             .collect();
-        let value: async_graphql::Value =
-            async_graphql::Value::from_json(serde_json::Value::Array(arr))
-                .unwrap_or(async_graphql::Value::Null);
+        let value = async_graphql::Value::from_json(serde_json::Value::Array(arr))
+            .unwrap_or(async_graphql::Value::Null);
         response
             .extensions
             .insert("warnings".to_string(), value);
