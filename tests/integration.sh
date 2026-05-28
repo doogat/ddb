@@ -2467,7 +2467,7 @@ pass "56.B: REST POST /doogats with omitted title surfaces TITLE_FROM_TEMPLATE w
 IG_GQL_WARN_TITLED=$(gql '{"query":"mutation { createDoogat(input: { title: \"gql-explicit\", type: \"ig_warn_demo\" }) { id title } }"}')
 assert_gql_ok "$IG_GQL_WARN_TITLED"
 printf '%s' "$IG_GQL_WARN_TITLED" | jq -e '.extensions.warnings == []' >/dev/null
-IG_GQL_WARN_TITLED_ID=$(printf '%s' "$IG_GQL_WARN_TITLED" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+IG_GQL_WARN_TITLED_ID=$(printf '%s' "$IG_GQL_WARN_TITLED" | jq -r '.data.createDoogat.id')
 pass "57.A: GraphQL createDoogat with title returns extensions.warnings: []"
 
 # 57.B — omitted title with a title_template typedef fires TITLE_FROM_TEMPLATE
@@ -2477,7 +2477,7 @@ assert_gql_ok "$IG_GQL_WARN_AUTO"
 printf '%s' "$IG_GQL_WARN_AUTO" | jq -e '.extensions.warnings | length == 1
        and (.[0].code == "TITLE_FROM_TEMPLATE")
        and (.[0].message | test("title_template"))' >/dev/null
-IG_GQL_WARN_AUTO_ID=$(printf '%s' "$IG_GQL_WARN_AUTO" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+IG_GQL_WARN_AUTO_ID=$(printf '%s' "$IG_GQL_WARN_AUTO" | jq -r '.data.createDoogat.id')
 pass "57.B: GraphQL createDoogat with omitted title surfaces TITLE_FROM_TEMPLATE warning in extensions"
 
 # Cleanup
