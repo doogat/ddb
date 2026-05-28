@@ -2381,9 +2381,45 @@ if ($warnAutoObj.warnings[0].message -notmatch "title_template") {
 }
 pass "56.B: REST POST /doogats with omitted title surfaces TITLE_FROM_TEMPLATE warning"
 
+# 57. GraphQL warnings envelope (PRD 00154). Pins the WarningExtension contract:
+# every GraphQL response carries `extensions.warnings` as an array; createDoogat
+# drains AppOutput.warnings into it so a template-rendered title surfaces a
+# TITLE_FROM_TEMPLATE entry. Mirrors the bash scenario added at the same time
+# so cross-platform CI exercises the same contract.
+
+# 57.A - caller-supplied title yields extensions.warnings: [] (always present).
+$gqlWarnTitled = gql '{"query":"mutation { createDoogat(input: { title: \"gql-explicit\", type: \"ig_warn_demo\" }) { id title } }"}'
+assertGqlOk $gqlWarnTitled "57.A GraphQL createDoogat with title"
+$gqlWarnTitledObj = $gqlWarnTitled | ConvertFrom-Json
+if ($null -eq $gqlWarnTitledObj.extensions -or $null -eq $gqlWarnTitledObj.extensions.warnings) {
+    throw "57.A: response missing extensions.warnings: $gqlWarnTitled"
+}
+if ($gqlWarnTitledObj.extensions.warnings.Count -ne 0) {
+    throw "57.A: expected extensions.warnings: [], got: $($gqlWarnTitledObj.extensions.warnings | ConvertTo-Json -Compress)"
+}
+pass "57.A: GraphQL createDoogat with title returns extensions.warnings: []"
+
+# 57.B - omitted title with a title_template typedef fires TITLE_FROM_TEMPLATE
+# under extensions.warnings (NOT under data).
+$gqlWarnAuto = gql '{"query":"mutation { createDoogat(input: { type: \"ig_warn_demo\" }) { id title } }"}'
+assertGqlOk $gqlWarnAuto "57.B GraphQL createDoogat with omitted title"
+$gqlWarnAutoObj = $gqlWarnAuto | ConvertFrom-Json
+if ($gqlWarnAutoObj.extensions.warnings.Count -ne 1) {
+    throw "57.B: expected one warning, got: $($gqlWarnAutoObj.extensions.warnings | ConvertTo-Json -Compress)"
+}
+if ($gqlWarnAutoObj.extensions.warnings[0].code -ne "TITLE_FROM_TEMPLATE") {
+    throw "57.B: expected code TITLE_FROM_TEMPLATE, got: $($gqlWarnAutoObj.extensions.warnings[0].code)"
+}
+if ($gqlWarnAutoObj.extensions.warnings[0].message -notmatch "title_template") {
+    throw "57.B: expected message to mention 'title_template', got: $($gqlWarnAutoObj.extensions.warnings[0].message)"
+}
+pass "57.B: GraphQL createDoogat with omitted title surfaces TITLE_FROM_TEMPLATE warning in extensions"
+
 # Cleanup
 rest "/doogats/$($warnTitledObj.data.id)" "DELETE" | Out-Null
 rest "/doogats/$($warnAutoObj.data.id)" "DELETE" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$($gqlWarnTitledObj.data.createDoogat.id)\`") }`"}" | Out-Null
+gql "{`"query`":`"mutation { deleteDoogat(id: \`"$($gqlWarnAutoObj.data.createDoogat.id)\`") }`"}" | Out-Null
 ddb query "DROP TABLE ig_warn_demo CASCADE" | Out-Null
 
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue

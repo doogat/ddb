@@ -2456,11 +2456,37 @@ jq -e '.warnings | length == 1
   "$IG_WARN_AUTO_BODY" >/dev/null
 pass "56.B: REST POST /doogats with omitted title surfaces TITLE_FROM_TEMPLATE warning"
 
+# 57. GraphQL warnings envelope (PRD 00154). Pins the WarningExtension contract:
+# every GraphQL response carries `extensions.warnings` as an array; createDoogat
+# drains AppOutput.warnings into it so a template-rendered title surfaces a
+# TITLE_FROM_TEMPLATE entry. REST parity is asserted in section 56 above; this
+# scenario proves the same warnings reach GraphQL clients via the response
+# extensions envelope, not the data payload.
+
+# 57.A — caller-supplied title yields extensions.warnings: [] (always present).
+IG_GQL_WARN_TITLED=$(gql '{"query":"mutation { createDoogat(input: { title: \"gql-explicit\", type: \"ig_warn_demo\" }) { id title } }"}')
+assert_gql_ok "$IG_GQL_WARN_TITLED"
+printf '%s' "$IG_GQL_WARN_TITLED" | jq -e '.extensions.warnings == []' >/dev/null
+IG_GQL_WARN_TITLED_ID=$(printf '%s' "$IG_GQL_WARN_TITLED" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+pass "57.A: GraphQL createDoogat with title returns extensions.warnings: []"
+
+# 57.B — omitted title with a title_template typedef fires TITLE_FROM_TEMPLATE
+# under extensions.warnings (NOT under data).
+IG_GQL_WARN_AUTO=$(gql '{"query":"mutation { createDoogat(input: { type: \"ig_warn_demo\" }) { id title } }"}')
+assert_gql_ok "$IG_GQL_WARN_AUTO"
+printf '%s' "$IG_GQL_WARN_AUTO" | jq -e '.extensions.warnings | length == 1
+       and (.[0].code == "TITLE_FROM_TEMPLATE")
+       and (.[0].message | test("title_template"))' >/dev/null
+IG_GQL_WARN_AUTO_ID=$(printf '%s' "$IG_GQL_WARN_AUTO" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+pass "57.B: GraphQL createDoogat with omitted title surfaces TITLE_FROM_TEMPLATE warning in extensions"
+
 # Cleanup
 IG_WARN_TITLED_ID=$(jq -r '.data.id' "$IG_WARN_TITLED_BODY")
 IG_WARN_AUTO_ID=$(jq -r '.data.id' "$IG_WARN_AUTO_BODY")
 curl -sf "$REST_URL/doogats/$IG_WARN_TITLED_ID" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
 curl -sf "$REST_URL/doogats/$IG_WARN_AUTO_ID" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$IG_GQL_WARN_TITLED_ID\\\") }\"}" >/dev/null
+gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$IG_GQL_WARN_AUTO_ID\\\") }\"}" >/dev/null
 $DDB query "DROP TABLE ig_warn_demo CASCADE" | grep -q "dropped"
 rm -f "$IG_WARN_TITLED_BODY" "$IG_WARN_AUTO_BODY"
 
