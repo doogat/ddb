@@ -68,7 +68,7 @@ impl Extension for WarningExtension {
             .map(|e| serde_json::json!({"code": e.code, "message": e.message}))
             .collect();
         let value = async_graphql::Value::from_json(serde_json::Value::Array(arr))
-            .unwrap_or(async_graphql::Value::Null);
+            .unwrap_or(async_graphql::Value::List(vec![]));
         response
             .extensions
             .insert("warnings".to_string(), value);
