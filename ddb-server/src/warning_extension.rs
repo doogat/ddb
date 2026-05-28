@@ -1,10 +1,12 @@
 use std::sync::{Arc, Mutex};
 
+use async_graphql::dynamic::ResolverContext;
 use async_graphql::extensions::{
     Extension, ExtensionContext, ExtensionFactory, NextPrepareRequest, NextRequest,
 };
 use async_graphql::{Request, Response, ServerResult};
 use async_trait::async_trait;
+use ddb_core::app_contract::AppWarning;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WarningEntry {
@@ -31,6 +33,14 @@ impl WarningCollector {
             .unwrap_or_else(|e| e.into_inner())
             .drain(..)
             .collect()
+    }
+}
+
+pub fn forward_warnings(ctx: &ResolverContext<'_>, warnings: &[AppWarning]) {
+    if let Ok(collector) = ctx.data::<Arc<WarningCollector>>() {
+        for w in warnings {
+            collector.push_warning(w.code, w.message.clone());
+        }
     }
 }
 

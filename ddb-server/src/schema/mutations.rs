@@ -12,6 +12,7 @@ use crate::actor::{ActorHandle, UpdateDoogatParams};
 use crate::error::{to_graphql_error, to_graphql_error_from_app};
 use crate::read_pool::ReadPool;
 use crate::reload::SchemaReloader;
+use crate::warning_extension::forward_warnings;
 
 use super::base_types::*;
 
@@ -77,13 +78,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                         .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
                         .await
                         .map_err(|e| to_graphql_error_from_app(e.into()))?;
-                    if let Ok(collector) = ctx
-                        .data::<std::sync::Arc<crate::warning_extension::WarningCollector>>()
-                    {
-                        for w in &output.warnings {
-                            collector.push_warning(w.code, w.message.clone());
-                        }
-                    }
+                    forward_warnings(&ctx, &output.warnings);
                     Ok(Some(FieldValue::owned_any(doogat_to_value(&output.value))))
                 })
             })
