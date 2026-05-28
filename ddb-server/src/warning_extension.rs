@@ -90,8 +90,12 @@ impl Extension for WarningExtension {
             .into_iter()
             .map(|e| serde_json::json!({"code": e.code, "message": e.message}))
             .collect();
+        // Input is a hand-built array of {code: string, message: string}
+        // objects; from_json cannot fail on this shape. A failure would mean
+        // serde_json or async_graphql changed their contract — surface it
+        // loudly instead of silently degrading to an empty array.
         let value = async_graphql::Value::from_json(serde_json::Value::Array(arr))
-            .unwrap_or(async_graphql::Value::List(vec![]));
+            .expect("from_json on hand-built warnings array cannot fail");
         response
             .extensions
             .insert("warnings".to_string(), value);
