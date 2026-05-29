@@ -1,8 +1,10 @@
 mod doogat;
+mod query;
 mod schema;
 mod value;
 
 pub use doogat::*;
+pub use query::*;
 pub use schema::*;
 pub use value::*;
 
