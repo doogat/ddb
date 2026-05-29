@@ -96,9 +96,7 @@ impl Extension for WarningExtension {
         // loudly instead of silently degrading to an empty array.
         let value = async_graphql::Value::from_json(serde_json::Value::Array(arr))
             .expect("from_json on hand-built warnings array cannot fail");
-        response
-            .extensions
-            .insert("warnings".to_string(), value);
+        response.extensions.insert("warnings".to_string(), value);
         response
     }
 }

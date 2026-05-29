@@ -39,7 +39,10 @@ fn rest_crud_lifecycle() {
     assert_eq!(body["data"]["title"], "REST Test");
 
     // Update — PUT /rest/doogats/:id returns 200 + the updated object.
-    let resp = server.rest_put(&format!("/doogats/{id}"), json!({ "title": "REST Updated" }));
+    let resp = server.rest_put(
+        &format!("/doogats/{id}"),
+        json!({ "title": "REST Updated" }),
+    );
     assert_eq!(resp.status(), 200, "update should return 200");
     let body: Value = resp.json().expect("invalid json");
     assert_eq!(body["data"]["title"], "REST Updated");
@@ -92,7 +95,9 @@ fn rest_search_returns_matching_results() {
     let resp = server.rest_get("/doogats?q=zqxfindme");
     assert_eq!(resp.status(), 200, "search should return 200");
     let body: Value = resp.json().expect("invalid json");
-    let hits = body["data"].as_array().expect("search body missing data array");
+    let hits = body["data"]
+        .as_array()
+        .expect("search body missing data array");
     assert!(
         hits.iter()
             .any(|h| h["title"].as_str().unwrap_or("").contains("zqxfindme")),
