@@ -1,3 +1,14 @@
+/// Adapter-neutral query parameter value used by foundation, service, and
+/// transport code. SQLite conversion is performed at the indexer boundary in a
+/// later change, not here.
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueryValue {
+    Null,
+    Integer(i64),
+    Real(f64),
+    Text(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
