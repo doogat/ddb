@@ -614,11 +614,21 @@ DELETE returns HTTP 204. Not-found returns HTTP 404 + `{ "error": "NOT_FOUND", "
 
 **List and search:**
 
+List (no `q`) returns a paginated envelope:
+
 ```http
-GET /rest/doogats?type=note&q=meeting&tag=work
+GET /rest/doogats?type=note&tag=work
 ```
 
-Response: `{ "data": [...], "pagination": { "total": 12, "limit": 20, "offset": 0 } }`
+Response: `{ "data": [...], "pagination": { "page": 1, "per_page": 50, "total": 12, "total_pages": 1 } }`
+
+Search (when `q` is present) returns a search envelope with `total_count` instead of `pagination`:
+
+```http
+GET /rest/doogats?q=meeting
+```
+
+Response: `{ "data": [...], "total_count": 3 }`
 
 **Error shape:** HTTP 4xx/5xx + JSON `{ "error": "<code>", "message": "<detail>" }`. The `error` field uses the unified code vocabulary but there is no `extensions` envelope — use GraphQL for the `Guaranteed` structured-error surface.
 
