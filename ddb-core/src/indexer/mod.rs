@@ -11,7 +11,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{DoogatError, Result};
 use crate::traits::DoogatSource;
-use crate::types::ParsedDoogat;
+use crate::types::{ParsedDoogat, QueryValue};
 
 impl From<rusqlite::Error> for DoogatError {
     fn from(e: rusqlite::Error) -> Self {
@@ -253,7 +253,7 @@ impl Index {
     fn upsert_doogat(&self, doogat: &ParsedDoogat) -> Result<()> {
         let id = doogat.meta.id.as_ref().map(|z| z.0.as_str()).unwrap_or("");
         let title = doogat.meta.title.as_deref().unwrap_or("");
-        let date = doogat.meta.date.as_deref().unwrap_or("");
+        let date = doogat.meta.date.as_deref();
         let ztype = doogat.meta.doogat_type.as_deref().unwrap_or("");
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -557,6 +557,24 @@ impl Index {
         }
 
         Ok(rows)
+    }
+
+    /// Execute arbitrary SQL query with adapter-neutral `QueryValue` parameters.
+    pub fn query_raw_with_query_values(
+        &self,
+        sql: &str,
+        params: &[QueryValue],
+    ) -> Result<Vec<Vec<String>>> {
+        let rusqlite_params: Vec<rusqlite::types::Value> = params
+            .iter()
+            .map(|v| match v {
+                QueryValue::Null => rusqlite::types::Value::Null,
+                QueryValue::Integer(i) => rusqlite::types::Value::Integer(*i),
+                QueryValue::Real(f) => rusqlite::types::Value::Real(*f),
+                QueryValue::Text(s) => rusqlite::types::Value::Text(s.clone()),
+            })
+            .collect();
+        self.query_raw_with_params(sql, &rusqlite_params)
     }
 
     /// Execute arbitrary SQL query, return column names and rows as string vectors.
