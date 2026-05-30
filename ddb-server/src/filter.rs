@@ -2,9 +2,9 @@ use async_graphql::dynamic::{
     Enum, EnumItem, Field, FieldFuture, FieldValue, InputObject, InputValue, Object, TypeRef,
 };
 use async_graphql::{Name, Value as GqlValue};
+use ddb_core::types::QueryValue;
 use ddb_core::types::TableSchema;
 use indexmap::IndexMap;
-use rusqlite::types::Value as SqlValue;
 
 use crate::schema::{resolve_column, sanitize_field_name, sanitize_type_name};
 
@@ -456,7 +456,7 @@ pub fn aggregate_row_to_value(row: &[String], names: &[String]) -> GqlValue {
 #[derive(Debug)]
 pub struct WhereClause {
     pub sql: String,
-    pub params: Vec<SqlValue>,
+    pub params: Vec<QueryValue>,
 }
 
 impl WhereClause {
@@ -556,7 +556,7 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
 fn build_tags_filter_condition(
     value: &GqlValue,
     table_name: &str,
-    params: &mut Vec<SqlValue>,
+    params: &mut Vec<QueryValue>,
 ) -> Result<Option<String>, String> {
     let GqlValue::Object(filter) = value else {
         return Ok(None);
@@ -573,7 +573,7 @@ fn build_tags_filter_condition(
             "contains" => {
                 let GqlValue::String(tag) = val else { continue };
                 any_operator_supplied = true;
-                params.push(SqlValue::Text(tag.clone()));
+                params.push(QueryValue::Text(tag.clone()));
                 clauses.push(format!(
                     "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag = ?)",
                     table = table_name,
@@ -589,7 +589,7 @@ fn build_tags_filter_condition(
                     let GqlValue::String(tag) = item else {
                         continue;
                     };
-                    params.push(SqlValue::Text(tag.clone()));
+                    params.push(QueryValue::Text(tag.clone()));
                     clauses.push(format!(
                         "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag = ?)",
                         table = table_name,
@@ -607,7 +607,7 @@ fn build_tags_filter_condition(
                     let GqlValue::String(tag) = item else {
                         continue;
                     };
-                    params.push(SqlValue::Text(tag.clone()));
+                    params.push(QueryValue::Text(tag.clone()));
                     placeholders.push("?".to_string());
                 }
                 if placeholders.is_empty() {
@@ -642,7 +642,7 @@ fn build_column_conditions(
     value: &GqlValue,
     schema: &TableSchema,
     conditions: &mut Vec<String>,
-    params: &mut Vec<SqlValue>,
+    params: &mut Vec<QueryValue>,
 ) {
     let col_name = resolve_column(&schema.columns, field)
         .or_else(|| BASE_FILTER_FIELDS.iter().find(|&&f| f == field).copied());
@@ -662,7 +662,7 @@ fn build_logical_combinator(
     items: &[GqlValue],
     schema: &TableSchema,
     combinator: &str,
-    params: &mut Vec<SqlValue>,
+    params: &mut Vec<QueryValue>,
 ) -> Option<String> {
     let sub: Vec<String> = items
         .iter()
@@ -688,7 +688,7 @@ fn build_operator_condition(
     column: &str,
     op: &str,
     value: &GqlValue,
-    params: &mut Vec<SqlValue>,
+    params: &mut Vec<QueryValue>,
 ) -> Option<String> {
     match op {
         "eq" => {
@@ -731,7 +731,7 @@ fn build_operator_condition(
 fn build_in_condition(
     column: &str,
     value: &GqlValue,
-    params: &mut Vec<SqlValue>,
+    params: &mut Vec<QueryValue>,
 ) -> Option<String> {
     let items = match value {
         GqlValue::List(items) => items,
@@ -750,24 +750,24 @@ fn build_in_condition(
     Some(format!("\"{}\" IN ({})", column, placeholders.join(", ")))
 }
 
-/// Convert a GraphQL value to a rusqlite parameter value.
-fn gql_to_sql(value: &GqlValue) -> SqlValue {
+/// Convert a GraphQL value to an adapter-neutral query parameter value.
+fn gql_to_sql(value: &GqlValue) -> QueryValue {
     match value {
         GqlValue::Number(n) => {
             if let Some(i) = n.as_i64() {
-                SqlValue::Integer(i)
+                QueryValue::Integer(i)
             } else if let Some(f) = n.as_f64() {
-                SqlValue::Real(f)
+                QueryValue::Real(f)
             } else {
-                SqlValue::Text(n.to_string())
+                QueryValue::Text(n.to_string())
             }
         }
-        GqlValue::String(s) => SqlValue::Text(s.clone()),
-        GqlValue::Boolean(b) => SqlValue::Integer(if *b { 1 } else { 0 }),
-        GqlValue::Null => SqlValue::Null,
+        GqlValue::String(s) => QueryValue::Text(s.clone()),
+        GqlValue::Boolean(b) => QueryValue::Integer(if *b { 1 } else { 0 }),
+        GqlValue::Null => QueryValue::Null,
         // Enum values (SortOrder etc.) come as Name strings
-        GqlValue::Enum(name) => SqlValue::Text(name.to_string()),
-        _ => SqlValue::Text(value.to_string()),
+        GqlValue::Enum(name) => QueryValue::Text(name.to_string()),
+        _ => QueryValue::Text(value.to_string()),
     }
 }
 
@@ -853,7 +853,7 @@ mod tests {
         let input = filter("title", "eq", GqlValue::String("rust".into()));
         let wc = build_where_sql(&input, &test_schema());
         assert_eq!(wc.sql, r#""title" = ?"#);
-        assert_eq!(wc.params, vec![SqlValue::Text("rust".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("rust".into())]);
     }
 
     #[test]
@@ -861,7 +861,7 @@ mod tests {
         let input = filter("title", "neq", GqlValue::String("java".into()));
         let wc = build_where_sql(&input, &test_schema());
         assert_eq!(wc.sql, r#""title" != ?"#);
-        assert_eq!(wc.params, vec![SqlValue::Text("java".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("java".into())]);
     }
 
     #[test]
@@ -869,7 +869,7 @@ mod tests {
         let input = filter("title", "contains", GqlValue::String("rust".into()));
         let wc = build_where_sql(&input, &test_schema());
         assert_eq!(wc.sql, r#""title" LIKE '%' || ? || '%' COLLATE NOCASE"#);
-        assert_eq!(wc.params, vec![SqlValue::Text("rust".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("rust".into())]);
     }
 
     #[test]
@@ -877,7 +877,7 @@ mod tests {
         let input = filter("title", "startsWith", GqlValue::String("Hello".into()));
         let wc = build_where_sql(&input, &test_schema());
         assert_eq!(wc.sql, r#""title" LIKE ? || '%' COLLATE NOCASE"#);
-        assert_eq!(wc.params, vec![SqlValue::Text("Hello".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("Hello".into())]);
     }
 
     #[test]
@@ -886,7 +886,7 @@ mod tests {
             let input = filter("priority", op, GqlValue::Number(3.into()));
             let wc = build_where_sql(&input, &test_schema());
             assert_eq!(wc.sql, format!("\"priority\" {sql_op} ?"));
-            assert_eq!(wc.params, vec![SqlValue::Integer(3)]);
+            assert_eq!(wc.params, vec![QueryValue::Integer(3)]);
         }
     }
 
@@ -935,7 +935,7 @@ mod tests {
         assert_eq!(wc.sql, r#"(("status" = ?) AND ("priority" >= ?))"#);
         assert_eq!(
             wc.params,
-            vec![SqlValue::Text("done".into()), SqlValue::Integer(3)]
+            vec![QueryValue::Text("done".into()), QueryValue::Integer(3)]
         );
     }
 
@@ -962,8 +962,8 @@ mod tests {
         assert_eq!(
             wc.params,
             vec![
-                SqlValue::Text("todo".into()),
-                SqlValue::Text("doing".into())
+                QueryValue::Text("todo".into()),
+                QueryValue::Text("doing".into())
             ]
         );
     }
@@ -1028,7 +1028,7 @@ mod tests {
         assert_eq!(wc.sql, r#""title" = ?"#);
         assert_eq!(
             wc.params,
-            vec![SqlValue::Text("'; DROP TABLE doogats; --".into())]
+            vec![QueryValue::Text("'; DROP TABLE doogats; --".into())]
         );
     }
 
@@ -1155,7 +1155,7 @@ mod tests {
     fn test_aggregate_sql_with_where() {
         let wc = WhereClause {
             sql: r#""status" = ?"#.to_string(),
-            params: vec![SqlValue::Text("done".into())],
+            params: vec![QueryValue::Text("done".into())],
         };
         let (sql, _) = build_aggregate_sql("bookmark", &test_schema(), &wc);
         assert!(sql.contains(r#"WHERE "status" = ?"#));
@@ -1186,7 +1186,7 @@ mod tests {
         let input = filter("id", "eq", GqlValue::String("20260401120000".into()));
         let wc = build_where_sql(&input, &test_schema());
         assert_eq!(wc.sql, r#""id" = ?"#);
-        assert_eq!(wc.params, vec![SqlValue::Text("20260401120000".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("20260401120000".into())]);
     }
 
     #[test]
@@ -1201,8 +1201,8 @@ mod tests {
         assert_eq!(
             wc.params,
             vec![
-                SqlValue::Text("20260401120000".into()),
-                SqlValue::Text("20260401130000".into()),
+                QueryValue::Text("20260401120000".into()),
+                QueryValue::Text("20260401130000".into()),
             ]
         );
     }
@@ -1213,7 +1213,7 @@ mod tests {
         let input = filter("title", "eq", GqlValue::String("My Bookmark".into()));
         let wc = build_where_sql(&input, &test_schema());
         assert_eq!(wc.sql, r#""title" = ?"#);
-        assert_eq!(wc.params, vec![SqlValue::Text("My Bookmark".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("My Bookmark".into())]);
     }
 
     #[test]
@@ -1246,8 +1246,8 @@ mod tests {
         assert_eq!(
             wc.params,
             vec![
-                SqlValue::Text("20260401120000".into()),
-                SqlValue::Text("rust".into()),
+                QueryValue::Text("20260401120000".into()),
+                QueryValue::Text("rust".into()),
             ]
         );
     }
@@ -1276,8 +1276,8 @@ mod tests {
         assert_eq!(
             wc.params,
             vec![
-                SqlValue::Text("20260401120000".into()),
-                SqlValue::Text("20260401130000".into()),
+                QueryValue::Text("20260401120000".into()),
+                QueryValue::Text("20260401130000".into()),
             ]
         );
     }
@@ -1430,7 +1430,7 @@ mod tests {
             wc.sql,
             r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?))"#
         );
-        assert_eq!(wc.params, vec![SqlValue::Text("rust".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("rust".into())]);
     }
 
     #[test]
@@ -1459,7 +1459,7 @@ mod tests {
         assert_eq!(wc.params.len(), 2);
         assert_eq!(
             wc.params,
-            vec![SqlValue::Text("a".into()), SqlValue::Text("b".into())]
+            vec![QueryValue::Text("a".into()), QueryValue::Text("b".into())]
         );
     }
 
@@ -1484,7 +1484,7 @@ mod tests {
         );
         assert_eq!(
             wc.params,
-            vec![SqlValue::Text("a".into()), SqlValue::Text("b".into())]
+            vec![QueryValue::Text("a".into()), QueryValue::Text("b".into())]
         );
     }
 
@@ -1551,6 +1551,6 @@ mod tests {
             wc.sql,
             r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?))"#
         );
-        assert_eq!(wc.params, vec![SqlValue::Text("rust".into())]);
+        assert_eq!(wc.params, vec![QueryValue::Text("rust".into())]);
     }
 }

@@ -2,7 +2,7 @@ use ddb_core::app_contract::CreateCommand;
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
 use ddb_core::service::DoogatService;
-use ddb_core::types::{ConflictAction, TypedListQuery, Value};
+use ddb_core::types::{ConflictAction, QueryValue, TypedListQuery, Value};
 use std::collections::BTreeMap;
 use tempfile::TempDir;
 
@@ -145,9 +145,7 @@ fn typed_filtered_list_text_param_in_where_sql_matches_typed_row() {
     let query = TypedListQuery {
         table_name: "bookmark".to_string(),
         where_sql: "url = ?1".to_string(),
-        params: vec![rusqlite::types::Value::Text(
-            "https://example.com".to_string(),
-        )],
+        params: vec![QueryValue::Text("https://example.com".to_string())],
         order_sql: None,
         tag: None,
         limit: None,

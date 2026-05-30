@@ -686,6 +686,56 @@ fn typed_filtered_list_has_updated_at() {
 }
 
 #[test]
+fn typed_filtered_list_binds_query_value_param() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE project (name TEXT)").unwrap();
+    svc.execute_sql("INSERT INTO project (name) VALUES ('Alpha')")
+        .unwrap();
+    svc.execute_sql("INSERT INTO project (name) VALUES ('Beta')")
+        .unwrap();
+
+    let query = |value: &str| crate::types::TypedListQuery {
+        table_name: "project".to_string(),
+        where_sql: "name = ?1".to_string(),
+        params: vec![crate::types::QueryValue::Text(value.to_string())],
+        order_sql: None,
+        tag: None,
+        limit: None,
+        offset: None,
+        distinct: None,
+    };
+
+    let alpha = svc.typed_filtered_list(&query("Alpha")).unwrap();
+    let beta = svc.typed_filtered_list(&query("Beta")).unwrap();
+    let ghost = svc.typed_filtered_list(&query("Ghost")).unwrap();
+
+    assert_eq!(
+        alpha.len(),
+        1,
+        "param 'Alpha' binds and matches exactly one row; a params-ignoring impl would return both rows"
+    );
+    assert_eq!(
+        beta.len(),
+        1,
+        "param 'Beta' selects the other single row, proving the bound value is actually used"
+    );
+    assert_eq!(
+        ghost.len(),
+        0,
+        "param 'Ghost' matches no row, so a params-ignoring impl returning rows must fail"
+    );
+
+    assert!(
+        alpha[0].meta.id.is_some() && beta[0].meta.id.is_some(),
+        "matched rows must carry a resolved doogat id"
+    );
+    assert_ne!(
+        alpha[0].meta.id, beta[0].meta.id,
+        "different param values must select different rows; ids are runtime-generated, so a hardcoded or params-ignoring impl cannot fake distinct ids"
+    );
+}
+
+#[test]
 fn create_returns_updated_at() {
     let (_tmp, svc) = fresh_svc();
     let parsed = svc

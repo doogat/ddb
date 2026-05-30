@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
+use super::query::QueryValue;
 use super::value::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -523,7 +524,7 @@ pub struct BatchUpdateInput {
 pub struct TypedListQuery {
     pub table_name: String,
     pub where_sql: String,
-    pub params: Vec<rusqlite::types::Value>,
+    pub params: Vec<QueryValue>,
     pub order_sql: Option<String>,
     pub tag: Option<String>,
     pub limit: Option<i64>,

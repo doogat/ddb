@@ -10,13 +10,27 @@ use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
-    BrokenSequence, ListFilter, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SearchFilters,
-    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, TableSchema, TagEntry, TagQueryFilter,
-    TypedListQuery, UnlinkedMention,
+    BrokenSequence, ListFilter, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, QueryValue,
+    SearchFilters, SequenceInfo, SequenceNode, StaleDoogat, Suggestion, TableSchema, TagEntry,
+    TagQueryFilter, TypedListQuery, UnlinkedMention,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 type Result<T> = std::result::Result<T, DoogatError>;
+
+// TODO(PRD 00141 Phase 2): transitional bridge — remove once DoogatService
+// aggregate methods accept QueryValue directly.
+fn query_values_to_sql(params: Vec<QueryValue>) -> Vec<rusqlite::types::Value> {
+    params
+        .into_iter()
+        .map(|v| match v {
+            QueryValue::Null => rusqlite::types::Value::Null,
+            QueryValue::Integer(i) => rusqlite::types::Value::Integer(i),
+            QueryValue::Real(f) => rusqlite::types::Value::Real(f),
+            QueryValue::Text(s) => rusqlite::types::Value::Text(s),
+        })
+        .collect()
+}
 
 /// Pool of read-only connections for concurrent query execution.
 ///
@@ -166,8 +180,9 @@ impl ReadPool {
     pub async fn aggregate_query(
         &self,
         sql: String,
-        params: Vec<rusqlite::types::Value>,
+        params: Vec<QueryValue>,
     ) -> Result<Vec<String>> {
+        let params = query_values_to_sql(params);
         self.with_service(move |svc| svc.aggregate_query(&sql, &params))
             .await
     }
@@ -175,8 +190,9 @@ impl ReadPool {
     pub async fn aggregate_query_rows(
         &self,
         sql: String,
-        params: Vec<rusqlite::types::Value>,
+        params: Vec<QueryValue>,
     ) -> Result<Vec<Vec<String>>> {
+        let params = query_values_to_sql(params);
         self.with_service(move |svc| svc.query_raw_with_params(&sql, &params))
             .await
     }

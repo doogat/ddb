@@ -142,7 +142,9 @@ impl<G: GitBackend> DoogatService<G> {
     pub fn typed_filtered_list(&self, query: &TypedListQuery) -> Result<Vec<ParsedDoogat>> {
         self.ensure_fresh()?;
         let sql = build_typed_list_sql(query);
-        let rows = self.index.query_raw_with_params(&sql, &query.params)?;
+        let rows = self
+            .index
+            .query_raw_with_query_values(&sql, &query.params)?;
         let ids: Vec<&str> = rows
             .iter()
             .filter_map(|r| r.first().map(|s| s.as_str()))
