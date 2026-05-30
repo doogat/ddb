@@ -79,7 +79,7 @@ fn query_raw_with_query_values_null_param_matches_null_column() {
         )
         .unwrap();
 
-    assert!(rows.len() >= 1);
+    assert!(!rows.is_empty());
 }
 
 #[test]

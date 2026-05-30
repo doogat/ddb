@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **indexer**: doogats without a `date` frontmatter field now store SQL `NULL` in the index instead of an empty string, so `WHERE date IS NULL` queries work correctly. (PRD 00141)
+- **indexer**: doogats without a `date` frontmatter field now store SQL `NULL` in the index instead of an empty string, so `WHERE date IS NULL` queries work correctly. Existing indexes built before this change should be rebuilt with `ddb reindex` so old rows (stored as `''`) and new rows (stored as `NULL`) filter and sort consistently. (PRD 00141)
 - **service**: `DoogatService::create` now binds the `TITLE_FROM_TEMPLATE` warning to the resolved typedef actually carrying a `title_template`, instead of the looser "caller omitted title AND result has a title" heuristic. Future auto-title mechanisms won't trip the warning, and the warning's message is accurate by construction for the common path. (PRD 00147 doubt-review)
 - **ddb-server**: GraphQL `to_graphql_error_from_app` now suppresses `field` and `details` extensions on Internal-category `AppError`s so structured errors that fall through to `Internal` (unknown structured code, future variants) cannot leak path/secret context past the message redaction. (PRD 00147 doubt-review)
 - **ddb-cli**, **ddb-server**: surface AppOutput warnings via CLI stderr and GraphQL response; preserve DoogatError Structured context in AppError envelope (PRD 00147).

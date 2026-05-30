@@ -67,6 +67,13 @@ pub trait DoogatIndex {
 pub trait SqlBackend: DoogatIndex {
     /// Raw SQLite connection for DDL execution, prepared statements, and
     /// transaction savepoints.
+    ///
+    /// **TRANSITIONAL EXCEPTION** — this method exposes a concrete `rusqlite::Connection`
+    /// on the `SqlBackend` trait, violating the adapter-neutral boundary established by
+    /// PRD 00141. Removing it requires rewriting dozens of call sites across
+    /// `sql_engine/{dml,ddl,transaction,junction,mod}.rs`. That rewrite is scoped to a
+    /// follow-up Phase 3 effort; until then this method is retained as a documented
+    /// exception and must not be extended to new callers.
     fn sql_conn(&self) -> &Connection;
 
     /// Execute a SQL query returning column names and rows.

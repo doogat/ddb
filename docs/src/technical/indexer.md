@@ -398,6 +398,14 @@ Find all doogat IDs that link to the given target path.
 
 Execute arbitrary SQL. Returns rows as string vectors. Handles all SQLite value types (null, integer, real, text, blob).
 
+### query_raw_with_query_values
+
+`query_raw_with_query_values(sql: &str, params: &[QueryValue]) -> Result<Vec<Vec<String>>>`
+
+Parameterized variant of `query_raw`. Query parameters cross the service and transport layers as the adapter-neutral `QueryValue` type (`ddb-core/src/types/query.rs`), which is converted to `rusqlite::types::Value` only at this indexer boundary. This keeps `rusqlite` isolated to the indexer and `sql_engine` adapter crates — service signatures, actor commands, and GraphQL filter output all use `QueryValue` instead.
+
+`QueryValue` has four variants: `Null`, `Integer(i64)`, `Real(f64)`, `Text(String)`. GraphQL boolean parameters normalize to `Integer(0|1)` at the filter boundary before reaching this method.
+
 ### Sequence Navigation
 
 Doogats form ordered chains via the `sequence` frontmatter field (stored in `_ddb_fields`). No schema migration needed.
