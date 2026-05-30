@@ -18,20 +18,6 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 type Result<T> = std::result::Result<T, DoogatError>;
 
-// TODO(PRD 00141 Phase 2): transitional bridge — remove once DoogatService
-// aggregate methods accept QueryValue directly.
-fn query_values_to_sql(params: Vec<QueryValue>) -> Vec<rusqlite::types::Value> {
-    params
-        .into_iter()
-        .map(|v| match v {
-            QueryValue::Null => rusqlite::types::Value::Null,
-            QueryValue::Integer(i) => rusqlite::types::Value::Integer(i),
-            QueryValue::Real(f) => rusqlite::types::Value::Real(f),
-            QueryValue::Text(s) => rusqlite::types::Value::Text(s),
-        })
-        .collect()
-}
-
 /// Pool of read-only connections for concurrent query execution.
 ///
 /// Each read acquires a semaphore permit and runs on `spawn_blocking`
@@ -141,15 +127,15 @@ impl ReadPool {
     ) -> Result<Vec<Vec<String>>> {
         self.with_service(move |svc| {
             let mut conditions = Vec::new();
-            let mut params: Vec<rusqlite::types::Value> = Vec::new();
+            let mut params: Vec<QueryValue> = Vec::new();
 
             if let Some(s) = state {
                 conditions.push(format!("c.state = ?{}", params.len() + 1));
-                params.push(rusqlite::types::Value::Text(s));
+                params.push(QueryValue::Text(s));
             }
             if let Some(id) = doogat_id {
                 conditions.push(format!("c.doogat_id = ?{}", params.len() + 1));
-                params.push(rusqlite::types::Value::Text(id));
+                params.push(QueryValue::Text(id));
             }
 
             let where_clause = if conditions.is_empty() {
@@ -182,7 +168,6 @@ impl ReadPool {
         sql: String,
         params: Vec<QueryValue>,
     ) -> Result<Vec<String>> {
-        let params = query_values_to_sql(params);
         self.with_service(move |svc| svc.aggregate_query(&sql, &params))
             .await
     }
@@ -192,7 +177,6 @@ impl ReadPool {
         sql: String,
         params: Vec<QueryValue>,
     ) -> Result<Vec<Vec<String>>> {
-        let params = query_values_to_sql(params);
         self.with_service(move |svc| svc.query_raw_with_params(&sql, &params))
             .await
     }

@@ -9,8 +9,9 @@ use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
     BatchCreateInput, BatchUpdateInput, BrokenSequence, CompactionReport, ConflictAction,
-    MaintenanceReport, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, SearchFilters,
-    SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema, UnlinkedMention,
+    MaintenanceReport, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, QueryValue,
+    SearchFilters, SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema,
+    UnlinkedMention,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -96,7 +97,7 @@ pub enum ActorCommand {
     FilteredList(ddb_core::types::TypedListQuery),
     AggregateQuery {
         sql: String,
-        params: Vec<rusqlite::types::Value>,
+        params: Vec<QueryValue>,
     },
     AttachFile {
         doogat_id: String,
@@ -272,7 +273,7 @@ impl ActorHandle {
     pub async fn aggregate_query(
         &self,
         sql: String,
-        params: Vec<rusqlite::types::Value>,
+        params: Vec<QueryValue>,
     ) -> ActorResult<Vec<String>> {
         match self
             .send(ActorCommand::AggregateQuery { sql, params })

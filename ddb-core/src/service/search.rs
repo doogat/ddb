@@ -1,8 +1,8 @@
 use crate::error::Result;
 use crate::parser;
 use crate::types::{
-    ListFilter, PaginatedSearchResult, ParsedDoogat, RebuildReport, SearchFilters, SearchResult,
-    TagEntry, TagQueryFilter, TypedListQuery,
+    ListFilter, PaginatedSearchResult, ParsedDoogat, QueryValue, RebuildReport, SearchFilters,
+    SearchResult, TagEntry, TagQueryFilter, TypedListQuery,
 };
 
 use crate::traits::GitBackend;
@@ -113,13 +113,9 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     /// Execute a raw SQL query with params, returning the first result row.
-    pub fn aggregate_query(
-        &self,
-        sql: &str,
-        params: &[rusqlite::types::Value],
-    ) -> Result<Vec<String>> {
+    pub fn aggregate_query(&self, sql: &str, params: &[QueryValue]) -> Result<Vec<String>> {
         self.ensure_fresh()?;
-        let rows = self.index.query_raw_with_params(sql, params)?;
+        let rows = self.index.query_raw_with_query_values(sql, params)?;
         Ok(rows.into_iter().next().unwrap_or_default())
     }
 
@@ -127,10 +123,10 @@ impl<G: GitBackend> DoogatService<G> {
     pub fn query_raw_with_params(
         &self,
         sql: &str,
-        params: &[rusqlite::types::Value],
+        params: &[QueryValue],
     ) -> Result<Vec<Vec<String>>> {
         self.ensure_fresh()?;
-        self.index.query_raw_with_params(sql, params)
+        self.index.query_raw_with_query_values(sql, params)
     }
 
     pub fn query_raw_with_columns(&self, sql: &str) -> Result<(Vec<String>, Vec<Vec<String>>)> {

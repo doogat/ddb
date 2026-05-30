@@ -106,7 +106,7 @@ fn aggregate_query_count_with_text_param_returns_count_as_string() {
     let result = svc
         .aggregate_query(
             "SELECT COUNT(*) FROM doogats WHERE type = ?1",
-            &[rusqlite::types::Value::Text("note".to_string())],
+            &[QueryValue::Text("note".to_string())],
         )
         .expect("aggregate_query should succeed");
 

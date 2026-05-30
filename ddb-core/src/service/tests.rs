@@ -346,6 +346,78 @@ fn aggregate_query_empty() {
 }
 
 #[test]
+fn aggregate_query_binds_query_value_param() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE project (name TEXT)").unwrap();
+    svc.execute_sql("INSERT INTO project (name) VALUES ('Alpha')")
+        .unwrap();
+    svc.execute_sql("INSERT INTO project (name) VALUES ('Beta')")
+        .unwrap();
+
+    let matched = svc
+        .aggregate_query(
+            "SELECT name FROM project WHERE name = ?1",
+            &[crate::types::QueryValue::Text("Alpha".to_string())],
+        )
+        .unwrap();
+    assert_eq!(
+        matched,
+        vec!["Alpha".to_string()],
+        "param 'Alpha' must bind to the exact value and return that row's name column; a params-ignoring impl returning the first/any row would fail"
+    );
+
+    let missed = svc
+        .aggregate_query(
+            "SELECT name FROM project WHERE name = ?1",
+            &[crate::types::QueryValue::Text("Ghost".to_string())],
+        )
+        .unwrap();
+    assert!(
+        missed.is_empty(),
+        "param 'Ghost' matches no row, so aggregate_query must return an empty vec; a params-ignoring impl returning a row must fail"
+    );
+}
+
+#[test]
+fn query_raw_with_params_binds_query_value_param() {
+    let (_tmp, mut svc) = fresh_svc();
+    svc.execute_sql("CREATE TABLE project (name TEXT)").unwrap();
+    svc.execute_sql("INSERT INTO project (name) VALUES ('Alpha')")
+        .unwrap();
+    svc.execute_sql("INSERT INTO project (name) VALUES ('Beta')")
+        .unwrap();
+
+    let matched = svc
+        .query_raw_with_params(
+            "SELECT name FROM project WHERE name = ?1",
+            &[crate::types::QueryValue::Text("Alpha".to_string())],
+        )
+        .unwrap();
+    assert_eq!(
+        matched.len(),
+        1,
+        "param 'Alpha' binds and selects exactly one row; a params-ignoring impl would return both rows"
+    );
+    assert_eq!(
+        matched[0],
+        vec!["Alpha".to_string()],
+        "the single matched row must carry the bound value's name column"
+    );
+
+    let missed = svc
+        .query_raw_with_params(
+            "SELECT name FROM project WHERE name = ?1",
+            &[crate::types::QueryValue::Text("Ghost".to_string())],
+        )
+        .unwrap();
+    assert_eq!(
+        missed.len(),
+        0,
+        "param 'Ghost' matches no row, so query_raw_with_params must return zero rows; a params-ignoring impl returning rows must fail"
+    );
+}
+
+#[test]
 fn health_check_returns_true() {
     let (_tmp, svc) = fresh_svc();
     assert!(svc.health_check().unwrap());
