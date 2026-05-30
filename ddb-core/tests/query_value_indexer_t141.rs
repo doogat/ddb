@@ -102,3 +102,33 @@ fn query_raw_with_query_values_produces_same_rows_as_query_raw_with_params() {
 
     assert_eq!(rows_legacy, rows_new);
 }
+
+#[test]
+fn query_raw_with_query_values_real_param_binds_float_value() {
+    let (_dir, repo, index) = setup();
+    seed_doogat(&repo, &index, "20260101000001", "note", "Float Test");
+
+    // 1.5 = ?1 with Real(1.5) must return the row — proves the f64 reaches SQLite.
+    let matching = index
+        .query_raw_with_query_values(
+            "SELECT id FROM doogats WHERE 1.5 = ?1",
+            &[QueryValue::Real(1.5)],
+        )
+        .unwrap();
+    assert!(
+        !matching.is_empty(),
+        "Real(1.5) bound to ?1 in '1.5 = ?1' must match; a params-ignoring impl would return no rows"
+    );
+
+    // 1.5 = ?1 with Real(2.5) must return nothing — proves the bound value is 2.5, not 1.5.
+    let non_matching = index
+        .query_raw_with_query_values(
+            "SELECT id FROM doogats WHERE 1.5 = ?1",
+            &[QueryValue::Real(2.5)],
+        )
+        .unwrap();
+    assert!(
+        non_matching.is_empty(),
+        "Real(2.5) bound to ?1 in '1.5 = ?1' must not match; distinct match vs non-match proves the f64 is bound, not ignored"
+    );
+}
