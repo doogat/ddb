@@ -11,6 +11,8 @@ types (depends: error — no adapter crate imports)
   v
 traits (depends: error, types, rusqlite — defines DoogatSource, DoogatStore,
   │                               DoogatIndex, SqlBackend, ConflictResolver,
+  │                               service ports IndexPort/TypedMaterializationPort/
+  │                               NoSqlMirrorPort (+ NoopMirror),
   │                               GitBackend + sub-traits: GitRemote, GitMerge,
   │                               GitHistory, GitBinary, GitRename, GitDesktopHooks)
   │
@@ -67,7 +69,7 @@ traits (depends: error, types, rusqlite — defines DoogatSource, DoogatStore,
 |--------|---------|-----------------|
 | `error` | `DoogatError` enum + `Result<T>` alias | thiserror only |
 | `types` | Domain types (directory module: `mod.rs` config types, `value.rs` Value enum/path utilities, `doogat.rs` domain model types, `schema.rs` schema/consistency types) | no adapter crates |
-| `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, SqlBackend, ConflictResolver, GitBackend supertrait + sub-traits: GitRemote, GitMerge, GitHistory, GitBinary, GitRename, GitDesktopHooks) | error, types, rusqlite (via SqlBackend) |
+| `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, SqlBackend, ConflictResolver, GitBackend supertrait + sub-traits: GitRemote, GitMerge, GitHistory, GitBinary, GitRename, GitDesktopHooks) plus service-facing ports `IndexPort` (supertrait of DoogatIndex+SqlBackend), `TypedMaterializationPort`, `NoSqlMirrorPort` (with `NoopMirror` default) that let `DoogatService` depend on injectable index/mirror abstractions instead of concrete adapters | error, types, rusqlite (via SqlBackend) |
 | `parser` | Parse/serialize three-zone Markdown | regex, chrono, serde_yaml |
 | `search_query` | Search query parsing and normalization to canonical form | — (std only) |
 | `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store/GitBackend (directory module: `mod.rs` struct/init/CRUD/traits, `read.rs` file reads/diffs/revision queries, `merge.rs` merge/conflict resolution, `remote.rs` push/pull/fetch, `rename.rs` rename with backlink rewrite) | git2 |
@@ -83,7 +85,7 @@ traits (depends: error, types, rusqlite — defines DoogatSource, DoogatStore,
 | `hlc` | Hybrid Logical Clock for causal ordering | — (std only) |
 | `bundle` | Air-gapped sync via tar archive export/import | tar, sha2, flate2 |
 | `nosql` | redb-based key-value index for fast lookups (feature-gated) | redb |
-| `service` | Unified orchestration layer (DoogatService) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write (directory module: `mod.rs` struct/constructors/state, `crud.rs` create/read/update/delete/batch ops, `search.rs` search/filtered queries, `sql.rs` SQL pass-through/transactions, `ops.rs` sync/compact/maintenance/bundles, `discovery.rs` unlinked mentions/sequences/backlinks, `utility.rs` schema queries/attachments/NoSQL reads) | all core modules |
+| `service` | Unified orchestration layer (`DoogatService<G: GitBackend = GitRepo, I: IndexPort = Index>`) — single entry point for CRUD, search, SQL, sync, discovery with consistent NoSQL dual-write. The index is an injected `IndexPort` and the NoSQL mirror an injected `Box<dyn NoSqlMirrorPort>`; `from_parts` is the dependency-injection seam, `open`/`init` are the default runtime builders that construct the concrete `Index` + Redb/`NoopMirror` at the edge. Directory module: `mod.rs` struct/builders/state, `crud.rs` create/read/update/delete/batch ops (+ port-based dual-write), `search.rs` search/filtered queries, `sql.rs` SQL pass-through/transactions, `ops.rs` compact/maintenance/bundles, `discovery.rs` unlinked mentions/sequences/backlinks, `utility.rs` schema queries/NoSQL reads, `concrete_index.rs` the few methods still needing the concrete `Index` (sync, import_bundle, rename, fix_all, zone_migrate, attach/detach) | all core modules |
 | `ffi` | UniFFI facade (DoogatDriver) wrapping `Mutex<DoogatService>` for Swift/Kotlin | service, uniffi |
 | **CLI** | Command-line interface (main.rs CLI structs/dispatch, `commands/` submodules: crud, query, sync, maintenance, discover) | service, clap |
 | **updater** (CLI) | Self-update from GitHub releases | reqwest, semver, self_replace, sha2, flate2, tar |

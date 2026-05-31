@@ -10,7 +10,7 @@ use crate::types::{
     BatchCreateInput, BatchUpdateInput, DoogatId, DoogatMeta, ParsedDoogat, TableSchema,
 };
 
-use crate::traits::GitBackend;
+use crate::traits::{GitBackend, IndexPort};
 
 use super::validation::{BareNextCounters, PartitionedNextCounters};
 use super::{DoogatService, ExtraFieldUpdates};
@@ -133,7 +133,7 @@ pub struct UpsertOutcome {
     pub created: bool,
 }
 
-impl<G: GitBackend> DoogatService<G> {
+impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     // ── CRUD ────────────────────────────────────────────────────────────
 
     /// Create a new doogat from individual fields.
@@ -325,7 +325,7 @@ impl<G: GitBackend> DoogatService<G> {
         // `ensure_fresh` detects the advanced HEAD and re-indexes, and
         // `consistency::singleton_sweep` (PRD 00139 §10) reconciles any duplicate.
         if is_singleton {
-            crate::indexer::with_immediate_transaction(&self.index.conn, write)
+            crate::indexer::with_immediate_transaction(self.index.sql_conn(), write)
         } else {
             write()
         }
@@ -361,7 +361,7 @@ impl<G: GitBackend> DoogatService<G> {
             )));
         }
 
-        crate::indexer::with_immediate_transaction(&self.index.conn, || {
+        crate::indexer::with_immediate_transaction(self.index.sql_conn(), || {
             let escaped = type_name.replace('"', "\"\"");
             let sql = format!("SELECT id FROM \"{escaped}\" ORDER BY id ASC LIMIT 1");
             let rows = self.index.query_raw_with_params(&sql, &[])?;
@@ -406,7 +406,7 @@ impl<G: GitBackend> DoogatService<G> {
         let mut col_values = stringify_typed_input_fields(input, schema)?;
         let mut counters = TypedInsertCounters::default();
 
-        prepare_typed_insert_validate(schema, &mut col_values, &mut counters, &self.index.conn)?;
+        prepare_typed_insert_validate(schema, &mut col_values, &mut counters, self.index.sql_conn())?;
 
         Self::validate_typed_create_post_defaults(input, schema, &col_values)?;
 
@@ -430,7 +430,7 @@ impl<G: GitBackend> DoogatService<G> {
             schema,
             &col_values,
             &ref_folder_types,
-            Some(&self.index.conn),
+            Some(self.index.sql_conn()),
         );
         parsed.meta.tags = input.tags.clone();
         if let Some(ref b) = input.body {
@@ -535,7 +535,7 @@ impl<G: GitBackend> DoogatService<G> {
         };
 
         if is_singleton {
-            crate::indexer::with_immediate_transaction(&self.index.conn, write)?;
+            crate::indexer::with_immediate_transaction(self.index.sql_conn(), write)?;
         } else {
             write()?;
         }
@@ -864,7 +864,7 @@ impl<G: GitBackend> DoogatService<G> {
         };
 
         if any_singleton {
-            crate::indexer::with_immediate_transaction(&self.index.conn, body)
+            crate::indexer::with_immediate_transaction(self.index.sql_conn(), body)
         } else {
             body()
         }
@@ -1058,7 +1058,7 @@ impl<G: GitBackend> DoogatService<G> {
             schema,
             &mut col_values,
             &mut helper_counters,
-            &self.index.conn,
+            self.index.sql_conn(),
         )?;
 
         write_back_helper_counters(
@@ -1086,7 +1086,7 @@ impl<G: GitBackend> DoogatService<G> {
             schema,
             &col_values,
             &ref_folder_types,
-            Some(&self.index.conn),
+            Some(self.index.sql_conn()),
         );
         parsed.meta.tags = input.tags.clone();
         if let Some(ref body) = input.body {
@@ -1156,7 +1156,7 @@ impl<G: GitBackend> DoogatService<G> {
                 id,
                 s,
                 col_values,
-                Some(&self.index.conn),
+                Some(self.index.sql_conn()),
             )),
             Some(s) => Err(DoogatError::not_null_violation(
                 s.table_name.clone(),
@@ -1345,7 +1345,7 @@ impl<G: GitBackend> DoogatService<G> {
         };
 
         if is_singleton {
-            crate::indexer::with_immediate_transaction(&self.index.conn, write)
+            crate::indexer::with_immediate_transaction(self.index.sql_conn(), write)
         } else {
             write()
         }
@@ -1432,7 +1432,7 @@ impl<G: GitBackend> DoogatService<G> {
         for (id, _path) in &plan {
             let doogat_type: Option<String> = self
                 .index
-                .conn
+                .sql_conn()
                 .query_row(
                     "SELECT type FROM doogats WHERE id = ?1",
                     params![id],
@@ -1443,7 +1443,7 @@ impl<G: GitBackend> DoogatService<G> {
             self.nosql_remove_doogat(id);
             if let Some(ref dtype) = doogat_type {
                 if !dtype.is_empty() && dtype != "_typedef" {
-                    let _ = self.index.conn.execute(
+                    let _ = self.index.sql_conn().execute(
                         &format!("DELETE FROM \"{}\" WHERE id = ?1", dtype),
                         params![id],
                     );
@@ -1608,29 +1608,18 @@ impl<G: GitBackend> DoogatService<G> {
         })
     }
 
-    /// Best-effort dual-write to NoSQL index.
-    #[cfg(feature = "nosql")]
+    /// Best-effort dual-write to the NoSQL mirror via the injected port.
+    /// Mirror failures are swallowed (silent best-effort), preserving the prior
+    /// behavior; the production Redb mirror opens the database per call and the
+    /// no-op mirror does nothing when the `nosql` feature is disabled.
     fn nosql_index_doogat(&self, doogat: &ParsedDoogat) {
-        let redb_path = self.repo_path.join(".ddb/nosql.redb");
-        if let Ok(ri) = crate::nosql::RedbIndex::open(&redb_path) {
-            let _ = ri.index_doogat(doogat);
-        }
+        let _ = self.nosql.mirror_index_doogat(doogat);
     }
 
-    #[cfg(not(feature = "nosql"))]
-    fn nosql_index_doogat(&self, _doogat: &ParsedDoogat) {}
-
-    /// Best-effort removal from NoSQL index.
-    #[cfg(feature = "nosql")]
+    /// Best-effort removal from the NoSQL mirror via the injected port.
     fn nosql_remove_doogat(&self, id: &str) {
-        let redb_path = self.repo_path.join(".ddb/nosql.redb");
-        if let Ok(ri) = crate::nosql::RedbIndex::open(&redb_path) {
-            let _ = ri.remove_doogat(id);
-        }
+        let _ = self.nosql.mirror_remove_doogat(id);
     }
-
-    #[cfg(not(feature = "nosql"))]
-    fn nosql_remove_doogat(&self, _id: &str) {}
 }
 
 /// Stringify a typed `BatchCreateInput`'s fields into the `BTreeMap<String, String>`

@@ -222,6 +222,35 @@ impl RedbIndex {
     }
 }
 
+/// Production `NoSqlMirrorPort` backed by the redb index.
+///
+/// Opens the redb database on each mirror call rather than holding it open,
+/// preserving the exact open-on-write behavior the service used before the
+/// port boundary (`service/crud.rs` `nosql_index_doogat`/`nosql_remove_doogat`).
+/// redb takes an exclusive file lock while open, so a long-lived handle would
+/// block other processes; opening per call keeps the mirror best-effort and
+/// non-blocking. PRD 00142.
+pub struct RedbMirror {
+    path: std::path::PathBuf,
+}
+
+impl RedbMirror {
+    /// Create a mirror that writes to the redb database at `path`.
+    pub fn new(path: std::path::PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl crate::traits::NoSqlMirrorPort for RedbMirror {
+    fn mirror_index_doogat(&self, doogat: &ParsedDoogat) -> Result<()> {
+        RedbIndex::open(&self.path)?.index_doogat(doogat)
+    }
+
+    fn mirror_remove_doogat(&self, id: &str) -> Result<()> {
+        RedbIndex::open(&self.path)?.remove_doogat(id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

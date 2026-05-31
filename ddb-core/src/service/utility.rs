@@ -1,14 +1,11 @@
 use crate::error::Result;
-use crate::git_ops;
 use crate::parser;
-use crate::traits::GitBackend;
-use crate::types::{
-    AttachmentInfo, CommitHash, DoogatId, FixReport, ParsedDoogat, RenameReport, TableSchema,
-};
+use crate::traits::{GitBackend, IndexPort};
+use crate::types::{AttachmentInfo, CommitHash, DoogatId, FixReport, ParsedDoogat, TableSchema};
 
 use super::DoogatService;
 
-impl<G: GitBackend> DoogatService<G> {
+impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     // ── Utility ─────────────────────────────────────────────────────────
 
     /// Verify index is reachable.
@@ -78,21 +75,8 @@ impl<G: GitBackend> DoogatService<G> {
         self.index.infer_schema(name, &self.repo)
     }
 
-    pub fn rename_doogat(&self, id: &str, new_path: &str) -> Result<RenameReport> {
-        let old_path = self.index.resolve_path(id)?;
-        git_ops::rename_doogat(&self.repo, &self.index, &old_path, new_path)
-    }
-
-    pub fn fix_all(&self, dry_run: bool) -> Result<FixReport> {
-        crate::consistency::fix_all(&self.repo, &self.index, dry_run)
-    }
-
     pub fn migrate_all(&self, dry_run: bool) -> Result<FixReport> {
         crate::consistency::migrate_all(&self.repo, dry_run)
-    }
-
-    pub fn zone_migrate_all(&self, dry_run: bool) -> Result<FixReport> {
-        crate::consistency::zone_migrate_all(&self.repo, &self.index, dry_run)
     }
 
     pub fn resurrected_doogats(&self) -> Result<Vec<(String, String)>> {
@@ -108,22 +92,6 @@ impl<G: GitBackend> DoogatService<G> {
     }
 
     // ── Attachments ─────────────────────────────────────────────────────
-
-    pub fn attach_file(
-        &self,
-        doogat_id: &str,
-        filename: &str,
-        bytes: &[u8],
-        mime: &str,
-    ) -> Result<AttachmentInfo> {
-        let id = DoogatId(doogat_id.to_owned());
-        crate::attachments::attach_file(&self.repo, &self.index, &id, filename, bytes, mime)
-    }
-
-    pub fn detach_file(&self, doogat_id: &str, filename: &str) -> Result<()> {
-        let id = DoogatId(doogat_id.to_owned());
-        crate::attachments::detach_file(&self.repo, &self.index, &id, filename)
-    }
 
     pub fn list_attachments(&self, doogat_id: &str) -> Result<Vec<AttachmentInfo>> {
         let id = DoogatId(doogat_id.to_owned());

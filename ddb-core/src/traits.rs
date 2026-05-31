@@ -293,6 +293,15 @@ pub trait IndexPort: DoogatIndex + SqlBackend {
         sql: &str,
         params: &[rusqlite::types::Value],
     ) -> Result<Vec<Vec<String>>>;
+
+    /// Paginated search with structured filters (type/tag/field negation).
+    fn search_paginated_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        filters: &crate::types::SearchFilters,
+    ) -> Result<PaginatedSearchResult>;
 }
 
 /// Materialized-typedef operations for typed writes and SQL-facing behavior.
@@ -329,6 +338,22 @@ pub trait NoSqlMirrorPort {
 
     /// Remove a mirrored doogat from the secondary NoSQL index.
     fn mirror_remove_doogat(&self, id: &str) -> Result<()>;
+}
+
+/// No-op `NoSqlMirrorPort` used when the `nosql` feature is disabled and in
+/// service unit tests that inject a mock index. Both operations succeed without
+/// writing anything, preserving the prior `#[cfg(not(feature = "nosql"))]`
+/// behavior where the dual-write was a silent no-op.
+pub struct NoopMirror;
+
+impl NoSqlMirrorPort for NoopMirror {
+    fn mirror_index_doogat(&self, _doogat: &ParsedDoogat) -> Result<()> {
+        Ok(())
+    }
+
+    fn mirror_remove_doogat(&self, _id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// CRDT-based conflict resolution strategy.

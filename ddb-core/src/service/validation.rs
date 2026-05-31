@@ -1,5 +1,5 @@
 use crate::error::{DoogatError, Result};
-use crate::traits::GitBackend;
+use crate::traits::{GitBackend, IndexPort};
 use crate::types::{BatchCreateInput, ParsedDoogat, TableSchema};
 
 use super::DoogatService;
@@ -9,7 +9,7 @@ pub(super) type BareNextCounters = std::collections::BTreeMap<(String, String), 
 /// (table, column, partition_value) -> current max value for DEFAULT NEXT(col) columns.
 pub(super) type PartitionedNextCounters = std::collections::BTreeMap<(String, String, String), i64>;
 
-impl<G: GitBackend> DoogatService<G> {
+impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     /// Convert a `Value` to its canonical string representation for comparison
     /// against allowed_values and FK IDs. List/Map variants return None because
     /// they are not comparable to scalar constraints.

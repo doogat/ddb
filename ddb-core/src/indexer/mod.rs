@@ -779,6 +779,216 @@ impl crate::traits::DoogatIndex for Index {
     }
 }
 
+/// Pass-through trait impl for `IndexPort`. Declares only the GAP methods not
+/// already inherited from the `DoogatIndex` + `SqlBackend` supertraits. Same
+/// dispatch contract as the impls above: each body delegates to the inherent
+/// method of the same name on `Index`, and accidental self-recursion is caught
+/// by `unconditional_recursion`. PRD 00142.
+impl crate::traits::IndexPort for Index {
+    fn rebuild_if_stale(
+        &self,
+        repo: &impl crate::traits::DoogatSource,
+    ) -> Result<Option<crate::types::RebuildReport>> {
+        self.rebuild_if_stale(repo)
+    }
+
+    fn rebuild(
+        &self,
+        repo: &impl crate::traits::DoogatSource,
+    ) -> Result<crate::types::RebuildReport> {
+        self.rebuild(repo)
+    }
+
+    fn is_stale(&self, repo: &impl crate::traits::DoogatSource) -> Result<bool> {
+        self.is_stale(repo)
+    }
+
+    fn store_head(&self, head: &str) -> Result<()> {
+        self.store_head(head)
+    }
+
+    fn lookup_updated_at(&self, id: &str) -> Result<Option<String>> {
+        self.lookup_updated_at(id)
+    }
+
+    fn lookup_updated_at_batch(
+        &self,
+        ids: &[&str],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        self.lookup_updated_at_batch(ids)
+    }
+
+    fn query_raw_with_query_values(
+        &self,
+        sql: &str,
+        params: &[crate::types::QueryValue],
+    ) -> Result<Vec<Vec<String>>> {
+        self.query_raw_with_query_values(sql, params)
+    }
+
+    fn load_all_typedefs(
+        &self,
+        repo: &dyn crate::traits::DoogatSource,
+    ) -> std::collections::HashMap<String, crate::types::TableSchema> {
+        self.load_all_typedefs(repo)
+    }
+
+    fn collect_cascade_children(
+        &self,
+        repo: &dyn crate::traits::DoogatSource,
+        deleted_id: &str,
+    ) -> Result<Vec<(String, String)>> {
+        self.collect_cascade_children(repo, deleted_id)
+    }
+
+    fn cascade_junction_cleanup(
+        &self,
+        repo: &dyn crate::traits::DoogatSource,
+        target_type: &str,
+        deleted_id: &str,
+    ) -> Result<()> {
+        self.cascade_junction_cleanup(repo, target_type, deleted_id)
+    }
+
+    fn list_tags(&self) -> Result<Vec<(String, i64)>> {
+        self.list_tags()
+    }
+
+    fn query_tags(
+        &self,
+        filter: &crate::types::TagQueryFilter,
+    ) -> Result<Vec<crate::types::TagEntry>> {
+        self.query_tags(filter)
+    }
+
+    fn unlinked_mentions(&self, target_id: &str) -> Result<Vec<crate::types::UnlinkedMention>> {
+        self.unlinked_mentions(target_id)
+    }
+
+    fn suggest_links(
+        &self,
+        source_id: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::types::Suggestion>> {
+        self.suggest_links(source_id, limit)
+    }
+
+    fn stale_doogats(
+        &self,
+        repo: &(impl crate::traits::DoogatSource + crate::traits::GitHistory),
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::StaleDoogat>> {
+        self.stale_doogats(repo, type_filter)
+    }
+
+    fn orphan_doogats(
+        &self,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::OrphanDoogat>> {
+        self.orphan_doogats(type_filter)
+    }
+
+    fn recent_doogats(
+        &self,
+        days: u32,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::RecentDoogat>> {
+        self.recent_doogats(days, type_filter)
+    }
+
+    fn link_density(
+        &self,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::LinkDensityEntry>> {
+        self.link_density(type_filter)
+    }
+
+    fn sequence_tree(
+        &self,
+        id: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(crate::types::SequenceNode, usize)>> {
+        self.sequence_tree(id, max_depth)
+    }
+
+    fn sequence_breadcrumb(&self, id: &str) -> Result<Vec<crate::types::SequenceNode>> {
+        self.sequence_breadcrumb(id)
+    }
+
+    fn broken_sequences(&self) -> Result<Vec<crate::types::BrokenSequence>> {
+        self.broken_sequences()
+    }
+
+    fn sequence_info(&self, id: &str) -> Result<crate::types::SequenceInfo> {
+        self.sequence_info(id)
+    }
+
+    fn sequence_children(&self, id: &str) -> Result<Vec<crate::types::SequenceNode>> {
+        self.sequence_children(id)
+    }
+
+    fn backlinks(&self, target_path: &str) -> Result<Vec<String>> {
+        self.backlinks(target_path)
+    }
+
+    fn backlinking_doogat_paths(&self, target: &str) -> Result<Vec<(String, String)>> {
+        self.backlinking_doogat_paths(target)
+    }
+
+    fn resurrected_doogats(&self) -> Result<Vec<(String, String)>> {
+        self.resurrected_doogats()
+    }
+
+    fn broken_backlinks(&self) -> Result<Vec<(String, String)>> {
+        self.broken_backlinks()
+    }
+
+    fn infer_schema(
+        &self,
+        type_name: &str,
+        repo: &(impl crate::traits::DoogatSource + ?Sized),
+    ) -> Result<crate::types::TableSchema> {
+        self.infer_schema(type_name, repo)
+    }
+
+    fn query_raw_with_params(
+        &self,
+        sql: &str,
+        params: &[rusqlite::types::Value],
+    ) -> Result<Vec<Vec<String>>> {
+        self.query_raw_with_params(sql, params)
+    }
+
+    fn search_paginated_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        filters: &crate::types::SearchFilters,
+    ) -> Result<PaginatedSearchResult> {
+        self.search_paginated_filtered(query, limit, offset, filters)
+    }
+}
+
+/// Pass-through trait impl for `TypedMaterializationPort`. Delegates to the same
+/// inherent `Index` methods reached by `IndexPort`. PRD 00142.
+impl crate::traits::TypedMaterializationPort for Index {
+    fn infer_schema(
+        &self,
+        type_name: &str,
+        repo: &(impl crate::traits::DoogatSource + ?Sized),
+    ) -> Result<crate::types::TableSchema> {
+        self.infer_schema(type_name, repo)
+    }
+
+    fn load_all_typedefs(
+        &self,
+        repo: &dyn crate::traits::DoogatSource,
+    ) -> std::collections::HashMap<String, crate::types::TableSchema> {
+        self.load_all_typedefs(repo)
+    }
+}
+
 /// Collect scalar frontmatter extra values into a space-separated string
 /// for the FTS5 `fields` column. Skips internal keys that have dedicated tables.
 fn collect_fts_fields(extras: &std::collections::BTreeMap<String, crate::types::Value>) -> String {

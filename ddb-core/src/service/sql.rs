@@ -1,11 +1,11 @@
 use crate::error::{DoogatError, Result};
 use crate::sql_engine::{SqlEngine, SqlResult};
 
-use crate::traits::GitBackend;
+use crate::traits::{GitBackend, IndexPort};
 
 use super::DoogatService;
 
-impl<G: GitBackend> DoogatService<G> {
+impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     // ── SQL ─────────────────────────────────────────────────────────────
 
     pub fn execute_sql(&mut self, sql: &str) -> Result<SqlResult> {

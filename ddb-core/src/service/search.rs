@@ -5,11 +5,11 @@ use crate::types::{
     SearchResult, TagEntry, TagQueryFilter, TypedListQuery,
 };
 
-use crate::traits::GitBackend;
+use crate::traits::{GitBackend, IndexPort};
 
 use super::DoogatService;
 
-impl<G: GitBackend> DoogatService<G> {
+impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     // ── Search ──────────────────────────────────────────────────────────
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {

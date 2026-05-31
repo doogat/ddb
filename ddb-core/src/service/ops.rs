@@ -2,35 +2,15 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{DoogatError, Result};
 use crate::sync_manager::SyncManager;
-use crate::traits::GitBackend;
+use crate::traits::{GitBackend, IndexPort};
 use crate::types::{
-    CompactDryRunInfo, CompactOptions, CompactionReport, MaintenanceReport, NodeConfig, SyncReport,
+    CompactDryRunInfo, CompactOptions, CompactionReport, MaintenanceReport, NodeConfig,
 };
 
 use super::DoogatService;
 
-impl<G: GitBackend> DoogatService<G> {
+impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     // ── Sync / Compact / Maintenance ────────────────────────────────────
-
-    pub fn sync(&self, remote: &str, branch: &str) -> Result<SyncReport> {
-        let mut mgr = match SyncManager::open(&self.repo) {
-            Ok(m) => m,
-            Err(DoogatError::NotFound(msg)) => {
-                let node_file = self.repo.repo_path().join(".git/ddb-node");
-                if node_file.exists() {
-                    return Err(DoogatError::NotFound(msg));
-                }
-                let name = hostname::get()
-                    .map(|h| h.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| "unknown".to_string());
-                tracing::info!(node_name = %name, "auto-registering node for first sync");
-                self.register_node(&name)?;
-                SyncManager::open(&self.repo)?
-            }
-            Err(e) => return Err(e),
-        };
-        mgr.sync(remote, branch, &self.index)
-    }
 
     pub fn compact(&self, opts: &CompactOptions) -> Result<CompactionReport> {
         let mgr = match SyncManager::open(&self.repo) {
@@ -128,8 +108,4 @@ impl<G: GitBackend> DoogatService<G> {
         crate::bundle::export_bundle(&self.repo, &mgr, target_uuid, output)
     }
 
-    pub fn import_bundle(&self, path: &Path) -> Result<SyncReport> {
-        let mut mgr = SyncManager::open(&self.repo)?;
-        crate::bundle::import_bundle(&self.repo, &mut mgr, &self.index, path)
-    }
 }
