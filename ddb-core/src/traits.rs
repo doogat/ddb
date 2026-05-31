@@ -132,6 +132,205 @@ pub trait SqlBackend: DoogatIndex {
     ) -> Result<()>;
 }
 
+// EventPort is intentionally NOT defined here. The core service publishes no
+// events; the `EventBus` lives only in `ddb-server` (see PRD 00142 inventory,
+// Section C). Event dispatch is a transport concern owned by the server actor
+// layer, so the core port set deliberately omits an event port.
+
+/// Service-facing index port: the full set of index operations the
+/// `DoogatService` layer calls through `self.index.*`.
+///
+/// Supertrait of `DoogatIndex` + `SqlBackend`, so it inherits the CRUD/search
+/// methods (`index_doogat`, `remove_doogat`, `search`, `search_paginated`,
+/// `resolve_path`, `query_raw`, `find_typedef_path`, `execute_sql`) and the SQL
+/// engine helpers (`sql_conn`, `query_raw_with_columns`, `rematerialize_type`,
+/// `materialize_single`, `populate_junction_tables`,
+/// `sync_junction_tables_for_columns`, `type_uses_folder`, `backlinks_by_target`,
+/// `check_restrict_blocks_delete`). This trait declares only the GAP methods not
+/// already on those supertraits. Signatures are byte-identical to the inherent
+/// methods on `Index` so a later task can swap the concrete `Index` field for a
+/// generic `I: IndexPort` without touching any `self.index.method(...)` call site.
+///
+/// The former direct `self.index.conn` field access (11 sites in `service/crud.rs`
+/// that pass `&self.index.conn` to `with_immediate_transaction` /
+/// `prepare_typed_insert_validate` or call `.execute` directly) is served by the
+/// inherited `SqlBackend::sql_conn() -> &Connection`. No separate connection
+/// accessor is added here: `sql_conn` already returns exactly the raw
+/// `&rusqlite::Connection` those sites need, and re-declaring it would duplicate a
+/// supertrait method.
+pub trait IndexPort: DoogatIndex + SqlBackend {
+    /// Rebuild the index if the stored HEAD is stale (used by `ensure_fresh`).
+    fn rebuild_if_stale(
+        &self,
+        repo: &impl DoogatSource,
+    ) -> Result<Option<crate::types::RebuildReport>>;
+
+    /// Full rebuild of the index from the repository.
+    fn rebuild(&self, repo: &impl DoogatSource) -> Result<crate::types::RebuildReport>;
+
+    /// Whether the index is stale relative to the repository HEAD.
+    fn is_stale(&self, repo: &impl DoogatSource) -> Result<bool>;
+
+    /// Store the current repository HEAD into the index meta table.
+    fn store_head(&self, head: &str) -> Result<()>;
+
+    /// Look up the indexed `updated_at` timestamp for one doogat ID.
+    fn lookup_updated_at(&self, id: &str) -> Result<Option<String>>;
+
+    /// Batch variant of `lookup_updated_at`.
+    fn lookup_updated_at_batch(
+        &self,
+        ids: &[&str],
+    ) -> Result<std::collections::HashMap<String, String>>;
+
+    /// Execute a SQL query with adapter-neutral `QueryValue` parameters.
+    fn query_raw_with_query_values(
+        &self,
+        sql: &str,
+        params: &[crate::types::QueryValue],
+    ) -> Result<Vec<Vec<String>>>;
+
+    /// Load all typedef schemas keyed by table name.
+    fn load_all_typedefs(
+        &self,
+        repo: &dyn DoogatSource,
+    ) -> std::collections::HashMap<String, TableSchema>;
+
+    /// Collect child doogats affected by a cascade delete of `deleted_id`.
+    fn collect_cascade_children(
+        &self,
+        repo: &dyn DoogatSource,
+        deleted_id: &str,
+    ) -> Result<Vec<(String, String)>>;
+
+    /// Remove junction rows referencing `deleted_id` as a target.
+    fn cascade_junction_cleanup(
+        &self,
+        repo: &dyn DoogatSource,
+        target_type: &str,
+        deleted_id: &str,
+    ) -> Result<()>;
+
+    /// List all tags with their counts.
+    fn list_tags(&self) -> Result<Vec<(String, i64)>>;
+
+    /// Query tags with a filter.
+    fn query_tags(
+        &self,
+        filter: &crate::types::TagQueryFilter,
+    ) -> Result<Vec<crate::types::TagEntry>>;
+
+    /// Find unlinked mentions of a target doogat.
+    fn unlinked_mentions(&self, target_id: &str) -> Result<Vec<crate::types::UnlinkedMention>>;
+
+    /// Suggest links for a source doogat.
+    fn suggest_links(&self, source_id: &str, limit: usize) -> Result<Vec<crate::types::Suggestion>>;
+
+    /// Find stale doogats per typedef staleness thresholds.
+    fn stale_doogats(
+        &self,
+        repo: &(impl DoogatSource + GitHistory),
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::StaleDoogat>>;
+
+    /// Find orphan doogats (no inbound links).
+    fn orphan_doogats(&self, type_filter: Option<&str>) -> Result<Vec<crate::types::OrphanDoogat>>;
+
+    /// Find recently updated doogats within `days`.
+    fn recent_doogats(
+        &self,
+        days: u32,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::RecentDoogat>>;
+
+    /// Compute per-type link density.
+    fn link_density(
+        &self,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<crate::types::LinkDensityEntry>>;
+
+    /// Build a sequence tree rooted at `id`, bounded by `max_depth`.
+    fn sequence_tree(
+        &self,
+        id: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(crate::types::SequenceNode, usize)>>;
+
+    /// Build a breadcrumb trail for a sequence node.
+    fn sequence_breadcrumb(&self, id: &str) -> Result<Vec<crate::types::SequenceNode>>;
+
+    /// Find broken sequence links.
+    fn broken_sequences(&self) -> Result<Vec<crate::types::BrokenSequence>>;
+
+    /// Summarize a sequence node's position.
+    fn sequence_info(&self, id: &str) -> Result<crate::types::SequenceInfo>;
+
+    /// List the direct children of a sequence node.
+    fn sequence_children(&self, id: &str) -> Result<Vec<crate::types::SequenceNode>>;
+
+    /// List paths of doogats linking to a target.
+    fn backlinks(&self, target_path: &str) -> Result<Vec<String>>;
+
+    /// List `(id, path)` of doogats linking to a target.
+    fn backlinking_doogat_paths(&self, target: &str) -> Result<Vec<(String, String)>>;
+
+    /// Find resurrected doogats (links to previously-deleted targets now present).
+    fn resurrected_doogats(&self) -> Result<Vec<(String, String)>>;
+
+    /// Find broken backlinks (links to targets that no longer exist).
+    fn broken_backlinks(&self) -> Result<Vec<(String, String)>>;
+
+    /// Infer a type's table schema from indexed data and the repository.
+    fn infer_schema(
+        &self,
+        type_name: &str,
+        repo: &(impl DoogatSource + ?Sized),
+    ) -> Result<TableSchema>;
+
+    /// Execute a SQL query with positional `rusqlite::Value` parameters.
+    fn query_raw_with_params(
+        &self,
+        sql: &str,
+        params: &[rusqlite::types::Value],
+    ) -> Result<Vec<Vec<String>>>;
+}
+
+/// Materialized-typedef operations for typed writes and SQL-facing behavior.
+///
+/// Signatures are byte-identical to the inherent `Index` methods so the later
+/// concrete-to-generic swap needs no call-site edits. `materialize_single` and
+/// `type_uses_folder` are intentionally NOT re-declared here — they already live
+/// on the `SqlBackend` supertrait and are reached through `IndexPort`.
+pub trait TypedMaterializationPort {
+    /// Infer a type's table schema from indexed data and the repository.
+    fn infer_schema(
+        &self,
+        type_name: &str,
+        repo: &(impl DoogatSource + ?Sized),
+    ) -> Result<TableSchema>;
+
+    /// Load all typedef schemas keyed by table name.
+    fn load_all_typedefs(
+        &self,
+        repo: &dyn DoogatSource,
+    ) -> std::collections::HashMap<String, TableSchema>;
+}
+
+/// Optional secondary NoSQL mirror (best-effort dual write).
+///
+/// Production is implemented by the Redb index; tests by a no-op. Methods return
+/// a fallible `Result<()>` rather than collapsing to a silent `()` so a caller
+/// can surface a visible warning when a mirror write fails. Covers exactly the
+/// dual-write operations in `service/crud.rs` (`nosql_index_doogat`,
+/// `nosql_remove_doogat`): mirror an upserted doogat, remove a mirrored doogat.
+pub trait NoSqlMirrorPort {
+    /// Mirror an upserted doogat into the secondary NoSQL index.
+    fn mirror_index_doogat(&self, doogat: &ParsedDoogat) -> Result<()>;
+
+    /// Remove a mirrored doogat from the secondary NoSQL index.
+    fn mirror_remove_doogat(&self, id: &str) -> Result<()>;
+}
+
 /// CRDT-based conflict resolution strategy.
 pub trait ConflictResolver {
     fn resolve_conflicts(
