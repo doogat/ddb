@@ -4,7 +4,7 @@ use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use ddb_core::error::DoogatError;
 use ddb_core::sql_engine::requires_schema_reload;
-use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ConflictAction, TableSchema};
+use ddb_core::types::{BatchCreateInput, BatchUpdateInput, TableSchema};
 use indexmap::IndexMap;
 
 use std::sync::Arc;
@@ -16,6 +16,9 @@ use crate::reload::SchemaReloader;
 use crate::warning_extension::forward_warnings;
 
 use super::base_types::*;
+use super::input::{
+    conflict_action, fields_map, opt_fields_map, opt_string, opt_string_list, string_list,
+};
 
 /// Auxiliary types and inputs produced by the mutation builder that must be
 /// registered on the schema alongside the Mutation object itself.
@@ -41,40 +44,14 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     let a = ctx.data::<ActorHandle>()?;
                     let input = ctx.args.try_get("input")?;
                     let input = input.object()?;
-                    let title = input
-                        .get("title")
-                        .and_then(|v| v.string().ok())
-                        .map(|s| s.to_string());
-                    let content = input
-                        .get("content")
-                        .and_then(|v| v.string().ok())
-                        .map(|s| s.to_string());
-                    let tags = input
-                        .get("tags")
-                        .and_then(|v| v.list().ok())
-                        .map(|l| {
-                            l.iter()
-                                .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let doogat_type = input
-                        .get("type")
-                        .and_then(|v| v.string().ok())
-                        .map(|s| s.to_string());
-                    let fields = match input.get("fields").and_then(|v| v.string().ok()) {
-                        Some(json_str) => parse_fields_json(json_str)
-                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
-                        None => std::collections::BTreeMap::new(),
-                    };
-                    let on_conflict = match ctx
-                        .args
-                        .get("onConflict")
-                        .map(|v| v.enum_name().ok().map(|s| s.to_string()))
-                    {
-                        Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
-                        _ => ConflictAction::Error,
-                    };
+                    let map = input.as_index_map();
+                    let title = opt_string(map, "title");
+                    let content = opt_string(map, "content");
+                    let tags = string_list(map, "tags");
+                    let doogat_type = opt_string(map, "type");
+                    let fields = fields_map(map)
+                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                    let on_conflict = conflict_action(ctx.args.as_index_map());
                     let output = a
                         .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
                         .await
@@ -104,37 +81,14 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     let input = ctx.args.try_get("input")?;
                     let input = input.object()?;
                     let id = input.try_get("id")?.string()?.to_string();
-                    let title = input
-                        .get("title")
-                        .and_then(|v| v.string().ok())
-                        .map(|s| s.to_string());
-                    let content = input
-                        .get("content")
-                        .and_then(|v| v.string().ok())
-                        .map(|s| s.to_string());
-                    let tags = input.get("tags").and_then(|v| v.list().ok()).map(|l| {
-                        l.iter()
-                            .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                            .collect()
-                    });
-                    let doogat_type = input
-                        .get("type")
-                        .and_then(|v| v.string().ok())
-                        .map(|s| s.to_string());
-                    let fields = match input.get("fields").and_then(|v| v.string().ok()) {
-                        Some(json_str) => parse_fields_json(json_str)
-                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
-                        None => std::collections::BTreeMap::new(),
-                    };
-                    let unset_fields: Vec<String> = input
-                        .get("unsetFields")
-                        .and_then(|v| v.list().ok())
-                        .map(|l| {
-                            l.iter()
-                                .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let map = input.as_index_map();
+                    let title = opt_string(map, "title");
+                    let content = opt_string(map, "content");
+                    let tags = opt_string_list(map, "tags");
+                    let doogat_type = opt_string(map, "type");
+                    let fields = fields_map(map)
+                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                    let unset_fields = string_list(map, "unsetFields");
                     let z = a
                         .update_doogat(crate::actor::UpdateDoogatParams {
                             id,
@@ -169,36 +123,14 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     for item in updates_val.iter() {
                         let obj = item.object()?;
                         let id = obj.try_get("id")?.string()?.to_string();
-                        let title = obj
-                            .get("title")
-                            .and_then(|v| v.string().ok())
-                            .map(|s| s.to_string());
-                        let body = obj
-                            .get("content")
-                            .and_then(|v| v.string().ok())
-                            .map(|s| s.to_string());
-                        let tags = obj.get("tags").and_then(|v| v.list().ok()).map(|l| {
-                            l.iter()
-                                .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                .collect()
-                        });
-                        let doogat_type = obj
-                            .get("type")
-                            .and_then(|v| v.string().ok())
-                            .map(|s| s.to_string());
-                        let fields = match obj.get("fields").and_then(|v| v.string().ok()) {
-                            Some(json_str) => Some(
-                                parse_fields_json(json_str)
-                                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
-                            ),
-                            None => None,
-                        };
-                        let unset_fields: Option<Vec<String>> =
-                            obj.get("unsetFields").and_then(|v| v.list().ok()).map(|l| {
-                                l.iter()
-                                    .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                    .collect()
-                            });
+                        let map = obj.as_index_map();
+                        let title = opt_string(map, "title");
+                        let body = opt_string(map, "content");
+                        let tags = opt_string_list(map, "tags");
+                        let doogat_type = opt_string(map, "type");
+                        let fields = opt_fields_map(map)
+                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                        let unset_fields = opt_string_list(map, "unsetFields");
                         updates.push(BatchUpdateInput {
                             id,
                             title,
@@ -233,44 +165,18 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
             Field::new("createMany", TypeRef::named_nn_list_nn("Doogat"), |ctx| {
                 FieldFuture::new(async move {
                     let a = ctx.data::<ActorHandle>()?;
-                    let on_conflict = match ctx
-                        .args
-                        .get("onConflict")
-                        .map(|v| v.enum_name().ok().map(|s| s.to_string()))
-                    {
-                        Some(Some(ref s)) if s == "IGNORE" => ConflictAction::Ignore,
-                        _ => ConflictAction::Error,
-                    };
+                    let on_conflict = conflict_action(ctx.args.as_index_map());
                     let inputs_val = ctx.args.try_get("inputs")?.list()?;
                     let mut inputs = Vec::with_capacity(inputs_val.len());
                     for item in inputs_val.iter() {
                         let obj = item.object()?;
-                        let title = obj
-                            .get("title")
-                            .and_then(|v| v.string().ok())
-                            .map(|s| s.to_string());
-                        let body = obj
-                            .get("content")
-                            .and_then(|v| v.string().ok())
-                            .map(|s| s.to_string());
-                        let tags = obj
-                            .get("tags")
-                            .and_then(|v| v.list().ok())
-                            .map(|l| {
-                                l.iter()
-                                    .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let doogat_type = obj
-                            .get("type")
-                            .and_then(|v| v.string().ok())
-                            .map(|s| s.to_string());
-                        let fields = match obj.get("fields").and_then(|v| v.string().ok()) {
-                            Some(json_str) => parse_fields_json(json_str)
-                                .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
-                            None => std::collections::BTreeMap::new(),
-                        };
+                        let map = obj.as_index_map();
+                        let title = opt_string(map, "title");
+                        let body = opt_string(map, "content");
+                        let tags = string_list(map, "tags");
+                        let doogat_type = opt_string(map, "type");
+                        let fields = fields_map(map)
+                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
                         inputs.push(BatchCreateInput {
                             title,
                             body,
