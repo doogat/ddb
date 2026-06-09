@@ -22,7 +22,7 @@ use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use ddb_core::sql_engine::SqlResult;
+use ddb_core::sql_engine::{requires_schema_reload, SqlResult};
 
 use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
@@ -113,14 +113,11 @@ impl SimpleQueryHandler for DdbBackend {
                 .await
                 .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
 
-            let upper = query.to_uppercase();
-            if upper.contains("CREATE TABLE")
-                || upper.contains("DROP TABLE")
-                || upper.contains("ALTER TABLE")
-            {
+            if requires_schema_reload(query) {
                 self.reloader.trigger_reload_and_wait().await;
             }
-            (r, upper)
+            // `upper` still feeds command-tag formatting below.
+            (r, query.to_uppercase())
         };
 
         let response = match result {

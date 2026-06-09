@@ -3,6 +3,7 @@ use async_graphql::{Name, Value as GqlValue};
 use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use ddb_core::error::DoogatError;
+use ddb_core::sql_engine::requires_schema_reload;
 use ddb_core::types::{BatchCreateInput, BatchUpdateInput, ConflictAction, TableSchema};
 use indexmap::IndexMap;
 
@@ -411,11 +412,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                     let result = a.execute_sql(sql.clone()).await.map_err(to_graphql_error)?;
 
                     // Await schema reload if this was a typedef-mutating statement
-                    let upper = sql.to_uppercase();
-                    if upper.contains("CREATE TABLE")
-                        || upper.contains("DROP TABLE")
-                        || upper.contains("ALTER TABLE")
-                    {
+                    if requires_schema_reload(&sql) {
                         if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>() {
                             reloader.trigger_reload_and_wait().await;
                         }
@@ -454,12 +451,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
                             .map(|v| v.string().unwrap_or_default().to_string())
                             .collect();
 
-                        let has_ddl = statements.iter().any(|s| {
-                            let upper = s.to_uppercase();
-                            upper.contains("CREATE TABLE")
-                                || upper.contains("DROP TABLE")
-                                || upper.contains("ALTER TABLE")
-                        });
+                        let has_ddl = statements.iter().any(|s| requires_schema_reload(s));
 
                         let results =
                             a.execute_batch(statements).await.map_err(to_graphql_error)?;
