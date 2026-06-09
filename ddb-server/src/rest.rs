@@ -102,11 +102,9 @@ struct SearchHit {
     rank: f64,
 }
 
-#[derive(Serialize)]
-pub struct ErrorBody {
-    pub error: String,
-    pub message: String,
-}
+// One error body shape for every HTTP surface. Re-exported here so existing
+// `crate::rest::ErrorBody` users (e.g. nosql_api) keep resolving (PRD 00143).
+pub use crate::http_error::ErrorBody;
 
 // ── Conversions ──────────────────────────────────────────────────
 
@@ -156,39 +154,7 @@ pub fn doogat_to_json(z: &ParsedDoogat) -> DoogatJson {
 }
 
 fn rest_error(e: DoogatError) -> (StatusCode, Json<ErrorBody>) {
-    use ddb_core::error::codes;
-    let status = match &e {
-        DoogatError::NotFound(_) => StatusCode::NOT_FOUND,
-        DoogatError::Validation(_) | DoogatError::InvalidPath(_) | DoogatError::BadRequest(_) => {
-            StatusCode::BAD_REQUEST
-        }
-        DoogatError::Conflict(_) => StatusCode::CONFLICT,
-        DoogatError::SqlEngine(_) => StatusCode::UNPROCESSABLE_ENTITY,
-        // PRD 00139 cycle-3 #2: structured DML errors (PRD 00129 §6) are
-        // client errors, not server errors. Map each code to the closest
-        // HTTP semantic so REST consumers (and the cross-protocol parity
-        // tests) can distinguish "bad input" from "server crashed."
-        DoogatError::Structured { code, .. } => match *code {
-            codes::UNIQUE_VIOLATION
-            | codes::SINGLETON_VIOLATION
-            | codes::REFERENCES_VIOLATION
-            | codes::CASCADE_CYCLE => StatusCode::CONFLICT,
-            codes::SINGLETON_NOT_FOUND => StatusCode::NOT_FOUND,
-            codes::NOT_NULL_VIOLATION | codes::UNKNOWN_FIELD | codes::TYPE_NOT_REGISTERED => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
-            _ => StatusCode::UNPROCESSABLE_ENTITY,
-        },
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    let (code, message) = crate::error::classify(&e);
-    (
-        status,
-        Json(ErrorBody {
-            error: code.into(),
-            message,
-        }),
-    )
+    crate::http_error::http_error_response(e)
 }
 
 // ── Router ───────────────────────────────────────────────────────

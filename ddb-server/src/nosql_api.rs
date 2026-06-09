@@ -21,21 +21,7 @@ struct IdsResponse {
 }
 
 fn nosql_error(e: DoogatError) -> axum::response::Response {
-    let status = match &e {
-        DoogatError::NotFound(_) => StatusCode::NOT_FOUND,
-        DoogatError::Validation(_) | DoogatError::InvalidPath(_) => StatusCode::BAD_REQUEST,
-        DoogatError::SqlEngine(_) => StatusCode::UNPROCESSABLE_ENTITY,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    let (code, message) = crate::error::classify(&e);
-    (
-        status,
-        Json(ErrorBody {
-            error: code.into(),
-            message,
-        }),
-    )
-        .into_response()
+    crate::http_error::http_error_response(e).into_response()
 }
 
 pub fn router() -> Router {
