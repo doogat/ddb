@@ -20,41 +20,72 @@ use async_graphql::{Name, Value as GqlValue};
 use ddb_core::types::{ConflictAction, Value as DdbValue};
 use indexmap::IndexMap;
 
+use super::base_types::parse_fields_json;
+
 /// The underlying map of a dynamic GraphQL input object or argument set.
 pub(crate) type GqlObject = IndexMap<Name, GqlValue>;
 
 /// Optional string field. `None` when absent or not a string value.
-pub(crate) fn opt_string(_obj: &GqlObject, _key: &str) -> Option<String> {
-    None
+pub(crate) fn opt_string(obj: &GqlObject, key: &str) -> Option<String> {
+    match obj.get(key) {
+        Some(GqlValue::String(s)) => Some(s.clone()),
+        _ => None,
+    }
 }
 
 /// Optional list-of-strings field. `None` when absent or not a list; non-string
 /// list elements are skipped.
-pub(crate) fn opt_string_list(_obj: &GqlObject, _key: &str) -> Option<Vec<String>> {
-    None
+pub(crate) fn opt_string_list(obj: &GqlObject, key: &str) -> Option<Vec<String>> {
+    match obj.get(key) {
+        Some(GqlValue::List(items)) => Some(
+            items
+                .iter()
+                .filter_map(|v| match v {
+                    GqlValue::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        _ => None,
+    }
 }
 
 /// List-of-strings field, empty when absent.
-pub(crate) fn string_list(_obj: &GqlObject, _key: &str) -> Vec<String> {
-    Vec::new()
+pub(crate) fn string_list(obj: &GqlObject, key: &str) -> Vec<String> {
+    opt_string_list(obj, key).unwrap_or_default()
 }
 
 /// Decode the `fields` JSON-string field into a typed-field map. Empty map when
 /// the field is absent or not a string. Errors propagate the JSON parse message.
-pub(crate) fn fields_map(_obj: &GqlObject) -> Result<BTreeMap<String, DdbValue>, String> {
-    Ok(BTreeMap::new())
+pub(crate) fn fields_map(obj: &GqlObject) -> Result<BTreeMap<String, DdbValue>, String> {
+    match obj.get("fields") {
+        Some(GqlValue::String(json)) => parse_fields_json(json),
+        _ => Ok(BTreeMap::new()),
+    }
 }
 
 /// Like [`fields_map`] but `None` when the field is absent (batch-update
 /// semantics: distinguish "leave fields unchanged" from "set fields to empty").
-pub(crate) fn opt_fields_map(_obj: &GqlObject) -> Result<Option<BTreeMap<String, DdbValue>>, String> {
-    Ok(None)
+pub(crate) fn opt_fields_map(obj: &GqlObject) -> Result<Option<BTreeMap<String, DdbValue>>, String> {
+    match obj.get("fields") {
+        Some(GqlValue::String(json)) => Ok(Some(parse_fields_json(json)?)),
+        _ => Ok(None),
+    }
 }
 
 /// Decode the `onConflict` argument. Defaults to `Error`; only an explicit
 /// `IGNORE` (enum or string) selects `Ignore`.
-pub(crate) fn conflict_action(_args: &GqlObject) -> ConflictAction {
-    ConflictAction::Error
+pub(crate) fn conflict_action(args: &GqlObject) -> ConflictAction {
+    let raw = match args.get("onConflict") {
+        Some(GqlValue::Enum(s)) => Some(s.as_str()),
+        Some(GqlValue::String(s)) => Some(s.as_str()),
+        _ => None,
+    };
+    if raw == Some("IGNORE") {
+        ConflictAction::Ignore
+    } else {
+        ConflictAction::Error
+    }
 }
 
 #[cfg(test)]
