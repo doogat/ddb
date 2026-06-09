@@ -3,25 +3,41 @@ use super::fixture::{
 };
 use super::result::{ConformanceError, ConformanceWarning};
 
+/// A client-input rejection both CLI and GraphQL must produce for the same
+/// malformed request.
+///
+/// The original trigger — `CreateDoogat{title:""}` — was not real: ddb accepts
+/// an empty title (create succeeds, exit 0), so the expected error never fired
+/// and only the result-count assertion exercised the fixture. An empty **search
+/// query** is a genuine input rejection reachable through the shared CRUD driver
+/// surface: the service rejects it with `DoogatError::BadRequest` ("invalid
+/// search query") on every interface.
+///
+/// Parity here is variant-level (both interfaces return an error), not
+/// code-level: CLI structured errors are `Specialized` (text + exit code,
+/// decision D-CLI-1), so the CLI driver reports the catch-all `CLI_ERROR` while
+/// GraphQL carries the machine-readable `BAD_REQUEST` in `extensions.code`.
+/// `cross_driver_validation.rs` asserts both return `Err` and that GraphQL
+/// reports this fixture's `expected.error.code`.
 pub fn validation_error() -> WorkflowFixture {
     WorkflowFixture {
         id: "validation_error".into(),
-        title: "Validation error scenario".into(),
+        title: "Client rejects malformed input (empty search query)".into(),
         setup: SetupExpectation {
             auth_mode: AuthMode::None,
             timeout_ms: 30_000,
             setup_steps: vec![],
         },
         steps: vec![Step {
-            op: StepOp::CreateDoogat,
-            args: serde_json::json!({"title": ""}),
+            op: StepOp::Search,
+            args: serde_json::json!({"query": ""}),
         }],
         expected: ExpectedBehavior {
             value: None,
             warnings: vec![],
             error: Some(ConformanceError {
-                code: "VALIDATION_ERROR".into(),
-                message: "Title cannot be empty".into(),
+                code: "BAD_REQUEST".into(),
+                message: "invalid search query".into(),
                 context: serde_json::Map::new(),
             }),
         },
@@ -266,10 +282,13 @@ mod tests {
     }
 
     #[test]
-    fn validation_error_steps_contains_create_doogat() {
+    fn validation_error_step_is_empty_search() {
+        // The real trigger is an empty search query (rejected as BadRequest on
+        // every interface); empty-title create is accepted, so it cannot be it.
         let fixture = validation_error();
-        let has_create = fixture.steps.iter().any(|s| s.op == StepOp::CreateDoogat);
-        assert!(has_create);
+        let step = &fixture.steps[0];
+        assert_eq!(step.op, StepOp::Search);
+        assert_eq!(step.args.get("query").and_then(|v| v.as_str()), Some(""));
     }
 
     #[test]
