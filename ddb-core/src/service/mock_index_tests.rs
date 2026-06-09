@@ -1,10 +1,4 @@
-//! Service unit test that injects a mock index port instead of real SQLite.
-//!
-//! Proves PRD 00142 success criterion 4: a meaningful service test runs against
-//! a mock `IndexPort` (no real SQLite index logic) plus a `NoopMirror`, with git
-//! storage supplied by a throwaway `GitRepo`. `get_doogat_parsed` is exercised
-//! end to end: it routes `resolve_path` and `lookup_updated_at` through the
-//! injected port and merges them with the real parser over real git content.
+//! Service tests for injected index and mirror ports.
 
 use std::collections::HashMap;
 
@@ -12,9 +6,7 @@ use rusqlite::Connection;
 
 use crate::error::{DoogatError, Result};
 use crate::git_ops::GitRepo;
-use crate::traits::{
-    DoogatIndex, DoogatSource, GitHistory, IndexPort, NoopMirror, SqlBackend,
-};
+use crate::traits::{DoogatIndex, DoogatSource, GitHistory, IndexPort, NoopMirror, SqlBackend};
 use crate::types::{
     BrokenSequence, LinkDensityEntry, OrphanDoogat, PaginatedSearchResult, ParsedDoogat,
     QueryValue, RebuildReport, RecentDoogat, SearchFilters, SearchResult, SequenceInfo,
@@ -23,12 +15,9 @@ use crate::types::{
 
 use super::DoogatService;
 
-/// Mock index that returns canned values for the two methods the test exercises
-/// (`resolve_path`, `lookup_updated_at`) and inert results elsewhere. It holds an
-/// in-memory SQLite connection only to satisfy the transitional `sql_conn()`
-/// accessor on `SqlBackend`; the test never queries it, so no real index logic
-/// runs. Methods whose return type has no `Default` and that the test does not
-/// call return an explicit error rather than a fabricated value.
+/// Mock index with canned path and timestamp lookups. It holds an in-memory
+/// SQLite connection only to satisfy the transitional `sql_conn()` accessor on
+/// `SqlBackend` — the test never queries it, so no real index logic runs.
 struct MockIndex {
     conn: Connection,
     resolve_to: String,
@@ -201,11 +190,7 @@ impl IndexPort for MockIndex {
     fn orphan_doogats(&self, _type_filter: Option<&str>) -> Result<Vec<OrphanDoogat>> {
         Ok(Vec::new())
     }
-    fn recent_doogats(
-        &self,
-        _days: u32,
-        _type_filter: Option<&str>,
-    ) -> Result<Vec<RecentDoogat>> {
+    fn recent_doogats(&self, _days: u32, _type_filter: Option<&str>) -> Result<Vec<RecentDoogat>> {
         Ok(Vec::new())
     }
     fn link_density(&self, _type_filter: Option<&str>) -> Result<Vec<LinkDensityEntry>> {
@@ -269,7 +254,6 @@ fn get_doogat_parsed_runs_against_mock_index() {
     GitRepo::init(tmp.path()).unwrap();
     let repo = GitRepo::open(tmp.path()).unwrap();
 
-    // Real git content the service will read and parse.
     repo.commit_file(
         "ddb/mock.md",
         "---\ntitle: Mock Doc\n---\nMock body content",
@@ -277,13 +261,9 @@ fn get_doogat_parsed_runs_against_mock_index() {
     )
     .unwrap();
 
-    // Inject the mock index + no-op mirror; no real SQLite index is constructed.
     let mock = MockIndex::new("ddb/mock.md", Some("20260101000000"));
-    let svc =
-        DoogatService::from_parts(repo, mock, Box::new(NoopMirror), tmp.path().to_path_buf());
+    let svc = DoogatService::from_parts(repo, mock, Box::new(NoopMirror), tmp.path().to_path_buf());
 
-    // The id is irrelevant: the mock resolves every id to "ddb/mock.md", which a
-    // real SQLite index could not do — proving the injected port is the seam.
     let parsed = svc.get_doogat_parsed("ignored-id").unwrap();
 
     assert_eq!(

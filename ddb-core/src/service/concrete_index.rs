@@ -1,13 +1,10 @@
-//! Service methods that still depend on the concrete SQLite `Index` adapter.
+//! Service methods that still depend on the concrete SQLite `Index`.
 //!
-//! These methods pass `&self.index` to collaborator functions
-//! (`sync_manager::sync`, `bundle::import_bundle`, `git_ops::rename_doogat`,
-//! `consistency::{fix_all, zone_migrate_all}`, `attachments::{attach_file,
-//! detach_file}`) that take a concrete `&Index`. Keeping them in a
-//! `DoogatService<G, Index>` impl avoids generifying those collaborators over
-//! `IndexPort` — a deep cascade through consistency/sync/bundle/attachments that
-//! the PRD 00142 stop/split criteria warn against. Production always uses
-//! `I = Index`, so every caller still resolves these methods. PRD 00142.
+//! The collaborators called here (sync, bundle import, rename, consistency,
+//! attachments) accept a concrete `&Index`, so these methods stay on
+//! `DoogatService<G, Index>`. Generifying them over `IndexPort` would cascade
+//! through all those modules — a deliberate stop point per the PRD 00142 split
+//! criteria, not an oversight. Production always uses `I = Index`.
 
 use std::path::Path;
 
@@ -21,8 +18,6 @@ use crate::types::{AttachmentInfo, DoogatId, FixReport, RenameReport, SyncReport
 use super::DoogatService;
 
 impl<G: GitBackend> DoogatService<G, Index> {
-    // ── Sync / Bundles (need concrete Index) ────────────────────────────
-
     pub fn sync(&self, remote: &str, branch: &str) -> Result<SyncReport> {
         let mut mgr = match SyncManager::open(&self.repo) {
             Ok(m) => m,
@@ -48,8 +43,6 @@ impl<G: GitBackend> DoogatService<G, Index> {
         crate::bundle::import_bundle(&self.repo, &mut mgr, &self.index, path)
     }
 
-    // ── Consistency / Rename (need concrete Index) ──────────────────────
-
     pub fn rename_doogat(&self, id: &str, new_path: &str) -> Result<RenameReport> {
         let old_path = self.index.resolve_path(id)?;
         git_ops::rename_doogat(&self.repo, &self.index, &old_path, new_path)
@@ -62,8 +55,6 @@ impl<G: GitBackend> DoogatService<G, Index> {
     pub fn zone_migrate_all(&self, dry_run: bool) -> Result<FixReport> {
         crate::consistency::zone_migrate_all(&self.repo, &self.index, dry_run)
     }
-
-    // ── Attachments (need concrete Index) ───────────────────────────────
 
     pub fn attach_file(
         &self,

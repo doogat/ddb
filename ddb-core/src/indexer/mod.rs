@@ -779,11 +779,8 @@ impl crate::traits::DoogatIndex for Index {
     }
 }
 
-/// Pass-through trait impl for `IndexPort`. Declares only the GAP methods not
-/// already inherited from the `DoogatIndex` + `SqlBackend` supertraits. Same
-/// dispatch contract as the impls above: each body delegates to the inherent
-/// method of the same name on `Index`, and accidental self-recursion is caught
-/// by `unconditional_recursion`. PRD 00142.
+/// Pass-through trait impl for `IndexPort`. Methods here are the operations not
+/// already inherited from the `DoogatIndex` and `SqlBackend` supertraits.
 impl crate::traits::IndexPort for Index {
     fn rebuild_if_stale(
         &self,
@@ -881,10 +878,7 @@ impl crate::traits::IndexPort for Index {
         self.stale_doogats(repo, type_filter)
     }
 
-    fn orphan_doogats(
-        &self,
-        type_filter: Option<&str>,
-    ) -> Result<Vec<crate::types::OrphanDoogat>> {
+    fn orphan_doogats(&self, type_filter: Option<&str>) -> Result<Vec<crate::types::OrphanDoogat>> {
         self.orphan_doogats(type_filter)
     }
 
@@ -970,8 +964,7 @@ impl crate::traits::IndexPort for Index {
     }
 }
 
-/// Pass-through trait impl for `TypedMaterializationPort`. Delegates to the same
-/// inherent `Index` methods reached by `IndexPort`. PRD 00142.
+/// Pass-through trait impl for `TypedMaterializationPort`.
 impl crate::traits::TypedMaterializationPort for Index {
     fn infer_schema(
         &self,

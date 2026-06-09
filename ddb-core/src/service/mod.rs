@@ -36,22 +36,10 @@ impl Default for ExtraFieldUpdates<'_> {
     }
 }
 
-/// Unified orchestration layer composing a git backend, Index, and optional
-/// NoSQL index into a single entry point for all high-level operations.
+/// Unified orchestration layer for high-level application operations.
 ///
-/// Generic over `G: GitBackend` to allow swapping storage backends.
-/// The default type parameter (`GitRepo`) means existing code that writes
-/// `DoogatService` without an explicit type argument keeps compiling.
-///
-/// CLI, FFI, and server consumers delegate to `DoogatService` instead of
-/// independently composing core modules. This ensures consistent behaviour
-/// (e.g. NoSQL dual-write) across all entry points.
-///
-/// Generic over `I: IndexPort` so the index dependency is injectable: production
-/// uses the concrete SQLite `Index` (the default), while unit tests inject a
-/// mock index that needs no real SQLite. The NoSQL secondary mirror is injected
-/// as a boxed `NoSqlMirrorPort` so dual-write storage is also swappable (Redb in
-/// production, `NoopMirror` when the `nosql` feature is off or in tests).
+/// Production uses the default `GitRepo` and SQLite `Index`; tests can inject a
+/// different git backend, index port, and NoSQL mirror.
 pub struct DoogatService<G: GitBackend = GitRepo, I: IndexPort = Index> {
     pub(super) repo: G,
     pub(super) index: I,
@@ -62,12 +50,7 @@ pub struct DoogatService<G: GitBackend = GitRepo, I: IndexPort = Index> {
 }
 
 impl DoogatService<GitRepo, Index> {
-    /// Open an existing Doogat DB repository.
-    ///
-    /// This is the default runtime builder: it constructs the concrete adapters
-    /// (`GitRepo`, SQLite `Index`, the NoSQL mirror) and injects them through
-    /// [`DoogatService::from_parts`]. Adapter construction and `.ddb` directory
-    /// creation live here at the runtime edge, not inside application logic.
+    /// Open an existing Doogat DB repository with the default adapters.
     pub fn open(path: &Path) -> Result<Self> {
         let repo = GitRepo::open(path)?;
         let db_dir = path.join(".ddb");
@@ -83,9 +66,7 @@ impl DoogatService<GitRepo, Index> {
         Self::open(path)
     }
 
-    /// Build the default NoSQL mirror for production wiring. Uses the Redb
-    /// mirror when the `nosql` feature is enabled, otherwise a no-op mirror so
-    /// the dual-write stays a silent best-effort (matching prior behavior).
+    /// Build the default NoSQL mirror for production wiring.
     #[cfg(feature = "nosql")]
     fn default_mirror(db_dir: &Path) -> Box<dyn NoSqlMirrorPort + Send + Sync> {
         Box::new(crate::nosql::RedbMirror::new(db_dir.join("nosql.redb")))
@@ -98,9 +79,7 @@ impl DoogatService<GitRepo, Index> {
 }
 
 impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
-    /// Inject pre-constructed dependencies. This is the dependency-injection
-    /// seam the default `open`/`init` builders wrap; tests use it to inject a
-    /// mock index and a `NoopMirror` without touching real storage.
+    /// Inject pre-constructed dependencies.
     pub fn from_parts(
         repo: G,
         index: I,

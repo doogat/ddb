@@ -10,7 +10,7 @@ use crate::types::{
 use super::DoogatService;
 
 impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
-    // ── Sync / Compact / Maintenance ────────────────────────────────────
+    // ── Compact / Maintenance ───────────────────────────────────────────
 
     pub fn compact(&self, opts: &CompactOptions) -> Result<CompactionReport> {
         let mgr = match SyncManager::open(&self.repo) {
@@ -107,5 +107,4 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         let mgr = SyncManager::open(&self.repo)?;
         crate::bundle::export_bundle(&self.repo, &mgr, target_uuid, output)
     }
-
 }

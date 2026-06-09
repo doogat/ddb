@@ -224,7 +224,8 @@ pub trait IndexPort: DoogatIndex + SqlBackend {
     fn unlinked_mentions(&self, target_id: &str) -> Result<Vec<crate::types::UnlinkedMention>>;
 
     /// Suggest links for a source doogat.
-    fn suggest_links(&self, source_id: &str, limit: usize) -> Result<Vec<crate::types::Suggestion>>;
+    fn suggest_links(&self, source_id: &str, limit: usize)
+        -> Result<Vec<crate::types::Suggestion>>;
 
     /// Find stale doogats per typedef staleness thresholds.
     fn stale_doogats(
@@ -340,10 +341,7 @@ pub trait NoSqlMirrorPort {
     fn mirror_remove_doogat(&self, id: &str) -> Result<()>;
 }
 
-/// No-op `NoSqlMirrorPort` used when the `nosql` feature is disabled and in
-/// service unit tests that inject a mock index. Both operations succeed without
-/// writing anything, preserving the prior `#[cfg(not(feature = "nosql"))]`
-/// behavior where the dual-write was a silent no-op.
+/// No-op mirror used when the secondary NoSQL index is unavailable or unwanted.
 pub struct NoopMirror;
 
 impl NoSqlMirrorPort for NoopMirror {

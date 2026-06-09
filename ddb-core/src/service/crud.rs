@@ -406,7 +406,12 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         let mut col_values = stringify_typed_input_fields(input, schema)?;
         let mut counters = TypedInsertCounters::default();
 
-        prepare_typed_insert_validate(schema, &mut col_values, &mut counters, self.index.sql_conn())?;
+        prepare_typed_insert_validate(
+            schema,
+            &mut col_values,
+            &mut counters,
+            self.index.sql_conn(),
+        )?;
 
         Self::validate_typed_create_post_defaults(input, schema, &col_values)?;
 
