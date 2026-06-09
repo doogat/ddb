@@ -921,7 +921,7 @@ Deprecated behavior on the PostgreSQL wire protocol:
 
 ### NoSQL HTTP
 
-No deprecated behavior. `Specialized` capabilities for NoSQL HTTP: `List / search basics` and `FTS5 search` are limited to prefix scan by `type=` / `tag=`; free-text search is not supported. All write/mutate capabilities are `Intentionally absent` by design (read-only interface). The `GET /nosql/:id` not-found error shape is currently undocumented (G-13 in the inventory); shape will be standardized as part of the documentation pass for the NoSQL HTTP error contract.
+No deprecated behavior. `Specialized` capabilities for NoSQL HTTP: `List / search basics` and `FTS5 search` are limited to prefix scan by `type=` / `tag=`; free-text search is not supported. All write/mutate capabilities are `Intentionally absent` by design (read-only interface). The `GET /nosql/:id` not-found response is the shared `{ error, message }` envelope (G-13 closed): HTTP 404 with `error: "NOT_FOUND"` and `message: "doogat not found"`, the same envelope and code vocabulary REST returns (see "Shared transport glue" above). Every other NoSQL HTTP error routes through the same `http_error_response` helper, so a given `DoogatError` yields one shape across REST and NoSQL.
 
 ## Crate Structure
 

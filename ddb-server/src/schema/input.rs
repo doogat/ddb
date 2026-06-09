@@ -10,9 +10,12 @@
 //! Helpers take `&IndexMap<Name, Value>` — the map behind an `ObjectAccessor`
 //! (`ObjectAccessor::as_index_map`) and `ResolverContext.args` — so they can be
 //! unit-tested without a live schema (`ObjectAccessor` has no public
-//! constructor). They mirror `ValueAccessor` semantics exactly: `string()`
-//! accepts only `Value::String`; the conflict-action read accepts an enum or a
-//! string, matching `ValueAccessor::enum_name`.
+//! constructor). String reads (`opt_string`) accept only `Value::String`. The
+//! conflict-action read intentionally accepts EITHER a GraphQL enum value
+//! (`Value::Enum`) OR its string spelling (`Value::String`): both map `"IGNORE"`
+//! to `ConflictAction::Ignore` and everything else to `Error`. The schema types
+//! `onConflict` as an enum, so in production only the enum form reaches the
+//! resolver; the string form is for direct arg-map callers and tests.
 
 use std::collections::BTreeMap;
 
