@@ -7,6 +7,10 @@
 //! (`-- CREATE TABLE`). This module parses the SQL and inspects statement kinds
 //! instead, so only genuine table DDL triggers a reload.
 
+use sqlparser::ast::{ObjectType, Statement};
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
+
 /// Returns `true` when executing `sql` may change the table schema and therefore
 /// requires a dynamic-schema reload.
 ///
@@ -21,8 +25,24 @@
 /// itself a schema mutation, and standard DML/SELECT always parses, so an
 /// already-executed statement that fails to parse here is a schema mutation.
 /// Returning `true` keeps those reloads firing.
-pub fn requires_schema_reload(_sql: &str) -> bool {
-    false
+pub fn requires_schema_reload(sql: &str) -> bool {
+    match Parser::parse_sql(&GenericDialect {}, sql) {
+        Ok(statements) => statements.iter().any(mutates_schema),
+        Err(_) => true,
+    }
+}
+
+/// True for the table-level DDL statements that change the dynamic schema.
+fn mutates_schema(stmt: &Statement) -> bool {
+    matches!(
+        stmt,
+        Statement::CreateTable(_)
+            | Statement::AlterTable { .. }
+            | Statement::Drop {
+                object_type: ObjectType::Table,
+                ..
+            }
+    )
 }
 
 #[cfg(test)]
