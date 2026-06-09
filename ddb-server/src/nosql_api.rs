@@ -110,3 +110,32 @@ async fn backlinks(
         Err(e) => nosql_error(e),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NoSQL HTTP errors now share REST's mapping via the one helper
+    // (PRD 00143 Phase 1). The Conflict case is the load-bearing assertion:
+    // before consolidation the local matcher had no Conflict arm and fell
+    // through to 500; the shared helper maps it to 409.
+    #[test]
+    fn nosql_error_delegates_to_shared_http_helper() {
+        assert_eq!(
+            nosql_error(DoogatError::NotFound("x".into())).status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            nosql_error(DoogatError::Validation("x".into())).status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            nosql_error(DoogatError::Conflict("x".into())).status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            nosql_error(DoogatError::SqlEngine("x".into())).status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+}

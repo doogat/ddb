@@ -453,6 +453,42 @@ mod tests {
     use super::*;
     use ddb_core::types::{DoogatId, DoogatMeta, InlineField, Zone};
 
+    // rest_error must stay in lockstep with the shared HTTP helper so REST and
+    // NoSQL produce one error shape (PRD 00143 Phase 1). DoogatError is not
+    // Clone, so each case builds the error twice — once per mapper.
+    #[test]
+    fn rest_error_delegates_to_shared_http_helper() {
+        fn check(make: impl Fn() -> DoogatError, want_status: StatusCode, want_code: &str) {
+            let (status, body) = rest_error(make());
+            assert_eq!(status, want_status);
+            assert_eq!(body.0.error, want_code);
+
+            let (h_status, h_body) = crate::http_error::http_error_response(make());
+            assert_eq!(status, h_status);
+            assert_eq!(body.0.error, h_body.0.error);
+        }
+        check(
+            || DoogatError::NotFound("x".into()),
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND",
+        );
+        check(
+            || DoogatError::Conflict("x".into()),
+            StatusCode::CONFLICT,
+            "CONFLICT",
+        );
+        check(
+            || DoogatError::BadRequest("x".into()),
+            StatusCode::BAD_REQUEST,
+            "BAD_REQUEST",
+        );
+        check(
+            || DoogatError::SqlEngine("x".into()),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "SQL_ERROR",
+        );
+    }
+
     #[test]
     fn rest_json_reference_arrays() {
         let z = ParsedDoogat {
