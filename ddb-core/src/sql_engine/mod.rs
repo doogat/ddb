@@ -1,4 +1,5 @@
 mod builders;
+mod classify;
 mod ddl;
 mod dml;
 mod helpers;
@@ -21,6 +22,7 @@ use crate::types::DoogatId;
 
 pub(crate) use builders::resolve_insert_title;
 pub use builders::{build_typedef_doogat, schema_from_parsed};
+pub use classify::requires_schema_reload;
 pub use ddl::create_table_with_default_seed_commit_msg;
 
 use helpers::{
