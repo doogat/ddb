@@ -4,6 +4,7 @@ pub mod config;
 pub mod error;
 pub mod events;
 pub mod filter;
+pub mod http_error;
 pub mod maintenance;
 pub mod nosql_api;
 pub mod pgwire;
