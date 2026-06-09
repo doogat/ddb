@@ -1,5 +1,6 @@
 mod base_types;
 mod discovery_queries;
+mod input;
 mod mutations;
 mod queries;
 mod subscriptions;
