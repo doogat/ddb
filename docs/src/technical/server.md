@@ -52,6 +52,51 @@ Both the server and embedded (`DoogatDriver`) paths delegate typed SQL execution
 
 See [FFI Bindings](./ffi.md) for the embedded side of this contract.
 
+## Shared transport glue
+
+Adapter policy that more than one transport needs lives in one place. Each
+helper is consumed by every transport that needs it, so the same input produces
+the same behavior across interfaces unless a transport documents a deliberate
+exception.
+
+| Helper | Location | Signature | Consumers |
+|--------|----------|-----------|-----------|
+| HTTP error mapping | `ddb-server/src/http_error.rs` | `http_error_response(DoogatError) -> (StatusCode, Json<ErrorBody>)` | REST (`rest.rs`), NoSQL HTTP (`nosql_api.rs`) |
+| SQL schema-mutation classifier | `ddb-core/src/sql_engine/classify.rs` | `requires_schema_reload(&str) -> bool` | GraphQL `executeSql`/`executeBatch` (`schema/mutations.rs`), PgWire (`pgwire.rs`) |
+| GraphQL input decoding | `ddb-server/src/schema/input.rs` | `opt_string`, `opt_string_list`, `string_list`, `fields_map`, `opt_fields_map`, `conflict_action` | mutation resolvers (`schema/mutations.rs`) |
+
+- **HTTP error mapping** turns a `DoogatError` into a status code plus a
+  `{ error, message }` body. The `error` field carries the unified code
+  vocabulary (`NOT_FOUND`, `VALIDATION_ERROR`, `UNIQUE_VIOLATION`, ...), the same
+  codes GraphQL exposes under `extensions.code`. REST and NoSQL HTTP route every
+  error through this one helper, so a given `DoogatError` yields the same shape
+  on both surfaces.
+- **SQL schema-mutation classifier** parses a statement (or batch) with
+  `sqlparser` and returns whether a schema reload is required. Only real
+  `CREATE TABLE`, `ALTER TABLE`, and `DROP TABLE` trigger a reload; the same DDL
+  text inside a string literal or comment (`SELECT 'CREATE TABLE x'`) does not.
+  Parse failures are conservative: unparseable custom DDL returns `true`.
+  GraphQL and PgWire share this one classifier instead of each re-detecting DDL.
+- **GraphQL input decoding** pulls `title`, `content`, `tags`, the `fields` JSON
+  blob, `unsetFields`, and `onConflict` out of dynamic resolver argument maps and
+  returns domain types (`BTreeMap<String, Value>`, `ConflictAction`).
+  `createDoogat`, `createMany`, `updateDoogat`, and `batchUpdate` all decode
+  through these helpers, so tag/field/conflict parsing stays consistent across
+  the four mutations. `opt_fields_map` preserves batch-update semantics:
+  an absent `fields` argument means "leave unchanged", distinct from an empty map.
+
+### Thin adapters
+
+Transport code handles auth, serialization, request parsing, and response
+formatting; business policy lives in the service and actor layers. The mutation
+resolvers, REST handlers, NoSQL handlers, and PgWire executor decode input,
+delegate to the actor or read pool, and serialize the result. The inline logic
+that remains in transports is transport-scoped only: pagination clamping and
+sort-field validation in REST, mutually-exclusive `?type=`/`?tag=` checks in
+NoSQL, and `pg_catalog`/`pg_class` introspection interception in PgWire. None of
+it carries domain rules. Validation, conflict resolution, and schema decisions
+are all delegated.
+
 ## Running
 
 ```bash
@@ -893,6 +938,7 @@ ddb-server/src/
 │   ├── mutations.rs # Mutation field resolvers
 │   ├── subscriptions.rs # Subscription field resolvers
 │   ├── type_defs.rs # GraphQL type/input/enum definitions
+│   ├── input.rs     # Shared GraphQL input decoding helpers (create/update/batch)
 │   └── discovery_queries.rs # Discovery query resolvers
 ├── read_pool.rs     # Semaphore-gated concurrent read dispatch (spawn_blocking)
 ├── filter.rs        # Filter/sort/aggregate: input types, SQL builders, Connection wrapper
@@ -902,8 +948,13 @@ ddb-server/src/
 ├── reload.rs        # Hot schema reload orchestration (ArcSwap + Notify)
 ├── rest.rs          # REST API handlers (/rest/doogats CRUD)
 ├── nosql_api.rs     # NoSQL REST handlers (/nosql/ key-value queries)
+├── http_error.rs    # Shared DoogatError → HTTP status + JSON body (REST + NoSQL)
 ├── maintenance.rs   # Background maintenance loop (compaction + stale detection)
 ├── auth.rs          # Token generation + Bearer middleware
 ├── config.rs        # ServerConfig from config.toml
 └── error.rs         # DoogatError → GraphQL error mapping
 ```
+
+The SQL schema-mutation classifier (`requires_schema_reload`) lives in
+`ddb-core/src/sql_engine/classify.rs`, shared by the GraphQL and PgWire
+transports rather than duplicated per adapter.
