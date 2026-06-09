@@ -102,8 +102,9 @@ struct SearchHit {
     rank: f64,
 }
 
-// One error body shape for every HTTP surface. Re-exported here so existing
-// `crate::rest::ErrorBody` users (e.g. nosql_api) keep resolving (PRD 00143).
+// `ErrorBody` now lives in `http_error` (one shape for every HTTP surface).
+// Re-exported here so the pre-existing `ddb_server::rest::ErrorBody` public
+// path keeps resolving after PRD 00143 moved the type out of this module.
 pub use crate::http_error::ErrorBody;
 
 // ── Conversions ──────────────────────────────────────────────────
@@ -445,6 +446,13 @@ mod tests {
             || DoogatError::BadRequest("x".into()),
             StatusCode::BAD_REQUEST,
             "BAD_REQUEST",
+        );
+        // VALIDATION_ERROR is also pinned by the NoSQL test, so both routes
+        // assert the same code for a validation failure (cross-route parity).
+        check(
+            || DoogatError::Validation("x".into()),
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_ERROR",
         );
         check(
             || DoogatError::SqlEngine("x".into()),
