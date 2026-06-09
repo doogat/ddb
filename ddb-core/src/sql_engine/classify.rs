@@ -100,6 +100,15 @@ mod tests {
     }
 
     #[test]
+    fn create_index_does_not_require_reload() {
+        // Symmetric with DROP INDEX: creating an index is non-table DDL and
+        // leaves the dynamic schema unchanged.
+        assert!(!requires_schema_reload(
+            "CREATE INDEX idx_book_title ON book (title)"
+        ));
+    }
+
+    #[test]
     fn multi_statement_batch_with_ddl_requires_reload() {
         assert!(requires_schema_reload(
             "INSERT INTO book (id) VALUES ('1'); ALTER TABLE book ADD COLUMN author TEXT"
