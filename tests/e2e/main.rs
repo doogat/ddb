@@ -8,6 +8,7 @@ mod cli_create_fk_freshness;
 mod collision;
 mod common;
 mod conformance;
+mod cross_transport_error;
 mod date_default;
 mod delete_backlinks;
 mod discover;
