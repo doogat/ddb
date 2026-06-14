@@ -55,10 +55,14 @@ pub(crate) fn create(
         body: body_text,
         fields: extra,
         on_conflict: ConflictAction::Error,
-        // PRD 00155 task 1: policy field added (Strict for now). The CLI flips
-        // to BaseOnly in the Phase 2 regression-test task to restore the
-        // <= v0.2.5 lenient unregistered-type create contract.
-        unregistered_type_policy: UnregisteredTypePolicy::Strict,
+        // PRD 00155: the CLI restores the released (<= v0.2.5) lenient
+        // unregistered-type create contract. `BaseOnly` makes
+        // `DoogatService::create` fall back to a base-only doogat (emitting an
+        // `UNREGISTERED_TYPE_BASE_ONLY` warning) when `--type` names a type with
+        // no registered `_typedef`, instead of rejecting with
+        // `TYPE_NOT_REGISTERED`. GraphQL/REST keep `Strict` (set by the server
+        // actor in `handlers.rs`).
+        unregistered_type_policy: UnregisteredTypePolicy::BaseOnly,
     };
     let output = match svc.create(cmd) {
         Ok(o) => o,
