@@ -1,4 +1,4 @@
-use ddb_core::app_contract::CreateCommand;
+use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
 use ddb_core::git_ops::GitRepo;
 use ddb_core::indexer::Index;
 use ddb_core::service::DoogatService;
@@ -100,6 +100,7 @@ fn aggregate_query_count_with_text_param_returns_count_as_string() {
         doogat_type: Some("note".into()),
         fields: BTreeMap::new(),
         on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     })
     .expect("create should succeed");
 
@@ -139,6 +140,7 @@ fn typed_filtered_list_text_param_in_where_sql_matches_typed_row() {
         doogat_type: Some("bookmark".into()),
         fields,
         on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     })
     .expect("create should succeed");
 

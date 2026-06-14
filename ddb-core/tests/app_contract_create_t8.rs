@@ -1,4 +1,4 @@
-use ddb_core::app_contract::CreateCommand;
+use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
 use ddb_core::service::DoogatService;
 use ddb_core::types::{ConflictAction, Value};
 use std::collections::BTreeMap;
@@ -11,6 +11,7 @@ fn basic_cmd(title: &str) -> CreateCommand {
         body: None,
         fields: BTreeMap::new(),
         on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     }
 }
 
@@ -41,6 +42,7 @@ fn create_returns_parsed_doogat_with_tags() {
         body: None,
         fields: BTreeMap::new(),
         on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     };
     let output = svc.create(cmd).unwrap();
     assert_eq!(output.value.meta.tags, vec!["rust", "test"]);
@@ -57,6 +59,7 @@ fn create_returns_parsed_doogat_with_body() {
         body: Some("some body text".to_string()),
         fields: BTreeMap::new(),
         on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     };
     let output = svc.create(cmd).unwrap();
     assert_eq!(output.value.body, "some body text");
@@ -75,6 +78,7 @@ fn create_with_doogat_type_succeeds() {
         body: None,
         fields: BTreeMap::new(),
         on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     };
     let output = svc.create(cmd).unwrap();
     assert_eq!(output.value.meta.doogat_type.as_deref(), Some("project"));
@@ -93,6 +97,7 @@ fn create_passes_extra_fields_through() {
         body: None,
         fields,
         on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     };
     let output = svc.create(cmd).unwrap();
     assert_eq!(

@@ -14,7 +14,9 @@ mod output;
 pub use output::{AppOutput, AppWarning};
 
 mod commands;
-pub use commands::{CreateCommand, DeleteCommand, ReadCommand, SearchCommand, UpdateCommand};
+pub use commands::{
+    CreateCommand, DeleteCommand, ReadCommand, SearchCommand, UnregisteredTypePolicy, UpdateCommand,
+};
 
 mod results;
 pub use results::{

@@ -1,4 +1,4 @@
-use ddb_core::app_contract::CreateCommand;
+use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
 use ddb_core::service::DoogatService;
 use ddb_core::types::{ConflictAction, Value};
 use std::collections::BTreeMap;
@@ -29,6 +29,7 @@ fn service_create_emits_title_from_template_warning_when_title_omitted() {
             doogat_type: Some("bookmark".into()),
             fields,
             on_conflict: ConflictAction::Error,
+            unregistered_type_policy: UnregisteredTypePolicy::Strict,
         })
         .expect("create succeeded");
 
@@ -80,6 +81,7 @@ fn service_create_emits_no_warning_when_title_provided() {
             doogat_type: Some("bookmark".into()),
             fields,
             on_conflict: ConflictAction::Error,
+            unregistered_type_policy: UnregisteredTypePolicy::Strict,
         })
         .expect("create succeeded");
 
@@ -108,6 +110,7 @@ fn service_create_emits_no_warning_for_untyped_with_title() {
             doogat_type: None,
             fields: BTreeMap::new(),
             on_conflict: ConflictAction::Error,
+            unregistered_type_policy: UnregisteredTypePolicy::Strict,
         })
         .expect("create succeeded");
 

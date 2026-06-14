@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ddb_core::app_contract::CreateCommand;
+use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
 use ddb_core::service::DoogatService;
 use ddb_core::types::{CompactOptions, ListFilter};
 
@@ -54,6 +54,9 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
                 doogat_type,
                 fields,
                 on_conflict,
+                // PRD 00155: GraphQL + REST reject unregistered types
+                // (TYPE_NOT_REGISTERED). Only the CLI opts into BaseOnly.
+                unregistered_type_policy: UnregisteredTypePolicy::Strict,
             };
             ActorReply::CreateOutput(Box::new(svc.create(cmd)))
         }

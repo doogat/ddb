@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ddb_core::app_contract::CreateCommand;
+use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
 use ddb_core::service::DoogatService;
 use ddb_core::types::ConflictAction;
 
@@ -55,6 +55,10 @@ pub(crate) fn create(
         body: body_text,
         fields: extra,
         on_conflict: ConflictAction::Error,
+        // PRD 00155 task 1: policy field added (Strict for now). The CLI flips
+        // to BaseOnly in the Phase 2 regression-test task to restore the
+        // <= v0.2.5 lenient unregistered-type create contract.
+        unregistered_type_policy: UnregisteredTypePolicy::Strict,
     };
     let output = match svc.create(cmd) {
         Ok(o) => o,

@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use crate::app_contract::{AppOutput, AppWarning, CreateCommand};
+use crate::app_contract::{AppOutput, AppWarning, CreateCommand, UnregisteredTypePolicy};
 use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
@@ -168,6 +168,34 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     /// title_template rendering, SINGLETON Ignore semantics, NOT_NULL_VIOLATION,
     /// TYPE_NOT_REGISTERED, and field validation.
     pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
+        // PRD 00155: explicit per-caller policy for an unregistered doogat
+        // type. BaseOnly (CLI) falls back to a base-only create with a
+        // warning; Strict (GraphQL/REST) falls through to the typed pipeline
+        // below, which rejects unregistered types with TYPE_NOT_REGISTERED.
+        if cmd.unregistered_type_policy == UnregisteredTypePolicy::BaseOnly {
+            if let Some(ty) = cmd.doogat_type.as_deref() {
+                let schemas = self.list_type_schemas()?;
+                if !schemas.iter().any(|s| s.table_name == ty) {
+                    let value = self.create_doogat_with_extra(
+                        cmd.title.as_deref().unwrap_or(""),
+                        &cmd.tags,
+                        Some(ty),
+                        cmd.body.as_deref().unwrap_or(""),
+                        cmd.fields,
+                    )?;
+                    return Ok(AppOutput {
+                        value,
+                        warnings: vec![AppWarning {
+                            code: "UNREGISTERED_TYPE_BASE_ONLY",
+                            message: format!(
+                                "type '{ty}' is not a registered typedef; created a base doogat without typed validation"
+                            ),
+                        }],
+                    });
+                }
+            }
+        }
+
         let caller_title = cmd.title.clone();
         let doogat_type = cmd.doogat_type.clone();
         let input = crate::types::BatchCreateInput {
