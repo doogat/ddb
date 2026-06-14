@@ -104,3 +104,31 @@ fn rest_search_returns_matching_results() {
         "search for unique token should surface the matching doogat, got: {body}"
     );
 }
+
+/// PRD 00155: REST `POST /doogats` keeps the `Strict` unregistered-type policy.
+/// Unlike the CLI (which restores the lenient base-only create), REST rejects an
+/// unregistered `type` with `TYPE_NOT_REGISTERED` (422 Unprocessable Entity).
+/// REST typed/unregistered create is `Specialized` (D-REST-1); strict is the
+/// ratified Phase 0 decision. The server actor builds the create command with
+/// `UnregisteredTypePolicy::Strict`, so this pins that the policy split holds.
+#[test]
+fn rest_create_unregistered_type_returns_type_not_registered() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // No `ddb type install project` on this fresh repo — `project` is unregistered.
+    let resp = server.rest_post(
+        "/doogats",
+        json!({ "title": "Project Alpha", "type": "project" }),
+    );
+    assert_eq!(
+        resp.status(),
+        422,
+        "unregistered-type create must reject with 422 Unprocessable Entity (Strict policy)"
+    );
+    let body: Value = resp.json().expect("invalid json");
+    assert_eq!(
+        body["error"], "TYPE_NOT_REGISTERED",
+        "REST must surface the TYPE_NOT_REGISTERED code (same vocabulary GraphQL puts in extensions.code), got: {body}"
+    );
+}
