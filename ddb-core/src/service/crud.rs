@@ -168,32 +168,8 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     /// title_template rendering, SINGLETON Ignore semantics, NOT_NULL_VIOLATION,
     /// TYPE_NOT_REGISTERED, and field validation.
     pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
-        // PRD 00155: explicit per-caller policy for an unregistered doogat
-        // type. BaseOnly (CLI) falls back to a base-only create with a
-        // warning; Strict (GraphQL/REST) falls through to the typed pipeline
-        // below, which rejects unregistered types with TYPE_NOT_REGISTERED.
-        if cmd.unregistered_type_policy == UnregisteredTypePolicy::BaseOnly {
-            if let Some(ty) = cmd.doogat_type.as_deref() {
-                let schemas = self.list_type_schemas()?;
-                if !schemas.iter().any(|s| s.table_name == ty) {
-                    let value = self.create_doogat_with_extra(
-                        cmd.title.as_deref().unwrap_or(""),
-                        &cmd.tags,
-                        Some(ty),
-                        cmd.body.as_deref().unwrap_or(""),
-                        cmd.fields,
-                    )?;
-                    return Ok(AppOutput {
-                        value,
-                        warnings: vec![AppWarning {
-                            code: "UNREGISTERED_TYPE_BASE_ONLY",
-                            message: format!(
-                                "type '{ty}' is not a registered typedef; created a base doogat without typed validation"
-                            ),
-                        }],
-                    });
-                }
-            }
+        if let Some(output) = self.try_baseonly_unregistered(&cmd)? {
+            return Ok(output);
         }
 
         let caller_title = cmd.title.clone();
@@ -211,39 +187,94 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             .pop()
             .ok_or_else(|| DoogatError::Validation("batch_create returned empty".into()))?;
 
-        // Emit TITLE_FROM_TEMPLATE only when the caller omitted a title AND the
-        // requested type has a `title_template` declared on its typedef.
-        // Binding to `title_template` (rather than "result has a non-empty
-        // title") narrows the heuristic so future auto-title mechanisms don't
-        // trigger this code, and it makes the warning's message ("title was
-        // rendered from typedef title_template") accurate by construction for
-        // the common path. The `on_conflict=Ignore` skip path is a known
-        // residual false positive: when an existing row is returned unchanged
-        // the warning still fires even though no rendering happened on this
-        // call. Eliminating that case requires plumbing a "title rendered"
-        // signal out of `batch_create` and is left for a follow-up.
-        let mut warnings = vec![];
-        if caller_title.is_none() {
-            if let Some(ref ty) = doogat_type {
-                let schemas = self.index.load_all_typedefs(&self.repo);
-                let template_present = schemas
-                    .get(ty.as_str())
-                    .and_then(|s| s.title_template.as_ref())
-                    .is_some();
-                if template_present {
-                    if let Some(ref t) = value.meta.title {
-                        if !t.is_empty() {
-                            warnings.push(AppWarning {
-                                code: "TITLE_FROM_TEMPLATE",
-                                message: "title was rendered from typedef title_template".into(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        let warnings = self
+            .title_from_template_warning(caller_title.is_none(), doogat_type.as_deref(), &value)
+            .into_iter()
+            .collect();
 
         Ok(AppOutput { value, warnings })
+    }
+
+    /// PRD 00155: if the caller uses `BaseOnly` policy and the requested type
+    /// is not a registered typedef, fall back to a base doogat and return a
+    /// warning rather than rejecting. Returns `Ok(None)` when the policy is
+    /// `Strict`, no type was specified, or the type IS registered (fall
+    /// through to the typed pipeline).
+    ///
+    /// Note: `on_conflict` is not honored on this path — `create_doogat_with_extra`
+    /// hardcodes `ConflictAction::Error`. The only BaseOnly caller is the CLI,
+    /// which also uses `Error`, so this is currently a non-issue.
+    fn try_baseonly_unregistered(
+        &self,
+        cmd: &CreateCommand,
+    ) -> Result<Option<AppOutput<ParsedDoogat>>> {
+        if cmd.unregistered_type_policy != UnregisteredTypePolicy::BaseOnly {
+            return Ok(None);
+        }
+        let ty = match cmd.doogat_type.as_deref() {
+            Some(ty) => ty,
+            None => return Ok(None),
+        };
+        let schemas = self.list_type_schemas()?;
+        if schemas.iter().any(|s| s.table_name == ty) {
+            return Ok(None);
+        }
+        let value = self.create_doogat_with_extra(
+            cmd.title.as_deref().unwrap_or(""),
+            &cmd.tags,
+            Some(ty),
+            cmd.body.as_deref().unwrap_or(""),
+            cmd.fields.clone(),
+        )?;
+        Ok(Some(AppOutput {
+            value,
+            warnings: vec![AppWarning {
+                code: "UNREGISTERED_TYPE_BASE_ONLY",
+                message: format!(
+                    "type '{ty}' is not a registered typedef; created a base doogat without typed validation"
+                ),
+            }],
+        }))
+    }
+
+    /// Emit `TITLE_FROM_TEMPLATE` only when the caller omitted a title AND the
+    /// requested type has a `title_template` declared on its typedef.
+    /// Binding to `title_template` (rather than "result has a non-empty
+    /// title") narrows the heuristic so future auto-title mechanisms don't
+    /// trigger this code, and it makes the warning's message ("title was
+    /// rendered from typedef title_template") accurate by construction for
+    /// the common path. The `on_conflict=Ignore` skip path is a known
+    /// residual false positive: when an existing row is returned unchanged
+    /// the warning still fires even though no rendering happened on this
+    /// call. Eliminating that case requires plumbing a "title rendered"
+    /// signal out of `batch_create` and is left for a follow-up.
+    fn title_from_template_warning(
+        &self,
+        caller_title_is_none: bool,
+        doogat_type: Option<&str>,
+        value: &ParsedDoogat,
+    ) -> Option<AppWarning> {
+        if !caller_title_is_none {
+            return None;
+        }
+        let ty = doogat_type?;
+        let schemas = self.index.load_all_typedefs(&self.repo);
+        let template_present = schemas
+            .get(ty)
+            .and_then(|s| s.title_template.as_ref())
+            .is_some();
+        if !template_present {
+            return None;
+        }
+        let title_nonempty = value.meta.title.as_deref().is_some_and(|t| !t.is_empty());
+        if title_nonempty {
+            Some(AppWarning {
+                code: "TITLE_FROM_TEMPLATE",
+                message: "title was rendered from typedef title_template".into(),
+            })
+        } else {
+            None
+        }
     }
 
     /// Create a new doogat with optional extra frontmatter fields.
