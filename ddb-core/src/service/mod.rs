@@ -6,16 +6,21 @@ use crate::indexer::Index;
 use crate::sql_engine::TransactionBuffer;
 use crate::traits::{GitBackend, IndexPort, NoSqlMirrorPort};
 
+mod batch;
 mod concrete_index;
-mod crud;
+mod create;
+mod delete;
 mod discovery;
 mod ops;
+mod read;
 mod search;
 mod sql;
+mod update;
 mod utility;
 mod validation;
+mod write_helpers;
 
-pub use crud::UpsertOutcome;
+pub use create::UpsertOutcome;
 pub use search::SORTABLE_COLUMNS;
 
 /// Extra frontmatter fields to set or remove during an update.
