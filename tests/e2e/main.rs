@@ -5,6 +5,7 @@ mod attachments;
 mod cascade_delete;
 mod checkboxes;
 mod cli_create_fk_freshness;
+mod cli_create_unregistered_type;
 mod collision;
 mod common;
 mod conformance;
