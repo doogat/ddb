@@ -208,7 +208,7 @@ Every public application interface supports the CRUD baseline operations listed 
 
 #### CLI
 
-- **Create**: `Guaranteed` — `ddb create` prints the new doogat id on stdout; exits 0 on success.
+- **Create**: `Guaranteed` — `ddb create` prints the new doogat id on stdout; exits 0 on success. `--type <unregistered>` (a type with no installed `_typedef`) creates a base doogat and prints an `UNREGISTERED_TYPE_BASE_ONLY` warning on stderr — the released (≤ v0.2.5) lenient contract (PRD 00155); a *registered* `--type` runs the full typed pipeline.
 - **Read (single by id)**: `Guaranteed` — `ddb read <id>` prints the raw Markdown; not-found returns non-zero exit and stderr message.
 - **Update**: `Guaranteed` — `ddb update <id> ...` prints the updated id; SQL `UPDATE` through `ddb query` prints affected-row count.
 - **Delete**: `Guaranteed` — `ddb delete <id>` removes the doogat; SQL `DELETE` through `ddb query` prints affected-row count.
@@ -241,7 +241,7 @@ Every public application interface supports the CRUD baseline operations listed 
 
 #### REST (`/rest/*`)
 
-- **Create**: `Guaranteed` — `POST /rest/doogats` creates a base-doogat and returns a `{ data, warnings }` JSON envelope.
+- **Create**: `Guaranteed` — `POST /rest/doogats` creates a base-doogat and returns a `{ data, warnings }` JSON envelope. An unregistered `type` rejects with HTTP 422 + `TYPE_NOT_REGISTERED` (strict, matching GraphQL — REST typed/unregistered create is `Specialized`, PRD 00155); unlike the CLI, REST does not fall back to a base-only create.
 - **Read (single by id)**: `Guaranteed` — `GET /rest/doogats/:id` returns the base-doogat in a `{ data, warnings }` JSON envelope.
 - **Update**: `Guaranteed` — `PUT /rest/doogats/:id` updates the doogat and returns a `{ data, warnings }` JSON envelope.
 - **Delete**: `Guaranteed` — `DELETE /rest/doogats/:id` removes the doogat and returns HTTP 204.
@@ -372,6 +372,21 @@ The remaining interfaces defer structured warnings:
 - **PgWire**: not yet surfaced over the wire protocol — see [PgWire warnings (D-12)](#pgwire-warnings-d-12). Use GraphQL in the interim.
 - **FFI**: warning fields omitted at the UniFFI boundary — see [FFI warnings (D-13)](#ffi-warnings-d-13). Use GraphQL in the interim.
 - **CLI**: human-readable stderr text only; no machine-readable envelope — see [CLI warnings (D-10)](#cli-warnings-d-10).
+
+**Stable warning codes:**
+
+- `UNREGISTERED_TYPE_BASE_ONLY` — a create named a `type` with no registered `_typedef`, so a base doogat (no typed validation) was created instead of rejecting. Emitted only on the lenient create path (CLI), surfaced on stderr.
+
+**Unregistered-type create policy** (PRD 00155) — create strictness is an explicit per-caller policy, so the response to an unregistered `type` differs by interface:
+
+| Interface | Unregistered `type` on create |
+|-----------|-------------------------------|
+| CLI (`ddb create`) | base doogat + `UNREGISTERED_TYPE_BASE_ONLY` warning on stderr (restores the released ≤ v0.2.5 contract) |
+| GraphQL `createDoogat` | rejects with `TYPE_NOT_REGISTERED` |
+| REST `POST /rest/doogats` | rejects with `TYPE_NOT_REGISTERED` (HTTP 422); typed/unregistered create is `Specialized` (D-REST-1) |
+| PgWire / FFI / NoSQL HTTP | unaffected — no unregistered-type base-create path |
+
+A *registered* `type` runs the full typed pipeline on every interface regardless of policy.
 
 ### Support diagnostics
 

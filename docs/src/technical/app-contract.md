@@ -31,12 +31,24 @@ The adapter-neutrality invariant is enforced by the integration test `ddb-core/t
 Commands are plain structs of domain/shared types. They follow a `<Verb>Command` naming pattern:
 
 ```rust
+pub enum UnregisteredTypePolicy {
+    /// Reject an unregistered `doogat_type` with `TYPE_NOT_REGISTERED`
+    /// (GraphQL `createDoogat` and the REST POST handler; default).
+    Strict,
+    /// Create a base doogat (no typed validation) for an unregistered
+    /// `doogat_type`, attaching an `UNREGISTERED_TYPE_BASE_ONLY` warning.
+    /// The CLI uses this to preserve the released (<= v0.2.5) contract.
+    BaseOnly,
+}
+
 pub struct CreateCommand {
-    pub title: String,
+    pub title: Option<String>,
     pub tags: Vec<String>,
     pub doogat_type: Option<String>,
-    pub body: String,
+    pub body: Option<String>,
     pub fields: BTreeMap<String, Value>,
+    pub on_conflict: ConflictAction,
+    pub unregistered_type_policy: UnregisteredTypePolicy,
 }
 
 pub struct ReadCommand { pub id: String }
@@ -44,6 +56,17 @@ pub struct UpdateCommand { /* id + optional title/tags/type/body + fields */ }
 pub struct DeleteCommand { pub id: String }
 pub struct SearchCommand { pub query: String, pub limit: Option<usize>, pub offset: Option<usize> }
 ```
+
+`title` and `body` are `Option` so transports can omit them and rely on
+service-level defaults (e.g. `title_template`). `on_conflict` selects the
+duplicate-identity behaviour. `unregistered_type_policy` makes create strictness
+an explicit per-caller input rather than an accident of shared routing (PRD
+00155): the CLI passes `BaseOnly` (restoring the released lenient base-only
+create for unregistered types, with an `UNREGISTERED_TYPE_BASE_ONLY` warning),
+while the GraphQL and REST actor passes `Strict` (rejects unregistered types with
+`TYPE_NOT_REGISTERED`). The field is required — there is no `Default` on
+`CreateCommand`, so every transport consciously states its policy. See
+`docs/src/guide/building-apps.md` for the per-interface contract matrix.
 
 Per AGENTS.md: "no `rusqlite`, `git2`, `redb`, `axum`, or `async_graphql` in `ddb-core/src/types/**`; convert at adapter boundaries." The same rule applies here. Commands carry only domain types (e.g. `crate::types::Value`) and `std` types.
 
