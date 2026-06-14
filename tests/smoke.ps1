@@ -70,9 +70,19 @@ pass "init"
 # 2. create doogats
 $ID1 = ddb create --title "First note" --tags "test,smoke" --body "Hello world"
 $ID2 = ddb create --title "Links to first" --body "See [[$ID1]]"
-$ID3 = ddb create --title "Project Alpha" --type project --tags "active" --body "A project doogat"
+# ID3 uses an unregistered type (`project`, no `ddb type install`). PRD 00155
+# restores the lenient base-only create and emits an UNREGISTERED_TYPE_BASE_ONLY
+# warning on stderr. Bypass the `ddb` wrapper (it folds stderr into stdout and
+# would merge the warning into the id); capture stderr to a file instead.
+$createErr = Join-Path $TMPDIR "create_unregistered.err"
+$ID3 = "$(& $DDB create --title "Project Alpha" --type project --tags "active" --body "A project doogat" 2>$createErr)".Trim()
+if ($LASTEXITCODE -ne 0) { throw "create --type project (unregistered) should succeed: $(Get-Content $createErr -Raw)" }
 if ($ID1 -eq $ID2 -or $ID2 -eq $ID3 -or $ID1 -eq $ID3) { throw "IDs not unique" }
 pass "create (3 unique IDs: $ID1 $ID2 $ID3)"
+if ((Get-Content $createErr -Raw) -notmatch "UNREGISTERED_TYPE_BASE_ONLY") {
+    throw "create --type <unregistered> should warn UNREGISTERED_TYPE_BASE_ONLY, got: $(Get-Content $createErr -Raw)"
+}
+pass "create --type <unregistered> warns UNREGISTERED_TYPE_BASE_ONLY (PRD 00155 base-only create restored)"
 
 # 3. read
 $output = ddb read $ID1

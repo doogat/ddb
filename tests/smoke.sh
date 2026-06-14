@@ -30,9 +30,14 @@ pass "init"
 # 2. create doogats (no sleeps — tests cross-process ID uniqueness)
 ID1=$($DDB create --title "First note" --tags "test,smoke" --body "Hello world")
 ID2=$($DDB create --title "Links to first" --body "See [[$ID1]]")
-ID3=$($DDB create --title "Project Alpha" --type project --tags "active" --body "A project doogat")
+# ID3 uses an unregistered type (`project`, no `ddb type install`). PRD 00155
+# restores the lenient base-only create and emits an UNREGISTERED_TYPE_BASE_ONLY
+# warning on stderr; capture stderr to assert the warning fires (stdout is the id).
+ID3=$($DDB create --title "Project Alpha" --type project --tags "active" --body "A project doogat" 2>"$TMPDIR/create_unregistered.err")
 [ "$ID1" != "$ID2" ] && [ "$ID2" != "$ID3" ] && [ "$ID1" != "$ID3" ]
 pass "create (3 unique IDs: $ID1 $ID2 $ID3)"
+grep -q "UNREGISTERED_TYPE_BASE_ONLY" "$TMPDIR/create_unregistered.err"
+pass "create --type <unregistered> warns UNREGISTERED_TYPE_BASE_ONLY (PRD 00155 base-only create restored)"
 
 # 3. read
 OUTPUT=$($DDB read "$ID1")
