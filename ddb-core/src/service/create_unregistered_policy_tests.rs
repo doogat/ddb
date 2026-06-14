@@ -1,7 +1,13 @@
-use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
-use ddb_core::error::{codes, DoogatError};
-use ddb_core::service::DoogatService;
-use ddb_core::types::{ConflictAction, Value};
+//! Tier 1 service-level regression tests for the unregistered-type create
+//! policy (PRD 00155). These live in the lib target so `cargo test-ci`
+//! (`--lib --bins`) exercises them: the regression this PRD fixes escaped
+//! Tier 1 for ~12 days because its only guard ran in Tier 2 (CI-only).
+//! Keeping the policy-branch guard here keeps the fast local gate honest.
+
+use crate::app_contract::{CreateCommand, UnregisteredTypePolicy};
+use crate::error::{codes, DoogatError};
+use crate::service::DoogatService;
+use crate::types::{ConflictAction, Value};
 use std::collections::BTreeMap;
 
 fn init_service(dir: &std::path::Path) -> DoogatService {
