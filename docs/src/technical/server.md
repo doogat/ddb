@@ -97,6 +97,8 @@ NoSQL, and `pg_catalog`/`pg_class` introspection interception in PgWire. None of
 it carries domain rules. Validation, conflict resolution, and schema decisions
 are all delegated.
 
+The **create and update** workflows are fully thinned: GraphQL, CLI, and REST route both through the app-command facade — `DoogatService::create` (PRD 00147) and `DoogatService::update` (PRD 00149) — each returning `AppOutput<ParsedDoogat>`. All three transports decode input, call the facade, and shape app errors and warnings per transport; no business logic lives in the adapters. **FFI and PgWire are specialized**: they keep their current direct paths (FFI uses `_raw`/service-method calls with untyped string errors and no structured warning channel; PgWire surfaces PostgreSQL-style error strings rather than the AppError envelope). Migration of these two is deferred to the `ffi-typed-errors-v1` and `pgwire-structured-errors-v1` follow-up PRDs respectively.
+
 ## Running
 
 ```bash
@@ -315,7 +317,7 @@ PRD 00130 / issue #12: `createMany(onConflict: IGNORE)` returns the surviving ro
 
 ### Response warnings (PRD 00154)
 
-Every GraphQL response carries an `extensions.warnings` array alongside the existing `data` / `errors` keys. The array is always present (`[]` when no warnings were collected) so clients can read it unconditionally. Each entry has `code` (stable SCREAMING_SNAKE string) and `message` (human-readable). The structure parallels the REST `warnings` array surfaced by PRD 00147 — same vocabulary across transports. `createDoogat` drains `AppOutput::warnings` from `DoogatService::create` into the response (e.g. omitting `title` on a typedef with a `title_template` surfaces `TITLE_FROM_TEMPLATE`). Other mutations do not yet forward warnings; the infrastructure is in place for incremental rollout. Client handling is advisory.
+Every GraphQL response carries an `extensions.warnings` array alongside the existing `data` / `errors` keys. The array is always present (`[]` when no warnings were collected) so clients can read it unconditionally. Each entry has `code` (stable SCREAMING_SNAKE string) and `message` (human-readable). The structure parallels the REST `warnings` array surfaced by PRD 00147 — same vocabulary across transports. `createDoogat` drains `AppOutput::warnings` from `DoogatService::create` into the response (e.g. omitting `title` on a typedef with a `title_template` surfaces `TITLE_FROM_TEMPLATE`). `updateDoogat` does the same via `DoogatService::update` (PRD 00149): the warning channel is wired end-to-end, so `extensions.warnings` is always present (`[]` when empty); no update-specific warnings are emitted today, so it is currently always `[]`. The remaining mutations (`createMany`, `batchUpdate`) do not yet forward warnings; the infrastructure is in place for incremental rollout. Client handling is advisory.
 
 ### SINGLETON typedefs (PRD 00139)
 

@@ -193,6 +193,7 @@ Not deprecated, still binding promises:
 - **Bundle export/import** — CLI is the canonical bundle workflow (`ddb bundle export/import`); FFI exposes the same engine for in-process orchestration.
 - **Remote sync (push/pull/fetch)** — bundle-shaped only; no Git remote push/pull/fetch method on `DoogatDriver`. Continuous remote sync runs through CLI `ddb sync` or the GraphQL `sync` mutation.
 - **Warnings (structured)** — see the deprecated entry above; tracked as `Specialized` in the promise matrix until `ffi-typed-errors-v1` adds the structured-warnings channel.
+- **Create/update facade exclusion (PRD 00149)** — PRD 00149 thinned the create and update workflows onto the app-command facade (`DoogatService::create` / `DoogatService::update`, each returning `AppOutput<ParsedDoogat>`) for GraphQL, CLI, and REST. FFI was deliberately excluded: `DoogatDriver.create_doogat` and `update_doogat` keep their direct `_raw`/service-method paths with untyped string errors and no structured warning channel. See the deprecated entries above; migration is tracked under `ffi-typed-errors-v1`.
 
 ## Binding Generation
 
