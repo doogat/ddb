@@ -150,27 +150,35 @@ fn rest_typed_create_populates_typed_columns() {
         "created doogat must carry the registered type"
     );
 
-    // Verify typed columns are populated by reading back via SQL
+    // Verify typed columns are populated by reading the materialized row back.
+    // A SELECT via executeSql with format:"objects" returns parsed rows, not a
+    // `message` (which carries DDL/DML status).
     let select = server.graphql_with_vars(
-        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        r#"mutation($sql: String!, $fmt: String) { executeSql(sql: $sql, format: $fmt) { rows } }"#,
         serde_json::json!({
-            "sql": format!("SELECT category, priority FROM item WHERE id = '{id}'")
+            "sql": format!("SELECT category, priority FROM item WHERE id = '{id}'"),
+            "fmt": "objects"
         }),
     );
     assert!(
         select.get("errors").is_none(),
         "SELECT from item failed: {select}"
     );
-    let message = select["data"]["executeSql"]["message"]
-        .as_str()
-        .expect("executeSql missing message");
-    assert!(
-        message.contains("books"),
-        "category field 'books' must appear in SELECT result, got: {message}"
+    let rows = select["data"]["executeSql"]["rows"]
+        .as_array()
+        .expect("executeSql missing rows");
+    assert_eq!(rows.len(), 1, "expected exactly one materialized row, got: {select}");
+    let row: Value = serde_json::from_str(rows[0].as_str().expect("row not a string"))
+        .expect("row not valid json");
+    assert_eq!(
+        row["category"].as_str(),
+        Some("books"),
+        "category typed column must round-trip exactly, got row: {row}"
     );
+    let priority = &row["priority"];
     assert!(
-        message.contains('1'),
-        "priority field '1' must appear in SELECT result, got: {message}"
+        priority.as_i64() == Some(1) || priority.as_str() == Some("1"),
+        "priority typed column must round-trip as 1, got row: {row}"
     );
 }
 
