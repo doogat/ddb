@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
+use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy, UpdateCommand};
 use ddb_core::service::DoogatService;
 use ddb_core::types::ConflictAction;
 
@@ -105,18 +105,29 @@ pub(crate) fn update(repo: &std::path::Path, args: UpdateArgs) -> ddb_core::erro
         .tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect());
     let extra_map = parse_set_pairs(&args.set)?;
-    let extra = ddb_core::service::ExtraFieldUpdates {
-        set: &extra_map,
-        unset: &args.unset,
+    let cmd = UpdateCommand {
+        id: args.id.clone(),
+        title: args.title,
+        tags: tags_vec,
+        doogat_type: args.r#type,
+        body: args.body,
+        fields: extra_map,
+        unset_fields: args.unset,
     };
-    svc.update_doogat(
-        &args.id,
-        args.title.as_deref(),
-        tags_vec.as_deref(),
-        args.r#type.as_deref(),
-        args.body.as_deref(),
-        &extra,
-    )?;
+    let output = match svc.update(cmd) {
+        Ok(o) => o,
+        Err(e) => {
+            // PRD 00149: route the migrated `update` workflow's error through the
+            // adapter-neutral AppError envelope before transport formatting,
+            // mirroring `create` (PRD 00147). CLI is a local-user surface — no
+            // redaction.
+            let app: ddb_core::app_contract::AppError = e.into();
+            eprintln!("{}", crate::app_err::format_app_error(&app));
+            std::process::exit(1);
+        }
+    };
+    crate::warnings::write_warnings(&output.warnings, &mut std::io::stderr())
+        .unwrap_or_else(|e| eprintln!("warning write failed: {e}"));
     outln!("updated {}", args.id)?;
     Ok(())
 }
