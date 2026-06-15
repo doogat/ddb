@@ -1,3 +1,4 @@
+use crate::app_contract::{AppOutput, UpdateCommand};
 use crate::error::{DoogatError, Result};
 use crate::parser;
 use crate::sql_engine::apply_updates_to_doogat;
@@ -75,6 +76,30 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         self.index.store_head(&self.repo.head_oid()?.0)?;
         parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
         Ok(parsed)
+    }
+
+    /// App facade entrypoint: update a doogat from an `UpdateCommand`.
+    /// Mirrors `DoogatService::create`. Delegates to `update_doogat_parsed`
+    /// and wraps the result in `AppOutput`. Update emits no warnings today,
+    /// so `warnings` is always empty; the envelope keeps the warning channel
+    /// available for callers.
+    pub fn update(&self, cmd: UpdateCommand) -> Result<AppOutput<ParsedDoogat>> {
+        let extra = ExtraFieldUpdates {
+            set: &cmd.fields,
+            unset: &cmd.unset_fields,
+        };
+        let value = self.update_doogat_parsed(
+            &cmd.id,
+            cmd.title.as_deref(),
+            cmd.tags.as_deref(),
+            cmd.doogat_type.as_deref(),
+            cmd.body.as_deref(),
+            &extra,
+        )?;
+        Ok(AppOutput {
+            value,
+            warnings: Vec::new(),
+        })
     }
 
     /// Batch-update multiple doogats in a single atomic commit.

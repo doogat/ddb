@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **graphql**: GraphQL responses now include an `extensions.warnings` array carrying structured `AppOutput::warnings` entries from `createDoogat`. Each entry has `code` (stable string) and `message` (human-readable). The key is always present, an empty array when no warnings were collected. Client handling is advisory; existing `data`/`errors` response shape is unchanged. (PRD 00154)
+- **service**: `DoogatService::update(UpdateCommand) -> AppOutput<ParsedDoogat>` app-contract facade (mirrors `DoogatService::create`), and `UpdateCommand` gains `unset_fields: Vec<String>` for clearing frontmatter fields through the facade. Internal ddb-core API for the transport update-slice thinning; transport behavior is unchanged in this commit. (PRD 00149)
 
 ### Fixed
 

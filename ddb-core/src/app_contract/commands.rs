@@ -52,6 +52,9 @@ pub struct UpdateCommand {
     pub body: Option<String>,
     /// Fields to set or update. An empty map means no field changes.
     pub fields: BTreeMap<String, Value>,
+    /// Field names to remove from the doogat's frontmatter. An empty vec
+    /// means no removals.
+    pub unset_fields: Vec<String>,
 }
 
 /// Command to delete a doogat by its 14-digit ID. The service returns a
