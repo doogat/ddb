@@ -22,6 +22,7 @@ pub struct CreateBody {
     pub tags: Vec<String>,
     #[serde(rename = "type")]
     pub doogat_type: Option<String>,
+    pub fields: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -356,13 +357,18 @@ async fn create_doogat(
     Extension(actor): Extension<ActorHandle>,
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<SingleResponse>), (StatusCode, Json<ErrorBody>)> {
+    let fields = match body.fields {
+        Some(json_str) => crate::schema::parse_fields_json(&json_str)
+            .map_err(|msg| rest_error(ddb_core::error::DoogatError::Validation(msg)))?,
+        None => std::collections::BTreeMap::new(),
+    };
     let output = actor
         .create_doogat(
             body.title,
             body.body,
             body.tags,
             body.doogat_type,
-            std::collections::BTreeMap::new(),
+            fields,
             ConflictAction::Error,
         )
         .await
