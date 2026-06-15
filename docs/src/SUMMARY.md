@@ -35,6 +35,7 @@
 - [Phase 1 & 2 Exit Gate](./technical/phase-2-exit.md)
 - [Conformance Harness](./technical/conformance-harness.md)
 - [Transport Policy Inventory](./technical/transport-policy-inventory.md)
+- [Compatibility Checklist](./technical/compatibility-checklist.md)
 
 # User Guide
 
