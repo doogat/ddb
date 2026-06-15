@@ -2422,6 +2422,86 @@ gql "{`"query`":`"mutation { deleteDoogat(id: \`"$($gqlWarnTitledObj.data.create
 gql "{`"query`":`"mutation { deleteDoogat(id: \`"$($gqlWarnAutoObj.data.createDoogat.id)\`") }`"}" | Out-Null
 ddb query "DROP TABLE ig_warn_demo CASCADE" | Out-Null
 
+# 58. Update warning/error shape (PRD 00149). Mirrors the bash §58 scenario so
+# cross-platform CI exercises the same contract: the migrated update slice
+# routes through DoogatService::update -> AppOutput on GraphQL/CLI/REST, the
+# warnings channel is always present (empty today), and a not-found update
+# surfaces the structured NOT_FOUND app-error code. Typedef registered via the
+# GraphQL DDL path (ddl waits for the in-process schema reload).
+ddl 'mutation { executeSql(sql: "CREATE TABLE ig_upd_demo (note TEXT)") { message } }'
+
+# 58.A - GraphQL updateDoogat carries extensions.warnings: [] and applies the change.
+$updCreate = gql '{"query":"mutation { createDoogat(input: { title: \"upd-orig\", type: \"ig_upd_demo\" }) { id } }"}'
+assertGqlOk $updCreate "58.A create"
+$updId = ($updCreate | ConvertFrom-Json).data.createDoogat.id
+$updGql = gql "{`"query`":`"mutation { updateDoogat(input: { id: \`"$updId\`", title: \`"upd-changed\`" }) { id title } }`"}"
+assertGqlOk $updGql "58.A update"
+$updGqlObj = $updGql | ConvertFrom-Json
+if ($updGqlObj.extensions.warnings.Count -ne 0) {
+    throw "58.A: expected extensions.warnings: [], got: $($updGqlObj.extensions.warnings | ConvertTo-Json -Compress)"
+}
+if ($updGqlObj.data.updateDoogat.title -ne "upd-changed") {
+    throw "58.A: expected title upd-changed, got: $($updGqlObj.data.updateDoogat.title)"
+}
+pass "58.A: GraphQL updateDoogat returns extensions.warnings: [] and applies the change"
+
+# 58.B - GraphQL updateDoogat on a missing id surfaces extensions.code = NOT_FOUND.
+$updMiss = gql '{"query":"mutation { updateDoogat(input: { id: \"99990101000000\", title: \"nope\" }) { id } }"}'
+assertGqlErrors $updMiss "58.B updateDoogat missing id"
+$updMissObj = $updMiss | ConvertFrom-Json
+if ($updMissObj.errors[0].extensions.code -ne "NOT_FOUND") {
+    throw "58.B: expected NOT_FOUND, got: $($updMissObj.errors[0].extensions.code)"
+}
+pass "58.B: GraphQL updateDoogat on missing id carries extensions.code = NOT_FOUND"
+
+# 58.C - REST PUT /doogats/{id} update response carries warnings: [] and applies the change.
+$updRest = rest "/doogats/$updId" "PUT" '{"title":"upd-rest"}'
+if ($updRest.StatusCode -ne 200) { throw "58.C: expected 200, got $($updRest.StatusCode)" }
+$updRestObj = (content $updRest) | ConvertFrom-Json
+if ($updRestObj.warnings.Count -ne 0) {
+    throw "58.C: expected warnings: [], got: $($updRestObj.warnings | ConvertTo-Json -Compress)"
+}
+if ($updRestObj.data.title -ne "upd-rest") {
+    throw "58.C: expected title upd-rest, got: $($updRestObj.data.title)"
+}
+pass "58.C: REST PUT /doogats update response carries warnings: [] and applies the change"
+
+# 58.D - REST PUT on a missing id surfaces the structured NOT_FOUND envelope (404).
+$updMissRest = Invoke-WebRequest -Uri "$REST_URL/doogats/99990101000000" -Method PUT -ContentType "application/json" `
+    -Headers @{ Authorization = "Bearer $TOKEN" } -Body '{"title":"nope"}' -SkipHttpErrorCheck
+if ([int]$updMissRest.StatusCode -ne 404) { throw "58.D: expected 404, got $($updMissRest.StatusCode)" }
+$updMissRestObj = (content $updMissRest) | ConvertFrom-Json
+if ($updMissRestObj.error -ne "NOT_FOUND") { throw "58.D: expected NOT_FOUND, got: $($updMissRestObj.error)" }
+pass "58.D: REST PUT /doogats on missing id returns 404 + NOT_FOUND envelope"
+
+# 59. REST typed create via the `fields` body member (PRD 00149). Mirrors the
+# bash §59 scenario: task 6 added CreateBody.fields, so REST typed create is now
+# expressible. Pins that typed columns are populated and that a malformed fields
+# payload is rejected with the structured VALIDATION_ERROR (400).
+ddl 'mutation { executeSql(sql: "CREATE TABLE ig_rest_typed (slug VARCHAR(64))") { message } }'
+
+# 59.A - POST /doogats with type + fields populates the typed column (read back via CLI).
+$rtResp = rest "/doogats" "POST" '{"title":"typed-rest","type":"ig_rest_typed","fields":"{\"slug\":\"hello-rest\"}"}'
+if ($rtResp.StatusCode -ne 201) { throw "59.A: expected 201, got $($rtResp.StatusCode)" }
+$rtId = ((content $rtResp) | ConvertFrom-Json).data.id
+$rtSel = ddb query "SELECT slug FROM ig_rest_typed WHERE id = '$rtId'"
+if ($rtSel -notmatch "hello-rest") { throw "59.A: expected slug hello-rest, got: $rtSel" }
+pass "59.A: REST POST /doogats with fields populates the typed column"
+
+# 59.B - malformed fields JSON is rejected with 400 + VALIDATION_ERROR.
+$rtBadResp = Invoke-WebRequest -Uri "$REST_URL/doogats" -Method POST -ContentType "application/json" `
+    -Headers @{ Authorization = "Bearer $TOKEN" } -Body '{"title":"typed-bad","type":"ig_rest_typed","fields":"{not valid json"}' -SkipHttpErrorCheck
+if ([int]$rtBadResp.StatusCode -ne 400) { throw "59.B: expected 400, got $($rtBadResp.StatusCode)" }
+$rtBadObj = (content $rtBadResp) | ConvertFrom-Json
+if ($rtBadObj.error -ne "VALIDATION_ERROR") { throw "59.B: expected VALIDATION_ERROR, got: $($rtBadObj.error)" }
+pass "59.B: REST POST /doogats with malformed fields returns 400 + VALIDATION_ERROR"
+
+# Cleanup §58/§59
+rest "/doogats/$updId" "DELETE" | Out-Null
+rest "/doogats/$rtId" "DELETE" | Out-Null
+ddb query "DROP TABLE ig_upd_demo CASCADE" | Out-Null
+ddb query "DROP TABLE ig_rest_typed CASCADE" | Out-Null
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

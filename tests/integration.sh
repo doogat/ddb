@@ -2490,6 +2490,98 @@ gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$IG_GQL_WARN_AUTO_ID\\\") }\"}
 $DDB query "DROP TABLE ig_warn_demo CASCADE" | grep -q "dropped"
 rm -f "$IG_WARN_TITLED_BODY" "$IG_WARN_AUTO_BODY"
 
+# 58. Update warning/error shape (PRD 00149). The update workflow now routes
+# through DoogatService::update -> AppOutput on GraphQL, CLI, and REST, mirroring
+# the create slice. This pins two app-semantic contracts on the migrated update
+# slice: (a) the warnings channel is wired end-to-end and the array is always
+# present (empty today, since update emits no warnings), and (b) a not-found
+# update surfaces the structured NOT_FOUND app-error code, not an untyped
+# string. Parallels the create-side §56 (REST) / §57 (GraphQL) envelopes.
+# Typedef registered via the GraphQL DDL path (ddl waits for the in-process
+# schema reload) so the server sees it despite set_skip_stale_check(true).
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_upd_demo (note TEXT)\") { message } }"}'
+
+# 58.A — GraphQL updateDoogat carries extensions.warnings: [] (always present)
+# and applies the change. No update-specific warnings exist today.
+IG_UPD_CREATE=$(gql '{"query":"mutation { createDoogat(input: { title: \"upd-orig\", type: \"ig_upd_demo\" }) { id } }"}')
+assert_gql_ok "$IG_UPD_CREATE"
+IG_UPD_ID=$(printf '%s' "$IG_UPD_CREATE" | jq -r '.data.createDoogat.id')
+IG_UPD_GQL=$(gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$IG_UPD_ID\\\", title: \\\"upd-changed\\\" }) { id title } }\"}")
+assert_gql_ok "$IG_UPD_GQL"
+printf '%s' "$IG_UPD_GQL" | jq -e '.extensions.warnings == []' >/dev/null
+printf '%s' "$IG_UPD_GQL" | jq -e '.data.updateDoogat.title == "upd-changed"' >/dev/null
+pass "58.A: GraphQL updateDoogat returns extensions.warnings: [] and applies the change"
+
+# 58.B — GraphQL updateDoogat on a missing id surfaces extensions.code = NOT_FOUND
+# (app-error shape via to_graphql_error_from_app), not an untyped string.
+IG_UPD_MISS=$(gql '{"query":"mutation { updateDoogat(input: { id: \"99990101000000\", title: \"nope\" }) { id } }"}')
+assert_gql_errors "$IG_UPD_MISS"
+printf '%s' "$IG_UPD_MISS" | jq -e '.errors[0].extensions.code == "NOT_FOUND"' >/dev/null
+pass "58.B: GraphQL updateDoogat on missing id carries extensions.code = NOT_FOUND"
+
+# 58.C — REST PUT /doogats/{id} update response always carries a warnings array
+# (empty today) and applies the change, parallel to the create envelope (§56.A).
+IG_UPD_REST_BODY="$TMPDIR/ig-upd-rest.json"
+IG_UPD_REST_CODE=$(curl -sS -o "$IG_UPD_REST_BODY" -w "%{http_code}" "$REST_URL/doogats/$IG_UPD_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -X PUT \
+  -d '{"title":"upd-rest"}')
+[ "$IG_UPD_REST_CODE" = "200" ]
+jq -e '.warnings == []' "$IG_UPD_REST_BODY" >/dev/null
+jq -e '.data.title == "upd-rest"' "$IG_UPD_REST_BODY" >/dev/null
+pass "58.C: REST PUT /doogats update response carries warnings: [] and applies the change"
+
+# 58.D — REST PUT on a missing id surfaces the structured NOT_FOUND envelope (404).
+IG_UPD_MISS_BODY="$TMPDIR/ig-upd-miss.json"
+IG_UPD_MISS_CODE=$(curl -sS -o "$IG_UPD_MISS_BODY" -w "%{http_code}" "$REST_URL/doogats/99990101000000" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -X PUT \
+  -d '{"title":"nope"}')
+[ "$IG_UPD_MISS_CODE" = "404" ]
+jq -e '.error == "NOT_FOUND"' "$IG_UPD_MISS_BODY" >/dev/null
+pass "58.D: REST PUT /doogats on missing id returns 404 + NOT_FOUND envelope"
+
+# 59. REST typed create via the `fields` body member (PRD 00149). Before this
+# PRD, REST CreateBody had no `fields` member, so typed create was not
+# expressible over REST despite the D-04/D-09 migration notes claiming it
+# shipped. Task 6 added CreateBody.fields; this pins that typed columns are
+# populated and that a malformed fields payload is rejected with the structured
+# VALIDATION_ERROR (400), matching the GraphQL/SQL typed-create contract.
+ddl '{"query":"mutation { executeSql(sql: \"CREATE TABLE ig_rest_typed (slug VARCHAR(64))\") { message } }"}'
+
+# 59.A — POST /doogats with type + fields populates the typed column. Verified
+# by reading the materialized column back through the CLI (its own index
+# rebuilds from the server-committed row).
+IG_RT_BODY="$TMPDIR/ig-rest-typed.json"
+IG_RT_CODE=$(curl -sS -o "$IG_RT_BODY" -w "%{http_code}" "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"typed-rest","type":"ig_rest_typed","fields":"{\"slug\":\"hello-rest\"}"}')
+[ "$IG_RT_CODE" = "201" ]
+IG_RT_ID=$(jq -r '.data.id' "$IG_RT_BODY")
+$DDB query "SELECT slug FROM ig_rest_typed WHERE id = '$IG_RT_ID'" | grep -q "hello-rest"
+pass "59.A: REST POST /doogats with fields populates the typed column"
+
+# 59.B — malformed fields JSON is rejected with 400 + VALIDATION_ERROR before
+# any row is written.
+IG_RT_BAD_BODY="$TMPDIR/ig-rest-typed-bad.json"
+IG_RT_BAD_CODE=$(curl -sS -o "$IG_RT_BAD_BODY" -w "%{http_code}" "$REST_URL/doogats" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"typed-bad","type":"ig_rest_typed","fields":"{not valid json"}')
+[ "$IG_RT_BAD_CODE" = "400" ]
+jq -e '.error == "VALIDATION_ERROR"' "$IG_RT_BAD_BODY" >/dev/null
+pass "59.B: REST POST /doogats with malformed fields returns 400 + VALIDATION_ERROR"
+
+# Cleanup §58/§59
+curl -sf "$REST_URL/doogats/$IG_UPD_ID" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+curl -sf "$REST_URL/doogats/$IG_RT_ID" -H "Authorization: Bearer $TOKEN" -X DELETE >/dev/null
+$DDB query "DROP TABLE ig_upd_demo CASCADE" | grep -q "dropped"
+$DDB query "DROP TABLE ig_rest_typed CASCADE" | grep -q "dropped"
+rm -f "$IG_UPD_REST_BODY" "$IG_UPD_MISS_BODY" "$IG_RT_BODY" "$IG_RT_BAD_BODY"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
