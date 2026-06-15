@@ -126,6 +126,8 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 #[cfg(test)]
 mod create_unregistered_policy_tests;
 #[cfg(test)]
+mod update_facade_tests;
+#[cfg(test)]
 mod mock_index_tests;
 #[cfg(test)]
 mod tests;
