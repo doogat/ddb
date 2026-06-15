@@ -431,7 +431,7 @@ enum Command {
         /// Doogat ID
         id: String,
     },
-    /// [experimental] Get doogat by ID via NoSQL index (O(1) lookup)
+    /// [experimental] Get a doogat by ID
     Get {
         /// Doogat ID
         id: String,
@@ -445,7 +445,7 @@ enum Command {
         #[arg(long)]
         tag: Option<String>,
     },
-    /// [experimental] List backlinks via NoSQL index
+    /// [experimental] List backlinks
     Backlinks {
         /// Doogat ID
         id: String,
