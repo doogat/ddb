@@ -18,7 +18,7 @@ use super::records::{
 /// Wraps a single `Mutex<DoogatService>` for thread safety.
 #[derive(uniffi::Object)]
 pub struct DoogatDriver {
-    svc: Mutex<DoogatService>,
+    pub(super) svc: Mutex<DoogatService>,
 }
 
 impl DoogatDriver {

@@ -1,5 +1,7 @@
+use std::sync::Mutex;
 
 use super::*;
+use crate::service::DoogatService;
 use tempfile::TempDir;
 
 fn fresh_driver() -> (TempDir, DoogatDriver) {
