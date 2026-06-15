@@ -54,10 +54,10 @@ Doogat DB exposes several network and embedded interfaces. They are not equivale
 | **Embedded / mobile app** | **FFI (`DoogatDriver` via UniFFI)** | GraphQL over local HTTP | In-process Swift/Kotlin bindings; no server process needed. CRUD baseline `Guaranteed` within the Experimental stability envelope. Use the host-shell model for mobile (see below). |
 | **CLI automation / scripting** | **CLI (`ddb` binary)** | GraphQL via `curl` + Bearer token | Shell-first: `ddb create`, `ddb query`, `ddb search`, `ddb sync`. Falls back to GraphQL when scripts need machine-readable error codes or structured warnings (CLI emits text/exit-code only). |
 | **SQL / reporting** (BI tools, psql, DBeaver) | **PgWire** (port 2892) | GraphQL `executeSql` | Any PostgreSQL client works without DDB-specific code. SELECT, DML (INSERT/UPDATE/DELETE), and DDL (CREATE/ALTER/DROP TABLE) against materialized type tables. DDL triggers the hot schema reload signal — observable readiness over GraphQL may lag by up to a few seconds (poll `schemaVersion`). Errors surface as PostgreSQL messages, not `extensions.code` — use GraphQL `executeSql` when you need structured error codes alongside DML. |
-| **REST CRUD/search** | **REST (`/rest/*`)** | GraphQL | Base-doogat CRUD and list/search over standard HTTP. No GraphQL library needed. Typed create/update is `Specialized` (not `Guaranteed`) until per-type REST routes land — use GraphQL when you need typed mutations. |
+| **REST CRUD/search** | **REST (`/rest/*`)** | GraphQL | Base-doogat CRUD and list/search over standard HTTP. No GraphQL library needed. Typed create/update is expressible via the `fields` body member (interface-local e2e coverage); there are still no dedicated per-type REST routes. Not a blanket `Guaranteed` — see [Promise labels](#promise-labels). |
 | **NoSQL document access** | **NoSQL HTTP (`/nosql/*`)** | REST `GET /rest/doogats/:id` | Read-only by design. O(1) document fetch and prefix scan by type or tag. All write/mutate operations are `Intentionally absent` — route writes through GraphQL or REST. |
 
-Each row corresponds to a golden workflow defined in `dev/local/notes/downstream-golden-workflows.md` (GW-1 through GW-12). The conformance harness exercises the cross-interface CRUD baseline (GW-3, `crud_baseline` fixture) against CLI and GraphQL. Golden workflow examples for GW-1, GW-3, GW-4, GW-5, and GW-7 appear in [Golden workflow examples](#golden-workflow-examples) below.
+Each row corresponds to a golden workflow defined in `dev/local/notes/downstream-golden-workflows.md` (GW-1 through GW-12). The conformance harness exercises the cross-interface CRUD baseline (GW-3, `crud_baseline` fixture) against CLI and GraphQL. REST has its own e2e suite (`tests/e2e/rest.rs`); FFI and PgWire are covered by interface-local e2e tests only, with no shared cross-interface harness driver yet (deferred to a harness follow-up PRD) — their CRUD-baseline rows are therefore an explicit conformance downgrade (`Specialized` coverage), not harness-pinned `Guaranteed`. Golden workflow examples for GW-1, GW-3, GW-4, GW-5, and GW-7 appear in [Golden workflow examples](#golden-workflow-examples) below.
 
 ### What "Specialized" means
 
@@ -114,10 +114,10 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 ##### REST typed create/update (D-04)
 
 - **Old behavior**: REST `POST/PUT /rest/doogats` typed payloads silently wrote only the base-doogat shape; type-specific tables were not populated atomically.
-- **New behavior**: typed-write paths shipped by PRD 00147 route REST typed create/update through the unified AppCommand, populating typed tables atomically.
-- **Replacement interface**: PRD 00147 typed-write path on REST (same `POST/PUT /rest/doogats` route, now with typed-column atomicity).
-- **Required client changes**: none. Same route, same payload; typed columns are now populated server-side. Legacy base-only behavior remains reachable until PRD 00149 removes it.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-04.
+- **New behavior**: REST typed *update* shipped earlier via `UpdateBody.fields`. REST typed *create* ships in PRD 00149 via the new `CreateBody.fields` member on the generic `POST /rest/doogats` endpoint (not a per-type route). Both are now expressible via the `fields` body member, with interface-local e2e coverage.
+- **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-string body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update).
+- **Required client changes**: add a `fields` JSON-string member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
+- Source: this document's Compatibility and Deprecation section; original `interface-deprecations.md` §2 D-04 was lost in a dev/local cleanup.
 
 ##### FFI not-found error variant on `get` (D-05)
 
@@ -154,10 +154,10 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 ##### REST typed create/update route (D-09)
 
 - **Old behavior**: REST `POST/PUT /rest/doogats` typed payloads routed through the base endpoint without atomic typed-column population (no per-type route shape).
-- **New behavior**: typed-write paths shipped by PRD 00147 land typed columns atomically through the unified AppCommand on the same base route.
-- **Replacement interface**: PRD 00147 typed-write path on REST (same base route, now with atomic typed-column population).
-- **Required client changes**: none. Same route, same payload; typed columns are populated server-side. Legacy base-only handler remains reachable until PRD 00149 removes it.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-09.
+- **New behavior**: REST typed *update* shipped earlier via `UpdateBody.fields`. REST typed *create* ships in PRD 00149 via the new `CreateBody.fields` member on the generic `POST /rest/doogats` endpoint. Both populate typed columns through the unified AppCommand on the same base route — there is no per-type route shape, and none is planned.
+- **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-string body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update). Same base routes; no per-type routes.
+- **Required client changes**: add a `fields` JSON-string member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
+- Source: this document's Compatibility and Deprecation section; original `interface-deprecations.md` §2 D-09 was lost in a dev/local cleanup.
 
 ##### CLI warnings (D-10)
 
@@ -247,7 +247,7 @@ Every public application interface supports the CRUD baseline operations listed 
 - **Delete**: `Guaranteed` — `DELETE /rest/doogats/:id` removes the doogat and returns HTTP 204.
 - **List**: `Guaranteed` — `GET /rest/doogats` returns `{ data: [...], pagination: {...} }`.
 - **Search (basics)**: `Guaranteed` — `GET /rest/doogats?q=...` returns `{ data: [...], total_count }`.
-- **Validation error handling**: `Specialized` — validation failures return HTTP 4xx + `{ error, message }` JSON envelope; the `error` field uses the unified code vocabulary, but REST has no GraphQL `extensions` object. Use GraphQL for the `Guaranteed` structured-code surface. Typed create/update is `Specialized` until per-type REST routes land — use GraphQL for typed mutations.
+- **Validation error handling**: `Specialized` — validation failures return HTTP 4xx + `{ error, message }` JSON envelope; the `error` field uses the unified code vocabulary, but REST has no GraphQL `extensions` object. Use GraphQL for the `Guaranteed` structured-code surface. Typed create/update is expressible via the `fields` body member on the base `POST`/`PUT /rest/doogats[/:id]` routes (interface-local e2e coverage); there are no dedicated per-type REST routes, so typed mutation stays `Specialized` rather than harness-pinned `Guaranteed` — use GraphQL for the `Guaranteed` typed-mutation shape.
 - **Not-found behavior**: `Guaranteed` — `GET /rest/doogats/:id` on a missing id returns HTTP 404 + `{ "error": "NOT_FOUND", "message": "..." }`.
 
 #### NoSQL HTTP (`/nosql/*`)
