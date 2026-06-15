@@ -41,3 +41,30 @@ fn query_long_help_mentions_guide() {
         .success()
         .stdout(predicate::str::contains("ddb help create-app"));
 }
+
+#[test]
+fn get_help_does_not_claim_nosql_index() {
+    ddb()
+        .args(["get", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("NoSQL index").not());
+}
+
+#[test]
+fn backlinks_help_does_not_claim_nosql_index() {
+    ddb()
+        .args(["backlinks", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("NoSQL index").not());
+}
+
+#[test]
+fn scan_help_still_mentions_nosql_index() {
+    ddb()
+        .args(["scan", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("NoSQL index"));
+}
