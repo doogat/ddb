@@ -170,6 +170,7 @@ pub enum ActorCommand {
 pub enum ActorReply {
     Doogat(Box<ActorResult<ParsedDoogat>>),
     CreateOutput(Box<ActorResult<AppOutput<ParsedDoogat>>>),
+    UpdateOutput(Box<ActorResult<AppOutput<ParsedDoogat>>>),
     DoogatList(ActorResult<Vec<ParsedDoogat>>),
     SearchResults(ActorResult<PaginatedSearchResult>),
     SqlResult(ActorResult<SqlResult>),
@@ -330,7 +331,10 @@ impl ActorHandle {
         }
     }
 
-    pub async fn update_doogat(&self, params: UpdateDoogatParams) -> ActorResult<ParsedDoogat> {
+    pub async fn update_doogat(
+        &self,
+        params: UpdateDoogatParams,
+    ) -> ActorResult<AppOutput<ParsedDoogat>> {
         match self
             .send(ActorCommand::UpdateDoogat {
                 id: params.id,
@@ -343,7 +347,7 @@ impl ActorHandle {
             })
             .await
         {
-            ActorReply::Doogat(r) => *r,
+            ActorReply::UpdateOutput(r) => *r,
             _ => Err(DoogatError::Validation("unexpected reply".into())),
         }
     }
@@ -728,9 +732,9 @@ fn emit_mutation_events(
                     event_bus.send(doogat_event(kind, &output.value, Utc::now()));
                 }
             }
-            (EventKind::Updated, ActorReply::Doogat(r)) => {
-                if let Ok(z) = r.as_ref() {
-                    event_bus.send(doogat_event(kind, z, Utc::now()));
+            (EventKind::Updated, ActorReply::UpdateOutput(r)) => {
+                if let Ok(output) = r.as_ref() {
+                    event_bus.send(doogat_event(kind, &output.value, Utc::now()));
                 }
             }
             (EventKind::Deleted, ActorReply::Deleted(Ok(()))) => {

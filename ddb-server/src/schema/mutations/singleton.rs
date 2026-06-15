@@ -59,7 +59,7 @@ pub(super) fn build_singleton_fields(schema: &TableSchema) -> (Field, Field) {
                     .ok_or_else(|| {
                         to_graphql_error(DoogatError::singleton_not_found(&table_name))
                     })?;
-                let z = a
+                let output = a
                     .update_doogat(UpdateDoogatParams {
                         id,
                         title: None,
@@ -72,7 +72,7 @@ pub(super) fn build_singleton_fields(schema: &TableSchema) -> (Field, Field) {
                     .await
                     .map_err(to_graphql_error)?;
                 Ok(Some(FieldValue::owned_any(typed_doogat_to_value(
-                    &z, &schema,
+                    &output.value, &schema,
                 ))))
             })
         },

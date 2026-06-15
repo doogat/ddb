@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy};
+use ddb_core::app_contract::{CreateCommand, UnregisteredTypePolicy, UpdateCommand};
 use ddb_core::service::DoogatService;
 use ddb_core::types::{CompactOptions, ListFilter};
 
@@ -69,19 +69,16 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
             fields,
             unset_fields,
         } => {
-            let extra = ddb_core::service::ExtraFieldUpdates {
-                set: &fields,
-                unset: &unset_fields,
+            let cmd = UpdateCommand {
+                id,
+                title,
+                tags,
+                doogat_type,
+                body,
+                fields,
+                unset_fields,
             };
-            let result = svc.update_doogat_parsed(
-                &id,
-                title.as_deref(),
-                tags.as_deref(),
-                doogat_type.as_deref(),
-                body.as_deref(),
-                &extra,
-            );
-            ActorReply::Doogat(Box::new(result))
+            ActorReply::UpdateOutput(Box::new(svc.update(cmd)))
         }
         ActorCommand::BatchUpdate { updates } => ActorReply::DoogatList(svc.batch_update(&updates)),
         ActorCommand::CreateMany { inputs } => ActorReply::DoogatList(svc.batch_create(&inputs)),

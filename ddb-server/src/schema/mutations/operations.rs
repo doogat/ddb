@@ -66,7 +66,7 @@ pub(super) fn build_update_doogat_field() -> Field {
             let fields =
                 fields_map(map).map_err(|msg| async_graphql::ServerError::new(msg, None))?;
             let unset_fields = string_list(map, "unsetFields");
-            let z = a
+            let output = a
                 .update_doogat(crate::actor::UpdateDoogatParams {
                     id,
                     title,
@@ -77,8 +77,9 @@ pub(super) fn build_update_doogat_field() -> Field {
                     unset_fields,
                 })
                 .await
-                .map_err(to_graphql_error)?;
-            Ok(Some(FieldValue::owned_any(doogat_to_value(&z))))
+                .map_err(|e| to_graphql_error_from_app(e.into()))?;
+            forward_warnings(&ctx, &output.warnings);
+            Ok(Some(FieldValue::owned_any(doogat_to_value(&output.value))))
         })
     })
     .argument(

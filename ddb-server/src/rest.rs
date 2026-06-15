@@ -392,7 +392,7 @@ async fn update_doogat(
         None => std::collections::BTreeMap::new(),
     };
     let unset_fields = body.unset_fields.unwrap_or_default();
-    let z = actor
+    let output = actor
         .update_doogat(crate::actor::UpdateDoogatParams {
             id,
             title: body.title,
@@ -404,7 +404,15 @@ async fn update_doogat(
         })
         .await
         .map_err(rest_error)?;
-    Ok(Json(SingleResponse::new(doogat_to_json(&z), vec![])))
+    let warnings: Vec<WarningJson> = output
+        .warnings
+        .into_iter()
+        .map(|w| WarningJson {
+            code: w.code.to_string(),
+            message: w.message,
+        })
+        .collect();
+    Ok(Json(SingleResponse::new(doogat_to_json(&output.value), warnings)))
 }
 
 async fn delete_doogat(
