@@ -9,7 +9,7 @@ The Cargo workspace lives at the repository root. Five members are declared in t
 
 ### ddb-core
 
-All domain logic lives here: parsing, Git storage, CRDT conflict resolution, SQLite indexing, SQL translation, sync orchestration, compaction, attachments, and the UniFFI FFI facade. Every other crate depends on it. The crate root at `lib.rs` re-exports every public module and calls `uniffi::setup_scaffolding!()` to wire up FFI scaffolding. An optional `nosql` feature gate enables an experimental redb-backed key-value index. The `service` module is a directory module providing a unified `DoogatService` orchestration layer that composes a GitBackend with an injected `IndexPort` and `NoSqlMirrorPort` into a single entry point — CLI, FFI, and server all delegate to it instead of independently composing core modules. The service directory splits concerns across submodules: `mod.rs` (struct, runtime builders `open`/`init`, the `from_parts` injection seam, state management), `crud.rs` (create/read/update/delete, batch ops, validation, port-based NoSQL dual-write), `search.rs` (search, filtered queries, tag/aggregate queries), `sql.rs` (SQL pass-through, transactions), `ops.rs` (compact, maintenance, bundle export), `discovery.rs` (unlinked mentions, sequences, backlinks, bundled types), `utility.rs` (schema queries, NoSQL reads, health check), and `concrete_index.rs` (methods still requiring the concrete `Index`: sync, import_bundle, rename, fix_all, zone_migrate, attach/detach).
+All domain logic lives here: parsing, Git storage, CRDT conflict resolution, SQLite indexing, SQL translation, sync orchestration, compaction, attachments, and the UniFFI FFI facade. Every other crate depends on it. The crate root at `lib.rs` re-exports every public module and calls `uniffi::setup_scaffolding!()` to wire up FFI scaffolding. An optional `nosql` feature gate enables an experimental redb-backed key-value index. The `service` module is a directory module providing a unified `DoogatService` orchestration layer that composes a GitBackend with an injected `IndexPort` and `NoSqlMirrorPort` into a single entry point — CLI, FFI, and server all delegate to it instead of independently composing core modules. The service directory splits concerns across submodules: `mod.rs` (struct, runtime builders `open`/`init`, the `from_parts` injection seam, state management), `create.rs`/`read.rs`/`update.rs`/`delete.rs` (single-doogat CRUD with port-based NoSQL dual-write), `batch.rs` (batch create/create_many for multi-row typed writes), `validation.rs` and `write_helpers.rs` (shared input validation and write/commit helpers), `search.rs` (search, filtered queries, tag/aggregate queries), `sql.rs` (SQL pass-through, transactions), `ops.rs` (compact, maintenance, bundle export), `discovery.rs` (unlinked mentions, sequences, backlinks, bundled types), `utility.rs` (schema queries, NoSQL reads, health check), and `concrete_index.rs` (methods still requiring the concrete `Index`: sync, import_bundle, rename, fix_all, zone_migrate, attach/detach).
 
 ### ddb-cli
 
@@ -123,7 +123,7 @@ Six primary paths move data through the system. Each path touches a specific sub
 
 Most public `DoogatService` methods that perform validation against the SQLite index call `ensure_fresh()` on entry. `ensure_fresh()` is a thin guard around `Index::rebuild_if_stale(&self.repo)`: when the stored HEAD OID in `_ddb_meta` differs from the current Git HEAD, it triggers `incremental_reindex()` for the changed paths only. The actor / server path opts out via `set_skip_stale_check(true)` because it keeps the index hot in-process between requests (see `service/mod.rs`). The "Known gaps" subsection below enumerates the public methods that perform index validation but do not call `ensure_fresh()` today.
 
-Methods bound by this contract (call sites in `service/crud.rs`, `service/search.rs`, `service/utility.rs`, `service/discovery.rs`):
+Methods bound by this contract (call sites in `service/create.rs`, `service/read.rs`, `service/update.rs`, `service/delete.rs`, `service/batch.rs`, `service/search.rs`, `service/utility.rs`, `service/discovery.rs`):
 
 - **Reads** — `read_doogat`, `get_doogat_parsed`, `get_doogats_batch`.
 - **Typed writes** — `create_doogat_with_extra`, `update_doogat_parsed`, `delete_doogat`.
@@ -142,7 +142,7 @@ Adding a new public service method that performs index validation requires addin
 **Known gaps:**
 
 - `rename_doogat` (`utility.rs`) calls `self.index.resolve_path(id)` without `ensure_fresh()`. A cross-process rename of a recently-committed doogat could fail with a stale "doogat not found" error. PRD 00136 documented this gap rather than fixing it; a follow-up will land alongside the FFI-create parity work.
-- `update_doogat_raw` (`crud.rs`) calls `self.index.resolve_path(id)` without `ensure_fresh()` — same staleness shape as `rename_doogat`. A cross-process raw update of a recently-committed doogat can fail with a stale "doogat not found" error.
+- `update_doogat_raw` (`update.rs`) calls `self.index.resolve_path(id)` without `ensure_fresh()` — same staleness shape as `rename_doogat`. A cross-process raw update of a recently-committed doogat can fail with a stale "doogat not found" error.
 - `execute_sql` / `execute_batch` (`sql.rs`) perform FK validation and schema lookup against the index but do not call `ensure_fresh()`. Today's mitigations: the CLI `query` handler calls `svc.rebuild_if_stale()?` on entry (see `commands/crud.rs`), and the actor / GraphQL path keeps the index hot via `set_skip_stale_check(true)`. A direct-FFI consumer that calls `execute_sql` outside both surfaces is responsible for its own freshness guarantees.
 - `list_type_schemas` (`utility.rs`) reads `WHERE type = '_typedef'` from the index without `ensure_fresh()`. Internal callers (`create_doogat_with_extra`, `update_doogat_parsed`, `batch_create`, `batch_update`, etc.) already `ensure_fresh()` before invoking it, so the typed-write paths are safe. The actor / GraphQL `read_pool::get_type_schemas` opts out via `set_skip_stale_check(true)` by design. A direct-FFI consumer calling `DdbDriver::list_type_schemas` across process boundaries can see typedef changes from a sibling process delayed until the next freshness-bound call. Same FFI-consumer-responsibility shape as `execute_sql`.
 
@@ -350,7 +350,7 @@ HLC values are totally ordered and used by the last-writer-wins CRDT strategy to
 
 ### UniFFI facade
 
-The FFI module (see `ffi.rs`) exposes a `DoogatDriver` struct that wraps `GitRepo` and `Index` behind a `Mutex`, creating `SqlEngine` instances on demand. It provides a UniFFI-friendly API with FFI-safe error types (`DdbError`) and value types (`SearchResult`, etc.) that mirror the core types but use only UniFFI-compatible primitives. Swift and Kotlin bindings are generated from the proc-macro annotations via the isolated `ddb-uniffi-bindgen` crate.
+The FFI module (see the `ffi/` directory: `driver.rs` for the object, `records.rs` for the FFI-safe types) exposes a `DoogatDriver` struct that wraps `GitRepo` and `Index` behind a `Mutex`, creating `SqlEngine` instances on demand. It provides a UniFFI-friendly API with FFI-safe error types (`DdbError`) and value types (`SearchResult`, etc.) that mirror the core types but use only UniFFI-compatible primitives. Swift and Kotlin bindings are generated from the proc-macro annotations via the isolated `ddb-uniffi-bindgen` crate.
 
 ### Bundled types
 
@@ -749,7 +749,7 @@ PRD 00139 adds a `SINGLETON` typedef primitive: a typedef constrained to hold at
 ### Three-layer enforcement
 
 1. **Typed-write validation** -- `service/validation.rs::check_singleton_constraint` queries the materialized table for `COUNT(*) >= 1` before any INSERT through the service layer. On hit, returns `DoogatError::singleton_violation(table, existing_id)`.
-2. **SQL DML pre-check** -- `sql_engine/dml.rs` INSERT Pass 1 runs the same check before any commit lands, and rejects two-rows-in-one-batch (`rows.len() > 1` against an empty table) with `existing_id = "<intra-batch>"`. The service-layer batch path in `service/crud.rs` uses a `seen_singleton` HashMap for the same purpose across a multi-row typed write.
+2. **SQL DML pre-check** -- `sql_engine/dml.rs` INSERT Pass 1 runs the same check before any commit lands, and rejects two-rows-in-one-batch (`rows.len() > 1` against an empty table) with `existing_id = "<intra-batch>"`. The service-layer batch path in `service/batch.rs` uses a `seen_singleton` HashMap for the same purpose across a multi-row typed write.
 3. **Materializer UNIQUE index** -- `indexer/materialize.rs::create_singleton_lock_index` issues `CREATE UNIQUE INDEX <table>_singleton_lock ON <table> ((1))`. The expression-index trick rejects any second materialized row even when the upstream service path is bypassed (direct git write, manual reindex).
 
 The three layers are integration-tested together in `ddb-core/tests/singleton_layers.rs` and must produce byte-identical structured errors.
@@ -768,7 +768,7 @@ Trade-off: every SINGLETON write serializes through the SQLite write lock. This 
 
 ### GraphQL surfaces
 
-`schema/queries.rs` and `schema/mutations.rs` branch on `schema.singleton`:
+`schema/queries.rs` and `schema/mutations/singleton.rs` (dispatched from `mutations/mod.rs`) branch on `schema.singleton`:
 
 - Singular query field `<typeName> { id, ...fields }` (no args, returns the row or null).
 - `update<TypeName>(input:)` mutation (no id arg; `SINGLETON_NOT_FOUND` when empty).

@@ -76,7 +76,7 @@ is no committed blocking row yet, so the field uses the literal sentinel
 `<intra-batch>` instead of an id. Clients that resolve `existing_id` to a row
 must treat this value as "no fetchable target" rather than passing it back as an id.
 
-Layer 1 (`service/crud.rs::batch_create`) emits this from the `seen_singleton`
+Layer 1 (`service/batch.rs::batch_create`) emits this from the `seen_singleton`
 HashMap tracker; Layer 2 (`sql_engine/dml.rs::handle_insert`) emits it when
 `rows.len() > 1` against an empty SINGLETON table. Both share the same
 `<intra-batch>` literal so the contract is uniform.

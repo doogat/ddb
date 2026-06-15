@@ -62,8 +62,8 @@ exception.
 | Helper | Location | Signature | Consumers |
 |--------|----------|-----------|-----------|
 | HTTP error mapping | `ddb-server/src/http_error.rs` | `http_error_response(DoogatError) -> (StatusCode, Json<ErrorBody>)` | REST (`rest.rs`), NoSQL HTTP (`nosql_api.rs`) |
-| SQL schema-mutation classifier | `ddb-core/src/sql_engine/classify.rs` | `requires_schema_reload(&str) -> bool` | GraphQL `executeSql`/`executeBatch` (`schema/mutations.rs`), PgWire (`pgwire.rs`) |
-| GraphQL input decoding | `ddb-server/src/schema/input.rs` | `opt_string`, `opt_string_list`, `string_list`, `fields_map`, `opt_fields_map`, `conflict_action` | mutation resolvers (`schema/mutations.rs`) |
+| SQL schema-mutation classifier | `ddb-core/src/sql_engine/classify.rs` | `requires_schema_reload(&str) -> bool` | GraphQL `executeSql`/`executeBatch` (`schema/mutations/operations.rs`), PgWire (`pgwire.rs`) |
+| GraphQL input decoding | `ddb-server/src/schema/input.rs` | `opt_string`, `opt_string_list`, `string_list`, `fields_map`, `opt_fields_map`, `conflict_action` | mutation resolvers (`schema/mutations/operations.rs`) |
 
 - **HTTP error mapping** turns a `DoogatError` into a status code plus a
   `{ error, message }` body. The `error` field carries the unified code

@@ -27,7 +27,8 @@ ddb-core/src/       Library crate
     search.rs         FTS5 search, tag queries
     filter.rs         Search filter/negation SQL building
     rebuild.rs        Rebuild, reindex, staleness checks
-  service/          Unified orchestration layer (DoogatService) for CLI/FFI/server
+    ports.rs          Index port-trait impls (DoogatIndex, SqlBackend)
+  service/          DoogatService orchestration for CLI/FFI/server; per-verb submodules (create/read/update/delete/batch, search, sql, ops, discovery, utility)
   sql_engine/       SQL DDL/DML translation (tables as doogat types)
   bundled_types.rs  Built-in type templates (project, contact)
   sync_manager/     Multi-device sync orchestration
@@ -40,7 +41,11 @@ ddb-core/src/       Library crate
                       supertrait + GitRemote, GitMerge, GitHistory, GitBinary,
                       GitRename, GitDesktopHooks, DoogatIndex, SqlBackend,
                       ConflictResolver)
-  ffi.rs            UniFFI DoogatDriver facade for Swift/Kotlin bindings
+  ffi/              UniFFI DoogatDriver facade for Swift/Kotlin bindings
+    mod.rs            Module wiring and re-exports
+    driver.rs         DoogatDriver struct and exported methods
+    records.rs        FFI-safe value and error types (SearchResult, DdbError, etc.)
+    tests.rs          FFI unit tests
   types/            Shared data structures (directory module)
     value.rs          Value enum, path utilities
     doogat.rs         Domain model types (DoogatId, ParsedDoogat, etc.)
@@ -61,7 +66,11 @@ ddb-server/src/     GraphQL server crate
   schema/           Dynamic GraphQL schema from _typedef doogats
     type_defs.rs      GraphQL type/input/enum definitions
     queries.rs        Query field resolvers
-    mutations.rs      Mutation field resolvers
+    mutations/        Mutation field resolvers (directory module)
+      mod.rs            build_mutation_fields + MutationOutput assembly
+      operations.rs     CRUD/SQL/sync/maintenance mutation fields
+      singleton.rs      Singleton update/upsert fields
+      types.rs          Auxiliary mutation output/input types
     subscriptions.rs  Subscription field resolvers
     discovery_queries.rs  Discovery query resolvers (orphans, sequences, etc.)
   auth.rs           Bearer token generation + middleware

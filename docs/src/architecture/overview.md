@@ -154,7 +154,7 @@ ddb/
 │   │   ├── bundle.rs           # Air-gapped bundle export/import
 │   │   ├── maintenance.rs      # Maintenance task orchestration
 │   │   ├── nosql.rs            # NoSQL index (O(1) lookups, scans)
-│   │   ├── ffi.rs              # UniFFI DoogatDriver facade
+│   │   ├── ffi/                # UniFFI DoogatDriver facade (driver, records, tests)
 │   │   └── ddb.udl             # UniFFI interface definition (docs)
 │   └── benches/
 │       ├── crud.rs             # CRUD benchmarks (1K doogats)

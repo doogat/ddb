@@ -2,7 +2,7 @@
 
 > **Experimental**: UniFFI bindings are experimental and may change in future releases. Do not depend on API stability.
 
-**Source**: `ddb-core/src/ffi.rs`
+**Source**: `ddb-core/src/ffi/` (`mod.rs`, `driver.rs`, `records.rs`, `tests.rs`)
 
 UniFFI-based foreign function interface exposing Doogat DB to Swift and Kotlin via a high-level `DoogatDriver` facade.
 
@@ -12,7 +12,7 @@ UniFFI-based foreign function interface exposing Doogat DB to Swift and Kotlin v
 Swift/Kotlin app
       │
       ▼
-DoogatDriver (ffi.rs)       ← UniFFI proc-macro boundary
+DoogatDriver (ffi/driver.rs) ← UniFFI proc-macro boundary
       │
       ├── GitRepo            ← git_ops (storage)
       ├── Index              ← indexer (search/query)
