@@ -184,7 +184,11 @@ ddb/
 │       │   ├── mod.rs          # Schema builder
 │       │   ├── base_types.rs   # Value converters, type builders
 │       │   ├── queries.rs      # Query field resolvers
-│       │   ├── mutations.rs    # Mutation field resolvers
+│       │   ├── mutations/      # Mutation field resolvers (directory module)
+│       │   │   ├── mod.rs          # build_mutation_fields + MutationOutput
+│       │   │   ├── operations.rs   # CRUD/SQL/sync/maintenance fields
+│       │   │   ├── singleton.rs    # Singleton update/upsert fields
+│       │   │   └── types.rs        # Auxiliary output/input types
 │       │   ├── subscriptions.rs # Subscription field resolvers
 │       │   ├── type_defs.rs    # Type/input/enum definitions
 │       │   └── discovery_queries.rs # Discovery query resolvers

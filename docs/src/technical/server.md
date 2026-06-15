@@ -342,7 +342,7 @@ Constraint violations on `createDoogat` / typed `INSERT` against a populated SIN
 
 `upsert_<type>` input is a JSON object of typed field values only; it carries no `title`. When the upsert creates the first row, the resolver defaults that row's title to the type name (e.g. `app_config`), since the service typed-create path requires a title.
 
-The plural query field (`<type_name>s`) and `createDoogat` are still generated for SINGLETON typedefs (backward compat); `createDoogat` rejects with `SINGLETON_VIOLATION` once a row exists. ALTER TABLE `SET/DROP SINGLETON` triggers the existing schema reload (any DDL through `executeSql` does so per `mutations.rs::executeSql`); the singular field appears or disappears on the next `schemaVersion` poll.
+The plural query field (`<type_name>s`) and `createDoogat` are still generated for SINGLETON typedefs (backward compat); `createDoogat` rejects with `SINGLETON_VIOLATION` once a row exists. ALTER TABLE `SET/DROP SINGLETON` triggers the existing schema reload (any DDL through `executeSql` does so per `mutations/operations.rs::executeSql`); the singular field appears or disappears on the next `schemaVersion` poll.
 
 ### Search query syntax
 
@@ -935,7 +935,11 @@ ddb-server/src/
 │   ├── mod.rs       # Schema builder (query, mutation, subscription)
 │   ├── base_types.rs # Value converters, type builders, helpers
 │   ├── queries.rs   # Query field resolvers
-│   ├── mutations.rs # Mutation field resolvers
+│   ├── mutations/   # Mutation field resolvers (directory module)
+│   │   ├── mod.rs        # build_mutation_fields + MutationOutput assembly
+│   │   ├── operations.rs # CRUD/SQL/sync/maintenance mutation fields
+│   │   ├── singleton.rs  # Singleton update/upsert fields
+│   │   └── types.rs      # Auxiliary mutation output/input types
 │   ├── subscriptions.rs # Subscription field resolvers
 │   ├── type_defs.rs # GraphQL type/input/enum definitions
 │   ├── input.rs     # Shared GraphQL input decoding helpers (create/update/batch)
