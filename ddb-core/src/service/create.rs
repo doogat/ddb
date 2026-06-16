@@ -287,11 +287,10 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         type_name: &str,
         fields: std::collections::BTreeMap<String, crate::types::Value>,
     ) -> Result<UpsertOutcome> {
-        // Refresh BEFORE opening the transaction so the IMMEDIATE write lock
-        // is not held across a potentially-long reindex. A nested `ensure_fresh`
-        // reached from inside the transaction below is still safe — its
-        // `rebuild`/`incremental_reindex` → `batch_index` path is
-        // nesting-tolerant — but refreshing up front keeps the lock window tight.
+        // Refresh BEFORE opening the transaction so the IMMEDIATE write lock is
+        // not held across a potentially-long reindex, keeping the lock window
+        // tight in the common (already-fresh) case. The authoritative refresh
+        // for cross-process convergence happens in-lock below.
         self.ensure_fresh()?;
 
         let schemas = self.list_type_schemas()?;
@@ -307,6 +306,19 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         }
 
         crate::indexer::with_immediate_transaction(self.index.sql_conn(), || {
+            // Reconcile freshness INSIDE the IMMEDIATE window (PRD 00157) so the
+            // loser of a cross-process race observes the winner's just-committed
+            // row before the SELECT below decides create-vs-update. The loser
+            // only acquires this lock after the winner's COMMIT released it, so
+            // by now the winner's row is fully materialized and `_ddb_meta.head`
+            // has advanced; without this in-lock refresh the loser's pre-lock
+            // refresh may predate that commit, leaving its SELECT stale → a
+            // second CREATE → a duplicate SINGLETON row. Inside a transaction
+            // `rebuild_if_stale` performs only the nesting-safe incremental
+            // reindex (never a destructive full rebuild — see its docs), so it
+            // composes with the open `BEGIN IMMEDIATE`. Usually a no-op once
+            // `_ddb_meta.head` already equals repo HEAD.
+            self.ensure_fresh()?;
             let escaped = type_name.replace('"', "\"\"");
             let sql = format!("SELECT id FROM \"{escaped}\" ORDER BY id ASC LIMIT 1");
             let rows = self.index.query_raw_with_params(&sql, &[])?;

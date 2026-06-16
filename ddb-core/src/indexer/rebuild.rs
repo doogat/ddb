@@ -385,21 +385,47 @@ impl Index {
     }
 
     /// Rebuild if stale or corrupt. Uses incremental reindex when possible.
+    ///
+    /// PRD 00157: when reached as a *nested* call from inside an open write
+    /// transaction (the SINGLETON write paths open `BEGIN IMMEDIATE`, then
+    /// their UPDATE/CREATE branch calls `update_doogat`/`create_doogat_with_extra`,
+    /// which call `ensure_fresh` again), the destructive full `rebuild` path is
+    /// forbidden: `drop_all_tables` toggles `PRAGMA foreign_keys`, which SQLite
+    /// silently ignores inside a transaction, so its `DROP TABLE`s would run
+    /// with FKs still enforced and fail with "FOREIGN KEY constraint failed".
+    /// That nested call is also redundant — the outer write path already ran
+    /// the full integrity-check + rebuild *before* opening the transaction — so
+    /// inside a transaction we only ever do the nesting-safe incremental
+    /// reindex (or nothing), never a full rebuild.
     pub fn rebuild_if_stale(
         &self,
         repo: &impl DoogatSource,
     ) -> Result<Option<crate::types::RebuildReport>> {
-        let corrupt = !self.check_integrity()?;
-        if corrupt {
-            tracing::warn!("index corruption detected, forcing full rebuild");
-            return Ok(Some(self.rebuild(repo)?));
+        let in_transaction = !self.conn.is_autocommit();
+
+        // The integrity check's only remedy is a full rebuild, which is unsafe
+        // inside a transaction. Skip it there; the outermost ensure_fresh
+        // (run before the transaction opened) already performed it.
+        if !in_transaction {
+            let corrupt = !self.check_integrity()?;
+            if corrupt {
+                tracing::warn!("index corruption detected, forcing full rebuild");
+                return Ok(Some(self.rebuild(repo)?));
+            }
         }
         if !self.is_stale(repo)? {
             return Ok(None);
         }
-        // Try incremental reindex if we have a stored HEAD
+        // Try incremental reindex if we have a stored HEAD. `incremental_reindex`
+        // routes its writes through nesting-tolerant helpers, so it composes
+        // with an enclosing transaction.
         if let Some(old_head) = self.stored_head_oid() {
             Ok(Some(self.incremental_reindex(repo, &old_head)?))
+        } else if in_transaction {
+            // No stored HEAD inside a transaction: the only option would be a
+            // full rebuild, which is unsafe here. Leave the index as-is; the
+            // next outermost ensure_fresh will rebuild if still needed.
+            Ok(None)
         } else {
             Ok(Some(self.rebuild(repo)?))
         }

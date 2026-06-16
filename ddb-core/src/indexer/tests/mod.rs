@@ -3959,3 +3959,68 @@ fn batch_index_joins_an_open_transaction_instead_of_nesting() {
         "doogats indexed in the joined transaction must persist after the outer COMMIT"
     );
 }
+
+#[test]
+fn rebuild_if_stale_inside_transaction_skips_destructive_full_rebuild() {
+    // PRD 00157 regression: a nested `ensure_fresh` reaching `rebuild_if_stale`
+    // from INSIDE an open write transaction (the path upsert_singleton's
+    // BEGIN IMMEDIATE → UPDATE branch → update_doogat → ensure_fresh takes)
+    // must not run a full `rebuild`. `drop_all_tables` toggles
+    // `PRAGMA foreign_keys`, which SQLite ignores inside a transaction, so its
+    // `DROP TABLE doogats` would fail with "FOREIGN KEY constraint failed"
+    // while child tables still reference it. Pre-fix, the corrupt branch ran
+    // here and errored; the fix skips the destructive rebuild inside a
+    // transaction (the outermost ensure_fresh already ran it before BEGIN).
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    // A tag gives the doogat a child `_ddb_tags` row that REFERENCES doogats(id),
+    // so a full rebuild's `DROP TABLE doogats` (with FK still enforced inside the
+    // transaction) reproduces the exact "FOREIGN KEY constraint failed" symptom.
+    repo.commit_file(
+        "ddb/20260226120000.md",
+        "---\nid: 20260226120000\ntitle: T\ntags:\n  - regression\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+    let idx = in_memory_index();
+    idx.rebuild(&repo).unwrap(); // fresh index; drop_all_tables leaves FK enforcement ON
+
+    // Force the corrupt trigger: drop a child relation table so check_integrity
+    // reports corruption (the pre-fix code would force a full rebuild here).
+    idx.conn.execute_batch("DROP TABLE _ddb_aliases").unwrap();
+    assert!(
+        !idx.check_integrity().unwrap(),
+        "precondition: index must read as corrupt outside a transaction"
+    );
+
+    // Inside a write transaction the destructive full-rebuild path is unsafe
+    // (PRAGMA foreign_keys is a no-op here) and redundant. rebuild_if_stale must
+    // skip it and return without error rather than FK-failing in DROP TABLE.
+    idx.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let result = idx.rebuild_if_stale(&repo);
+    idx.conn.execute_batch("ROLLBACK").unwrap();
+
+    assert!(
+        result.is_ok(),
+        "rebuild_if_stale inside a transaction must not run a destructive rebuild (got {result:?})"
+    );
+    assert!(
+        result.unwrap().is_none(),
+        "inside a transaction with a fresh HEAD, rebuild_if_stale must be a no-op, not a rebuild"
+    );
+
+    // The core `doogats` table must survive — the guard prevented
+    // drop_all_tables from running inside the transaction.
+    let doogats_exists: bool = idx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='doogats'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        doogats_exists,
+        "the core `doogats` table must survive a nested in-transaction rebuild_if_stale"
+    );
+}
