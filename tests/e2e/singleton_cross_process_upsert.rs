@@ -199,20 +199,12 @@ async fn pg_scalar(client: &Client, sql: &str) -> String {
 /// designed to protect. The losing caller must take the UPDATE branch and
 /// return `created:false`, never a duplicate INSERT or a raw SQL error.
 ///
-/// KNOWN BUG — `#[ignore]`d (PRD 00140 review cycle 1). When the two servers
-/// are *freshly started* and an upsert races immediately, one mutation returns
-/// a generic `INTERNAL_ERROR` instead of `created:false` (reproduced 6/6 in
-/// this harness). A manual repro with a ~3s warmup before firing passes, so
-/// the failure is a server-startup-window race, not a steady-state defect.
-/// The practically-important upsert concurrency — many clients, one server —
-/// is correctly serialised by the actor and covered by the test above; and
-/// genuine separate-OS-process create races are covered by
-/// `singleton_cross_process_create.rs`. The two-fresh-server upsert edge is
-/// tracked as a deferred decision for a follow-up PRD; un-ignore this test
-/// once it is fixed.
+/// Contract (PRD 00157): two freshly-started `ddb serve` processes on the same
+/// repo, each receiving one concurrent `upsert_app_config`, must converge —
+/// exactly one returns `created:true` and one returns `created:false`, both
+/// return the same id, neither response carries GraphQL errors, and exactly one
+/// row is materialized.
 #[test]
-#[ignore = "PRD 00140 cycle-1 deferred: two fresh ddb-serve processes racing an \
-upsert can return INTERNAL_ERROR instead of created:false (startup-window race)"]
 fn two_server_processes_racing_upsert_on_singleton_converge_on_one_row() {
     let repo = DdbTestRepo::init();
     repo.ddb()
