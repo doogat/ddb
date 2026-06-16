@@ -85,6 +85,58 @@ Post-sync conflict resolution (multiple rows arriving from offline nodes) is han
 
 `BOOLEAN` columns are stored as `INTEGER` (1/0) in SQLite. SQL `SELECT` queries against materialized type tables automatically coerce these values to `"true"`/`"false"` in the response. This coercion applies only to tables with typedefs; queries against raw internal tables (`_ddb_*`, `doogats`) return uncoerced values.
 
+### Cross-process SINGLETON write safety (PRD 00140 + 00157)
+
+The SINGLETON invariant (at most one materialized row per typedef) must hold even when several processes write the same repo at once (a desktop app, a `ddb serve` instance, and a `ddb` CLI invocation all sharing one `.ddb/`). Two mechanisms enforce it: a `BEGIN IMMEDIATE` window on the service write paths, and the Layer-3 UNIQUE index as the hard backstop.
+
+#### Transactional service write paths
+
+Every service write path that can land a SINGLETON row runs its check, git commit, and index update inside one `BEGIN IMMEDIATE` window, acquired up front so a second writer blocks on the SQLite write lock instead of racing the constraint check. The wrap (`indexer::with_immediate_transaction`) is conditional on SINGLETON reachability, so a non-SINGLETON write pays nothing.
+
+| Service path | Source | Wrapped |
+|---|---|---|
+| `create_doogat_raw` | `service/create.rs` | yes (PRD 00140) |
+| `create_doogat_with_extra` | `service/create.rs` | yes (PRD 00140) |
+| `upsert_singleton` | `service/create.rs` | yes (PRD 00140) |
+| `batch_create_with_message` | `service/batch.rs` | yes (PRD 00140) |
+| `update_doogat_raw` | `service/update.rs` | yes (PRD 00140) |
+| `update_doogat_parsed` | `service/update.rs` | yes (PRD 00157) |
+| `batch_update_with_message` | `service/update.rs` | yes (PRD 00157) |
+
+The update-path wraps (PRD 00157) close the gap where a typed update that retypes a doogat into a SINGLETON typedef, or two updates converging on one, could slip past the window the create paths already held. The wrap fires only when the target or result type is a registered SINGLETON typedef, mirroring the create-path conditional. The per-update `check_singleton_update_constraint` still runs before the commit lands, so cross-row invariants stay enforced; a loser inside the same process gets a structured `SINGLETON_VIOLATION` with `existing_id`.
+
+#### The SQL `INSERT` path is deliberately not wrapped
+
+`sql_engine::dml::handle_insert` (reached by PgWire, GraphQL `executeSql`, and `ddb query`) has no `BEGIN IMMEDIATE` window. It relies on the Layer-2 pre-check `SELECT` plus the Layer-3 `<table>_singleton_lock` UNIQUE index (a second row trips it, recognized by `is_singleton_lock_failure`). That UNIQUE index is the hard backstop: it fails the second row regardless of which process or lock discipline produced it.
+
+#### The cross-process guarantee
+
+Across any mix of processes and interfaces, **exactly one materialized row survives per SINGLETON typedef**. That row-count invariant is the real promise, and the Layer-3 UNIQUE index is what makes it hold without a cross-process lock.
+
+What a loser *observes* depends on whether the two writers were serialized by a shared lock:
+
+- **Serialized within one process** (two writes sharing the SQLite write lock, or two GraphQL mutations through the server actor's single-threaded mpsc loop): the loser deterministically gets the structured `SINGLETON_VIOLATION`, surfaced in each interface's documented shape: `extensions.code` on GraphQL, `{ error, message }` on REST and NoSQL HTTP (via the shared HTTP error helper), text on the CLI, and a string on FFI (until `ffi-typed-errors-v1`).
+- **Genuinely separate processes**: the error is **not** deterministic, because the two processes do not share one SQLite lock and additionally contend on git (`.git/index.lock`, ref updates) outside SQLite's control.
+
+The integration suite's §55.D scenario (a `ddb` CLI write racing the server's PgWire `INSERT`) pins the honest cross-process contract:
+
+1. exactly one winner and one loser;
+2. exactly one materialized row survives (Layer-3 UNIQUE);
+3. no raw `UNIQUE constraint failed` text ever leaks to a caller;
+4. the loser surfaces a *recognized* failure: either the structured SINGLETON message, or a transient cross-process contention error (a git-lock or SQLite-busy variant). It is never an unrecognized error and never a second row.
+
+A loser that collides on the git lock, or waits out the winner's held write lock, before it reaches a SINGLETON enforcement layer reports the contention, not the SINGLETON message. That is correct: both callers were told the truth, and the row-count invariant still held. §55.A/B/C, which are serialized inside one process, always carry the structured SINGLETON message; only §55.D, the true cross-process race, can also surface the transient variant.
+
+#### Two-server startup convergence (PRD 00157)
+
+Two fresh `ddb serve` processes racing an `upsert_<type>` on a SINGLETON typedef converge on one row. `upsert_singleton` runs `ensure_fresh()` a second time *inside* its `BEGIN IMMEDIATE` window, so the loser observes the winner's committed row and its `SELECT` takes the UPDATE branch (`created: false`) instead of inserting a duplicate.
+
+The in-lock refresh is nesting-safe: `rebuild_if_stale` skips the destructive full rebuild when it runs inside an open transaction (`!conn.is_autocommit()`) and performs only an incremental reindex there. The outermost `ensure_fresh` (run before the transaction opened) already did the integrity check and any full rebuild. This avoids a `FOREIGN KEY constraint failed` that a full rebuild would otherwise hit inside the window, because `DROP TABLE` cannot disable foreign keys mid-transaction (`PRAGMA foreign_keys = OFF` is a no-op there). The convergence regression is pinned by `two_server_processes_racing_upsert_on_singleton_converge_on_one_row` in `tests/e2e/singleton_cross_process_upsert.rs`.
+
+#### Out of scope
+
+The SchemaReloader concurrency redesign and the PgWire handshake-under-race auth failure remain deferred to their own PRDs (different subsystems, separately testable).
+
 ### DEFAULT NEXT (auto-increment)
 
 A ddb SQL extension for auto-incrementing INTEGER columns. Not standard SQL.
