@@ -3,6 +3,7 @@
 //! target so `cargo test-ci` (`--lib --bins`) exercises them.
 
 use crate::app_contract::UpdateCommand;
+use crate::error::DoogatError;
 use crate::service::DoogatService;
 use crate::types::Value;
 use std::collections::BTreeMap;
@@ -90,5 +91,153 @@ fn update_facade_unset_fields_clears_frontmatter_field() {
     assert!(
         !after_unset.value.meta.extra.contains_key("custom_key"),
         "after unsetting the field, meta.extra must NOT contain 'custom_key'"
+    );
+}
+
+/// SET-only update helper, used by the data-safety tests below to seed
+/// frontmatter fields without repeating the full `UpdateCommand` shape.
+fn set_fields(svc: &DoogatService, id: &str, fields: BTreeMap<String, Value>) {
+    svc.update(UpdateCommand {
+        id: id.to_string(),
+        title: None,
+        tags: None,
+        doogat_type: None,
+        body: None,
+        fields,
+        unset_fields: vec![],
+    })
+    .expect("set-fields update must return Ok");
+}
+
+#[test]
+fn update_empty_unset_fields_preserves_existing_frontmatter() {
+    // Data safety: an empty `unset_fields` vec must be a no-op. A title-only
+    // update must NOT silently clear previously-set custom fields.
+    let tmp = tempfile::tempdir().unwrap();
+    let svc = init_service(tmp.path());
+
+    let id = svc
+        .create_doogat("Base", &[], None, "")
+        .expect("create doogat");
+
+    let mut fields = BTreeMap::new();
+    fields.insert("alpha".to_string(), Value::String("one".into()));
+    fields.insert("beta".to_string(), Value::String("two".into()));
+    set_fields(&svc, &id, fields);
+
+    let after = svc
+        .update(UpdateCommand {
+            id: id.clone(),
+            title: Some("Renamed".into()),
+            tags: None,
+            doogat_type: None,
+            body: None,
+            fields: BTreeMap::new(),
+            unset_fields: vec![],
+        })
+        .expect("title-only update must return Ok");
+
+    assert_eq!(after.value.meta.title.as_deref(), Some("Renamed"));
+    assert!(
+        after.value.meta.extra.contains_key("alpha")
+            && after.value.meta.extra.contains_key("beta"),
+        "empty unset_fields must preserve all existing frontmatter fields, got: {:?}",
+        after.value.meta.extra.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn update_unset_removes_only_named_key_keeping_siblings() {
+    // Unset must remove exactly the named key and leave siblings intact.
+    let tmp = tempfile::tempdir().unwrap();
+    let svc = init_service(tmp.path());
+
+    let id = svc
+        .create_doogat("Base", &[], None, "")
+        .expect("create doogat");
+
+    let mut fields = BTreeMap::new();
+    fields.insert("keep".to_string(), Value::String("stay".into()));
+    fields.insert("drop".to_string(), Value::String("gone".into()));
+    set_fields(&svc, &id, fields);
+
+    let after = svc
+        .update(UpdateCommand {
+            id: id.clone(),
+            title: None,
+            tags: None,
+            doogat_type: None,
+            body: None,
+            fields: BTreeMap::new(),
+            unset_fields: vec!["drop".to_string()],
+        })
+        .expect("unset update must return Ok");
+
+    assert!(
+        !after.value.meta.extra.contains_key("drop"),
+        "named key 'drop' must be removed"
+    );
+    assert!(
+        after.value.meta.extra.contains_key("keep"),
+        "sibling key 'keep' must survive an unset of 'drop'"
+    );
+}
+
+#[test]
+fn update_unset_of_absent_key_is_safe_noop() {
+    // Unsetting a key that was never set must not error and must not disturb
+    // unrelated existing fields.
+    let tmp = tempfile::tempdir().unwrap();
+    let svc = init_service(tmp.path());
+
+    let id = svc
+        .create_doogat("Base", &[], None, "")
+        .expect("create doogat");
+
+    let mut fields = BTreeMap::new();
+    fields.insert("present".to_string(), Value::String("here".into()));
+    set_fields(&svc, &id, fields);
+
+    let after = svc
+        .update(UpdateCommand {
+            id: id.clone(),
+            title: None,
+            tags: None,
+            doogat_type: None,
+            body: None,
+            fields: BTreeMap::new(),
+            unset_fields: vec!["never_existed".to_string()],
+        })
+        .expect("unset of an absent key must still return Ok");
+
+    assert!(
+        after.value.meta.extra.contains_key("present"),
+        "unsetting an absent key must not remove unrelated fields"
+    );
+}
+
+#[test]
+fn update_nonexistent_id_returns_not_found_error() {
+    // Service-layer NOT_FOUND: updating an id with no backing doogat must
+    // surface `DoogatError::NotFound`, the vocabulary the transports map to a
+    // NOT_FOUND code / 404.
+    let tmp = tempfile::tempdir().unwrap();
+    let svc = init_service(tmp.path());
+
+    let err = svc
+        .update(UpdateCommand {
+            id: "00000000000000".to_string(),
+            title: Some("ignored".into()),
+            tags: None,
+            doogat_type: None,
+            body: None,
+            fields: BTreeMap::new(),
+            unset_fields: vec![],
+        })
+        .expect_err("update on a nonexistent id must fail");
+
+    assert!(
+        matches!(err, DoogatError::NotFound(_)),
+        "service update of a missing id must return DoogatError::NotFound, got: {err:?}"
     );
 }
