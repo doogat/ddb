@@ -151,6 +151,12 @@ fn rest_typed_create_populates_typed_columns() {
     );
 
     // Verify typed columns are populated by reading the materialized row back.
+    assert_item_typed_columns_roundtrip(&server, &id);
+}
+
+/// Read the materialized `item` row back via `executeSql` (format:"objects") and
+/// assert the typed columns set by the REST typed-create round-trip exactly.
+fn assert_item_typed_columns_roundtrip(server: &ServerGuard, id: &str) {
     // A SELECT via executeSql with format:"objects" returns parsed rows, not a
     // `message` (which carries DDL/DML status).
     let select = server.graphql_with_vars(

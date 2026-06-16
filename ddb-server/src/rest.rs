@@ -74,6 +74,18 @@ impl SingleResponse {
     }
 }
 
+/// Map app-contract warnings into the REST `WarningJson` wire shape. Shared by
+/// the create and update handlers so the conversion stays single-sourced.
+fn warnings_to_json(warnings: Vec<ddb_core::app_contract::AppWarning>) -> Vec<WarningJson> {
+    warnings
+        .into_iter()
+        .map(|w| WarningJson {
+            code: w.code.to_string(),
+            message: w.message,
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 struct SearchResponse {
     data: Vec<SearchHit>,
@@ -373,14 +385,7 @@ async fn create_doogat(
         )
         .await
         .map_err(rest_error)?;
-    let warnings: Vec<WarningJson> = output
-        .warnings
-        .into_iter()
-        .map(|w| WarningJson {
-            code: w.code.to_string(),
-            message: w.message,
-        })
-        .collect();
+    let warnings = warnings_to_json(output.warnings);
     Ok((
         StatusCode::CREATED,
         Json(SingleResponse::new(doogat_to_json(&output.value), warnings)),
@@ -410,14 +415,7 @@ async fn update_doogat(
         })
         .await
         .map_err(rest_error)?;
-    let warnings: Vec<WarningJson> = output
-        .warnings
-        .into_iter()
-        .map(|w| WarningJson {
-            code: w.code.to_string(),
-            message: w.message,
-        })
-        .collect();
+    let warnings = warnings_to_json(output.warnings);
     Ok(Json(SingleResponse::new(doogat_to_json(&output.value), warnings)))
 }
 
