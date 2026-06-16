@@ -92,7 +92,7 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 - **Old behavior**: REST `GET /rest/doogats?q=...` returns HTTP 4xx + `{ error, message }` JSON envelope. The `error` field carries a REST-local short-string code.
 - **New behavior**: AppError envelope shipped by PRD 00147 routes REST errors through the same code vocabulary as GraphQL. The `{ error, message }` envelope shape is unchanged; the `error` field now carries the unified code (e.g. `NOT_FOUND`, `VALIDATION_ERROR`, `UNIQUE_VIOLATION`) instead of REST-local short-strings.
 - **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`. See `docs/src/technical/server.md` REST error section. (REST has no `extensions` object — that path is GraphQL-only.)
-- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. Until PRD 00149 removes the legacy short-strings, both vocabularies can appear; prefer the unified codes.
+- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. The legacy REST-local short-strings have already been removed (REST errors route through the shared `http_error_response`/`classify` helper, shipped by PRD 00147/00143), so only the unified codes appear.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-01.
 
 ##### FFI search error variant (D-02)
@@ -108,7 +108,7 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 - **Old behavior**: REST `POST/PUT /rest/doogats[/:id]` returns HTTP 4xx + `{ error, message }` envelope on validation failure. The `error` field carries a REST-local short-string code.
 - **New behavior**: AppError envelope shipped by PRD 00147 feeds the same unified code vocabulary into REST mutations. Envelope shape is unchanged; the `error` field now carries the unified code.
 - **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`.
-- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. Until PRD 00149 removes the legacy short-strings, both vocabularies can appear; prefer the unified codes.
+- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. The legacy REST-local short-strings have already been removed (REST errors route through the shared `http_error_response`/`classify` helper, shipped by PRD 00147/00143), so only the unified codes appear.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-03.
 
 ##### REST typed create/update (D-04)
@@ -148,7 +148,7 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 - **Old behavior**: REST `POST /rest/doogats` (invalid) returns HTTP 400/422 with the `error` field carrying a short REST-local code string (and 500 on server errors).
 - **New behavior**: AppError envelope shipped by PRD 00147 routes REST validation errors through the unified code vocabulary. The `error` field now carries the same codes GraphQL validation errors expose under `extensions.code`.
 - **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`.
-- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. Until PRD 00149 removes the legacy short-strings, both vocabularies can appear; prefer the unified codes.
+- **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. The legacy REST-local short-strings have already been removed (REST errors route through the shared `http_error_response`/`classify` helper, shipped by PRD 00147/00143), so only the unified codes appear.
 - Source: `dev/local/notes/interface-deprecations.md` §2 D-08.
 
 ##### REST typed create/update route (D-09)

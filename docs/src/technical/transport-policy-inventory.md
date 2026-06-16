@@ -37,7 +37,7 @@ interface.
 |----------|-----|---------|------|--------|-----|------------|
 | Input decoding | transport (`clap`) | app-glue (`schema/input.rs`) | transport (`serde`) | transport (SQL text) | transport (UniFFI args) | transport (query params) |
 | Create routing | app facade (`DoogatService::create`) | app facade (via actor) | app facade (via actor) | n/a (SQL `INSERT`) | direct service (`_raw`) | n/a (read-only) |
-| Update routing | direct service | direct actor reply | direct actor reply | n/a (SQL `UPDATE`) | direct service (`_raw`) | n/a (read-only) |
+| Update routing | app facade (`DoogatService::update`) | app facade (via actor) | app facade (via actor) | n/a (SQL `UPDATE`) | direct service (`_raw`) | n/a (read-only) |
 | Error mapping | transport text + `format_app_error` | app vocab (`classify` / `to_graphql_error*`) | app vocab (`http_error_response`) | specialized (PG error strings) | specialized (untyped strings) | app vocab (`http_error_response`) |
 | Warning channel | text on stderr | `extensions.warnings` | `warnings` array | specialized (none) | specialized (none) | n/a (read-only) |
 | Schema-reload classification | n/a | app-glue (`classify.rs`) | n/a | app-glue (`classify.rs`) | n/a | n/a |
@@ -59,19 +59,22 @@ interface.
 - **GraphQL input decoding** is shared across the four dynamic mutations via
   `ddb-server/src/schema/input.rs`.
 
-### What is still transport-owned (this PRD's targets)
+### Closed by PRD 00149 (now app-owned)
 
-- **Update routing.** GraphQL, CLI, and REST update do not go through an app
-  facade. There is no `DoogatService::update` returning `AppOutput`; GraphQL and
-  REST call `ActorHandle::update_doogat` and get a bare `ParsedDoogat`, CLI
-  calls `svc.update_doogat` directly. REST update drops warnings (hardcoded
-  `vec![]` at `rest.rs:407`). PRD 00149 adds the facade and routes all three
-  through it (design contracts C-1..C-6).
-- **REST typed-create gap.** `CreateBody` (`rest.rs:18-25`) has no `fields`
-  member, and the create handler passes `BTreeMap::new()` (`rest.rs:365`), so
-  typed create is not expressible over REST. The matching `UpdateBody` already
-  has `fields` (`rest.rs:34`), so REST typed *update* works. PRD 00149 adds
-  `CreateBody.fields` (design contract C-7), closing the D-04/D-09 overclaim.
+These were this PRD's targets; both are now migrated:
+
+- **Update routing.** GraphQL, CLI, and REST update now route through the
+  `DoogatService::update(UpdateCommand) -> AppOutput<ParsedDoogat>` app facade
+  (GraphQL and REST via `ActorHandle::update_doogat`, which now returns
+  `AppOutput<ParsedDoogat>`; CLI calls `svc.update` directly). Errors map through
+  the app vocabulary (`to_graphql_error_from_app` / `format_app_error` /
+  `http_error_response`), and warnings are forwarded on all three (GraphQL
+  `extensions.warnings`, CLI stderr, REST `warnings` array), mirroring the
+  create slice (design contracts C-1..C-6).
+- **REST typed create.** `CreateBody` now has a `fields` JSON-string member
+  (parsed via `parse_fields_json`), so typed create is expressible over REST;
+  the named typed columns are populated from `fields` on the created doogat
+  (design contract C-7). This closed the D-04/D-09 overclaim.
 
 ### Specialized (deliberate per-interface difference)
 
