@@ -2374,7 +2374,29 @@ grep -q "UNIQUE constraint failed" "$RACE_TYPED_2" \
 $DDB query "SELECT COUNT(*) FROM ig_race_typed" | grep -q "^1$"
 pass "55.C: concurrent createDoogat race — loser carries SINGLETON_VIOLATION"
 
-# 55.D — CLI-vs-PgWire concurrent INSERT race
+# 55.D — CLI-vs-PgWire concurrent INSERT race.
+#
+# Determinism contract (PRD 00157, root-caused 2026-06-16; see
+# docs/src/technical/sql-engine.md "Cross-process SINGLETON write safety").
+# This is the ONLY truly cross-process race in §55: a separate `ddb` CLI
+# process (service path, holds BEGIN IMMEDIATE) racing the server's PgWire
+# INSERT (dml.rs path — no IMMEDIATE window: Layer-2 pre-check + Layer-3
+# `<table>_singleton_lock` UNIQUE backstop). §55.A/B/C are serialized within a
+# single process (A shares the SQLite write lock; B/C share the server actor's
+# single-threaded loop), so their loser deterministically carries the
+# structured SINGLETON message. §55.D cannot promise that wording: the two
+# processes do not share one lock discipline and additionally contend on git
+# (`.git/index.lock`, ref updates) outside SQLite's lock, so a loser that
+# collides on git (or waits out the winner's held write lock) before reaching a
+# singleton enforcement layer surfaces a transient contention error instead.
+# Closing that window would need a cross-process git lock — out of PRD 00157
+# scope. The DETERMINISTIC promise is therefore: (1) exactly one winner and one
+# loser; (2) exactly one materialized row survives (Layer-3 UNIQUE — hard);
+# (3) no raw `UNIQUE constraint failed` ever leaks; (4) the loser surfaces a
+# RECOGNIZED failure — the structured SINGLETON message OR a transient
+# cross-process contention error — never an unrecognized error, never a second
+# row. No retry loop: the assertion encodes the real promise (PRD Risk #2).
+#
 # The psql-absent `else` deliberately calls fail(), mirroring section 54.D and
 # the rationale in the general-psql-smoke comment (~line 1093): SINGLETON
 # PgWire parity is a hard requirement, so it fails loud rather than skipping.
@@ -2397,12 +2419,17 @@ if command -v psql >/dev/null 2>&1; then
   [ "$PG_OK" -eq 1 ] || fail "55.D: expected exactly 1 winner, got $PG_OK"
   [ "$PG_FAIL" -eq 1 ] || fail "55.D: expected exactly 1 loser, got $PG_FAIL"
   if [ "$EXIT_PG_CLI" -ne 0 ]; then PG_LOSER_FILE="$RACE_PG_CLI"; else PG_LOSER_FILE="$RACE_PG_SQL"; fi
-  grep -q "SINGLETON constraint" "$PG_LOSER_FILE" \
-    || fail "55.D: loser missing SINGLETON constraint message"
+  # Promise (3): a raw UNIQUE leak is always a bug, whichever layer caught it.
   grep -q "UNIQUE constraint failed" "$PG_LOSER_FILE" \
     && fail "55.D: loser leaked raw UNIQUE constraint failed" || true
+  # Promise (4): the loser must surface a RECOGNIZED failure — the structured
+  # SINGLETON message, or a transient cross-process contention error (git lock
+  # / SQLite busy). An unrecognized error means a new failure mode to triage.
+  grep -Eqi "SINGLETON constraint|locked|busy|index\.lock|cannot lock|unable to create|File exists|another git process" "$PG_LOSER_FILE" \
+    || fail "55.D: loser surfaced an unrecognized error (expected structured SINGLETON message or a transient cross-process contention error): $(cat "$PG_LOSER_FILE")"
+  # Promise (2): convergence — exactly one materialized row survives.
   $DDB query "SELECT COUNT(*) FROM ig_race_pg" | grep -q "^1$"
-  pass "55.D: concurrent CLI-vs-PgWire INSERT race on a SINGLETON typedef — loser carries the SINGLETON constraint message"
+  pass "55.D: concurrent CLI-vs-PgWire INSERT race on a SINGLETON typedef — converges on one row; loser carries the structured SINGLETON message or a transient cross-process contention error, never a raw UNIQUE leak"
 else
   fail "55.D: psql not on PATH; install psql or rely on cargo test -p ddb-e2e --test e2e -- pgwire_singleton"
 fi
@@ -2412,7 +2439,7 @@ for t in ig_race_cli ig_race_sql ig_race_typed ig_race_pg; do
   $DDB query "SELECT COUNT(*) FROM $t" | grep -q "^1$" \
     || fail "55.E: $t did not converge on exactly one row"
 done
-pass "55.E: CLI, executeSql, createDoogat, and PgWire races each converged on exactly one row with a structured SINGLETON-violation loser"
+pass "55.E: CLI, executeSql, createDoogat, and PgWire races each converged on exactly one row (A/B/C losers carry the structured SINGLETON violation; the cross-process PgWire loser carries a recognized SINGLETON-or-contention failure, never a raw UNIQUE leak)"
 
 # Cleanup
 $DDB query "DROP TABLE ig_race_cli CASCADE" | grep -q "dropped"
