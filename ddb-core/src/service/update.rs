@@ -38,44 +38,83 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         let content = self.repo.read_file(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
 
+        // PRD 00157: resolve the *result* type (the type after this update) —
+        // the arg type wins, otherwise the doogat keeps its current type. A
+        // retype into a registered (possibly SINGLETON) typedef is the gap
+        // this closes, so schema loading is broadened from the pre-00157 gate
+        // on the *current* type to the result type. Without this an untyped
+        // doogat retyped into a SINGLETON typedef would skip the singleton
+        // check and never materialize into the typed table.
+        let result_type: Option<String> = doogat_type
+            .map(|t| t.to_string())
+            .or_else(|| parsed.meta.doogat_type.clone());
+
         // Resolve schemas BEFORE applying field updates so typed-column SETs
         // route to the correct zone (REFERENCES → reference section, etc.).
         // PRD 00134 cycle-1 review C1 task #2.
-        let schemas = if parsed.meta.doogat_type.is_some() {
+        let schemas = if result_type.is_some() {
             Some(self.list_type_schemas()?)
         } else {
             None
         };
         let schema = schemas.as_ref().and_then(|all| {
-            parsed
-                .meta
-                .doogat_type
+            result_type
                 .as_deref()
                 .and_then(|t| all.iter().find(|s| s.table_name == t))
         });
 
-        // Validate the user-supplied SET fields BEFORE routing them. After
-        // routing, REFERENCES values land in the reference zone, hidden
-        // from the `parsed.meta.extra`-based validator. We validate against
-        // the input map directly so FK/allowed_values rejections still
-        // fire on the typed UPDATE path.
-        let has_field_changes = !extra.set.is_empty() || !extra.unset.is_empty();
-        if has_field_changes {
-            if let (Some(ref type_name), Some(ref schemas)) = (&parsed.meta.doogat_type, &schemas) {
-                self.validate_fields_with_schemas(schemas, type_name, extra.set)?;
+        // PRD 00157: when the result type is a registered SINGLETON typedef,
+        // run the constraint-check → commit → reindex → store_head window
+        // inside one BEGIN IMMEDIATE transaction (mirrors `update_doogat_raw`
+        // and the create paths) so a cross-process loser surfaces a structured
+        // SINGLETON_VIOLATION instead of a raw materializer error. Non-SINGLETON
+        // updates run with no transaction and pay no new cost.
+        let is_singleton = schema.map(|s| s.singleton).unwrap_or(false);
+
+        let mut write = || -> Result<ParsedDoogat> {
+            // Singleton check on the *result* type (no-op for unregistered or
+            // non-SINGLETON types). First DB read inside the window, so the
+            // loser's check runs only after the winner's COMMIT releases the
+            // write lock and its row is visible.
+            if let (Some(type_name), Some(all)) = (result_type.as_deref(), schemas.as_ref()) {
+                if all.iter().any(|s| s.table_name == type_name) {
+                    self.check_singleton_update_constraint(id, type_name, all)?;
+                }
             }
+
+            // Validate the user-supplied SET fields BEFORE routing them. After
+            // routing, REFERENCES values land in the reference zone, hidden
+            // from the `parsed.meta.extra`-based validator. We validate against
+            // the input map directly so FK/allowed_values rejections still
+            // fire on the typed UPDATE path. Kept keyed on the *current* type
+            // (PRD 00157 design: retype field-validation behavior unchanged).
+            let has_field_changes = !extra.set.is_empty() || !extra.unset.is_empty();
+            if has_field_changes {
+                if let (Some(type_name), Some(all)) =
+                    (parsed.meta.doogat_type.as_deref(), schemas.as_ref())
+                {
+                    self.validate_fields_with_schemas(all, type_name, extra.set)?;
+                }
+            }
+
+            apply_field_updates(&mut parsed, title, tags, doogat_type, body, extra, schema);
+
+            let new_content = parser::serialize(&parsed);
+            self.repo
+                .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
+            let mut updated =
+                self.reindex_and_rematerialize(&new_content, &path, schemas.as_deref())?;
+            // Sync stored HEAD to avoid spurious incremental_reindex on next call
+            self.index.store_head(&self.repo.head_oid()?.0)?;
+            updated.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
+            Ok(updated)
+        };
+
+        if is_singleton {
+            crate::indexer::with_immediate_transaction(self.index.sql_conn(), write)
+        } else {
+            write()
         }
-
-        apply_field_updates(&mut parsed, title, tags, doogat_type, body, extra, schema);
-
-        let new_content = parser::serialize(&parsed);
-        self.repo
-            .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
-        let mut parsed = self.reindex_and_rematerialize(&new_content, &path, schemas.as_deref())?;
-        // Sync stored HEAD to avoid spurious incremental_reindex on next call
-        self.index.store_head(&self.repo.head_oid()?.0)?;
-        parsed.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
-        Ok(parsed)
     }
 
     /// App facade entrypoint: update a doogat from an `UpdateCommand`.
@@ -125,30 +164,79 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
         let schemas = self.list_type_schemas()?;
 
-        // Phase 1: prepare all writes (fail-fast, no side effects)
-        let mut writes: Vec<(String, String)> = Vec::with_capacity(updates.len());
-        for update in updates {
-            writes.push(self.prepare_update(update, &schemas)?);
+        // PRD 00157: if any update's result type is a registered SINGLETON
+        // typedef, run prepare-all → commit_batch → reindex-each → store_head
+        // inside one BEGIN IMMEDIATE window so the per-update singleton check
+        // (`prepare_update`) and the commit are atomic across processes
+        // (mirrors `batch_create_with_message`). Batches with no
+        // SINGLETON-targeting update run unwrapped — no new contention.
+        let any_singleton = self.batch_update_targets_singleton(updates, &schemas)?;
+
+        let body = || -> Result<Vec<ParsedDoogat>> {
+            // Phase 1: prepare all writes (fail-fast, no side effects)
+            let mut writes: Vec<(String, String)> = Vec::with_capacity(updates.len());
+            for update in updates {
+                writes.push(self.prepare_update(update, &schemas)?);
+            }
+
+            // Phase 2: atomic commit
+            let write_refs: Vec<(&str, &str)> = writes
+                .iter()
+                .map(|(p, c)| (p.as_str(), c.as_str()))
+                .collect();
+            self.repo.commit_batch(&write_refs, &[], message)?;
+
+            // Phase 3: re-parse, index, rematerialize, return
+            let mut results = Vec::with_capacity(updates.len());
+            for (path, new_content) in &writes {
+                let parsed = self.reindex_and_rematerialize(new_content, path, Some(&schemas))?;
+                results.push(parsed);
+            }
+
+            // Sync stored HEAD to avoid spurious incremental_reindex on next call
+            self.index.store_head(&self.repo.head_oid()?.0)?;
+
+            Ok(results)
+        };
+
+        if any_singleton {
+            crate::indexer::with_immediate_transaction(self.index.sql_conn(), body)
+        } else {
+            body()
         }
+    }
 
-        // Phase 2: atomic commit
-        let write_refs: Vec<(&str, &str)> = writes
-            .iter()
-            .map(|(p, c)| (p.as_str(), c.as_str()))
-            .collect();
-        self.repo.commit_batch(&write_refs, &[], message)?;
-
-        // Phase 3: re-parse, index, rematerialize, return
-        let mut results = Vec::with_capacity(updates.len());
-        for (path, new_content) in &writes {
-            let parsed = self.reindex_and_rematerialize(new_content, path, Some(&schemas))?;
-            results.push(parsed);
+    /// PRD 00157: true when any update's *result* type (the arg type, else the
+    /// stored type of `u.id`) names a registered SINGLETON typedef. Resolves
+    /// the result type by re-parsing the stored file exactly as
+    /// `prepare_update` derives `final_type`, so the pre-wrap scan and the
+    /// in-window per-update check never disagree.
+    fn batch_update_targets_singleton(
+        &self,
+        updates: &[BatchUpdateInput],
+        schemas: &[TableSchema],
+    ) -> Result<bool> {
+        for u in updates {
+            let result_type = match u.doogat_type.as_deref() {
+                Some(t) => Some(t.to_string()),
+                None => {
+                    let path = self.index.resolve_path(&u.id)?;
+                    let content = self.repo.read_file(&path)?;
+                    parser::parse(&content, &path)?.meta.doogat_type
+                }
+            };
+            if let Some(t) = result_type {
+                if schemas
+                    .iter()
+                    .find(|s| s.table_name == t)
+                    .map(|s| s.singleton)
+                    .unwrap_or(false)
+                {
+                    return Ok(true);
+                }
+            }
         }
-
-        // Sync stored HEAD to avoid spurious incremental_reindex on next call
-        self.index.store_head(&self.repo.head_oid()?.0)?;
-
-        Ok(results)
+        Ok(false)
     }
 
     /// Reject batch updates that contain the same doogat ID more than once.
