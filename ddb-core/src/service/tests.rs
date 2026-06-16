@@ -4898,3 +4898,188 @@ fn raw_update_of_untyped_doogat_accepts_arbitrary_content() {
         "body must reflect raw update, got: {read}"
     );
 }
+
+// ── PRD 00157 cross-process SINGLETON update-path write safety ────────────
+//
+// In-process atomicity tests pinning the check->commit->index contract for the
+// two update paths PRD 00140 left unwrapped (see the Phase 0 audit). The
+// cross-process race coverage lives in `tests/e2e/singleton_cross_process_*`;
+// these in-process tests pin the deterministic per-process behavior that the
+// integration tests can otherwise pass for the wrong reason (capsule 00134
+// lesson: `ensure_fresh` runs per process).
+
+#[test]
+fn update_parsed_retype_untyped_into_occupied_singleton_rejects_prd_00157() {
+    // Gap 1a (RED until the wrap + result-type check land): retyping an
+    // *untyped* doogat into an already-occupied SINGLETON typedef via
+    // `update_doogat_parsed` must reject with a structured SINGLETON_VIOLATION
+    // naming the occupant, not a raw materializer error. On master this path
+    // runs no singleton check (schema loading is gated on the *current* type,
+    // which is None here), so the retype slips through to commit + reindex and
+    // the Layer-3 `<table>_singleton_lock` UNIQUE expr-index fires a raw error.
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+
+    // Occupy the singleton with one row.
+    let mut occ_fields = std::collections::BTreeMap::new();
+    occ_fields.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    let occupant = svc
+        .batch_create(&[crate::types::BatchCreateInput {
+            title: Some("Occupant".to_string()),
+            body: None,
+            tags: vec![],
+            doogat_type: Some("app_config".to_string()),
+            fields: occ_fields,
+            on_conflict: crate::types::ConflictAction::Error,
+        }])
+        .expect("occupant insert succeeds");
+    let occupant_id = occupant[0].meta.id.as_ref().unwrap().0.clone();
+
+    // A base (untyped) doogat we will try to retype into the occupied singleton.
+    let victim_id = svc.create_doogat("Victim", &[], None, "victim body").unwrap();
+
+    let mut set = std::collections::BTreeMap::new();
+    set.insert(
+        "theme".to_string(),
+        crate::types::Value::String("light".to_string()),
+    );
+    let extra = ExtraFieldUpdates {
+        set: &set,
+        unset: &[],
+    };
+    let err = svc
+        .update_doogat_parsed(&victim_id, None, None, Some("app_config"), None, &extra)
+        .expect_err("retype into an occupied singleton must reject");
+    match err {
+        crate::error::DoogatError::Structured {
+            code, ref context, ..
+        } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+            let existing = context
+                .iter()
+                .find(|(k, _)| k == "existing_id")
+                .map(|(_, v)| v)
+                .expect("existing_id context entry");
+            match existing {
+                crate::error::ErrorValue::String(s) => assert_eq!(
+                    s, &occupant_id,
+                    "loser must name the occupant row id (existing_id parity)"
+                ),
+                other => panic!("expected String existing_id, got {other:?}"),
+            }
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+
+    // The occupant remains the only row; the rejected retype committed nothing.
+    let rows = svc.index.query_raw("SELECT id FROM app_config").unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "occupied singleton must still hold exactly one row"
+    );
+}
+
+#[test]
+fn update_parsed_retype_into_empty_singleton_succeeds_prd_00157() {
+    // Guard: retyping a base doogat into an *empty* SINGLETON typedef is the
+    // legitimate path and must keep working after the conditional wrap lands
+    // (the wrap must not reject the first occupant).
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+    let id = svc.create_doogat("Becomes config", &[], None, "body").unwrap();
+    let mut set = std::collections::BTreeMap::new();
+    set.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    let extra = ExtraFieldUpdates {
+        set: &set,
+        unset: &[],
+    };
+    let updated = svc
+        .update_doogat_parsed(&id, None, None, Some("app_config"), None, &extra)
+        .expect("retype into an empty singleton must succeed");
+    assert_eq!(updated.meta.doogat_type.as_deref(), Some("app_config"));
+    let rows = svc.index.query_raw("SELECT id FROM app_config").unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "the retyped doogat is the sole singleton row"
+    );
+}
+
+#[test]
+fn batch_update_retype_into_occupied_singleton_rejects_prd_00157() {
+    // Gap 1b contract: a batch_update retyping a doogat into an occupied
+    // SINGLETON typedef must reject with structured SINGLETON_VIOLATION and
+    // leave the occupant as the sole row. The per-update check already runs in
+    // `prepare_update`; this pins that contract and guards it through the
+    // conditional BEGIN IMMEDIATE wrap that makes check->commit->index atomic
+    // across processes.
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+    let mut occ_fields = std::collections::BTreeMap::new();
+    occ_fields.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    svc.batch_create(&[crate::types::BatchCreateInput {
+        title: Some("Occupant".to_string()),
+        body: None,
+        tags: vec![],
+        doogat_type: Some("app_config".to_string()),
+        fields: occ_fields,
+        on_conflict: crate::types::ConflictAction::Error,
+    }])
+    .unwrap();
+
+    let victim_id = svc.create_doogat("Victim", &[], None, "body").unwrap();
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(
+        "theme".to_string(),
+        crate::types::Value::String("light".to_string()),
+    );
+    let err = svc
+        .batch_update(&[BatchUpdateInput {
+            id: victim_id.clone(),
+            title: None,
+            body: None,
+            tags: None,
+            doogat_type: Some("app_config".to_string()),
+            fields: Some(fields),
+            unset_fields: None,
+        }])
+        .expect_err("batch retype into occupied singleton must reject");
+    match err {
+        crate::error::DoogatError::Structured { code, .. } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+    let rows = svc.index.query_raw("SELECT id FROM app_config").unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "rejected batch retype must leave the occupant as the sole row"
+    );
+}
+
+#[test]
+fn non_singleton_updates_unaffected_by_wrap_prd_00157() {
+    // Happy path / PRD 00157 Risk #1 guard: updates that do NOT target a
+    // SINGLETON typedef run with no new transaction and must keep persisting
+    // independently. Two distinct non-singleton doogats update and both stick.
+    let (_tmp, svc) = fresh_svc();
+    let a = svc.create_doogat("A", &[], None, "a body").unwrap();
+    let b = svc.create_doogat("B", &[], None, "b body").unwrap();
+    svc.update_doogat(&a, Some("A2"), None, None, None, &ExtraFieldUpdates::default())
+        .unwrap();
+    svc.update_doogat(&b, Some("B2"), None, None, None, &ExtraFieldUpdates::default())
+        .unwrap();
+    assert!(svc.read_doogat(&a).unwrap().contains("A2"));
+    assert!(svc.read_doogat(&b).unwrap().contains("B2"));
+}
