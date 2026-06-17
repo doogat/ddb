@@ -4024,3 +4024,72 @@ fn rebuild_if_stale_inside_transaction_skips_destructive_full_rebuild() {
         "the core `doogats` table must survive a nested in-transaction rebuild_if_stale"
     );
 }
+
+#[test]
+fn rebuild_if_stale_inside_transaction_skips_full_rebuild_on_diff_failure() {
+    // PRD 00157 doubt-review #1 regression: the in-transaction guard in
+    // `rebuild_if_stale` must ALSO cover the path where `incremental_reindex`
+    // itself falls back to a destructive full `rebuild` because `diff_paths`
+    // fails (e.g. the stored HEAD is unreachable after a gc/compaction).
+    // `rebuild_if_stale` calls `incremental_reindex` whenever a stored HEAD
+    // exists, even inside an open write transaction; pre-fix, the diff-failure
+    // fallback ran `rebuild` -> `drop_all_tables`, whose `PRAGMA foreign_keys=OFF`
+    // is a no-op in a transaction, so `DROP TABLE doogats` failed with
+    // "FOREIGN KEY constraint failed". The fix skips that destructive fallback
+    // inside a transaction (the outermost ensure_fresh already ran any full
+    // rebuild before BEGIN).
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    // The tag gives a child `_ddb_tags` row REFERENCING doogats(id), so a full
+    // rebuild's `DROP TABLE doogats` (FK still enforced inside the transaction)
+    // reproduces the exact "FOREIGN KEY constraint failed" symptom.
+    repo.commit_file(
+        "ddb/20260227120000.md",
+        "---\nid: 20260227120000\ntitle: T\ntags:\n  - regression\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+    let idx = in_memory_index();
+    idx.rebuild(&repo).unwrap();
+
+    // Make the index stale with an UNREACHABLE stored HEAD: is_stale() is true
+    // (bogus != current HEAD) and `diff_paths(bogus, current)` fails, so
+    // `incremental_reindex` takes its full-rebuild fallback. Integrity is left
+    // healthy so the corrupt branch (a separate guard) does not fire — this
+    // isolates the diff-failure fallback path.
+    idx.store_head("0000000000000000000000000000000000000000")
+        .unwrap();
+    assert!(
+        idx.is_stale(&repo).unwrap(),
+        "precondition: index must read as stale with the bogus stored HEAD"
+    );
+    assert!(
+        idx.check_integrity().unwrap(),
+        "precondition: index must be healthy so only the diff-failure path is exercised"
+    );
+
+    idx.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let result = idx.rebuild_if_stale(&repo);
+    idx.conn.execute_batch("ROLLBACK").unwrap();
+
+    assert!(
+        result.is_ok(),
+        "rebuild_if_stale inside a transaction must not run a destructive rebuild \
+         when incremental_reindex's diff fails (got {result:?})"
+    );
+
+    // The core `doogats` table must survive — the guard prevented
+    // drop_all_tables from running inside the transaction.
+    let doogats_exists: bool = idx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='doogats'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        doogats_exists,
+        "the core `doogats` table must survive a nested in-transaction diff-failure fallback"
+    );
+}
