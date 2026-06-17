@@ -5069,6 +5069,102 @@ fn batch_update_retype_into_occupied_singleton_rejects_prd_00157() {
 }
 
 #[test]
+fn batch_update_intra_batch_two_retypes_into_same_singleton_reject_prd_00157() {
+    // PRD 00157 doubt-review #2: two updates in ONE batch_update that retype
+    // distinct doogats into the SAME (empty) SINGLETON typedef must reject
+    // BEFORE any git commit lands — create-path parity with
+    // batch_create_intra_batch_singleton_rejects_second_input_prd_00139.
+    // Pre-fix, both per-update checks passed (no app_config row existed yet),
+    // commit_batch committed BOTH retypes to git, and only then did
+    // materialization of the second row trip the UNIQUE lock — leaving git with
+    // two SINGLETON rows. The fix tracks intra-batch singleton targets and
+    // rejects at prepare time with a structured SINGLETON_VIOLATION, leaving git
+    // untouched.
+    let (_tmp, svc) = fresh_svc();
+    setup_app_config_singleton_typedef(&svc);
+
+    let v1 = svc
+        .create_doogat("Victim One", &[], None, "first body")
+        .unwrap();
+    let v2 = svc
+        .create_doogat("Victim Two", &[], None, "second body")
+        .unwrap();
+
+    let head_before = svc.repo.head_oid().unwrap().0;
+
+    let mut fields_a = std::collections::BTreeMap::new();
+    fields_a.insert(
+        "theme".to_string(),
+        crate::types::Value::String("dark".to_string()),
+    );
+    let mut fields_b = std::collections::BTreeMap::new();
+    fields_b.insert(
+        "theme".to_string(),
+        crate::types::Value::String("light".to_string()),
+    );
+
+    let err = svc
+        .batch_update(&[
+            BatchUpdateInput {
+                id: v1.clone(),
+                title: None,
+                body: None,
+                tags: None,
+                doogat_type: Some("app_config".to_string()),
+                fields: Some(fields_a),
+                unset_fields: None,
+            },
+            BatchUpdateInput {
+                id: v2.clone(),
+                title: None,
+                body: None,
+                tags: None,
+                doogat_type: Some("app_config".to_string()),
+                fields: Some(fields_b),
+                unset_fields: None,
+            },
+        ])
+        .expect_err("two intra-batch retypes into one empty singleton must reject");
+    match err {
+        crate::error::DoogatError::Structured {
+            code, ref context, ..
+        } => {
+            assert_eq!(code, crate::error::codes::SINGLETON_VIOLATION);
+            let existing = context
+                .iter()
+                .find(|(k, _)| k == "existing_id")
+                .map(|(_, v)| v)
+                .expect("existing_id context entry");
+            match existing {
+                crate::error::ErrorValue::String(s) => assert_eq!(
+                    s, "<intra-batch>",
+                    "the collision originated inside the batch, not from an existing row"
+                ),
+                other => panic!("expected String for existing_id, got {other:?}"),
+            }
+        }
+        other => panic!("expected Structured SINGLETON_VIOLATION, got {other:?}"),
+    }
+
+    // Core contract (finding #2): no git commit may land before the batch
+    // rejects. Pre-fix, commit_batch committed both retypes and only
+    // materialization caught the second, so HEAD advanced.
+    let head_after = svc.repo.head_oid().unwrap().0;
+    assert_eq!(
+        head_before, head_after,
+        "rejected intra-batch retype must not commit anything to git"
+    );
+
+    // And the singleton table stays empty (nothing materialized).
+    let rows = svc.index.query_raw("SELECT id FROM app_config").unwrap();
+    assert_eq!(
+        rows.len(),
+        0,
+        "rejected intra-batch retype must leave the singleton table empty"
+    );
+}
+
+#[test]
 fn non_singleton_updates_unaffected_by_wrap_prd_00157() {
     // Happy path / PRD 00157 Risk #1 guard: updates that do NOT target a
     // SINGLETON typedef run with no new transaction and must keep persisting
