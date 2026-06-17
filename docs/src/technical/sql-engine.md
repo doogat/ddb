@@ -105,9 +105,13 @@ Every service write path that can land a SINGLETON row runs its check, git commi
 
 The update-path wraps (PRD 00157) close the gap where a typed update that retypes a doogat into a SINGLETON typedef, or two updates converging on one, could slip past the window the create paths already held. The wrap fires only when the target or result type is a registered SINGLETON typedef, mirroring the create-path conditional. The per-update `check_singleton_update_constraint` still runs before the commit lands, so cross-row invariants stay enforced; a loser inside the same process gets a structured `SINGLETON_VIOLATION` with `existing_id`.
 
-#### The SQL `INSERT` path is deliberately not wrapped
+#### Paths deliberately left unwrapped
 
 `sql_engine::dml::handle_insert` (reached by PgWire, GraphQL `executeSql`, and `ddb query`) has no `BEGIN IMMEDIATE` window. It relies on the Layer-2 pre-check `SELECT` plus the Layer-3 `<table>_singleton_lock` UNIQUE index (a second row trips it, recognized by `is_singleton_lock_failure`). That UNIQUE index is the hard backstop: it fails the second row regardless of which process or lock discipline produced it.
+
+SQL `UPDATE` (`sql_engine::dml::handle_update`) needs no wrap: `apply_updates_to_doogat` never mutates `doogat_type`, so an `UPDATE` keeps a row's type and cannot retype it into a SINGLETON typedef — it can never create a second singleton row.
+
+The consistency fixer `consistency::singleton_sweep` is the single post-sync reconciliation pass that converges already-materialized duplicate SINGLETON rows (e.g. after an offline merge). It is not a write-race window, and the Layer-3 UNIQUE index backstops its final state, so it is not a missing `BEGIN IMMEDIATE` wrap.
 
 #### The cross-process guarantee
 
@@ -115,7 +119,7 @@ Across any mix of processes and interfaces, **exactly one materialized row survi
 
 What a loser *observes* depends on whether the two writers were serialized by a shared lock:
 
-- **Serialized within one process** (two writes sharing the SQLite write lock, or two GraphQL mutations through the server actor's single-threaded mpsc loop): the loser deterministically gets the structured `SINGLETON_VIOLATION`, surfaced in each interface's documented shape: `extensions.code` on GraphQL, `{ error, message }` on REST and NoSQL HTTP (via the shared HTTP error helper), text on the CLI, and a string on FFI (until `ffi-typed-errors-v1`).
+- **Serialized within one process** (two writes sharing the SQLite write lock, or two GraphQL mutations through the server actor's single-threaded mpsc loop): the loser deterministically gets the structured `SINGLETON_VIOLATION`, surfaced in each interface's documented shape: `extensions.code` on GraphQL, `{ error, message }` on REST (via the shared HTTP error helper), text on the CLI, and a string on FFI (until `ffi-typed-errors-v1`). NoSQL HTTP is read-only and never performs a SINGLETON write, so it is not a write-error surface.
 - **Genuinely separate processes**: the error is **not** deterministic, because the two processes do not share one SQLite lock and additionally contend on git (`.git/index.lock`, ref updates) outside SQLite's control.
 
 The integration suite's §55.D scenario (a `ddb` CLI write racing the server's PgWire `INSERT`) pins the honest cross-process contract:
