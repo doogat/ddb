@@ -46,7 +46,9 @@ impl Index {
     }
 
     /// Incremental reindex: only re-index doogats changed between old_head and current HEAD.
-    /// Falls back to full rebuild if diff fails (e.g. old HEAD unreachable after gc).
+    /// Falls back to full rebuild if diff fails (e.g. old HEAD unreachable after gc),
+    /// except inside an open write transaction, where a full rebuild is unsafe and
+    /// the diff-failure case is a no-op instead (PRD 00157 — see the body).
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn incremental_reindex(
         &self,
@@ -59,6 +61,24 @@ impl Index {
         let changes = match repo.diff_paths(old_head, &new_head) {
             Ok(c) => c,
             Err(e) => {
+                // PRD 00157: a full `rebuild` is unsafe inside an open write
+                // transaction (the SINGLETON write paths open `BEGIN IMMEDIATE`,
+                // then reach here via a nested `ensure_fresh`): `drop_all_tables`
+                // toggles `PRAGMA foreign_keys`, which SQLite ignores inside a
+                // transaction, so its `DROP TABLE`s run with FKs enforced and
+                // fail with "FOREIGN KEY constraint failed". It is also redundant
+                // — the outermost `ensure_fresh` already ran any full rebuild
+                // before the transaction opened. Skip the destructive fallback
+                // here and leave the index as-is; the next outermost
+                // `ensure_fresh` will rebuild if still needed (mirrors the
+                // no-stored-HEAD-in-transaction branch in `rebuild_if_stale`).
+                if !self.conn.is_autocommit() {
+                    tracing::warn!(
+                        error = %e,
+                        "diff_paths failed inside a transaction; skipping destructive full rebuild"
+                    );
+                    return Ok(crate::types::RebuildReport::default());
+                }
                 tracing::warn!(error = %e, "diff_paths failed, falling back to full rebuild");
                 return self.rebuild(repo);
             }
