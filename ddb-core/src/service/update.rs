@@ -164,18 +164,36 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
         let schemas = self.list_type_schemas()?;
 
-        // PRD 00157: if any update's result type is a registered SINGLETON
-        // typedef, run prepare-all → commit_batch → reindex-each → store_head
-        // inside one BEGIN IMMEDIATE window so the per-update singleton check
-        // (`prepare_update`) and the commit are atomic across processes
-        // (mirrors `batch_create_with_message`). Batches with no
-        // SINGLETON-targeting update run unwrapped — no new contention.
-        let any_singleton = self.batch_update_targets_singleton(updates, &schemas)?;
+        // PRD 00157: resolve each update's result SINGLETON typedef once. Any
+        // Some(..) means a SINGLETON-reachable write, so run prepare-all →
+        // commit_batch → reindex-each → store_head inside one BEGIN IMMEDIATE
+        // window so the per-update singleton check (`prepare_update`) and the
+        // commit are atomic across processes (mirrors `batch_create_with_message`).
+        // Batches with no SINGLETON-targeting update run unwrapped — no new
+        // contention.
+        let singleton_targets = self.resolve_batch_singleton_targets(updates, &schemas)?;
+        let any_singleton = singleton_targets.iter().any(|t| t.is_some());
 
         let body = || -> Result<Vec<ParsedDoogat>> {
-            // Phase 1: prepare all writes (fail-fast, no side effects)
+            // Phase 1: prepare all writes (fail-fast, no side effects). Track
+            // intra-batch SINGLETON targets so a second update retyping into the
+            // same SINGLETON typedef rejects BEFORE commit_batch lands —
+            // create-path parity with `batch_create_body`'s `seen_singleton`
+            // (PRD 00157 doubt-review #2). `reject_duplicate_update_ids` already
+            // guarantees distinct ids, so two updates sharing a singleton target
+            // are two rows contending for the one slot.
             let mut writes: Vec<(String, String)> = Vec::with_capacity(updates.len());
-            for update in updates {
+            let mut seen_singleton: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for (i, update) in updates.iter().enumerate() {
+                if let Some(type_name) = singleton_targets[i].as_deref() {
+                    if !seen_singleton.insert(type_name) {
+                        return Err(DoogatError::singleton_violation(
+                            type_name.to_string(),
+                            "<intra-batch>".to_string(),
+                        ));
+                    }
+                }
                 writes.push(self.prepare_update(update, &schemas)?);
             }
 
@@ -206,16 +224,20 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         }
     }
 
-    /// PRD 00157: true when any update's *result* type (the arg type, else the
-    /// stored type of `u.id`) names a registered SINGLETON typedef. Resolves
-    /// the result type by re-parsing the stored file exactly as
+    /// PRD 00157: resolve each update's *result* SINGLETON typedef — the arg
+    /// type, else the stored type of `u.id` — returning `Some(type_name)` only
+    /// when that type is a registered SINGLETON typedef, `None` otherwise.
+    /// Resolves the result type by re-parsing the stored file exactly as
     /// `prepare_update` derives `final_type`, so the pre-wrap scan and the
-    /// in-window per-update check never disagree.
-    fn batch_update_targets_singleton(
+    /// in-window per-update check never disagree. One pass drives both the
+    /// conditional BEGIN IMMEDIATE wrap (any `Some` → wrap) and the intra-batch
+    /// collision check (PRD 00157 doubt-review #2).
+    fn resolve_batch_singleton_targets(
         &self,
         updates: &[BatchUpdateInput],
         schemas: &[TableSchema],
-    ) -> Result<bool> {
+    ) -> Result<Vec<Option<String>>> {
+        let mut targets = Vec::with_capacity(updates.len());
         for u in updates {
             let result_type = match u.doogat_type.as_deref() {
                 Some(t) => Some(t.to_string()),
@@ -225,18 +247,16 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                     parser::parse(&content, &path)?.meta.doogat_type
                 }
             };
-            if let Some(t) = result_type {
-                if schemas
+            let singleton = result_type.filter(|t| {
+                schemas
                     .iter()
-                    .find(|s| s.table_name == t)
+                    .find(|s| s.table_name == *t)
                     .map(|s| s.singleton)
                     .unwrap_or(false)
-                {
-                    return Ok(true);
-                }
-            }
+            });
+            targets.push(singleton);
         }
-        Ok(false)
+        Ok(targets)
     }
 
     /// Reject batch updates that contain the same doogat ID more than once.
