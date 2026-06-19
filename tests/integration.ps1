@@ -1429,6 +1429,60 @@ pass "serve: base field id nonexistent returns empty"
 gqlq "mutation { deleteDoogat(id: `"$BF_ID`") }" | Out-Null
 gqlq "mutation { executeSql(sql: `"DROP TABLE \`"test-widget\`"`") { message } }" | Out-Null
 
+# 42b. base-field orderBy (created_at/updated_at/id) + deterministic pagination
+# (PRD 00158). Mirrors ddb-server/tests/graphql_orderby_base_fields_t158.rs
+# through the live GraphQL server: create 4 rows 1s apart so created_at (= date,
+# from the id timestamp) is strictly increasing, then update the oldest row so
+# its updated_at becomes the newest — making updated_at order diverge from
+# created_at order.
+$obVer = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+gqlq "mutation { executeSql(sql: `"CREATE TABLE obnote (subject TEXT NOT NULL)`") { message } }" | Out-Null
+waitSchemaReload $obVer
+foreach ($s in @('n0', 'n1', 'n2', 'n3')) {
+    gqlq "mutation { executeSql(sql: `"INSERT INTO obnote (subject) VALUES ('$s')`") { message } }" | Out-Null
+    Start-Sleep -Seconds 1
+}
+Start-Sleep -Seconds 1
+gqlq "mutation { executeSql(sql: `"UPDATE obnote SET subject = 'n0e' WHERE subject = 'n0'`") { message } }" | Out-Null
+
+# created_at ASC: n0 (renamed n0e) is still the oldest by created_at.
+$obParsed = (gqlq "{ obnotes(orderBy: { created_at: ASC }) { items { subject } totalCount } }") | ConvertFrom-Json
+$obOrder = @($obParsed.data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+if ($obOrder -ne 'n0e,n1,n2,n3') { throw "created_at ASC order wrong: $obOrder" }
+if ($obParsed.data.obnotes.totalCount -ne 4) { throw "obnotes totalCount expected 4, got $($obParsed.data.obnotes.totalCount)" }
+pass "serve: orderBy created_at ASC"
+
+# created_at DESC: date is day-level so all rows tie; the id ASC tiebreaker
+# dominates and yields the same order as ASC.
+$obOrder = @(((gqlq "{ obnotes(orderBy: { created_at: DESC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+if ($obOrder -ne 'n0e,n1,n2,n3') { throw "created_at DESC order wrong: $obOrder" }
+pass "serve: orderBy created_at DESC (id tiebreaker under tied dates)"
+
+# updated_at DESC: n0e was updated last, so it is newest by updated_at.
+$obOrder = @(((gqlq "{ obnotes(orderBy: { updated_at: DESC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+if ($obOrder -ne 'n0e,n3,n2,n1') { throw "updated_at DESC order wrong: $obOrder" }
+pass "serve: orderBy updated_at DESC"
+
+# updated_at ASC: n1 has the oldest updated_at, n0e the newest.
+$obOrder = @(((gqlq "{ obnotes(orderBy: { updated_at: ASC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+if ($obOrder -ne 'n1,n2,n3,n0e') { throw "updated_at ASC order wrong: $obOrder" }
+pass "serve: orderBy updated_at ASC"
+
+# id ASC: ids are timestamps, so this equals creation order.
+$obOrder = @(((gqlq "{ obnotes(orderBy: { id: ASC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+if ($obOrder -ne 'n0e,n1,n2,n3') { throw "id ASC order wrong: $obOrder" }
+pass "serve: orderBy id ASC"
+
+# Deterministic pagination over created_at ASC: page1 + page2 reconstruct the
+# full order with no gaps or dupes (the id tiebreaker guarantees a total order).
+$obP1 = @(((gqlq "{ obnotes(orderBy: { created_at: ASC }, limit: 2, offset: 0) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+$obP2 = @(((gqlq "{ obnotes(orderBy: { created_at: ASC }, limit: 2, offset: 2) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+if ($obP1 -ne 'n0e,n1') { throw "pagination page 1 wrong: $obP1" }
+if ($obP2 -ne 'n2,n3') { throw "pagination page 2 wrong: $obP2" }
+pass "serve: orderBy created_at ASC deterministic pagination (no gaps/dupes)"
+
+gqlq "mutation { executeSql(sql: `"DROP TABLE obnote CASCADE`") { message } }" | Out-Null
+
 # 43. SQL INSERT via executeSql defaults date, created_at non-null
 gqlq "mutation{executeSql(sql:`"CREATE TABLE datecheck (name TEXT)`"){message}}" | Out-Null
 $dcResult = gqlq "mutation{executeSql(sql:`"INSERT INTO datecheck (name) VALUES (\`"DateTest\`")`"){message}}"
