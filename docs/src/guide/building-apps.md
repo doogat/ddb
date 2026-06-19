@@ -85,7 +85,7 @@ For CLI consumers, one deprecation applies: warnings currently surface as unstru
 
 #### Migration Notes
 
-One note per deprecation entry, each tagged with its stable `D-0X` id. All deprecations are Risk=low (no shim entries exist as of this writing). The original `interface-deprecations.md` registry was lost in a dev/local cleanup, so these notes are now self-contained and authoritative. For deprecations whose replacement is a candidate slug ("Status: planned, not yet implemented"), no client action is required yet; the current behavior remains supported until the named follow-up PRD ships.
+One note per deprecation entry, each tagged with its stable `D-0X` id. All deprecations are Risk=low (no shim entries exist as of this writing). These notes are self-contained and authoritative. For deprecations whose replacement is a candidate slug ("Status: planned, not yet implemented"), no client action is required yet; the current behavior remains supported until the named follow-up PRD ships.
 
 ##### REST search error envelope (D-01)
 
@@ -113,19 +113,19 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 - **Required client changes**: add a `fields` JSON-string member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
 ##### FFI not-found error variant on `get` (D-05)
 
-- **Old behavior**: FFI `DoogatDriver.get` throws `DdbError.io(msg)` with the substring `"not found"` when the id is missing.
+- **Old behavior**: FFI `DoogatDriver.read_doogat` throws `DdbError.io(msg)` with the substring `"not found"` when the id is missing.
 - **New behavior**: planned typed `DdbError::NotFound { id }` variant mirroring AppError's `NOT_FOUND` code; not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will expose a typed `NotFound` variant on `DoogatError`.
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; current `msg.contains("not found")` substring-matching remains supported.
 ##### FFI not-found error variant on `delete` + `get` (D-06)
 
-- **Old behavior**: post-delete FFI `DoogatDriver.get` inherits the same untyped `DdbError.io(msg)` "not found" shape as D-05.
+- **Old behavior**: post-delete FFI `DoogatDriver.read_doogat` inherits the same untyped `DdbError.io(msg)` "not found" shape as D-05.
 - **New behavior**: planned typed `NotFound` variant covers the delete-then-get path identically; not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD (same gate as D-05).
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; current behavior remains supported.
 ##### FFI invalid-type error variant on `create` (D-07)
 
-- **Old behavior**: FFI `DoogatDriver.create` with an invalid type throws `DdbError.sql(msg)` whose message string contains `TYPE_NOT_REGISTERED`.
+- **Old behavior**: FFI `DoogatDriver.create_doogat` with an invalid type throws `DdbError.sql(msg)` whose message string contains `TYPE_NOT_REGISTERED`.
 - **New behavior**: planned typed FFI variants for AppError validation codes (including `TYPE_NOT_REGISTERED`); not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will expose validation codes as typed `DoogatError` enum variants.
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; parsing `msg` for `TYPE_NOT_REGISTERED` remains supported.
@@ -152,7 +152,7 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 - **Old behavior**: REST warnings surface as text embedded in the HTTP response body; no structured channel.
 - **New behavior**: REST `warnings` array shipped by PRD 00147 carries structured `AppWarning` entries alongside `data`.
 - **Replacement interface**: REST top-level `warnings` array on the response envelope.
-- **Required client changes**: parse the structured `warnings` array on REST responses; the legacy text-in-body emission remains until PRD 00149 removes it.
+- **Required client changes**: parse the structured `warnings` array on REST responses. The structured array is the only warning channel; there is no legacy text-in-body emission.
 ##### PgWire warnings (D-12)
 
 - **Old behavior**: PgWire warnings are not surfaced over the wire protocol; no structured channel and no notice-emission path.
@@ -167,7 +167,7 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; FFI consumers needing warnings today must read them through GraphQL.
 ### CRUD baseline
 
-Every public application interface supports the CRUD baseline operations listed below. Labels use the [promise vocabulary](#promise-labels). Per-interface evidence lives in the conformance harness (`tests/e2e/conformance/`) and the interface-local e2e suites; the original `interface-compatibility-inventory.md` was lost in a dev/local cleanup.
+Every public application interface supports the CRUD baseline operations listed below. Labels use the [promise vocabulary](#promise-labels). Per-interface evidence lives in the conformance harness (`tests/e2e/conformance/`) and the interface-local e2e suites.
 
 #### GraphQL
 
@@ -233,7 +233,7 @@ Every public application interface supports the CRUD baseline operations listed 
 - **List**: `Specialized` — `GET /nosql?type=<type>` and `GET /nosql?tag=<tag>` return prefix-scan results; no pagination or field filtering. Use GraphQL or REST for full list/filter semantics.
 - **Search (basics)**: `Intentionally absent` — FTS5 free-text search is not supported on the NoSQL HTTP surface; use GraphQL `search` for full-text search.
 - **Validation error handling**: `Intentionally absent` — NoSQL HTTP has no write path; validation errors do not apply. `POST`/`PUT`/`DELETE` return HTTP 405 Method Not Allowed.
-- **Not-found behavior**: `Specialized` — `GET /nosql/:id` on a missing id returns HTTP 404; the body uses a provisional `{ "error": "not_found", "message": "..." }` shape that is not yet pinned by the error contract (G-13 in the inventory). For a `Guaranteed` not-found shape, use GraphQL or `GET /rest/doogats/:id`. The shape will be standardized in a follow-up documentation pass.
+- **Not-found behavior**: `Specialized` — `GET /nosql/:id` on a missing id returns HTTP 404 + `{ "error": "NOT_FOUND", "message": "..." }`, the same shape REST returns. The body is hand-rolled on the NoSQL handler rather than routed through the shared error contract, so it is not formally pinned; for a contractually `Guaranteed` not-found shape, use GraphQL or `GET /rest/doogats/:id`.
 
 ### Specialized and intentionally absent capabilities
 
@@ -267,7 +267,7 @@ NoSQL HTTP is a read-only document fetch and prefix-scan surface. Use it for O(1
 
 **Specialized:**
 - *List* - `GET /nosql?type=<type>` and `GET /nosql?tag=<tag>` return prefix-scan results with no pagination or field filtering. Use GraphQL or REST for full list/filter semantics.
-- *Not-found error shape* - HTTP 404 is `Guaranteed`, but the JSON body shape is provisional (`{ "error": "not_found", "message": "..." }`) and not yet pinned by the error contract (G-13 in the inventory). Use GraphQL or REST when your client needs a stable not-found body shape.
+- *Not-found error shape* - HTTP 404 is `Guaranteed`. The JSON body is `{ "error": "NOT_FOUND", "message": "..." }` (matching REST), but it is hand-rolled on the NoSQL handler rather than routed through the shared error contract, so it is not formally pinned. Use GraphQL or REST when your client needs a contractually stable not-found body shape.
 
 **Intentionally absent:**
 - *All write operations* - Create, Update, and Delete are absent by design. `POST`, `PUT`, and `DELETE` return HTTP 405 Method Not Allowed. Route all writes through GraphQL or REST.
@@ -307,7 +307,7 @@ AppError codes (from PRD 00147) are the stable cross-interface vocabulary. The c
 
 #### Stable error codes
 
-These codes come from two sources: the Structured violation codes in `ddb-core::error::codes` and the AppError envelope mappings in `ddb-core::app_contract::error`. All codes in this list are stable across transports.
+These codes come from three sources: the Structured violation codes in `ddb-core::error::codes`, the AppError envelope mappings in `ddb-core::app_contract::error`, and the server transport classifier (`ddb-server::error::classify`), which adds `SQL_ERROR` on the SQL-execution paths. Each code below is stable on the transports that surface it (per-code scope is noted where a code is not universal).
 
 - `VALIDATION_ERROR` — a field value fails schema validation (missing required field, wrong format).
 - `NOT_NULL_VIOLATION` — a non-nullable column received a null value.
@@ -323,6 +323,7 @@ These codes come from two sources: the Structured violation codes in `ddb-core::
 - `CONFLICT` — the operation conflicts with current state (e.g., a concurrent write).
 - `SINGLETON_VIOLATION` — a create was attempted for a type that allows only one instance.
 - `SINGLETON_NOT_FOUND` — a singleton read was attempted but no instance exists yet.
+- `SQL_ERROR` — a SQL statement failed in the engine (unsupported DDL, syntax error, or a constraint surfaced by the SQL layer). Surfaced on the SQL-execution paths: GraphQL `executeSql` / `executeBatch` and the REST/NoSQL HTTP layer (HTTP 422). It is not part of the AppError envelope — internal SQL failures reached outside the SQL-execution path surface as `INTERNAL_ERROR`.
 - `INTERNAL_ERROR` — a catch-all for unexpected internal errors that do not map to a specific code above. Clients should treat this as "report and retry"; downstream code should not pattern-match on it as part of normal flow.
 
 #### Per-interface error framing
@@ -338,7 +339,7 @@ These codes come from two sources: the Structured violation codes in `ddb-core::
 
 Structured warnings use the `AppWarning` type (PRD 00147). Two interfaces surface the `warnings` channel today:
 
-- **GraphQL**: top-level `warnings` array on the response.
+- **GraphQL**: `warnings` array under the response `extensions` object (`extensions.warnings`).
 - **REST**: top-level `warnings` array in the `{ data, warnings }` response envelope (see [REST warnings (D-11)](#rest-warnings-d-11)).
 
 The remaining interfaces defer structured warnings:
@@ -357,7 +358,7 @@ The remaining interfaces defer structured warnings:
 |-----------|-------------------------------|
 | CLI (`ddb create`) | base doogat + `UNREGISTERED_TYPE_BASE_ONLY` warning on stderr (restores the released ≤ v0.2.5 contract) |
 | GraphQL `createDoogat` | rejects with `TYPE_NOT_REGISTERED` |
-| REST `POST /rest/doogats` | rejects with `TYPE_NOT_REGISTERED` (HTTP 422); typed/unregistered create is `Specialized` (D-REST-1) |
+| REST `POST /rest/doogats` | rejects with `TYPE_NOT_REGISTERED` (HTTP 422); typed/unregistered create is `Specialized` |
 | PgWire / FFI / NoSQL HTTP | unaffected — no unregistered-type base-create path |
 
 A *registered* `type` runs the full typed pipeline on every interface regardless of policy.

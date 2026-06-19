@@ -27,7 +27,7 @@ See the [Building Apps guide](guide/building-apps.md) for details on each mode.
 
 ## Current Status
 
-MVP implementation. The core library (`ddb-core`) and CLI (`ddb`) are functional with 10 modules, 12 CLI commands (+ 2 subcommands), and full two-node sync with conflict resolution. Includes a SQL engine for typed doogat tables, implicit type inference, and bundled type definitions.
+MVP implementation. The core library (`ddb-core`) and CLI (`ddb`) are functional, with a full command surface and two-node sync with conflict resolution. Includes a SQL engine for typed doogat tables, implicit type inference, and bundled type definitions.
 
 ## Documentation Structure
 

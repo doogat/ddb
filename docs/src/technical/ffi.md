@@ -20,7 +20,7 @@ DoogatDriver (ffi/driver.rs) ← UniFFI proc-macro boundary
       └── parser             ← parse/serialize
 ```
 
-`DoogatDriver` wraps `GitRepo` and `Index` behind `Mutex` for thread safety. All methods take `&self` (shared reference via `Arc` on the foreign side).
+`DoogatDriver` wraps a single `Mutex<DoogatService>` for thread safety; every method reaches the service through the central `with_service` / `with_service_mut` helpers. All methods take `&self` (shared reference via `Arc` on the foreign side).
 
 ## Mobile Integration Model
 
@@ -134,6 +134,7 @@ Returns `SqlResultRecord`:
 | Method | Delegates to |
 |--------|-------------|
 | `reindex()` | `index.rebuild` |
+| `run_maintenance()` | `service::run_maintenance`, returns the run's `success` flag |
 | `register_node(name)` | `sync_manager::register_node`, returns UUID |
 | `compact()` | `SyncManager::open` → `compaction::compact` |
 | `export_full_bundle(output_path)` | `bundle::export_full_bundle`, returns path |
@@ -142,16 +143,29 @@ Returns `SqlResultRecord`:
 
 ## Error Mapping
 
-`DdbError` is a UniFFI-exported enum mirroring `DoogatError` variants. Each variant carries a `msg: String`. The `From<DoogatError>` impl maps internal errors to FFI-safe variants:
+`DdbError` is a UniFFI-exported enum mirroring `DoogatError` variants. Most variants carry a single `msg: String`; the `Validation` and `SqlEngine` variants additionally carry `code: Option<String>` and `context: Vec<DdbErrorContextEntry>` (populated from a `Structured` violation's code and context). The `From<DoogatError>` impl maps internal errors to FFI-safe variants:
 
 | DoogatError | DdbError |
 |------------|---------|
 | `Git(msg)` | `Git { msg }` |
 | `Yaml(msg)` | `Yaml { msg }` |
 | `Sql(msg)` | `Sql { msg }` |
+| `Automerge(msg)` | `Automerge { msg }` |
 | `Io(e)` | `Io { msg: e.to_string() }` |
 | `Toml(msg)` | `Config { msg }` |
+| `Parse(msg)` | `Parse { msg }` |
+| `NotFound(msg)` | `NotFound { msg }` |
+| `Validation(msg)` | `Validation { msg, code: None, context: [] }` |
+| `InvalidPath(msg)` | `Validation { msg, code: None, context: [] }` |
+| `BadRequest(msg)` | `Validation { msg, code: None, context: [] }` |
+| `SqlEngine(msg)` | `SqlEngine { msg, code: None, context: [] }` |
+| `Conflict(msg)` | `Git { msg }` |
+| `Sync(msg)` | `Git { msg }` |
+| `Index(msg)` | `Sql { msg }` |
+| `Redb(msg)` (nosql feature) | `Io { msg }` |
 | `VersionMismatch { repo, driver }` | `VersionMismatch { msg: "..." }` |
+| `Structured` (`REFERENCES_VIOLATION`, `CASCADE_CYCLE`) | `SqlEngine { msg, code: Some(code), context }` |
+| `Structured` (all other codes) | `Validation { msg, code: Some(code), context }` |
 
 ### Service lock access
 
@@ -165,13 +179,14 @@ after a poisoned lock, never a Rust panic.
 
 ## FFI Records
 
-- `SearchResult` — `{ id, title, path, snippet, rank }` (mirrors `types::SearchResult`)
+- `SearchResult` — `{ id, title, path, snippet, rank, updated_at }` (mirrors `types::SearchResult`)
 - `PaginatedSearchResult` — `{ hits: Vec<SearchResult>, total_count: u64 }`
 - `RebuildReport` — `{ indexed, tables_materialized, types_inferred }` (subset of `types::RebuildReport`, omits warnings)
-- `AttachmentInfo` — `{ name, mime, size }` (mirrors `types::AttachmentInfo`)
+- `AttachmentInfo` — `{ name, mime, size, path }` (mirrors `types::AttachmentInfo`)
 - `SqlResultRecord` — `{ columns, rows, affected_rows, message }` (flat conversion from `SqlResult` enum)
 - `TypeSchemaRecord` — `{ table_name, columns, crdt_strategy, template_sections }`
 - `ColumnDefRecord` — `{ name, data_type, references, required }`
+- `DdbErrorContextEntry` — `{ key, value: Option<String>, values }` (structured-error context attached to the `Validation` / `SqlEngine` variants)
 
 ## Compatibility and Deprecation
 
@@ -180,9 +195,9 @@ Promise labels (`Guaranteed`, `Specialized`, `Intentionally absent`, `Deprecated
 ### Deprecated behavior
 
 - **`DoogatDriver.search` wraps engine errors as `DdbError::Sql(msg)`**: throws the SQL variant carrying engine error text in the string payload; no per-code typed variant, so Swift/Kotlin consumers substring-match `msg` to branch on failure kind. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD will expose AppError codes as typed FFI enum variants on `DoogatError`, mirroring the AppError envelope PRD 00147 shipped for the network transports. Status: planned, not yet implemented.
-- **`DoogatDriver.get` throws `DdbError::Io(msg)` on not-found**: error message carries the substring `"not found"`; consumers detect missing-id failures via `msg.contains("not found")`. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds `DdbError::NotFound { id }` as a typed variant, mirroring AppError's `NOT_FOUND` code shipped by PRD 00147. Status: planned, not yet implemented.
-- **`DoogatDriver.delete` followed by `get` returns the same untyped not-found shape**: the post-delete read inherits the `DdbError::Io(msg)` "not found" shape; consumers cannot distinguish delete-then-get from any other IO failure without substring matching. Replacement: same typed `NotFound` variant under candidate `ffi-typed-errors-v1`. Status: planned, not yet implemented.
-- **`DoogatDriver.create` invalid-type error embeds code in `DdbError::Sql(msg)`**: throws the SQL variant whose message contains `TYPE_NOT_REGISTERED`; the structured code AppError already carries internally is recoverable only by parsing the message string. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD exposes AppError validation codes (including `TYPE_NOT_REGISTERED`) as typed FFI enum variants. Status: planned, not yet implemented.
+- **`DoogatDriver.read_doogat` throws `DdbError::Io(msg)` on not-found**: error message carries the substring `"not found"`; consumers detect missing-id failures via `msg.contains("not found")`. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds `DdbError::NotFound { id }` as a typed variant, mirroring AppError's `NOT_FOUND` code shipped by PRD 00147. Status: planned, not yet implemented.
+- **`DoogatDriver.delete_doogat` followed by `read_doogat` returns the same untyped not-found shape**: the post-delete read inherits the `DdbError::Io(msg)` "not found" shape; consumers cannot distinguish delete-then-read from any other IO failure without substring matching. Replacement: same typed `NotFound` variant under candidate `ffi-typed-errors-v1`. Status: planned, not yet implemented.
+- **`DoogatDriver.create_doogat` invalid-type error embeds code in `DdbError::Sql(msg)`**: throws the SQL variant whose message contains `TYPE_NOT_REGISTERED`; the structured code AppError already carries internally is recoverable only by parsing the message string. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD exposes AppError validation codes (including `TYPE_NOT_REGISTERED`) as typed FFI enum variants. Status: planned, not yet implemented.
 - **FFI return types omit the structured warning channel**: `RebuildReport` explicitly omits warnings and other FFI return types do not carry a structured warning channel; AppWarning entries are dropped at the UniFFI boundary. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds a structured-warnings surface to FFI return types (e.g. `AppOutput<T>`-equivalent UniFFI record carrying `warnings: Vec<WarningEntry>`), mirroring the AppOutput shape PRD 00147 established for the network transports. Status: planned, not yet implemented.
 
 ### Specialized capabilities
@@ -222,14 +237,9 @@ Output files:
 
 ## Thread Safety
 
-`DoogatDriver` fields are wrapped in `Mutex`:
-- `repo: Mutex<GitRepo>` — serializes all git operations
-- `index: Mutex<Index>` — serializes all SQLite operations
-- `txn: Mutex<Option<TransactionBuffer>>` — holds buffered writes/deletes during an active transaction
+`DoogatDriver` holds a single `svc: Mutex<DoogatService>`. Every exported method acquires that one lock through `with_service` / `with_service_mut`, so all git, SQLite, and sync operations are serialized behind it — there is no multi-lock ordering to reason about. If a prior call panicked while holding the lock the mutex is poisoned, and the helpers map `PoisonError` to `DdbError::Io { msg: "service lock poisoned: ..." }` rather than letting the panic cross the FFI boundary.
 
-When multiple locks are needed, the canonical acquisition order is **index → repo → txn**. Methods that only need one lock at a time (e.g. `read_doogat`) may drop and reacquire in any order.
-
-During a transaction, `execute_sql` injects the stored `TransactionBuffer` into a fresh `SqlEngine`, executes, then extracts the buffer back. The SAVEPOINT lives on `Index.conn` and persists across calls. This avoids self-referential lifetime issues while maintaining SqlEngine's transaction semantics.
+During a transaction, `execute_sql` runs against the `SqlEngine` owned by the locked `DoogatService`; the SAVEPOINT lives on the service's SQLite connection and persists across `execute_sql` calls until `commit_transaction` / `rollback_transaction`.
 
 ## On-Device Verification
 

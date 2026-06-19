@@ -58,7 +58,7 @@ ddb update-bin --rollback
 
 ### Stable (v0.2 API contract)
 
-- CLI: init, create, read, update, delete, search, query, rename, type, sync, status, compact, reindex, fix, discover
+- CLI: init, create, read, update, delete, search, query, rename, type, sync, status, compact, reindex, fix, discover, register-node, node, maintenance, sequence
 - Git storage format (doogat Markdown, frontmatter schema)
 - SQLite FTS5 search
 - SQL SELECT, CREATE TABLE, INSERT, UPDATE, DELETE (including bulk, transactions, upsert)
@@ -105,7 +105,7 @@ cargo clippy --workspace   # lint
 ### Benchmarks
 
 ```bash
-cargo bench                # run criterion benchmarks (CRUD + search)
+cargo bench                # run criterion benchmarks
 ```
 
 ### Install locally
