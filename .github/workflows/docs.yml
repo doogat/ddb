@@ -23,7 +23,7 @@ jobs:
     env:
       MDBOOK_VERSION: v0.5.2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install mdbook
         run: |
