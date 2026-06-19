@@ -52,9 +52,11 @@ Execute arbitrary SQL against the index database. Useful for advanced queries co
 | Table | Columns |
 |-------|---------|
 | `doogats` | `id`, `title`, `date`, `type`, `path`, `body`, `updated_at` |
-| `tags` | `doogat_id`, `tag` |
-| `fields` | `doogat_id`, `key`, `value`, `zone` |
-| `links` | `source_id`, `target_path`, `display`, `zone` |
+| `_ddb_tags` | `doogat_id`, `tag`, `source` |
+| `_ddb_fields` | `doogat_id`, `key`, `value`, `zone` |
+| `_ddb_links` | `source_id`, `target_path`, `display`, `zone`, `kind` |
+
+> The underscore-prefixed `_ddb_*` tables are internal index tables and may change between releases. The `doogats` table and the materialized per-type tables are the stable query surface.
 
 ### Examples
 
@@ -67,19 +69,19 @@ ddb query "SELECT id, title FROM doogats ORDER BY date DESC"
 Find doogats by tag:
 
 ```bash
-ddb query "SELECT z.id, z.title FROM doogats z JOIN tags t ON t.doogat_id = z.id WHERE t.tag = 'crdt'"
+ddb query "SELECT z.id, z.title FROM doogats z JOIN _ddb_tags t ON t.doogat_id = z.id WHERE t.tag = 'crdt'"
 ```
 
 Find backlinks to a doogat:
 
 ```bash
-ddb query "SELECT z.title FROM doogats z JOIN links l ON l.source_id = z.id WHERE l.target_path = '20260226120000'"
+ddb query "SELECT z.title FROM doogats z JOIN _ddb_links l ON l.source_id = z.id WHERE l.target_path = '20260226120000'"
 ```
 
 Find doogats with a specific inline field:
 
 ```bash
-ddb query "SELECT z.title, f.value FROM doogats z JOIN fields f ON f.doogat_id = z.id WHERE f.key = 'source'"
+ddb query "SELECT z.title, f.value FROM doogats z JOIN _ddb_fields f ON f.doogat_id = z.id WHERE f.key = 'source'"
 ```
 
 Count doogats by type:
