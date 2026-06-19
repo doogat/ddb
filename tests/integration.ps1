@@ -3226,7 +3226,7 @@ Remove-Item -Recurse -Force $P9_DIR
 # (`service::tests::batch_create_*`, `create_doogat_with_extra_*`); this
 # section drives the CLI/FFI surface so cross-shell regressions surface in CI.
 Write-Host "=== PRD 00133: unified typed-write paths (CLI parity) ==="
-$TW_DIR = New-TemporaryDirectory
+$TW_DIR = New-TempDir
 Push-Location $TW_DIR
 ddb init | Out-Null
 ddb query "CREATE TABLE tw_category (label VARCHAR(64))" | Out-Null
