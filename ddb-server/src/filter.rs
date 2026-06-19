@@ -156,6 +156,27 @@ pub fn sort_order_enum() -> Enum {
         .item(EnumItem::new("DESC"))
 }
 
+/// Base doogat sort keys injected into every `{Type}OrderBy` input, paired
+/// with the materialized column each resolves to in `build_order_sql`.
+///
+/// `created_at` backs onto the `date` column on purpose: the typed object's
+/// `created_at` field returns the doogat's `date` value, so ordering by
+/// `date` matches the value the client actually sees. `updated_at` and `id`
+/// back onto their own columns.
+const BASE_ORDER_FIELDS: &[(&str, &str)] = &[
+    ("id", "id"),
+    ("created_at", "date"),
+    ("updated_at", "updated_at"),
+];
+
+/// Resolve a base sort key to its materialized backing column.
+fn base_order_column(name: &str) -> Option<&'static str> {
+    BASE_ORDER_FIELDS
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, col)| *col)
+}
+
 /// Generate a `{TypeName}OrderBy` input type from a `TableSchema`.
 pub fn build_order_by_input(type_name: &str, schema: &TableSchema) -> InputObject {
     let mut input = InputObject::new(format!("{type_name}OrderBy"));
@@ -163,6 +184,19 @@ pub fn build_order_by_input(type_name: &str, schema: &TableSchema) -> InputObjec
     for col in &schema.columns {
         let gql_name = sanitize_field_name(&col.name);
         input = input.field(InputValue::new(&gql_name, TypeRef::named("SortOrder")));
+    }
+
+    // Base doogat sort keys, collision-guarded against typedef columns of the
+    // same sanitized name (mirrors build_where_input's base-field injection).
+    let sanitized: Vec<String> = schema
+        .columns
+        .iter()
+        .map(|c| sanitize_field_name(&c.name))
+        .collect();
+    for (key, _) in BASE_ORDER_FIELDS {
+        if !sanitized.iter().any(|n| n == key) {
+            input = input.field(InputValue::new(*key, TypeRef::named("SortOrder")));
+        }
     }
 
     input
@@ -180,8 +214,11 @@ pub fn build_order_sql(input: &GqlValue, schema: &TableSchema) -> Option<String>
     };
 
     let mut parts = Vec::new();
+    let mut has_id = false;
     for (name, value) in obj {
-        let Some(col) = resolve_column(&schema.columns, name.as_str()) else {
+        let Some(col) = resolve_column(&schema.columns, name.as_str())
+            .or_else(|| base_order_column(name.as_str()))
+        else {
             continue;
         };
         let dir = match value {
@@ -190,7 +227,12 @@ pub fn build_order_sql(input: &GqlValue, schema: &TableSchema) -> Option<String>
             _ => continue,
         };
         match dir {
-            "ASC" | "DESC" => parts.push(format!("\"{col}\" {dir}")),
+            "ASC" | "DESC" => {
+                if col == "id" {
+                    has_id = true;
+                }
+                parts.push(format!("\"{col}\" {dir}"));
+            }
             _ => continue,
         }
     }
@@ -198,6 +240,11 @@ pub fn build_order_sql(input: &GqlValue, schema: &TableSchema) -> Option<String>
     if parts.is_empty() {
         None
     } else {
+        // Deterministic total order for offset pagination: append the unique
+        // primary key as a final tiebreaker unless the caller already sorts by id.
+        if !has_id {
+            parts.push("\"id\" ASC".to_string());
+        }
         Some(parts.join(", "))
     }
 }
