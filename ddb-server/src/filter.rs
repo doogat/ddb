@@ -1070,14 +1070,14 @@ mod tests {
     fn test_single_sort_asc() {
         let input = order("title", "ASC");
         let sql = build_order_sql(&input, &test_schema());
-        assert_eq!(sql.as_deref(), Some(r#""title" ASC"#));
+        assert_eq!(sql.as_deref(), Some(r#""title" ASC, "id" ASC"#));
     }
 
     #[test]
     fn test_single_sort_desc() {
         let input = order("priority", "DESC");
         let sql = build_order_sql(&input, &test_schema());
-        assert_eq!(sql.as_deref(), Some(r#""priority" DESC"#));
+        assert_eq!(sql.as_deref(), Some(r#""priority" DESC, "id" ASC"#));
     }
 
     #[test]
@@ -1101,6 +1101,132 @@ mod tests {
     fn test_sort_unknown_column_ignored() {
         let input = order("nonexistent", "ASC");
         assert!(build_order_sql(&input, &test_schema()).is_none());
+    }
+
+    // -- Base sort key tests --
+
+    #[test]
+    fn created_at_asc_orders_by_date_column_with_id_tiebreaker() {
+        let schema = schema_with_table("note", vec!["title"]);
+        let input = order("created_at", "ASC");
+        let sql = build_order_sql(&input, &schema);
+        assert_eq!(sql.as_deref(), Some(r#""date" ASC, "id" ASC"#));
+    }
+
+    #[test]
+    fn created_at_desc_orders_by_date_column_with_id_tiebreaker() {
+        let schema = schema_with_table("note", vec!["title"]);
+        let input = order("created_at", "DESC");
+        let sql = build_order_sql(&input, &schema);
+        assert_eq!(sql.as_deref(), Some(r#""date" DESC, "id" ASC"#));
+    }
+
+    #[test]
+    fn updated_at_desc_orders_by_updated_at_column_with_id_tiebreaker() {
+        let schema = schema_with_table("note", vec!["title"]);
+        let input = order("updated_at", "DESC");
+        let sql = build_order_sql(&input, &schema);
+        assert_eq!(sql.as_deref(), Some(r#""updated_at" DESC, "id" ASC"#));
+    }
+
+    #[test]
+    fn id_asc_has_no_duplicate_id_tiebreaker() {
+        let schema = schema_with_table("note", vec!["title"]);
+        let input = order("id", "ASC");
+        let sql = build_order_sql(&input, &schema).expect("id ASC must produce Some");
+        assert_eq!(sql, r#""id" ASC"#);
+        // Ensure "id" appears exactly once — no appended tiebreaker
+        assert_eq!(sql.matches("\"id\"").count(), 1);
+    }
+
+    #[test]
+    fn id_desc_has_no_duplicate_id_tiebreaker() {
+        let schema = schema_with_table("note", vec!["title"]);
+        let input = order("id", "DESC");
+        let sql = build_order_sql(&input, &schema).expect("id DESC must produce Some");
+        assert_eq!(sql, r#""id" DESC"#);
+        assert_eq!(sql.matches("\"id\"").count(), 1);
+    }
+
+    #[test]
+    fn multi_key_updated_at_then_created_at_appends_id_tiebreaker_once() {
+        let schema = schema_with_table("note", vec!["title"]);
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("updated_at"), GqlValue::Enum(Name::new("DESC")));
+        obj.insert(Name::new("created_at"), GqlValue::Enum(Name::new("ASC")));
+        let input = GqlValue::Object(obj);
+        let sql = build_order_sql(&input, &schema);
+        assert_eq!(
+            sql.as_deref(),
+            Some(r#""updated_at" DESC, "date" ASC, "id" ASC"#)
+        );
+    }
+
+    #[test]
+    fn created_at_collision_with_schema_column_uses_user_column() {
+        // When the typedef declares its own `created_at` column, that column
+        // is used directly rather than remapping to `date`.
+        let schema = schema_with_table("event", vec!["title", "created_at"]);
+        let input = order("created_at", "DESC");
+        let sql = build_order_sql(&input, &schema);
+        assert_eq!(sql.as_deref(), Some(r#""created_at" DESC, "id" ASC"#));
+    }
+
+    #[test]
+    fn build_order_by_input_exposes_base_sort_keys_in_sdl() {
+        let schema = schema_with_table("note", vec!["title"]);
+        let order_by = build_order_by_input("Note", &schema);
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(sort_order_enum())
+            .register(order_by)
+            .register(
+                async_graphql::dynamic::Object::new("Query").field(Field::new(
+                    "dummy",
+                    TypeRef::named(TypeRef::STRING),
+                    |_| FieldFuture::new(async { Ok(Option::<FieldValue>::None) }),
+                )),
+            )
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+        assert!(
+            sdl.contains("id: SortOrder"),
+            "NoteOrderBy must expose 'id: SortOrder', got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("created_at: SortOrder"),
+            "NoteOrderBy must expose 'created_at: SortOrder', got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("updated_at: SortOrder"),
+            "NoteOrderBy must expose 'updated_at: SortOrder', got:\n{sdl}"
+        );
+    }
+
+    #[test]
+    fn build_order_by_input_no_duplicate_created_at_when_schema_declares_it() {
+        // When the typedef has its own `created_at` column, the base key
+        // must NOT be registered a second time — exactly one occurrence.
+        let schema = schema_with_table("event", vec!["title", "created_at"]);
+        let order_by = build_order_by_input("Event", &schema);
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(sort_order_enum())
+            .register(order_by)
+            .register(
+                async_graphql::dynamic::Object::new("Query").field(Field::new(
+                    "dummy",
+                    TypeRef::named(TypeRef::STRING),
+                    |_| FieldFuture::new(async { Ok(Option::<FieldValue>::None) }),
+                )),
+            )
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+        let occurrences = sdl.matches("created_at: SortOrder").count();
+        assert_eq!(
+            occurrences, 1,
+            "created_at: SortOrder must appear exactly once in EventOrderBy SDL, got {occurrences} times:\n{sdl}"
+        );
     }
 
     // -- Aggregation tests --
