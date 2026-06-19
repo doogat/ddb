@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-19
+
 ### Added
 
 - **graphql**: GraphQL responses now include an `extensions.warnings` array carrying structured `AppOutput::warnings` entries from `createDoogat`. Each entry has `code` (stable string) and `message` (human-readable). The key is always present, an empty array when no warnings were collected. Client handling is advisory; existing `data`/`errors` response shape is unchanged. (PRD 00154)
@@ -305,7 +307,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error responses never leak internal paths, stack traces, or SQL details
 - quinn-proto upgraded to 0.11.14 (RUSTSEC-2026-0037)
 
-[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/doogat/ddb/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/doogat/ddb/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/doogat/ddb/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/doogat/ddb/compare/v0.2.2...v0.2.3

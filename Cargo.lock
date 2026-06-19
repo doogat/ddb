@@ -994,7 +994,7 @@ checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
 name = "ddb-cli"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "chrono",
  "clap",
@@ -1017,7 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "ddb-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "automerge",
  "chrono",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "ddb-e2e"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "assert_cmd",
  "predicates",
@@ -1064,7 +1064,7 @@ dependencies = [
 
 [[package]]
 name = "ddb-server"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "arc-swap",
  "async-graphql",
@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "ddb-uniffi-bindgen"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "uniffi",
 ]
