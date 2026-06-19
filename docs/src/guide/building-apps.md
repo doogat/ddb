@@ -57,7 +57,7 @@ Doogat DB exposes several network and embedded interfaces. They are not equivale
 | **REST CRUD/search** | **REST (`/rest/*`)** | GraphQL | Base-doogat CRUD and list/search over standard HTTP. No GraphQL library needed. Typed create/update is expressible via the `fields` body member (interface-local e2e coverage); there are still no dedicated per-type REST routes. Not a blanket `Guaranteed` — see [Promise labels](#promise-labels). |
 | **NoSQL document access** | **NoSQL HTTP (`/nosql/*`)** | REST `GET /rest/doogats/:id` | Read-only by design. O(1) document fetch and prefix scan by type or tag. All write/mutate operations are `Intentionally absent` — route writes through GraphQL or REST. |
 
-Each row corresponds to a golden workflow defined in `dev/local/notes/downstream-golden-workflows.md` (GW-1 through GW-12). The conformance harness exercises the cross-interface CRUD baseline (GW-3, `crud_baseline` fixture) against CLI and GraphQL. REST has its own e2e suite (`tests/e2e/rest.rs`); FFI and PgWire are covered by interface-local e2e tests only, with no shared cross-interface harness driver yet (deferred to a harness follow-up PRD) — their CRUD-baseline rows are therefore an explicit conformance downgrade (`Specialized` coverage), not harness-pinned `Guaranteed`. Golden workflow examples for GW-1, GW-3, GW-4, GW-5, and GW-7 appear in [Golden workflow examples](#golden-workflow-examples) below.
+Each row corresponds to a golden workflow (GW-1 through GW-12). The conformance harness exercises the cross-interface CRUD baseline (GW-3, `crud_baseline` fixture) against CLI and GraphQL. REST has its own e2e suite (`tests/e2e/rest.rs`); FFI and PgWire are covered by interface-local e2e tests only, with no shared cross-interface harness driver yet (deferred to a harness follow-up PRD) — their CRUD-baseline rows are therefore an explicit conformance downgrade (`Specialized` coverage), not harness-pinned `Guaranteed`. Golden workflow examples for GW-1, GW-3, GW-4, GW-5, and GW-7 appear in [Golden workflow examples](#golden-workflow-examples) below.
 
 ### What "Specialized" means
 
@@ -85,7 +85,7 @@ For CLI consumers, one deprecation applies: warnings currently surface as unstru
 
 #### Migration Notes
 
-One note per deprecation entry. All deprecations are Risk=low (no shim entries exist as of this writing). Notes follow the source order in `interface-deprecations.md` §2 (D-01 through D-13). For deprecations whose replacement is a candidate slug ("Status: planned, not yet implemented"), no client action is required yet; the current behavior remains supported until the named follow-up PRD ships.
+One note per deprecation entry, each tagged with its stable `D-0X` id. All deprecations are Risk=low (no shim entries exist as of this writing). The original `interface-deprecations.md` registry was lost in a dev/local cleanup, so these notes are now self-contained and authoritative. For deprecations whose replacement is a candidate slug ("Status: planned, not yet implemented"), no client action is required yet; the current behavior remains supported until the named follow-up PRD ships.
 
 ##### REST search error envelope (D-01)
 
@@ -93,107 +93,81 @@ One note per deprecation entry. All deprecations are Risk=low (no shim entries e
 - **New behavior**: AppError envelope shipped by PRD 00147 routes REST errors through the same code vocabulary as GraphQL. The `{ error, message }` envelope shape is unchanged; the `error` field now carries the unified code (e.g. `NOT_FOUND`, `VALIDATION_ERROR`, `UNIQUE_VIOLATION`) instead of REST-local short-strings.
 - **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`. See `docs/src/technical/server.md` REST error section. (REST has no `extensions` object — that path is GraphQL-only.)
 - **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. The legacy REST-local short-strings have already been removed (REST errors route through the shared `http_error_response`/`classify` helper, shipped by PRD 00147/00143), so only the unified codes appear.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-01.
-
 ##### FFI search error variant (D-02)
 
 - **Old behavior**: FFI `DoogatDriver.search` throws `DdbError::Sql(msg)` carrying engine error text in the string payload.
 - **New behavior**: planned typed FFI error variants mirroring AppError codes; not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will add per-code typed `DoogatError` enum variants.
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; current `catch DdbError.sql` substring-matching remains supported.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-02.
-
 ##### REST CRUD mutation error envelope (D-03)
 
 - **Old behavior**: REST `POST/PUT /rest/doogats[/:id]` returns HTTP 4xx + `{ error, message }` envelope on validation failure. The `error` field carries a REST-local short-string code.
 - **New behavior**: AppError envelope shipped by PRD 00147 feeds the same unified code vocabulary into REST mutations. Envelope shape is unchanged; the `error` field now carries the unified code.
 - **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`.
 - **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. The legacy REST-local short-strings have already been removed (REST errors route through the shared `http_error_response`/`classify` helper, shipped by PRD 00147/00143), so only the unified codes appear.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-03.
-
 ##### REST typed create/update (D-04)
 
 - **Old behavior**: REST `POST/PUT /rest/doogats` typed payloads silently wrote only the base-doogat shape; type-specific tables were not populated atomically.
 - **New behavior**: REST typed *update* shipped earlier via `UpdateBody.fields`. REST typed *create* ships in PRD 00149 via the new `CreateBody.fields` member on the generic `POST /rest/doogats` endpoint (not a per-type route). Both are now expressible via the `fields` body member, with interface-local e2e coverage.
 - **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-string body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update).
 - **Required client changes**: add a `fields` JSON-string member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
-- Source: this document's Compatibility and Deprecation section; original `interface-deprecations.md` §2 D-04 was lost in a dev/local cleanup.
-
 ##### FFI not-found error variant on `get` (D-05)
 
 - **Old behavior**: FFI `DoogatDriver.get` throws `DdbError.io(msg)` with the substring `"not found"` when the id is missing.
 - **New behavior**: planned typed `DdbError::NotFound { id }` variant mirroring AppError's `NOT_FOUND` code; not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will expose a typed `NotFound` variant on `DoogatError`.
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; current `msg.contains("not found")` substring-matching remains supported.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-05.
-
 ##### FFI not-found error variant on `delete` + `get` (D-06)
 
 - **Old behavior**: post-delete FFI `DoogatDriver.get` inherits the same untyped `DdbError.io(msg)` "not found" shape as D-05.
 - **New behavior**: planned typed `NotFound` variant covers the delete-then-get path identically; not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD (same gate as D-05).
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; current behavior remains supported.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-06.
-
 ##### FFI invalid-type error variant on `create` (D-07)
 
 - **Old behavior**: FFI `DoogatDriver.create` with an invalid type throws `DdbError.sql(msg)` whose message string contains `TYPE_NOT_REGISTERED`.
 - **New behavior**: planned typed FFI variants for AppError validation codes (including `TYPE_NOT_REGISTERED`); not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will expose validation codes as typed `DoogatError` enum variants.
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; parsing `msg` for `TYPE_NOT_REGISTERED` remains supported.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-07.
-
 ##### REST validation error vocabulary (D-08)
 
 - **Old behavior**: REST `POST /rest/doogats` (invalid) returns HTTP 400/422 with the `error` field carrying a short REST-local code string (and 500 on server errors).
 - **New behavior**: AppError envelope shipped by PRD 00147 routes REST validation errors through the unified code vocabulary. The `error` field now carries the same codes GraphQL validation errors expose under `extensions.code`.
 - **Replacement interface**: REST's `error` field, carrying the same code vocabulary GraphQL exposes under `extensions.code`.
 - **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. The legacy REST-local short-strings have already been removed (REST errors route through the shared `http_error_response`/`classify` helper, shipped by PRD 00147/00143), so only the unified codes appear.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-08.
-
 ##### REST typed create/update route (D-09)
 
 - **Old behavior**: REST `POST/PUT /rest/doogats` typed payloads routed through the base endpoint without atomic typed-column population (no per-type route shape).
 - **New behavior**: REST typed *update* shipped earlier via `UpdateBody.fields`. REST typed *create* ships in PRD 00149 via the new `CreateBody.fields` member on the generic `POST /rest/doogats` endpoint. Both populate typed columns through the unified AppCommand on the same base route — there is no per-type route shape, and none is planned.
 - **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-string body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update). Same base routes; no per-type routes.
 - **Required client changes**: add a `fields` JSON-string member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
-- Source: this document's Compatibility and Deprecation section; original `interface-deprecations.md` §2 D-09 was lost in a dev/local cleanup.
-
 ##### CLI warnings (D-10)
 
 - **Old behavior**: CLI warnings emit as human-readable text on stderr; no machine-readable envelope.
 - **New behavior**: planned `--json-errors` / `--json-output` mode will serialize `AppWarning` entries as structured JSON on stderr; not yet shipped.
 - **Replacement interface**: candidate `cli-json-errors-v1` follow-up PRD will add the structured-JSON CLI mode.
 - **Required client changes**: none yet. Wait for `cli-json-errors-v1` to ship; current text-scraping remains supported. Scripts that need structured warnings today can fall back to GraphQL.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-10.
-
 ##### REST warnings (D-11)
 
 - **Old behavior**: REST warnings surface as text embedded in the HTTP response body; no structured channel.
 - **New behavior**: REST `warnings` array shipped by PRD 00147 carries structured `AppWarning` entries alongside `data`.
 - **Replacement interface**: REST top-level `warnings` array on the response envelope.
 - **Required client changes**: parse the structured `warnings` array on REST responses; the legacy text-in-body emission remains until PRD 00149 removes it.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-11.
-
 ##### PgWire warnings (D-12)
 
 - **Old behavior**: PgWire warnings are not surfaced over the wire protocol; no structured channel and no notice-emission path.
 - **New behavior**: planned mapping of AppError codes and AppWarning entries onto PostgreSQL `ErrorResponse`/`NoticeResponse` messages; not yet shipped.
 - **Replacement interface**: candidate `pgwire-structured-errors-v1` follow-up PRD (extends deferred PRD 00139 §T22 work).
 - **Required client changes**: none yet. Wait for `pgwire-structured-errors-v1` to ship; PgWire consumers needing warnings today must read them through GraphQL.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-12.
-
 ##### FFI warnings (D-13)
 
 - **Old behavior**: FFI return types omit the structured warning channel (`RebuildReport` explicitly omits warnings; other types drop `AppWarning` at the UniFFI boundary).
 - **New behavior**: planned structured-warnings field on FFI return types (e.g. `AppOutput<T>`-equivalent UniFFI record carrying `warnings: Vec<WarningEntry>`); not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will add the structured-warnings surface.
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; FFI consumers needing warnings today must read them through GraphQL.
-- Source: `dev/local/notes/interface-deprecations.md` §2 D-13.
-
 ### CRUD baseline
 
-Every public application interface supports the CRUD baseline operations listed below. Labels use the [promise vocabulary](#promise-labels). Source of truth for per-interface evidence: `dev/local/notes/interface-compatibility-inventory.md`.
+Every public application interface supports the CRUD baseline operations listed below. Labels use the [promise vocabulary](#promise-labels). Per-interface evidence lives in the conformance harness (`tests/e2e/conformance/`) and the interface-local e2e suites; the original `interface-compatibility-inventory.md` was lost in a dev/local cleanup.
 
 #### GraphQL
 
