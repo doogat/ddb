@@ -1526,6 +1526,60 @@ pass "serve: base field id nonexistent returns empty"
 gql "{\"query\":\"mutation { deleteDoogat(id: \\\"$BF_ID\\\") }\"}" >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE \\\"test-widget\\\"\") { message } }"}' >/dev/null
 
+# 42b. base-field orderBy (created_at/updated_at/id) + deterministic pagination
+# (PRD 00158). Mirrors ddb-server/tests/graphql_orderby_base_fields_t158.rs
+# through the live GraphQL server: create 4 rows 1s apart so created_at (= date,
+# from the id timestamp) is strictly increasing, then update the oldest row so
+# its updated_at becomes the newest — making updated_at order diverge from
+# created_at order.
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE obnote (subject TEXT NOT NULL)\") { message } }"}' | grep -q "table obnote created"
+wait_schema_reload "$VER"
+for s in n0 n1 n2 n3; do
+  gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO obnote (subject) VALUES ('$s')\\\") { message } }\"}" >/dev/null
+  sleep 1
+done
+sleep 1
+gql "{\"query\":\"mutation { executeSql(sql: \\\"UPDATE obnote SET subject = 'n0e' WHERE subject = 'n0'\\\") { message } }\"}" >/dev/null
+
+# created_at ASC: n0 (renamed n0e) is still the oldest by created_at.
+OB=$(gql '{"query":"{ obnotes(orderBy: { created_at: ASC }) { items { subject } totalCount } }"}')
+echo "$OB" | jq -e '[.data.obnotes.items[].subject] == ["n0e","n1","n2","n3"]' >/dev/null
+echo "$OB" | jq -e '.data.obnotes.totalCount == 4' >/dev/null
+pass "serve: orderBy created_at ASC"
+
+# created_at DESC: date is day-level so all rows tie; the id ASC tiebreaker
+# dominates and yields the same order as ASC.
+OB=$(gql '{"query":"{ obnotes(orderBy: { created_at: DESC }) { items { subject } } }"}')
+echo "$OB" | jq -e '[.data.obnotes.items[].subject] == ["n0e","n1","n2","n3"]' >/dev/null
+pass "serve: orderBy created_at DESC (id tiebreaker under tied dates)"
+
+# updated_at DESC: n0e was updated last, so it is newest by updated_at.
+OB=$(gql '{"query":"{ obnotes(orderBy: { updated_at: DESC }) { items { subject } } }"}')
+echo "$OB" | jq -e '[.data.obnotes.items[].subject] == ["n0e","n3","n2","n1"]' >/dev/null
+pass "serve: orderBy updated_at DESC"
+
+# updated_at ASC: n1 has the oldest updated_at, n0e the newest.
+OB=$(gql '{"query":"{ obnotes(orderBy: { updated_at: ASC }) { items { subject } } }"}')
+echo "$OB" | jq -e '[.data.obnotes.items[].subject] == ["n1","n2","n3","n0e"]' >/dev/null
+pass "serve: orderBy updated_at ASC"
+
+# id ASC: ids are timestamps, so this equals creation order.
+OB=$(gql '{"query":"{ obnotes(orderBy: { id: ASC }) { items { subject } } }"}')
+echo "$OB" | jq -e '[.data.obnotes.items[].subject] == ["n0e","n1","n2","n3"]' >/dev/null
+pass "serve: orderBy id ASC"
+
+# Deterministic pagination over created_at ASC: page1 + page2 reconstruct the
+# full order with no gaps or dupes (the id tiebreaker guarantees a total order).
+P1=$(gql '{"query":"{ obnotes(orderBy: { created_at: ASC }, limit: 2, offset: 0) { items { subject } } }"}')
+P2=$(gql '{"query":"{ obnotes(orderBy: { created_at: ASC }, limit: 2, offset: 2) { items { subject } } }"}')
+echo "$P1" | jq -e '[.data.obnotes.items[].subject] == ["n0e","n1"]' >/dev/null
+echo "$P2" | jq -e '[.data.obnotes.items[].subject] == ["n2","n3"]' >/dev/null
+pass "serve: orderBy created_at ASC deterministic pagination (no gaps/dupes)"
+
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE obnote CASCADE\") { message } }"}' >/dev/null
+
 # 43. SQL INSERT via executeSql defaults date, created_at non-null
 gql '{"query":"mutation{executeSql(sql:\"CREATE TABLE datecheck (name TEXT)\"){message}}"}' >/dev/null
 DC_RESULT=$(gql '{"query":"mutation{executeSql(sql:\"INSERT INTO datecheck (name) VALUES (\\\"DateTest\\\")\"){message}}"}')
