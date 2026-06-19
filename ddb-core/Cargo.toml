@@ -13,7 +13,8 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 automerge = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
-git2 = "0.20"
+# git2 0.21 dropped ssh/https/cred from default features; restore them so remote sync keeps working
+git2 = { version = "0.21", default-features = false, features = ["ssh", "https"] }
 hostname = "0.4"
 rayon = "1"
 tracing = "0.1"

@@ -52,7 +52,9 @@ fn commit_summaries_since(repo: &GitRepo, since: &ddb_core::types::CommitHash) -
     walk.hide(git2::Oid::from_str(&since.0).unwrap()).unwrap();
     walk.map(|oid| {
         let commit = repo.repo.find_commit(oid.unwrap()).unwrap();
-        commit.summary().unwrap_or("").to_string()
+        // git2 0.21: summary() returns Result<Option<&str>, Error> (Err on
+        // non-UTF-8, None when absent); collapse both to a plain &str default.
+        commit.summary().ok().flatten().unwrap_or("").to_string()
     })
     .collect()
 }
