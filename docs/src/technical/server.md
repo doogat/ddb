@@ -685,6 +685,34 @@ Per-type queries accept `orderBy` with column names mapped to `SortOrder` (`ASC`
   } }
 ```
 
+#### Base sort keys (PRD 00158)
+
+Every `{Type}OrderBy` input also exposes three base Doogat sort keys, on top of
+the typedef's own columns:
+
+| Key | Sorts by | Notes |
+|-----|----------|-------|
+| `id` | the doogat ID | IDs are 14-digit creation timestamps, so `id: ASC` is creation order. |
+| `created_at` | the `date` column | Matches the value the `created_at` field returns. `date` is `YYYY-MM-DD` (day-level), so same-day rows tie. |
+| `updated_at` | the `updated_at` column | Last-indexed timestamp. |
+
+```graphql
+{ projects(orderBy: { created_at: DESC }, limit: 20, offset: 0) {
+    items { id title created_at } totalCount
+  } }
+```
+
+To make `limit`/`offset` paginate deterministically, a unique `id` tiebreaker
+is appended to every sort (e.g. `orderBy: { created_at: DESC }` emits
+`ORDER BY "date" DESC, "id" ASC`). Ordering by a non-unique key like
+`created_at` or `updated_at` therefore yields a total order with no gaps or
+duplicates across pages. Sorting by `id` adds no extra tiebreaker (it is already
+unique).
+
+If a typedef declares its own column named `created_at` or `updated_at`, that
+user column wins (resolution is user-column-first), and the base key is not
+injected. `id` is reserved, so its base mapping always applies.
+
 ### Aggregation
 
 Per-type aggregate queries return `count` plus per-numeric-column `min`/`max`/`avg`/`sum`:
