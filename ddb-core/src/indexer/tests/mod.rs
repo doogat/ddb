@@ -4093,3 +4093,97 @@ fn rebuild_if_stale_inside_transaction_skips_full_rebuild_on_diff_failure() {
         "the core `doogats` table must survive a nested in-transaction diff-failure fallback"
     );
 }
+
+#[test]
+fn rematerialize_never_exposes_missing_table_to_concurrent_reader() {
+    // §55.A residual race: `materialize_all_types` dropped and recreated each
+    // user table in SEPARATE autocommit statements, so a second connection (WAL)
+    // could read between the committed DROP and the committed CREATE and see
+    // "no such table". Two concurrent `ddb create` into a SINGLETON typedef hit
+    // exactly this: the loser surfaced "no such table" instead of the structured
+    // SINGLETON message, failing integration.sh §55.A intermittently on linux CI.
+    // The fix wraps the rematerialize in one transaction, so a concurrent reader
+    // sees the OLD table or the NEW table, never an absent one.
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    // A _typedef-backed table (like §55.A's `CREATE TABLE ... SINGLETON`): it is
+    // in the orphan-cleanup keep-set, so it persists across rematerialize passes.
+    // (An inferred-only table would be dropped by drop_orphan_materialized_tables
+    // every pass, which is a legitimate absence, not the race under test.)
+    repo.commit_file(
+        "ddb/_typedef/20260101000000.md",
+        "---\nid: 20260101000000\ntitle: widget\ntype: _typedef\ncolumns:\n  - name: theme\n    data_type: TEXT\n    zone: frontmatter\n---\n",
+        "add widget typedef",
+    )
+    .unwrap();
+    // A data row so rematerialize takes the type_names drop+create+populate path
+    // (the path two racing `ddb create` invocations exercise in §55.A).
+    repo.commit_file(
+        "ddb/20260101000100.md",
+        "---\nid: 20260101000100\ntitle: W\ntype: widget\ntheme: dark\n---\nBody.",
+        "add widget row",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join("index-concurrency.db");
+    let writer = Index::open(&db_path).unwrap();
+    writer.rebuild(&repo).unwrap();
+    // Precondition: the materialized table exists and is committed before the
+    // reader connection opens.
+    writer
+        .conn
+        .query_row("SELECT COUNT(*) FROM widget", [], |r| r.get::<_, i64>(0))
+        .expect("precondition: `widget` table must exist after rebuild");
+    assert!(
+        writer.conn.is_autocommit(),
+        "precondition: writer must be in autocommit so materialize_all_types opens its own transaction"
+    );
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let missing = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::new(AtomicUsize::new(0));
+
+    let reader = Index::open(&db_path).unwrap();
+    let stop_r = Arc::clone(&stop);
+    let missing_r = Arc::clone(&missing);
+    let seen_r = Arc::clone(&seen);
+    let handle = std::thread::spawn(move || {
+        while !stop_r.load(Ordering::Relaxed) {
+            match reader
+                .conn
+                .query_row("SELECT COUNT(*) FROM widget", [], |r| r.get::<_, i64>(0))
+            {
+                Ok(_) => {
+                    seen_r.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(e) if e.to_string().contains("no such table") => {
+                    missing_r.fetch_add(1, Ordering::Relaxed);
+                }
+                // WAL readers don't block writers; any other transient is ignored.
+                Err(_) => {}
+            }
+        }
+    });
+
+    for _ in 0..500 {
+        writer
+            .materialize_all_types(&repo)
+            .expect("rematerialize must succeed");
+    }
+    stop.store(true, Ordering::Relaxed);
+    handle.join().unwrap();
+
+    assert!(
+        seen.load(Ordering::Relaxed) > 0,
+        "test sanity: the reader must have observed the table at least once"
+    );
+    let missing = missing.load(Ordering::Relaxed);
+    assert_eq!(
+        missing, 0,
+        "a concurrent reader observed `widget` missing {missing} time(s) during \
+         rematerialize; the drop+recreate must be atomic to other connections"
+    );
+}

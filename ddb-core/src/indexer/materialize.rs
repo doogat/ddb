@@ -279,6 +279,21 @@ impl Index {
     /// Materialize SQLite tables for all typed doogats using merged schemas.
     /// Returns (tables_materialized, types_inferred).
     pub fn materialize_all_types(&self, repo: &impl DoogatSource) -> Result<(usize, Vec<String>)> {
+        // Atomic to concurrent readers: the per-type drop+recreate in the inner
+        // method must commit as one unit, or a second connection (WAL) can read
+        // between a committed `DROP TABLE` and the matching `CREATE TABLE` and
+        // see "no such table" — the residual §55.A cross-process race where two
+        // racing `ddb create` losers surfaced "no such table" instead of the
+        // structured SINGLETON message. `with_immediate_transaction` is
+        // nesting-tolerant: when a SINGLETON write's BEGIN IMMEDIATE is already
+        // open it runs inline and that outer transaction owns the commit.
+        super::with_immediate_transaction(&self.conn, || self.materialize_all_types_inner(repo))
+    }
+
+    fn materialize_all_types_inner(
+        &self,
+        repo: &impl DoogatSource,
+    ) -> Result<(usize, Vec<String>)> {
         let mut tables_materialized = 0;
         let mut types_inferred = Vec::new();
 

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ddb-server**: GraphQL `to_graphql_error_from_app` now suppresses `field` and `details` extensions on Internal-category `AppError`s so structured errors that fall through to `Internal` (unknown structured code, future variants) cannot leak path/secret context past the message redaction. (PRD 00147 doubt-review)
 - **ddb-cli**, **ddb-server**: surface AppOutput warnings via CLI stderr and GraphQL response; preserve DoogatError Structured context in AppError envelope (PRD 00147).
 - **ddb-server**: restore createDoogat behavior parity (onConflict, title/body Option, TYPE_NOT_REGISTERED) after PRD 00147 routing through DoogatService::create.
+- **indexer**: typedef-change rematerialization now drops and recreates the materialized type tables inside a single transaction. A second process reading a table (e.g. a concurrent `ddb create` racing into the same `SINGLETON` typedef) can no longer observe a transient `no such table` between the committed `DROP` and `CREATE`; the losing writer reliably surfaces the structured `SINGLETON` message instead.
+- **deps**: bumped `git2` 0.20 to 0.21 (re-enabling the `ssh`/`https` transports it dropped from default features) and `tokio-postgres` to 0.7.18 / `postgres-protocol` to 0.6.12 to clear five `cargo deny` advisories: `git2` unsoundness (RUSTSEC-2026-0183, -0184) and `postgres-protocol`/SCRAM denial-of-service (RUSTSEC-2026-0178, -0179, -0180). No API or behavior change.
 
 ### Added
 
