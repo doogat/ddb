@@ -709,9 +709,17 @@ is appended to every sort (e.g. `orderBy: { created_at: DESC }` emits
 duplicates across pages. Sorting by `id` adds no extra tiebreaker (it is already
 unique).
 
+This determinism guarantee does **not** hold when the query also uses `distinct`
+(see [Distinct](#distinct) below): the appended `id` tiebreaker is not part of
+the `GROUP BY`, so SQLite returns an arbitrary representative row per group.
+`limit`/`offset` pages over a `distinct` result are therefore not guaranteed
+stable.
+
 If a typedef declares its own column named `created_at` or `updated_at`, that
 user column wins (resolution is user-column-first), and the base key is not
-injected. `id` is reserved, so its base mapping always applies.
+injected. The base `id` key is never suppressed this way: the DDL layer rejects
+a user-declared `id` column, so the same collision guard simply never finds an
+`id` column to match against.
 
 ### Aggregation
 
