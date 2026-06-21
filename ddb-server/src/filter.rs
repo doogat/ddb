@@ -1734,4 +1734,112 @@ mod tests {
         );
         assert_eq!(wc.params, vec![QueryValue::Text("rust".into())]);
     }
+
+    // -- notIn / nin / isNull operator tests --
+
+    #[test]
+    fn notin_filter_emits_not_in_sql_on_scalar_column() {
+        let list = GqlValue::List(vec![
+            GqlValue::String("active".into()),
+            GqlValue::String("pending".into()),
+            GqlValue::String("closed".into()),
+        ]);
+        let input = filter("status", "notIn", list);
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""status" NOT IN (?, ?, ?)"#);
+        assert_eq!(
+            wc.params,
+            vec![
+                QueryValue::Text("active".into()),
+                QueryValue::Text("pending".into()),
+                QueryValue::Text("closed".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn notin_filter_emits_not_in_sql_on_id_field() {
+        let list = GqlValue::List(vec![
+            GqlValue::String("20260401120000".into()),
+            GqlValue::String("20260401130000".into()),
+        ]);
+        let input = filter("id", "notIn", list);
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""id" NOT IN (?, ?)"#);
+        assert_eq!(
+            wc.params,
+            vec![
+                QueryValue::Text("20260401120000".into()),
+                QueryValue::Text("20260401130000".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn notin_empty_list_emits_always_true_sentinel() {
+        let input = filter("status", "notIn", GqlValue::List(vec![]));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, "1"); // always-true: NOT IN () matches every row
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn nin_is_alias_of_notin_on_scalar_column() {
+        let list = GqlValue::List(vec![
+            GqlValue::String("active".into()),
+            GqlValue::String("pending".into()),
+            GqlValue::String("closed".into()),
+        ]);
+        let input = filter("status", "nin", list);
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""status" NOT IN (?, ?, ?)"#);
+        assert_eq!(
+            wc.params,
+            vec![
+                QueryValue::Text("active".into()),
+                QueryValue::Text("pending".into()),
+                QueryValue::Text("closed".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn nin_empty_list_emits_always_true_sentinel() {
+        let input = filter("status", "nin", GqlValue::List(vec![]));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, "1");
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn isnull_true_emits_is_null_on_scalar_column() {
+        let input = filter("status", "isNull", GqlValue::Boolean(true));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""status" IS NULL"#);
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn isnull_false_emits_is_not_null_on_scalar_column() {
+        let input = filter("status", "isNull", GqlValue::Boolean(false));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""status" IS NOT NULL"#);
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn isnull_true_emits_is_null_on_id_field() {
+        let input = filter("id", "isNull", GqlValue::Boolean(true));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""id" IS NULL"#);
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn isnull_false_emits_is_not_null_on_id_field() {
+        let input = filter("id", "isNull", GqlValue::Boolean(false));
+        let wc = build_where_sql(&input, &test_schema());
+        assert_eq!(wc.sql, r#""id" IS NOT NULL"#);
+        assert!(wc.params.is_empty());
+    }
 }
