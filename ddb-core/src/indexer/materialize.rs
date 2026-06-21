@@ -73,12 +73,28 @@ fn build_column_definitions(columns: &[crate::types::ColumnDef]) -> Vec<String> 
     col_defs
 }
 
+/// Junction table name for a REFERENCES column (single source of truth).
+pub fn junction_table_name(type_name: &str, col_name: &str) -> String {
+    format!("{type_name}_{col_name}")
+}
+
+/// Parent-id column name in a junction table.
+pub fn junction_parent_id_column(type_name: &str) -> String {
+    format!("{type_name}_id")
+}
+
+/// Referenced-id column name in a junction table.
+pub fn junction_ref_id_column(col_name: &str) -> String {
+    format!("{col_name}_id")
+}
+
 /// DDL for creating a junction table for a REFERENCES column.
 pub fn junction_table_ddl(table_name: &str, col_name: &str) -> String {
+    let table = junction_table_name(table_name, col_name);
+    let parent_id = junction_parent_id_column(table_name);
+    let ref_id = junction_ref_id_column(col_name);
     format!(
-        "CREATE TABLE IF NOT EXISTS \"{t}_{c}\" (\"{t}_id\" TEXT NOT NULL, \"{c}_id\" TEXT NOT NULL, PRIMARY KEY (\"{t}_id\", \"{c}_id\"))",
-        t = table_name,
-        c = col_name
+        "CREATE TABLE IF NOT EXISTS \"{table}\" (\"{parent_id}\" TEXT NOT NULL, \"{ref_id}\" TEXT NOT NULL, PRIMARY KEY (\"{parent_id}\", \"{ref_id}\"))"
     )
 }
 

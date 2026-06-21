@@ -21,7 +21,9 @@ impl From<rusqlite::Error> for DoogatError {
 }
 
 pub use crate::types::{PaginatedSearchResult, SearchResult};
-pub use materialize::is_core_column;
+pub use materialize::{
+    is_core_column, junction_parent_id_column, junction_ref_id_column, junction_table_name,
+};
 
 pub struct Index {
     pub(crate) conn: Connection,
