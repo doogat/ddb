@@ -1431,34 +1431,50 @@ gqlq "mutation { executeSql(sql: `"DROP TABLE \`"test-widget\`"`") { message } }
 
 # 42b. base-field orderBy (created_at/updated_at/id) + deterministic pagination
 # (PRD 00158). Mirrors ddb-server/tests/graphql_orderby_base_fields_t158.rs
-# through the live GraphQL server: create 4 rows 1s apart so created_at (= date,
-# from the id timestamp) is strictly increasing, then update the oldest row so
-# its updated_at becomes the newest — making updated_at order diverge from
-# created_at order.
+# through the live GraphQL server. Rows are inserted with DISTINCT dates
+# scrambled relative to insertion order so that created_at ASC, created_at DESC,
+# and id ASC each produce a different ordering -- binding the sort direction.
+#
+#   subject | date       | insertion order (id ASC)
+#   n0      | 2026-03-01 | 1st  (renamed to n0e after update)
+#   n1      | 2026-01-01 | 2nd
+#   n2      | 2026-04-01 | 3rd
+#   n3      | 2026-02-01 | 4th
+#
+#   id ASC          = [n0e, n1, n2, n3]
+#   created_at ASC  = [n1, n3, n0e, n2]   (Jan < Feb < Mar < Apr)
+#   created_at DESC = [n2, n0e, n3, n1]   (Apr > Mar > Feb > Jan)
+#   updated_at ASC  = [n1, n2, n3, n0e]   (n0e re-indexed last = newest)
+#   updated_at DESC = [n0e, n3, n2, n1]
 $obVer = if ((gqlq '{ schemaVersion }') -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
-gqlq "mutation { executeSql(sql: `"CREATE TABLE obnote (subject TEXT NOT NULL)`") { message } }" | Out-Null
+$obResult = gqlq "mutation { executeSql(sql: `"CREATE TABLE obnote (subject TEXT NOT NULL)`") { message } }"
+if ($obResult -notmatch 'table obnote created') { throw "CREATE TABLE obnote failed: $obResult" }
 waitSchemaReload $obVer
-foreach ($s in @('n0', 'n1', 'n2', 'n3')) {
-    gqlq "mutation { executeSql(sql: `"INSERT INTO obnote (subject) VALUES ('$s')`") { message } }" | Out-Null
-    Start-Sleep -Seconds 1
-}
+gqlq "mutation { executeSql(sql: `"INSERT INTO obnote (subject, date) VALUES ('n0', '2026-03-01')`") { message } }" | Out-Null
+Start-Sleep -Seconds 1
+gqlq "mutation { executeSql(sql: `"INSERT INTO obnote (subject, date) VALUES ('n1', '2026-01-01')`") { message } }" | Out-Null
+Start-Sleep -Seconds 1
+gqlq "mutation { executeSql(sql: `"INSERT INTO obnote (subject, date) VALUES ('n2', '2026-04-01')`") { message } }" | Out-Null
+Start-Sleep -Seconds 1
+gqlq "mutation { executeSql(sql: `"INSERT INTO obnote (subject, date) VALUES ('n3', '2026-02-01')`") { message } }" | Out-Null
 Start-Sleep -Seconds 1
 gqlq "mutation { executeSql(sql: `"UPDATE obnote SET subject = 'n0e' WHERE subject = 'n0'`") { message } }" | Out-Null
 
-# created_at ASC: n0 (renamed n0e) is still the oldest by created_at.
+# created_at ASC: date order Jan < Feb < Mar < Apr = [n1, n3, n0e, n2].
+# Differs from id ASC [n0e,n1,n2,n3] -- proves date sort, not insertion order.
 $obParsed = (gqlq "{ obnotes(orderBy: { created_at: ASC }) { items { subject } totalCount } }") | ConvertFrom-Json
 $obOrder = @($obParsed.data.obnotes.items | ForEach-Object { $_.subject }) -join ','
-if ($obOrder -ne 'n0e,n1,n2,n3') { throw "created_at ASC order wrong: $obOrder" }
+if ($obOrder -ne 'n1,n3,n0e,n2') { throw "created_at ASC order wrong: $obOrder" }
 if ($obParsed.data.obnotes.totalCount -ne 4) { throw "obnotes totalCount expected 4, got $($obParsed.data.obnotes.totalCount)" }
 pass "serve: orderBy created_at ASC"
 
-# created_at DESC: date is day-level so all rows tie; the id ASC tiebreaker
-# dominates and yields the same order as ASC.
+# created_at DESC: date order Apr > Mar > Feb > Jan = [n2, n0e, n3, n1].
+# Differs from ASC -- proves direction matters.
 $obOrder = @(((gqlq "{ obnotes(orderBy: { created_at: DESC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
-if ($obOrder -ne 'n0e,n1,n2,n3') { throw "created_at DESC order wrong: $obOrder" }
-pass "serve: orderBy created_at DESC (id tiebreaker under tied dates)"
+if ($obOrder -ne 'n2,n0e,n3,n1') { throw "created_at DESC order wrong: $obOrder" }
+pass "serve: orderBy created_at DESC"
 
-# updated_at DESC: n0e was updated last, so it is newest by updated_at.
+# updated_at DESC: n0e was re-indexed last (UPDATE), so it is newest.
 $obOrder = @(((gqlq "{ obnotes(orderBy: { updated_at: DESC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
 if ($obOrder -ne 'n0e,n3,n2,n1') { throw "updated_at DESC order wrong: $obOrder" }
 pass "serve: orderBy updated_at DESC"
@@ -1468,17 +1484,22 @@ $obOrder = @(((gqlq "{ obnotes(orderBy: { updated_at: ASC }) { items { subject }
 if ($obOrder -ne 'n1,n2,n3,n0e') { throw "updated_at ASC order wrong: $obOrder" }
 pass "serve: orderBy updated_at ASC"
 
-# id ASC: ids are timestamps, so this equals creation order.
+# id ASC: insertion order.
 $obOrder = @(((gqlq "{ obnotes(orderBy: { id: ASC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
 if ($obOrder -ne 'n0e,n1,n2,n3') { throw "id ASC order wrong: $obOrder" }
 pass "serve: orderBy id ASC"
+
+# id DESC: reverse insertion order.
+$obOrder = @(((gqlq "{ obnotes(orderBy: { id: DESC }) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
+if ($obOrder -ne 'n3,n2,n1,n0e') { throw "id DESC order wrong: $obOrder" }
+pass "serve: orderBy id DESC"
 
 # Deterministic pagination over created_at ASC: page1 + page2 reconstruct the
 # full order with no gaps or dupes (the id tiebreaker guarantees a total order).
 $obP1 = @(((gqlq "{ obnotes(orderBy: { created_at: ASC }, limit: 2, offset: 0) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
 $obP2 = @(((gqlq "{ obnotes(orderBy: { created_at: ASC }, limit: 2, offset: 2) { items { subject } } }") | ConvertFrom-Json).data.obnotes.items | ForEach-Object { $_.subject }) -join ','
-if ($obP1 -ne 'n0e,n1') { throw "pagination page 1 wrong: $obP1" }
-if ($obP2 -ne 'n2,n3') { throw "pagination page 2 wrong: $obP2" }
+if ($obP1 -ne 'n1,n3') { throw "pagination page 1 wrong: $obP1" }
+if ($obP2 -ne 'n0e,n2') { throw "pagination page 2 wrong: $obP2" }
 pass "serve: orderBy created_at ASC deterministic pagination (no gaps/dupes)"
 
 gqlq "mutation { executeSql(sql: `"DROP TABLE obnote CASCADE`") { message } }" | Out-Null
