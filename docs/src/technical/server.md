@@ -703,11 +703,12 @@ the typedef's own columns:
 ```
 
 To make `limit`/`offset` paginate deterministically, a unique `id` tiebreaker
-is appended to every sort (e.g. `orderBy: { created_at: DESC }` emits
-`ORDER BY "date" DESC, "id" ASC`). Ordering by a non-unique key like
-`created_at` or `updated_at` therefore yields a total order with no gaps or
-duplicates across pages. Sorting by `id` adds no extra tiebreaker (it is already
-unique).
+is appended to every sort, mirroring the last sort term's direction (e.g.
+`orderBy: { created_at: DESC }` emits `ORDER BY "date" DESC, "id" DESC`, so
+same-`date` rows stay newest-id first within a reverse-chronological page).
+Ordering by a non-unique key like `created_at` or `updated_at` therefore yields
+a total order with no gaps or duplicates across pages. Sorting by `id` adds no
+extra tiebreaker (it is already unique).
 
 This determinism guarantee does **not** hold when the query also uses `distinct`
 (see [Distinct](#distinct) below): the appended `id` tiebreaker is not part of
@@ -715,11 +716,16 @@ the `GROUP BY`, so SQLite returns an arbitrary representative row per group.
 `limit`/`offset` pages over a `distinct` result are therefore not guaranteed
 stable.
 
-If a typedef declares its own column named `created_at` or `updated_at`, that
-user column wins (resolution is user-column-first), and the base key is not
-injected. The base `id` key is never suppressed this way: the DDL layer skips
-a user-declared `id` column (it is an implicit, auto-managed column), so the
-same collision guard simply never finds an `id` column to match against.
+If a typedef declares its own column named `created_at`, that user column wins
+(resolution is user-column-first) and the base `created_at` key is not injected:
+`created_at` is not a core column name (the base key maps to the core `date`
+column), so a declared `created_at` is a genuine, distinct typed column.
+
+`id` and `updated_at` are core-managed and cannot be overridden. The DDL layer
+skips a user-declared `id` column outright; a user-declared `updated_at`
+collapses onto the core `updated_at` column (`create_materialized_table` skips it
+via `is_core_column`), preserving no separate user value. The base `id` and
+`updated_at` sort keys therefore always resolve to the core column.
 
 ### Aggregation
 

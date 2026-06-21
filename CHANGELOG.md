@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **graphql**: typed connection `orderBy` inputs now accept the base Doogat sort keys `id`, `created_at`, and `updated_at` (in addition to typed columns), so any typed connection can be ordered by recency without a downstream having to declare those columns. `created_at` sorts by the doogat's `date` value (the same value the `created_at` field returns); a unique `id` tiebreaker is appended so `limit`/`offset` pagination is deterministic (no gaps, dupes, or instability). A base sort key is hidden when the typedef declares its own column of that name. (PRD 00158)
+- **graphql**: typed connection `orderBy` inputs now accept the base Doogat sort keys `id`, `created_at`, and `updated_at` (in addition to typed columns), so any typed connection can be ordered by recency without a downstream having to declare those columns. `created_at` sorts by the doogat's `date` value (the same value the `created_at` field returns); a unique `id` tiebreaker is appended (following the sort direction, so `created_at: DESC` keeps same-`date` rows newest-first) so `limit`/`offset` pagination is deterministic (no gaps, dupes, or instability). A base sort key is hidden when the typedef declares its own column of that name. (PRD 00158)
 
 ## [0.2.6] - 2026-06-19
 

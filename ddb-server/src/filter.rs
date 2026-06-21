@@ -215,6 +215,7 @@ pub fn build_order_sql(input: &GqlValue, schema: &TableSchema) -> Option<String>
 
     let mut parts = Vec::new();
     let mut has_id = false;
+    let mut last_dir = "ASC";
     for (name, value) in obj {
         let Some(col) = resolve_column(&schema.columns, name.as_str())
             .or_else(|| base_order_column(name.as_str()))
@@ -231,6 +232,7 @@ pub fn build_order_sql(input: &GqlValue, schema: &TableSchema) -> Option<String>
                 if col == "id" {
                     has_id = true;
                 }
+                last_dir = dir;
                 parts.push(format!("\"{col}\" {dir}"));
             }
             _ => continue,
@@ -242,8 +244,13 @@ pub fn build_order_sql(input: &GqlValue, schema: &TableSchema) -> Option<String>
     } else {
         // Deterministic total order for offset pagination: append the unique
         // primary key as a final tiebreaker unless the caller already sorts by id.
+        // The tiebreaker mirrors the last sort term's direction so ties extend the
+        // ordering naturally — `created_at DESC` keeps same-date rows newest-id
+        // first, not oldest-first. `date` is day-level, so created_at ties are the
+        // common case. Either direction is a stable total order, so pagination
+        // stays gap/dupe-free regardless.
         if !has_id {
-            parts.push("\"id\" ASC".to_string());
+            parts.push(format!("\"id\" {last_dir}"));
         }
         Some(parts.join(", "))
     }
@@ -1124,7 +1131,8 @@ mod tests {
     fn test_single_sort_desc() {
         let input = order("priority", "DESC");
         let sql = build_order_sql(&input, &test_schema());
-        assert_eq!(sql.as_deref(), Some(r#""priority" DESC, "id" ASC"#));
+        // The appended id tiebreaker mirrors the sort direction (DESC here).
+        assert_eq!(sql.as_deref(), Some(r#""priority" DESC, "id" DESC"#));
     }
 
     #[test]
@@ -1165,7 +1173,7 @@ mod tests {
         let schema = schema_with_table("note", vec!["title"]);
         let input = order("created_at", "DESC");
         let sql = build_order_sql(&input, &schema);
-        assert_eq!(sql.as_deref(), Some(r#""date" DESC, "id" ASC"#));
+        assert_eq!(sql.as_deref(), Some(r#""date" DESC, "id" DESC"#));
     }
 
     #[test]
@@ -1173,7 +1181,7 @@ mod tests {
         let schema = schema_with_table("note", vec!["title"]);
         let input = order("updated_at", "DESC");
         let sql = build_order_sql(&input, &schema);
-        assert_eq!(sql.as_deref(), Some(r#""updated_at" DESC, "id" ASC"#));
+        assert_eq!(sql.as_deref(), Some(r#""updated_at" DESC, "id" DESC"#));
     }
 
     #[test]
@@ -1216,7 +1224,7 @@ mod tests {
         let schema = schema_with_table("event", vec!["title", "created_at"]);
         let input = order("created_at", "DESC");
         let sql = build_order_sql(&input, &schema);
-        assert_eq!(sql.as_deref(), Some(r#""created_at" DESC, "id" ASC"#));
+        assert_eq!(sql.as_deref(), Some(r#""created_at" DESC, "id" DESC"#));
     }
 
     #[test]

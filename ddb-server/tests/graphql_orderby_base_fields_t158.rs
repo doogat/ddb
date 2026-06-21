@@ -158,3 +158,55 @@ async fn orderby_updated_at_asc() {
         "updated_at ASC order mismatch"
     );
 }
+
+/// PRD 00158 doubt-review: within a tied `date`, the appended `id` tiebreaker
+/// must mirror the primary sort direction. `date` is day-level, so same-day
+/// ties are the common case for the headline `created_at` reverse-chron use —
+/// `created_at DESC` must keep the newer-id row first (not oldest-first), and
+/// `created_at ASC` the older-id row first. Fails if the tiebreaker is a fixed
+/// `id ASC` regardless of direction.
+#[tokio::test]
+async fn orderby_created_at_tiebreaker_follows_sort_direction() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (actor, pool) = setup(tmp.path()).await;
+    actor
+        .execute_sql("CREATE TABLE note (subject TEXT NOT NULL)".to_string())
+        .await
+        .expect("create table");
+
+    // Two rows share one date; insertion order fixes their ids (a < b).
+    for subject in ["a", "b"] {
+        actor
+            .execute_sql(format!(
+                "INSERT INTO note (subject, date) VALUES ('{subject}', '2026-05-01')"
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("insert {subject}: {e:?}"));
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    let type_schemas = pool.get_type_schemas().await.expect("type schemas");
+    let schema = ddb_server::schema::build_schema(actor, pool, type_schemas, None)
+        .expect("schema must build");
+
+    // DESC: within the tied date, the newer id (b) comes first.
+    assert_eq!(
+        run_notes_query(
+            &schema,
+            r#"{ notes(orderBy: { created_at: DESC }) { items { subject } } }"#,
+        )
+        .await,
+        vec!["b", "a"],
+        "created_at DESC must keep the newest-id row first within a tied date"
+    );
+    // ASC: within the tied date, the older id (a) comes first.
+    assert_eq!(
+        run_notes_query(
+            &schema,
+            r#"{ notes(orderBy: { created_at: ASC }) { items { subject } } }"#,
+        )
+        .await,
+        vec!["a", "b"],
+        "created_at ASC must keep the oldest-id row first within a tied date"
+    );
+}
