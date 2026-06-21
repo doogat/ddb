@@ -432,6 +432,12 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
         .iter()
         .map(|name| (*name).to_string())
         .collect();
+    // Lookup of every registered type schema, threaded into the where-builder
+    // for relation resolution (consumed by later relation tasks). Built once.
+    let schema_lookup: crate::filter::SchemaLookup = type_schemas
+        .iter()
+        .map(|s| (s.table_name.clone(), s.clone()))
+        .collect();
     for schema in type_schemas {
         let type_name = match known_types.get(&schema.table_name) {
             Some(name) => name.clone(),
@@ -475,6 +481,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
         {
             let schema_clone = schema_clone.clone();
             let table_name = table_name.clone();
+            let schema_lookup = schema_lookup.clone();
             query = query.field(
                 Field::new(
                     &plural,
@@ -482,6 +489,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                     move |ctx| {
                         let schema_clone = schema_clone.clone();
                         let table_name = table_name.clone();
+                        let schema_lookup = schema_lookup.clone();
                         FieldFuture::new(async move {
                             let pool = ctx.data::<ReadPool>()?;
                             let tag = ctx
@@ -515,8 +523,12 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                                 ctx.args.get("where").map(|v| v.deserialize::<GqlValue>());
                             let wc = match &where_val {
                                 Some(Ok(ref filter_input)) => {
-                                    crate::filter::try_build_where_sql(filter_input, &schema_clone)
-                                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?
+                                    crate::filter::try_build_where_sql(
+                                        filter_input,
+                                        &schema_clone,
+                                        &schema_lookup,
+                                    )
+                                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?
                                 }
                                 _ => crate::filter::WhereClause::empty(),
                             };
@@ -601,6 +613,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
             let agg_type_name = format!("{type_name}Aggregate");
             let schema_clone2 = schema_clone.clone();
             let table_name2 = table_name.clone();
+            let schema_lookup2 = schema_lookup.clone();
             query = query.field(
                 Field::new(
                     format!("{plural}Aggregate"),
@@ -608,6 +621,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                     move |ctx| {
                         let schema_clone = schema_clone2.clone();
                         let table_name = table_name2.clone();
+                        let schema_lookup = schema_lookup2.clone();
                         FieldFuture::new(async move {
                             let pool = ctx.data::<ReadPool>()?;
                             // Aggregate `where` shares the issue-#11
@@ -617,8 +631,12 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                                 .get("where")
                                 .and_then(|v| v.deserialize::<GqlValue>().ok())
                             {
-                                Some(v) => crate::filter::try_build_where_sql(&v, &schema_clone)
-                                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
+                                Some(v) => crate::filter::try_build_where_sql(
+                                    &v,
+                                    &schema_clone,
+                                    &schema_lookup,
+                                )
+                                .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
                                 None => crate::filter::WhereClause::empty(),
                             };
 

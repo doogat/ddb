@@ -21,7 +21,10 @@ pub fn string_filter() -> InputObject {
             TypeRef::named(TypeRef::STRING),
         ))
         .field(InputValue::new("in", TypeRef::named_list(TypeRef::STRING)))
-        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::STRING)))
+        .field(InputValue::new(
+            "notIn",
+            TypeRef::named_list(TypeRef::STRING),
+        ))
         .field(InputValue::new("nin", TypeRef::named_list(TypeRef::STRING)))
         .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
@@ -51,7 +54,10 @@ pub fn float_filter() -> InputObject {
         .field(InputValue::new("lt", TypeRef::named(TypeRef::FLOAT)))
         .field(InputValue::new("lte", TypeRef::named(TypeRef::FLOAT)))
         .field(InputValue::new("in", TypeRef::named_list(TypeRef::FLOAT)))
-        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::FLOAT)))
+        .field(InputValue::new(
+            "notIn",
+            TypeRef::named_list(TypeRef::FLOAT),
+        ))
         .field(InputValue::new("nin", TypeRef::named_list(TypeRef::FLOAT)))
         .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
@@ -60,8 +66,14 @@ pub fn float_filter() -> InputObject {
 pub fn bool_filter() -> InputObject {
     InputObject::new("BoolFilter")
         .field(InputValue::new("eq", TypeRef::named(TypeRef::BOOLEAN)))
-        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::BOOLEAN)))
-        .field(InputValue::new("nin", TypeRef::named_list(TypeRef::BOOLEAN)))
+        .field(InputValue::new(
+            "notIn",
+            TypeRef::named_list(TypeRef::BOOLEAN),
+        ))
+        .field(InputValue::new(
+            "nin",
+            TypeRef::named_list(TypeRef::BOOLEAN),
+        ))
         .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
 
@@ -522,6 +534,32 @@ pub fn aggregate_row_to_value(row: &[String], names: &[String]) -> GqlValue {
 
 // -- WHERE clause builder --
 
+use std::collections::HashMap;
+
+/// Lookup of every registered type schema, keyed by `TableSchema::table_name`.
+/// Threaded through the compiler for relation resolution (consumed by the
+/// forward/reverse relation tasks; this task only plumbs it to the seam).
+pub type SchemaLookup = HashMap<String, TableSchema>;
+
+/// Max EXISTS nesting depth for relation sub-filters.
+const MAX_RELATION_DEPTH: usize = 5;
+
+/// Recursion context threaded through the WHERE-clause compiler.
+pub(crate) struct WhereCtx<'a> {
+    pub schema: &'a TableSchema,    // the "current row" type
+    pub qualifier: Option<&'a str>, // None = top-level (cols unqualified, row-ref = schema.table_name)
+    pub depth: usize,               // EXISTS nesting depth, capped at MAX_RELATION_DEPTH
+    pub alias_seq: &'a mut u32,     // monotonic counter for unique EXISTS aliases
+    pub params: &'a mut Vec<QueryValue>,
+}
+
+impl<'a> WhereCtx<'a> {
+    /// Table or alias used for an EXISTS `... = <row_ref>.id` correlation.
+    pub fn row_ref(&self) -> &str {
+        self.qualifier.unwrap_or(&self.schema.table_name)
+    }
+}
+
 /// Parameterized SQL WHERE clause.
 #[derive(Debug)]
 pub struct WhereClause {
@@ -552,44 +590,23 @@ const BASE_FILTER_FIELDS: &[&str] = &["id", "title"];
 ///
 /// The `input` should be the resolved `{Type}Where` object value.
 /// Column names are validated against the schema to prevent injection.
-pub fn try_build_where_sql(input: &GqlValue, schema: &TableSchema) -> Result<WhereClause, String> {
+pub fn try_build_where_sql(
+    input: &GqlValue,
+    schema: &TableSchema,
+    _schemas: &SchemaLookup,
+) -> Result<WhereClause, String> {
     let mut conditions = Vec::new();
     let mut params = Vec::new();
+    let mut alias_seq = 0u32;
 
-    let obj = match input {
-        GqlValue::Object(obj) => obj,
-        _ => return Ok(WhereClause::empty()),
+    let mut ctx = WhereCtx {
+        schema,
+        qualifier: None,
+        depth: 0,
+        alias_seq: &mut alias_seq,
+        params: &mut params,
     };
-
-    for (name, value) in obj {
-        let field = name.as_str();
-        match field {
-            "_and" | "_or" => {
-                let combinator = if field == "_and" { "AND" } else { "OR" };
-                let GqlValue::List(items) = value else {
-                    continue;
-                };
-                if let Some(cond) = build_logical_combinator(items, schema, combinator, &mut params)
-                {
-                    conditions.push(cond);
-                }
-            }
-            // PRD 00129 §5: `tags` is a synthetic field backed by the
-            // doogat-level `_ddb_tags` index, not a column on the
-            // materialized type table. It only fires when the typedef
-            // doesn't have its own `tags` column (the where-input
-            // generator hides `TagsFilter` in that case so this branch
-            // only runs for the synthetic path).
-            "tags" if !schema.columns.iter().any(|c| c.name == "tags") => {
-                if let Some(cond) =
-                    build_tags_filter_condition(value, &schema.table_name, &mut params)?
-                {
-                    conditions.push(cond);
-                }
-            }
-            _ => build_column_conditions(field, value, schema, &mut conditions, &mut params),
-        }
-    }
+    build_conditions_into(input, &mut ctx, &mut conditions)?;
 
     let wc = if conditions.is_empty() {
         WhereClause::empty()
@@ -606,8 +623,59 @@ pub fn try_build_where_sql(input: &GqlValue, schema: &TableSchema) -> Result<Whe
 /// returns an empty clause instead — production resolvers should call
 /// `try_build_where_sql` so user-input errors surface to the GraphQL
 /// response.
-pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
-    try_build_where_sql(input, schema).unwrap_or_else(|_| WhereClause::empty())
+pub fn build_where_sql(
+    input: &GqlValue,
+    schema: &TableSchema,
+    _schemas: &SchemaLookup,
+) -> WhereClause {
+    try_build_where_sql(input, schema, _schemas).unwrap_or_else(|_| WhereClause::empty())
+}
+
+/// Walk a `{Type}Where` object value, appending each field's SQL condition to
+/// `conditions`. Shared by the top-level entry and the logical combinators, so
+/// every recursion level threads the same `WhereCtx` (one params Vec, one alias
+/// counter) instead of allocating fresh state per branch.
+fn build_conditions_into(
+    obj: &GqlValue,
+    ctx: &mut WhereCtx,
+    conditions: &mut Vec<String>,
+) -> Result<(), String> {
+    if ctx.depth > MAX_RELATION_DEPTH {
+        return Err("relation filter nested too deep (max 5)".to_string());
+    }
+
+    let GqlValue::Object(obj) = obj else {
+        return Ok(());
+    };
+
+    for (name, value) in obj {
+        let field = name.as_str();
+        match field {
+            "_and" | "_or" => {
+                let combinator = if field == "_and" { "AND" } else { "OR" };
+                let GqlValue::List(items) = value else {
+                    continue;
+                };
+                if let Some(cond) = build_logical_combinator(items, combinator, ctx)? {
+                    conditions.push(cond);
+                }
+            }
+            // PRD 00129 §5: `tags` is a synthetic field backed by the
+            // doogat-level `_ddb_tags` index, not a column on the
+            // materialized type table. It only fires when the typedef
+            // doesn't have its own `tags` column (the where-input
+            // generator hides `TagsFilter` in that case so this branch
+            // only runs for the synthetic path).
+            "tags" if !ctx.schema.columns.iter().any(|c| c.name == "tags") => {
+                if let Some(cond) = build_tags_filter_condition(value, ctx)? {
+                    conditions.push(cond);
+                }
+            }
+            _ => build_column_conditions(field, value, ctx, conditions),
+        }
+    }
+
+    Ok(())
 }
 
 /// PRD 00129 §5 + issue #11: build the SQL fragment for a `TagsFilter`
@@ -625,13 +693,13 @@ pub fn build_where_sql(input: &GqlValue, schema: &TableSchema) -> WhereClause {
 ///   the array is `[]` (silently matching nothing was the trap).
 fn build_tags_filter_condition(
     value: &GqlValue,
-    table_name: &str,
-    params: &mut Vec<QueryValue>,
+    ctx: &mut WhereCtx,
 ) -> Result<Option<String>, String> {
     let GqlValue::Object(filter) = value else {
         return Ok(None);
     };
 
+    let table_name = ctx.row_ref().to_string();
     let mut clauses = Vec::new();
     let mut any_operator_supplied = false;
     for (op, val) in filter {
@@ -643,7 +711,7 @@ fn build_tags_filter_condition(
             "contains" => {
                 let GqlValue::String(tag) = val else { continue };
                 any_operator_supplied = true;
-                params.push(QueryValue::Text(tag.clone()));
+                ctx.params.push(QueryValue::Text(tag.clone()));
                 clauses.push(format!(
                     "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag = ?)",
                     table = table_name,
@@ -659,7 +727,7 @@ fn build_tags_filter_condition(
                     let GqlValue::String(tag) = item else {
                         continue;
                     };
-                    params.push(QueryValue::Text(tag.clone()));
+                    ctx.params.push(QueryValue::Text(tag.clone()));
                     clauses.push(format!(
                         "EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = \"{table}\".id AND _t.tag = ?)",
                         table = table_name,
@@ -677,7 +745,7 @@ fn build_tags_filter_condition(
                     let GqlValue::String(tag) = item else {
                         continue;
                     };
-                    params.push(QueryValue::Text(tag.clone()));
+                    ctx.params.push(QueryValue::Text(tag.clone()));
                     placeholders.push("?".to_string());
                 }
                 if placeholders.is_empty() {
@@ -710,52 +778,64 @@ fn build_tags_filter_condition(
 fn build_column_conditions(
     field: &str,
     value: &GqlValue,
-    schema: &TableSchema,
+    ctx: &mut WhereCtx,
     conditions: &mut Vec<String>,
-    params: &mut Vec<QueryValue>,
 ) {
-    let col_name = resolve_column(&schema.columns, field)
+    let col_name = resolve_column(&ctx.schema.columns, field)
         .or_else(|| BASE_FILTER_FIELDS.iter().find(|&&f| f == field).copied());
     let Some(col_name) = col_name else { return };
     let GqlValue::Object(filter_obj) = value else {
         return;
     };
+    let col_ref = match ctx.qualifier {
+        None => format!("\"{col_name}\""),
+        Some(a) => format!("\"{a}\".\"{col_name}\""),
+    };
     for (op, val) in filter_obj {
-        if let Some(cond) = build_operator_condition(col_name, op.as_str(), val, params) {
+        if let Some(cond) = build_operator_condition(&col_ref, op.as_str(), val, ctx.params) {
             conditions.push(cond);
         }
     }
 }
 
 /// Recursively build a compound AND/OR clause from a list of filter items.
+///
+/// Each item recurses through `build_conditions_into` on a child ctx that keeps
+/// the parent's `qualifier`/`depth` and SHARES the same `alias_seq`/`params`, so
+/// bound parameters accumulate in left-to-right source order across nesting.
 fn build_logical_combinator(
     items: &[GqlValue],
-    schema: &TableSchema,
     combinator: &str,
-    params: &mut Vec<QueryValue>,
-) -> Option<String> {
-    let sub: Vec<String> = items
-        .iter()
-        .filter_map(|item| {
-            let wc = build_where_sql(item, schema);
-            if wc.is_empty() {
-                None
-            } else {
-                params.extend(wc.params);
-                Some(format!("({})", wc.sql))
-            }
-        })
-        .collect();
+    ctx: &mut WhereCtx,
+) -> Result<Option<String>, String> {
+    let mut sub = Vec::new();
+    for item in items {
+        let mut item_conditions = Vec::new();
+        let mut child = WhereCtx {
+            schema: ctx.schema,
+            qualifier: ctx.qualifier,
+            depth: ctx.depth,
+            alias_seq: &mut *ctx.alias_seq,
+            params: &mut *ctx.params,
+        };
+        build_conditions_into(item, &mut child, &mut item_conditions)?;
+        if !item_conditions.is_empty() {
+            sub.push(format!("({})", item_conditions.join(" AND ")));
+        }
+    }
     if sub.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(format!("({})", sub.join(&format!(" {combinator} "))))
+        Ok(Some(format!("({})", sub.join(&format!(" {combinator} ")))))
     }
 }
 
 /// Translate a single filter operator (eq, neq, contains, etc.) into SQL.
+///
+/// `col_ref` is the already-quoted column reference (`"col"` at top level,
+/// `"alias"."col"` when qualified), so the operator text is column-agnostic.
 fn build_operator_condition(
-    column: &str,
+    col_ref: &str,
     op: &str,
     value: &GqlValue,
     params: &mut Vec<QueryValue>,
@@ -763,41 +843,41 @@ fn build_operator_condition(
     match op {
         "eq" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" = ?"))
+            Some(format!("{col_ref} = ?"))
         }
         "neq" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" != ?"))
+            Some(format!("{col_ref} != ?"))
         }
         "gt" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" > ?"))
+            Some(format!("{col_ref} > ?"))
         }
         "gte" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" >= ?"))
+            Some(format!("{col_ref} >= ?"))
         }
         "lt" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" < ?"))
+            Some(format!("{col_ref} < ?"))
         }
         "lte" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" <= ?"))
+            Some(format!("{col_ref} <= ?"))
         }
         "contains" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" LIKE '%' || ? || '%' COLLATE NOCASE"))
+            Some(format!("{col_ref} LIKE '%' || ? || '%' COLLATE NOCASE"))
         }
         "startsWith" => {
             params.push(gql_to_sql(value));
-            Some(format!("\"{column}\" LIKE ? || '%' COLLATE NOCASE"))
+            Some(format!("{col_ref} LIKE ? || '%' COLLATE NOCASE"))
         }
-        "in" => build_in_condition(column, value, params),
-        "notIn" | "nin" => build_not_in_condition(column, value, params),
+        "in" => build_in_condition(col_ref, value, params),
+        "notIn" | "nin" => build_not_in_condition(col_ref, value, params),
         "isNull" => match value {
-            GqlValue::Boolean(true) => Some(format!("\"{column}\" IS NULL")),
-            GqlValue::Boolean(false) => Some(format!("\"{column}\" IS NOT NULL")),
+            GqlValue::Boolean(true) => Some(format!("{col_ref} IS NULL")),
+            GqlValue::Boolean(false) => Some(format!("{col_ref} IS NOT NULL")),
             _ => None,
         },
         _ => None,
@@ -805,7 +885,7 @@ fn build_operator_condition(
 }
 
 fn build_in_condition(
-    column: &str,
+    col_ref: &str,
     value: &GqlValue,
     params: &mut Vec<QueryValue>,
 ) -> Option<String> {
@@ -823,11 +903,11 @@ fn build_in_condition(
             "?"
         })
         .collect();
-    Some(format!("\"{}\" IN ({})", column, placeholders.join(", ")))
+    Some(format!("{col_ref} IN ({})", placeholders.join(", ")))
 }
 
 fn build_not_in_condition(
-    column: &str,
+    col_ref: &str,
     value: &GqlValue,
     params: &mut Vec<QueryValue>,
 ) -> Option<String> {
@@ -845,7 +925,7 @@ fn build_not_in_condition(
             "?"
         })
         .collect();
-    Some(format!("\"{}\" NOT IN ({})", column, placeholders.join(", ")))
+    Some(format!("{col_ref} NOT IN ({})", placeholders.join(", ")))
 }
 
 /// Convert a GraphQL value to an adapter-neutral query parameter value.
@@ -875,6 +955,12 @@ mod tests {
     use async_graphql::{Name, Value as GqlValue};
     use ddb_core::types::{ColumnDef, TableSchema};
     use indexmap::IndexMap;
+
+    /// Empty schema lookup for the where-builder entry points. No test in this
+    /// module emits relation SQL, so the lookup is never consulted.
+    fn no_schemas() -> SchemaLookup {
+        SchemaLookup::new()
+    }
 
     fn test_schema() -> TableSchema {
         TableSchema {
@@ -949,7 +1035,7 @@ mod tests {
     #[test]
     fn test_string_eq() {
         let input = filter("title", "eq", GqlValue::String("rust".into()));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""title" = ?"#);
         assert_eq!(wc.params, vec![QueryValue::Text("rust".into())]);
     }
@@ -957,7 +1043,7 @@ mod tests {
     #[test]
     fn test_string_neq() {
         let input = filter("title", "neq", GqlValue::String("java".into()));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""title" != ?"#);
         assert_eq!(wc.params, vec![QueryValue::Text("java".into())]);
     }
@@ -965,7 +1051,7 @@ mod tests {
     #[test]
     fn test_string_contains() {
         let input = filter("title", "contains", GqlValue::String("rust".into()));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""title" LIKE '%' || ? || '%' COLLATE NOCASE"#);
         assert_eq!(wc.params, vec![QueryValue::Text("rust".into())]);
     }
@@ -973,7 +1059,7 @@ mod tests {
     #[test]
     fn test_string_starts_with() {
         let input = filter("title", "startsWith", GqlValue::String("Hello".into()));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""title" LIKE ? || '%' COLLATE NOCASE"#);
         assert_eq!(wc.params, vec![QueryValue::Text("Hello".into())]);
     }
@@ -982,7 +1068,7 @@ mod tests {
     fn test_int_comparison() {
         for (op, sql_op) in [("gt", ">"), ("gte", ">="), ("lt", "<"), ("lte", "<=")] {
             let input = filter("priority", op, GqlValue::Number(3.into()));
-            let wc = build_where_sql(&input, &test_schema());
+            let wc = build_where_sql(&input, &test_schema(), &no_schemas());
             assert_eq!(wc.sql, format!("\"priority\" {sql_op} ?"));
             assert_eq!(wc.params, vec![QueryValue::Integer(3)]);
         }
@@ -996,7 +1082,7 @@ mod tests {
             GqlValue::String("c".into()),
         ]);
         let input = filter("status", "in", list);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""status" IN (?, ?, ?)"#);
         assert_eq!(wc.params.len(), 3);
     }
@@ -1004,7 +1090,7 @@ mod tests {
     #[test]
     fn test_empty_in_filter() {
         let input = filter("status", "in", GqlValue::List(vec![]));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, "0"); // always-false
     }
 
@@ -1029,7 +1115,7 @@ mod tests {
             ]),
         );
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#"(("status" = ?) AND ("priority" >= ?))"#);
         assert_eq!(
             wc.params,
@@ -1055,7 +1141,7 @@ mod tests {
             GqlValue::List(vec![GqlValue::Object(or_item1), GqlValue::Object(or_item2)]),
         );
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#"(("status" = ?) OR ("status" = ?))"#);
         assert_eq!(
             wc.params,
@@ -1096,7 +1182,7 @@ mod tests {
             GqlValue::List(vec![GqlValue::Object(or_wrapper), GqlValue::Object(prio)]),
         );
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(
             wc.sql,
             r#"(((("status" = ?) OR ("status" = ?))) AND ("priority" >= ?))"#
@@ -1105,9 +1191,82 @@ mod tests {
     }
 
     #[test]
+    fn where_ctx_nested_combinator_shares_params_in_order() {
+        // _and: [ { _or: [status=todo, status=doing] }, { priority=5 } ]
+        // The shared-ctx params Vec must collect all three bound values in
+        // left-to-right source order across the nested recursion, never
+        // duplicating or reordering them.
+        let mut or1 = IndexMap::new();
+        let mut f1 = IndexMap::new();
+        f1.insert(Name::new("eq"), GqlValue::String("todo".into()));
+        or1.insert(Name::new("status"), GqlValue::Object(f1));
+
+        let mut or2 = IndexMap::new();
+        let mut f2 = IndexMap::new();
+        f2.insert(Name::new("eq"), GqlValue::String("doing".into()));
+        or2.insert(Name::new("status"), GqlValue::Object(f2));
+
+        let mut or_wrapper = IndexMap::new();
+        or_wrapper.insert(
+            Name::new("_or"),
+            GqlValue::List(vec![GqlValue::Object(or1), GqlValue::Object(or2)]),
+        );
+
+        let mut prio = IndexMap::new();
+        let mut f3 = IndexMap::new();
+        f3.insert(Name::new("eq"), GqlValue::Number(5.into()));
+        prio.insert(Name::new("priority"), GqlValue::Object(f3));
+
+        let mut obj = IndexMap::new();
+        obj.insert(
+            Name::new("_and"),
+            GqlValue::List(vec![GqlValue::Object(or_wrapper), GqlValue::Object(prio)]),
+        );
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"(((("status" = ?) OR ("status" = ?))) AND ("priority" = ?))"#
+        );
+        assert_eq!(
+            wc.params,
+            vec![
+                QueryValue::Text("todo".into()),
+                QueryValue::Text("doing".into()),
+                QueryValue::Integer(5),
+            ]
+        );
+    }
+
+    #[test]
+    fn where_ctx_combinator_preserves_paren_grouping() {
+        // _or: [status=todo, status=doing] — each item is wrapped in its own
+        // parens, then the whole disjunction in an outer pair. A regression in
+        // the per-item paren-wrap would change this exact shape.
+        let mut or1 = IndexMap::new();
+        let mut f1 = IndexMap::new();
+        f1.insert(Name::new("eq"), GqlValue::String("todo".into()));
+        or1.insert(Name::new("status"), GqlValue::Object(f1));
+
+        let mut or2 = IndexMap::new();
+        let mut f2 = IndexMap::new();
+        f2.insert(Name::new("eq"), GqlValue::String("doing".into()));
+        or2.insert(Name::new("status"), GqlValue::Object(f2));
+
+        let mut obj = IndexMap::new();
+        obj.insert(
+            Name::new("_or"),
+            GqlValue::List(vec![GqlValue::Object(or1), GqlValue::Object(or2)]),
+        );
+        let input = GqlValue::Object(obj);
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
+        assert_eq!(wc.sql, r#"(("status" = ?) OR ("status" = ?))"#);
+    }
+
+    #[test]
     fn test_empty_where() {
         let input = GqlValue::Object(IndexMap::new());
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert!(wc.is_empty());
         assert!(wc.params.is_empty());
     }
@@ -1120,7 +1279,7 @@ mod tests {
             "eq",
             GqlValue::String("'; DROP TABLE doogats; --".into()),
         );
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert!(!wc.sql.contains("DROP"));
         assert!(!wc.sql.contains("';"));
         assert_eq!(wc.sql, r#""title" = ?"#);
@@ -1133,7 +1292,7 @@ mod tests {
     #[test]
     fn test_unknown_column_ignored() {
         let input = filter("nonexistent", "eq", GqlValue::String("val".into()));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert!(wc.is_empty());
     }
 
@@ -1149,7 +1308,7 @@ mod tests {
         obj.insert(Name::new("priority"), GqlValue::Object(f2));
 
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert!(wc.sql.contains(r#""title" LIKE '%' || ? || '%'"#));
         assert!(wc.sql.contains(r#""priority" >= ?"#));
         assert!(wc.sql.contains(" AND "));
@@ -1409,7 +1568,7 @@ mod tests {
     #[test]
     fn test_base_field_id_eq() {
         let input = filter("id", "eq", GqlValue::String("20260401120000".into()));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""id" = ?"#);
         assert_eq!(wc.params, vec![QueryValue::Text("20260401120000".into())]);
     }
@@ -1421,7 +1580,7 @@ mod tests {
             GqlValue::String("20260401130000".into()),
         ]);
         let input = filter("id", "in", list);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""id" IN (?, ?)"#);
         assert_eq!(
             wc.params,
@@ -1436,7 +1595,7 @@ mod tests {
     fn test_base_field_title_eq() {
         // title IS in test_schema columns — resolved via resolve_column, not BASE_FILTER_FIELDS
         let input = filter("title", "eq", GqlValue::String("My Bookmark".into()));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""title" = ?"#);
         assert_eq!(wc.params, vec![QueryValue::Text("My Bookmark".into())]);
     }
@@ -1463,7 +1622,7 @@ mod tests {
             ]),
         );
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(
             wc.sql,
             r#"(("id" = ?) AND ("title" LIKE '%' || ? || '%' COLLATE NOCASE))"#
@@ -1496,7 +1655,7 @@ mod tests {
             GqlValue::List(vec![GqlValue::Object(or1), GqlValue::Object(or2)]),
         );
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#"(("id" = ?) OR ("id" = ?))"#);
         assert_eq!(
             wc.params,
@@ -1650,7 +1809,7 @@ mod tests {
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(filter));
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &schema);
+        let wc = build_where_sql(&input, &schema, &no_schemas());
         assert_eq!(
             wc.sql,
             r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?))"#
@@ -1672,7 +1831,7 @@ mod tests {
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(filter));
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &schema);
+        let wc = build_where_sql(&input, &schema, &no_schemas());
         // Two EXISTS clauses joined by AND
         let expected_one =
             r#"EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?)"#;
@@ -1702,7 +1861,7 @@ mod tests {
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(filter));
         let input = GqlValue::Object(obj);
-        let wc = build_where_sql(&input, &schema);
+        let wc = build_where_sql(&input, &schema, &no_schemas());
         assert_eq!(
             wc.sql,
             r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag IN (?, ?)))"#
@@ -1724,7 +1883,8 @@ mod tests {
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(filter));
         let input = GqlValue::Object(obj);
-        let err = try_build_where_sql(&input, &schema).expect_err("empty containsAny must reject");
+        let err = try_build_where_sql(&input, &schema, &no_schemas())
+            .expect_err("empty containsAny must reject");
         assert!(err.contains("containsAny cannot be empty"), "got: {err}");
     }
 
@@ -1736,7 +1896,8 @@ mod tests {
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(filter));
         let input = GqlValue::Object(obj);
-        let err = try_build_where_sql(&input, &schema).expect_err("empty containsAll must reject");
+        let err = try_build_where_sql(&input, &schema, &no_schemas())
+            .expect_err("empty containsAll must reject");
         assert!(err.contains("containsAll cannot be empty"), "got: {err}");
     }
 
@@ -1749,7 +1910,8 @@ mod tests {
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(IndexMap::new()));
         let input = GqlValue::Object(obj);
-        let err = try_build_where_sql(&input, &schema).expect_err("empty tags filter must reject");
+        let err = try_build_where_sql(&input, &schema, &no_schemas())
+            .expect_err("empty tags filter must reject");
         assert!(
             err.contains("tags filter requires at least one of")
                 && err.contains("contains")
@@ -1771,7 +1933,8 @@ mod tests {
         let mut obj = IndexMap::new();
         obj.insert(Name::new("tags"), GqlValue::Object(filter));
         let input = GqlValue::Object(obj);
-        let wc = try_build_where_sql(&input, &schema).expect("contains-only filter must succeed");
+        let wc = try_build_where_sql(&input, &schema, &no_schemas())
+            .expect("contains-only filter must succeed");
         assert_eq!(
             wc.sql,
             r#"(EXISTS (SELECT 1 FROM _ddb_tags _t WHERE _t.doogat_id = "link".id AND _t.tag = ?))"#
@@ -1789,7 +1952,7 @@ mod tests {
             GqlValue::String("closed".into()),
         ]);
         let input = filter("status", "notIn", list);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""status" NOT IN (?, ?, ?)"#);
         assert_eq!(
             wc.params,
@@ -1808,7 +1971,7 @@ mod tests {
             GqlValue::String("20260401130000".into()),
         ]);
         let input = filter("id", "notIn", list);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""id" NOT IN (?, ?)"#);
         assert_eq!(
             wc.params,
@@ -1822,7 +1985,7 @@ mod tests {
     #[test]
     fn notin_empty_list_emits_always_true_sentinel() {
         let input = filter("status", "notIn", GqlValue::List(vec![]));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, "1"); // always-true: NOT IN () matches every row
         assert!(wc.params.is_empty());
     }
@@ -1835,7 +1998,7 @@ mod tests {
             GqlValue::String("closed".into()),
         ]);
         let input = filter("status", "nin", list);
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""status" NOT IN (?, ?, ?)"#);
         assert_eq!(
             wc.params,
@@ -1850,7 +2013,7 @@ mod tests {
     #[test]
     fn nin_empty_list_emits_always_true_sentinel() {
         let input = filter("status", "nin", GqlValue::List(vec![]));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, "1");
         assert!(wc.params.is_empty());
     }
@@ -1858,7 +2021,7 @@ mod tests {
     #[test]
     fn isnull_true_emits_is_null_on_scalar_column() {
         let input = filter("status", "isNull", GqlValue::Boolean(true));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""status" IS NULL"#);
         assert!(wc.params.is_empty());
     }
@@ -1866,7 +2029,7 @@ mod tests {
     #[test]
     fn isnull_false_emits_is_not_null_on_scalar_column() {
         let input = filter("status", "isNull", GqlValue::Boolean(false));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""status" IS NOT NULL"#);
         assert!(wc.params.is_empty());
     }
@@ -1874,7 +2037,7 @@ mod tests {
     #[test]
     fn isnull_true_emits_is_null_on_id_field() {
         let input = filter("id", "isNull", GqlValue::Boolean(true));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""id" IS NULL"#);
         assert!(wc.params.is_empty());
     }
@@ -1882,7 +2045,7 @@ mod tests {
     #[test]
     fn isnull_false_emits_is_not_null_on_id_field() {
         let input = filter("id", "isNull", GqlValue::Boolean(false));
-        let wc = build_where_sql(&input, &test_schema());
+        let wc = build_where_sql(&input, &test_schema(), &no_schemas());
         assert_eq!(wc.sql, r#""id" IS NOT NULL"#);
         assert!(wc.params.is_empty());
     }
