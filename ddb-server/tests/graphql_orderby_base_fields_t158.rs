@@ -11,8 +11,62 @@ async fn setup(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
     (actor, pool)
 }
 
-/// Execute a GraphQL query, assert no errors, and return notes[].items[].subject.
-async fn run_query(schema: &Schema, query: &str) -> Vec<String> {
+/// Build a schema over a `note` table seeded so created_at, updated_at, and id
+/// orderings are all distinct — every test case below fails if its sort
+/// direction is dropped. Shared by both tests so the fixture lives in one place.
+///
+///   subject  | date       | insertion order (id ASC)
+///   n0 -> n0e| 2026-03-01 | 1st  (re-indexed last via UPDATE -> newest updated_at)
+///   n1       | 2026-01-01 | 2nd
+///   n2       | 2026-04-01 | 3rd
+///   n3       | 2026-02-01 | 4th
+///
+///   id ASC          = [n0e, n1, n2, n3]   (insertion order)
+///   created_at ASC  = [n1, n3, n0e, n2]   (Jan < Feb < Mar < Apr)
+///   created_at DESC = [n2, n0e, n3, n1]   (Apr > Mar > Feb > Jan)
+///   updated_at ASC  = [n1, n2, n3, n0e]   (n0e re-indexed last = newest)
+///   updated_at DESC = [n0e, n3, n2, n1]
+async fn build_fixture_schema(dir: &std::path::Path) -> Schema {
+    let (actor, pool) = setup(dir).await;
+    actor
+        .execute_sql("CREATE TABLE note (subject TEXT NOT NULL)".to_string())
+        .await
+        .expect("create table");
+
+    // Insert rows with explicit, scrambled dates so created_at order diverges
+    // from insertion (id) order. Small async sleeps ensure distinct updated_at
+    // values (set to chrono::Utc::now() at index time).
+    let fixtures = [
+        ("n0", "2026-03-01"),
+        ("n1", "2026-01-01"),
+        ("n2", "2026-04-01"),
+        ("n3", "2026-02-01"),
+    ];
+    for (subject, date) in fixtures {
+        actor
+            .execute_sql(format!(
+                "INSERT INTO note (subject, date) VALUES ('{subject}', '{date}')"
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("insert {subject}: {e:?}"));
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    // Update n0 so its updated_at becomes the newest.
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    actor
+        .execute_sql("UPDATE note SET subject = 'n0e' WHERE subject = 'n0'".to_string())
+        .await
+        .expect("update n0");
+
+    let type_schemas = pool.get_type_schemas().await.expect("type schemas");
+    ddb_server::schema::build_schema(actor, pool, type_schemas, None).expect("schema must build")
+}
+
+/// Execute a GraphQL query against the `note` connection, assert no errors, and
+/// return notes[].items[].subject. (Coupled to the `notes` query by design — the
+/// only connection these tests exercise.)
+async fn run_notes_query(schema: &Schema, query: &str) -> Vec<String> {
     let response = schema.execute(query).await;
     assert!(
         response.errors.is_empty(),
@@ -29,178 +83,71 @@ async fn run_query(schema: &Schema, query: &str) -> Vec<String> {
 }
 
 /// PRD 00158 T1: base-field GraphQL orderBy (created_at, updated_at, id) with
-/// deterministic pagination via id tiebreaker.
-///
-/// Fixture: insert n0..n3 with DISTINCT dates scrambled relative to insertion
-/// order, so created_at ASC, created_at DESC, and id ASC all produce different
-/// orderings, binding the sort direction under test.
-///
-///   subject | date       | insertion order (id ASC)
-///   n0      | 2026-03-01 | 1st  (renamed to n0e after update)
-///   n1      | 2026-01-01 | 2nd
-///   n2      | 2026-04-01 | 3rd
-///   n3      | 2026-02-01 | 4th
-///
-///   id ASC          = [n0e, n1, n2, n3]   (insertion order)
-///   created_at ASC  = [n1, n3, n0e, n2]   (Jan < Feb < Mar < Apr)
-///   created_at DESC = [n2, n0e, n3, n1]   (Apr > Mar > Feb > Jan)
-///   updated_at DESC = [n0e, n3, n2, n1]   (n0e re-indexed last = newest)
+/// deterministic pagination via the id tiebreaker. Each case below yields an
+/// ordering distinct from the others (see `build_fixture_schema`), so a dropped
+/// sort direction would change the result and fail the test.
 #[tokio::test]
 async fn orderby_base_fields_paginate_deterministically() {
     let tmp = tempfile::tempdir().unwrap();
-    let (actor, pool) = setup(tmp.path()).await;
+    let schema = build_fixture_schema(tmp.path()).await;
 
-    // 1. Register typedef.
-    actor
-        .execute_sql("CREATE TABLE note (subject TEXT NOT NULL)".to_string())
-        .await
-        .expect("create table");
-
-    // 2. Insert rows with explicit, scrambled dates so created_at order
-    //    diverges from insertion (id) order. Small async sleeps ensure
-    //    distinct updated_at values (set to chrono::Utc::now() at index time).
-    let fixtures = [
-        ("n0", "2026-03-01"),
-        ("n1", "2026-01-01"),
-        ("n2", "2026-04-01"),
-        ("n3", "2026-02-01"),
+    let cases = [
+        (
+            r#"{ notes(orderBy: { id: ASC }) { items { subject } } }"#,
+            vec!["n0e", "n1", "n2", "n3"],
+        ),
+        (
+            r#"{ notes(orderBy: { created_at: ASC }) { items { subject } totalCount } }"#,
+            vec!["n1", "n3", "n0e", "n2"],
+        ),
+        (
+            r#"{ notes(orderBy: { created_at: DESC }) { items { subject } } }"#,
+            vec!["n2", "n0e", "n3", "n1"],
+        ),
+        (
+            r#"{ notes(orderBy: { updated_at: DESC }) { items { subject } } }"#,
+            vec!["n0e", "n3", "n2", "n1"],
+        ),
     ];
-    for (subject, date) in fixtures {
-        actor
-            .execute_sql(format!(
-                "INSERT INTO note (subject, date) VALUES ('{subject}', '{date}')"
-            ))
-            .await
-            .unwrap_or_else(|e| panic!("insert {subject}: {e:?}"));
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    for (query, expected) in cases {
+        assert_eq!(
+            run_notes_query(&schema, query).await,
+            expected,
+            "order mismatch for query:\n{query}"
+        );
     }
 
-    // 3. Update n0 so its updated_at becomes the newest.
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    actor
-        .execute_sql("UPDATE note SET subject = 'n0e' WHERE subject = 'n0'".to_string())
-        .await
-        .expect("update n0");
-
-    // 4. Build the schema (consumes actor + pool).
-    let type_schemas = pool.get_type_schemas().await.expect("type schemas");
-    let schema = ddb_server::schema::build_schema(actor, pool, type_schemas, None)
-        .expect("schema must build");
-
-    // A. id ASC: insertion order.
-    let subjects_a = run_query(
-        &schema,
-        r#"{ notes(orderBy: { id: ASC }) { items { subject } } }"#,
-    )
-    .await;
-    assert_eq!(
-        subjects_a,
-        vec!["n0e", "n1", "n2", "n3"],
-        "id ASC order mismatch"
-    );
-
-    // B. created_at ASC: date order Jan < Feb < Mar < Apr.
-    //    Differs from id ASC: [n1,n3,n0e,n2] != [n0e,n1,n2,n3].
-    let subjects_b = run_query(
-        &schema,
-        r#"{ notes(orderBy: { created_at: ASC }) { items { subject } totalCount } }"#,
-    )
-    .await;
-    assert_eq!(
-        subjects_b,
-        vec!["n1", "n3", "n0e", "n2"],
-        "created_at ASC order mismatch"
-    );
-
-    // C. created_at DESC: date order Apr > Mar > Feb > Jan.
-    //    Differs from ASC and from id ASC: proves direction matters.
-    let subjects_c = run_query(
-        &schema,
-        r#"{ notes(orderBy: { created_at: DESC }) { items { subject } } }"#,
-    )
-    .await;
-    assert_eq!(
-        subjects_c,
-        vec!["n2", "n0e", "n3", "n1"],
-        "created_at DESC order mismatch (must differ from ASC)"
-    );
-
-    // D. updated_at DESC: n0e was re-indexed last (UPDATE), so it is newest.
-    let subjects_d = run_query(
-        &schema,
-        r#"{ notes(orderBy: { updated_at: DESC }) { items { subject } } }"#,
-    )
-    .await;
-    assert_eq!(
-        subjects_d,
-        vec!["n0e", "n3", "n2", "n1"],
-        "updated_at DESC order mismatch"
-    );
-
-    // E. Deterministic pagination over created_at ASC with id tiebreaker.
-    let page1 = run_query(
+    // Deterministic pagination over created_at ASC with the id tiebreaker.
+    let page1 = run_notes_query(
         &schema,
         r#"{ notes(orderBy: { created_at: ASC }, limit: 2, offset: 0) { items { subject } } }"#,
     )
     .await;
-    let page2 = run_query(
+    let page2 = run_notes_query(
         &schema,
         r#"{ notes(orderBy: { created_at: ASC }, limit: 2, offset: 2) { items { subject } } }"#,
     )
     .await;
     assert_eq!(page1, vec!["n1", "n3"], "pagination page 1 mismatch");
     assert_eq!(page2, vec!["n0e", "n2"], "pagination page 2 mismatch");
-    let concatenated: Vec<String> = page1.into_iter().chain(page2).collect();
+    let full: Vec<String> = page1.into_iter().chain(page2).collect();
     assert_eq!(
-        concatenated,
+        full,
         vec!["n1", "n3", "n0e", "n2"],
         "page1 + page2 must equal full created_at ASC order; no gaps or dupes"
     );
 }
 
-/// PRD 00158 T2: updated_at ASC — the updated row (n0e) has the newest updated_at
-/// and therefore appears LAST in ASC order. Ordering differs from both id ASC
-/// and created_at ASC, binding the sort direction.
+/// PRD 00158 T2: updated_at ASC — the updated row (n0e) has the newest
+/// updated_at and therefore appears LAST in ASC order. Ordering differs from
+/// both id ASC [n0e,n1,n2,n3] and created_at ASC [n1,n3,n0e,n2], binding the
+/// sort direction.
 #[tokio::test]
 async fn orderby_updated_at_asc() {
     let tmp = tempfile::tempdir().unwrap();
-    let (actor, pool) = setup(tmp.path()).await;
+    let schema = build_fixture_schema(tmp.path()).await;
 
-    actor
-        .execute_sql("CREATE TABLE note (subject TEXT NOT NULL)".to_string())
-        .await
-        .expect("create table");
-
-    let fixtures = [
-        ("n0", "2026-03-01"),
-        ("n1", "2026-01-01"),
-        ("n2", "2026-04-01"),
-        ("n3", "2026-02-01"),
-    ];
-    for (subject, date) in fixtures {
-        actor
-            .execute_sql(format!(
-                "INSERT INTO note (subject, date) VALUES ('{subject}', '{date}')"
-            ))
-            .await
-            .unwrap_or_else(|e| panic!("insert {subject}: {e:?}"));
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    actor
-        .execute_sql("UPDATE note SET subject = 'n0e' WHERE subject = 'n0'".to_string())
-        .await
-        .expect("update n0");
-
-    let type_schemas = pool.get_type_schemas().await.expect("type schemas");
-    let schema = ddb_server::schema::build_schema(actor, pool, type_schemas, None)
-        .expect("schema must build");
-
-    // updated_at ASC: n1 was indexed second (oldest remaining after n0 re-index),
-    // n0e was re-indexed last (newest). Order: [n1, n2, n3, n0e].
-    // Differs from id ASC [n0e,n1,n2,n3] and created_at ASC [n1,n3,n0e,n2].
-    let subjects = run_query(
+    let subjects = run_notes_query(
         &schema,
         r#"{ notes(orderBy: { updated_at: ASC }) { items { subject } } }"#,
     )
