@@ -21,6 +21,9 @@ pub fn string_filter() -> InputObject {
             TypeRef::named(TypeRef::STRING),
         ))
         .field(InputValue::new("in", TypeRef::named_list(TypeRef::STRING)))
+        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::STRING)))
+        .field(InputValue::new("nin", TypeRef::named_list(TypeRef::STRING)))
+        .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
 
 /// `IntFilter` — equality, comparison, set membership on INTEGER columns.
@@ -33,6 +36,9 @@ pub fn int_filter() -> InputObject {
         .field(InputValue::new("lt", TypeRef::named(TypeRef::INT)))
         .field(InputValue::new("lte", TypeRef::named(TypeRef::INT)))
         .field(InputValue::new("in", TypeRef::named_list(TypeRef::INT)))
+        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::INT)))
+        .field(InputValue::new("nin", TypeRef::named_list(TypeRef::INT)))
+        .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
 
 /// `FloatFilter` — equality, comparison, set membership on REAL columns.
@@ -45,11 +51,18 @@ pub fn float_filter() -> InputObject {
         .field(InputValue::new("lt", TypeRef::named(TypeRef::FLOAT)))
         .field(InputValue::new("lte", TypeRef::named(TypeRef::FLOAT)))
         .field(InputValue::new("in", TypeRef::named_list(TypeRef::FLOAT)))
+        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::FLOAT)))
+        .field(InputValue::new("nin", TypeRef::named_list(TypeRef::FLOAT)))
+        .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
 
 /// `BoolFilter` — equality on BOOLEAN columns.
 pub fn bool_filter() -> InputObject {
-    InputObject::new("BoolFilter").field(InputValue::new("eq", TypeRef::named(TypeRef::BOOLEAN)))
+    InputObject::new("BoolFilter")
+        .field(InputValue::new("eq", TypeRef::named(TypeRef::BOOLEAN)))
+        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::BOOLEAN)))
+        .field(InputValue::new("nin", TypeRef::named_list(TypeRef::BOOLEAN)))
+        .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
 
 /// `IDFilter` — equality and set membership on ID/reference columns.
@@ -57,6 +70,9 @@ pub fn id_filter() -> InputObject {
     InputObject::new("IDFilter")
         .field(InputValue::new("eq", TypeRef::named(TypeRef::ID)))
         .field(InputValue::new("in", TypeRef::named_list(TypeRef::ID)))
+        .field(InputValue::new("notIn", TypeRef::named_list(TypeRef::ID)))
+        .field(InputValue::new("nin", TypeRef::named_list(TypeRef::ID)))
+        .field(InputValue::new("isNull", TypeRef::named(TypeRef::BOOLEAN)))
 }
 
 /// `TagsFilter` — match the tag set on the doogat-level `_ddb_tags`
@@ -778,6 +794,12 @@ fn build_operator_condition(
             Some(format!("\"{column}\" LIKE ? || '%' COLLATE NOCASE"))
         }
         "in" => build_in_condition(column, value, params),
+        "notIn" | "nin" => build_not_in_condition(column, value, params),
+        "isNull" => match value {
+            GqlValue::Boolean(true) => Some(format!("\"{column}\" IS NULL")),
+            GqlValue::Boolean(false) => Some(format!("\"{column}\" IS NOT NULL")),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -802,6 +824,28 @@ fn build_in_condition(
         })
         .collect();
     Some(format!("\"{}\" IN ({})", column, placeholders.join(", ")))
+}
+
+fn build_not_in_condition(
+    column: &str,
+    value: &GqlValue,
+    params: &mut Vec<QueryValue>,
+) -> Option<String> {
+    let items = match value {
+        GqlValue::List(items) => items,
+        _ => return None,
+    };
+    if items.is_empty() {
+        return Some("1".to_string()); // NOT IN () matches every row; always-true
+    }
+    let placeholders: Vec<&str> = items
+        .iter()
+        .map(|v| {
+            params.push(gql_to_sql(v));
+            "?"
+        })
+        .collect();
+    Some(format!("\"{}\" NOT IN ({})", column, placeholders.join(", ")))
 }
 
 /// Convert a GraphQL value to an adapter-neutral query parameter value.
