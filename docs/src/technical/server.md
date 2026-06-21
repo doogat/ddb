@@ -717,9 +717,9 @@ stable.
 
 If a typedef declares its own column named `created_at` or `updated_at`, that
 user column wins (resolution is user-column-first), and the base key is not
-injected. The base `id` key is never suppressed this way: the DDL layer rejects
-a user-declared `id` column, so the same collision guard simply never finds an
-`id` column to match against.
+injected. The base `id` key is never suppressed this way: the DDL layer skips
+a user-declared `id` column (it is an implicit, auto-managed column), so the
+same collision guard simply never finds an `id` column to match against.
 
 ### Aggregation
 
