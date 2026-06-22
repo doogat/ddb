@@ -2702,7 +2702,7 @@ rm -f "$IG_UPD_REST_BODY" "$IG_UPD_MISS_BODY" "$IG_RT_BODY" "$IG_RT_BAD_BODY"
 # --- Fixture ---
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 VER=${VER:-0}
-gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE relcat (slug TEXT)\") { message } }"}' | grep -q "table relcat created"
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE relcat (title TEXT, slug TEXT)\") { message } }"}' | grep -q "table relcat created"
 wait_schema_reload "$VER"
 VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
 gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rellink (url TEXT, category TEXT REFERENCES relcat)\") { message } }"}' | grep -q "table rellink created"

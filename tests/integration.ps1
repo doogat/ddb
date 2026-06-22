@@ -2611,7 +2611,7 @@ ddb query "DROP TABLE ig_rest_typed CASCADE" | Out-Null
 $gqlVer = gqlq '{ schemaVersion }'
 $ver = if ($gqlVer -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
 
-gqlq 'mutation { executeSql(sql: "CREATE TABLE relcat (slug TEXT)") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "CREATE TABLE relcat (title TEXT, slug TEXT)") { message } }' | Out-Null
 waitSchemaReload $ver
 $gqlVer = gqlq '{ schemaVersion }'
 $ver = if ($gqlVer -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
