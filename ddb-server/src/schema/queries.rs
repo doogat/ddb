@@ -451,7 +451,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
         dynamic_types.push(typed_obj);
 
         // Create per-type Where, OrderBy inputs, Connection and Aggregate types
-        let where_input = crate::filter::build_where_input(&type_name, schema);
+        let where_input =
+            crate::filter::build_where_input(&type_name, schema, type_schemas, &known_types);
         let order_by_input = crate::filter::build_order_by_input(&type_name, schema);
         let connection_type = crate::filter::build_connection_type(&type_name);
         let aggregate_type = crate::filter::build_aggregate_type(&type_name, schema);
@@ -869,6 +870,15 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                 "Query individual tag assignments with where filters on doogatId and tag name.",
             ),
         );
+    }
+
+    // Forward-relation `{Target}RelationFilter` inputs for every REFERENCES
+    // column whose target type is registered. Keyed off `known_types` so it
+    // agrees with `build_where_input` on which targets get a RelationFilter.
+    for relation_input in
+        crate::relation_filter::relation_input_objects(type_schemas, &known_types)
+    {
+        dynamic_inputs.push(relation_input);
     }
 
     Ok(QueryOutput {

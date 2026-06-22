@@ -138,14 +138,30 @@ pub fn filter_type_for_column(col: &ddb_core::types::ColumnDef) -> &'static str 
 ///
 /// Each column gets a field typed to the matching scalar filter.
 /// `_and` and `_or` are self-referencing list fields for compound logic.
-pub fn build_where_input(type_name: &str, schema: &TableSchema) -> InputObject {
+///
+/// A REFERENCES column whose target type is registered in `known_types` is
+/// typed `{TargetTypeName}RelationFilter` (forward relation traversal);
+/// otherwise it keeps the legacy bare `IDFilter` so there is no dangling type
+/// reference.
+pub fn build_where_input(
+    type_name: &str,
+    schema: &TableSchema,
+    _schemas: &[TableSchema],
+    known_types: &HashMap<String, String>,
+) -> InputObject {
     let name = format!("{type_name}Where");
     let mut input = InputObject::new(&name);
 
     for col in &schema.columns {
         let gql_name = sanitize_field_name(&col.name);
-        let filter_type = filter_type_for_column(col);
-        input = input.field(InputValue::new(&gql_name, TypeRef::named(filter_type)));
+        let filter_type = match &col.references {
+            Some(target) => match known_types.get(target) {
+                Some(target_type_name) => format!("{target_type_name}RelationFilter"),
+                None => "IDFilter".to_string(),
+            },
+            None => filter_type_for_column(col).to_string(),
+        };
+        input = input.field(InputValue::new(&gql_name, TypeRef::named(&filter_type)));
     }
 
     // Base doogat fields (always present in materialized tables)
@@ -547,6 +563,7 @@ const MAX_RELATION_DEPTH: usize = 5;
 /// Recursion context threaded through the WHERE-clause compiler.
 pub(crate) struct WhereCtx<'a> {
     pub schema: &'a TableSchema,    // the "current row" type
+    pub schemas: &'a SchemaLookup,  // table_name -> TableSchema, for relation resolution
     pub qualifier: Option<&'a str>, // None = top-level (cols unqualified, row-ref = schema.table_name)
     pub depth: usize,               // EXISTS nesting depth, capped at MAX_RELATION_DEPTH
     pub alias_seq: &'a mut u32,     // monotonic counter for unique EXISTS aliases
@@ -593,7 +610,7 @@ const BASE_FILTER_FIELDS: &[&str] = &["id", "title"];
 pub fn try_build_where_sql(
     input: &GqlValue,
     schema: &TableSchema,
-    _schemas: &SchemaLookup,
+    schemas: &SchemaLookup,
 ) -> Result<WhereClause, String> {
     let mut conditions = Vec::new();
     let mut params = Vec::new();
@@ -601,6 +618,7 @@ pub fn try_build_where_sql(
 
     let mut ctx = WhereCtx {
         schema,
+        schemas,
         qualifier: None,
         depth: 0,
         alias_seq: &mut alias_seq,
@@ -626,16 +644,16 @@ pub fn try_build_where_sql(
 pub fn build_where_sql(
     input: &GqlValue,
     schema: &TableSchema,
-    _schemas: &SchemaLookup,
+    schemas: &SchemaLookup,
 ) -> WhereClause {
-    try_build_where_sql(input, schema, _schemas).unwrap_or_else(|_| WhereClause::empty())
+    try_build_where_sql(input, schema, schemas).unwrap_or_else(|_| WhereClause::empty())
 }
 
 /// Walk a `{Type}Where` object value, appending each field's SQL condition to
 /// `conditions`. Shared by the top-level entry and the logical combinators, so
 /// every recursion level threads the same `WhereCtx` (one params Vec, one alias
 /// counter) instead of allocating fresh state per branch.
-fn build_conditions_into(
+pub(crate) fn build_conditions_into(
     obj: &GqlValue,
     ctx: &mut WhereCtx,
     conditions: &mut Vec<String>,
@@ -671,11 +689,46 @@ fn build_conditions_into(
                     conditions.push(cond);
                 }
             }
-            _ => build_column_conditions(field, value, ctx, conditions),
+            _ => {
+                // Forward-relation routing: a field resolving to a REFERENCES
+                // column whose target type is registered routes to the
+                // junction EXISTS emitter; everything else keeps the existing
+                // direct-column path.
+                if let Some((parent_col, target_table)) = resolve_reference_target(field, ctx) {
+                    for cond in crate::relation_filter::build_forward_relation(
+                        &parent_col,
+                        &target_table,
+                        value,
+                        ctx,
+                    )? {
+                        conditions.push(cond);
+                    }
+                } else {
+                    build_column_conditions(field, value, ctx, conditions);
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+/// If `field` resolves to a REFERENCES column on the current row type whose
+/// referenced target is a registered schema, return `(stored_column_name,
+/// target_table)`. Returns `None` for non-reference columns or unregistered
+/// targets (keeps the legacy direct-column path).
+fn resolve_reference_target(field: &str, ctx: &WhereCtx) -> Option<(String, String)> {
+    let col = ctx
+        .schema
+        .columns
+        .iter()
+        .find(|c| c.name == field || sanitize_field_name(&c.name) == field)?;
+    let target = col.references.as_ref()?;
+    if ctx.schemas.contains_key(target) {
+        Some((col.name.clone(), target.clone()))
+    } else {
+        None
+    }
 }
 
 /// PRD 00129 §5 + issue #11: build the SQL fragment for a `TagsFilter`
@@ -813,6 +866,7 @@ fn build_logical_combinator(
         let mut item_conditions = Vec::new();
         let mut child = WhereCtx {
             schema: ctx.schema,
+            schemas: ctx.schemas,
             qualifier: ctx.qualifier,
             depth: ctx.depth,
             alias_seq: &mut *ctx.alias_seq,
@@ -834,7 +888,7 @@ fn build_logical_combinator(
 ///
 /// `col_ref` is the already-quoted column reference (`"col"` at top level,
 /// `"alias"."col"` when qualified), so the operator text is column-agnostic.
-fn build_operator_condition(
+pub(crate) fn build_operator_condition(
     col_ref: &str,
     op: &str,
     value: &GqlValue,
@@ -1673,7 +1727,7 @@ mod tests {
         // title is deduped (already in columns), so base fields add only id.
         // Expected: id + title + priority + status + category + _and + _or = 7 fields.
         let schema = test_schema();
-        let input = build_where_input("Bookmark", &schema);
+        let input = build_where_input("Bookmark", &schema, &[], &HashMap::new());
         // InputObject doesn't expose field introspection directly, but we can
         // register it in a dynamic schema and check the SDL.
         let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
@@ -1776,7 +1830,7 @@ mod tests {
         // Default: typed `link` table has no `tags` column, so the
         // synthetic `tags: TagsFilter` is added by the where builder.
         let schema = schema_with_table("link", vec!["title", "url"]);
-        let input = build_where_input("Link", &schema);
+        let input = build_where_input("Link", &schema, &[], &HashMap::new());
         let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
             .register(string_filter())
             .register(int_filter())
