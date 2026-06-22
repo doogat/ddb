@@ -5,9 +5,6 @@
 //! against the auto-junction table. id-ops on the same field stay a direct
 //! stored-column compare (back-compat). Junction names come from the
 //! single-source-of-truth helpers in `ddb_core::indexer`.
-//!
-//! Reverse/junction membership quantifiers are a separate task; the shared
-//! helpers here are structured so reverse can be added later.
 
 use async_graphql::dynamic::{InputObject, InputValue, TypeRef};
 use async_graphql::{Name, Value as GqlValue};
@@ -130,16 +127,12 @@ fn emit_quantifier_exists(
         ));
     }
 
-    // The target schema's presence is verified before routing, so this is
-    // guaranteed by the caller; resolve it for the child ctx.
     let target_schema = ctx
         .schemas
         .get(target_table)
         .expect("target schema presence checked before routing")
         .clone();
 
-    // Compile the sub-`where` object against the target schema, qualified by
-    // the relation alias and one level deeper.
     let mut sub_conditions = Vec::new();
     {
         let mut child = WhereCtx {
@@ -163,7 +156,6 @@ fn emit_quantifier_exists(
     let sql = match quantifier {
         "none" => format!("NOT EXISTS ({join_and_where} AND ({sub_sql}))"),
         "every" => format!("NOT EXISTS ({join_and_where} AND NOT ({sub_sql}))"),
-        // `some` and implicit-some.
         _ => format!("EXISTS ({join_and_where} AND ({sub_sql}))"),
     };
     Ok(sql)
