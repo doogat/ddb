@@ -47,4 +47,5 @@ mod tag_entries;
 mod tags;
 mod title_template_references;
 mod typed_field_mutations;
+mod typed_where_filter;
 mod upsert;
