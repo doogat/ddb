@@ -937,4 +937,128 @@ mod tests {
             .to_string()
             .contains("reserved"));
     }
+
+    // --- strip_inline_zones tests ---
+
+    #[test]
+    fn strip_inline_zones_single_zoned_column_maps_and_strips_token() {
+        use crate::types::Zone;
+        let sql = "CREATE TABLE notes (descr TEXT ZONE frontmatter)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map["descr"], Zone::Frontmatter);
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+        // Type and column name survive
+        assert!(cleaned.to_lowercase().contains("descr"));
+        assert!(cleaned.to_lowercase().contains("text"));
+    }
+
+    #[test]
+    fn strip_inline_zones_maps_two_zoned_columns() {
+        use crate::types::Zone;
+        let sql = "CREATE TABLE t (title TEXT ZONE frontmatter, body TEXT ZONE body)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map["title"], Zone::Frontmatter);
+        assert_eq!(map["body"], Zone::Body);
+        // Neither ZONE token survives
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+        assert!(!cleaned.to_lowercase().contains("zone body"));
+    }
+
+    #[test]
+    fn strip_inline_zones_preserves_enum_comma() {
+        use crate::types::Zone;
+        let sql = "CREATE TABLE t (status ENUM('a','b') ZONE frontmatter, id INTEGER)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map["status"], Zone::Frontmatter);
+        // The ENUM comma must be inside the cleaned column definition, not split
+        assert!(cleaned.contains("ENUM('a','b')") || cleaned.contains("ENUM('a', 'b')"));
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+    }
+
+    #[test]
+    fn strip_inline_zones_quoted_identifier_key_strips_quotes() {
+        use crate::types::Zone;
+        let sql = r#"CREATE TABLE t ("long-desc" TEXT ZONE frontmatter)"#;
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map["long-desc"], Zone::Frontmatter);
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+    }
+
+    #[test]
+    fn strip_inline_zones_non_create_table_is_noop() {
+        let sql = "INSERT INTO t (a) VALUES (1)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(cleaned, sql);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn strip_inline_zones_rejects_invalid_zone_value() {
+        let sql = "CREATE TABLE t (x TEXT ZONE sidebar)";
+        let err = strip_inline_zones(sql).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid zone: sidebar (use frontmatter, body, or reference)"
+        );
+    }
+
+    #[test]
+    fn strip_inline_zones_column_named_zone_does_not_misfire() {
+        use crate::types::Zone;
+        // A column named `zone` with no ZONE attribute -> empty map
+        let sql = "CREATE TABLE t (zone TEXT)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert!(map.is_empty(), "column named 'zone' must not misfire");
+        assert!(cleaned.to_lowercase().contains("zone text") || cleaned.to_lowercase().contains("zone"));
+
+        // A quoted string default that contains 'zone' must not misfire
+        let sql2 = "CREATE TABLE t (descr TEXT DEFAULT 'zone body')";
+        let (cleaned2, map2) = strip_inline_zones(sql2).unwrap();
+        assert!(map2.is_empty(), "quoted literal 'zone body' must not misfire");
+        assert!(!cleaned2.is_empty());
+
+        // A column named `zone` with a ZONE attribute -> map key `zone`, value Body
+        let sql3 = "CREATE TABLE t (zone TEXT ZONE body)";
+        let (cleaned3, map3) = strip_inline_zones(sql3).unwrap();
+        assert_eq!(map3.len(), 1);
+        assert_eq!(map3["zone"], Zone::Body);
+        assert!(!cleaned3.to_lowercase().contains("zone body") || {
+            // Only allowed if "zone body" in cleaned is the "zone TEXT" column def,
+            // not the ZONE attribute. A stricter check: the ZONE keyword appearing
+            // as an attribute token should be absent after the column name.
+            cleaned3.to_lowercase().matches("zone").count() == 1
+        });
+    }
+
+    #[test]
+    fn strip_inline_zones_case_insensitive_keyword_and_value() {
+        use crate::types::Zone;
+        let sql = "CREATE TABLE t (descr TEXT zone FRONTMATTER)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map["descr"], Zone::Frontmatter);
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+    }
+
+    #[test]
+    fn strip_inline_zones_no_zone_create_table_is_idempotent() {
+        let sql = "CREATE TABLE t (id INTEGER, name TEXT)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(cleaned, sql);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn strip_inline_zones_reference_zone_value_accepted() {
+        use crate::types::Zone;
+        let sql = "CREATE TABLE t (owner_id INTEGER ZONE reference)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map["owner_id"], Zone::Reference);
+        assert!(!cleaned.to_lowercase().contains("zone reference"));
+    }
 }
