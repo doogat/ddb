@@ -201,6 +201,13 @@ echo "$SMOKE136_CAT" | grep -qE "^[0-9]{14}$"
 $DDB create --type smoke136link --title "Link 136" --set "url=https://a" --set "category=$SMOKE136_CAT" >/dev/null
 pass "cross-process FK freshness on ddb create (#16)"
 
+# 11g. Inline column ZONE at CREATE TABLE (PRD 00160)
+$DDB query "CREATE TABLE smokezone (summary TEXT ZONE frontmatter, body_note TEXT)" | grep -q "table smokezone created"
+SZ_ID=$($DDB query "INSERT INTO smokezone (summary, body_note) VALUES ('recap', 'long notes')" | tr -d '[:space:]')
+$DDB read "$SZ_ID" | grep -q "summary: recap"
+$DDB query "DROP TABLE smokezone CASCADE" | grep -q "dropped"
+pass "inline column zone at create table (PRD 00160)"
+
 # 12. install bundled type
 $DDB type install contact | grep -q "installed type"
 pass "type install"

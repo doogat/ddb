@@ -288,6 +288,16 @@ if ($SMOKE136_CAT -notmatch '^\d{14}$') { throw "category id malformed: $SMOKE13
 ddb create --type smoke136link --title "Link 136" --set "url=https://a" --set "category=$SMOKE136_CAT" | Out-Null
 pass "cross-process FK freshness on ddb create (#16)"
 
+# 11g. Inline column ZONE at CREATE TABLE (PRD 00160)
+$output = ddb query "CREATE TABLE smokezone (summary TEXT ZONE frontmatter, body_note TEXT)"
+if ($output -notmatch "table smokezone created") { throw "inline zone create failed" }
+$SZ_ID = (ddb query "INSERT INTO smokezone (summary, body_note) VALUES ('recap', 'long notes')").Trim()
+$output = ddb read $SZ_ID
+if ($output -notmatch "summary: recap") { throw "inline zone did not materialize summary to frontmatter: $output" }
+$output = ddb query "DROP TABLE smokezone CASCADE"
+if ($output -notmatch "dropped") { throw "inline zone cleanup drop failed" }
+pass "inline column zone at create table (PRD 00160)"
+
 # 12. install bundled type
 $output = ddb type install contact
 if ($output -notmatch "installed type") { throw "type install failed" }
