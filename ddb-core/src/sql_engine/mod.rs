@@ -18,7 +18,8 @@ use crate::error::{DoogatError, Result};
 use crate::parser;
 use crate::traits::DoogatStore;
 use crate::traits::SqlBackend;
-use crate::types::DoogatId;
+use crate::types::{DoogatId, Zone};
+use std::collections::HashMap;
 
 pub(crate) use builders::resolve_insert_title;
 pub use builders::{build_typedef_doogat, schema_from_parsed};
@@ -28,7 +29,7 @@ pub use ddl::create_table_with_default_seed_commit_msg;
 use helpers::{
     normalize_alter_column_type, re_create_table_singleton, re_drop_search_key, re_drop_singleton,
     re_drop_title_template, re_set_search_key, re_set_singleton, re_set_title_template,
-    re_set_zone,
+    re_set_zone, strip_inline_zones,
 };
 
 #[derive(Debug)]
@@ -72,6 +73,12 @@ pub struct SqlEngine<'a> {
     /// `handle_create_table`. T7 reads the inner bool to drive the
     /// post-install auto-seed.
     pub(super) pending_singleton: Option<bool>,
+    /// PRD 00160: inline `ZONE <z>` column attributes stripped from a CREATE
+    /// TABLE source before parsing, keyed by lowercase column name. Set in
+    /// `execute_batch`, consumed (taken) by `extract_columns`. Empty when no
+    /// inline zone was declared. Same single-statement lifecycle as
+    /// `pending_singleton`.
+    pub(super) pending_column_zones: HashMap<String, Zone>,
 }
 
 impl<'a> SqlEngine<'a> {
@@ -81,6 +88,7 @@ impl<'a> SqlEngine<'a> {
             repo,
             txn: None,
             pending_singleton: None,
+            pending_column_zones: HashMap::new(),
         }
     }
 
@@ -258,6 +266,14 @@ impl<'a> SqlEngine<'a> {
             self.pending_singleton = None;
             sql.to_string()
         };
+
+        // PRD 00160: strip inline `ZONE <z>` column attributes (sqlparser has
+        // no ZONE column option) and park the column-name -> Zone map for
+        // handle_create_table -> extract_columns. Runs on the already
+        // SINGLETON-stripped SQL. Unconditional assignment (like the SINGLETON
+        // else-branch reset) so a stale map never leaks to a later statement.
+        let (stripped, column_zones) = strip_inline_zones(&stripped)?;
+        self.pending_column_zones = column_zones;
 
         let normalized = normalize_alter_column_type(&stripped);
         let sql_parse = normalized.as_ref();

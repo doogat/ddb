@@ -252,6 +252,7 @@ impl<'a> SqlEngine<'a> {
 
     fn extract_columns(&mut self, cols: &[sqlparser::ast::ColumnDef]) -> Result<Vec<ColumnDef>> {
         let mut out = Vec::new();
+        let declared_zones = std::mem::take(&mut self.pending_column_zones);
         for col in cols {
             let name = col.name.value.to_lowercase();
             if name == "id" || name == "type" {
@@ -265,7 +266,9 @@ impl<'a> SqlEngine<'a> {
             // via `is_core_column`.
             let data_type = data_type_to_string(&col.data_type);
             let references = extract_references(&col.options);
-            let zone = if references.is_some() {
+            let zone = if !is_core_column(&name) && declared_zones.contains_key(&name) {
+                declared_zones.get(&name).cloned()
+            } else if references.is_some() {
                 Some(Zone::Reference)
             } else if is_numeric_type(&data_type) || is_short_string_type(&col.data_type) {
                 Some(Zone::Frontmatter)

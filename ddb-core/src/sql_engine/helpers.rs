@@ -364,8 +364,8 @@ fn find_zone_in_text(text: &str) -> Option<(String, usize, usize)> {
         // Check if this match is inside a single-quoted string
         let start = m.start();
         let mut inside = false;
-        for i in 0..start {
-            if bytes[i] == b'\'' {
+        for &byte in &bytes[..start] {
+            if byte == b'\'' {
                 inside = !inside;
             }
         }
@@ -462,9 +462,8 @@ pub(super) fn strip_inline_zones(
             let t = trimmed;
             let leading_ws = seg.len() - t.len();
 
-            if t.starts_with('"') {
+            if let Some(inner) = t.strip_prefix('"') {
                 // Quoted identifier: strip surrounding double-quotes
-                let inner = &t[1..];
                 let end = inner.find('"').unwrap_or(inner.len());
                 let name = &inner[..end];
                 (name.to_lowercase(), leading_ws + 1 + name.len() + 1)
