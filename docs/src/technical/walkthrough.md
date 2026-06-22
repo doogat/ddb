@@ -266,6 +266,10 @@ Incremental reindex (see `indexer/rebuild.rs:incremental_reindex()`) uses `Dooga
 
 The server's `EventBus` (see `events.rs`) is a tokio broadcast channel. After each successful mutation, the actor publishes a `DoogatEvent` with the kind (created/updated/deleted), doogat ID, type, and timestamp. GraphQL subscriptions and WebSocket connections subscribe to this channel for real-time updates.
 
+### Relation filter compiler (PRD 00159)
+
+PRD 00159 introduced `ddb-server/src/relation_filter.rs`, which houses the forward and reverse relation `EXISTS`-over-junction compilers that back the typed `where:` filter's `{T}RelationFilter` and `{T}MembershipFilter` inputs. The `where:`-clause compiler now threads a `WhereCtx` recursion context (depth counter, schema reference) through the single object-walker `build_conditions_into`, so nested relation sub-filters share a consistent depth bound and schema view without re-entering schema lookup on every level.
+
 ### Hot schema reload
 
 When a typedef doogat is created, updated, or deleted, the actor triggers a schema reload via `SchemaReloader` (see `reload.rs`). The reloader fetches current type schemas from the actor, rebuilds the dynamic GraphQL schema, and atomically swaps it into the `ArcSwap<Schema>` shared with all request handlers. This allows the GraphQL API to reflect typedef changes without a server restart.

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **graphql**: scalar and ID filter inputs (`StringFilter`, `IntFilter`, `FloatFilter`, `BoolFilter`, `IDFilter`) gained `notIn`, `nin`, and `isNull` operators on their `where:` filters. `notIn`/`nin` emit `col NOT IN (...)` (`nin` is an exact alias); an empty list is always-true. `isNull: true` → `col IS NULL`, `isNull: false` → `col IS NOT NULL`. `notIn` + NULL follows SQLite three-valued logic (NULL columns are excluded from `x NOT IN (...)`); use `isNull: true` to include nulls explicitly. (PRD 00159)
 - **graphql**: REFERENCES columns now accept a `{Target}RelationFilter` instead of `IDFilter`, enabling forward sub-filters by a related entity's columns (`some`/`none`/`every` quantifiers, inlined target columns). `none: {}` (empty) means "has no relation at all" — i.e. uncategorized. Reverse `{Type}MembershipFilter` quantifier fields are added on the target type for every referencing type, enabling queries like `categories(where: { links: { some: { title: { contains: "rust" } } } })`. Nesting depth bounded at 5 (`MAX_RELATION_DEPTH`). All relation filters compile to parameterized `EXISTS`-over-junction subqueries. (PRD 00159)
 
+### Changed
+
+- **server**: a REFERENCES column's GraphQL `where:` input type changed from `IDFilter` to `{Target}RelationFilter`. `eq`/`in` keep working identically (back-compat); only clients that referenced the `IDFilter` type name directly in typed GraphQL variables for a relation field must switch to `{Target}RelationFilter`. (PRD 00159)
+
 ## [0.2.6] - 2026-06-19
 
 ### Added
