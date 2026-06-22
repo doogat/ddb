@@ -772,6 +772,25 @@ pub(crate) struct ReverseRelation {
     pub ref_type_name: String,
 }
 
+/// Field names already present on `current`'s Where input: its sanitized
+/// columns plus the synthetic base fields (`id`/`title`/`tags`) and the
+/// logical combinators (`_and`/`_or`). A reverse-relation name colliding with
+/// any of these must fall back or be skipped. Split out of `reverse_relations`
+/// to keep that function under the size limit; the set is unchanged.
+fn current_field_names(current: &TableSchema) -> std::collections::HashSet<String> {
+    let mut existing: std::collections::HashSet<String> = current
+        .columns
+        .iter()
+        .map(|c| sanitize_field_name(&c.name))
+        .collect();
+    for base in ["id", "title", "tags"] {
+        existing.insert(base.to_string());
+    }
+    existing.insert("_and".to_string());
+    existing.insert("_or".to_string());
+    existing
+}
+
 /// Deterministically enumerate the reverse relations on `current`: every
 /// registered type that REFERENCES `current` via some column. Shared by
 /// `build_where_input` (to emit the reverse field) and `resolve_reverse_target`
@@ -786,16 +805,7 @@ pub(crate) fn reverse_relations(
     current: &TableSchema,
     registered: &[&TableSchema],
 ) -> Vec<ReverseRelation> {
-    let mut existing: std::collections::HashSet<String> = current
-        .columns
-        .iter()
-        .map(|c| sanitize_field_name(&c.name))
-        .collect();
-    for base in ["id", "title", "tags"] {
-        existing.insert(base.to_string());
-    }
-    existing.insert("_and".to_string());
-    existing.insert("_or".to_string());
+    let existing = current_field_names(current);
 
     let mut sorted: Vec<&TableSchema> = registered.to_vec();
     sorted.sort_by(|a, b| a.table_name.cmp(&b.table_name));

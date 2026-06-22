@@ -40,13 +40,13 @@ const QUANTIFIERS: &[&str] = &["some", "none", "every"];
 
 /// Reserved keys that must not be inlined as target columns in the relation
 /// filter input (reachable via `some:`/`none:`/`every:` instead).
-// RESERVED_RELATION_KEYS must remain a superset of ID_OPS ∪ QUANTIFIERS so an
-// operator-named target column is never inlined (it would be shadowed by the
-// id-ops branch).
-const RESERVED_RELATION_KEYS: &[&str] = &[
-    "eq", "neq", "gt", "gte", "lt", "lte", "contains", "startsWith", "in", "notIn", "nin",
-    "isNull", "some", "none", "every",
-];
+///
+/// Derived as `ID_OPS` ∪ `QUANTIFIERS` so it can never drift from those two
+/// sources: an operator-named target column must never be inlined (it would be
+/// shadowed by the id-ops branch), nor a quantifier key.
+fn reserved_relation_keys() -> std::collections::HashSet<&'static str> {
+    ID_OPS.iter().chain(QUANTIFIERS).copied().collect()
+}
 
 /// Forward-relation emitter for a REFERENCES column `parent_col` on the
 /// current row type, pointing at registered `target_table`.
@@ -151,24 +151,8 @@ fn emit_membership_exists(
     // Compile sub-conditions FIRST so the depth check at the top of
     // `build_conditions_into` always runs (even for an empty terminal), then
     // branch on whether the COMPILED conditions are empty.
-    let target_schema = ctx
-        .schemas
-        .get(target_table)
-        .ok_or_else(|| "relation target schema missing".to_string())?
-        .clone();
-
-    let mut sub_conditions = Vec::new();
-    {
-        let mut child = WhereCtx {
-            schema: &target_schema,
-            schemas: ctx.schemas,
-            qualifier: Some(&r_alias),
-            depth: ctx.depth + 1,
-            alias_seq: &mut *ctx.alias_seq,
-            params: &mut *ctx.params,
-        };
-        build_conditions_into(sub_value, &mut child, &mut sub_conditions)?;
-    }
+    let sub_conditions =
+        compile_membership_sub_conditions(target_table, &r_alias, sub_value, ctx)?;
 
     // Empty compiled sub-`where`: no JOIN needed; the quantifier reduces to
     // junction presence/absence (a junction row implies a related row, same
@@ -191,6 +175,36 @@ fn emit_membership_exists(
         _ => format!("EXISTS ({join_and_where} AND ({sub_sql}))"),
     };
     Ok(sql)
+}
+
+/// Compile the target's sub-`where` object against `target_table`'s schema with
+/// a child ctx (alias `r_alias`, depth+1). Returns the compiled sub-conditions,
+/// or `Err` when the target schema is absent from the lookup. Split out of
+/// `emit_membership_exists` to keep that function under the size limit; the
+/// emitted SQL and bound params are unchanged.
+fn compile_membership_sub_conditions(
+    target_table: &str,
+    r_alias: &str,
+    sub_value: &GqlValue,
+    ctx: &mut WhereCtx,
+) -> Result<Vec<String>, String> {
+    let target_schema = ctx
+        .schemas
+        .get(target_table)
+        .ok_or_else(|| "relation target schema missing".to_string())?
+        .clone();
+
+    let mut sub_conditions = Vec::new();
+    let mut child = WhereCtx {
+        schema: &target_schema,
+        schemas: ctx.schemas,
+        qualifier: Some(r_alias),
+        depth: ctx.depth + 1,
+        alias_seq: &mut *ctx.alias_seq,
+        params: &mut *ctx.params,
+    };
+    build_conditions_into(sub_value, &mut child, &mut sub_conditions)?;
+    Ok(sub_conditions)
 }
 
 /// No-JOIN membership form for an empty (compiled) sub-`where`: the quantifier
@@ -278,9 +292,10 @@ pub(crate) fn relation_filter_input(
         .field(InputValue::new("every", TypeRef::named(&where_type)));
 
     // Inlined target columns (implicit `some`), skipping reserved-op names.
+    let reserved = reserved_relation_keys();
     for col in &target_schema.columns {
         let gql_name = sanitize_field_name(&col.name);
-        if RESERVED_RELATION_KEYS.contains(&gql_name.as_str()) {
+        if reserved.contains(gql_name.as_str()) {
             continue;
         }
         let filter_type = filter_type_for_column(col);
@@ -341,4 +356,74 @@ pub(crate) fn relation_input_objects(
         }
     }
     objects
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filter::SchemaLookup;
+    use ddb_core::types::ColumnDef;
+
+    /// Minimal current-row schema (`bookmark`); only `table_name` feeds the
+    /// EXISTS correlation via `row_ref()`, so columns can stay empty.
+    fn current_schema() -> TableSchema {
+        TableSchema {
+            table_name: "bookmark".into(),
+            columns: Vec::<ColumnDef>::new(),
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+            unique_together: None,
+            search_key: None,
+            singleton: false,
+        }
+    }
+
+    /// `{ title: { eq: "X" } }` sub-`where`, non-empty so the emitter must
+    /// resolve the target schema before compiling it.
+    fn sub_where() -> GqlValue {
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("X".into()));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("title"), GqlValue::Object(title_op));
+        GqlValue::Object(sub)
+    }
+
+    // ── The membership EXISTS emitter must ERROR (not panic, not silently
+    //    drop) when the relation's target table is absent from the lookup.
+    //    The public forward path guards this case out via
+    //    `resolve_reference_target`, so the emitter's `ok_or_else` is reachable
+    //    only by calling it directly with a target missing from `schemas`. ──
+    #[test]
+    fn membership_emitter_errors_when_target_schema_absent() {
+        let schema = current_schema();
+        let schemas = SchemaLookup::new(); // empty -> `category` is absent
+        let mut alias_seq = 0u32;
+        let mut params = Vec::new();
+        let mut ctx = WhereCtx {
+            schema: &schema,
+            schemas: &schemas,
+            qualifier: None,
+            depth: 0,
+            alias_seq: &mut alias_seq,
+            params: &mut params,
+        };
+
+        let result = emit_membership_exists(
+            "bookmark_category",
+            "bookmark_id",
+            "category_id",
+            "category",
+            "some",
+            &sub_where(),
+            &mut ctx,
+        );
+        assert!(
+            result.is_err(),
+            "absent relation target schema must error, got: {result:?}"
+        );
+    }
 }
