@@ -283,3 +283,198 @@ fn typed_where_filter_completeness() {
     // No duplicates across pages
     assert_ne!(p0_url, p1_url, "page 0 and page 1 should have different URLs: {r}");
 }
+
+/// Helper: run a `CREATE TABLE`/`INSERT` (or any `executeSql`) mutation and
+/// return the trimmed `message` (the new doogat id for INSERTs). Panics with
+/// the full response on a GraphQL error.
+fn exec_sql(server: &ServerGuard, sql: &str) -> String {
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": sql }),
+    );
+    assert!(r.get("errors").is_none(), "SQL failed ({sql}): {r}");
+    r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// `every` over a junction relation must follow SQLite three-valued logic: a
+/// related row whose filtered (inlinable) target column is NULL is NOT a
+/// counterexample, because `NOT (<col> = ?)` evaluates to NULL (not TRUE) and
+/// so never satisfies the inner `NOT EXISTS (... AND NOT (<sub>))`. The parent
+/// is therefore still returned by `every`, as if the NULL row "passes".
+///
+/// This characterizes design non-blocker #4: `every` + a NULL target column.
+/// The target type DECLARES the filtered column (`color`) so it is inlinable
+/// (base doogat fields are never inlined). A genuine non-matching related row
+/// (`color = 'blue'`) IS excluded, proving the test binds to the 3VL rule and
+/// not to a trivially-passing query.
+#[test]
+fn every_treats_null_target_column_as_non_counterexample() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    // Target type declares `color` (inlinable). Parent references it.
+    exec_sql(&server, "CREATE TABLE evcat (title TEXT, color TEXT)");
+    exec_sql(
+        &server,
+        "CREATE TABLE evlink (url TEXT, evcat TEXT REFERENCES evcat)",
+    );
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // catNull: color absent -> stored color is NULL.
+    let cat_null = exec_sql(&server, "INSERT INTO evcat (title) VALUES ('NoColor')");
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    // catRed: color = 'red' (the value `every` filters on).
+    let cat_red = exec_sql(&server, "INSERT INTO evcat (title, color) VALUES ('Red', 'red')");
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    // catBlue: color = 'blue' (genuine counterexample to color = 'red').
+    let cat_blue = exec_sql(
+        &server,
+        "INSERT INTO evcat (title, color) VALUES ('Blue', 'blue')",
+    );
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // linkNull -> catNull (NULL color): must pass `every` via 3VL.
+    let link_null = exec_sql(
+        &server,
+        &format!("INSERT INTO evlink (url, evcat) VALUES ('null.example', '{cat_null}')"),
+    );
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    // linkRed -> catRed ('red'): matches, passes `every`.
+    let link_red = exec_sql(
+        &server,
+        &format!("INSERT INTO evlink (url, evcat) VALUES ('red.example', '{cat_red}')"),
+    );
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    // linkBlue -> catBlue ('blue'): genuine counterexample, excluded by `every`.
+    let link_blue = exec_sql(
+        &server,
+        &format!("INSERT INTO evlink (url, evcat) VALUES ('blue.example', '{cat_blue}')"),
+    );
+
+    // `every: { color: { eq: "red" } }`
+    let r = server.graphql(
+        r#"{ evlinks(where: { evcat: { every: { color: { eq: "red" } } } }) { totalCount items { id } } }"#,
+    );
+    assert!(r.get("errors").is_none(), "every query failed: {r}");
+
+    let ids: Vec<String> = r["data"]["evlinks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|it| it["id"].as_str().unwrap().to_string())
+        .collect();
+
+    // 3VL: the NULL-color related row is NOT a counterexample, so linkNull is
+    // returned. linkRed matches outright. linkBlue ('blue' != 'red') is the
+    // genuine counterexample and is excluded.
+    assert!(
+        ids.contains(&link_null),
+        "linkNull (NULL target column) must pass `every` as a 3VL non-counterexample: {r}"
+    );
+    assert!(
+        ids.contains(&link_red),
+        "linkRed (color = 'red') must pass `every`: {r}"
+    );
+    assert!(
+        !ids.contains(&link_blue),
+        "linkBlue (color = 'blue') is a real counterexample and must be excluded: {r}"
+    );
+    assert_eq!(
+        r["data"]["evlinks"]["totalCount"].as_i64().unwrap(),
+        2,
+        "exactly linkNull + linkRed should match `every`: {r}"
+    );
+}
+
+/// A single stored REFERENCES column and its junction are different
+/// truth-sources for a multi-reference row. The forward id-op
+/// (`evcat: { eq: B }`) compares the parent's STORED column directly, while
+/// `evcat: { some: { id: { eq: B } } }` traverses the full junction. When a
+/// row stores A but the junction also holds B, the two operators return
+/// DIFFERENT result sets for that row: id-op does NOT match B, the junction
+/// `some` DOES.
+///
+/// This characterizes design non-blocker #6: id-op vs junction `some`
+/// divergence on a multi-reference column. The extra junction row (B) is
+/// inserted directly via SQL (same idiom as the plural-resolver e2e fixtures);
+/// the test performs no reindex, so the manual junction row persists.
+#[test]
+fn id_op_vs_junction_some_diverge_on_multi_reference() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    exec_sql(&server, "CREATE TABLE mrcat (title TEXT)");
+    exec_sql(
+        &server,
+        "CREATE TABLE mrlink (url TEXT, mrcat TEXT REFERENCES mrcat)",
+    );
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Two categories: A is the stored first-value reference, B lives only in
+    // the junction.
+    let cat_a = exec_sql(&server, "INSERT INTO mrcat (title) VALUES ('A')");
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let cat_b = exec_sql(&server, "INSERT INTO mrcat (title) VALUES ('B')");
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // Link stores A in its `mrcat` column (and auto-populates junction row A).
+    let link = exec_sql(
+        &server,
+        &format!("INSERT INTO mrlink (url, mrcat) VALUES ('multi.example', '{cat_a}')"),
+    );
+
+    // Add B to the junction directly: the junction now holds A and B, but the
+    // stored `mrcat` column still holds only A. Junction for column `mrcat` on
+    // table `mrlink` is `mrlink_mrcat(mrlink_id, mrcat_id)`.
+    exec_sql(
+        &server,
+        &format!("INSERT INTO mrlink_mrcat (mrlink_id, mrcat_id) VALUES ('{link}', '{cat_b}')"),
+    );
+
+    // id-op: direct stored-column compare. Stored column is A, so `eq: B`
+    // does NOT match.
+    let r = server.graphql(&format!(
+        r#"{{ mrlinks(where: {{ mrcat: {{ eq: "{cat_b}" }} }}) {{ totalCount items {{ id }} }} }}"#
+    ));
+    assert!(r.get("errors").is_none(), "id-op eq B query failed: {r}");
+    let id_op_ids: Vec<String> = r["data"]["mrlinks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|it| it["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        !id_op_ids.contains(&link),
+        "id-op `eq: B` must NOT match the row (stored column holds A, not B): {r}"
+    );
+
+    // junction `some`: traverses the full junction, which holds B, so it
+    // DOES match.
+    let r = server.graphql(&format!(
+        r#"{{ mrlinks(where: {{ mrcat: {{ some: {{ id: {{ eq: "{cat_b}" }} }} }} }}) {{ totalCount items {{ id }} }} }}"#
+    ));
+    assert!(
+        r.get("errors").is_none(),
+        "junction some id eq B query failed: {r}"
+    );
+    let junction_ids: Vec<String> = r["data"]["mrlinks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|it| it["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        junction_ids.contains(&link),
+        "junction `some: {{ id: {{ eq: B }} }}` MUST match the row (junction holds B): {r}"
+    );
+
+    // The divergence is the point: the two operators disagree on this row.
+    assert_ne!(
+        id_op_ids, junction_ids,
+        "id-op and junction `some` must diverge on a multi-reference row: {r}"
+    );
+}
