@@ -40,8 +40,12 @@ const QUANTIFIERS: &[&str] = &["some", "none", "every"];
 
 /// Reserved keys that must not be inlined as target columns in the relation
 /// filter input (reachable via `some:`/`none:`/`every:` instead).
+// RESERVED_RELATION_KEYS must remain a superset of ID_OPS ∪ QUANTIFIERS so an
+// operator-named target column is never inlined (it would be shadowed by the
+// id-ops branch).
 const RESERVED_RELATION_KEYS: &[&str] = &[
-    "eq", "in", "notIn", "nin", "isNull", "some", "none", "every",
+    "eq", "neq", "gt", "gte", "lt", "lte", "contains", "startsWith", "in", "notIn", "nin",
+    "isNull", "some", "none", "every",
 ];
 
 /// Forward-relation emitter for a REFERENCES column `parent_col` on the
@@ -144,26 +148,13 @@ fn emit_membership_exists(
     let row_ref = ctx.row_ref().to_string();
     let correlation = format!("\"{j_alias}\".\"{correlation_col}\" = \"{row_ref}\".id");
 
-    // Empty sub-`where`: no JOIN needed; the quantifier reduces to junction
-    // presence/absence (a junction row implies a related row, same basis as
-    // the empty-`none` "uncategorized" form). Avoids emitting `AND ()`.
-    if matches!(sub_value, GqlValue::Object(o) if o.is_empty()) {
-        return Ok(match quantifier {
-            // No related row at all ("uncategorized").
-            "none" => format!(
-                "NOT EXISTS (SELECT 1 FROM \"{junction}\" \"{j_alias}\" WHERE {correlation})"
-            ),
-            // Every related row matches the empty (always-true) filter -> vacuously true.
-            "every" => "1".to_string(),
-            // Some related row matches the empty filter -> any related row exists.
-            _ => format!("EXISTS (SELECT 1 FROM \"{junction}\" \"{j_alias}\" WHERE {correlation})"),
-        });
-    }
-
+    // Compile sub-conditions FIRST so the depth check at the top of
+    // `build_conditions_into` always runs (even for an empty terminal), then
+    // branch on whether the COMPILED conditions are empty.
     let target_schema = ctx
         .schemas
         .get(target_table)
-        .expect("target schema presence checked before routing")
+        .ok_or_else(|| "relation target schema missing".to_string())?
         .clone();
 
     let mut sub_conditions = Vec::new();
@@ -178,6 +169,14 @@ fn emit_membership_exists(
         };
         build_conditions_into(sub_value, &mut child, &mut sub_conditions)?;
     }
+
+    // Empty compiled sub-`where`: no JOIN needed; the quantifier reduces to
+    // junction presence/absence (a junction row implies a related row, same
+    // basis as the empty-`none` "uncategorized" form). Avoids emitting `AND ()`.
+    if sub_conditions.is_empty() {
+        return Ok(no_join_membership_sql(junction, &j_alias, &correlation, quantifier));
+    }
+
     let sub_sql = sub_conditions.join(" AND ");
 
     let join_and_where = format!(
@@ -192,6 +191,26 @@ fn emit_membership_exists(
         _ => format!("EXISTS ({join_and_where} AND ({sub_sql}))"),
     };
     Ok(sql)
+}
+
+/// No-JOIN membership form for an empty (compiled) sub-`where`: the quantifier
+/// reduces to junction presence/absence, with no `AND (...)` tail.
+fn no_join_membership_sql(
+    junction: &str,
+    j_alias: &str,
+    correlation: &str,
+    quantifier: &str,
+) -> String {
+    match quantifier {
+        // No related row at all ("uncategorized").
+        "none" => {
+            format!("NOT EXISTS (SELECT 1 FROM \"{junction}\" \"{j_alias}\" WHERE {correlation})")
+        }
+        // Every related row matches the empty (always-true) filter -> vacuously true.
+        "every" => "1".to_string(),
+        // Some related row matches the empty filter -> any related row exists.
+        _ => format!("EXISTS (SELECT 1 FROM \"{junction}\" \"{j_alias}\" WHERE {correlation})"),
+    }
 }
 
 /// Reverse-relation emitter: the current row is the REFERENCED type, and
