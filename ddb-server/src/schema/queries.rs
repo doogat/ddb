@@ -436,6 +436,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
     // for relation resolution (consumed by later relation tasks). Built once.
     let schema_lookup: crate::filter::SchemaLookup = type_schemas
         .iter()
+        .filter(|s| known_types.contains_key(&s.table_name))
         .map(|s| (s.table_name.clone(), s.clone()))
         .collect();
     for schema in type_schemas {

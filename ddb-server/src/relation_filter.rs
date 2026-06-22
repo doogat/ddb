@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use crate::filter::{
     build_conditions_into, build_operator_condition, filter_type_for_column, WhereCtx,
 };
-use crate::schema::sanitize_field_name;
+use crate::schema::{sanitize_field_name, sanitize_type_name};
 
 /// id-ops that compare the parent's stored REFERENCES column directly,
 /// preserving today's `category: { eq: id }` semantics.
@@ -97,12 +97,40 @@ pub(crate) fn build_forward_relation(
     Ok(conditions)
 }
 
-/// Emit a single quantifier EXISTS (`some`/`none`/`every`) over the junction
-/// for the given REFERENCES column. Consumes one alias for both `_j{n}` and
-/// `_r{n}`, then compiles the sub-`where` object against the target schema
-/// with a child ctx (alias `_r{n}`, depth+1).
+/// Forward quantifier EXISTS over the junction for a REFERENCES column on the
+/// current row type: the current row is the parent (correlation on
+/// `{table}_id`), the related target is reached via `{parent_col}_id`.
 fn emit_quantifier_exists(
     parent_col: &str,
+    target_table: &str,
+    quantifier: &str,
+    sub_value: &GqlValue,
+    ctx: &mut WhereCtx,
+) -> Result<String, String> {
+    let junction = junction_table_name(&ctx.schema.table_name, parent_col);
+    let correlation_col = junction_parent_id_column(&ctx.schema.table_name);
+    let join_col = junction_ref_id_column(parent_col);
+    emit_membership_exists(
+        &junction,
+        &correlation_col,
+        &join_col,
+        target_table,
+        quantifier,
+        sub_value,
+        ctx,
+    )
+}
+
+/// Emit a single quantifier EXISTS (`some`/`none`/`every`) over a junction
+/// table, correlating `{correlation_col}` against the current row and joining
+/// the target table on `{join_col}`. Consumes one alias for both `_j{n}` and
+/// `_r{n}`, then compiles the sub-`where` object against the target schema with
+/// a child ctx (alias `_r{n}`, depth+1). Shared by the forward and reverse
+/// emitters, which differ only in which junction columns correlate vs. join.
+fn emit_membership_exists(
+    junction: &str,
+    correlation_col: &str,
+    join_col: &str,
     target_table: &str,
     quantifier: &str,
     sub_value: &GqlValue,
@@ -113,12 +141,8 @@ fn emit_quantifier_exists(
     let j_alias = format!("_j{n}");
     let r_alias = format!("_r{n}");
 
-    let junction = junction_table_name(&ctx.schema.table_name, parent_col);
-    let parent_id = junction_parent_id_column(&ctx.schema.table_name);
-    let ref_id = junction_ref_id_column(parent_col);
     let row_ref = ctx.row_ref().to_string();
-
-    let correlation = format!("\"{j_alias}\".\"{parent_id}\" = \"{row_ref}\".id");
+    let correlation = format!("\"{j_alias}\".\"{correlation_col}\" = \"{row_ref}\".id");
 
     // Empty sub-`where`: no JOIN needed; the quantifier reduces to junction
     // presence/absence (a junction row implies a related row, same basis as
@@ -158,7 +182,7 @@ fn emit_quantifier_exists(
 
     let join_and_where = format!(
         "SELECT 1 FROM \"{junction}\" \"{j_alias}\" \
-         JOIN \"{target_table}\" \"{r_alias}\" ON \"{r_alias}\".id = \"{j_alias}\".\"{ref_id}\" \
+         JOIN \"{target_table}\" \"{r_alias}\" ON \"{r_alias}\".id = \"{j_alias}\".\"{join_col}\" \
          WHERE {correlation}"
     );
 
@@ -168,6 +192,45 @@ fn emit_quantifier_exists(
         _ => format!("EXISTS ({join_and_where} AND ({sub_sql}))"),
     };
     Ok(sql)
+}
+
+/// Reverse-relation emitter: the current row is the REFERENCED type, and
+/// `ref_type`'s `ref_col` REFERENCES it. Emits one quantifier EXISTS per
+/// `some`/`none`/`every` key in the MembershipFilter object (other keys
+/// ignored). The junction is `{ref_type}_{ref_col}`; correlation is on the
+/// ref-id column (`{ref_col}_id`, holding the current row id), and the JOIN
+/// reaches `ref_type` via its parent-id column (`{ref_type}_id`).
+pub(crate) fn build_reverse_relation(
+    ref_type: &str,
+    ref_col: &str,
+    value: &GqlValue,
+    ctx: &mut WhereCtx,
+) -> Result<Vec<String>, String> {
+    let GqlValue::Object(filter_obj) = value else {
+        return Ok(Vec::new());
+    };
+
+    let junction = junction_table_name(ref_type, ref_col);
+    let correlation_col = junction_ref_id_column(ref_col);
+    let join_col = junction_parent_id_column(ref_type);
+
+    let mut conditions = Vec::new();
+    for (key, val) in filter_obj {
+        let key = key.as_str();
+        if !QUANTIFIERS.contains(&key) {
+            continue;
+        }
+        conditions.push(emit_membership_exists(
+            &junction,
+            &correlation_col,
+            &join_col,
+            ref_type,
+            key,
+            val,
+            ctx,
+        )?);
+    }
+    Ok(conditions)
 }
 
 // -- Input-type generation --
@@ -208,15 +271,27 @@ pub(crate) fn relation_filter_input(
     input
 }
 
-/// Every forward `RelationFilter` input object to register, deduped by name.
-/// Keyed off `known_types` so it agrees with `build_where_input` on which
-/// targets get a `RelationFilter`.
+/// `{TypeName}MembershipFilter` input for the reverse relation: exposes only
+/// the `some`/`none`/`every` quantifiers, each typed `{TypeName}Where`. No
+/// id-ops or inlined columns (a reverse relation has no stored parent column).
+pub(crate) fn membership_filter_input(type_name: &str) -> InputObject {
+    let where_type = format!("{type_name}Where");
+    InputObject::new(format!("{type_name}MembershipFilter"))
+        .field(InputValue::new("some", TypeRef::named(&where_type)))
+        .field(InputValue::new("none", TypeRef::named(&where_type)))
+        .field(InputValue::new("every", TypeRef::named(&where_type)))
+}
+
+/// Every forward `RelationFilter` and reverse `MembershipFilter` input object
+/// to register, each deduped by name. Keyed off `known_types` so it agrees
+/// with `build_where_input` on which targets get a filter input.
 pub(crate) fn relation_input_objects(
     type_schemas: &[TableSchema],
     known_types: &HashMap<String, String>,
 ) -> Vec<InputObject> {
     let mut objects = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut seen_membership = std::collections::HashSet::new();
     let by_name: HashMap<&str, &TableSchema> = type_schemas
         .iter()
         .map(|s| (s.table_name.as_str(), s))
@@ -233,10 +308,17 @@ pub(crate) fn relation_input_objects(
             let Some(target_schema) = by_name.get(target.as_str()) else {
                 continue;
             };
-            if !seen.insert(target_type_name.clone()) {
-                continue;
+            if seen.insert(target_type_name.clone()) {
+                objects.push(relation_filter_input(target_type_name, target_schema));
             }
-            objects.push(relation_filter_input(target_type_name, target_schema));
+            // Reverse `MembershipFilter` for the referencing type `schema`,
+            // emitted only when `schema` itself is a registered target.
+            if known_types.get(&schema.table_name).is_some() {
+                let ref_type_name = sanitize_type_name(&schema.table_name);
+                if seen_membership.insert(ref_type_name.clone()) {
+                    objects.push(membership_filter_input(&ref_type_name));
+                }
+            }
         }
     }
     objects

@@ -7,7 +7,8 @@ mod subscriptions;
 mod type_defs;
 use base_types::TypeSchemaMap;
 pub(crate) use base_types::{
-    parse_fields_json, resolve_column, sanitize_field_name, sanitize_type_name,
+    parse_fields_json, pluralize_preserving_case, resolve_column, sanitize_field_name,
+    sanitize_type_name,
 };
 
 use async_graphql::dynamic::*;

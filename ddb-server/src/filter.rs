@@ -6,7 +6,9 @@ use ddb_core::types::QueryValue;
 use ddb_core::types::TableSchema;
 use indexmap::IndexMap;
 
-use crate::schema::{resolve_column, sanitize_field_name, sanitize_type_name};
+use crate::schema::{
+    pluralize_preserving_case, resolve_column, sanitize_field_name, sanitize_type_name,
+};
 
 // -- Shared scalar filter input types --
 
@@ -146,7 +148,7 @@ pub fn filter_type_for_column(col: &ddb_core::types::ColumnDef) -> &'static str 
 pub fn build_where_input(
     type_name: &str,
     schema: &TableSchema,
-    _schemas: &[TableSchema],
+    schemas: &[TableSchema],
     known_types: &HashMap<String, String>,
 ) -> InputObject {
     let name = format!("{type_name}Where");
@@ -187,6 +189,19 @@ pub fn build_where_input(
     // Compound combinators (self-referencing)
     input = input.field(InputValue::new("_and", TypeRef::named_list(&name)));
     input = input.field(InputValue::new("_or", TypeRef::named_list(&name)));
+
+    // Reverse-relation fields: every registered type that REFERENCES this one
+    // surfaces as a `{Type}MembershipFilter` quantifier field.
+    let registered: Vec<&TableSchema> = schemas
+        .iter()
+        .filter(|s| known_types.contains_key(&s.table_name))
+        .collect();
+    for rev in reverse_relations(schema, &registered) {
+        input = input.field(InputValue::new(
+            &rev.field_name,
+            TypeRef::named(format!("{}MembershipFilter", rev.ref_type_name)),
+        ));
+    }
 
     input
 }
@@ -703,6 +718,12 @@ pub(crate) fn build_conditions_into(
                     )? {
                         conditions.push(cond);
                     }
+                } else if let Some((ref_type, ref_col)) = resolve_reverse_target(field, ctx) {
+                    for cond in crate::relation_filter::build_reverse_relation(
+                        &ref_type, &ref_col, value, ctx,
+                    )? {
+                        conditions.push(cond);
+                    }
                 } else {
                     build_column_conditions(field, value, ctx, conditions);
                 }
@@ -729,6 +750,96 @@ fn resolve_reference_target(field: &str, ctx: &WhereCtx) -> Option<(String, Stri
     } else {
         None
     }
+}
+
+/// A reverse relation discovered on the current row type: another registered
+/// type `ref_table` references it via `ref_col`, surfaced on the current
+/// Where input as the field `field_name` typed `{ref_type_name}MembershipFilter`.
+pub(crate) struct ReverseRelation {
+    pub field_name: String,
+    pub ref_table: String,
+    pub ref_col: String,
+    pub ref_type_name: String,
+}
+
+/// Deterministically enumerate the reverse relations on `current`: every
+/// registered type that REFERENCES `current` via some column. Shared by
+/// `build_where_input` (to emit the reverse field) and `resolve_reverse_target`
+/// (to route the compiler) so the generated name and the routing never drift.
+///
+/// `registered` is sorted by `table_name` first for a stable collision
+/// fallback regardless of caller order. The default field name pluralizes the
+/// referencing type; on collision with an existing Where field or an
+/// already-assigned reverse field it falls back to `{table}_{col}`; a still
+/// colliding name is warned and skipped (never silently duplicated).
+pub(crate) fn reverse_relations(
+    current: &TableSchema,
+    registered: &[&TableSchema],
+) -> Vec<ReverseRelation> {
+    let mut existing: std::collections::HashSet<String> = current
+        .columns
+        .iter()
+        .map(|c| sanitize_field_name(&c.name))
+        .collect();
+    for base in ["id", "title", "tags"] {
+        if !existing.contains(base) {
+            existing.insert(base.to_string());
+        }
+    }
+    existing.insert("_and".to_string());
+    existing.insert("_or".to_string());
+
+    let mut sorted: Vec<&TableSchema> = registered.to_vec();
+    sorted.sort_by(|a, b| a.table_name.cmp(&b.table_name));
+
+    let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for r in sorted {
+        if r.table_name == current.table_name {
+            continue;
+        }
+        for rc in &r.columns {
+            if rc.references.as_deref() != Some(current.table_name.as_str()) {
+                continue;
+            }
+            let default = pluralize_preserving_case(&sanitize_field_name(&r.table_name));
+            let field_name = if existing.contains(&default) || taken.contains(&default) {
+                let fallback = sanitize_field_name(&format!("{}_{}", r.table_name, rc.name));
+                if existing.contains(&fallback) || taken.contains(&fallback) {
+                    tracing::warn!(
+                        "skipping reverse relation '{}.{}' -> '{}': field names '{}' and '{}' both collide",
+                        r.table_name,
+                        rc.name,
+                        current.table_name,
+                        default,
+                        fallback
+                    );
+                    continue;
+                }
+                fallback
+            } else {
+                default
+            };
+            taken.insert(field_name.clone());
+            out.push(ReverseRelation {
+                field_name,
+                ref_table: r.table_name.clone(),
+                ref_col: rc.name.clone(),
+                ref_type_name: sanitize_type_name(&r.table_name),
+            });
+        }
+    }
+    out
+}
+
+/// If `field` is a reverse-relation field on the current row type, return the
+/// referencing `(table, column)` so the compiler can emit the reverse EXISTS.
+fn resolve_reverse_target(field: &str, ctx: &WhereCtx) -> Option<(String, String)> {
+    let registered: Vec<&TableSchema> = ctx.schemas.values().collect();
+    reverse_relations(ctx.schema, &registered)
+        .into_iter()
+        .find(|r| r.field_name == field)
+        .map(|r| (r.ref_table, r.ref_col))
 }
 
 /// PRD 00129 §5 + issue #11: build the SQL fragment for a `TagsFilter`
