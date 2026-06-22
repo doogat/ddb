@@ -2720,4 +2720,402 @@ mod tests {
             wc.sql
         );
     }
+
+    // ── P2: reverse / junction membership quantifiers ──
+    // The CURRENT row type is the REFERENCED type (`category`); the lookup
+    // holds the REFERENCING type (`bookmark` = test_schema(), whose `category`
+    // column REFERENCES `category`). On `category`'s Where input the reverse
+    // relation surfaces as field `bookmarks` (pluralized `bookmark`), typed
+    // `BookmarkMembershipFilter`. Junction facts mirror forward: table
+    // "bookmark_category", correlation col "category_id" (= "category".id),
+    // JOIN col "bookmark_id" -> "_r{n}".id. Aliases start at _j0/_r0.
+
+    /// Lookup for reverse tests: referencing type `bookmark` plus the current
+    /// referenced type `category`, matching the P2 spec fixture.
+    fn reverse_schemas() -> SchemaLookup {
+        let mut schemas = SchemaLookup::new();
+        schemas.insert("bookmark".into(), test_schema());
+        schemas.insert("category".into(), schema_with_table("category", vec!["title"]));
+        schemas
+    }
+
+    /// Build `{ bookmarks: { <quantifier>: <sub> } }` against the current
+    /// `category` row type.
+    fn reverse_filter(quantifier: &str, sub: GqlValue) -> GqlValue {
+        let mut q = IndexMap::new();
+        q.insert(Name::new(quantifier), sub);
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("bookmarks"), GqlValue::Object(q));
+        GqlValue::Object(obj)
+    }
+
+    #[test]
+    fn reverse_some_emits_exists_over_junction() {
+        // { bookmarks: { some: { title: { eq: "Rust" } } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Rust".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("title"), GqlValue::Object(title_op));
+        let input = reverse_filter("some", GqlValue::Object(inner));
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "bookmark" "_r0" ON "_r0".id = "_j0"."bookmark_id" WHERE "_j0"."category_id" = "category".id AND ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Rust".into())]);
+    }
+
+    #[test]
+    fn reverse_none_empty_is_uncategorized_not_exists() {
+        // { bookmarks: { none: {} } } — "no bookmark references this category".
+        let input = reverse_filter("none", GqlValue::Object(IndexMap::new()));
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "bookmark_category" "_j0" WHERE "_j0"."category_id" = "category".id)"#
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn reverse_some_empty_emits_no_join_exists() {
+        // { bookmarks: { some: {} } } — "has at least one referencing bookmark".
+        let input = reverse_filter("some", GqlValue::Object(IndexMap::new()));
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "bookmark_category" "_j0" WHERE "_j0"."category_id" = "category".id)"#
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn reverse_every_empty_is_vacuously_true() {
+        // { bookmarks: { every: {} } } — all referencing rows match the empty
+        // filter -> always true.
+        let input = reverse_filter("every", GqlValue::Object(IndexMap::new()));
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert_eq!(wc.sql, "1");
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn reverse_every_with_subfilter_emits_double_negation_not_exists() {
+        // { bookmarks: { every: { title: { eq: "Rust" } } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Rust".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("title"), GqlValue::Object(title_op));
+        let input = reverse_filter("every", GqlValue::Object(inner));
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "bookmark" "_r0" ON "_r0".id = "_j0"."bookmark_id" WHERE "_j0"."category_id" = "category".id AND NOT ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Rust".into())]);
+    }
+
+    #[test]
+    fn reverse_none_with_subfilter_emits_not_exists_over_junction() {
+        // { bookmarks: { none: { title: { eq: "Rust" } } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Rust".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("title"), GqlValue::Object(title_op));
+        let input = reverse_filter("none", GqlValue::Object(inner));
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "bookmark" "_r0" ON "_r0".id = "_j0"."bookmark_id" WHERE "_j0"."category_id" = "category".id AND ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Rust".into())]);
+    }
+
+    /// Second reverse fixture with COMPLETELY DIFFERENT names than the
+    /// `bookmark`/`category` one. The current (referenced) type is `author`
+    /// (column `name`); the referencing type is `post`, whose REFERENCES column
+    /// `author` points back to `author`. A correct emitter must DERIVE the
+    /// reverse field (`posts`), junction (`post_author`), correlation column
+    /// (`author_id`) and JOIN column (`post_id`) from the schema, not hardcode.
+    fn author_post_schemas() -> SchemaLookup {
+        let mut post = schema_with_table("post", vec!["headline"]);
+        post.columns.push(ColumnDef {
+            name: "author".into(),
+            data_type: "TEXT".into(),
+            references: Some("author".into()),
+            zone: None,
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+            on_delete: ddb_core::types::OnDeleteAction::Restrict,
+        });
+        let mut s = SchemaLookup::new();
+        s.insert("post".into(), post);
+        s.insert("author".into(), schema_with_table("author", vec!["name"]));
+        s
+    }
+
+    /// Build `{ posts: { <quantifier>: <sub> } }` against the current `author`
+    /// row type (the reverse field on `author` is `posts`, pluralized `post`).
+    fn reverse_filter_for(field: &str, quantifier: &str, sub: GqlValue) -> GqlValue {
+        let mut q = IndexMap::new();
+        q.insert(Name::new(quantifier), sub);
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new(field), GqlValue::Object(q));
+        GqlValue::Object(obj)
+    }
+
+    #[test]
+    fn reverse_some_second_fixture_derives_names_from_schema() {
+        // { posts: { some: { headline: { eq: "Rust" } } } } on `author`.
+        let mut headline_op = IndexMap::new();
+        headline_op.insert(Name::new("eq"), GqlValue::String("Rust".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("headline"), GqlValue::Object(headline_op));
+        let input = reverse_filter_for("posts", "some", GqlValue::Object(inner));
+
+        let author = schema_with_table("author", vec!["name"]);
+        let wc = build_where_sql(&input, &author, &author_post_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "post_author" "_j0" JOIN "post" "_r0" ON "_r0".id = "_j0"."post_id" WHERE "_j0"."author_id" = "author".id AND ("_r0"."headline" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Rust".into())]);
+    }
+
+    #[test]
+    fn reverse_none_empty_second_fixture_uncategorized() {
+        // { posts: { none: {} } } — "no post references this author".
+        let input = reverse_filter_for("posts", "none", GqlValue::Object(IndexMap::new()));
+
+        let author = schema_with_table("author", vec!["name"]);
+        let wc = build_where_sql(&input, &author, &author_post_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "post_author" "_j0" WHERE "_j0"."author_id" = "author".id)"#
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn reverse_sibling_filters_get_unique_aliases() {
+        // _and: [ { bookmarks: { some: { title: { eq: "A" } } } },
+        //         { bookmarks: { some: { title: { eq: "B" } } } } ]
+        // Two sibling reverse EXISTS over the same junction must use distinct
+        // monotonic aliases _j0/_r0 and _j1/_r1, with params left-to-right.
+        let sibling = |val: &str| {
+            let mut title_op = IndexMap::new();
+            title_op.insert(Name::new("eq"), GqlValue::String(val.into()));
+            let mut inner = IndexMap::new();
+            inner.insert(Name::new("title"), GqlValue::Object(title_op));
+            reverse_filter("some", GqlValue::Object(inner))
+        };
+
+        let mut obj = IndexMap::new();
+        obj.insert(
+            Name::new("_and"),
+            GqlValue::List(vec![sibling("A"), sibling("B")]),
+        );
+        let input = GqlValue::Object(obj);
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"((EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "bookmark" "_r0" ON "_r0".id = "_j0"."bookmark_id" WHERE "_j0"."category_id" = "category".id AND ("_r0"."title" = ?))) AND (EXISTS (SELECT 1 FROM "bookmark_category" "_j1" JOIN "bookmark" "_r1" ON "_r1".id = "_j1"."bookmark_id" WHERE "_j1"."category_id" = "category".id AND ("_r1"."title" = ?))))"#
+        );
+        assert_eq!(
+            wc.params,
+            vec![QueryValue::Text("A".into()), QueryValue::Text("B".into())]
+        );
+    }
+
+    #[test]
+    fn membership_filter_input_exposes_only_quantifiers() {
+        // `BookmarkMembershipFilter` must expose exactly some/none/every, each
+        // typed `BookmarkWhere`, and NO `eq`/`in`/`isNull`/column fields.
+        let membership = crate::relation_filter::membership_filter_input("Bookmark");
+        // Minimal stub so the `BookmarkWhere` references resolve.
+        let bookmark_where = InputObject::new("BookmarkWhere")
+            .field(InputValue::new("title", TypeRef::named("StringFilter")));
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(string_filter())
+            .register(bookmark_where)
+            .register(membership)
+            .register(
+                async_graphql::dynamic::Object::new("Query").field(Field::new(
+                    "dummy",
+                    TypeRef::named(TypeRef::STRING),
+                    |_| FieldFuture::new(async { Ok(Option::<FieldValue>::None) }),
+                )),
+            )
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+        assert!(
+            sdl.contains("input BookmarkMembershipFilter"),
+            "expected BookmarkMembershipFilter input, got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("some: BookmarkWhere"),
+            "expected 'some: BookmarkWhere', got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("none: BookmarkWhere"),
+            "expected 'none: BookmarkWhere', got:\n{sdl}"
+        );
+        assert!(
+            sdl.contains("every: BookmarkWhere"),
+            "expected 'every: BookmarkWhere', got:\n{sdl}"
+        );
+        // Slice out the membership input block and assert it carries EXACTLY
+        // three fields — no `eq`/`in`/`isNull`/columns/combinators leak in.
+        let block_start = sdl
+            .find("input BookmarkMembershipFilter")
+            .expect("membership input block present");
+        let block = &sdl[block_start..];
+        let block_end = block.find('}').expect("membership input block closes");
+        let block = &block[..block_end];
+        let field_count = block.matches(": BookmarkWhere").count();
+        assert_eq!(
+            field_count, 3,
+            "BookmarkMembershipFilter must expose exactly 3 quantifier fields, got {field_count} in:\n{block}"
+        );
+        // Each line inside the block (after the `input ... {` header) must be a
+        // quantifier; nothing else (columns, scalar ops, combinators) appears.
+        for line in block.lines().skip(1) {
+            let field = line.trim();
+            if field.is_empty() {
+                continue;
+            }
+            assert!(
+                field == "some: BookmarkWhere"
+                    || field == "none: BookmarkWhere"
+                    || field == "every: BookmarkWhere",
+                "unexpected field on BookmarkMembershipFilter: {field:?}\nfull block:\n{block}"
+            );
+        }
+    }
+
+    #[test]
+    fn category_where_input_types_reverse_field_from_schema() {
+        // `bookmark.category` REFERENCES `category`, so on `category`'s Where
+        // input the reverse relation must surface as `bookmarks` (pluralized
+        // referencing type `bookmark` -> `Bookmark`), typed
+        // `BookmarkMembershipFilter`. The name and type are DERIVED from the
+        // schema wiring, never a constant.
+        let bookmark = test_schema();
+        let category = schema_with_table("category", vec!["title"]);
+        let all = vec![bookmark.clone(), category.clone()];
+        let mut known_types = HashMap::new();
+        known_types.insert("bookmark".to_string(), "Bookmark".to_string());
+        known_types.insert("category".to_string(), "Category".to_string());
+
+        let category_where = build_where_input("Category", &category, &all, &known_types);
+        // Stub `BookmarkWhere` so the membership filter's references resolve.
+        let bookmark_where = InputObject::new("BookmarkWhere")
+            .field(InputValue::new("title", TypeRef::named("StringFilter")));
+        let membership = crate::relation_filter::membership_filter_input("Bookmark");
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(string_filter())
+            .register(id_filter())
+            .register(tags_filter())
+            .register(bookmark_where)
+            .register(membership)
+            .register(category_where)
+            .register(
+                async_graphql::dynamic::Object::new("Query").field(Field::new(
+                    "dummy",
+                    TypeRef::named(TypeRef::STRING),
+                    |_| FieldFuture::new(async { Ok(Option::<FieldValue>::None) }),
+                )),
+            )
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+        assert!(
+            sdl.contains("bookmarks: BookmarkMembershipFilter"),
+            "CategoryWhere must expose reverse field 'bookmarks: BookmarkMembershipFilter' derived from the referencing `bookmark` type, got:\n{sdl}"
+        );
+    }
+
+    // ── Adversarial (Devon round 2): the reverse path must consult `references`
+    //    metadata, NOT reconstruct names by string-singularizing the field or
+    //    assuming the referencing column equals the current type name. ──
+
+    #[test]
+    fn reverse_field_without_backing_relation_is_ignored() {
+        // { widgets: { some: {} } } on `category`: no registered type references
+        // `category` via a field that pluralizes to `widgets`, so the reverse
+        // router must NOT fire (kills a singularize("widgets") -> "widget"
+        // shortcut that would emit a junction against tables that don't exist).
+        // Falls through to the column path, which finds no `widgets` column.
+        let input = reverse_filter_for("widgets", "some", GqlValue::Object(IndexMap::new()));
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &reverse_schemas());
+        assert!(
+            wc.sql.is_empty(),
+            "reverse field with no backing relation must be ignored, got: {}",
+            wc.sql
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    /// `bookmark.primaryCategory REFERENCES category`: the referencing COLUMN
+    /// name differs from the referenced type name. The reverse field on
+    /// `category` is still `bookmarks` (named from the referencing TYPE), but
+    /// the junction/correlation columns must come from the referencing COLUMN.
+    fn differing_column_schemas() -> SchemaLookup {
+        let mut bookmark = schema_with_table("bookmark", vec!["title"]);
+        bookmark.columns.push(ColumnDef {
+            name: "primaryCategory".into(),
+            data_type: "TEXT".into(),
+            references: Some("category".into()),
+            zone: None,
+            required: false,
+            search_boost: None,
+            allowed_values: None,
+            default_value: None,
+            on_delete: ddb_core::types::OnDeleteAction::Restrict,
+        });
+        let mut s = SchemaLookup::new();
+        s.insert("bookmark".into(), bookmark);
+        s.insert("category".into(), schema_with_table("category", vec!["title"]));
+        s
+    }
+
+    #[test]
+    fn reverse_relation_derives_junction_from_referencing_column_not_type_name() {
+        // { bookmarks: { some: { title: { eq: "Rust" } } } } on `category`,
+        // where bookmark references category via column `primaryCategory`. The
+        // junction is "bookmark_primaryCategory" and the correlation column is
+        // "primaryCategory_id" — derived from the column, NOT the type name
+        // "category". This kills the `referencing_col = current_type` shortcut.
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Rust".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("title"), GqlValue::Object(title_op));
+        let input = reverse_filter_for("bookmarks", "some", GqlValue::Object(inner));
+
+        let category = schema_with_table("category", vec!["title"]);
+        let wc = build_where_sql(&input, &category, &differing_column_schemas());
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "bookmark_primaryCategory" "_j0" JOIN "bookmark" "_r0" ON "_r0".id = "_j0"."bookmark_id" WHERE "_j0"."primaryCategory_id" = "category".id AND ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Rust".into())]);
+    }
 }
