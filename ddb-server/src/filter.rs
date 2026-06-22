@@ -2290,6 +2290,47 @@ mod tests {
         );
     }
 
+    // ── Review (per-task): empty `some {}` / `every {}` must not emit `AND ()`. ──
+
+    #[test]
+    fn some_empty_emits_no_join_exists() {
+        // { category: { some: {} } } -> "has at least one related row" (no JOIN).
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("some"), GqlValue::Object(IndexMap::new()));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "bookmark_category" "_j0" WHERE "_j0"."bookmark_id" = "bookmark".id)"#
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn every_empty_is_vacuously_true() {
+        // { category: { every: {} } } -> all related match the empty filter -> always true.
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("every"), GqlValue::Object(IndexMap::new()));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(wc.sql, "1");
+        assert!(wc.params.is_empty());
+    }
+
     // ── Case 1: back-compat id-ops on a REFERENCES column compile to a
     //            direct stored-column compare, NOT a junction EXISTS. ──
 

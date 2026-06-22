@@ -120,12 +120,20 @@ fn emit_quantifier_exists(
 
     let correlation = format!("\"{j_alias}\".\"{parent_id}\" = \"{row_ref}\".id");
 
-    // Empty `none {}` -> "uncategorized": no JOIN, just absence of any junction row.
-    let is_empty_sub = matches!(sub_value, GqlValue::Object(o) if o.is_empty());
-    if quantifier == "none" && is_empty_sub {
-        return Ok(format!(
-            "NOT EXISTS (SELECT 1 FROM \"{junction}\" \"{j_alias}\" WHERE {correlation})"
-        ));
+    // Empty sub-`where`: no JOIN needed; the quantifier reduces to junction
+    // presence/absence (a junction row implies a related row, same basis as
+    // the empty-`none` "uncategorized" form). Avoids emitting `AND ()`.
+    if matches!(sub_value, GqlValue::Object(o) if o.is_empty()) {
+        return Ok(match quantifier {
+            // No related row at all ("uncategorized").
+            "none" => format!(
+                "NOT EXISTS (SELECT 1 FROM \"{junction}\" \"{j_alias}\" WHERE {correlation})"
+            ),
+            // Every related row matches the empty (always-true) filter -> vacuously true.
+            "every" => "1".to_string(),
+            // Some related row matches the empty filter -> any related row exists.
+            _ => format!("EXISTS (SELECT 1 FROM \"{junction}\" \"{j_alias}\" WHERE {correlation})"),
+        });
     }
 
     let target_schema = ctx
