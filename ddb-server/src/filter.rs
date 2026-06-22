@@ -2049,4 +2049,580 @@ mod tests {
         assert_eq!(wc.sql, r#""id" IS NOT NULL"#);
         assert!(wc.params.is_empty());
     }
+
+    // ── Forward relation sub-filters on REFERENCES columns ──
+    // Parent `bookmark` has a REFERENCES column `category` -> target type
+    // `category`. Junction facts: table "bookmark_category", parent-id col
+    // "bookmark_id", ref-id col "category_id". Alias counter starts at 0;
+    // each relation EXISTS consumes the current value for BOTH `_j{n}` and
+    // `_r{n}`, then increments, in left-to-right source order. Top-level
+    // correlation uses the bare parent table name `"bookmark".id`.
+
+    /// Build a `SchemaLookup` from a single target schema, keyed by its
+    /// table name so the compiler can resolve the relation.
+    fn schemas_with(s: TableSchema) -> SchemaLookup {
+        let mut m = SchemaLookup::new();
+        m.insert(s.table_name.clone(), s);
+        m
+    }
+
+    /// A `category` target schema that self-references `category`, so a
+    /// `some` sub-filter can nest over the same relation repeatedly. Used to
+    /// exceed the EXISTS depth cap.
+    fn category_self_ref() -> TableSchema {
+        TableSchema {
+            table_name: "category".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "title".into(),
+                    data_type: "TEXT".into(),
+                    references: None,
+                    zone: None,
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
+                },
+                ColumnDef {
+                    name: "category".into(),
+                    data_type: "TEXT".into(),
+                    references: Some("category".into()),
+                    zone: None,
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
+                },
+            ],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+            unique_together: None,
+            search_key: None,
+            singleton: false,
+        }
+    }
+
+    /// A second forward-relation fixture with entirely different names from
+    /// the bookmark/category one, so the compiler must DERIVE junction,
+    /// target, and column names from the schema rather than hardcode them.
+    /// `article` has two REFERENCES columns (`author`, `editor`), both
+    /// pointing at `person`.
+    fn article_schema() -> TableSchema {
+        TableSchema {
+            table_name: "article".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "author".into(),
+                    data_type: "TEXT".into(),
+                    references: Some("person".into()),
+                    zone: None,
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
+                },
+                ColumnDef {
+                    name: "editor".into(),
+                    data_type: "TEXT".into(),
+                    references: Some("person".into()),
+                    zone: None,
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
+                },
+            ],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+            unique_together: None,
+            search_key: None,
+            singleton: false,
+        }
+    }
+
+    /// The `person` target schema referenced by `article_schema`. One plain
+    /// column `name` (no relations), so the JOIN target resolves and the
+    /// inline `name` sub-filter has a real column to compare.
+    fn person_schema() -> TableSchema {
+        schema_with_table("person", vec!["name"])
+    }
+
+    /// A fixture where `article` references TWO DIFFERENT target types —
+    /// `author -> person` and `category -> topic`. Used to prove the JOIN
+    /// target is resolved from the column's `references` metadata, not grabbed
+    /// from a lone schema-lookup entry.
+    fn article_with_category_schema() -> TableSchema {
+        TableSchema {
+            table_name: "article".into(),
+            columns: vec![
+                ColumnDef {
+                    name: "author".into(),
+                    data_type: "TEXT".into(),
+                    references: Some("person".into()),
+                    zone: None,
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
+                },
+                ColumnDef {
+                    name: "category".into(),
+                    data_type: "TEXT".into(),
+                    references: Some("topic".into()),
+                    zone: None,
+                    required: false,
+                    search_boost: None,
+                    allowed_values: None,
+                    default_value: None,
+                    on_delete: ddb_core::types::OnDeleteAction::Restrict,
+                },
+            ],
+            crdt_strategy: None,
+            template_sections: vec![],
+            folder: false,
+            stale_after_days: None,
+            title_template: None,
+            origin: None,
+            unique_together: None,
+            search_key: None,
+            singleton: false,
+        }
+    }
+
+    // ── Adversarial (Devon round 2): the JOIN target must be resolved from
+    //    the column's `references`, NOT taken from a lone schema-lookup entry. ──
+    #[test]
+    fn forward_relation_picks_target_from_column_references_not_lone_map_entry() {
+        // article.category -> topic; the lookup ALSO holds `person` (author's
+        // target). A `.values().next()` target shortcut would JOIN the wrong
+        // table. With two entries, only resolving via `col.references` is right.
+        let mut schemas = SchemaLookup::new();
+        schemas.insert("person".into(), person_schema());
+        schemas.insert("topic".into(), schema_with_table("topic", vec!["title"]));
+
+        // { category: { title: { eq: "Rust" } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Rust".into()));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("title"), GqlValue::Object(title_op));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(&input, &article_with_category_schema(), &schemas);
+        assert!(
+            wc.sql
+                .contains(r#"JOIN "topic" "_r0" ON "_r0".id = "_j0"."category_id""#),
+            "category relation must JOIN its referenced target `topic`, got:\n{}",
+            wc.sql
+        );
+        assert!(
+            !wc.sql.contains(r#"JOIN "person""#),
+            "must not JOIN the wrong lone-map target, got:\n{}",
+            wc.sql
+        );
+    }
+
+    // ── Case 1: back-compat id-ops on a REFERENCES column compile to a
+    //            direct stored-column compare, NOT a junction EXISTS. ──
+
+    #[test]
+    fn references_column_eq_stays_direct_stored_column_compare() {
+        let input = filter("category", "eq", GqlValue::String("c1".into()));
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(wc.sql, r#""category" = ?"#);
+        assert_eq!(wc.params, vec![QueryValue::Text("c1".into())]);
+    }
+
+    #[test]
+    fn references_column_in_stays_direct_stored_column_compare() {
+        let list = GqlValue::List(vec![
+            GqlValue::String("a".into()),
+            GqlValue::String("b".into()),
+        ]);
+        let input = filter("category", "in", list);
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(wc.sql, r#""category" IN (?, ?)"#);
+        assert_eq!(
+            wc.params,
+            vec![QueryValue::Text("a".into()), QueryValue::Text("b".into())]
+        );
+    }
+
+    #[test]
+    fn references_column_not_in_stays_direct_stored_column_compare() {
+        let list = GqlValue::List(vec![GqlValue::String("a".into())]);
+        let input = filter("category", "notIn", list);
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(wc.sql, r#""category" NOT IN (?)"#);
+        assert_eq!(wc.params, vec![QueryValue::Text("a".into())]);
+    }
+
+    #[test]
+    fn references_column_is_null_true_stays_direct_stored_column_compare() {
+        let input = filter("category", "isNull", GqlValue::Boolean(true));
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(wc.sql, r#""category" IS NULL"#);
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn references_column_is_null_false_stays_direct_stored_column_compare() {
+        let input = filter("category", "isNull", GqlValue::Boolean(false));
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(wc.sql, r#""category" IS NOT NULL"#);
+        assert!(wc.params.is_empty());
+    }
+
+    // ── Case 2: inline target column on a REFERENCES field is implicit
+    //            `some`, compiled to EXISTS over the junction. ──
+
+    #[test]
+    fn forward_inline_column_emits_exists_over_junction() {
+        // { category: { title: { eq: "Work" } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Work".into()));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("title"), GqlValue::Object(title_op));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "category" "_r0" ON "_r0".id = "_j0"."category_id" WHERE "_j0"."bookmark_id" = "bookmark".id AND ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Work".into())]);
+    }
+
+    // ── Case 3: explicit `some` is identical to the implicit form. ──
+
+    #[test]
+    fn forward_explicit_some_matches_implicit_some() {
+        // { category: { some: { title: { eq: "Work" } } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Work".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("title"), GqlValue::Object(title_op));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("some"), GqlValue::Object(inner));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "category" "_r0" ON "_r0".id = "_j0"."category_id" WHERE "_j0"."bookmark_id" = "bookmark".id AND ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Work".into())]);
+    }
+
+    // ── Case 4: `none` with a sub-filter is NOT EXISTS over the junction. ──
+
+    #[test]
+    fn forward_none_with_subfilter_emits_not_exists_over_junction() {
+        // { category: { none: { title: { eq: "Work" } } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Work".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("title"), GqlValue::Object(title_op));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("none"), GqlValue::Object(inner));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "category" "_r0" ON "_r0".id = "_j0"."category_id" WHERE "_j0"."bookmark_id" = "bookmark".id AND ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Work".into())]);
+    }
+
+    // ── Case 5: empty `none` is "uncategorized" — NOT EXISTS, no JOIN. ──
+
+    #[test]
+    fn none_empty_emits_no_join_not_exists() {
+        // { category: { none: {} } }
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("none"), GqlValue::Object(IndexMap::new()));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "bookmark_category" "_j0" WHERE "_j0"."bookmark_id" = "bookmark".id)"#
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    // ── Case 6: `every` is the double-negation form (NOT EXISTS ... AND NOT (...)). ──
+
+    #[test]
+    fn forward_every_emits_double_negation_not_exists() {
+        // { category: { every: { title: { eq: "Work" } } } }
+        let mut title_op = IndexMap::new();
+        title_op.insert(Name::new("eq"), GqlValue::String("Work".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("title"), GqlValue::Object(title_op));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("every"), GqlValue::Object(inner));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "bookmark_category" "_j0" JOIN "category" "_r0" ON "_r0".id = "_j0"."category_id" WHERE "_j0"."bookmark_id" = "bookmark".id AND NOT ("_r0"."title" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Work".into())]);
+    }
+
+    // ── Case 1b: a SECOND fixture with entirely different names forces the
+    //            compiler to DERIVE junction/target/column names from the
+    //            schema. A name-hardcoding impl that only knows
+    //            bookmark/category cannot satisfy these. ──
+
+    #[test]
+    fn forward_inline_column_derives_names_for_second_fixture() {
+        // { author: { name: { eq: "Ann" } } } on `article` → `person`.
+        let mut name_op = IndexMap::new();
+        name_op.insert(Name::new("eq"), GqlValue::String("Ann".into()));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("name"), GqlValue::Object(name_op));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("author"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(&input, &article_schema(), &schemas_with(person_schema()));
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "article_author" "_j0" JOIN "person" "_r0" ON "_r0".id = "_j0"."author_id" WHERE "_j0"."article_id" = "article".id AND ("_r0"."name" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Ann".into())]);
+    }
+
+    #[test]
+    fn none_empty_derives_names_for_second_fixture() {
+        // { author: { none: {} } } — "no author" — NOT EXISTS, no JOIN.
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("none"), GqlValue::Object(IndexMap::new()));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("author"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(&input, &article_schema(), &schemas_with(person_schema()));
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "article_author" "_j0" WHERE "_j0"."article_id" = "article".id)"#
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    #[test]
+    fn forward_every_derives_names_for_second_fixture() {
+        // { author: { every: { name: { eq: "Ann" } } } } — double negation.
+        let mut name_op = IndexMap::new();
+        name_op.insert(Name::new("eq"), GqlValue::String("Ann".into()));
+        let mut inner = IndexMap::new();
+        inner.insert(Name::new("name"), GqlValue::Object(name_op));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("every"), GqlValue::Object(inner));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("author"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(&input, &article_schema(), &schemas_with(person_schema()));
+        assert_eq!(
+            wc.sql,
+            r#"NOT EXISTS (SELECT 1 FROM "article_author" "_j0" JOIN "person" "_r0" ON "_r0".id = "_j0"."author_id" WHERE "_j0"."article_id" = "article".id AND NOT ("_r0"."name" = ?))"#
+        );
+        assert_eq!(wc.params, vec![QueryValue::Text("Ann".into())]);
+    }
+
+    // ── Case 7: sibling relation EXISTS get distinct, monotonic aliases. ──
+
+    #[test]
+    fn sibling_relation_exists_get_distinct_aliases() {
+        // _and: [ { author: { name: { eq: "A" } } },
+        //         { editor: { name: { eq: "B" } } } ]
+        // Two DIFFERENT relations on the same parent: each must derive its
+        // own junction table ("article_author" vs "article_editor") and its
+        // own monotonic alias. A single hardcoded junction block cannot
+        // satisfy both substrings.
+        let relation_item = |rel: &str, val: &str| {
+            let mut name_op = IndexMap::new();
+            name_op.insert(Name::new("eq"), GqlValue::String(val.into()));
+            let mut sub = IndexMap::new();
+            sub.insert(Name::new("name"), GqlValue::Object(name_op));
+            let mut item = IndexMap::new();
+            item.insert(Name::new(rel), GqlValue::Object(sub));
+            GqlValue::Object(item)
+        };
+
+        let mut obj = IndexMap::new();
+        obj.insert(
+            Name::new("_and"),
+            GqlValue::List(vec![
+                relation_item("author", "A"),
+                relation_item("editor", "B"),
+            ]),
+        );
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(&input, &article_schema(), &schemas_with(person_schema()));
+        // First sibling (author) consumes alias 0 over the article_author
+        // junction; second (editor) consumes alias 1 over article_editor.
+        assert!(
+            wc.sql.contains(
+                r#"EXISTS (SELECT 1 FROM "article_author" "_j0" JOIN "person" "_r0" ON "_r0".id = "_j0"."author_id" WHERE "_j0"."article_id" = "article".id AND ("_r0"."name" = ?))"#
+            ),
+            "missing author junction block in:\n{}",
+            wc.sql
+        );
+        assert!(
+            wc.sql.contains(
+                r#"EXISTS (SELECT 1 FROM "article_editor" "_j1" JOIN "person" "_r1" ON "_r1".id = "_j1"."editor_id" WHERE "_j1"."article_id" = "article".id AND ("_r1"."name" = ?))"#
+            ),
+            "missing editor junction block in:\n{}",
+            wc.sql
+        );
+        assert_eq!(
+            wc.params,
+            vec![QueryValue::Text("A".into()), QueryValue::Text("B".into())]
+        );
+    }
+
+    // ── Case 8: nesting `some` past the depth cap returns Err("too deep"). ──
+
+    #[test]
+    fn forward_relation_depth_cap_returns_err() {
+        // Six nested `some` over the self-referencing category relation:
+        // category.some.category.some. ... exceeds MAX_RELATION_DEPTH (5).
+        let mut inner = {
+            let mut title_op = IndexMap::new();
+            title_op.insert(Name::new("eq"), GqlValue::String("deep".into()));
+            let mut leaf = IndexMap::new();
+            leaf.insert(Name::new("title"), GqlValue::Object(title_op));
+            leaf
+        };
+        // Wrap 6 times: { category: { some: <inner> } }
+        for _ in 0..6 {
+            let mut some_wrap = IndexMap::new();
+            some_wrap.insert(Name::new("some"), GqlValue::Object(inner));
+            let mut rel = IndexMap::new();
+            rel.insert(Name::new("category"), GqlValue::Object(some_wrap));
+            inner = rel;
+        }
+        let input = GqlValue::Object(inner);
+
+        let err = try_build_where_sql(&input, &test_schema(), &schemas_with(category_self_ref()))
+            .expect_err("nesting past the depth cap must reject");
+        assert!(err.contains("too deep"), "got: {err}");
+    }
+
+    // ── Case 8b: exactly five nested `some` levels is the deepest that
+    //            succeeds. This pins the boundary from below so a faked
+    //            depth check (counting literal `some` keys) cannot pass:
+    //            5 must succeed with 5 distinct EXISTS aliases, 6 must fail.
+    //            Real recursion-depth threading + real alias counting is the
+    //            only way to make 5 succeed (with _j0.._j4) and 6 reject. ──
+
+    #[test]
+    fn forward_relation_five_deep_succeeds_with_five_aliases() {
+        // Five nested `some` over the self-referencing category relation,
+        // leaf `{ title: { eq: "d" } }`:
+        // { category: { some: { category: { some: { ... { title } ... } } } } }
+        let mut inner = {
+            let mut title_op = IndexMap::new();
+            title_op.insert(Name::new("eq"), GqlValue::String("d".into()));
+            let mut leaf = IndexMap::new();
+            leaf.insert(Name::new("title"), GqlValue::Object(title_op));
+            leaf
+        };
+        // Wrap 5 times → exactly MAX_RELATION_DEPTH (5) relation levels.
+        for _ in 0..5 {
+            let mut some_wrap = IndexMap::new();
+            some_wrap.insert(Name::new("some"), GqlValue::Object(inner));
+            let mut rel = IndexMap::new();
+            rel.insert(Name::new("category"), GqlValue::Object(some_wrap));
+            inner = rel;
+        }
+        let input = GqlValue::Object(inner);
+
+        let wc = try_build_where_sql(&input, &test_schema(), &schemas_with(category_self_ref()))
+            .expect("exactly five nested relation levels must succeed");
+        // Five distinct nested EXISTS aliases, and no sixth.
+        for alias in [r#""_j0""#, r#""_j1""#, r#""_j2""#, r#""_j3""#, r#""_j4""#] {
+            assert!(
+                wc.sql.contains(alias),
+                "missing {alias} in five-deep sql:\n{}",
+                wc.sql
+            );
+        }
+        assert!(
+            !wc.sql.contains(r#""_j5""#),
+            "five-deep sql must not contain a sixth alias _j5:\n{}",
+            wc.sql
+        );
+    }
 }
