@@ -5,7 +5,8 @@ use sqlparser::ast::{
 use std::sync::OnceLock;
 
 use crate::error::{DoogatError, Result};
-use crate::types::Value;
+use crate::types::{Value, Zone};
+use std::collections::HashMap;
 
 // --- Regex statics ---
 
@@ -345,6 +346,177 @@ pub(super) fn extract_on_delete(
         }
     }
     Ok(crate::types::OnDeleteAction::Restrict)
+}
+
+/// Find the first ZONE keyword followed by a value in text,
+/// ignoring occurrences inside single-quoted strings.
+/// Returns (value, start_of_ZONE, end_of_value) relative to the input text.
+fn find_zone_in_text(text: &str) -> Option<(String, usize, usize)> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"(?i)\bZONE\s+(\w+)").unwrap());
+
+    let bytes = text.as_bytes();
+
+    for cap in re.captures_iter(text) {
+        let m = cap.get(0).unwrap();
+        let value = cap.get(1).unwrap().as_str().to_string();
+
+        // Check if this match is inside a single-quoted string
+        let start = m.start();
+        let mut inside = false;
+        for i in 0..start {
+            if bytes[i] == b'\'' {
+                inside = !inside;
+            }
+        }
+
+        if !inside {
+            return Some((value, m.start(), m.end()));
+        }
+    }
+
+    None
+}
+
+/// Strip inline `ZONE <frontmatter|body|reference>` column attributes from a
+/// CREATE TABLE source string, returning the cleaned SQL and a map of
+/// column-name -> zone.
+///
+/// Non-CREATE statements are a no-op. Columns without a ZONE attribute are
+/// left untouched. If no ZONE was found, the original string is returned
+/// unchanged (idempotent).
+pub(super) fn strip_inline_zones(
+    sql: &str,
+) -> crate::error::Result<(String, HashMap<String, Zone>)> {
+    // Guard: non-CREATE TABLE is a no-op
+    if !Regex::new(r"(?i)^\s*CREATE\s+TABLE\b")
+        .unwrap()
+        .is_match(sql)
+    {
+        return Ok((sql.to_string(), HashMap::new()));
+    }
+
+    // Find the first ( and its matching )
+    let mut depth = 0usize;
+    let mut open_pos = None;
+    let mut close_pos = None;
+    for (i, b) in sql.char_indices() {
+        if b == '(' {
+            if depth == 0 {
+                open_pos = Some(i);
+            }
+            depth += 1;
+        } else if b == ')' {
+            depth -= 1;
+            if depth == 0 {
+                close_pos = Some(i);
+                break;
+            }
+        }
+    }
+
+    let (open_pos, close_pos) = match (open_pos, close_pos) {
+        (Some(o), Some(c)) => (o, c),
+        _ => return Ok((sql.to_string(), HashMap::new())),
+    };
+
+    let prefix = &sql[..=open_pos];
+    let suffix = &sql[close_pos..];
+    let column_list = &sql[open_pos + 1..close_pos];
+
+    // Split column list on top-level commas (track paren depth + single-quote state)
+    let segments: Vec<&str> = {
+        let mut segs = Vec::new();
+        let mut depth = 0;
+        let mut in_sq = false;
+        let mut start = 0;
+        for (i, b) in column_list.char_indices() {
+            match b {
+                '\'' => in_sq = !in_sq,
+                '(' if !in_sq => depth += 1,
+                ')' if !in_sq => depth -= 1,
+                ',' if depth == 0 && !in_sq => {
+                    segs.push(&column_list[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        segs.push(&column_list[start..]);
+        segs
+    };
+
+    let mut map = HashMap::new();
+    let mut modified = false;
+    let mut new_segments: Vec<String> = Vec::with_capacity(segments.len());
+
+    for seg in &segments {
+        let trimmed = seg.trim();
+        if trimmed.is_empty() {
+            new_segments.push(seg.to_string());
+            continue;
+        }
+
+        // Extract leading identifier (column name) and its byte span in the original segment
+        let (name_lower, name_end) = {
+            let t = trimmed;
+            let leading_ws = seg.len() - t.len();
+
+            if t.starts_with('"') {
+                // Quoted identifier: strip surrounding double-quotes
+                let inner = &t[1..];
+                let end = inner.find('"').unwrap_or(inner.len());
+                let name = &inner[..end];
+                (name.to_lowercase(), leading_ws + 1 + name.len() + 1)
+            } else {
+                let name = t.split_whitespace().next().unwrap_or(t);
+                (name.to_lowercase(), leading_ws + name.len())
+            }
+        };
+
+        // Scan the rest of the segment (after the name token) for ZONE keyword
+        let rest = &seg[name_end..];
+        let zone_match = find_zone_in_text(rest);
+
+        if let Some((zone_value, match_start, match_end)) = zone_match {
+            // Validate zone value
+            let zone = match zone_value.to_lowercase().as_str() {
+                "frontmatter" => Zone::Frontmatter,
+                "body" => Zone::Body,
+                "reference" => Zone::Reference,
+                other => {
+                    return Err(DoogatError::Structured {
+                        code: "INVALID_ZONE",
+                        message: format!(
+                            "invalid zone: {} (use frontmatter, body, or reference)",
+                            other
+                        ),
+                        context: vec![],
+                    });
+                }
+            };
+
+            map.insert(name_lower, zone);
+
+            // Excise the matched run from the segment
+            let new_seg = format!(
+                "{}{}",
+                &seg[..name_end + match_start],
+                &seg[name_end + match_end..]
+            );
+            new_segments.push(new_seg);
+            modified = true;
+        } else {
+            new_segments.push(seg.to_string());
+        }
+    }
+
+    if !modified {
+        return Ok((sql.to_string(), HashMap::new()));
+    }
+
+    let cleaned = format!("{}{}{}", prefix, new_segments.join(", "), suffix);
+    Ok((cleaned, map))
 }
 
 /// Returns true when the column declares `NOT NULL` in its DDL options.
@@ -1013,12 +1185,17 @@ mod tests {
         let sql = "CREATE TABLE t (zone TEXT)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
         assert!(map.is_empty(), "column named 'zone' must not misfire");
-        assert!(cleaned.to_lowercase().contains("zone text") || cleaned.to_lowercase().contains("zone"));
+        assert!(
+            cleaned.to_lowercase().contains("zone text") || cleaned.to_lowercase().contains("zone")
+        );
 
         // A quoted string default that contains 'zone' must not misfire
         let sql2 = "CREATE TABLE t (descr TEXT DEFAULT 'zone body')";
         let (cleaned2, map2) = strip_inline_zones(sql2).unwrap();
-        assert!(map2.is_empty(), "quoted literal 'zone body' must not misfire");
+        assert!(
+            map2.is_empty(),
+            "quoted literal 'zone body' must not misfire"
+        );
         assert!(!cleaned2.is_empty());
 
         // A column named `zone` with a ZONE attribute -> map key `zone`, value Body
@@ -1026,12 +1203,14 @@ mod tests {
         let (cleaned3, map3) = strip_inline_zones(sql3).unwrap();
         assert_eq!(map3.len(), 1);
         assert_eq!(map3["zone"], Zone::Body);
-        assert!(!cleaned3.to_lowercase().contains("zone body") || {
-            // Only allowed if "zone body" in cleaned is the "zone TEXT" column def,
-            // not the ZONE attribute. A stricter check: the ZONE keyword appearing
-            // as an attribute token should be absent after the column name.
-            cleaned3.to_lowercase().matches("zone").count() == 1
-        });
+        assert!(
+            !cleaned3.to_lowercase().contains("zone body") || {
+                // Only allowed if "zone body" in cleaned is the "zone TEXT" column def,
+                // not the ZONE attribute. A stricter check: the ZONE keyword appearing
+                // as an attribute token should be absent after the column name.
+                cleaned3.to_lowercase().matches("zone").count() == 1
+            }
+        );
     }
 
     #[test]
