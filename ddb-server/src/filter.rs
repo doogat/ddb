@@ -705,32 +705,42 @@ pub(crate) fn build_conditions_into(
                 }
             }
             _ => {
-                // Forward-relation routing: a field resolving to a REFERENCES
-                // column whose target type is registered routes to the
-                // junction EXISTS emitter; everything else keeps the existing
-                // direct-column path.
-                if let Some((parent_col, target_table)) = resolve_reference_target(field, ctx) {
-                    for cond in crate::relation_filter::build_forward_relation(
-                        &parent_col,
-                        &target_table,
-                        value,
-                        ctx,
-                    )? {
-                        conditions.push(cond);
-                    }
-                } else if let Some((ref_type, ref_col)) = resolve_reverse_target(field, ctx) {
-                    for cond in crate::relation_filter::build_reverse_relation(
-                        &ref_type, &ref_col, value, ctx,
-                    )? {
-                        conditions.push(cond);
-                    }
-                } else {
-                    build_column_conditions(field, value, ctx, conditions);
-                }
+                route_field_condition(field, value, ctx, conditions)?;
             }
         }
     }
 
+    Ok(())
+}
+
+/// Route the `_ =>` arm of [`build_conditions_into`]: a field resolving to a
+/// REFERENCES column whose target type is registered routes to the forward
+/// junction EXISTS emitter; a reverse-relation field routes to the reverse
+/// EXISTS emitter; everything else keeps the existing direct-column path.
+fn route_field_condition(
+    field: &str,
+    value: &GqlValue,
+    ctx: &mut WhereCtx,
+    conditions: &mut Vec<String>,
+) -> Result<(), String> {
+    if let Some((parent_col, target_table)) = resolve_reference_target(field, ctx) {
+        for cond in crate::relation_filter::build_forward_relation(
+            &parent_col,
+            &target_table,
+            value,
+            ctx,
+        )? {
+            conditions.push(cond);
+        }
+    } else if let Some((ref_type, ref_col)) = resolve_reverse_target(field, ctx) {
+        for cond in
+            crate::relation_filter::build_reverse_relation(&ref_type, &ref_col, value, ctx)?
+        {
+            conditions.push(cond);
+        }
+    } else {
+        build_column_conditions(field, value, ctx, conditions);
+    }
     Ok(())
 }
 
@@ -793,6 +803,10 @@ pub(crate) fn reverse_relations(
     let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out = Vec::new();
     for r in sorted {
+        // Intentional skip: a self-referencing type gets no reverse membership
+        // field. Its reverse name would collide with (and duplicate) the
+        // forward field already on the same Where input; reverse
+        // self-membership is out of scope.
         if r.table_name == current.table_name {
             continue;
         }
@@ -801,22 +815,11 @@ pub(crate) fn reverse_relations(
                 continue;
             }
             let default = pluralize_preserving_case(&sanitize_field_name(&r.table_name));
-            let field_name = if existing.contains(&default) || taken.contains(&default) {
-                let fallback = sanitize_field_name(&format!("{}_{}", r.table_name, rc.name));
-                if existing.contains(&fallback) || taken.contains(&fallback) {
-                    tracing::warn!(
-                        "skipping reverse relation '{}.{}' -> '{}': field names '{}' and '{}' both collide",
-                        r.table_name,
-                        rc.name,
-                        current.table_name,
-                        default,
-                        fallback
-                    );
-                    continue;
-                }
-                fallback
-            } else {
-                default
+            let parts = (r.table_name.as_str(), rc.name.as_str());
+            let Some(field_name) =
+                pick_reverse_field_name(default, parts, &current.table_name, &existing, &taken)
+            else {
+                continue;
             };
             taken.insert(field_name.clone());
             out.push(ReverseRelation {
@@ -828,6 +831,38 @@ pub(crate) fn reverse_relations(
         }
     }
     out
+}
+
+/// Resolve the field name for a reverse relation, handling collisions. Returns
+/// the pluralized `default` when free; on collision with an existing Where
+/// field or an already-`taken` reverse field, falls back to `{table}_{col}`
+/// (the `fallback_parts`); if that also collides, warns and returns `None` so
+/// the caller skips the relation (never silently duplicated).
+fn pick_reverse_field_name(
+    default: String,
+    fallback_parts: (&str, &str),
+    current_table: &str,
+    existing: &std::collections::HashSet<String>,
+    taken: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let (table, col) = fallback_parts;
+    if existing.contains(&default) || taken.contains(&default) {
+        let fallback = sanitize_field_name(&format!("{}_{}", table, col));
+        if existing.contains(&fallback) || taken.contains(&fallback) {
+            tracing::warn!(
+                "skipping reverse relation '{}.{}' -> '{}': field names '{}' and '{}' both collide",
+                table,
+                col,
+                current_table,
+                default,
+                fallback
+            );
+            return None;
+        }
+        Some(fallback)
+    } else {
+        Some(default)
+    }
 }
 
 /// If `field` is a reverse-relation field on the current row type, return the
@@ -1079,7 +1114,9 @@ fn build_not_in_condition(
         _ => return None,
     };
     if items.is_empty() {
-        return Some("1".to_string()); // NOT IN () matches every row; always-true
+        // An empty `NOT IN ()` is invalid SQL, so return the always-true
+        // sentinel "1" instead of emitting it.
+        return Some("1".to_string());
     }
     let placeholders: Vec<&str> = items
         .iter()
