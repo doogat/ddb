@@ -2603,6 +2603,132 @@ rest "/doogats/$rtId" "DELETE" | Out-Null
 ddb query "DROP TABLE ig_upd_demo CASCADE" | Out-Null
 ddb query "DROP TABLE ig_rest_typed CASCADE" | Out-Null
 
+# 60. Typed where-filter completeness (PRD 00159)
+# Tests negation/null ops, forward relation sub-filters, reverse membership,
+# and totalCount correlation with pagination.
+
+# --- Fixture ---
+$gqlVer = gqlq '{ schemaVersion }'
+$ver = if ($gqlVer -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+
+gqlq 'mutation { executeSql(sql: "CREATE TABLE relcat (slug TEXT)") { message } }' | Out-Null
+waitSchemaReload $ver
+$gqlVer = gqlq '{ schemaVersion }'
+$ver = if ($gqlVer -match '"schemaVersion":(\d+)') { [int]$Matches[1] } else { 0 }
+gqlq 'mutation { executeSql(sql: "CREATE TABLE rellink (url TEXT, category TEXT REFERENCES relcat)") { message } }' | Out-Null
+waitSchemaReload $ver
+
+# Seed relcat rows (capture ids)
+$r1 = gqlq 'mutation { executeSql(sql: "INSERT INTO relcat (title, slug) VALUES (''Rust'', ''rust'')") { message } }'
+$CAT_RUST_ID = extractId $r1
+if (-not $CAT_RUST_ID) { throw "60: failed to seed relcat Rust" }
+
+$r2 = gqlq 'mutation { executeSql(sql: "INSERT INTO relcat (title, slug) VALUES (''Python'', ''py'')") { message } }'
+$CAT_PY_ID = extractId $r2
+if (-not $CAT_PY_ID) { throw "60: failed to seed relcat Python" }
+
+$r3 = gqlq 'mutation { executeSql(sql: "INSERT INTO relcat (title, slug) VALUES (''Empty'', ''empty'')") { message } }'
+$CAT_EMPTY_ID = extractId $r3
+if (-not $CAT_EMPTY_ID) { throw "60: failed to seed relcat Empty" }
+
+# Seed rellink rows
+$rl1 = gqlq "mutation { executeSql(sql: `"INSERT INTO rellink (url, category) VALUES ('https://rust.example', '$CAT_RUST_ID')`") { message } }"
+$LINK1_ID = extractId $rl1
+if (-not $LINK1_ID) { throw "60: failed to seed rellink 1" }
+
+$rl2 = gqlq "mutation { executeSql(sql: `"INSERT INTO rellink (url, category) VALUES ('https://py.example', '$CAT_PY_ID')`") { message } }"
+$LINK2_ID = extractId $rl2
+if (-not $LINK2_ID) { throw "60: failed to seed rellink 2" }
+
+$rl3 = gqlq 'mutation { executeSql(sql: "INSERT INTO rellink (title) VALUES (''orphan-link'')") { message } }'
+$LINK3_ID = extractId $rl3
+if (-not $LINK3_ID) { throw "60: failed to seed rellink 3" }
+
+Start-Sleep -Seconds 1
+
+# 60.A — Negation: notIn / nin
+$rl = gqlq "{ rellinks(where: { id: { notIn: [`"$LINK1_ID`"] } }) { totalCount } }"
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 2) { throw "60.A notIn: expected 2, got $rlCnt" }
+pass "serve: rellinks where id notIn returns 2"
+
+$rl = gqlq "{ rellinks(where: { id: { nin: [`"$LINK1_ID`"] } }) { totalCount } }"
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 2) { throw "60.A nin: expected 2, got $rlCnt" }
+pass "serve: rellinks where id nin (alias) returns 2"
+
+# 60.B — Null operators
+$rl = gqlq '{ rellinks(where: { url: { isNull: true } }) { totalCount } }'
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 1) { throw "60.B isNull true: expected 1, got $rlCnt" }
+pass "serve: rellinks where url isNull true returns 1"
+
+$rl = gqlq '{ rellinks(where: { url: { isNull: false } }) { totalCount } }'
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 2) { throw "60.B isNull false: expected 2, got $rlCnt" }
+pass "serve: rellinks where url isNull false returns 2"
+
+# 60.C — Forward relation sub-filter (inlined target columns)
+$rl = gqlq "{ rellinks(where: { category: { title: { eq: `"Rust`" } } }) { items { url } totalCount } }"
+$rlObj = $rl | ConvertFrom-Json
+if ($rlObj.data.rellinks.totalCount -ne 1) { throw "60.C title eq: expected 1, got $($rlObj.data.rellinks.totalCount)" }
+if ($rlObj.data.rellinks.items[0].url -ne 'https://rust.example') { throw "60.C title eq: url mismatch" }
+pass "serve: rellinks where category.title eq Rust returns 1"
+
+$rl = gqlq "{ rellinks(where: { category: { slug: { eq: `"py`" } } }) { totalCount } }"
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 1) { throw "60.C slug eq: expected 1, got $rlCnt" }
+pass "serve: rellinks where category.slug eq py returns 1"
+
+# 60.D — Forward id-ops (back-compatible)
+$rl = gqlq "{ rellinks(where: { category: { eq: `"$CAT_RUST_ID`" } }) { totalCount } }"
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 1) { throw "60.D category eq: expected 1, got $rlCnt" }
+pass "serve: rellinks where category eq returns 1"
+
+# 60.E — none / some
+$rl = gqlq '{ rellinks(where: { category: { none: {} } }) { totalCount } }'
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 1) { throw "60.E none: expected 1, got $rlCnt" }
+pass "serve: rellinks where category none returns 1 (orphan)"
+
+$rl = gqlq '{ rellinks(where: { category: { some: {} } }) { totalCount } }'
+$rlCnt = ($rl | ConvertFrom-Json).data.rellinks.totalCount
+if ($rlCnt -ne 2) { throw "60.E some: expected 2, got $rlCnt" }
+pass "serve: rellinks where category some returns 2"
+
+# 60.F — Reverse membership
+$rc = gqlq "{ relcats(where: { rellinks: { some: { url: { contains: `"rust`" } } } }) { items { title } totalCount } }"
+$rcObj = $rc | ConvertFrom-Json
+if ($rcObj.data.relcats.totalCount -ne 1) { throw "60.F reverse some: expected 1, got $($rcObj.data.relcats.totalCount)" }
+if ($rcObj.data.relcats.items[0].title -ne 'Rust') { throw "60.F reverse some: title mismatch" }
+pass "serve: relcats where rellinks some url contains rust returns 1"
+
+$rc = gqlq '{ relcats(where: { rellinks: { none: {} } }) { items { title } totalCount } }'
+$rcObj = $rc | ConvertFrom-Json
+if ($rcObj.data.relcats.totalCount -ne 1) { throw "60.F reverse none: expected 1, got $($rcObj.data.relcats.totalCount)" }
+if ($rcObj.data.relcats.items[0].title -ne 'Empty') { throw "60.F reverse none: title mismatch" }
+pass "serve: relcats where rellinks none returns 1 (Empty category)"
+
+# 60.G — Relation filter + orderBy + pagination + totalCount correlation
+$rl = gqlq "{ rellinks(where: { category: { some: {} } }, orderBy: { id: ASC }, limit: 1, offset: 0) { items { url } totalCount } }"
+$rlObj = $rl | ConvertFrom-Json
+if ($rlObj.data.rellinks.items.Count -ne 1) { throw "60.G page0: expected 1 item" }
+if ($rlObj.data.rellinks.totalCount -ne 2) { throw "60.G page0 totalCount: expected 2, got $($rlObj.data.rellinks.totalCount)" }
+$rl0Url = $rlObj.data.rellinks.items[0].url
+
+$rl = gqlq "{ rellinks(where: { category: { some: {} } }, orderBy: { id: ASC }, limit: 1, offset: 1) { items { url } totalCount } }"
+$rlObj = $rl | ConvertFrom-Json
+if ($rlObj.data.rellinks.items.Count -ne 1) { throw "60.G page1: expected 1 item" }
+if ($rlObj.data.rellinks.totalCount -ne 2) { throw "60.G page1 totalCount: expected 2, got $($rlObj.data.rellinks.totalCount)" }
+$rl1Url = $rlObj.data.rellinks.items[0].url
+if ($rl0Url -eq $rl1Url) { throw "60.G pagination: dupes across pages" }
+pass "serve: rellinks pagination with relation filter (totalCount=2, no dupes)"
+
+# Cleanup
+gqlq 'mutation { executeSql(sql: "DROP TABLE rellink CASCADE") { message } }' | Out-Null
+gqlq 'mutation { executeSql(sql: "DROP TABLE relcat CASCADE") { message } }' | Out-Null
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

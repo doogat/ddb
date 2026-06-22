@@ -2695,6 +2695,125 @@ $DDB query "DROP TABLE ig_upd_demo CASCADE" | grep -q "dropped"
 $DDB query "DROP TABLE ig_rest_typed CASCADE" | grep -q "dropped"
 rm -f "$IG_UPD_REST_BODY" "$IG_UPD_MISS_BODY" "$IG_RT_BODY" "$IG_RT_BAD_BODY"
 
+# 60. Typed where-filter completeness (PRD 00159)
+# Tests negation/null ops, forward relation sub-filters, reverse membership,
+# and totalCount correlation with pagination.
+
+# --- Fixture ---
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+VER=${VER:-0}
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE relcat (slug TEXT)\") { message } }"}' | grep -q "table relcat created"
+wait_schema_reload "$VER"
+VER=$(gql '{"query":"{ schemaVersion }"}' | sed -n 's/.*"schemaVersion":\([0-9]*\).*/\1/p')
+gql '{"query":"mutation { executeSql(sql: \"CREATE TABLE rellink (url TEXT, category TEXT REFERENCES relcat)\") { message } }"}' | grep -q "table rellink created"
+wait_schema_reload "$VER"
+
+# Seed relcat rows (capture ids)
+CAT_RUST=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO relcat (title, slug) VALUES ('Rust', 'rust')\\\") { message } }\"}")
+CAT_RUST_ID=$(printf '%s' "$CAT_RUST" | extract_id)
+[ -n "$CAT_RUST_ID" ]
+
+CAT_PY=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO relcat (title, slug) VALUES ('Python', 'py')\\\") { message } }\"}")
+CAT_PY_ID=$(printf '%s' "$CAT_PY" | extract_id)
+[ -n "$CAT_PY_ID" ]
+
+CAT_EMPTY=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO relcat (title, slug) VALUES ('Empty', 'empty')\\\") { message } }\"}")
+CAT_EMPTY_ID=$(printf '%s' "$CAT_EMPTY" | extract_id)
+[ -n "$CAT_EMPTY_ID" ]
+
+# Seed rellink rows
+LINK1=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO rellink (url, category) VALUES ('https://rust.example', '$CAT_RUST_ID')\\\") { message } }\"}")
+LINK1_ID=$(printf '%s' "$LINK1" | extract_id)
+[ -n "$LINK1_ID" ]
+
+LINK2=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO rellink (url, category) VALUES ('https://py.example', '$CAT_PY_ID')\\\") { message } }\"}")
+LINK2_ID=$(printf '%s' "$LINK2" | extract_id)
+[ -n "$LINK2_ID" ]
+
+LINK3=$(gql "{\"query\":\"mutation { executeSql(sql: \\\"INSERT INTO rellink (title) VALUES ('orphan-link')\\\") { message } }\"}")
+LINK3_ID=$(printf '%s' "$LINK3" | extract_id)
+[ -n "$LINK3_ID" ]
+
+sleep 1
+
+# 60.A — Negation: notIn / nin
+RL=$(gql "{\"query\":\"{ rellinks(where: { id: { notIn: [\\\"$LINK1_ID\\\"] } }) { totalCount } }\"}")
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "2" ]
+pass "serve: rellinks where id notIn returns 2"
+
+RL=$(gql "{\"query\":\"{ rellinks(where: { id: { nin: [\\\"$LINK1_ID\\\"] } }) { totalCount } }\"}")
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "2" ]
+pass "serve: rellinks where id nin (alias) returns 2"
+
+# 60.B — Null operators
+RL=$(gql '{"query":"{ rellinks(where: { url: { isNull: true } }) { totalCount } }"}')
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "1" ]
+pass "serve: rellinks where url isNull true returns 1"
+
+RL=$(gql '{"query":"{ rellinks(where: { url: { isNull: false } }) { totalCount } }"}')
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "2" ]
+pass "serve: rellinks where url isNull false returns 2"
+
+# 60.C — Forward relation sub-filter (inlined target columns)
+RL=$(gql "{\"query\":\"{ rellinks(where: { category: { title: { eq: \\\"Rust\\\" } } }) { items { url } totalCount } }\"}")
+echo "$RL" | jq -e '.data.rellinks.totalCount == 1' >/dev/null
+echo "$RL" | jq -e '.data.rellinks.items[0].url == "https://rust.example"' >/dev/null
+pass "serve: rellinks where category.title eq Rust returns 1"
+
+RL=$(gql "{\"query\":\"{ rellinks(where: { category: { slug: { eq: \\\"py\\\" } } }) { totalCount } }\"}")
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "1" ]
+pass "serve: rellinks where category.slug eq py returns 1"
+
+# 60.D — Forward id-ops (back-compatible)
+RL=$(gql "{\"query\":\"{ rellinks(where: { category: { eq: \\\"$CAT_RUST_ID\\\" } }) { totalCount } }\"}")
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "1" ]
+pass "serve: rellinks where category eq returns 1"
+
+# 60.E — none / some
+RL=$(gql '{"query":"{ rellinks(where: { category: { none: {} } }) { totalCount } }"}')
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "1" ]
+pass "serve: rellinks where category none returns 1 (orphan)"
+
+RL=$(gql '{"query":"{ rellinks(where: { category: { some: {} } }) { totalCount } }"}')
+RL_CNT=$(echo "$RL" | jq -e '.data.rellinks.totalCount')
+[ "$RL_CNT" = "2" ]
+pass "serve: rellinks where category some returns 2"
+
+# 60.F — Reverse membership
+RC=$(gql "{\"query\":\"{ relcats(where: { rellinks: { some: { url: { contains: \\\"rust\\\" } } } }) { items { title } totalCount } }\"}")
+echo "$RC" | jq -e '.data.relcats.totalCount == 1' >/dev/null
+echo "$RC" | jq -e '.data.relcats.items[0].title == "Rust"' >/dev/null
+pass "serve: relcats where rellinks some url contains rust returns 1"
+
+RC=$(gql '{"query":"{ relcats(where: { rellinks: { none: {} } }) { items { title } totalCount } }"}')
+echo "$RC" | jq -e '.data.relcats.totalCount == 1' >/dev/null
+echo "$RC" | jq -e '.data.relcats.items[0].title == "Empty"' >/dev/null
+pass "serve: relcats where rellinks none returns 1 (Empty category)"
+
+# 60.G — Relation filter + orderBy + pagination + totalCount correlation
+RL=$(gql "{\"query\":\"{ rellinks(where: { category: { some: {} } }, orderBy: { id: ASC }, limit: 1, offset: 0) { items { url } totalCount } }\"}")
+echo "$RL" | jq -e '.data.rellinks.items | length == 1' >/dev/null
+echo "$RL" | jq -e '.data.rellinks.totalCount == 2' >/dev/null
+RL0_URL=$(echo "$RL" | jq -r '.data.rellinks.items[0].url')
+
+RL=$(gql "{\"query\":\"{ rellinks(where: { category: { some: {} } }, orderBy: { id: ASC }, limit: 1, offset: 1) { items { url } totalCount } }\"}")
+echo "$RL" | jq -e '.data.rellinks.items | length == 1' >/dev/null
+echo "$RL" | jq -e '.data.rellinks.totalCount == 2' >/dev/null
+RL1_URL=$(echo "$RL" | jq -r '.data.rellinks.items[0].url')
+[ "$RL0_URL" != "$RL1_URL" ]
+pass "serve: rellinks pagination with relation filter (totalCount=2, no dupes)"
+
+# Cleanup
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rellink CASCADE\") { message } }"}' >/dev/null
+gql '{"query":"mutation { executeSql(sql: \"DROP TABLE relcat CASCADE\") { message } }"}' >/dev/null
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
