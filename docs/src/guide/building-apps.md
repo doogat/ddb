@@ -871,6 +871,14 @@ After changing a zone, existing doogats need migration to move data to the new z
 ddb fix --migrate
 ```
 
+To set a column's zone at creation instead (no post-hoc `SET ZONE`, no migration), declare it inline in `CREATE TABLE`:
+
+```sql
+CREATE TABLE note (summary TEXT ZONE frontmatter, body TEXT);
+```
+
+`ZONE <frontmatter|body|reference>` may appear anywhere in the column definition after the name and is case-insensitive. A declared zone overrides the inferred default, including the `REFERENCES` default, so a denormalized reference column can live in frontmatter. Only the first `CREATE TABLE` in a multi-statement batch is processed; a zone declared on a core column (`id`, `type`, `title`, `date`, `updated_at`) is ignored.
+
 ### Multi-valued references
 
 When a `CREATE TABLE` includes a `REFERENCES` column, the engine auto-creates a **junction table** named `{type}_{column}` for storing multiple references:

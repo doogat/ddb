@@ -219,6 +219,21 @@ Each column maps to a doogat zone based on explicit `zone` field or inference:
 
 Zone inference uses `is_short_string_type()` (AST-based) at CREATE TABLE time and `is_short_string_type_str()` (string-based) at runtime in `effective_zone()`. The 255-char boundary follows MySQL convention. `effective_zone()` resolves: explicit zone from `_typedef` wins, then references, then numeric/short-string → frontmatter, else body. Columns with `allowed_values` always infer frontmatter.
 
+### Inline column ZONE (CREATE TABLE)
+
+A column can declare its zone inline at `CREATE TABLE`, overriding the inferred default:
+
+```sql
+CREATE TABLE note (summary TEXT ZONE frontmatter, body TEXT);
+```
+
+`ZONE <frontmatter|body|reference>` may appear anywhere in the column definition after the name (the value is case-insensitive). The declared zone is the "explicit zone" that wins in `effective_zone()` resolution above — it takes precedence over every implicit rule, including the `references -> reference` default (the motivating denormalized-reference case). sqlparser models no `ZONE` column option, so `strip_inline_zones()` excises the token before parsing and parks a column-name -> zone map consumed by `extract_columns`, mirroring the `SINGLETON` pre-scan.
+
+- **Single statement only:** like `SINGLETON`, only the first `CREATE TABLE` in a multi-statement batch is stripped. An inline `ZONE` on a later `CREATE TABLE` in the same batch is left in the SQL and errors at parse time.
+- **Core columns:** a declared zone on `id`/`type`/`title`/`date`/`updated_at` is accepted but ignored — their zone is vestigial (they always materialize to their own slots).
+- **Invalid value:** an unrecognized zone (e.g. `ZONE sidebar`) errors with `invalid zone: sidebar (use frontmatter, body, or reference)`, the same wording as `SET ZONE`.
+- **Persistence:** the zone is stored as `ColumnDef.zone` identically to `ALTER TABLE ... SET ZONE`, so it round-trips through the typedef YAML, introspection, and `ddb fix` with no extra wiring.
+
 ## _typedef Doogat Format
 
 A `_typedef` doogat defines a table schema:
