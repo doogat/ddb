@@ -632,11 +632,11 @@ The REST API exposes multi-value references via a `references` JSON object on ea
 Each per-type query accepts a `where` argument with field-level filters. Filter types match column data types:
 
 ```graphql
-input StringFilter { eq: String, neq: String, contains: String, startsWith: String, in: [String] }
-input IntFilter    { eq: Int, neq: Int, gt: Int, gte: Int, lt: Int, lte: Int, in: [Int] }
-input FloatFilter  { eq: Float, neq: Float, gt: Float, gte: Float, lt: Float, lte: Float, in: [Float] }
-input BoolFilter   { eq: Boolean }
-input IDFilter     { eq: ID, in: [ID] }
+input StringFilter { eq: String, neq: String, contains: String, startsWith: String, in: [String], notIn: [String], nin: [String], isNull: Boolean }
+input IntFilter    { eq: Int, neq: Int, gt: Int, gte: Int, lt: Int, lte: Int, in: [Int], notIn: [Int], nin: [Int], isNull: Boolean }
+input FloatFilter  { eq: Float, neq: Float, gt: Float, gte: Float, lt: Float, lte: Float, in: [Float], notIn: [Float], nin: [Float], isNull: Boolean }
+input BoolFilter   { eq: Boolean, notIn: [Boolean], nin: [Boolean], isNull: Boolean }
+input IDFilter     { eq: ID, in: [ID], notIn: [ID], nin: [ID], isNull: Boolean }
 ```
 
 Every `{Type}Where` input includes `id: IDFilter`, `title: StringFilter`, and `tags: TagsFilter` in addition to user-defined columns. PRD 00129 §5 added the `tags` filter:
@@ -674,6 +674,66 @@ Where inputs support compound logic with `_and` and `_or`:
 ```
 
 All filter values are parameterized (never interpolated into SQL), preventing injection.
+
+#### Negation and null operators (PRD 00159)
+
+Scalar and ID filter inputs gained three new operators:
+
+- **`notIn`** / **`nin`** — emit `col NOT IN (...)`. `nin` is an exact alias of `notIn` (identical SQL). An empty list is always-true (matches all rows), mirroring `in` with an empty list being always-false.
+- **`isNull: true`** — `col IS NULL`; **`isNull: false`** — `col IS NOT NULL`.
+
+**`notIn` + NULL**: SQLite three-valued logic excludes a row whose column is NULL from `x NOT IN (...)`. To include nulls explicitly, combine with `isNull: true`.
+
+```graphql
+# Exclude specific IDs
+{ links(where: { id: { notIn: ["20260401074007"] } }) { items { id } } }
+# Find rows with missing url
+{ links(where: { url: { isNull: true } }) { items { id } } }
+```
+
+#### Relation traversal (PRD 00159)
+
+A REFERENCES column `c` pointing at target type `T` is now typed `{T}RelationFilter` instead of `IDFilter`. `{T}RelationFilter` exposes two families of operators:
+
+**ID operations** — compare the stored first-value reference column (back-compatible):
+
+`eq: ID`, `in: [ID]`, `notIn: [ID]`, `nin: [ID]`, `isNull: Boolean`.
+
+**Junction quantifiers** — traverse the full junction table:
+
+`some: {T}Where`, `none: {T}Where`, `every: {T}Where`.
+
+**Inlined target columns** — each column of `T` appears as a field (e.g. `title: StringFilter`), so `category: { title: { eq: "X" } }` works directly. A target column whose name collides with a reserved op (`eq`/`in`/`notIn`/`nin`/`isNull`/`some`/`none`/`every`) is NOT inlined; reach it via `some: { ... }`.
+
+**Reverse / junction membership** — for every type `R` that REFERENCES the current type, a reverse field typed `{R}MembershipFilter` is added, exposing ONLY `some`/`none`/`every: {R}Where`. The reverse field name defaults to the pluralized referencing-type name (e.g. type `link` referencing `category` ⇒ a `links` field on `CategoryWhere`); on collision it falls back to `{referencingType}_{column}`; if it still collides it is omitted (server logs a warning).
+
+**Quantifier semantics** (compiled to `EXISTS` over the auto-junction table):
+
+- `some` — at least one related entity matches the sub-filter.
+- `none` — no related entity matches. `none: {}` (empty) means "has no relation at all" — i.e. uncategorized.
+- `every` — all related entities match (vacuously true when none related).
+
+**Edge cases:**
+
+- Two truth-sources in a forward `RelationFilter`: id-ops (`eq`/`in`/…) compare the stored first-value reference column, while quantifiers/inlined columns traverse the full junction. For a row referencing multiple targets these can differ (`category: { eq: X }` vs `category: { some: { id: { eq: X } } }`).
+- Forward `every` over a single-valued REFERENCES is defined-but-degenerate (equivalent to `some` when a relation exists); reverse `every` is the genuinely to-many case.
+- `every` + NULL target column: SQLite three-valued logic — `every` compiles to `NOT EXISTS (... AND NOT (sub))`, so a related row whose target column is NULL is not treated as a counterexample (same 3VL family as the `notIn` + NULL note).
+- Nesting depth is bounded at 5 (`MAX_RELATION_DEPTH`); exceeding it returns an error.
+- All relation filters compile to parameterized `EXISTS`-over-junction subqueries (reusing the tags `EXISTS` template); values are never interpolated.
+
+```graphql
+# Forward relation sub-filter (implicit some on inlined target column)
+{ links(where: { category: { title: { eq: "Rust" } } }) { items { id title } } }
+
+# Forward id-ops (back-compatible, unchanged behavior)
+{ links(where: { category: { eq: "20260401074007" } }) { items { id } } }
+
+# Uncategorized = none
+{ links(where: { category: { none: {} } }) { items { id } } }
+
+# Reverse membership: categories that have at least one matching link
+{ categories(where: { links: { some: { title: { contains: "rust" } } } }) { items { id title } } }
+```
 
 ### Sorting
 
