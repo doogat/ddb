@@ -40,8 +40,9 @@ const QUANTIFIERS: &[&str] = &["some", "none", "every"];
 
 /// Reserved keys that must not be inlined as target columns in the relation
 /// filter input (reachable via `some:`/`none:`/`every:` instead).
-const RESERVED_RELATION_KEYS: &[&str] =
-    &["eq", "in", "notIn", "nin", "isNull", "some", "none", "every"];
+const RESERVED_RELATION_KEYS: &[&str] = &[
+    "eq", "in", "notIn", "nin", "isNull", "some", "none", "every",
+];
 
 /// Forward-relation emitter for a REFERENCES column `parent_col` on the
 /// current row type, pointing at registered `target_table`.

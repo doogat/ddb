@@ -875,8 +875,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
     // Forward-relation `{Target}RelationFilter` inputs for every REFERENCES
     // column whose target type is registered. Keyed off `known_types` so it
     // agrees with `build_where_input` on which targets get a RelationFilter.
-    for relation_input in
-        crate::relation_filter::relation_input_objects(type_schemas, &known_types)
+    for relation_input in crate::relation_filter::relation_input_objects(type_schemas, &known_types)
     {
         dynamic_inputs.push(relation_input);
     }
