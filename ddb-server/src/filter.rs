@@ -2830,6 +2830,126 @@ mod tests {
         );
     }
 
+    // ── Where-filter completeness: a semantically-empty-but-structurally-
+    //    non-empty sub-where (`{ _and: [] }`) must reduce to the SAME no-JOIN
+    //    quantifier form as a literal `{}`, never emit `EXISTS (... AND ())`. ──
+
+    #[test]
+    fn some_with_empty_and_list_emits_no_join_exists() {
+        // { category: { some: { _and: [] } } } compiles zero sub-conditions, so
+        // it is semantically the empty filter. It must reduce to the no-JOIN
+        // "has at least one related row" form, identical to `some: {}` — never a
+        // JOIN that dangles an invalid `AND ()`.
+        let mut and_wrap = IndexMap::new();
+        and_wrap.insert(Name::new("_and"), GqlValue::List(Vec::new()));
+        let mut sub = IndexMap::new();
+        sub.insert(Name::new("some"), GqlValue::Object(and_wrap));
+        let mut obj = IndexMap::new();
+        obj.insert(Name::new("category"), GqlValue::Object(sub));
+        let input = GqlValue::Object(obj);
+
+        let wc = build_where_sql(
+            &input,
+            &test_schema(),
+            &schemas_with(schema_with_table("category", vec!["title"])),
+        );
+        assert_eq!(
+            wc.sql,
+            r#"EXISTS (SELECT 1 FROM "bookmark_category" "_j0" WHERE "_j0"."bookmark_id" = "bookmark".id)"#
+        );
+        assert!(wc.params.is_empty());
+    }
+
+    // ── Where-filter completeness: the depth cap must fire even when the
+    //    deepest relation level is an empty quantifier. A literal `{}` terminal
+    //    must not short-circuit past the depth check at the recursion top. ──
+
+    #[test]
+    fn relation_depth_cap_fires_for_empty_terminal_quantifier() {
+        // Six nested `some` over the self-referencing category relation, with
+        // the INNERMOST (6th) quantifier an empty `some: {}`:
+        //   category.some.category.some. ... .category.some.{}
+        // The empty terminal still descends one relation level, so the sixth
+        // level exceeds MAX_RELATION_DEPTH (5) and must reject.
+        let mut inner = {
+            let mut some_wrap = IndexMap::new();
+            some_wrap.insert(Name::new("some"), GqlValue::Object(IndexMap::new()));
+            let mut rel = IndexMap::new();
+            rel.insert(Name::new("category"), GqlValue::Object(some_wrap));
+            rel
+        };
+        // Wrap five more times around the empty-terminal innermost level →
+        // six relation levels total.
+        for _ in 0..5 {
+            let mut some_wrap = IndexMap::new();
+            some_wrap.insert(Name::new("some"), GqlValue::Object(inner));
+            let mut rel = IndexMap::new();
+            rel.insert(Name::new("category"), GqlValue::Object(some_wrap));
+            inner = rel;
+        }
+        let input = GqlValue::Object(inner);
+
+        let err = try_build_where_sql(&input, &test_schema(), &schemas_with(category_self_ref()))
+            .expect_err("empty terminal quantifier past the depth cap must reject");
+        assert!(err.contains("too deep"), "got: {err}");
+    }
+
+    // ── Where-filter completeness: a target column literally named `neq` is a
+    //    reserved id-op and must NOT be inlined on the RelationFilter input;
+    //    it is reachable only via `some:`. Normal columns stay inlined. ──
+
+    #[test]
+    fn operator_named_target_column_is_not_inlined_in_relation_filter() {
+        use crate::relation_filter::relation_filter_input;
+
+        // Category target declares a column literally named `neq` plus a normal
+        // `title`. `neq` collides with the reserved id-op set, so it must be
+        // excluded from inline fields; `title` must remain inlined.
+        let relation = relation_filter_input(
+            "Category",
+            &schema_with_table("category", vec!["neq", "title"]),
+        );
+        // Stub `CategoryWhere` so the RelationFilter's quantifier references
+        // resolve when the schema is built.
+        let category_where = InputObject::new("CategoryWhere")
+            .field(InputValue::new("title", TypeRef::named("StringFilter")));
+        let sdl_schema = async_graphql::dynamic::Schema::build("Query", None, None)
+            .register(string_filter())
+            .register(id_filter())
+            .register(category_where)
+            .register(relation)
+            .register(
+                async_graphql::dynamic::Object::new("Query").field(Field::new(
+                    "dummy",
+                    TypeRef::named(TypeRef::STRING),
+                    |_| FieldFuture::new(async { Ok(Option::<FieldValue>::None) }),
+                )),
+            )
+            .finish()
+            .expect("schema build");
+        let sdl = sdl_schema.sdl();
+
+        // Slice out the RelationFilter input block.
+        let block_start = sdl
+            .find("input CategoryRelationFilter")
+            .expect("relation filter input block present");
+        let block = &sdl[block_start..];
+        let block_end = block.find('}').expect("relation filter input block closes");
+        let block = &block[..block_end];
+
+        // `title` is a normal column -> inlined as a StringFilter field.
+        assert!(
+            block.contains("title: StringFilter"),
+            "normal column `title` must be inlined on CategoryRelationFilter, got:\n{block}"
+        );
+        // `neq` is a reserved id-op name -> must NOT appear as an inline field.
+        // (It is reachable only via `some:`/`none:`/`every:`.)
+        assert!(
+            !block.contains("neq:"),
+            "column named `neq` must NOT be inlined on CategoryRelationFilter, got:\n{block}"
+        );
+    }
+
     // ── P2: reverse / junction membership quantifiers ──
     // The CURRENT row type is the REFERENCED type (`category`); the lookup
     // holds the REFERENCING type (`bookmark` = test_schema(), whose `category`
