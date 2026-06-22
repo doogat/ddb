@@ -782,9 +782,7 @@ pub(crate) fn reverse_relations(
         .map(|c| sanitize_field_name(&c.name))
         .collect();
     for base in ["id", "title", "tags"] {
-        if !existing.contains(base) {
-            existing.insert(base.to_string());
-        }
+        existing.insert(base.to_string());
     }
     existing.insert("_and".to_string());
     existing.insert("_or".to_string());
