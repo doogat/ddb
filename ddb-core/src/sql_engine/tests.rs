@@ -8858,3 +8858,225 @@ fn sql_update_bulk_rolls_back_materialized_when_junction_sync_fails() {
         "materialized url must roll back to OLD value when junction sync fails (bulk path)"
     );
 }
+
+#[test]
+fn inline_zone_text_frontmatter_overrides_body_default() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // TEXT implicitly derives to Body; the inline ZONE must override that.
+    engine
+        .execute("CREATE TABLE inline_text_fm (descr TEXT ZONE frontmatter)")
+        .unwrap();
+
+    let schema = engine.load_schema("inline_text_fm").unwrap();
+    let descr = schema.columns.iter().find(|c| c.name == "descr").unwrap();
+    assert_eq!(descr.zone, Some(Zone::Frontmatter));
+}
+
+#[test]
+fn inline_zone_body_overrides_text_and_numeric_defaults() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // INTEGER implicitly derives to Frontmatter; ZONE body must override it.
+    // TEXT already derives to Body, but ZONE body must keep it Body explicitly.
+    engine
+        .execute("CREATE TABLE inline_body (descr TEXT ZONE body, count INTEGER ZONE body)")
+        .unwrap();
+
+    let schema = engine.load_schema("inline_body").unwrap();
+    let descr = schema.columns.iter().find(|c| c.name == "descr").unwrap();
+    let count = schema.columns.iter().find(|c| c.name == "count").unwrap();
+    assert_eq!(descr.zone, Some(Zone::Body));
+    assert_eq!(count.zone, Some(Zone::Body));
+}
+
+#[test]
+fn inline_zone_overrides_references_default() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // A REFERENCES column implicitly derives to Reference; the inline ZONE wins.
+    engine
+        .execute("CREATE TABLE inline_ref (r TEXT REFERENCES other ZONE frontmatter)")
+        .unwrap();
+
+    let schema = engine.load_schema("inline_ref").unwrap();
+    let r = schema.columns.iter().find(|c| c.name == "r").unwrap();
+    assert_eq!(r.zone, Some(Zone::Frontmatter));
+}
+
+#[test]
+fn inline_zone_identical_to_set_zone() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Inline declaration must store the exact same zone a post-hoc SET ZONE would.
+    engine
+        .execute("CREATE TABLE inline_eq (descr TEXT ZONE frontmatter)")
+        .unwrap();
+    engine
+        .execute("CREATE TABLE setzone_eq (descr TEXT)")
+        .unwrap();
+    engine
+        .execute("ALTER TABLE setzone_eq SET ZONE frontmatter FOR descr")
+        .unwrap();
+
+    let inline = engine.load_schema("inline_eq").unwrap();
+    let altered = engine.load_schema("setzone_eq").unwrap();
+    let inline_zone = inline
+        .columns
+        .iter()
+        .find(|c| c.name == "descr")
+        .unwrap()
+        .zone
+        .clone();
+    let altered_zone = altered
+        .columns
+        .iter()
+        .find(|c| c.name == "descr")
+        .unwrap()
+        .zone
+        .clone();
+    assert_eq!(inline_zone, Some(Zone::Frontmatter));
+    assert_eq!(altered_zone, Some(Zone::Frontmatter));
+    assert_eq!(inline_zone, altered_zone);
+}
+
+#[test]
+fn no_inline_zone_preserves_implicit_derivation() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Without any inline ZONE, the old implicit rules must still hold.
+    engine
+        .execute("CREATE TABLE inline_default (descr TEXT, count INTEGER)")
+        .unwrap();
+
+    let schema = engine.load_schema("inline_default").unwrap();
+    let descr = schema.columns.iter().find(|c| c.name == "descr").unwrap();
+    let count = schema.columns.iter().find(|c| c.name == "count").unwrap();
+    assert_eq!(descr.zone, Some(Zone::Body));
+    assert_eq!(count.zone, Some(Zone::Frontmatter));
+}
+
+#[test]
+fn inline_zone_keyword_and_value_are_case_insensitive() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Mixed and upper case for both the keyword and the value must work.
+    engine
+        .execute("CREATE TABLE inline_case (a TEXT ZONE Frontmatter, b TEXT zone FRONTMATTER)")
+        .unwrap();
+
+    let schema = engine.load_schema("inline_case").unwrap();
+    let a = schema.columns.iter().find(|c| c.name == "a").unwrap();
+    let b = schema.columns.iter().find(|c| c.name == "b").unwrap();
+    assert_eq!(a.zone, Some(Zone::Frontmatter));
+    assert_eq!(b.zone, Some(Zone::Frontmatter));
+}
+
+#[test]
+fn inline_zone_placement_agnostic_and_preserves_not_null() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // ZONE may sit before or after NOT NULL; both yield Frontmatter and keep NOT NULL.
+    engine
+        .execute(
+            "CREATE TABLE inline_place (x TEXT NOT NULL ZONE frontmatter, y TEXT ZONE frontmatter NOT NULL)",
+        )
+        .unwrap();
+
+    let schema = engine.load_schema("inline_place").unwrap();
+    let x = schema.columns.iter().find(|c| c.name == "x").unwrap();
+    let y = schema.columns.iter().find(|c| c.name == "y").unwrap();
+    assert_eq!(x.zone, Some(Zone::Frontmatter));
+    assert_eq!(y.zone, Some(Zone::Frontmatter));
+    assert!(x.required, "ZONE before NOT NULL must still honor NOT NULL");
+    assert!(y.required, "ZONE after NOT NULL must still honor NOT NULL");
+}
+
+#[test]
+fn inline_zone_on_enum_preserves_allowed_values() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // The comma inside ENUM(...) must not confuse ZONE parsing.
+    engine
+        .execute("CREATE TABLE inline_enum (status ENUM('a','b') ZONE frontmatter)")
+        .unwrap();
+
+    let schema = engine.load_schema("inline_enum").unwrap();
+    let status = schema.columns.iter().find(|c| c.name == "status").unwrap();
+    assert_eq!(status.zone, Some(Zone::Frontmatter));
+    assert_eq!(
+        status.allowed_values,
+        Some(vec!["a".into(), "b".into()])
+    );
+}
+
+#[test]
+fn inline_zone_invalid_value_errors() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    let err = engine
+        .execute("CREATE TABLE inline_bad (descr TEXT ZONE sidebar)")
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("invalid zone:"),
+        "error must name the invalid zone, got: {msg}"
+    );
+    assert!(
+        msg.contains("(use frontmatter, body, or reference)"),
+        "error must list the valid zones, got: {msg}"
+    );
+}
+
+#[test]
+fn inline_zone_on_core_column_is_accepted_as_noop() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Declaring a zone on a core column must not error; the table is created.
+    engine
+        .execute("CREATE TABLE inline_core (title TEXT ZONE frontmatter, note TEXT)")
+        .unwrap();
+
+    let schema = engine.load_schema("inline_core").unwrap();
+    let note = schema.columns.iter().find(|c| c.name == "note").unwrap();
+    assert_eq!(note.zone, Some(Zone::Body));
+}
+
+#[test]
+fn inline_zone_distinct_zones_per_column_in_one_statement() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Three columns, three different inline zones in a single CREATE TABLE.
+    // Each column must keep its OWN declared zone; collapsing the per-column
+    // zone map to one arbitrary value (or swapping any two) must fail here.
+    engine
+        .execute(
+            "CREATE TABLE inline_mixed (fm TEXT ZONE frontmatter, bd TEXT ZONE body, rf TEXT ZONE reference)",
+        )
+        .unwrap();
+
+    let schema = engine.load_schema("inline_mixed").unwrap();
+    let zone_of = |name: &str| {
+        schema
+            .columns
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap()
+            .zone
+            .clone()
+    };
+    assert_eq!(zone_of("fm"), Some(Zone::Frontmatter));
+    assert_eq!(zone_of("bd"), Some(Zone::Body));
+    assert_eq!(zone_of("rf"), Some(Zone::Reference));
+}
