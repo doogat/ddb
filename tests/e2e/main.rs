@@ -30,6 +30,7 @@ mod reference_raw_id;
 mod relation_resolution;
 mod rename;
 mod rest;
+mod schema_apply;
 mod search_in_filter;
 mod search_junction_filter;
 mod search_links;
