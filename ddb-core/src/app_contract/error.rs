@@ -149,3 +149,161 @@ impl From<DoogatError> for AppError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // All references below are fully-qualified (`crate::error::...`,
+    // `crate::app_contract::...`) because `super::*` would only bring this
+    // module's own items into scope, none of which these tests use.
+
+    #[test]
+    fn schema_apply_partial_code_constant_has_exact_value() {
+        assert_eq!(
+            crate::error::codes::SCHEMA_APPLY_PARTIAL,
+            "SCHEMA_APPLY_PARTIAL"
+        );
+    }
+
+    #[test]
+    fn schema_destructive_blocked_code_constant_has_exact_value() {
+        assert_eq!(
+            crate::error::codes::SCHEMA_DESTRUCTIVE_BLOCKED,
+            "SCHEMA_DESTRUCTIVE_BLOCKED"
+        );
+    }
+
+    #[test]
+    fn schema_unsupported_change_warning_code_constant_has_exact_value() {
+        assert_eq!(
+            crate::app_contract::SCHEMA_UNSUPPORTED_CHANGE,
+            "SCHEMA_UNSUPPORTED_CHANGE"
+        );
+    }
+
+    #[test]
+    fn destructive_blocked_maps_to_conflict_category_with_code_and_message() {
+        let err = crate::error::DoogatError::Structured {
+            code: crate::error::codes::SCHEMA_DESTRUCTIVE_BLOCKED,
+            message: "plan blocked: risky operations require override".into(),
+            context: vec![],
+        };
+        let app: crate::app_contract::AppError = err.into();
+        assert_eq!(app.code, "SCHEMA_DESTRUCTIVE_BLOCKED");
+        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Conflict);
+        assert_eq!(app.message, "plan blocked: risky operations require override");
+    }
+
+    #[test]
+    fn destructive_blocked_category_is_code_driven_not_message_driven() {
+        // Same code, a second distinct message with none of the
+        // "destructive"/"drop"/"rename" theme words. The category must derive
+        // from `code` (-> Conflict), never from message prose, so an impl that
+        // sniffs the message instead of matching the code is rejected here.
+        let err = crate::error::DoogatError::Structured {
+            code: crate::error::codes::SCHEMA_DESTRUCTIVE_BLOCKED,
+            message: "request requires the override flag".into(),
+            context: vec![],
+        };
+        let app: crate::app_contract::AppError = err.into();
+        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Conflict);
+        assert_eq!(app.message, "request requires the override flag");
+    }
+
+    #[test]
+    fn apply_partial_maps_to_internal_category_with_code_and_message() {
+        let err = crate::error::DoogatError::Structured {
+            code: crate::error::codes::SCHEMA_APPLY_PARTIAL,
+            message: "halted after 5 of 9 operations".into(),
+            context: vec![],
+        };
+        let app: crate::app_contract::AppError = err.into();
+        assert_eq!(app.code, "SCHEMA_APPLY_PARTIAL");
+        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Internal);
+        assert_eq!(app.message, "halted after 5 of 9 operations");
+    }
+
+    #[test]
+    fn destructive_blocked_carries_context_into_details_in_order_with_matching_variants() {
+        let err = crate::error::DoogatError::Structured {
+            code: crate::error::codes::SCHEMA_DESTRUCTIVE_BLOCKED,
+            message: "schema plan contains destructive operations".into(),
+            context: vec![
+                (
+                    "table".into(),
+                    crate::error::ErrorValue::String("project".into()),
+                ),
+                (
+                    "operations".into(),
+                    crate::error::ErrorValue::List(vec![
+                        "DROP COLUMN status".into(),
+                        "DROP COLUMN owner".into(),
+                    ]),
+                ),
+            ],
+        };
+        let app: crate::app_contract::AppError = err.into();
+        assert_eq!(
+            app.details,
+            vec![
+                (
+                    "table".to_string(),
+                    crate::app_contract::AppErrorDetail::String("project".into()),
+                ),
+                (
+                    "operations".to_string(),
+                    crate::app_contract::AppErrorDetail::List(vec![
+                        "DROP COLUMN status".into(),
+                        "DROP COLUMN owner".into(),
+                    ]),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_partial_carries_context_into_details_in_order_with_matching_variants() {
+        let err = crate::error::DoogatError::Structured {
+            code: crate::error::codes::SCHEMA_APPLY_PARTIAL,
+            message: "schema apply completed 2 of 3 operations".into(),
+            context: vec![
+                (
+                    "failed_at".into(),
+                    crate::error::ErrorValue::String("ADD COLUMN due_date".into()),
+                ),
+                (
+                    "applied".into(),
+                    crate::error::ErrorValue::List(vec![
+                        "ADD COLUMN status".into(),
+                        "ADD COLUMN owner".into(),
+                    ]),
+                ),
+            ],
+        };
+        let app: crate::app_contract::AppError = err.into();
+        assert_eq!(
+            app.details,
+            vec![
+                (
+                    "failed_at".to_string(),
+                    crate::app_contract::AppErrorDetail::String("ADD COLUMN due_date".into()),
+                ),
+                (
+                    "applied".to_string(),
+                    crate::app_contract::AppErrorDetail::List(vec![
+                        "ADD COLUMN status".into(),
+                        "ADD COLUMN owner".into(),
+                    ]),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn schema_unsupported_change_usable_as_app_warning_code() {
+        let warning = crate::app_contract::AppWarning {
+            code: crate::app_contract::SCHEMA_UNSUPPORTED_CHANGE,
+            message: "altering column type is not supported".into(),
+        };
+        assert_eq!(warning.code, "SCHEMA_UNSUPPORTED_CHANGE");
+    }
+}
