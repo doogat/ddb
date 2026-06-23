@@ -13,6 +13,7 @@ mod delete;
 mod discovery;
 mod ops;
 mod read;
+mod schema_apply;
 mod search;
 mod sql;
 mod update;
