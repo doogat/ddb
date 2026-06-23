@@ -1,3 +1,235 @@
+use crate::types::{ColumnDef, OnDeleteAction, TableSchema, Zone};
+
+/// Lowercase token for a zone in rendered DDL.
+fn zone_token(zone: &Zone) -> &'static str {
+    match zone {
+        Zone::Frontmatter => "frontmatter",
+        Zone::Body => "body",
+        Zone::Reference => "reference",
+    }
+}
+
+/// Render a single column. `include_zone` is `true` for `CREATE TABLE`
+/// columns and `false` for `ADD COLUMN` (which does not accept inline ZONE).
+fn render_column(column: &ColumnDef, include_zone: bool) -> String {
+    let mut s = format!("{} {}", column.name, column.data_type);
+    if column.required {
+        s.push_str(" NOT NULL");
+    }
+    if let Some(default) = &column.default_value {
+        s.push_str(&format!(" DEFAULT {default}"));
+    }
+    if let Some(references) = &column.references {
+        s.push_str(&format!(" REFERENCES {references}"));
+        if column.on_delete == OnDeleteAction::Cascade {
+            s.push_str(" ON DELETE CASCADE");
+        }
+    }
+    if include_zone {
+        if let Some(zone) = &column.zone {
+            s.push_str(&format!(" ZONE {}", zone_token(zone)));
+        }
+    }
+    s
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlanOp {
+    CreateType(TableSchema),
+    AddColumn { table: String, column: ColumnDef },
+    AlterColumnType { table: String, column: String, new_type: String },
+    SetZone { table: String, column: String, zone: Zone },
+    SetSearchKey { table: String, column: Option<String> },
+    SetSingleton { table: String, on: bool },
+    RenameColumn { table: String, from: String, to: String },
+    DropColumn { table: String, column: String },
+}
+
+impl PlanOp {
+    /// Render this op to DDL. Never ends with a `;`.
+    pub fn render_sql(&self) -> String {
+        match self {
+            PlanOp::CreateType(schema) => {
+                let mut parts: Vec<String> = schema
+                    .columns
+                    .iter()
+                    .map(|c| render_column(c, true))
+                    .collect();
+                if let Some(constraints) = &schema.unique_together {
+                    for cols in constraints {
+                        if !cols.is_empty() {
+                            parts.push(format!("UNIQUE({})", cols.join(", ")));
+                        }
+                    }
+                }
+                let mut sql = format!("CREATE TABLE {} ({})", schema.table_name, parts.join(", "));
+                if schema.singleton {
+                    sql.push_str(" SINGLETON");
+                }
+                sql
+            }
+            PlanOp::AddColumn { table, column } => {
+                format!("ALTER TABLE {table} ADD COLUMN {}", render_column(column, false))
+            }
+            PlanOp::AlterColumnType { table, column, new_type } => {
+                format!("ALTER TABLE {table} ALTER COLUMN {column} TYPE {new_type}")
+            }
+            PlanOp::SetZone { table, column, zone } => {
+                format!("ALTER TABLE {table} SET ZONE {} FOR {column}", zone_token(zone))
+            }
+            PlanOp::SetSearchKey { table, column } => match column {
+                Some(col) => format!("ALTER TABLE {table} SET SEARCH KEY {col}"),
+                None => format!("ALTER TABLE {table} DROP SEARCH KEY"),
+            },
+            PlanOp::SetSingleton { table, on } => {
+                if *on {
+                    format!("ALTER TABLE {table} SET SINGLETON")
+                } else {
+                    format!("ALTER TABLE {table} DROP SINGLETON")
+                }
+            }
+            PlanOp::RenameColumn { table, from, to } => {
+                format!("ALTER TABLE {table} RENAME COLUMN {from} TO {to}")
+            }
+            PlanOp::DropColumn { table, column } => {
+                format!("ALTER TABLE {table} DROP COLUMN {column}")
+            }
+        }
+    }
+
+    /// Stable kind identifier for reporting.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            PlanOp::CreateType(_) => "create_type",
+            PlanOp::AddColumn { .. } => "add_column",
+            PlanOp::AlterColumnType { .. } => "alter_column_type",
+            PlanOp::SetZone { .. } => "set_zone",
+            PlanOp::SetSearchKey { .. } => "set_search_key",
+            PlanOp::SetSingleton { .. } => "set_singleton",
+            PlanOp::RenameColumn { .. } => "rename_column",
+            PlanOp::DropColumn { .. } => "drop_column",
+        }
+    }
+
+    /// Whether applying this op can destroy data.
+    pub fn is_destructive(&self) -> bool {
+        matches!(self, PlanOp::DropColumn { .. } | PlanOp::RenameColumn { .. })
+    }
+
+    /// User-facing dry-run description.
+    pub fn describe(&self) -> String {
+        match self {
+            PlanOp::CreateType(s) => format!("create type {}", s.table_name),
+            PlanOp::AddColumn { table, column } => {
+                format!("add column {} to {table}", column.name)
+            }
+            PlanOp::AlterColumnType { table, column, new_type } => {
+                format!("alter column {column} on {table} to type {new_type}")
+            }
+            PlanOp::SetZone { table, column, zone } => {
+                format!("set zone of {column} on {table} to {}", zone_token(zone))
+            }
+            PlanOp::SetSearchKey { table, column } => match column {
+                Some(col) => format!("set search key of {table} to {col}"),
+                None => format!("reset search key of {table} to title"),
+            },
+            PlanOp::SetSingleton { table, on } => {
+                if *on {
+                    format!("set singleton on {table}")
+                } else {
+                    format!("clear singleton on {table}")
+                }
+            }
+            PlanOp::RenameColumn { table, from, to } => {
+                format!("rename column {from} to {to} on {table}")
+            }
+            PlanOp::DropColumn { table, column } => {
+                format!("drop column {column} from {table}")
+            }
+        }
+    }
+
+    /// Affected table, read from the structured field (never parsed from SQL).
+    fn affected_table(&self) -> &str {
+        match self {
+            PlanOp::CreateType(s) => &s.table_name,
+            PlanOp::AddColumn { table, .. }
+            | PlanOp::AlterColumnType { table, .. }
+            | PlanOp::SetZone { table, .. }
+            | PlanOp::SetSearchKey { table, .. }
+            | PlanOp::SetSingleton { table, .. }
+            | PlanOp::RenameColumn { table, .. }
+            | PlanOp::DropColumn { table, .. } => table,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaPlan {
+    pub ops: Vec<PlanOp>,
+    pub unsupported: Vec<String>,
+}
+
+impl SchemaPlan {
+    /// `true` when there are no ops (ignores `unsupported`).
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
+
+    /// `true` when any op is destructive.
+    pub fn has_destructive(&self) -> bool {
+        self.ops.iter().any(|op| op.is_destructive())
+    }
+
+    /// Render all ops as `;`-terminated statements joined by newlines.
+    pub fn to_sql(&self) -> String {
+        self.ops
+            .iter()
+            .map(|op| format!("{};", op.render_sql()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SchemaApplyReport {
+    pub dry_run: bool,
+    pub applied: bool,
+    pub ops: Vec<PlanOpReport>,
+    pub unsupported: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PlanOpReport {
+    pub kind: String,
+    pub table: String,
+    pub detail: String,
+    pub destructive: bool,
+    pub sql: String,
+}
+
+impl SchemaApplyReport {
+    pub fn from_plan(plan: &SchemaPlan, dry_run: bool, applied: bool) -> Self {
+        let ops = plan
+            .ops
+            .iter()
+            .map(|op| PlanOpReport {
+                kind: op.kind().to_string(),
+                table: op.affected_table().to_string(),
+                detail: op.describe(),
+                destructive: op.is_destructive(),
+                sql: op.render_sql(),
+            })
+            .collect();
+        SchemaApplyReport {
+            dry_run,
+            applied,
+            ops,
+            unsupported: plan.unsupported.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

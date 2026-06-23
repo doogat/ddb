@@ -36,7 +36,7 @@ impl OnDeleteAction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnDef {
     pub name: String,
     pub data_type: String,
@@ -90,7 +90,7 @@ impl ColumnDef {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TableSchema {
     pub table_name: String,
     pub columns: Vec<ColumnDef>,
