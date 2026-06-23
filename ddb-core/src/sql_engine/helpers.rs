@@ -380,24 +380,33 @@ fn find_zone_in_text(text: &str) -> Option<(String, usize, usize)> {
     let re = RE.get_or_init(|| Regex::new(r"(?i)\bZONE\s+(\w+)").expect("valid regex"));
 
     let bytes = text.as_bytes();
+    let mut from = 0;
 
-    for cap in re.captures_iter(text) {
+    while let Some(cap) = re.captures_at(text, from) {
         let m = cap.get(0).unwrap();
         let value = cap.get(1).unwrap().as_str().to_string();
         let start = m.start();
 
+        // On a skip, advance the cursor past only the `ZONE` keyword (4 bytes),
+        // NOT the whole `ZONE <word>` match, so a genuine inline ZONE that
+        // immediately follows a skipped one (e.g. `... WITH TIME ZONE ZONE body`)
+        // is still found rather than swallowed.
+        let skip_to = start + "ZONE".len();
+
         // Skip a match inside a single-quoted string literal.
         let inside = bytes[..start].iter().filter(|&&b| b == b'\'').count() % 2 == 1;
         if inside {
+            from = skip_to;
             continue;
         }
 
         // Skip the `ZONE` that closes a `TIME ZONE` type keyword.
         if preceding_word(text, start).eq_ignore_ascii_case("time") {
+            from = skip_to;
             continue;
         }
 
-        return Some((value, m.start(), m.end()));
+        return Some((value, start, m.end()));
     }
 
     None
@@ -1366,5 +1375,19 @@ mod tests {
         assert_eq!(map.get("a"), Some(&Zone::Frontmatter));
         assert!(cleaned.contains("DEFAULT '('"), "quoted default preserved");
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+    }
+
+    #[test]
+    fn strip_inline_zones_inline_zone_after_time_zone_type() {
+        use crate::types::Zone;
+        // A `TIMESTAMP WITH TIME ZONE` column that ALSO declares an inline zone:
+        // the TIME ZONE type keyword is skipped, but the trailing real ZONE must
+        // still be mapped (the carve-out must not swallow it).
+        let sql = "CREATE TABLE t (created TIMESTAMP WITH TIME ZONE ZONE body)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.get("created"), Some(&Zone::Body));
+        // The TIME ZONE type keyword survives; the trailing inline ZONE is excised.
+        assert!(cleaned.to_uppercase().contains("TIME ZONE"));
+        assert!(!cleaned.to_lowercase().contains("zone body"));
     }
 }
