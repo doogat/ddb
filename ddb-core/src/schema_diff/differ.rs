@@ -3,26 +3,159 @@
 //! declarative schema apply (PRD 00161 task 3).
 
 use crate::schema_diff::desired::SchemaDoc;
-use crate::schema_diff::plan::SchemaPlan;
+use crate::schema_diff::plan::{PlanOp, SchemaPlan};
 use crate::types::TableSchema;
 
 /// Diff `desired` against `live`, producing an ordered plan of DDL ops.
 ///
-/// `live[i]` corresponds to `desired.types[i]`; `None` means the type does
-/// not exist yet and must be created.
+/// `live[i]` corresponds to `desired.types[i]`; `None` (or an index past the
+/// end of `live`) means the type does not exist yet and must be created.
 pub fn diff(desired: &SchemaDoc, live: &[Option<TableSchema>]) -> SchemaPlan {
     let mut plan = SchemaPlan { ops: Vec::new(), unsupported: Vec::new() };
     for (i, desired_type) in desired.types.iter().enumerate() {
-        if let Some(current) = live.get(i).and_then(Option::as_ref) {
-            diff_type(desired_type, current, &mut plan);
+        match live.get(i).and_then(Option::as_ref) {
+            Some(current) => diff_type(desired_type, current, &mut plan),
+            None => {
+                plan.ops.push(PlanOp::CreateType(desired_type.clone()));
+                if desired_type.search_key.is_some() {
+                    plan.ops.push(PlanOp::SetSearchKey {
+                        table: desired_type.table_name.clone(),
+                        column: desired_type.search_key.clone(),
+                    });
+                }
+            }
         }
     }
+
+    // Destructive ops sort after every additive op (stable partition).
+    let (additive, drops): (Vec<PlanOp>, Vec<PlanOp>) = std::mem::take(&mut plan.ops)
+        .into_iter()
+        .partition(|op| !matches!(op, PlanOp::DropColumn { .. }));
+    plan.ops = additive;
+    plan.ops.extend(drops);
+
     plan
 }
 
 /// Append ops to converge `current` toward `desired` for one existing type.
 fn diff_type(desired: &TableSchema, current: &TableSchema, plan: &mut SchemaPlan) {
-    let _ = (desired, current, plan);
+    let table = &desired.table_name;
+
+    for desired_col in &desired.columns {
+        match current.columns.iter().find(|c| c.name == desired_col.name) {
+            None => plan.ops.push(PlanOp::AddColumn {
+                table: table.clone(),
+                column: desired_col.clone(),
+            }),
+            Some(current_col) => {
+                if desired_col.data_type != current_col.data_type {
+                    plan.ops.push(PlanOp::AlterColumnType {
+                        table: table.clone(),
+                        column: desired_col.name.clone(),
+                        new_type: desired_col.data_type.clone(),
+                    });
+                }
+
+                // Live zone as it will be after the (possible) type alter, so a
+                // pure data_type change never emits a consequential SetZone.
+                let mut post_alter = current_col.clone();
+                post_alter.data_type = desired_col.data_type.clone();
+                let desired_zone = desired_col.effective_zone();
+                if post_alter.effective_zone() != desired_zone {
+                    plan.ops.push(PlanOp::SetZone {
+                        table: table.clone(),
+                        column: desired_col.name.clone(),
+                        zone: desired_zone,
+                    });
+                }
+
+                if desired_col.required != current_col.required {
+                    plan.unsupported.push(format!(
+                        "column {}.{}: required change is unsupported",
+                        table, desired_col.name
+                    ));
+                }
+                if desired_col.default_value != current_col.default_value {
+                    plan.unsupported.push(format!(
+                        "column {}.{}: default_value change is unsupported",
+                        table, desired_col.name
+                    ));
+                }
+                if desired_col.references != current_col.references {
+                    plan.unsupported.push(format!(
+                        "column {}.{}: references change is unsupported",
+                        table, desired_col.name
+                    ));
+                }
+                if desired_col.on_delete != current_col.on_delete {
+                    plan.unsupported.push(format!(
+                        "column {}.{}: on_delete change is unsupported",
+                        table, desired_col.name
+                    ));
+                }
+                if desired_col.search_boost != current_col.search_boost {
+                    plan.unsupported.push(format!(
+                        "column {}.{}: search_boost change is unsupported",
+                        table, desired_col.name
+                    ));
+                }
+                if desired_col.allowed_values != current_col.allowed_values {
+                    plan.unsupported.push(format!(
+                        "column {}.{}: allowed_values change is unsupported",
+                        table, desired_col.name
+                    ));
+                }
+            }
+        }
+    }
+
+    for current_col in &current.columns {
+        if !desired.columns.iter().any(|c| c.name == current_col.name) {
+            plan.ops.push(PlanOp::DropColumn {
+                table: table.clone(),
+                column: current_col.name.clone(),
+            });
+        }
+    }
+
+    if desired.search_key != current.search_key {
+        plan.ops.push(PlanOp::SetSearchKey {
+            table: table.clone(),
+            column: desired.search_key.clone(),
+        });
+    }
+    if desired.singleton != current.singleton {
+        plan.ops.push(PlanOp::SetSingleton {
+            table: table.clone(),
+            on: desired.singleton,
+        });
+    }
+
+    // origin is never diffed.
+    if desired.title_template != current.title_template {
+        plan.unsupported
+            .push(format!("type {table}: title_template change is unsupported"));
+    }
+    if desired.crdt_strategy != current.crdt_strategy {
+        plan.unsupported
+            .push(format!("type {table}: crdt_strategy change is unsupported"));
+    }
+    if desired.template_sections != current.template_sections {
+        plan.unsupported
+            .push(format!("type {table}: template_sections change is unsupported"));
+    }
+    if desired.folder != current.folder {
+        plan.unsupported
+            .push(format!("type {table}: folder change is unsupported"));
+    }
+    if desired.stale_after_days != current.stale_after_days {
+        plan.unsupported
+            .push(format!("type {table}: stale_after_days change is unsupported"));
+    }
+    if desired.unique_together != current.unique_together {
+        plan.unsupported
+            .push(format!("type {table}: unique_together change is unsupported"));
+    }
 }
 
 #[cfg(test)]
