@@ -111,6 +111,12 @@ pub mod codes {
     pub const SINGLETON_VIOLATION: &str = "SINGLETON_VIOLATION";
     /// PRD 00139 §5: typed `update<Type>` against an empty SINGLETON typedef.
     pub const SINGLETON_NOT_FOUND: &str = "SINGLETON_NOT_FOUND";
+    /// PRD 00161 §3.5: a multi-typedef schema apply failed partway; the
+    /// already-applied ops are listed in the error context.
+    pub const SCHEMA_APPLY_PARTIAL: &str = "SCHEMA_APPLY_PARTIAL";
+    /// PRD 00161 §3.5: a schema plan contains destructive ops (drop/rename)
+    /// and `allow_destructive` was not set.
+    pub const SCHEMA_DESTRUCTIVE_BLOCKED: &str = "SCHEMA_DESTRUCTIVE_BLOCKED";
 }
 
 impl DoogatError {

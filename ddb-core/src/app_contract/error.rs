@@ -1,5 +1,9 @@
 use crate::error::{codes, DoogatError, ErrorValue};
 
+/// Warning code for a desired-vs-live schema difference that has no targeted
+/// DDL path (PRD 00161 §3.4/§3.5). Attached to `AppWarning.code`.
+pub const SCHEMA_UNSUPPORTED_CHANGE: &str = "SCHEMA_UNSUPPORTED_CHANGE";
+
 /// Broad classification of an application-layer error, transport-agnostic.
 ///
 /// Transports map these categories to their own status codes or error kinds
@@ -94,10 +98,12 @@ impl From<DoogatError> for AppError {
                     codes::UNIQUE_VIOLATION
                     | codes::SINGLETON_VIOLATION
                     | codes::REFERENCES_VIOLATION
-                    | codes::CASCADE_CYCLE => AppErrorCategory::Conflict,
+                    | codes::CASCADE_CYCLE
+                    | codes::SCHEMA_DESTRUCTIVE_BLOCKED => AppErrorCategory::Conflict,
                     codes::NOT_NULL_VIOLATION
                     | codes::UNKNOWN_FIELD
                     | codes::TYPE_NOT_REGISTERED => AppErrorCategory::InvalidInput,
+                    codes::SCHEMA_APPLY_PARTIAL => AppErrorCategory::Internal,
                     _ => AppErrorCategory::Internal,
                 };
                 let details: Vec<(String, AppErrorDetail)> = context
