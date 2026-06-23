@@ -1,3 +1,73 @@
+use std::collections::BTreeMap;
+
+use crate::error::{DoogatError, Result};
+use crate::parser::from_serde_yaml;
+use crate::sql_engine::schema_from_parsed;
+use crate::types::{DoogatMeta, ParsedDoogat, Value};
+
+/// A declarative description of the desired typedefs.
+pub struct SchemaDoc {
+    /// One [`TableSchema`](crate::types::TableSchema) per declared type.
+    pub types: Vec<crate::types::TableSchema>,
+}
+
+impl SchemaDoc {
+    /// Parse a desired-schema YAML document into one `TableSchema` per type.
+    pub fn from_yaml(doc: &str) -> Result<SchemaDoc> {
+        let root: serde_yaml::Value = serde_yaml::from_str(doc)?;
+
+        let types_seq = root
+            .get("types")
+            .and_then(|v| v.as_sequence())
+            .ok_or_else(|| DoogatError::SqlEngine("desired schema missing `types:` sequence".into()))?;
+
+        let mut types = Vec::with_capacity(types_seq.len());
+        for entry in types_seq {
+            let map = entry
+                .as_mapping()
+                .ok_or_else(|| DoogatError::SqlEngine("type entry must be a mapping".into()))?;
+
+            let name = map
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| DoogatError::SqlEngine("type entry missing `name`".into()))?
+                .to_string();
+
+            let extra: BTreeMap<String, Value> = map
+                .iter()
+                .filter_map(|(k, v)| {
+                    let key = k.as_str()?;
+                    if key == "name" {
+                        return None;
+                    }
+                    Some((key.to_string(), from_serde_yaml(v.clone())))
+                })
+                .collect();
+
+            let meta = DoogatMeta {
+                title: Some(name),
+                extra,
+                ..Default::default()
+            };
+            let parsed = ParsedDoogat {
+                meta,
+                body: String::new(),
+                sections: Vec::new(),
+                reference_section: String::new(),
+                inline_fields: Vec::new(),
+                links: Vec::new(),
+                body_tags: Vec::new(),
+                checkboxes: Vec::new(),
+                path: String::new(),
+                updated_at: None,
+            };
+            types.push(schema_from_parsed(&parsed)?);
+        }
+
+        Ok(SchemaDoc { types })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::schema_diff::desired::SchemaDoc;

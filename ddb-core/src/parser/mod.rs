@@ -55,7 +55,7 @@ impl From<RawDoogatMeta> for DoogatMeta {
     }
 }
 
-fn from_serde_yaml(v: serde_yaml::Value) -> Value {
+pub(crate) fn from_serde_yaml(v: serde_yaml::Value) -> Value {
     match v {
         serde_yaml::Value::String(s) => Value::String(s),
         serde_yaml::Value::Number(n) => Value::Number(n.as_f64().unwrap_or(0.0)),
