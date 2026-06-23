@@ -348,31 +348,56 @@ pub(super) fn extract_on_delete(
     Ok(crate::types::OnDeleteAction::Restrict)
 }
 
-/// Find the first ZONE keyword followed by a value in text,
-/// ignoring occurrences inside single-quoted strings.
+/// PRD 00160: guard regex matching a leading `CREATE TABLE`. Cached (like every
+/// other regex helper here) so `strip_inline_zones` doesn't recompile per call.
+fn re_create_table_guard() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)^\s*CREATE\s+TABLE\b").expect("valid regex"))
+}
+
+/// The last word token (alphanumeric/underscore run) ending at or before
+/// `pos`, skipping intervening whitespace. Empty when none precedes `pos`.
+/// `pos` must be a char boundary in `text`.
+fn preceding_word(text: &str, pos: usize) -> &str {
+    let before = text[..pos].trim_end();
+    match before
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !(c.is_alphanumeric() || *c == '_'))
+    {
+        Some((i, c)) => &before[i + c.len_utf8()..],
+        None => before,
+    }
+}
+
+/// Find the first ZONE keyword followed by a value in text, ignoring
+/// occurrences inside single-quoted strings and the `ZONE` that is the tail of
+/// a `TIME ZONE` type keyword (so `TIMESTAMP WITH TIME ZONE` is not misread as
+/// an inline zone attribute).
 /// Returns (value, start_of_ZONE, end_of_value) relative to the input text.
 fn find_zone_in_text(text: &str) -> Option<(String, usize, usize)> {
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"(?i)\bZONE\s+(\w+)").unwrap());
+    let re = RE.get_or_init(|| Regex::new(r"(?i)\bZONE\s+(\w+)").expect("valid regex"));
 
     let bytes = text.as_bytes();
 
     for cap in re.captures_iter(text) {
         let m = cap.get(0).unwrap();
         let value = cap.get(1).unwrap().as_str().to_string();
-
-        // Check if this match is inside a single-quoted string
         let start = m.start();
-        let mut inside = false;
-        for &byte in &bytes[..start] {
-            if byte == b'\'' {
-                inside = !inside;
-            }
+
+        // Skip a match inside a single-quoted string literal.
+        let inside = bytes[..start].iter().filter(|&&b| b == b'\'').count() % 2 == 1;
+        if inside {
+            continue;
         }
 
-        if !inside {
-            return Some((value, m.start(), m.end()));
+        // Skip the `ZONE` that closes a `TIME ZONE` type keyword.
+        if preceding_word(text, start).eq_ignore_ascii_case("time") {
+            continue;
         }
+
+        return Some((value, m.start(), m.end()));
     }
 
     None
@@ -384,129 +409,36 @@ fn find_zone_in_text(text: &str) -> Option<(String, usize, usize)> {
 ///
 /// Non-CREATE statements are a no-op. Columns without a ZONE attribute are
 /// left untouched. If no ZONE was found, the original string is returned
-/// unchanged (idempotent).
+/// unchanged (idempotent). Malformed input (unbalanced parens, unterminated
+/// quoted identifier) is passed through to the parser rather than panicking.
 pub(super) fn strip_inline_zones(
     sql: &str,
-) -> crate::error::Result<(String, HashMap<String, Zone>)> {
-    // Guard: non-CREATE TABLE is a no-op
-    if !Regex::new(r"(?i)^\s*CREATE\s+TABLE\b")
-        .unwrap()
-        .is_match(sql)
-    {
+) -> Result<(String, HashMap<String, Zone>)> {
+    // Guard: non-CREATE TABLE is a no-op.
+    if !re_create_table_guard().is_match(sql) {
         return Ok((sql.to_string(), HashMap::new()));
     }
 
-    // Find the first ( and its matching )
-    let mut depth = 0usize;
-    let mut open_pos = None;
-    let mut close_pos = None;
-    for (i, b) in sql.char_indices() {
-        if b == '(' {
-            if depth == 0 {
-                open_pos = Some(i);
-            }
-            depth += 1;
-        } else if b == ')' {
-            depth -= 1;
-            if depth == 0 {
-                close_pos = Some(i);
-                break;
-            }
-        }
-    }
-
-    let (open_pos, close_pos) = match (open_pos, close_pos) {
-        (Some(o), Some(c)) => (o, c),
-        _ => return Ok((sql.to_string(), HashMap::new())),
+    let Some((open_pos, close_pos)) = find_column_list_bounds(sql) else {
+        return Ok((sql.to_string(), HashMap::new()));
     };
 
     let prefix = &sql[..=open_pos];
     let suffix = &sql[close_pos..];
     let column_list = &sql[open_pos + 1..close_pos];
 
-    // Split column list on top-level commas (track paren depth + single-quote state)
-    let segments: Vec<&str> = {
-        let mut segs = Vec::new();
-        let mut depth = 0;
-        let mut in_sq = false;
-        let mut start = 0;
-        for (i, b) in column_list.char_indices() {
-            match b {
-                '\'' => in_sq = !in_sq,
-                '(' if !in_sq => depth += 1,
-                ')' if !in_sq => depth -= 1,
-                ',' if depth == 0 && !in_sq => {
-                    segs.push(&column_list[start..i]);
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        segs.push(&column_list[start..]);
-        segs
-    };
-
     let mut map = HashMap::new();
     let mut modified = false;
-    let mut new_segments: Vec<String> = Vec::with_capacity(segments.len());
+    let mut new_segments: Vec<String> = Vec::new();
 
-    for seg in &segments {
-        let trimmed = seg.trim();
-        if trimmed.is_empty() {
-            new_segments.push(seg.to_string());
-            continue;
-        }
-
-        // Extract leading identifier (column name) and its byte span in the original segment
-        let (name_lower, name_end) = {
-            let t = trimmed;
-            let leading_ws = seg.len() - t.len();
-
-            if let Some(inner) = t.strip_prefix('"') {
-                // Quoted identifier: strip surrounding double-quotes
-                let end = inner.find('"').unwrap_or(inner.len());
-                let name = &inner[..end];
-                (name.to_lowercase(), leading_ws + 1 + name.len() + 1)
-            } else {
-                let name = t.split_whitespace().next().unwrap_or(t);
-                (name.to_lowercase(), leading_ws + name.len())
+    for seg in split_top_level_segments(column_list) {
+        match parse_segment_zone(seg)? {
+            Some((name, zone, new_seg)) => {
+                map.insert(name, zone);
+                new_segments.push(new_seg);
+                modified = true;
             }
-        };
-
-        // Scan the rest of the segment (after the name token) for ZONE keyword
-        let rest = &seg[name_end..];
-        let zone_match = find_zone_in_text(rest);
-
-        if let Some((zone_value, match_start, match_end)) = zone_match {
-            // Validate zone value
-            let zone = match zone_value.to_lowercase().as_str() {
-                "frontmatter" => Zone::Frontmatter,
-                "body" => Zone::Body,
-                "reference" => Zone::Reference,
-                other => {
-                    return Err(DoogatError::Structured {
-                        code: "INVALID_ZONE",
-                        message: format!(
-                            "invalid zone: {} (use frontmatter, body, or reference)",
-                            other
-                        ),
-                        context: vec![],
-                    });
-                }
-            };
-
-            map.insert(name_lower, zone);
-
-            // Excise the matched run from the segment
-            let new_seg = format!(
-                "{}{}",
-                &seg[..name_end + match_start],
-                &seg[name_end + match_end..]
-            );
-            new_segments.push(new_seg);
-            modified = true;
-        } else {
-            new_segments.push(seg.to_string());
+            None => new_segments.push(seg.to_string()),
         }
     }
 
@@ -516,6 +448,118 @@ pub(super) fn strip_inline_zones(
 
     let cleaned = format!("{}{}{}", prefix, new_segments.join(", "), suffix);
     Ok((cleaned, map))
+}
+
+/// Locate the first top-level parenthesized column list, returning the byte
+/// indices of its opening and matching closing paren. Quote-aware: parens
+/// inside single-quoted literals don't affect depth. Returns None on a
+/// CREATE TABLE with no balanced top-level `(...)` (treated as a no-op by the
+/// caller rather than a panic).
+fn find_column_list_bounds(sql: &str) -> Option<(usize, usize)> {
+    let mut depth = 0usize;
+    let mut open_pos = None;
+    let mut in_sq = false;
+    for (i, c) in sql.char_indices() {
+        match c {
+            '\'' => in_sq = !in_sq,
+            '(' if !in_sq => {
+                if depth == 0 {
+                    open_pos = Some(i);
+                }
+                depth += 1;
+            }
+            ')' if !in_sq => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return open_pos.map(|o| (o, i));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split a column list on top-level commas, tracking paren depth and
+/// single-quote state so commas inside `ENUM('a','b')`, `VARCHAR(255)`,
+/// `CHECK(...)`, or quoted literals never split a column.
+fn split_top_level_segments(column_list: &str) -> Vec<&str> {
+    let mut segs = Vec::new();
+    let mut depth = 0usize;
+    let mut in_sq = false;
+    let mut start = 0;
+    for (i, c) in column_list.char_indices() {
+        match c {
+            '\'' => in_sq = !in_sq,
+            '(' if !in_sq => depth += 1,
+            ')' if !in_sq => depth = depth.saturating_sub(1),
+            ',' if depth == 0 && !in_sq => {
+                segs.push(&column_list[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    segs.push(&column_list[start..]);
+    segs
+}
+
+/// Extract a column-def segment's leading identifier (lowercased, quotes
+/// stripped) and the byte offset just past it in the original `seg`. Leading
+/// whitespace only — trailing whitespace must NOT shift the offset.
+fn column_name_and_end(seg: &str) -> (String, usize) {
+    let trimmed = seg.trim_start();
+    let leading_ws = seg.len() - trimmed.len();
+    if let Some(inner) = trimmed.strip_prefix('"') {
+        // Quoted identifier: runs to the next quote (or end if unterminated).
+        let end = inner.find('"').unwrap_or(inner.len());
+        (inner[..end].to_lowercase(), leading_ws + 1 + end + 1)
+    } else {
+        let name = trimmed.split_whitespace().next().unwrap_or(trimmed);
+        (name.to_lowercase(), leading_ws + name.len())
+    }
+}
+
+/// Validate a zone value token. Reuses the exact wording of `handle_set_zone`.
+fn parse_zone_value(value: &str) -> Result<Zone> {
+    match value.to_lowercase().as_str() {
+        "frontmatter" => Ok(Zone::Frontmatter),
+        "body" => Ok(Zone::Body),
+        "reference" => Ok(Zone::Reference),
+        other => Err(DoogatError::Structured {
+            code: "INVALID_ZONE",
+            message: format!("invalid zone: {} (use frontmatter, body, or reference)", other),
+            context: vec![],
+        }),
+    }
+}
+
+/// Parse one column-def segment for an inline `ZONE <value>`. Returns the
+/// lowercased column name, the parsed zone, and the segment with the matched
+/// ` ZONE <value>` run excised — or None if the segment has no inline zone.
+/// Errors only on a recognized-but-invalid zone value.
+fn parse_segment_zone(seg: &str) -> Result<Option<(String, Zone, String)>> {
+    if seg.trim().is_empty() {
+        return Ok(None);
+    }
+    let (name_lower, name_end) = column_name_and_end(seg);
+
+    // Bounds-safe: an unterminated quoted identifier can push name_end past the
+    // segment. Treat that as "no inline zone" rather than slicing out of bounds.
+    let Some(rest) = seg.get(name_end..) else {
+        return Ok(None);
+    };
+
+    let Some((zone_value, match_start, match_end)) = find_zone_in_text(rest) else {
+        return Ok(None);
+    };
+    let zone = parse_zone_value(&zone_value)?;
+    let new_seg = format!(
+        "{}{}",
+        &seg[..name_end + match_start],
+        &seg[name_end + match_end..]
+    );
+    Ok(Some((name_lower, zone, new_seg)))
 }
 
 /// Returns true when the column declares `NOT NULL` in its DDL options.
@@ -1238,5 +1282,89 @@ mod tests {
         assert_eq!(map.len(), 1);
         assert_eq!(map["owner_id"], Zone::Reference);
         assert!(!cleaned.to_lowercase().contains("zone reference"));
+    }
+
+    // PRD 00160 rework (review cycle 1): regression tests for the defects the
+    // multi-reviewer cycle found in strip_inline_zones.
+
+    #[test]
+    fn strip_inline_zones_trailing_whitespace_before_delimiter_still_maps() {
+        use crate::types::Zone;
+        // Trailing whitespace before the closing paren / comma must NOT cause the
+        // ZONE token to be skipped. (Bug: leading_ws counted trailing whitespace,
+        // over-skipping past ZONE so it survived to sqlparser as a parse error.)
+        let sql = "CREATE TABLE t (a TEXT ZONE body          , b TEXT)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.len(), 1, "trailing whitespace must not lose the ZONE");
+        assert_eq!(map["a"], Zone::Body);
+        assert!(!cleaned.to_lowercase().contains("zone body"));
+
+        // Also before the closing paren.
+        let sql2 = "CREATE TABLE t (a TEXT ZONE frontmatter          )";
+        let (_c2, map2) = strip_inline_zones(sql2).unwrap();
+        assert_eq!(map2.get("a"), Some(&Zone::Frontmatter));
+    }
+
+    #[test]
+    fn strip_inline_zones_does_not_panic_on_unterminated_quoted_identifier() {
+        // Malformed user SQL must not panic (AGENTS.md no-panic guardrail).
+        // (Bug: name_end for an unterminated quoted identifier exceeded seg.len(),
+        // making &seg[name_end..] an out-of-bounds slice.)
+        let sql = "CREATE TABLE t (\"unterminated TEXT)";
+        // Must return (Ok or Err) without panicking.
+        let _ = strip_inline_zones(sql);
+    }
+
+    #[test]
+    fn strip_inline_zones_does_not_panic_on_unbalanced_parens() {
+        // A stray ) before any ( must not underflow the depth counter.
+        let sql = "CREATE TABLE t )";
+        let _ = strip_inline_zones(sql);
+        let sql2 = "CREATE TABLE t (a TEXT))";
+        let _ = strip_inline_zones(sql2);
+    }
+
+    #[test]
+    fn strip_inline_zones_time_zone_type_is_not_treated_as_inline_zone() {
+        // `TIMESTAMP WITH TIME ZONE` is a standard type; the ZONE inside it must
+        // NOT be parsed as an inline zone attribute (which previously errored with
+        // `invalid zone: not`). A genuine inline ZONE on another column still maps.
+        let sql = "CREATE TABLE t (created TIMESTAMP WITH TIME ZONE NOT NULL)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert!(map.is_empty(), "TIME ZONE must not yield an inline zone");
+        assert_eq!(cleaned, sql, "no-zone input round-trips unchanged");
+
+        // A real inline ZONE alongside a TIME ZONE typed column still maps, and
+        // the TIME ZONE token is left intact.
+        let sql2 = "CREATE TABLE t (created TIMESTAMP WITH TIME ZONE NOT NULL, descr TEXT ZONE frontmatter)";
+        let (cleaned2, map2) = strip_inline_zones(sql2).unwrap();
+        use crate::types::Zone;
+        assert_eq!(map2.get("descr"), Some(&Zone::Frontmatter));
+        assert!(map2.get("created").is_none());
+        assert!(cleaned2.to_uppercase().contains("TIME ZONE"));
+    }
+
+    #[test]
+    fn strip_inline_zones_still_errors_on_genuine_bad_value() {
+        // The TIME ZONE carve-out must not swallow a real typo: `ZONE sidebar`
+        // still errors clearly.
+        let sql = "CREATE TABLE t (x TEXT ZONE sidebar)";
+        let err = strip_inline_zones(sql).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid zone: sidebar (use frontmatter, body, or reference)"
+        );
+    }
+
+    #[test]
+    fn strip_inline_zones_quoted_paren_before_zone() {
+        use crate::types::Zone;
+        // A single-quoted '(' before the inline ZONE must not desync the paren
+        // scanner that finds the column-list bounds.
+        let sql = "CREATE TABLE t (a TEXT DEFAULT '(' ZONE frontmatter)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map.get("a"), Some(&Zone::Frontmatter));
+        assert!(cleaned.contains("DEFAULT '('"), "quoted default preserved");
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
     }
 }

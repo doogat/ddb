@@ -9080,3 +9080,80 @@ fn inline_zone_distinct_zones_per_column_in_one_statement() {
     assert_eq!(zone_of("bd"), Some(Zone::Body));
     assert_eq!(zone_of("rf"), Some(Zone::Reference));
 }
+
+// PRD 00160 rework (review cycle 1): engine-level regression tests for the
+// defects the multi-reviewer cycle found.
+
+#[test]
+fn inline_zone_time_zone_typed_column_does_not_false_positive() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // A `TIMESTAMP WITH TIME ZONE` column must NOT be rejected with an
+    // `invalid zone: not` error from the inline-ZONE pre-parser. (It may still
+    // fail for an unrelated reason if the type is unsupported, but never with a
+    // false-positive zone error.)
+    let result = engine.execute("CREATE TABLE inline_tz (created TIMESTAMP WITH TIME ZONE NOT NULL)");
+    if let Err(e) = result {
+        let msg = format!("{e}");
+        assert!(
+            !msg.contains("invalid zone"),
+            "TIME ZONE type must not trip the inline-zone validator, got: {msg}"
+        );
+    }
+}
+
+#[test]
+fn inline_zone_malformed_create_errors_without_panic() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Malformed SQL (unterminated quoted identifier) must surface a normal
+    // error, never a panic, from the inline-ZONE pre-parser.
+    let result = engine.execute("CREATE TABLE inline_bad (\"unterminated TEXT)");
+    assert!(result.is_err(), "malformed CREATE TABLE must error, not panic");
+}
+
+#[test]
+fn inline_zone_persists_across_fresh_engine() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Round-trip: an inline-declared zone must survive being read back by a
+    // fresh engine (proves typedef persistence, not just in-memory state).
+    engine
+        .execute("CREATE TABLE inline_rt (descr TEXT ZONE frontmatter, owner TEXT REFERENCES other ZONE frontmatter)")
+        .unwrap();
+
+    let mut engine2 = SqlEngine::new(&index, &repo);
+    let schema = engine2.load_schema("inline_rt").unwrap();
+    let descr = schema.columns.iter().find(|c| c.name == "descr").unwrap();
+    let owner = schema.columns.iter().find(|c| c.name == "owner").unwrap();
+    assert_eq!(descr.zone, Some(Zone::Frontmatter));
+    assert_eq!(owner.zone, Some(Zone::Frontmatter));
+}
+
+#[test]
+fn inline_zone_skipped_if_not_exists_does_not_leak_to_later_table() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Pre-create leak_a so the IF NOT EXISTS below is skipped.
+    engine
+        .execute("CREATE TABLE leak_a (descr TEXT ZONE frontmatter)")
+        .unwrap();
+
+    // Single batch: a skipped `IF NOT EXISTS leak_a` carrying an inline zone,
+    // followed by a zone-less leak_b with a same-named column. The skipped
+    // statement's parked zone must NOT leak onto leak_b.descr.
+    engine
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS leak_a (descr TEXT ZONE frontmatter); CREATE TABLE leak_b (descr TEXT)",
+        )
+        .unwrap();
+
+    let schema = engine.load_schema("leak_b").unwrap();
+    let descr = schema.columns.iter().find(|c| c.name == "descr").unwrap();
+    // TEXT with no inline zone derives to Body — NOT the leaked frontmatter.
+    assert_eq!(descr.zone, Some(Zone::Body));
+}

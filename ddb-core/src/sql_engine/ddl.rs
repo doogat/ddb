@@ -116,6 +116,12 @@ impl<'a> SqlEngine<'a> {
             )
             .ok();
         if existing.is_some() {
+            // PRD 00160: this CREATE TABLE is skipped/rejected before
+            // extract_columns (the sole consumer of pending_column_zones), so
+            // discard any inline ZONE map parked for it — otherwise a skipped
+            // `IF NOT EXISTS ... ZONE ...` could leak its zones onto a later
+            // CREATE TABLE in the same batch.
+            self.pending_column_zones.clear();
             if ct.if_not_exists {
                 return Ok(SqlResult::Ok(format!(
                     "table already exists, skipped: {table_name}"
