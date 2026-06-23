@@ -11,7 +11,20 @@ fn zone_token(zone: &Zone) -> &'static str {
 /// Render a single column. `include_zone` is `true` for `CREATE TABLE`
 /// columns and `false` for `ADD COLUMN` (which does not accept inline ZONE).
 fn render_column(column: &ColumnDef, include_zone: bool) -> String {
-    let mut s = format!("{} {}", column.name, column.data_type);
+    // The engine normalizes ENUM(...)/SET(...) to data_type="TEXT" plus a
+    // separate allowed_values list, so render the enum form back from
+    // allowed_values; otherwise the constraint is lost on apply.
+    let type_token = match &column.allowed_values {
+        Some(values) if !values.is_empty() => {
+            let quoted: Vec<String> = values
+                .iter()
+                .map(|v| format!("'{}'", v.replace('\'', "''")))
+                .collect();
+            format!("ENUM({})", quoted.join(", "))
+        }
+        _ => column.data_type.clone(),
+    };
+    let mut s = format!("{} {}", column.name, type_token);
     if column.required {
         s.push_str(" NOT NULL");
     }
@@ -558,6 +571,55 @@ mod tests {
         let op = PlanOp::CreateType(s);
         assert_eq!(op.render_sql(), "CREATE TABLE contact (email VARCHAR(255))");
         assert!(!op.render_sql().contains("SEARCH KEY"));
+    }
+
+    #[test]
+    fn render_create_type_enum_column_emits_enum_constraint() {
+        // allowed_values has a real CREATE form (ENUM(...)). The engine
+        // normalizes ENUM(...) to data_type="TEXT" + separate allowed_values,
+        // so rendering the bare data_type ("TEXT") would silently drop the
+        // constraint on apply. The render must reconstruct ENUM(...).
+        let status = ColumnDef {
+            name: "status".into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: None,
+            required: false,
+            search_boost: None,
+            allowed_values: Some(vec!["todo".into(), "doing".into(), "done".into()]),
+            default_value: None,
+            on_delete: OnDeleteAction::Restrict,
+        };
+        let op = PlanOp::CreateType(schema("task", vec![status], false, None));
+        assert_eq!(
+            op.render_sql(),
+            "CREATE TABLE task (status ENUM('todo', 'doing', 'done'))"
+        );
+    }
+
+    #[test]
+    fn render_add_column_enum_emits_enum_constraint() {
+        // ADD COLUMN accepts ENUM(...) too, so an added enum column must
+        // carry its constraint rather than render as a bare TEXT column.
+        let status = ColumnDef {
+            name: "status".into(),
+            data_type: "TEXT".into(),
+            references: None,
+            zone: None,
+            required: false,
+            search_boost: None,
+            allowed_values: Some(vec!["todo".into(), "done".into()]),
+            default_value: None,
+            on_delete: OnDeleteAction::Restrict,
+        };
+        let op = PlanOp::AddColumn {
+            table: "task".into(),
+            column: status,
+        };
+        assert_eq!(
+            op.render_sql(),
+            "ALTER TABLE task ADD COLUMN status ENUM('todo', 'done')"
+        );
     }
 
     #[test]
