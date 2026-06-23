@@ -348,16 +348,18 @@ pub(super) fn extract_on_delete(
     Ok(crate::types::OnDeleteAction::Restrict)
 }
 
-/// PRD 00160: guard regex matching a leading `CREATE TABLE`. Cached (like every
-/// other regex helper here) so `strip_inline_zones` doesn't recompile per call.
+/// Fast-path guard: true when the batch contains a `CREATE TABLE` anywhere.
+/// Unanchored so a batch whose first statement is something else (e.g. a leading
+/// `CREATE TYPE` or `BEGIN`) is still processed. Cached (like every other regex
+/// helper here) so `strip_inline_zones` doesn't recompile per call.
 fn re_create_table_guard() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)^\s*CREATE\s+TABLE\b").expect("valid regex"))
+    RE.get_or_init(|| Regex::new(r"(?i)\bCREATE\s+TABLE\b").expect("valid regex"))
 }
 
-/// PRD 00160: match each `CREATE TABLE [IF NOT EXISTS] <name>` preamble in a
-/// batch, capturing the table name (quoted or bare). Used to locate every
-/// table's column list so a multi-statement batch has all inline zones stripped.
+/// Match each `CREATE TABLE [IF NOT EXISTS] <name>` preamble in a batch,
+/// capturing the table name (quoted or bare). Used to locate every table's
+/// column list so a multi-statement batch has all inline zones stripped.
 fn re_create_table_preamble() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -423,8 +425,8 @@ fn find_zone_in_text(text: &str) -> Option<(String, usize, usize)> {
     None
 }
 
-/// PRD 00160: inline column zones parked per CREATE TABLE, keyed by lowercase
-/// table name then lowercase column name.
+/// Inline column zones parked per CREATE TABLE, keyed by lowercase table name
+/// then lowercase column name.
 pub(super) type TableColumnZones = HashMap<String, HashMap<String, Zone>>;
 
 /// Strip inline `ZONE <frontmatter|body|reference>` column attributes from a
@@ -451,6 +453,20 @@ pub(super) fn strip_inline_zones(sql: &str) -> Result<(String, TableColumnZones)
 
     for caps in re_create_table_preamble().captures_iter(sql) {
         let preamble = caps.get(0).unwrap();
+
+        // Skip a `CREATE TABLE` that sits inside a single-quoted string literal
+        // (e.g. a column default `'CREATE TABLE fake (...)'`): an odd number of
+        // `'` before the match means we are inside a literal.
+        let in_literal = sql.as_bytes()[..preamble.start()]
+            .iter()
+            .filter(|&&b| b == b'\'')
+            .count()
+            % 2
+            == 1;
+        if in_literal {
+            continue;
+        }
+
         let table = caps.get(1).unwrap().as_str().trim_matches('"').to_lowercase();
 
         // The column list is the first balanced top-level `(...)` after the
@@ -460,6 +476,13 @@ pub(super) fn strip_inline_zones(sql: &str) -> Result<(String, TableColumnZones)
         };
         let open = preamble.end() + rel_open;
         let close = preamble.end() + rel_close;
+
+        // Defensive: never slice backwards into already-copied text. Unreachable
+        // for valid input now that literal matches are skipped above, but it
+        // guarantees the `&sql[cursor..=open]` below can never panic begin > end.
+        if open < cursor {
+            continue;
+        }
 
         let Some((map, rebuilt)) = strip_column_list(&sql[open + 1..close])? else {
             continue; // no inline zone in this table -> copy it verbatim later
@@ -1468,5 +1491,54 @@ mod tests {
         // The TIME ZONE type keyword survives; the trailing inline ZONE is excised.
         assert!(cleaned.to_uppercase().contains("TIME ZONE"));
         assert!(!cleaned.to_lowercase().contains("zone body"));
+    }
+
+    // PRD 00160 doubt review: regression tests for the two correctness bugs the
+    // skeptical final review found in strip_inline_zones.
+
+    #[test]
+    fn strip_inline_zones_leading_non_create_statement_strips_later_table() {
+        use crate::types::Zone;
+        // A batch whose FIRST statement is not CREATE TABLE (e.g. a CREATE TYPE
+        // for an enum, or a BEGIN) must still have a later table's inline ZONE
+        // stripped. (Bug: the guard was anchored `^\s*CREATE TABLE`, so any
+        // leading non-CREATE-TABLE statement made the whole batch a no-op and the
+        // ZONE token reached sqlparser as a parse error.)
+        let sql = "CREATE TYPE mood AS ENUM ('a','b'); \
+                   CREATE TABLE t (m TEXT ZONE frontmatter)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(
+            map["t"]["m"],
+            Zone::Frontmatter,
+            "later table's ZONE must be stripped despite a leading non-CREATE statement"
+        );
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+        // The leading statement is untouched.
+        assert!(cleaned.contains("CREATE TYPE mood AS ENUM ('a','b')"));
+    }
+
+    #[test]
+    fn strip_inline_zones_create_table_inside_string_literal_does_not_panic() {
+        use crate::types::Zone;
+        // A column default that is a string literal CONTAINING `CREATE TABLE ...`
+        // must not panic. (Bug: the preamble regex matched the fake CREATE TABLE
+        // inside the literal, whose open offset fell before the cursor, so the
+        // slice `&sql[cursor..=open]` panicked with begin > end. No-panic guardrail.)
+        let sql = "CREATE TABLE t (note TEXT DEFAULT 'CREATE TABLE fake (x TEXT ZONE body)', summary TEXT ZONE frontmatter)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        // Only the real table/column is mapped; the literal's fake table is not.
+        assert_eq!(map["t"].len(), 1);
+        assert_eq!(map["t"]["summary"], Zone::Frontmatter);
+        assert!(
+            map.get("fake").is_none(),
+            "a CREATE TABLE inside a string literal must not be mapped"
+        );
+        // The literal default is preserved verbatim.
+        assert!(
+            cleaned.contains("'CREATE TABLE fake (x TEXT ZONE body)'"),
+            "literal default preserved verbatim"
+        );
+        // The real inline ZONE attribute is excised.
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
     }
 }
