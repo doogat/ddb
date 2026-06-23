@@ -1454,7 +1454,7 @@ impl<'a> SqlEngine<'a> {
             .map_err(|_| DoogatError::SqlEngine(format!("table not found: {table_name}")))
     }
 
-    pub(super) fn load_schema(&mut self, table_name: &str) -> Result<TableSchema> {
+    pub(crate) fn load_schema(&mut self, table_name: &str) -> Result<TableSchema> {
         let (_id, path) = self.load_typedef_location(table_name)?;
         let content = self.repo.read_file(&path)?;
         let parsed = parser::parse(&content, &path)?;

@@ -65,6 +65,17 @@ pub struct DeleteCommand {
     pub id: String,
 }
 
+/// Command to apply a declarative desired-schema document. `schema_doc` is the
+/// YAML describing the desired typedefs. `dry_run` returns the plan without
+/// mutating; `allow_destructive` permits drop/rename ops that would otherwise
+/// be blocked (PRD 00161 §3.5).
+#[derive(Debug, Clone)]
+pub struct ApplySchemaCommand {
+    pub schema_doc: String,
+    pub dry_run: bool,
+    pub allow_destructive: bool,
+}
+
 /// Command to run a full-text search against the SQLite FTS5 index.
 ///
 /// `query` is passed through the search-query normalizer. `limit` and

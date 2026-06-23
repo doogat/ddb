@@ -1,7 +1,121 @@
 //! `apply_schema` service verb + `describe_type` (PRD 00161 Phase 1).
 //!
-//! Non-test implementation is added by the implementer; this file currently
-//! holds only the unit tests for the declarative schema-apply contract.
+//! Declarative schema apply: parse a desired-schema YAML doc, diff it against
+//! the live typedefs, and apply the resulting plan one op at a time with
+//! forward-recovery semantics (no rollback — see PRD 00161 §3.5).
+
+use crate::app_contract::{AppOutput, AppWarning, ApplySchemaCommand, SCHEMA_UNSUPPORTED_CHANGE};
+use crate::error::{codes, DoogatError, ErrorValue, Result};
+use crate::schema_diff::{self, plan::SchemaApplyReport};
+use crate::sql_engine::SqlEngine;
+use crate::traits::{GitBackend, IndexPort};
+use crate::types::TableSchema;
+
+use super::DoogatService;
+
+impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
+    /// Describe a type's live schema, or `None` if the type is not registered.
+    ///
+    /// Builds a fresh `SqlEngine` over the live index (refreshing it the same
+    /// way `execute_sql` does when no transaction is open), then loads the
+    /// typedef. Only the `table not found:` sentinel maps to `Ok(None)`; any
+    /// other error propagates.
+    pub fn describe_type(&mut self, type_name: &str) -> Result<Option<TableSchema>> {
+        if self.txn.is_none() {
+            self.ensure_fresh()?;
+        }
+        let mut engine = SqlEngine::new(&self.index, &self.repo);
+        match engine.load_schema(type_name) {
+            Ok(schema) => Ok(Some(schema)),
+            Err(DoogatError::SqlEngine(msg)) if msg.starts_with("table not found:") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Apply a declarative desired-schema document.
+    ///
+    /// Forward-recovery, not rollback: ops apply in order; on failure the
+    /// already-applied ops are reported via `SCHEMA_APPLY_PARTIAL` and left in
+    /// place so a re-apply can converge.
+    pub fn apply_schema(
+        &mut self,
+        cmd: ApplySchemaCommand,
+    ) -> Result<AppOutput<SchemaApplyReport>> {
+        let doc = schema_diff::desired::SchemaDoc::from_yaml(&cmd.schema_doc)?;
+        let live: Vec<Option<TableSchema>> = doc
+            .types
+            .iter()
+            .map(|t| self.describe_type(&t.table_name))
+            .collect::<Result<Vec<_>>>()?;
+        let plan = schema_diff::diff(&doc, &live);
+
+        let warnings: Vec<AppWarning> = plan
+            .unsupported
+            .iter()
+            .map(|m| AppWarning {
+                code: SCHEMA_UNSUPPORTED_CHANGE,
+                message: m.clone(),
+            })
+            .collect();
+
+        if cmd.dry_run {
+            return Ok(AppOutput {
+                value: SchemaApplyReport::from_plan(&plan, true, false),
+                warnings,
+            });
+        }
+
+        if plan.is_empty() {
+            return Ok(AppOutput {
+                value: SchemaApplyReport::from_plan(&plan, false, false),
+                warnings,
+            });
+        }
+
+        if plan.has_destructive() && !cmd.allow_destructive {
+            return Err(DoogatError::Structured {
+                code: codes::SCHEMA_DESTRUCTIVE_BLOCKED,
+                message:
+                    "schema plan contains destructive operations (drop/rename); re-run with allow_destructive"
+                        .to_string(),
+                context: vec![],
+            });
+        }
+
+        let mut applied_kinds: Vec<String> = Vec::new();
+        for op in &plan.ops {
+            match self.execute_sql(&op.render_sql()) {
+                Ok(_) => applied_kinds.push(op.kind().to_string()),
+                Err(e) => {
+                    return Err(DoogatError::Structured {
+                        code: codes::SCHEMA_APPLY_PARTIAL,
+                        message: format!(
+                            "schema apply failed after {} of {} operations: {}",
+                            applied_kinds.len(),
+                            plan.ops.len(),
+                            e
+                        ),
+                        context: vec![
+                            (
+                                "applied_ops".to_string(),
+                                ErrorValue::List(applied_kinds.clone()),
+                            ),
+                            (
+                                "failed_op".to_string(),
+                                ErrorValue::String(op.kind().to_string()),
+                            ),
+                        ],
+                    });
+                }
+            }
+        }
+
+        Ok(AppOutput {
+            value: SchemaApplyReport::from_plan(&plan, false, true),
+            warnings,
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
