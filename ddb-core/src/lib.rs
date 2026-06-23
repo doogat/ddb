@@ -18,6 +18,7 @@
 //! - [`indexer`] — SQLite FTS5 search index, type inference, materialization
 //! - [`maintenance`] — Git maintenance runner and auto-trigger
 //! - [`parser`] — Parse and serialize three-zone Markdown doogats
+//! - [`schema_diff`] — Declarative desired-schema parsing and diffing
 //! - [`search_query`] — Search query parsing and normalization
 //! - [`service`] — Unified orchestration layer (DoogatService) for CLI, FFI, and server
 //! - [`sql_engine`] — SQL DDL/DML translation (tables as doogat types)
@@ -46,6 +47,7 @@ pub mod hlc;
 pub mod indexer;
 pub mod maintenance;
 pub mod parser;
+pub mod schema_diff;
 pub mod search_query;
 pub mod service;
 pub mod sql_engine;
