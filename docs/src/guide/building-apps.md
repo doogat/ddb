@@ -877,7 +877,7 @@ To set a column's zone at creation instead (no post-hoc `SET ZONE`, no migration
 CREATE TABLE note (summary TEXT ZONE frontmatter, body TEXT);
 ```
 
-`ZONE <frontmatter|body|reference>` may appear anywhere in the column definition after the name and is case-insensitive. A declared zone overrides the inferred default, including the `REFERENCES` default, so a denormalized reference column can live in frontmatter. Only the first `CREATE TABLE` in a multi-statement batch is processed; a zone declared on a core column (`id`, `type`, `title`, `date`, `updated_at`) is ignored.
+`ZONE <frontmatter|body|reference>` may appear anywhere in the column definition after the name and is case-insensitive. A declared zone overrides the inferred default, including the `REFERENCES` default, so a denormalized reference column can live in frontmatter. Every `CREATE TABLE` in a multi-statement batch is processed (each table's zones are attributed independently, regardless of statement order), and a zone declared on a core column (`id`, `type`, `title`, `date`, `updated_at`) is persisted identically to a post-hoc `SET ZONE` (functionally inert on core columns, which materialize to their own slots).
 
 ### Multi-valued references
 
