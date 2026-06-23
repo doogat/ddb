@@ -832,5 +832,29 @@ if ($output -notmatch "auto") { throw "smoke_singleton SELECT returned unexpecte
 ddb query "DROP TABLE smoke_singleton CASCADE" | Out-Null
 pass "SINGLETON typedef: first INSERT, second rejects, UPDATE survives (PRD 00139)"
 
+# 31. declarative schema apply/diff (PRD 00161)
+$schemaFile = Join-Path $TMPDIR "smoke_schema.yaml"
+@"
+types:
+  - name: smoke_widget
+    columns:
+      - name: wlabel
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+"@ | Set-Content -Path $schemaFile
+# Dry-run prints a create_type plan naming the declared column; mutates nothing.
+$output = ddb schema apply $schemaFile --dry-run
+if ($output -notmatch "create_type") { throw "schema dry-run missing create_type: $output" }
+if ($output -notmatch "CREATE TABLE") { throw "schema dry-run missing CREATE TABLE: $output" }
+if (-not (ddb-fails query "SELECT wlabel FROM smoke_widget")) { throw "dry-run must not create smoke_widget" }
+# Real apply creates the type; the column is queryable afterwards.
+ddb schema apply $schemaFile | Out-Null
+ddb query "SELECT wlabel FROM smoke_widget" | Out-Null
+# Re-apply is a converged no-op (no create/add/drop op).
+$output = ddb schema apply $schemaFile
+if ($output -match "create_type") { throw "re-apply must be a no-op, got: $output" }
+pass "schema apply/diff: dry-run plan, real create, idempotent re-apply (PRD 00161)"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

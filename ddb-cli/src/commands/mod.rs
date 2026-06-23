@@ -2,6 +2,7 @@ mod crud;
 mod discover;
 mod maintenance;
 mod query;
+mod schema;
 mod sync;
 
 use crate::Command;
@@ -80,6 +81,7 @@ pub(crate) fn run(cli: crate::Cli) -> ddb_core::error::Result<()> {
         Command::Maintenance { action } => maintenance::maintenance(repo, action),
         Command::Discover { action } => discover::discover(repo, action),
         Command::Sequence { action } => discover::sequence(repo, action),
+        Command::Schema { action } => schema::schema(repo, action),
         // Handled in main() before run() is called
         Command::UpdateBin { .. } | Command::UpdateCheck => unreachable!(),
     }

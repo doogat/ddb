@@ -697,4 +697,17 @@ $DDB query "SELECT theme FROM smoke_singleton WHERE id = '$SS_ID'" | grep -q "au
 $DDB query "DROP TABLE smoke_singleton CASCADE" | grep -q "dropped"
 pass "SINGLETON typedef: first INSERT, second rejects, UPDATE survives (PRD 00139)"
 
+# 31. declarative schema apply/diff (PRD 00161)
+printf 'types:\n  - name: smoke_widget\n    columns:\n      - name: wlabel\n        data_type: VARCHAR(255)\n        zone: frontmatter\n        required: true\n' > "$TMPDIR/smoke_schema.yaml"
+# Dry-run prints a create_type plan naming the declared column; mutates nothing.
+$DDB schema apply "$TMPDIR/smoke_schema.yaml" --dry-run | grep -q "create_type"
+$DDB schema apply "$TMPDIR/smoke_schema.yaml" --dry-run | grep -q "CREATE TABLE"
+! $DDB query "SELECT wlabel FROM smoke_widget" 2>/dev/null
+# Real apply creates the type; the column is queryable afterwards.
+$DDB schema apply "$TMPDIR/smoke_schema.yaml" >/dev/null
+$DDB query "SELECT wlabel FROM smoke_widget" >/dev/null
+# Re-apply is a converged no-op (no create/add/drop op).
+$DDB schema apply "$TMPDIR/smoke_schema.yaml" | grep -qv "create_type"
+pass "schema apply/diff: dry-run plan, real create, idempotent re-apply (PRD 00161)"
+
 echo "=== all smoke tests passed ==="

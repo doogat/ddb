@@ -474,6 +474,25 @@ enum Command {
         #[command(subcommand)]
         action: SequenceAction,
     },
+    /// Declarative schema apply/diff.
+    Schema {
+        #[command(subcommand)]
+        action: SchemaAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SchemaAction {
+    /// Diff a desired-schema file against the live schema and apply the minimal migration.
+    Apply {
+        file: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        allow_destructive: bool,
+    },
+    /// Alias for `apply --dry-run`.
+    Diff { file: String },
 }
 
 #[derive(Subcommand)]
