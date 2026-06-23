@@ -9038,16 +9038,26 @@ fn inline_zone_invalid_value_errors() {
 }
 
 #[test]
-fn inline_zone_on_core_column_is_accepted_as_noop() {
+fn inline_zone_on_core_column_records_zone_like_set_zone() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
 
-    // Declaring a zone on a core column must not error; the table is created.
+    // PRD 00160 (blind review, Important): an inline ZONE on a core column must
+    // record the zone identically to a post-hoc `ALTER TABLE ... SET ZONE`
+    // (which sets the zone on any schema column). Functionally inert on core
+    // columns (they are not materialized as typed-table columns) but a real
+    // parity requirement of the PRD's success metric.
     engine
         .execute("CREATE TABLE inline_core (title TEXT ZONE frontmatter, note TEXT)")
         .unwrap();
 
     let schema = engine.load_schema("inline_core").unwrap();
+    let title = schema.columns.iter().find(|c| c.name == "title").unwrap();
+    assert_eq!(
+        title.zone,
+        Some(Zone::Frontmatter),
+        "inline ZONE on the core `title` column must persist, matching SET ZONE"
+    );
     let note = schema.columns.iter().find(|c| c.name == "note").unwrap();
     assert_eq!(note.zone, Some(Zone::Body));
 }
@@ -9156,4 +9166,75 @@ fn inline_zone_skipped_if_not_exists_does_not_leak_to_later_table() {
     let descr = schema.columns.iter().find(|c| c.name == "descr").unwrap();
     // TEXT with no inline zone derives to Body — NOT the leaked frontmatter.
     assert_eq!(descr.zone, Some(Zone::Body));
+}
+
+// PRD 00160 (blind review): multi-statement batch + round-trip parity.
+
+#[test]
+fn inline_zone_multi_statement_batch_applies_per_table() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // Critical: a batch with inline ZONE on more than one table must apply each
+    // table's zone correctly. Pre-fix, only the first table was stripped (the
+    // second's ZONE token reached sqlparser and failed) and the parked map was
+    // drained by the first table. Same column name in both tables with DIFFERENT
+    // zones proves per-table attribution (a flat column-keyed map would collide).
+    engine
+        .execute_batch(
+            "CREATE TABLE batch_a (descr TEXT ZONE frontmatter); \
+             CREATE TABLE batch_b (descr TEXT ZONE body)",
+        )
+        .unwrap();
+
+    let a = engine.load_schema("batch_a").unwrap();
+    let b = engine.load_schema("batch_b").unwrap();
+    let a_descr = a.columns.iter().find(|c| c.name == "descr").unwrap();
+    let b_descr = b.columns.iter().find(|c| c.name == "descr").unwrap();
+    assert_eq!(a_descr.zone, Some(Zone::Frontmatter));
+    assert_eq!(b_descr.zone, Some(Zone::Body));
+}
+
+#[test]
+fn inline_zone_in_batch_round_trips_identically_to_set_zone() {
+    let (_dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+
+    // PRD 00160 success metric: an inline ZONE declared inside a multi-statement
+    // batch must persist identically to a post-hoc SET ZONE, and survive a fresh
+    // engine reload (typedef round-trip). The batch declares the zone inline;
+    // the control table sets it via ALTER. After reload the two must match.
+    engine
+        .execute_batch(
+            "CREATE TABLE rt_inline (descr TEXT ZONE frontmatter); \
+             CREATE TABLE rt_setzone (descr TEXT)",
+        )
+        .unwrap();
+    engine
+        .execute("ALTER TABLE rt_setzone SET ZONE frontmatter FOR descr")
+        .unwrap();
+
+    // Fresh engine: zones must come from the persisted typedefs, not memory.
+    let mut engine2 = SqlEngine::new(&index, &repo);
+    let inline = engine2.load_schema("rt_inline").unwrap();
+    let setzone = engine2.load_schema("rt_setzone").unwrap();
+    let inline_zone = inline
+        .columns
+        .iter()
+        .find(|c| c.name == "descr")
+        .unwrap()
+        .zone
+        .clone();
+    let setzone_zone = setzone
+        .columns
+        .iter()
+        .find(|c| c.name == "descr")
+        .unwrap()
+        .zone
+        .clone();
+    assert_eq!(inline_zone, Some(Zone::Frontmatter));
+    assert_eq!(
+        inline_zone, setzone_zone,
+        "inline ZONE must round-trip identically to SET ZONE"
+    );
 }

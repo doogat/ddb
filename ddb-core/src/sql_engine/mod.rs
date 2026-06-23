@@ -18,7 +18,7 @@ use crate::error::{DoogatError, Result};
 use crate::parser;
 use crate::traits::DoogatStore;
 use crate::traits::SqlBackend;
-use crate::types::{DoogatId, Zone};
+use crate::types::DoogatId;
 use std::collections::HashMap;
 
 pub(crate) use builders::resolve_insert_title;
@@ -29,7 +29,7 @@ pub use ddl::create_table_with_default_seed_commit_msg;
 use helpers::{
     normalize_alter_column_type, re_create_table_singleton, re_drop_search_key, re_drop_singleton,
     re_drop_title_template, re_set_search_key, re_set_singleton, re_set_title_template,
-    re_set_zone, strip_inline_zones,
+    re_set_zone, strip_inline_zones, TableColumnZones,
 };
 
 #[derive(Debug)]
@@ -74,11 +74,12 @@ pub struct SqlEngine<'a> {
     /// post-install auto-seed.
     pub(super) pending_singleton: Option<bool>,
     /// PRD 00160: inline `ZONE <z>` column attributes stripped from a CREATE
-    /// TABLE source before parsing, keyed by lowercase column name. Set in
-    /// `execute_batch`, consumed (taken) by `extract_columns`. Empty when no
-    /// inline zone was declared. Same single-statement lifecycle as
-    /// `pending_singleton`.
-    pub(super) pending_column_zones: HashMap<String, Zone>,
+    /// TABLE source before parsing, keyed by lowercase table name then lowercase
+    /// column name. Set in `execute_batch` (over the whole batch, so every
+    /// CREATE TABLE in a multi-statement batch is covered), and each table's
+    /// entry is removed by `extract_columns` when that table is created. Empty
+    /// when no inline zone was declared.
+    pub(super) pending_column_zones: TableColumnZones,
 }
 
 impl<'a> SqlEngine<'a> {
@@ -268,10 +269,11 @@ impl<'a> SqlEngine<'a> {
         };
 
         // PRD 00160: strip inline `ZONE <z>` column attributes (sqlparser has
-        // no ZONE column option) and park the column-name -> Zone map for
-        // handle_create_table -> extract_columns. Runs on the already
-        // SINGLETON-stripped SQL. Unconditional assignment (like the SINGLETON
-        // else-branch reset) so a stale map never leaks to a later statement.
+        // no ZONE column option) and park the table -> column -> Zone map for
+        // handle_create_table -> extract_columns. Runs over the whole (already
+        // SINGLETON-stripped) batch so every CREATE TABLE statement is covered,
+        // not just the first. Unconditional assignment (like the SINGLETON
+        // else-branch reset) so a stale map never leaks to a later batch.
         let (stripped, column_zones) = strip_inline_zones(&stripped)?;
         self.pending_column_zones = column_zones;
 

@@ -118,10 +118,11 @@ impl<'a> SqlEngine<'a> {
         if existing.is_some() {
             // PRD 00160: this CREATE TABLE is skipped/rejected before
             // extract_columns (the sole consumer of pending_column_zones), so
-            // discard any inline ZONE map parked for it — otherwise a skipped
-            // `IF NOT EXISTS ... ZONE ...` could leak its zones onto a later
-            // CREATE TABLE in the same batch.
-            self.pending_column_zones.clear();
+            // discard only THIS table's parked inline ZONE map — otherwise a
+            // skipped `IF NOT EXISTS ... ZONE ...` could leak its zones onto a
+            // later CREATE TABLE in the same batch, while a sibling table's
+            // zones must survive.
+            self.pending_column_zones.remove(&table_name);
             if ct.if_not_exists {
                 return Ok(SqlResult::Ok(format!(
                     "table already exists, skipped: {table_name}"
@@ -133,7 +134,7 @@ impl<'a> SqlEngine<'a> {
         }
 
         // Extract columns
-        let columns = self.extract_columns(&ct.columns)?;
+        let columns = self.extract_columns(&table_name, &ct.columns)?;
         let unique_together = extract_unique_constraints(&ct.constraints, &ct.columns);
         // PRD 00139 §2: take() the pre-parse SINGLETON marker. `Some(_)`
         // flips the flag on the typedef; the inner bool drives T7's
@@ -256,9 +257,18 @@ impl<'a> SqlEngine<'a> {
         Ok(SqlResult::Ok(format!("table {table_name} created")))
     }
 
-    fn extract_columns(&mut self, cols: &[sqlparser::ast::ColumnDef]) -> Result<Vec<ColumnDef>> {
+    fn extract_columns(
+        &mut self,
+        table_name: &str,
+        cols: &[sqlparser::ast::ColumnDef],
+    ) -> Result<Vec<ColumnDef>> {
         let mut out = Vec::new();
-        let declared_zones = std::mem::take(&mut self.pending_column_zones);
+        // Take only this table's parked inline zones; later CREATE TABLE
+        // statements in the same batch keep theirs (PRD 00160).
+        let declared_zones = self
+            .pending_column_zones
+            .remove(table_name)
+            .unwrap_or_default();
         for col in cols {
             let name = col.name.value.to_lowercase();
             if name == "id" || name == "type" {
@@ -272,8 +282,13 @@ impl<'a> SqlEngine<'a> {
             // via `is_core_column`.
             let data_type = data_type_to_string(&col.data_type);
             let references = extract_references(&col.options);
-            let zone = if !is_core_column(&name) && declared_zones.contains_key(&name) {
-                declared_zones.get(&name).cloned()
+            // An inline ZONE applies to any schema column, core columns
+            // included, so it round-trips identically to a post-hoc
+            // `ALTER TABLE ... SET ZONE` (which also sets the zone on any
+            // schema column). Functionally inert on core columns (they are
+            // not materialized as typed-table columns) but keeps parity.
+            let zone = if let Some(z) = declared_zones.get(&name) {
+                Some(z.clone())
             } else if references.is_some() {
                 Some(Zone::Reference)
             } else if is_numeric_type(&data_type) || is_short_string_type(&col.data_type) {

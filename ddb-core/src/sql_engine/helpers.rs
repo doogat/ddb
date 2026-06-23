@@ -355,6 +355,17 @@ fn re_create_table_guard() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"(?i)^\s*CREATE\s+TABLE\b").expect("valid regex"))
 }
 
+/// PRD 00160: match each `CREATE TABLE [IF NOT EXISTS] <name>` preamble in a
+/// batch, capturing the table name (quoted or bare). Used to locate every
+/// table's column list so a multi-statement batch has all inline zones stripped.
+fn re_create_table_preamble() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?("[^"]*"|\w+)"#)
+            .expect("valid regex")
+    })
+}
+
 /// The last word token (alphanumeric/underscore run) ending at or before
 /// `pos`, skipping intervening whitespace. Empty when none precedes `pos`.
 /// `pos` must be a char boundary in `text`.
@@ -412,34 +423,70 @@ fn find_zone_in_text(text: &str) -> Option<(String, usize, usize)> {
     None
 }
 
+/// PRD 00160: inline column zones parked per CREATE TABLE, keyed by lowercase
+/// table name then lowercase column name.
+pub(super) type TableColumnZones = HashMap<String, HashMap<String, Zone>>;
+
 /// Strip inline `ZONE <frontmatter|body|reference>` column attributes from a
-/// CREATE TABLE source string, returning the cleaned SQL and a map of
-/// column-name -> zone.
+/// batch of SQL, returning the cleaned SQL and a map of table-name ->
+/// (column-name -> zone). Every `CREATE TABLE` in the batch is processed (not
+/// just the first), so multi-statement migrations that batch many table
+/// declarations all have their inline zones stripped and attributed to the
+/// right table.
 ///
 /// Non-CREATE statements are a no-op. Columns without a ZONE attribute are
 /// left untouched. If no ZONE was found, the original string is returned
 /// unchanged (idempotent). Malformed input (unbalanced parens, unterminated
 /// quoted identifier) is passed through to the parser rather than panicking.
-pub(super) fn strip_inline_zones(
-    sql: &str,
-) -> Result<(String, HashMap<String, Zone>)> {
-    // Guard: non-CREATE TABLE is a no-op.
+pub(super) fn strip_inline_zones(sql: &str) -> Result<(String, TableColumnZones)> {
+    // Guard: a batch with no leading CREATE TABLE is a no-op.
     if !re_create_table_guard().is_match(sql) {
         return Ok((sql.to_string(), HashMap::new()));
     }
 
-    let Some((open_pos, close_pos)) = find_column_list_bounds(sql) else {
+    let mut tables: TableColumnZones = HashMap::new();
+    let mut out = String::with_capacity(sql.len());
+    // Byte offset up to which `sql` has been copied into `out`.
+    let mut cursor = 0usize;
+
+    for caps in re_create_table_preamble().captures_iter(sql) {
+        let preamble = caps.get(0).unwrap();
+        let table = caps.get(1).unwrap().as_str().trim_matches('"').to_lowercase();
+
+        // The column list is the first balanced top-level `(...)` after the
+        // `CREATE TABLE <name>` preamble. Missing (e.g. CTAS) -> leave alone.
+        let Some((rel_open, rel_close)) = find_column_list_bounds(&sql[preamble.end()..]) else {
+            continue;
+        };
+        let open = preamble.end() + rel_open;
+        let close = preamble.end() + rel_close;
+
+        let Some((map, rebuilt)) = strip_column_list(&sql[open + 1..close])? else {
+            continue; // no inline zone in this table -> copy it verbatim later
+        };
+
+        tables.insert(table, map);
+        out.push_str(&sql[cursor..=open]);
+        out.push_str(&rebuilt);
+        cursor = close;
+    }
+
+    // cursor stays 0 only when no table was modified -> nothing stripped.
+    if cursor == 0 {
         return Ok((sql.to_string(), HashMap::new()));
-    };
+    }
+    out.push_str(&sql[cursor..]);
+    Ok((out, tables))
+}
 
-    let prefix = &sql[..=open_pos];
-    let suffix = &sql[close_pos..];
-    let column_list = &sql[open_pos + 1..close_pos];
-
+/// Strip inline zones from a single column-list body (the text between the
+/// table's outer parens). Returns the per-column zone map and the rebuilt body,
+/// or None when the column list carries no inline zone. Errors only on a
+/// recognized-but-invalid zone value.
+fn strip_column_list(column_list: &str) -> Result<Option<(HashMap<String, Zone>, String)>> {
     let mut map = HashMap::new();
-    let mut modified = false;
     let mut new_segments: Vec<String> = Vec::new();
-
+    let mut modified = false;
     for seg in split_top_level_segments(column_list) {
         match parse_segment_zone(seg)? {
             Some((name, zone, new_seg)) => {
@@ -450,13 +497,11 @@ pub(super) fn strip_inline_zones(
             None => new_segments.push(seg.to_string()),
         }
     }
-
-    if !modified {
-        return Ok((sql.to_string(), HashMap::new()));
+    if modified {
+        Ok(Some((map, new_segments.join(", "))))
+    } else {
+        Ok(None)
     }
-
-    let cleaned = format!("{}{}{}", prefix, new_segments.join(", "), suffix);
-    Ok((cleaned, map))
 }
 
 /// Locate the first top-level parenthesized column list, returning the byte
@@ -1163,6 +1208,9 @@ mod tests {
     }
 
     // --- strip_inline_zones tests ---
+    //
+    // PRD 00160: `strip_inline_zones` returns a table-name -> (column -> zone)
+    // map. Single-table tests dig into the one table they declare.
 
     #[test]
     fn strip_inline_zones_single_zoned_column_maps_and_strips_token() {
@@ -1170,7 +1218,7 @@ mod tests {
         let sql = "CREATE TABLE notes (descr TEXT ZONE frontmatter)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
         assert_eq!(map.len(), 1);
-        assert_eq!(map["descr"], Zone::Frontmatter);
+        assert_eq!(map["notes"]["descr"], Zone::Frontmatter);
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
         // Type and column name survive
         assert!(cleaned.to_lowercase().contains("descr"));
@@ -1182,9 +1230,9 @@ mod tests {
         use crate::types::Zone;
         let sql = "CREATE TABLE t (title TEXT ZONE frontmatter, body TEXT ZONE body)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.len(), 2);
-        assert_eq!(map["title"], Zone::Frontmatter);
-        assert_eq!(map["body"], Zone::Body);
+        assert_eq!(map["t"].len(), 2);
+        assert_eq!(map["t"]["title"], Zone::Frontmatter);
+        assert_eq!(map["t"]["body"], Zone::Body);
         // Neither ZONE token survives
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
         assert!(!cleaned.to_lowercase().contains("zone body"));
@@ -1195,8 +1243,8 @@ mod tests {
         use crate::types::Zone;
         let sql = "CREATE TABLE t (status ENUM('a','b') ZONE frontmatter, id INTEGER)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.len(), 1);
-        assert_eq!(map["status"], Zone::Frontmatter);
+        assert_eq!(map["t"].len(), 1);
+        assert_eq!(map["t"]["status"], Zone::Frontmatter);
         // The ENUM comma must be inside the cleaned column definition, not split
         assert!(cleaned.contains("ENUM('a','b')") || cleaned.contains("ENUM('a', 'b')"));
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
@@ -1207,8 +1255,8 @@ mod tests {
         use crate::types::Zone;
         let sql = r#"CREATE TABLE t ("long-desc" TEXT ZONE frontmatter)"#;
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.len(), 1);
-        assert_eq!(map["long-desc"], Zone::Frontmatter);
+        assert_eq!(map["t"].len(), 1);
+        assert_eq!(map["t"]["long-desc"], Zone::Frontmatter);
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
     }
 
@@ -1253,8 +1301,8 @@ mod tests {
         // A column named `zone` with a ZONE attribute -> map key `zone`, value Body
         let sql3 = "CREATE TABLE t (zone TEXT ZONE body)";
         let (cleaned3, map3) = strip_inline_zones(sql3).unwrap();
-        assert_eq!(map3.len(), 1);
-        assert_eq!(map3["zone"], Zone::Body);
+        assert_eq!(map3["t"].len(), 1);
+        assert_eq!(map3["t"]["zone"], Zone::Body);
         assert!(
             !cleaned3.to_lowercase().contains("zone body") || {
                 // Only allowed if "zone body" in cleaned is the "zone TEXT" column def,
@@ -1270,8 +1318,8 @@ mod tests {
         use crate::types::Zone;
         let sql = "CREATE TABLE t (descr TEXT zone FRONTMATTER)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.len(), 1);
-        assert_eq!(map["descr"], Zone::Frontmatter);
+        assert_eq!(map["t"].len(), 1);
+        assert_eq!(map["t"]["descr"], Zone::Frontmatter);
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
     }
 
@@ -1288,9 +1336,40 @@ mod tests {
         use crate::types::Zone;
         let sql = "CREATE TABLE t (owner_id INTEGER ZONE reference)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.len(), 1);
-        assert_eq!(map["owner_id"], Zone::Reference);
+        assert_eq!(map["t"].len(), 1);
+        assert_eq!(map["t"]["owner_id"], Zone::Reference);
         assert!(!cleaned.to_lowercase().contains("zone reference"));
+    }
+
+    #[test]
+    fn strip_inline_zones_strips_every_table_in_multi_statement_batch() {
+        use crate::types::Zone;
+        // PRD 00160 Critical (blind review): a multi-statement batch must have
+        // EVERY table's inline ZONE stripped and attributed to the right table,
+        // not just the first. Same column name in two tables with DIFFERENT
+        // zones proves per-table keying (a flat column-keyed map would collide).
+        let sql = "CREATE TABLE a (descr TEXT ZONE frontmatter); \
+                   CREATE TABLE b (descr TEXT ZONE body)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert_eq!(map["a"]["descr"], Zone::Frontmatter);
+        assert_eq!(map["b"]["descr"], Zone::Body);
+        // No ZONE attribute token survives in either table (would fail sqlparser).
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+        assert!(!cleaned.to_lowercase().contains("zone body"));
+    }
+
+    #[test]
+    fn strip_inline_zones_batch_with_unzoned_first_table_strips_later_table() {
+        use crate::types::Zone;
+        // The exact Critical scenario: the first table has no inline zone, a
+        // later one does. The later table's ZONE must still be stripped.
+        let sql = "CREATE TABLE a (x TEXT); CREATE TABLE b (descr TEXT ZONE frontmatter)";
+        let (cleaned, map) = strip_inline_zones(sql).unwrap();
+        assert!(map.get("a").is_none(), "unzoned table absent from map");
+        assert_eq!(map["b"]["descr"], Zone::Frontmatter);
+        assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
+        // The first table's body is untouched.
+        assert!(cleaned.contains("CREATE TABLE a (x TEXT)"));
     }
 
     // PRD 00160 rework (review cycle 1): regression tests for the defects the
@@ -1304,14 +1383,14 @@ mod tests {
         // over-skipping past ZONE so it survived to sqlparser as a parse error.)
         let sql = "CREATE TABLE t (a TEXT ZONE body          , b TEXT)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.len(), 1, "trailing whitespace must not lose the ZONE");
-        assert_eq!(map["a"], Zone::Body);
+        assert_eq!(map["t"].len(), 1, "trailing whitespace must not lose the ZONE");
+        assert_eq!(map["t"]["a"], Zone::Body);
         assert!(!cleaned.to_lowercase().contains("zone body"));
 
         // Also before the closing paren.
         let sql2 = "CREATE TABLE t (a TEXT ZONE frontmatter          )";
         let (_c2, map2) = strip_inline_zones(sql2).unwrap();
-        assert_eq!(map2.get("a"), Some(&Zone::Frontmatter));
+        assert_eq!(map2["t"].get("a"), Some(&Zone::Frontmatter));
     }
 
     #[test]
@@ -1348,8 +1427,8 @@ mod tests {
         let sql2 = "CREATE TABLE t (created TIMESTAMP WITH TIME ZONE NOT NULL, descr TEXT ZONE frontmatter)";
         let (cleaned2, map2) = strip_inline_zones(sql2).unwrap();
         use crate::types::Zone;
-        assert_eq!(map2.get("descr"), Some(&Zone::Frontmatter));
-        assert!(map2.get("created").is_none());
+        assert_eq!(map2["t"].get("descr"), Some(&Zone::Frontmatter));
+        assert!(map2["t"].get("created").is_none());
         assert!(cleaned2.to_uppercase().contains("TIME ZONE"));
     }
 
@@ -1372,7 +1451,7 @@ mod tests {
         // scanner that finds the column-list bounds.
         let sql = "CREATE TABLE t (a TEXT DEFAULT '(' ZONE frontmatter)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.get("a"), Some(&Zone::Frontmatter));
+        assert_eq!(map["t"].get("a"), Some(&Zone::Frontmatter));
         assert!(cleaned.contains("DEFAULT '('"), "quoted default preserved");
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
     }
@@ -1385,7 +1464,7 @@ mod tests {
         // still be mapped (the carve-out must not swallow it).
         let sql = "CREATE TABLE t (created TIMESTAMP WITH TIME ZONE ZONE body)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert_eq!(map.get("created"), Some(&Zone::Body));
+        assert_eq!(map["t"].get("created"), Some(&Zone::Body));
         // The TIME ZONE type keyword survives; the trailing inline ZONE is excised.
         assert!(cleaned.to_uppercase().contains("TIME ZONE"));
         assert!(!cleaned.to_lowercase().contains("zone body"));
