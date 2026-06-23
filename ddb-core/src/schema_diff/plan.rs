@@ -1,6 +1,5 @@
 use crate::types::{ColumnDef, OnDeleteAction, TableSchema, Zone};
 
-/// Lowercase token for a zone in rendered DDL.
 fn zone_token(zone: &Zone) -> &'static str {
     match zone {
         Zone::Frontmatter => "frontmatter",
@@ -111,7 +110,6 @@ impl PlanOp {
         }
     }
 
-    /// Whether applying this op can destroy data.
     pub fn is_destructive(&self) -> bool {
         matches!(self, PlanOp::DropColumn { .. } | PlanOp::RenameColumn { .. })
     }
@@ -176,7 +174,6 @@ impl SchemaPlan {
         self.ops.is_empty()
     }
 
-    /// `true` when any op is destructive.
     pub fn has_destructive(&self) -> bool {
         self.ops.iter().any(|op| op.is_destructive())
     }
