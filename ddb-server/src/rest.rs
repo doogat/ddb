@@ -37,6 +37,15 @@ pub struct UpdateBody {
     pub unset_fields: Option<Vec<String>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ApplySchemaBody {
+    pub schema: String,
+    #[serde(rename = "dryRun", default)]
+    pub dry_run: bool,
+    #[serde(rename = "allowDestructive", default)]
+    pub allow_destructive: bool,
+}
+
 // ── Response types ───────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -72,6 +81,15 @@ impl SingleResponse {
     fn new(data: DoogatJson, warnings: Vec<WarningJson>) -> Self {
         Self { data, warnings }
     }
+}
+
+/// REST envelope for `POST /schema/apply`: the apply report under `data`, plus
+/// the always-present `warnings` array (same envelope shape as the other
+/// mutating REST routes).
+#[derive(Serialize)]
+pub struct SchemaApplyResponse {
+    pub data: ddb_core::schema_diff::plan::SchemaApplyReport,
+    pub warnings: Vec<WarningJson>,
 }
 
 /// Map app-contract warnings into the REST `WarningJson` wire shape. Shared by
@@ -182,6 +200,7 @@ pub fn router() -> Router {
                 .put(update_doogat)
                 .delete(delete_doogat),
         )
+        .route("/schema/apply", routing::post(apply_schema))
 }
 
 // ── Handlers ─────────────────────────────────────────────────────
@@ -425,6 +444,21 @@ async fn delete_doogat(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
     actor.delete_doogat(id).await.map_err(rest_error)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn apply_schema(
+    Extension(actor): Extension<ActorHandle>,
+    Json(body): Json<ApplySchemaBody>,
+) -> Result<Json<SchemaApplyResponse>, (StatusCode, Json<ErrorBody>)> {
+    let output = actor
+        .apply_schema(body.schema, body.dry_run, body.allow_destructive)
+        .await
+        .map_err(rest_error)?;
+    let warnings = warnings_to_json(output.warnings);
+    Ok(Json(SchemaApplyResponse {
+        data: output.value,
+        warnings,
+    }))
 }
 
 #[cfg(test)]
