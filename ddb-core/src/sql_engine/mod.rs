@@ -59,6 +59,14 @@ pub struct PendingDelete {
 pub struct TransactionBuffer {
     pub writes: Vec<PendingWrite>,
     pub deletes: Vec<PendingDelete>,
+    /// Type names whose materialized table must be rebuilt on COMMIT (PRD
+    /// 00161 task 10). DDL alter handlers defer `rematerialize_type` into this
+    /// list while a transaction is open: `rematerialize_type` reads the typedef
+    /// and row content from git, so it would be blind to buffered (uncommitted)
+    /// typedef writes. `handle_commit` flushes the writes to git first, then
+    /// rematerializes each listed type against the now-committed state.
+    /// Order-preserving and deduped on insert.
+    pub rematerialize: Vec<String>,
 }
 
 pub struct SqlEngine<'a> {

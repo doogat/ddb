@@ -54,8 +54,21 @@ impl SqlEngine<'_> {
             .map(|d| d.path.as_str())
             .collect();
 
+        // Types whose materialized table must be rebuilt after the flush
+        // (PRD 00161 task 10). Cloned out so the `buf` borrow can be dropped
+        // before the index reads below.
+        let rematerialize: Vec<String> = buf.rematerialize.clone();
+
         if !writes.is_empty() || !deletes.is_empty() {
             self.repo.commit_batch(&writes, &deletes, "transaction")?;
+        }
+
+        // The buffered typedef writes are now committed to git, so
+        // `rematerialize_type` (which reads typedefs + rows from git) sees the
+        // final schema. Runs under the still-open SAVEPOINT so the index
+        // rebuild is atomic with the rest of the transaction.
+        for table_name in &rematerialize {
+            self.index.rematerialize_type(table_name, self.repo)?;
         }
 
         self.index

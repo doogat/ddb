@@ -82,15 +82,26 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             });
         }
 
+        // Apply atomically (PRD 00161 task 10): buffer every DDL op's typedef
+        // write in one transaction and flush them as a single git commit on
+        // success. A mid-plan failure rolls the whole transaction back, so a
+        // partially-applied plan never reaches git — superseding the Phase-1
+        // per-op forward-recovery semantics.
+        self.begin_transaction()?;
         let mut applied_kinds: Vec<String> = Vec::new();
         for op in &plan.ops {
             match self.execute_sql(&op.render_sql()) {
                 Ok(_) => applied_kinds.push(op.kind().to_string()),
                 Err(e) => {
+                    // Discard the buffered writes and roll the SAVEPOINT back so
+                    // nothing from this plan lands in git. The original op error
+                    // is the meaningful one; a rollback failure is swallowed
+                    // (Drop also rolls back as a backstop).
+                    let _ = self.rollback_transaction();
                     return Err(DoogatError::Structured {
                         code: codes::SCHEMA_APPLY_PARTIAL,
                         message: format!(
-                            "schema apply failed after {} of {} operations: {}",
+                            "schema apply failed after {} of {} operations and rolled back: {}",
                             applied_kinds.len(),
                             plan.ops.len(),
                             e
@@ -109,6 +120,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                 }
             }
         }
+        self.commit_transaction()?;
 
         Ok(AppOutput {
             value: SchemaApplyReport::from_plan(&plan, false, true),
@@ -151,6 +163,26 @@ types:
         zone: frontmatter
         required: true
       - name: note
+        data_type: TEXT
+        zone: body
+";
+
+    /// Desired-schema YAML for type `widget` with THREE columns: `label`
+    /// (frontmatter), `note` (body), and `extra` (body). Applying this over a
+    /// live `widget` that has only `label` plans TWO `add_column` ops on the
+    /// same existing type in one apply — the read-your-writes exerciser.
+    const WIDGET_THREE_COLUMNS: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+      - name: note
+        data_type: TEXT
+        zone: body
+      - name: extra
         data_type: TEXT
         zone: body
 ";
@@ -393,12 +425,14 @@ types:
     }
 
     #[test]
-    fn partial_apply_reports_then_reapply_converges() {
-        // A doc that declares `widget` twice creates it on the first op and
-        // fails on the second (the type now exists), yielding a partial
-        // failure with code SCHEMA_APPLY_PARTIAL. A subsequent apply of a
-        // single-`widget` doc must then converge to a no-op (the type already
-        // exists from the first, applied, op).
+    fn partial_apply_rolls_back_atomically_then_reapply_creates() {
+        // PRD 00161 Phase 2 (task 10): apply is now ATOMIC. A doc that declares
+        // `widget` twice creates it on the first op and fails on the second
+        // (the type now exists). Under transactional apply the WHOLE plan rolls
+        // back: the error is still SCHEMA_APPLY_PARTIAL, but the first op's
+        // create is UNDONE — `widget` must be ABSENT afterwards (git unchanged),
+        // superseding the Phase-1 forward-recovery behavior where the first op
+        // persisted. A fresh single-`widget` apply then creates it cleanly.
         let (_tmp, mut svc) = fresh_svc();
 
         let err = svc
@@ -407,9 +441,9 @@ types:
         match err {
             crate::error::DoogatError::Structured { code, context, .. } => {
                 assert_eq!(code, crate::error::codes::SCHEMA_APPLY_PARTIAL);
-                // The partial-failure error must carry the ops that DID land
-                // (the first, applied, create_type), keyed `applied_ops`. A
-                // fabricated empty-context error fails this.
+                // The error still reports which ops ran before the failure
+                // (now rolled back), keyed `applied_ops`. A fabricated
+                // empty-context error fails this.
                 let applied_ops = context
                     .iter()
                     .find(|(k, _)| k == "applied_ops")
@@ -418,7 +452,7 @@ types:
                 match applied_ops {
                     crate::error::ErrorValue::List(list) => assert!(
                         !list.is_empty(),
-                        "`applied_ops` must list the ops that landed before the failure"
+                        "`applied_ops` must list the ops that ran before the failure"
                     ),
                     other => {
                         panic!("`applied_ops` must be an ErrorValue::List, got: {other:?}")
@@ -428,19 +462,98 @@ types:
             other => panic!("expected Structured SCHEMA_APPLY_PARTIAL, got: {other:?}"),
         }
 
-        // Re-apply the single-widget form: widget already exists from the
-        // first op of the partial run, so this converges.
+        // ATOMIC ROLLBACK: the first op's create is undone — `widget` is ABSENT.
+        // The Phase-1 forward-recovery code left it persisted; this assertion is
+        // the behavioral pin that the apply is now transactional.
+        assert!(
+            svc.describe_type("widget").unwrap().is_none(),
+            "atomic apply must roll the partial create back — widget must be absent"
+        );
+
+        // A fresh single-widget apply now creates it from scratch.
         let report = svc
             .apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
             .unwrap();
+        assert!(report.value.applied, "fresh re-apply must create widget");
         assert!(
-            !report.value.applied,
-            "convergence re-apply must not report applied"
+            svc.describe_type("widget").unwrap().is_some(),
+            "widget must exist after the clean re-apply"
         );
+    }
+
+    #[test]
+    fn apply_failure_leaves_git_head_unchanged() {
+        // The atomicity contract at the git layer: a mid-plan failure must
+        // leave the repository's HEAD commit exactly where it was — no typedef
+        // from the partially-applied plan may survive in git. Captures the
+        // HEAD oid before/after the failing apply and asserts equality.
+        let (_tmp, mut svc) = fresh_svc();
+        let head_before = svc.repo.head_oid().unwrap().0;
+
+        let err = svc
+            .apply_schema(cmd(WIDGET_DUPLICATED, false, false))
+            .expect_err("the duplicated-type doc must fail mid-plan");
         assert!(
-            report.value.ops.is_empty(),
-            "convergence re-apply must produce no ops, got: {:?}",
+            matches!(err, crate::error::DoogatError::Structured { .. }),
+            "expected a Structured error, got: {err:?}"
+        );
+
+        let head_after = svc.repo.head_oid().unwrap().0;
+        assert_eq!(
+            head_before, head_after,
+            "atomic apply must leave git HEAD unchanged on a mid-plan failure"
+        );
+    }
+
+    #[test]
+    fn multi_add_column_one_apply_preserves_every_column() {
+        // Two `add_column` ops on the SAME existing type in ONE apply must BOTH
+        // survive. Under transactional apply each op's typedef write is buffered
+        // (not committed), so the second op's schema read must see the first
+        // op's buffered column (read-your-writes) — otherwise the second op
+        // reads the stale pre-buffer typedef and overwrites the first, silently
+        // losing a column. Live `widget` starts with `label`; the 3-column doc
+        // adds `note` and `extra` in one apply.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+
+        let report = svc
+            .apply_schema(cmd(WIDGET_THREE_COLUMNS, false, false))
+            .unwrap();
+        assert!(report.value.applied, "adding two columns must apply");
+        let add_ops = report
+            .value
+            .ops
+            .iter()
+            .filter(|op| op.kind == "add_column" && op.table == "widget")
+            .count();
+        assert_eq!(
+            add_ops, 2,
+            "adding two new columns must plan two add_column ops, got: {:?}",
             report.value.ops
+        );
+
+        // Every column survives in the persisted typedef — the read-your-writes
+        // guarantee. A buffer-blind second op would drop `note`.
+        let schema = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must exist after the multi-add apply");
+        for col in ["label", "note", "extra"] {
+            assert!(
+                has_column(&schema, col),
+                "multi-add apply must preserve `{col}`: {:?}",
+                schema.columns
+            );
+        }
+
+        // The materialized table is consistent too: both added columns are
+        // queryable (proves the deferred rematerialize ran against the
+        // committed typedef, not a stale one).
+        assert!(
+            svc.execute_sql("SELECT note, extra FROM widget").is_ok(),
+            "both added columns must be queryable on the materialized table"
         );
     }
 }

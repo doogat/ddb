@@ -13,7 +13,7 @@ use super::helpers::{
     extract_references, is_not_null, is_numeric_type, is_reserved_table, is_short_string_type,
     unquote_identifier, validate_rename_target_name,
 };
-use super::{SqlEngine, SqlResult};
+use super::{PendingWrite, SqlEngine, SqlResult};
 
 /// All file writes and deletes that an `ALTER TABLE foo RENAME TO bar` will
 /// perform. Computed up front so the operation can fail validation before
@@ -221,8 +221,28 @@ impl<'a> SqlEngine<'a> {
         } else {
             format!("create table {table_name}")
         };
-        match seed_artifacts {
-            Some((_, ref seed_path, ref seed_content, _)) => {
+        // Inside a transaction the typedef (and optional seed) git writes are
+        // buffered and flushed as one commit on COMMIT (PRD 00161 task 10); the
+        // in-memory `index_doogat` + `create_materialized_table` below still run
+        // under the SAVEPOINT, so the type is queryable within the transaction.
+        match (&mut self.txn, &seed_artifacts) {
+            (Some(buf), Some((_, seed_path, seed_content, _))) => {
+                buf.writes.push(PendingWrite {
+                    path: typedef_path.clone(),
+                    content: typedef_content.clone(),
+                });
+                buf.writes.push(PendingWrite {
+                    path: seed_path.clone(),
+                    content: seed_content.clone(),
+                });
+            }
+            (Some(buf), None) => {
+                buf.writes.push(PendingWrite {
+                    path: typedef_path.clone(),
+                    content: typedef_content.clone(),
+                });
+            }
+            (None, Some((_, seed_path, seed_content, _))) => {
                 self.repo.commit_files(
                     &[
                         (typedef_path.as_str(), typedef_content.as_str()),
@@ -231,7 +251,7 @@ impl<'a> SqlEngine<'a> {
                     &commit_msg,
                 )?;
             }
-            None => {
+            (None, None) => {
                 self.repo
                     .commit_file(&typedef_path, &typedef_content, &commit_msg)?;
             }
@@ -553,7 +573,7 @@ impl<'a> SqlEngine<'a> {
         }
 
         self.update_typedef(&table_name, &schema)?;
-        self.index.rematerialize_type(&table_name, self.repo)?;
+        self.rematerialize_or_defer(&table_name)?;
 
         Ok(SqlResult::Ok(format!("table {table_name} altered")))
     }
@@ -759,20 +779,47 @@ impl<'a> SqlEngine<'a> {
         Ok(())
     }
 
-    /// Serialize a modified TableSchema back to its typedef doogat, commit to Git, re-index.
+    /// Serialize a modified TableSchema back to its typedef doogat, commit to
+    /// Git (or buffer the write inside a transaction), and re-index.
+    ///
+    /// Inside an open transaction the git write is buffered into the
+    /// `TransactionBuffer` (mirroring the row-write path in `dml.rs`) and
+    /// flushed as one `commit_batch` on COMMIT, so a multi-op schema apply is
+    /// atomic. The `index_doogat` call always runs under the SAVEPOINT so a
+    /// later op's `load_typedef_location` lookup finds the type.
     fn update_typedef(&mut self, table_name: &str, schema: &TableSchema) -> Result<()> {
         let (typedef_id, typedef_path) = self.load_typedef_location(table_name)?;
         let id = DoogatId(typedef_id);
         let schema_doogat = build_typedef_doogat(&id, schema);
         let content = parser::serialize(&schema_doogat);
-        self.repo.commit_file(
-            &typedef_path,
-            &content,
-            &format!("alter table {table_name}"),
-        )?;
         let parsed = parser::parse(&content, &typedef_path)?;
+        if let Some(ref mut buf) = self.txn {
+            buf.writes.push(PendingWrite {
+                path: typedef_path,
+                content,
+            });
+        } else {
+            self.repo
+                .commit_file(&typedef_path, &content, &format!("alter table {table_name}"))?;
+        }
         self.index.index_doogat(&parsed)?;
         Ok(())
+    }
+
+    /// Rebuild a type's materialized table now, or defer it to COMMIT when a
+    /// transaction is open (PRD 00161 task 10). `rematerialize_type` reads the
+    /// typedef and row content from git and is blind to buffered typedef
+    /// writes, so inside a transaction we record the type and let
+    /// `handle_commit` rematerialize it after flushing the writes to git.
+    fn rematerialize_or_defer(&mut self, table_name: &str) -> Result<()> {
+        if let Some(ref mut buf) = self.txn {
+            if !buf.rematerialize.iter().any(|t| t == table_name) {
+                buf.rematerialize.push(table_name.to_string());
+            }
+            Ok(())
+        } else {
+            self.index.rematerialize_type(table_name, self.repo)
+        }
     }
 
     pub(super) fn handle_set_zone(
@@ -800,7 +847,7 @@ impl<'a> SqlEngine<'a> {
         };
         col.zone = Some(zone);
         self.update_typedef(table_name, &schema)?;
-        self.index.rematerialize_type(table_name, self.repo)?;
+        self.rematerialize_or_defer(table_name)?;
         Ok(SqlResult::Ok(format!(
             "zone set to {zone_str} for {col_lower} in {table_name}"
         )))
@@ -922,7 +969,7 @@ impl<'a> SqlEngine<'a> {
         }
         schema.singleton = true;
         self.update_typedef(table_name, &schema)?;
-        self.index.rematerialize_type(table_name, self.repo)?;
+        self.rematerialize_or_defer(table_name)?;
         Ok(SqlResult::Ok(format!("singleton set on {table_name}")))
     }
 
@@ -938,7 +985,7 @@ impl<'a> SqlEngine<'a> {
         }
         schema.singleton = false;
         self.update_typedef(table_name, &schema)?;
-        self.index.rematerialize_type(table_name, self.repo)?;
+        self.rematerialize_or_defer(table_name)?;
         Ok(SqlResult::Ok(format!("singleton dropped on {table_name}")))
     }
 
@@ -1456,9 +1503,25 @@ impl<'a> SqlEngine<'a> {
 
     pub(crate) fn load_schema(&mut self, table_name: &str) -> Result<TableSchema> {
         let (_id, path) = self.load_typedef_location(table_name)?;
-        let content = self.repo.read_file(&path)?;
+        let content = self.read_typedef_content(&path)?;
         let parsed = parser::parse(&content, &path)?;
         schema_from_parsed(&parsed)
+    }
+
+    /// Read a typedef's markdown content with read-your-writes semantics inside
+    /// a transaction (PRD 00161 task 10). DDL ops buffer typedef writes instead
+    /// of committing them while a transaction is open, so a later op in the same
+    /// transaction must see an earlier op's buffered content (the last write to
+    /// the path wins) before falling back to the committed git copy. Without
+    /// this, two adds to the same type in one apply read the stale pre-buffer
+    /// typedef and the second silently overwrites the first.
+    fn read_typedef_content(&self, path: &str) -> Result<String> {
+        if let Some(ref buf) = self.txn {
+            if let Some(write) = buf.writes.iter().rev().find(|w| w.path == path) {
+                return Ok(write.content.clone());
+            }
+        }
+        self.repo.read_file(path)
     }
 }
 
