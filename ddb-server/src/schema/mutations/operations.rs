@@ -523,8 +523,6 @@ pub(super) fn build_maintenance_field() -> Field {
     .description("Run git maintenance tasks (gc, repack, commit-graph). Optionally specify a single task to run.")
 }
 
-/// Map a snake_case `SchemaApplyReport` DTO into the camelCase GraphQL object
-/// shape resolved by the `SchemaApplyReport`/`PlanOpReport` output types.
 fn schema_apply_report_to_value(report: &SchemaApplyReport) -> GqlValue {
     let ops: Vec<GqlValue> = report
         .ops
