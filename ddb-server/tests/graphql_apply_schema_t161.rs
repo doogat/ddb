@@ -204,10 +204,15 @@ async fn real_apply_creates_type_and_is_idempotent() {
     let second_data = second.data.clone().into_json().unwrap();
     let second_report = &second_data["applySchema"];
 
+    // An idempotent re-apply has an EMPTY plan, so `applied` is false: the core
+    // contract defines `applied` as "ops were executed on this call", not "the
+    // desired state holds" (see ddb-core apply_schema: empty plan => applied=false,
+    // pinned by its own `reapply_same_doc_is_idempotent_noop` test). The real
+    // idempotency signal is the empty `ops` below plus the table still existing.
     assert_eq!(
         second_report.get("applied").and_then(|v| v.as_bool()),
-        Some(true),
-        "idempotent re-apply must still report applied == true; got: {second_report}"
+        Some(false),
+        "idempotent re-apply executes no ops, so applied == false; got: {second_report}"
     );
     let second_ops = second_report
         .get("ops")
