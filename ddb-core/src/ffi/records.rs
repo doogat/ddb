@@ -275,3 +275,68 @@ impl From<SqlResult> for SqlResultRecord {
         }
     }
 }
+
+/// FFI-safe single schema-plan operation report.
+#[derive(Debug, uniffi::Record)]
+pub struct SchemaPlanOpRecord {
+    pub kind: String,
+    pub table: String,
+    pub detail: String,
+    pub destructive: bool,
+    pub sql: String,
+}
+
+impl From<crate::schema_diff::plan::PlanOpReport> for SchemaPlanOpRecord {
+    fn from(op: crate::schema_diff::plan::PlanOpReport) -> Self {
+        Self {
+            kind: op.kind,
+            table: op.table,
+            detail: op.detail,
+            destructive: op.destructive,
+            sql: op.sql,
+        }
+    }
+}
+
+/// FFI-safe schema-apply warning.
+#[derive(Debug, uniffi::Record)]
+pub struct SchemaWarningRecord {
+    pub code: String,
+    pub message: String,
+}
+
+/// FFI-safe schema-apply report.
+#[derive(Debug, uniffi::Record)]
+pub struct SchemaApplyReportRecord {
+    pub dry_run: bool,
+    pub applied: bool,
+    pub ops: Vec<SchemaPlanOpRecord>,
+    pub unsupported: Vec<String>,
+    pub warnings: Vec<SchemaWarningRecord>,
+}
+
+impl SchemaApplyReportRecord {
+    pub(super) fn from_output(
+        out: crate::app_contract::AppOutput<crate::schema_diff::plan::SchemaApplyReport>,
+    ) -> Self {
+        Self {
+            dry_run: out.value.dry_run,
+            applied: out.value.applied,
+            ops: out
+                .value
+                .ops
+                .into_iter()
+                .map(SchemaPlanOpRecord::from)
+                .collect(),
+            unsupported: out.value.unsupported,
+            warnings: out
+                .warnings
+                .into_iter()
+                .map(|w| SchemaWarningRecord {
+                    code: w.code.to_string(),
+                    message: w.message,
+                })
+                .collect(),
+        }
+    }
+}

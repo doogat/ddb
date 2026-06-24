@@ -10,7 +10,7 @@ use crate::service::DoogatService;
 
 use super::records::{
     empty_error_context, AttachmentInfo, DdbError, PaginatedSearchResult, RebuildReport,
-    SearchResult, SqlResultRecord, TypeSchemaRecord,
+    SchemaApplyReportRecord, SearchResult, SqlResultRecord, TypeSchemaRecord,
 };
 
 /// High-level facade for mobile/desktop FFI consumers.
@@ -159,6 +159,24 @@ impl DoogatDriver {
         self.with_service_mut(|svc| {
             let result = svc.execute_sql(&sql).map_err(DdbError::from)?;
             Ok(result.into())
+        })
+    }
+
+    pub fn apply_schema(
+        &self,
+        schema_doc: String,
+        dry_run: bool,
+        allow_destructive: bool,
+    ) -> Result<SchemaApplyReportRecord, DdbError> {
+        self.with_service_mut(|svc| {
+            let out = svc
+                .apply_schema(crate::app_contract::ApplySchemaCommand {
+                    schema_doc,
+                    dry_run,
+                    allow_destructive,
+                })
+                .map_err(DdbError::from)?;
+            Ok(SchemaApplyReportRecord::from_output(out))
         })
     }
 
