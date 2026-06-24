@@ -14,6 +14,10 @@ async fn setup(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
 /// in a freshly-init'd repo, so applying it is a CREATE.
 const GIZMO_YAML: &str = "types:\n  - name: gizmo\n    columns:\n      - name: status\n        data_type: VARCHAR(50)\n        zone: frontmatter\n      - name: owner\n        data_type: VARCHAR(100)\n    search_key: status\n";
 
+/// Second desired-schema YAML declaring a DIFFERENT type `widget`. Used to prove
+/// the apply report is derived from the actual input doc, not a hardcoded name.
+const WIDGET_YAML: &str = "types:\n  - name: widget\n    columns:\n      - name: label\n        data_type: VARCHAR(30)\n        zone: frontmatter\n";
+
 /// Assert that an `ops` JSON entry carries all five required keys with the
 /// right scalar types, per the PlanOpReport contract.
 fn assert_op_shape(op: &serde_json::Value) {
@@ -39,14 +43,27 @@ fn assert_op_shape(op: &serde_json::Value) {
     );
 }
 
+/// True if `op`'s `sql` field, lowercased, contains `needle`. Lets parse-binding
+/// assertions check that the emitted SQL mentions the declared type name.
+fn op_sql_contains(op: &serde_json::Value, needle: &str) -> bool {
+    op.get("sql")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase().contains(needle))
+        .unwrap_or(false)
+}
+
 /// PRD 00161 T6: `applySchema(..., dryRun: true)` must return the full
-/// SchemaApplyReport plan (with a `gizmo` op) WITHOUT mutating the repo —
-/// `applied` stays false even though a CREATE is planned.
+/// SchemaApplyReport plan (with a `gizmo` op whose SQL names gizmo) WITHOUT
+/// mutating the repo. `applied` stays false, and the `gizmo` table must NOT
+/// exist afterward — proven by a SELECT that fails on a missing table.
 #[tokio::test]
 async fn dry_run_apply_returns_plan_without_mutating() {
     let tmp = tempfile::tempdir().unwrap();
     let (actor, pool) = setup(tmp.path()).await;
 
+    // Keep a handle for raw-SQL probes against the SAME repo before build_schema
+    // moves the actor.
+    let probe = actor.clone();
     let schema =
         ddb_server::schema::build_schema(actor, pool, vec![], None).expect("schema must build");
 
@@ -87,9 +104,11 @@ async fn dry_run_apply_returns_plan_without_mutating() {
         "creating a brand-new gizmo type must plan at least one op; got: {report}"
     );
     assert!(
-        ops.iter()
-            .any(|op| op.get("table").and_then(|v| v.as_str()) == Some("gizmo")),
-        "at least one planned op must target table == 'gizmo'; got: {report}"
+        ops.iter().any(|op| {
+            op.get("table").and_then(|v| v.as_str()) == Some("gizmo")
+                && op_sql_contains(op, "gizmo")
+        }),
+        "at least one planned op must target table == 'gizmo' with SQL naming gizmo; got: {report}"
     );
     for op in ops {
         assert_op_shape(op);
@@ -102,17 +121,29 @@ async fn dry_run_apply_returns_plan_without_mutating() {
             .is_some(),
         "unsupported must be a JSON array (possibly empty); got: {report}"
     );
+
+    // PROVE no mutation by observation: a dry-run must NOT have created the
+    // table, so selecting from it must fail (`no such table`).
+    let probed = probe
+        .execute_sql("SELECT * FROM gizmo".to_string())
+        .await;
+    assert!(
+        probed.is_err(),
+        "dry-run must NOT create the gizmo table; SELECT against it should fail but it succeeded"
+    );
 }
 
 /// PRD 00161 T6: omitting `dryRun` defaults it to false, so `applySchema`
-/// actually creates the `gizmo` type (applied == true, ops non-empty). A second
-/// identical call is idempotent — the type already exists, so ops is now empty,
-/// which proves the first call really mutated.
+/// actually creates the `gizmo` type. Real persistence is proven by selecting
+/// the declared columns from the live table. A second identical call is
+/// idempotent — the type already exists, so ops is now empty, and the table
+/// still exists.
 #[tokio::test]
 async fn real_apply_creates_type_and_is_idempotent() {
     let tmp = tempfile::tempdir().unwrap();
     let (actor, pool) = setup(tmp.path()).await;
 
+    let probe = actor.clone();
     let schema =
         ddb_server::schema::build_schema(actor, pool, vec![], None).expect("schema must build");
 
@@ -151,6 +182,16 @@ async fn real_apply_creates_type_and_is_idempotent() {
         "creating gizmo for the first time must produce ops; got: {first_report}"
     );
 
+    // PROVE real persistence: the table with its declared columns must really
+    // exist, so selecting `status` and `owner` from it must succeed.
+    let after_first = probe
+        .execute_sql("SELECT status, owner FROM gizmo".to_string())
+        .await;
+    assert!(
+        after_first.is_ok(),
+        "real apply must create the gizmo table with its declared columns; SELECT status, owner FROM gizmo failed"
+    );
+
     // Second call: identical mutation. The type now exists, so there is nothing
     // to change — ops must be empty. This proves the first call mutated and that
     // re-apply is idempotent.
@@ -175,5 +216,59 @@ async fn real_apply_creates_type_and_is_idempotent() {
     assert!(
         second_ops.is_empty(),
         "re-applying an already-applied schema must produce zero ops; got: {second_report}"
+    );
+
+    // After the idempotent re-apply, the table must STILL exist with its columns.
+    let after_second = probe
+        .execute_sql("SELECT status, owner FROM gizmo".to_string())
+        .await;
+    assert!(
+        after_second.is_ok(),
+        "idempotent re-apply must leave the gizmo table intact; SELECT status, owner FROM gizmo failed afterward"
+    );
+}
+
+/// PRD 00161 T6: the apply report must be derived from the actual input doc, not
+/// a hardcoded type name. Applying a doc that declares `widget` must produce an
+/// op targeting `widget` (NOT `gizmo`) whose SQL names widget — killing any
+/// hardcoded-"gizmo" resolver.
+#[tokio::test]
+async fn apply_report_reflects_declared_type_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (actor, pool) = setup(tmp.path()).await;
+
+    let schema =
+        ddb_server::schema::build_schema(actor, pool, vec![], None).expect("schema must build");
+
+    let schema_lit = serde_json::to_string(WIDGET_YAML).unwrap();
+    let query = format!(
+        r#"mutation {{ applySchema(schema: {schema_lit}, dryRun: true) {{ dryRun applied ops {{ kind table detail destructive sql }} unsupported }} }}"#
+    );
+
+    let response = schema.execute(query).await;
+
+    assert!(
+        response.errors.is_empty(),
+        "expected no GraphQL errors, got: {:?}",
+        response.errors
+    );
+
+    let data = response.data.clone().into_json().unwrap();
+    let report = &data["applySchema"];
+
+    let ops = report
+        .get("ops")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| panic!("ops must be a JSON array; got: {report}"));
+    assert!(
+        !ops.is_empty(),
+        "creating a brand-new widget type must plan at least one op; got: {report}"
+    );
+    assert!(
+        ops.iter().any(|op| {
+            op.get("table").and_then(|v| v.as_str()) == Some("widget")
+                && op_sql_contains(op, "widget")
+        }),
+        "at least one planned op must target table == 'widget' with SQL naming widget — report must reflect the input doc, not a hardcoded name; got: {report}"
     );
 }
