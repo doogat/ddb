@@ -345,3 +345,130 @@ types:
         .assert()
         .success();
 }
+
+#[test]
+fn rename_blocked_without_allow_destructive() {
+    // A column rename (via `rename_from`) is destructive: it is gated like a
+    // drop. Without --allow-destructive the apply is refused (non-zero, stderr
+    // mentions destructive) and the live schema is UNCHANGED: the OLD column
+    // name is still selectable, the NEW one is not.
+    let repo = DdbTestRepo::init();
+
+    // Create the type with the original column name.
+    let original = "\
+types:
+  - name: renameblockwidget
+    columns:
+      - name: oldfield
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+";
+    let original_schema = write_schema(&repo, "renameblockwidget_old", original);
+    repo.ddb()
+        .args(["schema", "apply", &original_schema])
+        .assert()
+        .success();
+    repo.ddb()
+        .args(["query", "SELECT oldfield FROM renameblockwidget"])
+        .assert()
+        .success();
+
+    // Desired schema renames oldfield -> newfield via rename_from.
+    let renamed = "\
+types:
+  - name: renameblockwidget
+    columns:
+      - name: newfield
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+        rename_from: oldfield
+";
+    let renamed_schema = write_schema(&repo, "renameblockwidget_new", renamed);
+
+    // Apply without the flag is refused and names the destructive block.
+    repo.ddb()
+        .args(["schema", "apply", &renamed_schema])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("destructive"));
+
+    // The rename did NOT happen: oldfield still selectable, newfield is not.
+    repo.ddb()
+        .args(["query", "SELECT oldfield FROM renameblockwidget"])
+        .assert()
+        .success();
+    repo.ddb()
+        .args(["query", "SELECT newfield FROM renameblockwidget"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn rename_with_allow_destructive_preserves_row_data() {
+    // With --allow-destructive a rename proceeds (exit 0) and PRESERVES data:
+    // a row stored under the old column name is selectable under the NEW name
+    // with the same value, and the old name is no longer selectable.
+    let repo = DdbTestRepo::init();
+
+    // Create the type with the original column name.
+    let original = "\
+types:
+  - name: renamekeepwidget
+    columns:
+      - name: oldfield
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+";
+    let original_schema = write_schema(&repo, "renamekeepwidget_old", original);
+    repo.ddb()
+        .args(["schema", "apply", &original_schema])
+        .assert()
+        .success();
+
+    // Insert a row carrying a value under the OLD column name.
+    repo.ddb()
+        .args([
+            "query",
+            "INSERT INTO renamekeepwidget (oldfield) VALUES ('keepme')",
+        ])
+        .assert()
+        .success();
+    repo.ddb()
+        .args(["query", "SELECT oldfield FROM renamekeepwidget"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("keepme"));
+
+    // Apply the rename WITH the destructive flag.
+    let renamed = "\
+types:
+  - name: renamekeepwidget
+    columns:
+      - name: newfield
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+        rename_from: oldfield
+";
+    let renamed_schema = write_schema(&repo, "renamekeepwidget_new", renamed);
+    repo.ddb()
+        .args(["schema", "apply", &renamed_schema, "--allow-destructive"])
+        .assert()
+        .success();
+
+    // The row data is preserved under the NEW column name, same value.
+    repo.ddb()
+        .args(["query", "SELECT newfield FROM renamekeepwidget"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("keepme"));
+
+    // The old column name is no longer selectable.
+    repo.ddb()
+        .args(["query", "SELECT oldfield FROM renamekeepwidget"])
+        .assert()
+        .failure();
+}

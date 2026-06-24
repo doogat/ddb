@@ -161,7 +161,7 @@ fn diff_type(desired: &TableSchema, current: &TableSchema, plan: &mut SchemaPlan
 #[cfg(test)]
 mod tests {
     use super::diff;
-    use crate::schema_diff::desired::SchemaDoc;
+    use crate::schema_diff::desired::{ColumnRename, SchemaDoc};
     use crate::schema_diff::plan::PlanOp;
     use crate::types::{ColumnDef, OnDeleteAction, TableSchema, Zone};
 
@@ -198,7 +198,23 @@ mod tests {
     }
 
     fn doc(types: Vec<TableSchema>) -> SchemaDoc {
-        SchemaDoc { types }
+        SchemaDoc {
+            types,
+            renames: vec![],
+        }
+    }
+
+    fn doc_with_renames(types: Vec<TableSchema>, renames: Vec<ColumnRename>) -> SchemaDoc {
+        SchemaDoc { types, renames }
+    }
+
+    /// Convenience for building a ColumnRename in tests.
+    fn rename(table: &str, from: &str, to: &str) -> ColumnRename {
+        ColumnRename {
+            table: table.into(),
+            from: from.into(),
+            to: to.into(),
+        }
     }
 
     // ---- 1 & 2: creation of new types ----
@@ -561,6 +577,163 @@ mod tests {
             plan.ops.len(),
             4,
             "exactly two AddColumns and two DropColumns across the two types, no phantom ops"
+        );
+    }
+
+    // ---- 15: explicit column-rename directive ----
+
+    /// A valid rename directive (from IS in live, to is NOT in live, to IS in
+    /// desired) emits exactly one RenameColumn and suppresses the DropColumn
+    /// of `from` and the AddColumn of `to`. Without the directive this same
+    /// shape is a Drop+Add (see removed_plus_added_column_never_infers_rename);
+    /// the directive is what turns it into a data-preserving rename.
+    #[test]
+    fn rename_directive_emits_rename_not_drop_add() {
+        let desired = tbl("a", vec![col("owner", "TEXT")]);
+        let live = tbl("a", vec![col("assignee", "TEXT")]);
+        let plan = diff(
+            &doc_with_renames(vec![desired], vec![rename("a", "assignee", "owner")]),
+            &[Some(live)],
+        );
+
+        assert_eq!(
+            plan.ops,
+            vec![PlanOp::RenameColumn {
+                table: "a".into(),
+                from: "assignee".into(),
+                to: "owner".into(),
+            }],
+            "a valid rename directive must yield exactly one RenameColumn"
+        );
+        assert!(
+            !plan
+                .ops
+                .iter()
+                .any(|op| matches!(op, PlanOp::DropColumn { .. } | PlanOp::AddColumn { .. })),
+            "a valid rename must not also Drop `from` or Add `to`"
+        );
+        assert!(plan.unsupported.is_empty());
+    }
+
+    /// A rename directive whose `from` is absent in live has nothing to
+    /// rename. It must NOT silently no-op: record an unsupported message
+    /// naming the offending column and emit no RenameColumn.
+    #[test]
+    fn rename_directive_with_absent_from_records_unsupported_no_rename() {
+        let desired = tbl("a", vec![col("owner", "TEXT")]);
+        // live has no `assignee` column.
+        let live = tbl("a", vec![col("owner", "TEXT")]);
+        let plan = diff(
+            &doc_with_renames(vec![desired], vec![rename("a", "assignee", "owner")]),
+            &[Some(live)],
+        );
+
+        assert!(
+            !plan.ops.iter().any(|op| matches!(op, PlanOp::RenameColumn { .. })),
+            "a rename whose `from` is absent must not emit a RenameColumn"
+        );
+        assert_eq!(
+            plan.unsupported.len(),
+            1,
+            "exactly one warning for the invalid rename"
+        );
+        assert!(
+            plan.unsupported[0].contains("assignee"),
+            "warning must name the offending column: {}",
+            plan.unsupported[0]
+        );
+    }
+
+    /// A rename directive whose `to` already exists in live is a target-name
+    /// collision. It must NOT silently no-op: record an unsupported message
+    /// naming the offending column and emit no RenameColumn.
+    #[test]
+    fn rename_directive_with_colliding_to_records_unsupported_no_rename() {
+        // desired keeps both `owner` and `assignee` so the differ does not try
+        // to drop the existing target; the directive itself is the conflict.
+        let desired = tbl("a", vec![col("owner", "TEXT"), col("assignee", "TEXT")]);
+        // live already has both names: renaming assignee -> owner collides.
+        let live = tbl("a", vec![col("owner", "TEXT"), col("assignee", "TEXT")]);
+        let plan = diff(
+            &doc_with_renames(vec![desired], vec![rename("a", "assignee", "owner")]),
+            &[Some(live)],
+        );
+
+        assert!(
+            !plan.ops.iter().any(|op| matches!(op, PlanOp::RenameColumn { .. })),
+            "a rename whose target already exists must not emit a RenameColumn"
+        );
+        assert_eq!(
+            plan.unsupported.len(),
+            1,
+            "exactly one warning for the colliding rename"
+        );
+        assert!(
+            plan.unsupported[0].contains("owner"),
+            "warning must name the offending target column: {}",
+            plan.unsupported[0]
+        );
+    }
+
+    /// Any RenameColumn op must come before any DropColumn op so the live
+    /// data is moved to the new name before unrelated columns are removed.
+    #[test]
+    fn rename_column_sorts_before_drop_column() {
+        // `assignee` -> `owner` rename, plus an unrelated `gone` column drop.
+        let desired = tbl("a", vec![col("owner", "TEXT")]);
+        let live = tbl("a", vec![col("assignee", "TEXT"), col("gone", "INTEGER")]);
+        let plan = diff(
+            &doc_with_renames(vec![desired], vec![rename("a", "assignee", "owner")]),
+            &[Some(live)],
+        );
+
+        let rename_idx = plan
+            .ops
+            .iter()
+            .position(|op| matches!(op, PlanOp::RenameColumn { .. }))
+            .expect("a RenameColumn op is expected");
+        let drop_idx = plan
+            .ops
+            .iter()
+            .position(|op| matches!(op, PlanOp::DropColumn { .. }))
+            .expect("a DropColumn op is expected");
+
+        assert!(
+            rename_idx < drop_idx,
+            "RenameColumn must appear before DropColumn"
+        );
+    }
+
+    /// A valid rename that ALSO changes the column's data_type must surface
+    /// the type change, not swallow it. The plan emits the RenameColumn AND
+    /// an AlterColumnType targeting the NEW column name with the desired type.
+    /// This guards against an impl that suppresses the whole column on rename.
+    #[test]
+    fn rename_with_retype_also_emits_alter_column_type() {
+        // live `assignee` is TEXT; desired `owner` is VARCHAR(100).
+        let desired = tbl("a", vec![col("owner", "VARCHAR(100)")]);
+        let live = tbl("a", vec![col("assignee", "TEXT")]);
+        let plan = diff(
+            &doc_with_renames(vec![desired], vec![rename("a", "assignee", "owner")]),
+            &[Some(live)],
+        );
+
+        assert!(
+            plan.ops.contains(&PlanOp::RenameColumn {
+                table: "a".into(),
+                from: "assignee".into(),
+                to: "owner".into(),
+            }),
+            "the rename itself must be emitted"
+        );
+        assert!(
+            plan.ops.contains(&PlanOp::AlterColumnType {
+                table: "a".into(),
+                column: "owner".into(),
+                new_type: "VARCHAR(100)".into(),
+            }),
+            "the type change must be surfaced against the NEW column name, not dropped: {:?}",
+            plan.ops
         );
     }
 }

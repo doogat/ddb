@@ -367,7 +367,220 @@ types:
         assert_eq!(block.types[1].columns[0].data_type, "VARCHAR(255)");
     }
 
+    /// A column carrying `rename_from: <old>` records a ColumnRename tagging
+    /// the type, the old name (`from`), and the column's own `name:` as the
+    /// new name (`to`). This is the directive's whole point: the parser must
+    /// surface the rename intent separately from the column data.
+    #[test]
+    fn rename_from_directive_is_captured_as_column_rename() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: owner
+        data_type: VARCHAR(100)
+        rename_from: assignee
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("doc with rename_from parses");
+        assert_eq!(doc.renames.len(), 1, "exactly one rename captured");
+        let r = &doc.renames[0];
+        assert_eq!(r.table, "project");
+        assert_eq!(r.from, "assignee");
+        assert_eq!(r.to, "owner");
+    }
+
+    /// `rename_from` is a directive, not column data: it must be stripped
+    /// before the column is assembled. The resulting ColumnDef carries the
+    /// NEW name and its normal attributes, and nothing named `rename_from`
+    /// leaks into the column (the existing column parser never sees it).
+    #[test]
+    fn rename_from_key_is_stripped_from_assembled_column() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: owner
+        data_type: VARCHAR(100)
+        rename_from: assignee
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("doc with rename_from parses");
+        assert_eq!(doc.types.len(), 1);
+        let col = &doc.types[0].columns[0];
+        // The assembled column has the NEW name and normal attributes.
+        assert_eq!(col.name, "owner");
+        assert_eq!(col.data_type, "VARCHAR(100)");
+        // `rename_from` does not survive as a phantom column or stray value:
+        // the type has exactly the one declared column, named `owner`.
+        assert_eq!(doc.types[0].columns.len(), 1);
+        assert!(
+            !doc.types[0]
+                .columns
+                .iter()
+                .any(|c| c.name == "assignee" || c.name == "rename_from"),
+            "rename_from must not leak into the column set"
+        );
+    }
+
+    /// A doc with no `rename_from` anywhere yields an empty renames list.
+    /// This pins the default so an impl can't fabricate phantom renames.
+    #[test]
+    fn doc_without_rename_from_yields_empty_renames() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: VARCHAR(50)
+  - name: contact
+    columns:
+      - name: email
+        data_type: VARCHAR(255)
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("doc without rename_from parses");
+        assert!(
+            doc.renames.is_empty(),
+            "no rename_from anywhere must yield zero renames"
+        );
+    }
+
+    /// Multiple renames across multiple types are all captured, each tagged
+    /// with the type it belongs to. A parser that hardcodes a single rename
+    /// or drops the table tag fails here.
+    #[test]
+    fn multiple_renames_across_types_each_tagged_with_its_table() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: owner
+        data_type: VARCHAR(100)
+        rename_from: assignee
+      - name: status
+        data_type: VARCHAR(50)
+  - name: contact
+    columns:
+      - name: full_name
+        data_type: TEXT
+        rename_from: name
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("multi-rename doc parses");
+        assert_eq!(doc.renames.len(), 2, "both renames captured");
+
+        let project = doc
+            .renames
+            .iter()
+            .find(|r| r.table == "project")
+            .expect("project rename present");
+        assert_eq!(project.from, "assignee");
+        assert_eq!(project.to, "owner");
+
+        let contact = doc
+            .renames
+            .iter()
+            .find(|r| r.table == "contact")
+            .expect("contact rename present");
+        assert_eq!(contact.from, "name");
+        assert_eq!(contact.to, "full_name");
+    }
+
+    /// A `rename_from` directive written in FLOW/JSON-style one-line YAML must
+    /// be captured identically to its block-form equivalent. A line scanner
+    /// that tracks the last `name:`/`- name:` line and pairs it with a later
+    /// `rename_from:` line produces ZERO renames here, because flow form has
+    /// no line boundaries between keys. Only a real structural YAML parse
+    /// recovers the directive, making this the decisive guard against the
+    /// scanner cheat.
+    #[test]
+    fn rename_from_in_flow_form_is_captured() {
+        let flow_yaml = r#"{types: [{name: project, columns: [{name: owner, data_type: "VARCHAR(100)", rename_from: assignee}]}]}"#;
+        let doc = SchemaDoc::from_yaml(flow_yaml).expect("flow-form rename doc parses");
+        assert_eq!(
+            doc.renames.len(),
+            1,
+            "flow-form rename_from must yield exactly one rename"
+        );
+        let r = &doc.renames[0];
+        assert_eq!(r.table, "project");
+        assert_eq!(r.from, "assignee");
+        assert_eq!(r.to, "owner");
+        // The directive is still stripped from the assembled column.
+        assert_eq!(doc.types[0].columns.len(), 1);
+        assert_eq!(doc.types[0].columns[0].name, "owner");
+    }
+
+    /// YAML mappings are unordered: a real structural parse pairs `rename_from`
+    /// with the column's `name:` regardless of which key text appears first.
+    /// Here `rename_from:` is listed BEFORE `name:` inside the column mapping.
+    /// A line scanner pairs `rename_from` with whatever `name` it last saw
+    /// (the type's `name: project`, or nothing), corrupting `to`. The captured
+    /// rename must still be `from`=old, `to`=the column's own name.
+    #[test]
+    fn rename_from_before_name_key_is_key_order_invariant() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - rename_from: assignee
+        data_type: VARCHAR(100)
+        name: owner
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("key-order-reversed rename doc parses");
+        assert_eq!(doc.renames.len(), 1, "exactly one rename captured");
+        let r = &doc.renames[0];
+        assert_eq!(r.table, "project");
+        assert_eq!(r.from, "assignee");
+        assert_eq!(
+            r.to, "owner",
+            "`to` must be the column's own name, not the type name or empty"
+        );
+        // The assembled column carries the new name, not the type name.
+        assert_eq!(doc.types[0].columns[0].name, "owner");
+        assert_eq!(doc.types[0].columns[0].data_type, "VARCHAR(100)");
+    }
+
+    /// A column whose `rename_from` VALUE collides with a real structural key
+    /// (`name`) is still handled structurally: the directive records the old
+    /// name `name`, the column keeps its declared `name:` (`label`), and no
+    /// phantom column leaks. A scanner that matches on the literal `name`
+    /// token, or that confuses the value `name` with the `name:` key, would
+    /// corrupt either the rename or the column. This stops the strip test from
+    /// passing vacuously by forcing the value/key distinction.
+    #[test]
+    fn rename_from_value_colliding_with_key_name_is_handled_structurally() {
+        let yaml = r#"
+types:
+  - name: contact
+    columns:
+      - name: label
+        data_type: TEXT
+        rename_from: name
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("collision doc parses");
+        assert_eq!(doc.renames.len(), 1);
+        let r = &doc.renames[0];
+        assert_eq!(r.table, "contact");
+        assert_eq!(r.from, "name", "old name is the literal value `name`");
+        assert_eq!(r.to, "label");
+        // Exactly one column, named `label`; nothing named `name` or
+        // `rename_from` leaks in.
+        assert_eq!(doc.types[0].columns.len(), 1);
+        assert_eq!(doc.types[0].columns[0].name, "label");
+        assert!(
+            !doc.types[0]
+                .columns
+                .iter()
+                .any(|c| c.name == "name" || c.name == "rename_from"),
+            "neither the rename value nor the directive key may leak into columns"
+        );
+    }
+
     use proptest::prelude::*;
+
+    /// One generated column's expected shape: (new_name, data_type,
+    /// optional REFERENCES target, optional `rename_from` old name).
+    type ExpectedCol = (String, String, Option<String>, Option<String>);
+    /// One generated type's expected shape: (type name, its columns).
+    type ExpectedType = (String, Vec<ExpectedCol>);
 
     proptest! {
         /// Generated (non-enumerable) YAML defeats substring-fingerprinting:
@@ -375,7 +588,12 @@ types:
         /// and data_type. A finite if/else cascade keyed on fixed literals
         /// cannot satisfy randomized inputs. Emitting FLOW-form YAML (one
         /// line, no fixed indentation) additionally defeats a line scanner
-        /// that keys off indentation depth.
+        /// that keys off indentation depth. Some generated columns also carry
+        /// a randomized `rename_from: <old name>`, and the test asserts the
+        /// exact set of resulting ColumnRenames (table, from=old, to=new) plus
+        /// that each assembled column keeps its NEW name. A line scanner that
+        /// pairs `name:`/`rename_from:` lines yields nothing from flow form,
+        /// so the rename assertions cannot pass under the cheat.
         #[test]
         fn parses_arbitrary_types_and_columns(
             specs in prop::collection::vec(
@@ -387,6 +605,8 @@ types:
                             prop::sample::select(vec!["TEXT", "INTEGER", "BOOLEAN", "VARCHAR(64)"]),
                             // Optional REFERENCES target on some columns.
                             prop::option::of("[a-z][a-z0-9_]{0,11}"),
+                            // Optional `rename_from: <old name>` on some columns.
+                            prop::option::of("[a-z][a-z0-9_]{0,11}"),
                         ),
                         1..=4,
                     ),
@@ -396,14 +616,20 @@ types:
         ) {
             // Build the expected document, deduping column names within a
             // type by prefixing the column index so assertions are unambiguous.
-            let expected: Vec<(String, Vec<(String, String, Option<String>)>)> = specs
+            // Each column carries (new_name, data_type, refs, rename_from).
+            let expected: Vec<ExpectedType> = specs
                 .iter()
                 .map(|(ty_name, cols)| {
                     let cols = cols
                         .iter()
                         .enumerate()
-                        .map(|(i, (col_name, dt, refs))| {
-                            (format!("c{i}_{col_name}"), dt.to_string(), refs.clone())
+                        .map(|(i, (col_name, dt, refs, rename))| {
+                            (
+                                format!("c{i}_{col_name}"),
+                                dt.to_string(),
+                                refs.clone(),
+                                rename.as_ref().map(|old| format!("old{i}_{old}")),
+                            )
                         })
                         .collect();
                     (ty_name.clone(), cols)
@@ -417,11 +643,16 @@ types:
                 .map(|(ty_name, cols)| {
                     let cols_joined = cols
                         .iter()
-                        .map(|(col_name, dt, refs)| match refs {
-                            Some(r) => {
-                                format!("{{name: {col_name}, data_type: \"{dt}\", references: {r}}}")
+                        .map(|(col_name, dt, refs, rename)| {
+                            let mut parts =
+                                vec![format!("name: {col_name}"), format!("data_type: \"{dt}\"")];
+                            if let Some(r) = refs {
+                                parts.push(format!("references: {r}"));
                             }
-                            None => format!("{{name: {col_name}, data_type: \"{dt}\"}}"),
+                            if let Some(old) = rename {
+                                parts.push(format!("rename_from: {old}"));
+                            }
+                            format!("{{{}}}", parts.join(", "))
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -438,14 +669,38 @@ types:
             for (table, (exp_name, exp_cols)) in doc.types.iter().zip(expected.iter()) {
                 prop_assert_eq!(&table.table_name, exp_name);
                 prop_assert_eq!(table.columns.len(), exp_cols.len());
-                for (col, (exp_col_name, exp_dt, exp_refs)) in
+                for (col, (exp_col_name, exp_dt, exp_refs, _exp_rename)) in
                     table.columns.iter().zip(exp_cols.iter())
                 {
+                    // The assembled column carries the NEW name (`to`),
+                    // unaffected by any rename_from directive on it.
                     prop_assert_eq!(&col.name, exp_col_name);
                     prop_assert_eq!(&col.data_type, exp_dt);
                     prop_assert_eq!(&col.references, exp_refs);
                 }
             }
+
+            // Compute the exact set of renames the document declares and
+            // assert the parser surfaced precisely that set. Sorting both
+            // sides makes the comparison order-independent.
+            let mut expected_renames: Vec<(String, String, String)> = expected
+                .iter()
+                .flat_map(|(ty_name, cols)| {
+                    cols.iter().filter_map(move |(new_name, _dt, _refs, rename)| {
+                        rename
+                            .as_ref()
+                            .map(|old| (ty_name.clone(), old.clone(), new_name.clone()))
+                    })
+                })
+                .collect();
+            let mut actual_renames: Vec<(String, String, String)> = doc
+                .renames
+                .iter()
+                .map(|r| (r.table.clone(), r.from.clone(), r.to.clone()))
+                .collect();
+            expected_renames.sort();
+            actual_renames.sort();
+            prop_assert_eq!(actual_renames, expected_renames);
         }
     }
 }
