@@ -542,3 +542,391 @@ fn ffi_singleton_create_exposes_structured_error_context() {
         other => panic!("expected Validation with structured code/context, got {other:?}"),
     }
 }
+
+// --- apply_schema FFI tests (PRD 00161) ---
+//
+// `DoogatDriver::apply_schema(schema_doc, dry_run, allow_destructive)` delegates to
+// the core `DoogatService::apply_schema` verb: it diffs a desired-schema YAML doc
+// against live typedefs and applies the minimal migration (forward-recovery, no
+// rollback). It returns a typed `SchemaApplyReportRecord` (NOT a JSON string).
+
+const APPLY_WIDGET_ONE_COLUMN: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+";
+
+const APPLY_WIDGET_TWO_COLUMNS: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+      - name: note
+        data_type: TEXT
+        zone: body
+";
+
+const APPLY_GADGET_ONE_COLUMN: &str = "\
+types:
+  - name: gadget
+    columns:
+      - name: serial
+        data_type: TEXT
+        zone: body
+";
+
+/// Identical to `APPLY_GADGET_ONE_COLUMN` (same serial/TEXT/body column) but adds a
+/// top-level `title_template` on the `gadget` type. A title_template change on an
+/// existing type has no DDL path, so the core verb surfaces it as an unsupported
+/// change (zero ops) reported in both `report.unsupported` and `report.warnings`.
+const APPLY_GADGET_WITH_TITLE_TEMPLATE: &str = "\
+types:
+  - name: gadget
+    title_template: \"{serial}\"
+    columns:
+      - name: serial
+        data_type: TEXT
+        zone: body
+";
+
+/// dry_run=true returns the plan and mutates nothing: a brand-new type yields a
+/// single `create_type` op, `dry_run==true`, `applied==false`, and the type is
+/// NOT created (a second dry-run still shows the same create_type op).
+#[test]
+fn apply_schema_dry_run_returns_plan_without_mutating() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    let report = driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), true, false)
+        .expect("dry-run apply should succeed");
+
+    assert!(report.dry_run, "dry_run flag must be reflected as true");
+    assert!(!report.applied, "dry-run must not apply (applied=false)");
+    assert_eq!(report.ops.len(), 1, "new type should plan exactly one op");
+    assert_eq!(report.ops[0].kind, "create_type");
+    assert_eq!(report.ops[0].table, "widget");
+
+    // The op must carry real plan content, not a blanked stub: the create_type op
+    // exposes the generated DDL and a human-readable detail. A cheat that blanks
+    // `sql`/`detail` after delegating the mutation is caught here.
+    let sql_lower = report.ops[0].sql.to_lowercase();
+    assert!(
+        !report.ops[0].sql.is_empty(),
+        "create_type op must expose non-empty sql, got {:?}",
+        report.ops[0].sql
+    );
+    assert!(
+        sql_lower.contains("create table"),
+        "create_type sql must contain CREATE TABLE, got {:?}",
+        report.ops[0].sql
+    );
+    assert!(
+        sql_lower.contains("widget"),
+        "create_type sql must reference the widget table, got {:?}",
+        report.ops[0].sql
+    );
+    assert!(
+        !report.ops[0].detail.is_empty(),
+        "create_type op must expose a non-empty detail, got {:?}",
+        report.ops[0].detail
+    );
+
+    // Nothing was created: a second dry-run still plans the create_type op,
+    // proving the first dry-run did not materialize the type.
+    let report2 = driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), true, false)
+        .expect("second dry-run apply should succeed");
+    assert!(!report2.applied);
+    assert_eq!(report2.ops.len(), 1);
+    assert_eq!(report2.ops[0].kind, "create_type");
+    assert_eq!(report2.ops[0].table, "widget");
+}
+
+/// dry_run=false creates the declared type and makes it queryable.
+/// Uses the distinctive name `gadget` to defeat any hardcoded widget/label impl.
+#[test]
+fn apply_schema_creates_declared_type_when_not_dry_run() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    let report = driver
+        .apply_schema(APPLY_GADGET_ONE_COLUMN.into(), false, false)
+        .expect("apply should succeed");
+
+    assert!(!report.dry_run);
+    assert!(report.applied, "non-dry-run create must report applied=true");
+    let create = report
+        .ops
+        .iter()
+        .find(|op| op.kind == "create_type" && op.table == "gadget")
+        .expect("plan must contain a create_type op for gadget");
+    assert_eq!(create.table, "gadget");
+
+    // The type is now real and queryable through the SQL path.
+    assert!(
+        driver
+            .execute_sql("SELECT serial FROM gadget".into())
+            .is_ok(),
+        "gadget type should be queryable after apply"
+    );
+}
+
+/// Re-applying a converged doc is an idempotent no-op: the second apply reports
+/// applied=false with an empty ops list.
+#[test]
+fn apply_schema_reapplying_converged_doc_is_noop() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    let first = driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), false, false)
+        .expect("first apply should succeed");
+    assert!(first.applied, "first apply should change the schema");
+
+    let second = driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), false, false)
+        .expect("re-apply should succeed");
+    assert!(
+        !second.applied,
+        "re-applying a converged doc must not change anything"
+    );
+    assert!(
+        second.ops.is_empty(),
+        "converged re-apply must plan zero ops, got {:?}",
+        second.ops
+    );
+}
+
+/// Adding a column to an existing type is non-destructive and applies WITHOUT
+/// allow_destructive: yields an `add_column` op and both columns become present.
+#[test]
+fn apply_schema_adds_column_without_allow_destructive() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), false, false)
+        .expect("initial 1-column apply should succeed");
+
+    let report = driver
+        .apply_schema(APPLY_WIDGET_TWO_COLUMNS.into(), false, false)
+        .expect("adding a column should succeed without allow_destructive");
+
+    assert!(report.applied, "adding a column must report applied=true");
+    let add = report
+        .ops
+        .iter()
+        .find(|op| op.kind == "add_column" && op.table == "widget")
+        .expect("plan must contain an add_column op for widget");
+    assert!(!add.destructive, "adding a column is not a destructive op");
+
+    // The add_column op must carry real plan content, not a blanked stub. A cheat
+    // that blanks `sql`/`detail` on the add_column op (while only create_type's are
+    // checked) is caught here.
+    let add_sql_lower = add.sql.to_lowercase();
+    assert!(
+        !add.sql.is_empty(),
+        "add_column op must expose non-empty sql, got {:?}",
+        add.sql
+    );
+    assert!(
+        add_sql_lower.contains("alter table"),
+        "add_column sql must contain ALTER TABLE, got {:?}",
+        add.sql
+    );
+    assert!(
+        add_sql_lower.contains("add column"),
+        "add_column sql must contain ADD COLUMN, got {:?}",
+        add.sql
+    );
+    assert!(
+        add_sql_lower.contains("note"),
+        "add_column sql must reference the note column, got {:?}",
+        add.sql
+    );
+    assert!(
+        !add.detail.is_empty(),
+        "add_column op must expose a non-empty detail, got {:?}",
+        add.detail
+    );
+
+    // Both columns are now present and queryable.
+    assert!(
+        driver
+            .execute_sql("SELECT label, note FROM widget".into())
+            .is_ok(),
+        "both label and note columns should exist after add_column"
+    );
+}
+
+/// A destructive drop without allow_destructive is blocked and mutates nothing.
+/// Live widget has label+note; a desired doc with only label implies dropping note.
+/// The call must Err with DdbError::Validation { code: SCHEMA_DESTRUCTIVE_BLOCKED },
+/// and note must remain present afterward.
+#[test]
+fn apply_schema_destructive_drop_blocked_without_allow_destructive() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    // Establish live widget with both label and note.
+    driver
+        .apply_schema(APPLY_WIDGET_TWO_COLUMNS.into(), false, false)
+        .expect("two-column apply should succeed");
+
+    // Desired doc has only `label`, implying a destructive drop of `note`.
+    let err = driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), false, false)
+        .expect_err("dropping a column without allow_destructive must error");
+
+    match err {
+        DdbError::Validation {
+            code: Some(code), ..
+        } => {
+            assert_eq!(code, crate::error::codes::SCHEMA_DESTRUCTIVE_BLOCKED);
+        }
+        other => panic!("expected Validation SCHEMA_DESTRUCTIVE_BLOCKED, got {other:?}"),
+    }
+
+    // The destructive apply must have mutated nothing: note still queryable.
+    assert!(
+        driver
+            .execute_sql("SELECT label, note FROM widget".into())
+            .is_ok(),
+        "note column must still be present after a blocked destructive apply"
+    );
+}
+
+/// allow_destructive=true permits the drop: applied=true and afterward the
+/// dropped column is gone.
+#[test]
+fn apply_schema_allow_destructive_permits_drop() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    driver
+        .apply_schema(APPLY_WIDGET_TWO_COLUMNS.into(), false, false)
+        .expect("two-column apply should succeed");
+
+    let report = driver
+        .apply_schema(APPLY_WIDGET_ONE_COLUMN.into(), false, true)
+        .expect("destructive drop with allow_destructive should succeed");
+
+    assert!(report.applied, "permitted drop must report applied=true");
+
+    // The plan must mark the column drop as destructive. A cheat that hardcodes
+    // every op's `destructive = false` is caught here.
+    let drop = report
+        .ops
+        .iter()
+        .find(|op| op.kind == "drop_column" && op.destructive)
+        .expect("plan must contain a drop_column op flagged destructive");
+
+    // The drop_column op must carry real plan content, not a blanked stub. A cheat
+    // that blanks `sql`/`detail` on the drop_column op (while only create_type's are
+    // checked) is caught here.
+    let drop_sql_lower = drop.sql.to_lowercase();
+    assert!(
+        drop_sql_lower.contains("alter table"),
+        "drop_column sql must contain ALTER TABLE, got {:?}",
+        drop.sql
+    );
+    assert!(
+        drop_sql_lower.contains("drop column"),
+        "drop_column sql must contain DROP COLUMN, got {:?}",
+        drop.sql
+    );
+    assert!(
+        drop_sql_lower.contains("note"),
+        "drop_column sql must reference the note column, got {:?}",
+        drop.sql
+    );
+    assert!(
+        !drop.detail.is_empty(),
+        "drop_column op must expose a non-empty detail, got {:?}",
+        drop.detail
+    );
+
+    // `note` is gone: selecting it now errors.
+    assert!(
+        driver
+            .execute_sql("SELECT note FROM widget".into())
+            .is_err(),
+        "note column should be dropped after an allowed destructive apply"
+    );
+    // `label` survives.
+    assert!(
+        driver
+            .execute_sql("SELECT label FROM widget".into())
+            .is_ok(),
+        "label column should remain after dropping note"
+    );
+}
+
+/// An unsupported change (a `title_template` edit on an existing type, which has no
+/// DDL path) must surface in BOTH `report.unsupported: Vec<String>` and
+/// `report.warnings: Vec<SchemaWarningRecord>` (warning code
+/// `SCHEMA_UNSUPPORTED_CHANGE`). A cheat that blanks `warnings`/`unsupported` after
+/// delegating the mutation is caught here. Loose assertions (non-empty + `any(...)`)
+/// keep this stable against incidental extra diffs.
+#[test]
+fn apply_schema_surfaces_unsupported_change_as_warning() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+
+    // Establish a live `gadget` type with no title_template.
+    driver
+        .apply_schema(APPLY_GADGET_ONE_COLUMN.into(), false, false)
+        .expect("initial gadget apply should succeed");
+
+    // Dry-run a doc that only adds a title_template: an unsupported change. dry_run
+    // keeps this read-only so the assertions describe the plan, not a mutation.
+    let report = driver
+        .apply_schema(APPLY_GADGET_WITH_TITLE_TEMPLATE.into(), true, false)
+        .expect("dry-run apply with unsupported change should succeed");
+
+    assert!(
+        !report.unsupported.is_empty(),
+        "unsupported change must populate report.unsupported, got {:?}",
+        report.unsupported
+    );
+    assert!(
+        report
+            .unsupported
+            .iter()
+            .any(|entry| entry.contains("title_template")),
+        "an unsupported entry must mention title_template, got {:?}",
+        report.unsupported
+    );
+
+    assert!(
+        !report.warnings.is_empty(),
+        "unsupported change must populate report.warnings, got {:?}",
+        report.warnings
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.code == crate::app_contract::SCHEMA_UNSUPPORTED_CHANGE),
+        "a warning must carry code SCHEMA_UNSUPPORTED_CHANGE, got {:?}",
+        report.warnings
+    );
+
+    // The warning must carry a real message, not a blanked stub. A cheat that checks
+    // only `code` and blanks the warning `message` is caught here.
+    assert!(
+        report.warnings.iter().any(|w| w.code
+            == crate::app_contract::SCHEMA_UNSUPPORTED_CHANGE
+            && w.message.to_lowercase().contains("title_template")),
+        "the SCHEMA_UNSUPPORTED_CHANGE warning must carry a non-empty message mentioning title_template, got {:?}",
+        report.warnings
+    );
+}
