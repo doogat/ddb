@@ -1090,6 +1090,11 @@ impl<'a> SqlEngine<'a> {
             .map(|(p, c)| (p.as_str(), c.as_str()))
             .collect();
         let delete_refs: Vec<&str> = plan.deletes.iter().map(String::as_str).collect();
+        // Immediate commit — NOT transaction-buffered. RENAME TABLE is outside
+        // the PRD 00161 task-10 transactional-apply scope: schema-apply's differ
+        // never emits a rename-table op, so this handler is unreachable under an
+        // open apply transaction. Do not invoke it inside a BEGIN/COMMIT
+        // expecting atomicity. Transactional rename is PRD 00161 task 11.
         self.repo.commit_batch(
             &write_refs,
             &delete_refs,
@@ -1298,6 +1303,11 @@ impl<'a> SqlEngine<'a> {
             .iter()
             .map(|(p, c)| (p.as_str(), c.as_str()))
             .collect();
+        // Immediate commit — NOT transaction-buffered. RENAME COLUMN is outside
+        // the PRD 00161 task-10 transactional-apply scope: schema-apply's differ
+        // never emits a rename-column op (a remove+add is deliberately not
+        // collapsed into a rename), so this handler is unreachable under an open
+        // apply transaction. Transactional rename is PRD 00161 task 11.
         self.repo.commit_files(
             &file_refs,
             &format!("alter table {table_name} rename {old_name} to {new_name}"),
@@ -1449,6 +1459,10 @@ impl<'a> SqlEngine<'a> {
             .iter()
             .map(|(p, c)| (p.as_str(), c.as_str()))
             .collect();
+        // Immediate commit — NOT transaction-buffered. DROP TABLE is outside the
+        // PRD 00161 task-10 transactional-apply scope: schema-apply never drops a
+        // whole type (only columns, via the buffered ALTER path), so this handler
+        // is unreachable under an open apply transaction.
         self.repo.commit_batch(
             &write_refs,
             &[typedef_path],

@@ -55,9 +55,14 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             .ok_or_else(|| DoogatError::SqlEngine("no active transaction".into()))?;
         let mut engine = SqlEngine::new(&self.index, &self.repo);
         engine.resume_transaction(buf);
-        engine.execute("COMMIT").inspect_err(|_| {
-            self.txn = engine.suspend_transaction();
-        })?;
+        // On COMMIT failure do NOT restore the buffer: a failed COMMIT cannot be
+        // resumed, and leaving the SAVEPOINT open would poison the connection
+        // (every later op would see "transaction already active"). Dropping the
+        // engine with its buffer intact lets `Drop` roll back + RELEASE the
+        // savepoint, and `self.txn` stays None (taken above). If the git commit
+        // already landed before the failure, the index is simply left stale and
+        // self-heals on the next read (git is source of truth). PRD 00161 task 10.
+        engine.execute("COMMIT")?;
         Ok(())
     }
 
