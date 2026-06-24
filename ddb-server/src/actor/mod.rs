@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 use ddb_core::app_contract::AppOutput;
 use ddb_core::error::DoogatError;
+use ddb_core::schema_diff::plan::SchemaApplyReport;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 use ddb_core::types::{
@@ -164,6 +165,11 @@ pub enum ActorCommand {
         type_name: String,
         fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
     },
+    ApplySchema {
+        schema_doc: String,
+        dry_run: bool,
+        allow_destructive: bool,
+    },
 }
 
 /// Replies from the actor.
@@ -197,6 +203,7 @@ pub enum ActorReply {
     BrokenSequences(ActorResult<Vec<BrokenSequence>>),
     HealthStatus(ActorResult<bool>),
     Upsert(ActorResult<UpsertOutcome>),
+    SchemaApply(Box<ActorResult<AppOutput<SchemaApplyReport>>>),
 }
 
 struct ActorMsg {
@@ -612,6 +619,25 @@ impl ActorHandle {
             .await
         {
             ActorReply::Upsert(r) => r,
+            _ => Err(DoogatError::Validation("unexpected reply".into())),
+        }
+    }
+
+    pub async fn apply_schema(
+        &self,
+        schema_doc: String,
+        dry_run: bool,
+        allow_destructive: bool,
+    ) -> ActorResult<AppOutput<SchemaApplyReport>> {
+        match self
+            .send(ActorCommand::ApplySchema {
+                schema_doc,
+                dry_run,
+                allow_destructive,
+            })
+            .await
+        {
+            ActorReply::SchemaApply(r) => *r,
             _ => Err(DoogatError::Validation("unexpected reply".into())),
         }
     }

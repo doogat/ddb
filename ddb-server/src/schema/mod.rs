@@ -66,6 +66,8 @@ pub fn build_schema(
         .register(m.compact_result_type)
         .register(m.git_maintenance_result_type)
         .register(m.upsert_result_type)
+        .register(m.schema_apply_report_type)
+        .register(m.plan_op_report_type)
         .register(q.query)
         .register(m.mutation)
         .register(s.subscription)

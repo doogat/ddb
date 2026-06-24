@@ -185,5 +185,17 @@ pub(crate) fn handle_command(svc: &mut DoogatService, cmd: ActorCommand) -> Acto
         ActorCommand::UpsertSingleton { type_name, fields } => {
             ActorReply::Upsert(svc.upsert_singleton(&type_name, fields))
         }
+        ActorCommand::ApplySchema {
+            schema_doc,
+            dry_run,
+            allow_destructive,
+        } => {
+            let cmd = ddb_core::app_contract::ApplySchemaCommand {
+                schema_doc,
+                dry_run,
+                allow_destructive,
+            };
+            ActorReply::SchemaApply(Box::new(svc.apply_schema(cmd)))
+        }
     }
 }

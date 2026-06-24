@@ -15,6 +15,9 @@ pub(crate) struct MutationOutput {
     pub compact_result_type: Object,
     pub git_maintenance_result_type: Object,
     pub upsert_result_type: Object,
+    /// PRD 00161 T6: applySchema output types.
+    pub schema_apply_report_type: Object,
+    pub plan_op_report_type: Object,
     pub attach_input: InputObject,
 }
 
@@ -43,6 +46,7 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
     mutation = mutation.field(operations::build_sync_field());
     mutation = mutation.field(operations::build_compact_field());
     mutation = mutation.field(operations::build_maintenance_field());
+    mutation = mutation.field(operations::build_apply_schema_field());
 
     MutationOutput {
         mutation,
@@ -51,6 +55,8 @@ pub(crate) fn build_mutation_fields(type_schemas: &[TableSchema]) -> MutationOut
         compact_result_type: types::build_compact_result_type(),
         git_maintenance_result_type: types::build_git_maintenance_result_type(),
         upsert_result_type: types::build_upsert_result_type(),
+        schema_apply_report_type: types::build_schema_apply_report_type(),
+        plan_op_report_type: types::build_plan_op_report_type(),
         attach_input: types::build_attach_input(),
     }
 }

@@ -139,3 +139,32 @@ pub(super) fn build_upsert_result_type() -> Object {
         .field(simple_field("id", TypeRef::named_nn(TypeRef::ID)))
         .field(simple_field("created", TypeRef::named_nn(TypeRef::BOOLEAN)))
 }
+
+// -- SchemaApplyReport + PlanOpReport output types (PRD 00161 T6) --
+pub(super) fn build_plan_op_report_type() -> Object {
+    Object::new("PlanOpReport")
+        .description("A single planned schema-diff operation with its rendered DDL.")
+        .field(simple_field("kind", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("table", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field("detail", TypeRef::named_nn(TypeRef::STRING)))
+        .field(simple_field(
+            "destructive",
+            TypeRef::named_nn(TypeRef::BOOLEAN),
+        ))
+        .field(simple_field("sql", TypeRef::named_nn(TypeRef::STRING)))
+}
+
+pub(super) fn build_schema_apply_report_type() -> Object {
+    Object::new("SchemaApplyReport")
+        .description("Result of applying a declarative desired-schema document.")
+        .field(simple_field("dryRun", TypeRef::named_nn(TypeRef::BOOLEAN)))
+        .field(simple_field("applied", TypeRef::named_nn(TypeRef::BOOLEAN)))
+        .field(simple_field(
+            "ops",
+            TypeRef::named_nn_list_nn("PlanOpReport"),
+        ))
+        .field(simple_field(
+            "unsupported",
+            TypeRef::named_nn_list_nn(TypeRef::STRING),
+        ))
+}

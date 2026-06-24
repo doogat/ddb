@@ -2,6 +2,7 @@ use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
 use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
+use ddb_core::schema_diff::plan::SchemaApplyReport;
 use ddb_core::sql_engine::requires_schema_reload;
 use ddb_core::types::{BatchCreateInput, BatchUpdateInput};
 use indexmap::IndexMap;
@@ -520,4 +521,73 @@ pub(super) fn build_maintenance_field() -> Field {
     )
     .argument(InputValue::new("task", TypeRef::named(TypeRef::STRING)).description("Specific maintenance task to run. Omit to run all."))
     .description("Run git maintenance tasks (gc, repack, commit-graph). Optionally specify a single task to run.")
+}
+
+/// Map a snake_case `SchemaApplyReport` DTO into the camelCase GraphQL object
+/// shape resolved by the `SchemaApplyReport`/`PlanOpReport` output types.
+fn schema_apply_report_to_value(report: &SchemaApplyReport) -> GqlValue {
+    let ops: Vec<GqlValue> = report
+        .ops
+        .iter()
+        .map(|op| {
+            let mut o = IndexMap::new();
+            o.insert(Name::new("kind"), GqlValue::from(op.kind.as_str()));
+            o.insert(Name::new("table"), GqlValue::from(op.table.as_str()));
+            o.insert(Name::new("detail"), GqlValue::from(op.detail.as_str()));
+            o.insert(Name::new("destructive"), GqlValue::from(op.destructive));
+            o.insert(Name::new("sql"), GqlValue::from(op.sql.as_str()));
+            GqlValue::Object(o)
+        })
+        .collect();
+    let unsupported: Vec<GqlValue> = report
+        .unsupported
+        .iter()
+        .map(|s| GqlValue::from(s.as_str()))
+        .collect();
+    let mut obj = IndexMap::new();
+    obj.insert(Name::new("dryRun"), GqlValue::from(report.dry_run));
+    obj.insert(Name::new("applied"), GqlValue::from(report.applied));
+    obj.insert(Name::new("ops"), GqlValue::List(ops));
+    obj.insert(Name::new("unsupported"), GqlValue::List(unsupported));
+    GqlValue::Object(obj)
+}
+
+pub(super) fn build_apply_schema_field() -> Field {
+    Field::new("applySchema", TypeRef::named_nn("SchemaApplyReport"), |ctx| {
+        FieldFuture::new(async move {
+            let a = ctx.data::<ActorHandle>()?;
+            let schema_doc = ctx.args.try_get("schema")?.string()?.to_string();
+            let dry_run = ctx
+                .args
+                .get("dryRun")
+                .and_then(|v| v.boolean().ok())
+                .unwrap_or(false);
+            let allow_destructive = ctx
+                .args
+                .get("allowDestructive")
+                .and_then(|v| v.boolean().ok())
+                .unwrap_or(false);
+            let output = a
+                .apply_schema(schema_doc, dry_run, allow_destructive)
+                .await
+                .map_err(|e| to_graphql_error_from_app(e.into()))?;
+            forward_warnings(&ctx, &output.warnings);
+            Ok(Some(FieldValue::owned_any(schema_apply_report_to_value(
+                &output.value,
+            ))))
+        })
+    })
+    .argument(
+        InputValue::new("schema", TypeRef::named_nn(TypeRef::STRING))
+            .description("Declarative desired-schema document (YAML)."),
+    )
+    .argument(
+        InputValue::new("dryRun", TypeRef::named(TypeRef::BOOLEAN))
+            .description("Plan only without mutating. Defaults to false."),
+    )
+    .argument(
+        InputValue::new("allowDestructive", TypeRef::named(TypeRef::BOOLEAN))
+            .description("Permit destructive ops (drop/rename column). Defaults to false."),
+    )
+    .description("Apply a declarative desired-schema document, diffing it against the live typedefs and applying the resulting plan.")
 }
