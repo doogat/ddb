@@ -17,6 +17,7 @@
 - [CRDT Conflict Resolution](./technical/crdt-resolver.md)
 - [Search Index](./technical/indexer.md)
 - [SQL Engine](./technical/sql-engine.md)
+- [Declarative Schema Apply](./technical/schema-apply.md)
 - [Sync & Compaction](./technical/sync.md)
 - [FFI Bindings](./technical/ffi.md)
 - [Error Handling](./technical/errors.md)

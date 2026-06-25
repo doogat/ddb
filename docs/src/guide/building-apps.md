@@ -622,6 +622,44 @@ Response: `{ "data": [...], "total_count": 3 }`
 
 **Error shape:** HTTP 4xx/5xx + JSON `{ "error": "<code>", "message": "<detail>" }`. The `error` field uses the unified code vocabulary but there is no `extensions` envelope — use GraphQL for the `Guaranteed` structured-error surface.
 
+## Declarative schema apply
+
+You do not have to hand-write ordered `CREATE`/`ALTER` migrations plus your own
+idempotency and detection logic. Declare your typedefs once, in a single schema
+document, and call one apply. Doogat DB diffs the desired schema against the live schema
+and runs the minimal safe migration: add, alter, rename, or drop columns; zone, index,
+search-key, and singleton changes. A dry-run prints the plan first.
+
+```yaml
+# contact.yaml
+types:
+  - name: contact
+    columns:
+      - name: email
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+      - name: notes
+        data_type: TEXT
+        zone: body
+```
+
+```bash
+ddb schema diff contact.yaml      # preview the plan, change nothing
+ddb schema apply contact.yaml     # apply the minimal migration
+```
+
+Apply is atomic (one git commit on success, full rollback on any failure) and idempotent
+(re-running a converged schema is a no-op). Drops and renames need `--allow-destructive`.
+The same capability is `Guaranteed` over CLI, GraphQL (`applySchema`), REST
+(`POST /schema/apply`), and FFI (`DoogatDriver::apply_schema`). See
+[Declarative Schema Apply](../technical/schema-apply.md) for the full contract, plan op
+kinds, and error codes.
+
+The imperative `CREATE TABLE` path below still works and remains the way to define a
+type from scratch in a quick script. Declarative apply is the path for managing a whole
+schema over time.
+
 ## Data modeling
 
 > **Always use `CREATE TABLE` via `ddb query` to define types.** Do not create `_typedef` doogats manually - manual creation bypasses CRDT tracking and may cause sync conflicts across devices.

@@ -45,6 +45,8 @@ Column types: `TEXT`, `VARCHAR(n)`, `CHAR(n)`, `TINYTEXT`, `MEDIUMTEXT`, `LONGTE
 
 `ENUM` and `SET` columns extract `allowed_values` into the typedef schema and store as `TEXT` in SQLite.
 
+These imperative DDL statements also back [Declarative Schema Apply](./schema-apply.md): the schema differ renders its plan into this same grammar, so declarative apply reuses these handlers rather than duplicating them.
+
 ### UNIQUE Constraints
 
 Table-level `UNIQUE` constraints are supported in `CREATE TABLE`:

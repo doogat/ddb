@@ -209,6 +209,16 @@ Historical note: issue #16 (PRD 00136) surfaced when `create_doogat_with_extra` 
 4. SELECT statements run directly against the SQLite index (both core tables and materialized type tables).
 5. Multi-statement transactions use a `TransactionBuffer` to batch writes and deletes into a single Git commit.
 
+### Declarative schema apply (PRD 00161)
+
+The `schema_diff` module (`ddb-core/src/schema_diff/`) is a new module boundary that sits above the SQL engine. It turns a desired-schema YAML document into an ordered DDL plan and applies it.
+
+1. `schema_diff::desired::SchemaDoc::from_yaml()` parses the desired-schema document into one `TableSchema` per declared type, reusing `schema_from_parsed` so the desired vocabulary matches stored typedefs.
+2. `service::DoogatService::describe_type()` reads each type's live `TableSchema` (or `None` when absent).
+3. `schema_diff::diff()` is a pure function over desired and live schemas; it returns a `SchemaPlan` of ordered `PlanOp`s plus a list of unsupported changes.
+4. On apply, the service wraps the plan in one transaction and runs each op via `execute_sql(op.render_sql())`. `render_sql` emits DDL the existing `sql_engine` handlers already accept, so apply reuses the imperative DDL path rather than duplicating it. The whole plan commits as a single Git commit on success or rolls back on any failure.
+5. Dry-run returns the `SchemaApplyReport` without mutating. The differ stays pure (no I/O), which keeps diff logic unit-testable in isolation.
+
 ### Rename
 
 1. `git_ops::GitRepo::rename_doogat()` moves the file to a new path and commits.
