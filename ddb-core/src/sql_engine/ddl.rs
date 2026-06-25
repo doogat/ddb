@@ -1299,25 +1299,67 @@ impl<'a> SqlEngine<'a> {
         files.push((typedef_path.to_string(), typedef_content.clone()));
         files.extend(data_writes);
 
-        let file_refs: Vec<(&str, &str)> = files
-            .iter()
-            .map(|(p, c)| (p.as_str(), c.as_str()))
-            .collect();
-        // Immediate commit — NOT transaction-buffered. RENAME COLUMN is outside
-        // the PRD 00161 task-10 transactional-apply scope: schema-apply's differ
-        // never emits a rename-column op (a remove+add is deliberately not
-        // collapsed into a rename), so this handler is unreachable under an open
-        // apply transaction. Transactional rename is PRD 00161 task 11.
-        self.repo.commit_files(
-            &file_refs,
-            &format!("alter table {table_name} rename {old_name} to {new_name}"),
-        )?;
-
-        self.reindex_after_rename(&typedef_content, typedef_path, &data_doogats, table_name)?;
+        if self.txn.is_some() {
+            // Inside an open transaction (e.g. a declarative schema apply that
+            // emits RenameColumn alongside other ops, PRD 00161 task 11), buffer
+            // the typedef AND every renamed row-doogat into the SAME
+            // `TransactionBuffer` so the whole rename flushes in the single
+            // `commit_batch` on COMMIT — atomic with the rest of the plan. A
+            // mid-plan failure rolls the SAVEPOINT back and nothing reaches git.
+            self.buffer_rename_writes(&files);
+            // Index the renamed typedef + rows under the SAVEPOINT so a later op
+            // in the same plan sees the renamed state. Index from the in-memory
+            // content we just buffered, not a fresh git read (the writes are not
+            // committed yet, so a git read would be buffer-blind).
+            self.reindex_rename_from_buffer(typedef_path, &files)?;
+            // `rematerialize_type` reads typedef + rows from git, so it would be
+            // blind to the buffered writes — defer it to COMMIT, after the flush.
+            self.rematerialize_or_defer(table_name)?;
+        } else {
+            let file_refs: Vec<(&str, &str)> = files
+                .iter()
+                .map(|(p, c)| (p.as_str(), c.as_str()))
+                .collect();
+            self.repo.commit_files(
+                &file_refs,
+                &format!("alter table {table_name} rename {old_name} to {new_name}"),
+            )?;
+            self.reindex_after_rename(&typedef_content, typedef_path, &data_doogats, table_name)?;
+        }
 
         Ok(SqlResult::Ok(format!(
             "renamed {old_name} to {new_name} in {table_name}"
         )))
+    }
+
+    /// Push every `(path, content)` write a rename produces into the open
+    /// transaction buffer. Caller must hold an open transaction.
+    fn buffer_rename_writes(&mut self, files: &[(String, String)]) {
+        if let Some(ref mut buf) = self.txn {
+            for (path, content) in files {
+                buf.writes.push(PendingWrite {
+                    path: path.clone(),
+                    content: content.clone(),
+                });
+            }
+        }
+    }
+
+    /// Index the renamed typedef and each renamed row-doogat under the open
+    /// SAVEPOINT, parsing the in-memory buffered content (not a git read, which
+    /// would be blind to the uncommitted buffer). `files[0]` is the typedef.
+    fn reindex_rename_from_buffer(
+        &mut self,
+        typedef_path: &str,
+        files: &[(String, String)],
+    ) -> Result<()> {
+        let parsed_typedef = parser::parse(&files[0].1, typedef_path)?;
+        self.index.index_doogat(&parsed_typedef)?;
+        for (path, content) in &files[1..] {
+            let parsed = parser::parse(content, path)?;
+            self.index.index_doogat(&parsed)?;
+        }
+        Ok(())
     }
 
     fn rewrite_data_doogats_for_rename(

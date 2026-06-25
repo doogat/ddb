@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
 
+use sqlparser::ast::Statement;
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
+
 use crate::error::{DoogatError, Result};
 use crate::parser::from_serde_yaml;
 use crate::sql_engine::schema_from_parsed;
-use crate::types::{DoogatMeta, ParsedDoogat, Value};
+use crate::types::{DoogatMeta, ParsedDoogat, TableSchema, Value};
 
 /// A declarative description of the desired typedefs.
 pub struct SchemaDoc {
@@ -44,6 +48,11 @@ impl SchemaDoc {
                 .ok_or_else(|| DoogatError::SqlEngine("type entry missing `name`".into()))?
                 .to_string();
 
+            // Trust-boundary check: the type name becomes `CREATE TABLE {name}`
+            // verbatim in PlanOp::render_sql, so reject any name that is not a
+            // safe SQL identifier before it can smuggle DDL.
+            validate_identifier("table name", &name)?;
+
             // Capture and strip per-column `rename_from:` directives, then hand
             // the cleaned columns to schema_from_parsed via `extra`.
             let columns = strip_renames(map.get("columns"), &name, &mut renames);
@@ -79,11 +88,91 @@ impl SchemaDoc {
                 path: String::new(),
                 updated_at: None,
             };
-            types.push(schema_from_parsed(&parsed)?);
+            let schema = schema_from_parsed(&parsed)?;
+            validate_schema(&schema)?;
+            types.push(schema);
+        }
+
+        // Rename directives render into `ALTER TABLE {table} RENAME COLUMN
+        // {from} TO {to}` verbatim. `table`/`to` are already validated above
+        // (table name + the column's own `name`), but `from` (the old column
+        // name) comes straight from the directive value, so guard it here.
+        for r in &renames {
+            validate_identifier("rename_from", &r.from)?;
+            validate_identifier("rename target", &r.to)?;
         }
 
         Ok(SchemaDoc { types, renames })
     }
+}
+
+/// A safe SQL identifier for the declarative-schema trust boundary:
+/// starts with an ASCII letter or `_`, followed by ASCII letters, digits,
+/// `_`, or `-`. This mirrors the engine's own `is_safe_sql_identifier`
+/// (`sql_engine::helpers`) so a name accepted here is exactly one the engine
+/// already treats as injection-safe; hyphens are allowed because typedef
+/// names like `meeting-minutes` are legitimate. The helper is `pub(super)`
+/// and unreachable from this module, so the rule is re-stated here rather
+/// than relaxing its visibility in a file this task may not touch.
+fn validate_identifier(role: &str, ident: &str) -> Result<()> {
+    let mut chars = ident.chars();
+    let ok = match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        }
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(DoogatError::SqlEngine(format!(
+            "invalid {role}: {ident:?} is not a safe SQL identifier"
+        )))
+    }
+}
+
+/// Validate every interpolation site of an assembled `TableSchema` that
+/// `PlanOp::render_sql` emits without escaping: each column's name, its
+/// `references` target (rendered as `REFERENCES {target}`), and its raw
+/// `data_type` string. ENUM allowed-values are already single-quote-escaped
+/// in `render_column`, so they are not re-checked here.
+fn validate_schema(schema: &TableSchema) -> Result<()> {
+    for col in &schema.columns {
+        validate_identifier("column name", &col.name)?;
+        if let Some(target) = &col.references {
+            validate_identifier("references target", target)?;
+        }
+        validate_data_type(&col.data_type)?;
+    }
+    Ok(())
+}
+
+/// Validate a raw `data_type` string against the engine's own type grammar.
+///
+/// The string is rendered verbatim into DDL by `PlanOp::render_sql`, so it
+/// must be a single, well-formed column type and nothing more. Rather than
+/// inventing a character allow/deny list (which cannot distinguish
+/// `VARCHAR(255)` / `ENUM('a','b')` from smuggled SQL), this parses
+/// `CREATE TABLE _v ("c" <data_type>)` with the same `GenericDialect` the
+/// apply path uses and accepts only when the parse yields exactly one
+/// `CREATE TABLE` statement with exactly one column and no extra constraints.
+/// A `data_type` carrying a statement terminator, an extra column, or any
+/// trailing tokens therefore fails to round-trip and is rejected.
+fn validate_data_type(data_type: &str) -> Result<()> {
+    let probe = format!(r#"CREATE TABLE _v ("c" {data_type})"#);
+    let reject = || {
+        DoogatError::SqlEngine(format!(
+            "invalid data_type: {data_type:?} is not a single well-formed column type"
+        ))
+    };
+    let statements = Parser::parse_sql(&GenericDialect {}, &probe).map_err(|_| reject())?;
+    let [Statement::CreateTable(ct)] = statements.as_slice() else {
+        return Err(reject());
+    };
+    if ct.columns.len() != 1 || !ct.constraints.is_empty() {
+        return Err(reject());
+    }
+    Ok(())
 }
 
 /// Walk a type's `columns` sequence structurally. For each column mapping that
@@ -334,6 +423,166 @@ types:
     fn rejects_missing_types_key() {
         let yaml = "name: project\n";
         assert!(SchemaDoc::from_yaml(yaml).is_err());
+    }
+
+    // --- Identifier / data_type injection guards (PRD 00161 cycle 1 rework) ---
+    //
+    // `from_yaml` is the trust boundary for the schema doc, which arrives as
+    // UNTRUSTED client input via `applySchema` (GraphQL) and `POST
+    // /schema/apply` (REST). Names and `data_type` strings flow verbatim into
+    // `PlanOp::render_sql`'s raw `format!` DDL with no escaping, and the
+    // `allow_destructive` gate keys off PlanOp VARIANTS, not the rendered SQL
+    // text. So a benign-looking AddColumn whose name embeds `DROP TABLE`
+    // smuggles destructive DDL past the gate. These tests pin that `from_yaml`
+    // rejects such inputs at the boundary while still accepting every
+    // legitimate identifier and type the engine supports.
+
+    /// A column name that is not a safe SQL identifier (here it embeds `)`,
+    /// `;`, whitespace, and `--`) must be rejected: rendered verbatim it would
+    /// close the column list early and smuggle a `DROP TABLE`.
+    #[test]
+    fn rejects_column_name_with_injection_payload() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: "x); DROP TABLE users; --"
+        data_type: TEXT
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "an injection payload column name must be rejected at the trust boundary"
+        );
+    }
+
+    /// A table name that is not a safe identifier is rejected. The name becomes
+    /// `CREATE TABLE {name} (...)` verbatim, so a space/paren/semicolon in it
+    /// smuggles arbitrary DDL.
+    #[test]
+    fn rejects_table_name_not_an_identifier() {
+        let yaml = r#"
+types:
+  - name: "project; DROP TABLE users; --"
+    columns:
+      - name: status
+        data_type: TEXT
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a non-identifier table name must be rejected"
+        );
+    }
+
+    /// A `rename_from:` value that is not a safe identifier is rejected. It is
+    /// rendered into `ALTER TABLE {table} RENAME COLUMN {from} TO {to}`
+    /// verbatim, so an injection payload in `from` smuggles DDL.
+    #[test]
+    fn rejects_rename_from_not_an_identifier() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: owner
+        data_type: VARCHAR(100)
+        rename_from: "assignee); DROP TABLE users; --"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a non-identifier rename_from value must be rejected"
+        );
+    }
+
+    /// A `data_type` that smuggles statement-terminating SQL is rejected. The
+    /// raw string is rendered verbatim into the column DDL, so
+    /// `TEXT); DROP TABLE users; --` would close the column list and inject a
+    /// destructive statement that the variant-keyed gate never flags.
+    #[test]
+    fn rejects_data_type_smuggling_sql() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: "TEXT); DROP TABLE users; --"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a data_type that smuggles SQL must be rejected"
+        );
+    }
+
+    /// A `data_type` that parses as two columns (`TEXT, evil TEXT`) is rejected:
+    /// rendered verbatim it would add an undeclared column. Only a single,
+    /// well-formed type token is accepted.
+    #[test]
+    fn rejects_data_type_with_extra_column() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: "TEXT, evil TEXT"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a data_type that introduces an extra column must be rejected"
+        );
+    }
+
+    /// The accept side of the guard: every legitimate identifier and type the
+    /// engine supports must keep parsing. This is the over-restriction guard —
+    /// if validation rejects any of these, it is too strict. Covers VARCHAR(N),
+    /// ENUM('a','b') (parens + quotes + comma), INTEGER, BOOLEAN, TEXT, plus an
+    /// underscore-leading and a hyphenated identifier (the engine's
+    /// `is_safe_sql_identifier` permits hyphens).
+    #[test]
+    fn accepts_legitimate_identifiers_and_types() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: VARCHAR(255)
+      - name: stage
+        data_type: ENUM('open', 'closed')
+      - name: priority
+        data_type: INTEGER
+      - name: active
+        data_type: BOOLEAN
+      - name: notes
+        data_type: TEXT
+      - name: _internal
+        data_type: TEXT
+      - name: meeting-minutes
+        data_type: TEXT
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("all legitimate inputs must keep parsing");
+        assert_eq!(doc.types.len(), 1);
+        let cols = &doc.types[0].columns;
+        assert_eq!(cols.len(), 7);
+        assert_eq!(cols[0].data_type, "VARCHAR(255)");
+        assert_eq!(cols[3].data_type, "BOOLEAN");
+        assert_eq!(cols[5].name, "_internal");
+        assert_eq!(cols[6].name, "meeting-minutes");
+    }
+
+    /// A legitimate `rename_from` with a normal identifier is accepted and
+    /// still captured as a ColumnRename — the guard must not break the
+    /// happy path.
+    #[test]
+    fn accepts_legitimate_rename_from() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: owner
+        data_type: VARCHAR(100)
+        rename_from: assignee
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("a normal rename_from must keep parsing");
+        assert_eq!(doc.renames.len(), 1);
+        assert_eq!(doc.renames[0].from, "assignee");
+        assert_eq!(doc.renames[0].to, "owner");
     }
 
     /// A fully VALID desired doc whose field values contain substrings a

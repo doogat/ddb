@@ -1,8 +1,9 @@
 //! `apply_schema` service verb + `describe_type` (PRD 00161 Phase 1).
 //!
 //! Declarative schema apply: parse a desired-schema YAML doc, diff it against
-//! the live typedefs, and apply the resulting plan one op at a time with
-//! forward-recovery semantics (no rollback — see PRD 00161 §3.5).
+//! the live typedefs, and apply the resulting plan inside a single transaction.
+//! The whole plan flushes as one git commit on success; a mid-plan failure rolls
+//! the transaction back so nothing reaches git (PRD 00161 task 10 + task 11).
 
 use crate::app_contract::{AppOutput, AppWarning, ApplySchemaCommand, SCHEMA_UNSUPPORTED_CHANGE};
 use crate::error::{codes, DoogatError, ErrorValue, Result};
@@ -34,9 +35,12 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
     /// Apply a declarative desired-schema document.
     ///
-    /// Forward-recovery, not rollback: ops apply in order; on failure the
-    /// already-applied ops are reported via `SCHEMA_APPLY_PARTIAL` and left in
-    /// place so a re-apply can converge.
+    /// Atomic, not forward-recovery: the whole plan runs inside one transaction
+    /// (task 10 + task 11). On success every op's git write — including a column
+    /// rename's typedef + row moves — flushes as a single commit. On any op's
+    /// failure the transaction rolls back, git HEAD is unchanged, and the error
+    /// carries `SCHEMA_APPLY_PARTIAL` naming the ops that ran before the failure
+    /// (now undone). Recovery is a clean re-apply.
     pub fn apply_schema(
         &mut self,
         cmd: ApplySchemaCommand,
@@ -95,15 +99,23 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                 Err(e) => {
                     // Discard the buffered writes and roll the SAVEPOINT back so
                     // nothing from this plan lands in git. The original op error
-                    // is the meaningful one; a rollback failure is swallowed
-                    // (Drop also rolls back as a backstop).
-                    let _ = self.rollback_transaction();
+                    // is the meaningful one, but surface the rollback outcome too
+                    // rather than asserting it succeeded: if the rollback itself
+                    // fails the message must not claim a clean rollback (Drop is
+                    // the backstop, reported here so the caller can react).
+                    let rollback_outcome = match self.rollback_transaction() {
+                        Ok(()) => "rolled back".to_string(),
+                        Err(re) => {
+                            format!("rollback ALSO failed ({re}); relying on Drop backstop")
+                        }
+                    };
                     return Err(DoogatError::Structured {
                         code: codes::SCHEMA_APPLY_PARTIAL,
                         message: format!(
-                            "schema apply failed after {} of {} operations and rolled back: {}",
+                            "schema apply failed after {} of {} operations and {}: {}",
                             applied_kinds.len(),
                             plan.ops.len(),
+                            rollback_outcome,
                             e
                         ),
                         context: vec![
@@ -215,6 +227,55 @@ types:
         data_type: VARCHAR(255)
         zone: frontmatter
         required: true
+";
+
+    /// Desired-schema YAML for an existing `widget` (which starts with `label`)
+    /// that renames `label` -> `caption` AND adds a `note` body column in ONE
+    /// apply. The differ emits `RenameColumn` (additive partition, kept in doc
+    /// order) followed by `AddColumn`, so this exercises a rename plus a second
+    /// op flushing in a single transaction.
+    const WIDGET_RENAME_AND_ADD: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: caption
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+        rename_from: label
+      - name: note
+        data_type: TEXT
+        zone: body
+";
+
+    /// Desired-schema YAML whose `types:` list FIRST renames `widget.label` ->
+    /// `caption` (a valid `RenameColumn`) and THEN declares a DISTINCT type
+    /// `gadget` TWICE. The differ emits, in order:
+    ///   RenameColumn(widget) , CreateType(gadget) , CreateType(gadget)
+    /// `RenameColumn` is not a DropColumn, so it stays in the additive partition
+    /// at its doc position — BEFORE the duplicate `CreateType` that fails (the
+    /// type already exists after the first create). The mid-plan failure lands
+    /// AFTER the rename has run inside the transaction, so it proves the rename
+    /// rolls back atomically with the rest of the plan.
+    const WIDGET_RENAME_THEN_DUP_CREATE: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: caption
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+        rename_from: label
+  - name: gadget
+    columns:
+      - name: serial
+        data_type: TEXT
+        zone: body
+  - name: gadget
+    columns:
+      - name: serial
+        data_type: TEXT
+        zone: body
 ";
 
     fn cmd(
@@ -554,6 +615,134 @@ types:
         assert!(
             svc.execute_sql("SELECT note, extra FROM widget").is_ok(),
             "both added columns must be queryable on the materialized table"
+        );
+    }
+
+    #[test]
+    fn apply_with_rename_then_failure_rolls_back_atomically() {
+        // The bug this PRD 00161 cycle-1 rework fixes: a column rename used to
+        // commit IMMEDIATELY (its own git commit), ignoring the open apply
+        // transaction, so a mid-plan failure AFTER the rename stranded a
+        // half-applied migration in git. With the rename routed through the
+        // transaction buffer, a plan that renames `widget.label` -> `caption`
+        // and THEN fails (duplicate `gadget` create) must leave git HEAD exactly
+        // where it was AND leave the rename un-applied: `label` still present,
+        // `caption` absent.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        // Sanity: pre-state has `label`, not `caption`.
+        let before = svc.describe_type("widget").unwrap().unwrap();
+        assert!(has_column(&before, "label"));
+        assert!(!has_column(&before, "caption"));
+
+        let head_before = svc.repo.head_oid().unwrap().0;
+
+        let err = svc
+            // allow_destructive=true: a rename is destructive, so the plan would
+            // otherwise be blocked before any op runs.
+            .apply_schema(cmd(WIDGET_RENAME_THEN_DUP_CREATE, false, true))
+            .expect_err("rename + duplicate-create must fail mid-plan");
+        assert!(
+            matches!(err, crate::error::DoogatError::Structured { .. }),
+            "expected a Structured error, got: {err:?}"
+        );
+        // The partial-apply error surfaces the rollback outcome rather than
+        // swallowing it (cycle-1 finding C): on the success path the message
+        // reports a clean rollback.
+        if let crate::error::DoogatError::Structured { message, .. } = &err {
+            assert!(
+                message.contains("rolled back"),
+                "partial-apply error must surface the rollback outcome: {message}"
+            );
+        }
+
+        // GIT ATOMICITY: HEAD is unchanged — no commit from the rolled-back plan
+        // (the pre-fix immediate rename commit would have advanced HEAD here).
+        let head_after = svc.repo.head_oid().unwrap().0;
+        assert_eq!(
+            head_before, head_after,
+            "a rename inside a failed apply must leave git HEAD unchanged"
+        );
+
+        // THE RENAME DID NOT LAND: `label` is still there, `caption` is absent.
+        let after = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must still exist after the rolled-back apply");
+        assert!(
+            has_column(&after, "label"),
+            "rolled-back rename must keep the old column `label`: {:?}",
+            after.columns
+        );
+        assert!(
+            !has_column(&after, "caption"),
+            "rolled-back rename must NOT have applied `caption`: {:?}",
+            after.columns
+        );
+    }
+
+    #[test]
+    fn apply_renaming_and_adding_produces_single_commit() {
+        // A success plan that renames a column AND adds another in one apply must
+        // produce EXACTLY ONE new git commit, not two. Before the fix the rename
+        // committed immediately and the buffered transaction committed the add
+        // separately -> two commits. We assert HEAD advanced by exactly one
+        // commit: the new HEAD's first parent is the pre-apply HEAD.
+        use crate::traits::GitHistory;
+
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+
+        let head_before = svc.repo.head_oid().unwrap().0;
+
+        let report = svc
+            // allow_destructive=true because a rename is destructive.
+            .apply_schema(cmd(WIDGET_RENAME_AND_ADD, false, true))
+            .unwrap();
+        assert!(report.value.applied, "the rename+add plan must apply");
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "rename_column" && op.table == "widget"),
+            "the plan must contain a rename_column op, got: {:?}",
+            report.value.ops
+        );
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "add_column" && op.table == "widget"),
+            "the plan must contain an add_column op, got: {:?}",
+            report.value.ops
+        );
+
+        let head_after = svc.repo.head_oid().unwrap().0;
+        assert_ne!(
+            head_before, head_after,
+            "a non-empty apply must advance HEAD"
+        );
+        // Exactly one commit added: the new HEAD's first parent is the old HEAD.
+        let parent = svc.repo.commit_parent_oid(&head_after, 0).unwrap();
+        assert_eq!(
+            parent, head_before,
+            "rename+add must flush as ONE commit (new HEAD parent == pre-apply HEAD), not two"
+        );
+
+        // Both the rename and the add landed: `caption` (renamed) and `note`
+        // (added) are present, `label` (old name) is gone.
+        let schema = svc.describe_type("widget").unwrap().unwrap();
+        assert!(has_column(&schema, "caption"), "{:?}", schema.columns);
+        assert!(has_column(&schema, "note"), "{:?}", schema.columns);
+        assert!(!has_column(&schema, "label"), "{:?}", schema.columns);
+        // Materialized table is consistent: the renamed + added columns query.
+        assert!(
+            svc.execute_sql("SELECT caption, note FROM widget").is_ok(),
+            "renamed and added columns must be queryable on the materialized table"
         );
     }
 }
