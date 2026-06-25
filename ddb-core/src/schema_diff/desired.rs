@@ -9,6 +9,16 @@ use crate::types::{DoogatMeta, ParsedDoogat, Value};
 pub struct SchemaDoc {
     /// One [`TableSchema`](crate::types::TableSchema) per declared type.
     pub types: Vec<crate::types::TableSchema>,
+    /// Explicit per-column rename directives, one per `rename_from:` key.
+    pub renames: Vec<ColumnRename>,
+}
+
+/// An explicit column-rename directive: rename `from` to `to` on `table`.
+#[derive(Debug, Clone)]
+pub struct ColumnRename {
+    pub table: String,
+    pub from: String,
+    pub to: String,
 }
 
 impl SchemaDoc {
@@ -22,6 +32,7 @@ impl SchemaDoc {
             .ok_or_else(|| DoogatError::SqlEngine("desired schema missing `types:` sequence".into()))?;
 
         let mut types = Vec::with_capacity(types_seq.len());
+        let mut renames = Vec::new();
         for entry in types_seq {
             let map = entry
                 .as_mapping()
@@ -33,12 +44,19 @@ impl SchemaDoc {
                 .ok_or_else(|| DoogatError::SqlEngine("type entry missing `name`".into()))?
                 .to_string();
 
+            // Capture and strip per-column `rename_from:` directives, then hand
+            // the cleaned columns to schema_from_parsed via `extra`.
+            let columns = strip_renames(map.get("columns"), &name, &mut renames);
+
             let extra: BTreeMap<String, Value> = map
                 .iter()
                 .filter_map(|(k, v)| {
                     let key = k.as_str()?;
                     if key == "name" {
                         return None;
+                    }
+                    if key == "columns" {
+                        return Some(("columns".to_string(), from_serde_yaml(columns.clone())));
                     }
                     Some((key.to_string(), from_serde_yaml(v.clone())))
                 })
@@ -64,8 +82,50 @@ impl SchemaDoc {
             types.push(schema_from_parsed(&parsed)?);
         }
 
-        Ok(SchemaDoc { types })
+        Ok(SchemaDoc { types, renames })
     }
+}
+
+/// Walk a type's `columns` sequence structurally. For each column mapping that
+/// carries a `rename_from:` key, push a [`ColumnRename`] (tagged with `table`,
+/// `from` = the directive value, `to` = the column's own `name:`) and return a
+/// copy of the columns with the `rename_from` key removed so it never reaches
+/// the column assembler. Non-sequence/absent `columns` are passed through
+/// unchanged for the existing assembler to validate.
+fn strip_renames(
+    columns: Option<&serde_yaml::Value>,
+    table: &str,
+    renames: &mut Vec<ColumnRename>,
+) -> serde_yaml::Value {
+    let Some(seq) = columns.and_then(|c| c.as_sequence()) else {
+        return columns.cloned().unwrap_or(serde_yaml::Value::Null);
+    };
+
+    let rename_key = serde_yaml::Value::String("rename_from".to_string());
+    let cleaned: Vec<serde_yaml::Value> = seq
+        .iter()
+        .map(|col| {
+            let Some(map) = col.as_mapping() else {
+                return col.clone();
+            };
+            let Some(from) = map.get(&rename_key).and_then(|v| v.as_str()) else {
+                return col.clone();
+            };
+            let to = map
+                .get(serde_yaml::Value::String("name".to_string()))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            renames.push(ColumnRename {
+                table: table.to_string(),
+                from: from.to_string(),
+                to: to.to_string(),
+            });
+            let mut cleaned = map.clone();
+            cleaned.remove(&rename_key);
+            serde_yaml::Value::Mapping(cleaned)
+        })
+        .collect();
+    serde_yaml::Value::Sequence(cleaned)
 }
 
 #[cfg(test)]

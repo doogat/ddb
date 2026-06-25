@@ -14,7 +14,10 @@ pub fn diff(desired: &SchemaDoc, live: &[Option<TableSchema>]) -> SchemaPlan {
     let mut plan = SchemaPlan { ops: Vec::new(), unsupported: Vec::new() };
     for (i, desired_type) in desired.types.iter().enumerate() {
         match live.get(i).and_then(Option::as_ref) {
-            Some(current) => diff_type(desired_type, current, &mut plan),
+            Some(current) => {
+                let renamed_cols = apply_renames(desired_type, current, desired, &mut plan);
+                diff_type(desired_type, current, &renamed_cols, &mut plan);
+            }
             None => {
                 plan.ops.push(PlanOp::CreateType(desired_type.clone()));
                 if desired_type.search_key.is_some() {
@@ -37,11 +40,68 @@ pub fn diff(desired: &SchemaDoc, live: &[Option<TableSchema>]) -> SchemaPlan {
     plan
 }
 
+/// Consume `desired.renames` for one existing type. Emit a `RenameColumn` (plus
+/// an `AlterColumnType` when the renamed column also retypes) for each valid
+/// directive, flag invalid ones as unsupported, and return the set of valid
+/// `(from, to)` pairs so `diff_type` can suppress the matching Drop/Add.
+fn apply_renames(
+    desired_type: &TableSchema,
+    current: &TableSchema,
+    desired: &SchemaDoc,
+    plan: &mut SchemaPlan,
+) -> Vec<(String, String)> {
+    let table = &desired_type.table_name;
+    let mut valid = Vec::new();
+
+    for r in desired.renames.iter().filter(|r| &r.table == table) {
+        let from_col = current.columns.iter().find(|c| c.name == r.from);
+        let to_in_current = current.columns.iter().any(|c| c.name == r.to);
+        let to_in_desired = desired_type.columns.iter().find(|c| c.name == r.to);
+
+        match (from_col, to_in_current, to_in_desired) {
+            (Some(from_col), false, Some(to_col)) => {
+                plan.ops.push(PlanOp::RenameColumn {
+                    table: table.clone(),
+                    from: r.from.clone(),
+                    to: r.to.clone(),
+                });
+                if to_col.data_type != from_col.data_type {
+                    plan.ops.push(PlanOp::AlterColumnType {
+                        table: table.clone(),
+                        column: r.to.clone(),
+                        new_type: to_col.data_type.clone(),
+                    });
+                }
+                valid.push((r.from.clone(), r.to.clone()));
+            }
+            _ => {
+                let offending = if from_col.is_none() { &r.from } else { &r.to };
+                plan.unsupported.push(format!(
+                    "column {table}.{offending}: rename {} -> {} is unsupported",
+                    r.from, r.to
+                ));
+            }
+        }
+    }
+
+    valid
+}
+
 /// Append ops to converge `current` toward `desired` for one existing type.
-fn diff_type(desired: &TableSchema, current: &TableSchema, plan: &mut SchemaPlan) {
+/// `renames` is the set of valid `(from, to)` pairs already handled by
+/// [`apply_renames`]; their Drop (`from`) and Add (`to`) are suppressed here.
+fn diff_type(
+    desired: &TableSchema,
+    current: &TableSchema,
+    renames: &[(String, String)],
+    plan: &mut SchemaPlan,
+) {
     let table = &desired.table_name;
 
     for desired_col in &desired.columns {
+        if renames.iter().any(|(_, to)| to == &desired_col.name) {
+            continue;
+        }
         match current.columns.iter().find(|c| c.name == desired_col.name) {
             None => plan.ops.push(PlanOp::AddColumn {
                 table: table.clone(),
@@ -110,6 +170,9 @@ fn diff_type(desired: &TableSchema, current: &TableSchema, plan: &mut SchemaPlan
     }
 
     for current_col in &current.columns {
+        if renames.iter().any(|(from, _)| from == &current_col.name) {
+            continue;
+        }
         if !desired.columns.iter().any(|c| c.name == current_col.name) {
             plan.ops.push(PlanOp::DropColumn {
                 table: table.clone(),
