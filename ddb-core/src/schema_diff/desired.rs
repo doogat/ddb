@@ -132,10 +132,28 @@ fn validate_identifier(role: &str, ident: &str) -> Result<()> {
 }
 
 /// Validate every interpolation site of an assembled `TableSchema` that
-/// `PlanOp::render_sql` emits without escaping: each column's name, its
-/// `references` target (rendered as `REFERENCES {target}`), and its raw
-/// `data_type` string. ENUM allowed-values are already single-quote-escaped
-/// in `render_column`, so they are not re-checked here.
+/// `PlanOp::render_sql` emits without escaping. The schema arrives as untrusted
+/// client input, and the `allow_destructive` gate keys off PlanOp *variants*,
+/// not the rendered SQL text, so any unescaped value here can smuggle DDL past
+/// the gate. The sites covered:
+///
+/// - each column's `name` (`render_column`: `{name} {type}` in CreateType /
+///   AddColumn);
+/// - each column's `references` target (`render_column`: `REFERENCES {target}`);
+/// - each column's raw `data_type` (`render_column`'s type token, and the
+///   `AlterColumnType.new_type` the differ copies from a desired column's
+///   `data_type`) — see [`validate_data_type`];
+/// - each column's `default_value` (`render_column`: `DEFAULT {default}`) — see
+///   [`validate_default_value`];
+/// - every `unique_together` column name (CreateType: `UNIQUE({cols.join})`);
+/// - the type's `search_key`, when set (the differ's `SetSearchKey`:
+///   `SET SEARCH KEY {col}`).
+///
+/// Sites NOT checked here because they are inherently safe or guarded
+/// elsewhere: the table name (validated in [`SchemaDoc::from_yaml`] before
+/// assembly), rename `from`/`to` (validated there too), ENUM allowed-values
+/// (single-quote-escaped in `render_column`), the closed zone-token enum, and
+/// `DropColumn` whose column comes from the live schema, not this doc.
 fn validate_schema(schema: &TableSchema) -> Result<()> {
     for col in &schema.columns {
         validate_identifier("column name", &col.name)?;
@@ -143,6 +161,19 @@ fn validate_schema(schema: &TableSchema) -> Result<()> {
             validate_identifier("references target", target)?;
         }
         validate_data_type(&col.data_type)?;
+        if let Some(default) = &col.default_value {
+            validate_default_value(default)?;
+        }
+    }
+    if let Some(constraints) = &schema.unique_together {
+        for cols in constraints {
+            for col in cols {
+                validate_identifier("unique_together column", col)?;
+            }
+        }
+    }
+    if let Some(key) = &schema.search_key {
+        validate_identifier("search key", key)?;
     }
     Ok(())
 }
@@ -163,6 +194,36 @@ fn validate_data_type(data_type: &str) -> Result<()> {
     let reject = || {
         DoogatError::SqlEngine(format!(
             "invalid data_type: {data_type:?} is not a single well-formed column type"
+        ))
+    };
+    let statements = Parser::parse_sql(&GenericDialect {}, &probe).map_err(|_| reject())?;
+    let [Statement::CreateTable(ct)] = statements.as_slice() else {
+        return Err(reject());
+    };
+    if ct.columns.len() != 1 || !ct.constraints.is_empty() {
+        return Err(reject());
+    }
+    Ok(())
+}
+
+/// Validate a raw `default_value` string against the engine's own default-
+/// expression grammar.
+///
+/// The string is rendered verbatim into DDL by `render_column` as
+/// ` DEFAULT {default_value}`, so it must be a single, well-formed default
+/// expression and nothing more. Mirroring [`validate_data_type`], this parses
+/// `CREATE TABLE _v ("c" TEXT DEFAULT {default_value})` with the same
+/// `GenericDialect` the apply path uses and accepts only when the parse yields
+/// exactly one `CREATE TABLE` statement with exactly one column and no extra
+/// constraints. A `default_value` carrying a statement terminator, an extra
+/// column, or any trailing tokens therefore fails to round-trip and is
+/// rejected, while legitimate defaults (numbers, single-quoted strings,
+/// `CURRENT_TIMESTAMP`, `TRUE`/`FALSE`) parse cleanly.
+fn validate_default_value(default_value: &str) -> Result<()> {
+    let probe = format!(r#"CREATE TABLE _v ("c" TEXT DEFAULT {default_value})"#);
+    let reject = || {
+        DoogatError::SqlEngine(format!(
+            "invalid default_value: {default_value:?} is not a single well-formed default expression"
         ))
     };
     let statements = Parser::parse_sql(&GenericDialect {}, &probe).map_err(|_| reject())?;
@@ -529,6 +590,158 @@ types:
         );
     }
 
+    /// A `default_value` that smuggles statement-terminating SQL is rejected.
+    /// It is rendered verbatim by `render_column` as ` DEFAULT {default}`, so
+    /// `0); DROP TABLE users; --` would close the column list and inject a
+    /// destructive statement while the plan still reports a non-destructive
+    /// CreateType/AddColumn that the variant-keyed gate never flags.
+    #[test]
+    fn rejects_default_value_smuggling_sql() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: INTEGER
+        default_value: "0); DROP TABLE users; --"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a default_value that smuggles SQL must be rejected at the trust boundary"
+        );
+    }
+
+    /// A `default_value` that introduces an extra column (`0, evil TEXT`) is
+    /// rejected: rendered verbatim it would add an undeclared column. Only a
+    /// single, well-formed default expression is accepted.
+    #[test]
+    fn rejects_default_value_with_extra_column() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: INTEGER
+        default_value: "0, evil TEXT"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a default_value that introduces an extra column must be rejected"
+        );
+    }
+
+    /// A `unique_together` column name that is not a safe identifier is
+    /// rejected. Each name is rendered verbatim inside `UNIQUE({cols.join})`,
+    /// so an injection payload there would close the constraint list early and
+    /// smuggle DDL past the variant-keyed gate.
+    #[test]
+    fn rejects_unique_together_column_smuggling_sql() {
+        let yaml = r#"
+types:
+  - name: membership
+    columns:
+      - name: status
+        data_type: TEXT
+      - name: owner
+        data_type: TEXT
+    unique_together: [["status", "owner); DROP TABLE users; --"]]
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a unique_together column name that smuggles SQL must be rejected"
+        );
+    }
+
+    /// A `search_key` that is not a safe identifier is rejected. It is rendered
+    /// verbatim into `ALTER TABLE {table} SET SEARCH KEY {col}` by the
+    /// SetSearchKey op the differ emits from the desired type's `search_key`,
+    /// so an injection payload there smuggles DDL.
+    #[test]
+    fn rejects_search_key_smuggling_sql() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: TEXT
+    search_key: "status); DROP TABLE users; --"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(yaml).is_err(),
+            "a search_key that smuggles SQL must be rejected"
+        );
+    }
+
+    /// The accept side of the default_value guard: legitimate defaults the
+    /// engine supports must keep parsing. Covers a single-quoted string
+    /// literal, an integer, the CURRENT_TIMESTAMP keyword, and a boolean
+    /// literal. If validation rejects any of these it is too strict.
+    #[test]
+    fn accepts_legitimate_default_values() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: VARCHAR(50)
+        default_value: "'active'"
+      - name: priority
+        data_type: INTEGER
+        default_value: "0"
+      - name: created
+        data_type: TIMESTAMP
+        default_value: CURRENT_TIMESTAMP
+      - name: active
+        data_type: BOOLEAN
+        default_value: "TRUE"
+"#;
+        let doc =
+            SchemaDoc::from_yaml(yaml).expect("legitimate default values must keep parsing");
+        let cols = &doc.types[0].columns;
+        assert_eq!(cols[0].default_value, Some("'active'".to_string()));
+        assert_eq!(cols[1].default_value, Some("0".to_string()));
+        assert_eq!(cols[2].default_value, Some("CURRENT_TIMESTAMP".to_string()));
+        assert_eq!(cols[3].default_value, Some("TRUE".to_string()));
+    }
+
+    /// The accept side of the unique_together guard: a constraint over two
+    /// normal identifiers must keep parsing and round-trip onto the schema.
+    #[test]
+    fn accepts_legitimate_unique_together() {
+        let yaml = r#"
+types:
+  - name: membership
+    columns:
+      - name: status
+        data_type: TEXT
+      - name: owner
+        data_type: TEXT
+    unique_together: [[status, owner]]
+"#;
+        let doc =
+            SchemaDoc::from_yaml(yaml).expect("legitimate unique_together must keep parsing");
+        assert_eq!(
+            doc.types[0].unique_together,
+            Some(vec![vec!["status".to_string(), "owner".to_string()]])
+        );
+    }
+
+    /// The accept side of the search_key guard: a normal identifier search_key
+    /// must keep parsing and round-trip onto the schema.
+    #[test]
+    fn accepts_legitimate_search_key() {
+        let yaml = r#"
+types:
+  - name: contact
+    columns:
+      - name: email
+        data_type: VARCHAR(255)
+    search_key: email
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("legitimate search_key must keep parsing");
+        assert_eq!(doc.types[0].search_key, Some("email".to_string()));
+    }
+
     /// The accept side of the guard: every legitimate identifier and type the
     /// engine supports must keep parsing. This is the over-restriction guard —
     /// if validation rejects any of these, it is too strict. Covers VARCHAR(N),
@@ -590,7 +803,9 @@ types:
     /// (`unterminated` from the malformed-YAML test, `contact` from the
     /// multi-type test) must still parse and read its fields correctly.
     /// An impl that pattern-matches on those fingerprint substrings instead
-    /// of parsing would misclassify this valid input and fail.
+    /// of parsing would misclassify this valid input and fail. The marker
+    /// lives inside a single-quoted SQL string literal so it is also a
+    /// well-formed `default_value` under the trust-boundary guard.
     #[test]
     fn valid_doc_with_error_marker_substring_parses() {
         let yaml = r#"
@@ -599,7 +814,7 @@ types:
     columns:
       - name: unterminated
         data_type: TEXT
-        default_value: "[unterminated"
+        default_value: "'[unterminated'"
 "#;
         let doc = SchemaDoc::from_yaml(yaml).expect("valid doc with marker substrings parses");
         assert_eq!(doc.types.len(), 1);
@@ -610,7 +825,7 @@ types:
         assert_eq!(contact.columns[0].data_type, "TEXT");
         assert_eq!(
             contact.columns[0].default_value,
-            Some("[unterminated".to_string())
+            Some("'[unterminated'".to_string())
         );
     }
 
