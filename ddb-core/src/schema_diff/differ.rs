@@ -4,7 +4,7 @@
 
 use crate::schema_diff::desired::SchemaDoc;
 use crate::schema_diff::plan::{PlanOp, SchemaPlan};
-use crate::types::TableSchema;
+use crate::types::{ColumnDef, TableSchema};
 
 /// Diff `desired` against `live`, producing an ordered plan of DDL ops.
 ///
@@ -96,79 +96,148 @@ fn diff_type(
     renames: &[(String, String)],
     plan: &mut SchemaPlan,
 ) {
-    let table = &desired.table_name;
+    diff_columns(desired, current, renames, plan);
+    diff_dropped_columns(desired, current, renames, plan);
+    diff_type_attributes(desired, current, plan);
+}
 
+/// Add-or-compare pass over every desired column (renamed targets skipped):
+/// a column missing from `current` is added, a present one is compared.
+fn diff_columns(
+    desired: &TableSchema,
+    current: &TableSchema,
+    renames: &[(String, String)],
+    plan: &mut SchemaPlan,
+) {
+    let table = &desired.table_name;
     for desired_col in &desired.columns {
         if renames.iter().any(|(_, to)| to == &desired_col.name) {
             continue;
         }
         match current.columns.iter().find(|c| c.name == desired_col.name) {
-            None => plan.ops.push(PlanOp::AddColumn {
-                table: table.clone(),
-                column: desired_col.clone(),
-            }),
-            Some(current_col) => {
-                if desired_col.data_type != current_col.data_type {
-                    plan.ops.push(PlanOp::AlterColumnType {
-                        table: table.clone(),
-                        column: desired_col.name.clone(),
-                        new_type: desired_col.data_type.clone(),
-                    });
-                }
-
-                // Live zone as it will be after the (possible) type alter, so a
-                // pure data_type change never emits a consequential SetZone.
-                let mut post_alter = current_col.clone();
-                post_alter.data_type = desired_col.data_type.clone();
-                let desired_zone = desired_col.effective_zone();
-                if post_alter.effective_zone() != desired_zone {
-                    plan.ops.push(PlanOp::SetZone {
-                        table: table.clone(),
-                        column: desired_col.name.clone(),
-                        zone: desired_zone,
-                    });
-                }
-
-                if desired_col.required != current_col.required {
-                    plan.unsupported.push(format!(
-                        "column {}.{}: required change is unsupported",
-                        table, desired_col.name
-                    ));
-                }
-                if desired_col.default_value != current_col.default_value {
-                    plan.unsupported.push(format!(
-                        "column {}.{}: default_value change is unsupported",
-                        table, desired_col.name
-                    ));
-                }
-                if desired_col.references != current_col.references {
-                    plan.unsupported.push(format!(
-                        "column {}.{}: references change is unsupported",
-                        table, desired_col.name
-                    ));
-                }
-                if desired_col.on_delete != current_col.on_delete {
-                    plan.unsupported.push(format!(
-                        "column {}.{}: on_delete change is unsupported",
-                        table, desired_col.name
-                    ));
-                }
-                if desired_col.search_boost != current_col.search_boost {
-                    plan.unsupported.push(format!(
-                        "column {}.{}: search_boost change is unsupported",
-                        table, desired_col.name
-                    ));
-                }
-                if desired_col.allowed_values != current_col.allowed_values {
-                    plan.unsupported.push(format!(
-                        "column {}.{}: allowed_values change is unsupported",
-                        table, desired_col.name
-                    ));
-                }
-            }
+            None => diff_added_column(table, desired_col, plan),
+            Some(current_col) => diff_existing_column(table, desired_col, current_col, plan),
         }
     }
+}
 
+/// Plan the addition of a column absent from `current`.
+///
+/// `ADD COLUMN` carries no inline ZONE (the engine assigns a column added this
+/// way to the zone its `data_type`/`references` infer to). So when the desired
+/// column pins a zone the inference would NOT produce, emit a follow-up
+/// `SetZone` right after the `AddColumn`; otherwise a single apply leaves the
+/// column in the inferred zone and never converges. The check mirrors the
+/// existing-column path: clone the desired column with `zone = None`, take its
+/// `effective_zone()` (exactly what a ZONE-less ADD COLUMN yields), and emit
+/// `SetZone` only when it differs from the desired effective zone.
+fn diff_added_column(table: &str, desired_col: &ColumnDef, plan: &mut SchemaPlan) {
+    plan.ops.push(PlanOp::AddColumn {
+        table: table.to_string(),
+        column: desired_col.clone(),
+    });
+
+    let mut zoneless = desired_col.clone();
+    zoneless.zone = None;
+    let desired_zone = desired_col.effective_zone();
+    if zoneless.effective_zone() != desired_zone {
+        plan.ops.push(PlanOp::SetZone {
+            table: table.to_string(),
+            column: desired_col.name.clone(),
+            zone: desired_zone,
+        });
+    }
+}
+
+/// Compare a desired column against its live counterpart: emit the supported
+/// ops (type alter, consequential zone set) and delegate unsupported
+/// attribute changes to [`flag_unsupported_column_attrs`].
+fn diff_existing_column(
+    table: &str,
+    desired_col: &ColumnDef,
+    current_col: &ColumnDef,
+    plan: &mut SchemaPlan,
+) {
+    if desired_col.data_type != current_col.data_type {
+        plan.ops.push(PlanOp::AlterColumnType {
+            table: table.to_string(),
+            column: desired_col.name.clone(),
+            new_type: desired_col.data_type.clone(),
+        });
+    }
+
+    // Live zone as it will be after the (possible) type alter, so a pure
+    // data_type change never emits a consequential SetZone.
+    let mut post_alter = current_col.clone();
+    post_alter.data_type = desired_col.data_type.clone();
+    let desired_zone = desired_col.effective_zone();
+    if post_alter.effective_zone() != desired_zone {
+        plan.ops.push(PlanOp::SetZone {
+            table: table.to_string(),
+            column: desired_col.name.clone(),
+            zone: desired_zone,
+        });
+    }
+
+    flag_unsupported_column_attrs(table, desired_col, current_col, plan);
+}
+
+/// Flag every column attribute that has no DDL op to converge it
+/// (required/default_value/references/on_delete/search_boost/allowed_values).
+/// Each differing attribute records one unsupported-change warning.
+fn flag_unsupported_column_attrs(
+    table: &str,
+    desired_col: &ColumnDef,
+    current_col: &ColumnDef,
+    plan: &mut SchemaPlan,
+) {
+    if desired_col.required != current_col.required {
+        plan.unsupported.push(format!(
+            "column {}.{}: required change is unsupported",
+            table, desired_col.name
+        ));
+    }
+    if desired_col.default_value != current_col.default_value {
+        plan.unsupported.push(format!(
+            "column {}.{}: default_value change is unsupported",
+            table, desired_col.name
+        ));
+    }
+    if desired_col.references != current_col.references {
+        plan.unsupported.push(format!(
+            "column {}.{}: references change is unsupported",
+            table, desired_col.name
+        ));
+    }
+    if desired_col.on_delete != current_col.on_delete {
+        plan.unsupported.push(format!(
+            "column {}.{}: on_delete change is unsupported",
+            table, desired_col.name
+        ));
+    }
+    if desired_col.search_boost != current_col.search_boost {
+        plan.unsupported.push(format!(
+            "column {}.{}: search_boost change is unsupported",
+            table, desired_col.name
+        ));
+    }
+    if desired_col.allowed_values != current_col.allowed_values {
+        plan.unsupported.push(format!(
+            "column {}.{}: allowed_values change is unsupported",
+            table, desired_col.name
+        ));
+    }
+}
+
+/// Drop every live column absent from `desired` (renamed sources skipped,
+/// since [`apply_renames`] already moved their data).
+fn diff_dropped_columns(
+    desired: &TableSchema,
+    current: &TableSchema,
+    renames: &[(String, String)],
+    plan: &mut SchemaPlan,
+) {
+    let table = &desired.table_name;
     for current_col in &current.columns {
         if renames.iter().any(|(from, _)| from == &current_col.name) {
             continue;
@@ -180,6 +249,12 @@ fn diff_type(
             });
         }
     }
+}
+
+/// Diff the per-type attributes: emit the supported ops (search_key, singleton)
+/// and flag unsupported type-attribute changes. `origin` is never diffed.
+fn diff_type_attributes(desired: &TableSchema, current: &TableSchema, plan: &mut SchemaPlan) {
+    let table = &desired.table_name;
 
     if desired.search_key != current.search_key {
         plan.ops.push(PlanOp::SetSearchKey {
@@ -359,6 +434,61 @@ mod tests {
                 column: col("y", "INTEGER"),
             }],
             "added column must surface as exactly one AddColumn carrying the desired ColumnDef"
+        );
+    }
+
+    /// Adding a column whose explicitly-desired zone differs from what a
+    /// ZONE-less `ADD COLUMN` would infer must converge in ONE apply: the plan
+    /// emits `AddColumn` immediately followed by `SetZone` carrying the desired
+    /// effective zone. Without the follow-up SetZone the engine inserts the
+    /// column into its inferred zone (here Frontmatter for INTEGER), so a single
+    /// apply does not converge even though it reports applied=true.
+    #[test]
+    fn added_column_with_non_default_zone_yields_add_then_set_zone() {
+        // INTEGER infers to Frontmatter via a ZONE-less ADD COLUMN; desired
+        // pins Body, so the inferred zone is wrong and needs a SetZone.
+        let mut desired_col = col("count", "INTEGER");
+        desired_col.zone = Some(Zone::Body);
+        let desired = tbl("a", vec![col("x", "TEXT"), desired_col.clone()]);
+        let live = tbl("a", vec![col("x", "TEXT")]);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(
+            plan.ops,
+            vec![
+                PlanOp::AddColumn {
+                    table: "a".into(),
+                    column: desired_col,
+                },
+                PlanOp::SetZone {
+                    table: "a".into(),
+                    column: "count".into(),
+                    zone: Zone::Body,
+                },
+            ],
+            "an added column with a non-inferable desired zone must emit AddColumn then SetZone, in that order"
+        );
+    }
+
+    /// The negative: when the desired column's effective zone EQUALS what a
+    /// ZONE-less `ADD COLUMN` would infer, no spurious SetZone is emitted. Here
+    /// INTEGER infers to Frontmatter and the desired zone is also Frontmatter,
+    /// so AddColumn alone converges.
+    #[test]
+    fn added_column_with_default_matching_zone_yields_only_add() {
+        let mut desired_col = col("count", "INTEGER");
+        desired_col.zone = Some(Zone::Frontmatter); // matches INTEGER inference
+        let desired = tbl("a", vec![col("x", "TEXT"), desired_col.clone()]);
+        let live = tbl("a", vec![col("x", "TEXT")]);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(
+            plan.ops,
+            vec![PlanOp::AddColumn {
+                table: "a".into(),
+                column: desired_col,
+            }],
+            "an added column whose desired zone equals the inferred zone must not emit a SetZone"
         );
     }
 
