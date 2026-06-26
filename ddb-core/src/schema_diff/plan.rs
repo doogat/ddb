@@ -330,7 +330,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE contact (email VARCHAR(255) NOT NULL ZONE frontmatter)"
+            r#"CREATE TABLE "contact" ("email" VARCHAR(255) NOT NULL ZONE frontmatter)"#
         );
         assert_eq!(op.kind(), "create_type");
     }
@@ -351,7 +351,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE project (status VARCHAR(50), owner VARCHAR(100))"
+            r#"CREATE TABLE "project" ("status" VARCHAR(50), "owner" VARCHAR(100))"#
         );
     }
 
@@ -365,7 +365,7 @@ mod tests {
             false,
             None,
         ));
-        assert_eq!(op.render_sql(), "CREATE TABLE project (status VARCHAR(50))");
+        assert_eq!(op.render_sql(), r#"CREATE TABLE "project" ("status" VARCHAR(50))"#);
         assert!(!op.render_sql().contains("ZONE"));
     }
 
@@ -386,7 +386,7 @@ mod tests {
             false,
             None,
         ));
-        assert_eq!(body.render_sql(), "CREATE TABLE note (content TEXT ZONE body)");
+        assert_eq!(body.render_sql(), r#"CREATE TABLE "note" ("content" TEXT ZONE body)"#);
 
         let reference = PlanOp::CreateType(schema(
             "task",
@@ -404,7 +404,7 @@ mod tests {
         ));
         assert_eq!(
             reference.render_sql(),
-            "CREATE TABLE task (project VARCHAR(100) ZONE reference)"
+            r#"CREATE TABLE "task" ("project" VARCHAR(100) ZONE reference)"#
         );
     }
 
@@ -428,7 +428,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE project (status VARCHAR(50) DEFAULT active)"
+            r#"CREATE TABLE "project" ("status" VARCHAR(50) DEFAULT active)"#
         );
     }
 
@@ -452,7 +452,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE task (owner VARCHAR(100) REFERENCES contact)"
+            r#"CREATE TABLE "task" ("owner" VARCHAR(100) REFERENCES "contact")"#
         );
         assert!(!op.render_sql().contains("ON DELETE"));
     }
@@ -476,7 +476,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE task (owner VARCHAR(100) REFERENCES contact ON DELETE CASCADE)"
+            r#"CREATE TABLE "task" ("owner" VARCHAR(100) REFERENCES "contact" ON DELETE CASCADE)"#
         );
     }
 
@@ -500,7 +500,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE task (owner VARCHAR(100) NOT NULL DEFAULT nobody REFERENCES contact ON DELETE CASCADE ZONE reference)"
+            r#"CREATE TABLE "task" ("owner" VARCHAR(100) NOT NULL DEFAULT nobody REFERENCES "contact" ON DELETE CASCADE ZONE reference)"#
         );
     }
 
@@ -515,7 +515,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE settings (theme VARCHAR(50)) SINGLETON"
+            r#"CREATE TABLE "settings" ("theme" VARCHAR(50)) SINGLETON"#
         );
     }
 
@@ -539,7 +539,7 @@ mod tests {
         ));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE membership (team VARCHAR(50), person VARCHAR(50), UNIQUE(team, person), UNIQUE(person))"
+            r#"CREATE TABLE "membership" ("team" VARCHAR(50), "person" VARCHAR(50), UNIQUE("team", "person"), UNIQUE("person"))"#
         );
     }
 
@@ -553,7 +553,7 @@ mod tests {
             false,
             Some(vec![]),
         ));
-        assert_eq!(op.render_sql(), "CREATE TABLE project (status VARCHAR(50))");
+        assert_eq!(op.render_sql(), r#"CREATE TABLE "project" ("status" VARCHAR(50))"#);
         assert!(!op.render_sql().contains("UNIQUE"));
     }
 
@@ -569,7 +569,7 @@ mod tests {
         );
         s.search_key = Some("email".into());
         let op = PlanOp::CreateType(s);
-        assert_eq!(op.render_sql(), "CREATE TABLE contact (email VARCHAR(255))");
+        assert_eq!(op.render_sql(), r#"CREATE TABLE "contact" ("email" VARCHAR(255))"#);
         assert!(!op.render_sql().contains("SEARCH KEY"));
     }
 
@@ -593,7 +593,7 @@ mod tests {
         let op = PlanOp::CreateType(schema("task", vec![status], false, None));
         assert_eq!(
             op.render_sql(),
-            "CREATE TABLE task (status ENUM('todo', 'doing', 'done'))"
+            r#"CREATE TABLE "task" ("status" ENUM('todo', 'doing', 'done'))"#
         );
     }
 
@@ -618,7 +618,7 @@ mod tests {
         };
         assert_eq!(
             op.render_sql(),
-            "ALTER TABLE task ADD COLUMN status ENUM('todo', 'done')"
+            r#"ALTER TABLE "task" ADD COLUMN "status" ENUM('todo', 'done')"#
         );
     }
 
@@ -630,7 +630,7 @@ mod tests {
         };
         assert_eq!(
             op.render_sql(),
-            "ALTER TABLE contact ADD COLUMN phone VARCHAR(30)"
+            r#"ALTER TABLE "contact" ADD COLUMN "phone" VARCHAR(30)"#
         );
         assert_eq!(op.kind(), "add_column");
     }
@@ -653,7 +653,7 @@ mod tests {
         };
         assert_eq!(
             op.render_sql(),
-            "ALTER TABLE task ADD COLUMN owner VARCHAR(100) NOT NULL DEFAULT nobody REFERENCES contact ON DELETE CASCADE"
+            r#"ALTER TABLE "task" ADD COLUMN "owner" VARCHAR(100) NOT NULL DEFAULT nobody REFERENCES "contact" ON DELETE CASCADE"#
         );
     }
 
@@ -675,7 +675,7 @@ mod tests {
         };
         assert_eq!(
             op.render_sql(),
-            "ALTER TABLE contact ADD COLUMN email VARCHAR(255)"
+            r#"ALTER TABLE "contact" ADD COLUMN "email" VARCHAR(255)"#
         );
         assert!(!op.render_sql().contains("ZONE"));
     }
@@ -689,7 +689,7 @@ mod tests {
         };
         assert_eq!(
             op.render_sql(),
-            "ALTER TABLE contact ALTER COLUMN email TYPE TEXT"
+            r#"ALTER TABLE "contact" ALTER COLUMN "email" TYPE TEXT"#
         );
         assert_eq!(op.kind(), "alter_column_type");
     }
@@ -705,7 +705,7 @@ mod tests {
         };
         assert_eq!(
             op.render_sql(),
-            "ALTER TABLE contact SET ZONE body FOR email"
+            r#"ALTER TABLE "contact" SET ZONE body FOR "email""#
         );
         assert_eq!(op.kind(), "set_zone");
     }
@@ -716,7 +716,7 @@ mod tests {
             table: "contact".into(),
             column: Some("fqn".into()),
         };
-        assert_eq!(op.render_sql(), "ALTER TABLE contact SET SEARCH KEY fqn");
+        assert_eq!(op.render_sql(), r#"ALTER TABLE "contact" SET SEARCH KEY "fqn""#);
         assert_eq!(op.kind(), "set_search_key");
     }
 
@@ -728,7 +728,7 @@ mod tests {
             table: "contact".into(),
             column: None,
         };
-        assert_eq!(op.render_sql(), "ALTER TABLE contact DROP SEARCH KEY");
+        assert_eq!(op.render_sql(), r#"ALTER TABLE "contact" DROP SEARCH KEY"#);
         assert_eq!(op.kind(), "set_search_key");
     }
 
@@ -738,7 +738,7 @@ mod tests {
             table: "settings".into(),
             on: true,
         };
-        assert_eq!(op.render_sql(), "ALTER TABLE settings SET SINGLETON");
+        assert_eq!(op.render_sql(), r#"ALTER TABLE "settings" SET SINGLETON"#);
         assert_eq!(op.kind(), "set_singleton");
     }
 
@@ -749,7 +749,7 @@ mod tests {
             table: "settings".into(),
             on: false,
         };
-        assert_eq!(op.render_sql(), "ALTER TABLE settings DROP SINGLETON");
+        assert_eq!(op.render_sql(), r#"ALTER TABLE "settings" DROP SINGLETON"#);
         assert_eq!(op.kind(), "set_singleton");
     }
 
@@ -762,7 +762,7 @@ mod tests {
         };
         assert_eq!(
             op.render_sql(),
-            "ALTER TABLE contact RENAME COLUMN mail TO email"
+            r#"ALTER TABLE "contact" RENAME COLUMN "mail" TO "email""#
         );
         assert_eq!(op.kind(), "rename_column");
     }
@@ -773,8 +773,38 @@ mod tests {
             table: "contact".into(),
             column: "fax".into(),
         };
-        assert_eq!(op.render_sql(), "ALTER TABLE contact DROP COLUMN fax");
+        assert_eq!(op.render_sql(), r#"ALTER TABLE "contact" DROP COLUMN "fax""#);
         assert_eq!(op.kind(), "drop_column");
+    }
+
+    #[test]
+    fn render_hyphenated_identifiers_are_quoted_in_create_and_add() {
+        // The bug this contract fixes: hyphenated names pass SchemaDoc
+        // validation (e.g. type `meeting-minutes`, column `long-desc`), but a
+        // bare-identifier render emits DDL the SQL parser rejects on the `-`.
+        // Every identifier the render emits must be double-quoted so a
+        // hyphenated name round-trips — the table name AND the column name, in
+        // both CreateType and AddColumn. Non-identifiers (the TEXT data type)
+        // stay unquoted.
+        let create = PlanOp::CreateType(schema(
+            "meeting-minutes",
+            vec![simple_col("long-desc", "TEXT")],
+            false,
+            None,
+        ));
+        assert_eq!(
+            create.render_sql(),
+            r#"CREATE TABLE "meeting-minutes" ("long-desc" TEXT)"#
+        );
+
+        let add = PlanOp::AddColumn {
+            table: "meeting-minutes".into(),
+            column: simple_col("long-desc", "TEXT"),
+        };
+        assert_eq!(
+            add.render_sql(),
+            r#"ALTER TABLE "meeting-minutes" ADD COLUMN "long-desc" TEXT"#
+        );
     }
 
     #[test]
@@ -1027,7 +1057,7 @@ mod tests {
         };
         assert_eq!(
             plan.to_sql(),
-            "ALTER TABLE contact DROP COLUMN fax;\nALTER TABLE contact SET SINGLETON;"
+            "ALTER TABLE \"contact\" DROP COLUMN \"fax\";\nALTER TABLE \"contact\" SET SINGLETON;"
         );
     }
 
@@ -1040,7 +1070,7 @@ mod tests {
             }],
             unsupported: vec![],
         };
-        assert_eq!(plan.to_sql(), "ALTER TABLE contact DROP SINGLETON;");
+        assert_eq!(plan.to_sql(), "ALTER TABLE \"contact\" DROP SINGLETON;");
     }
 
     // ── SchemaApplyReport::from_plan ────────────────────────────────────
@@ -1114,7 +1144,7 @@ mod tests {
         assert_eq!(r.destructive, drop.is_destructive());
         assert!(r.destructive); // DropColumn is destructive — pins the bool, not just equality
         assert_eq!(r.sql, drop.render_sql());
-        assert_eq!(r.sql, "ALTER TABLE contact DROP COLUMN fax");
+        assert_eq!(r.sql, r#"ALTER TABLE "contact" DROP COLUMN "fax""#);
     }
 
     #[test]

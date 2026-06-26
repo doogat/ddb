@@ -278,6 +278,68 @@ types:
         zone: body
 ";
 
+    /// Desired-schema YAML for a HYPHENATED type `meeting-minutes` with a
+    /// single HYPHENATED body column `long-desc`. Both names pass `SchemaDoc`
+    /// validation (the validator deliberately accepts hyphens), so the apply
+    /// must render quoted DDL the engine accepts and round-trips. With bare
+    /// identifiers the SQL parser chokes on the `-`, the transactional apply
+    /// rolls back, and the error is SCHEMA_APPLY_PARTIAL.
+    const HYPHENATED_TYPE_AND_COLUMN: &str = "\
+types:
+  - name: meeting-minutes
+    columns:
+      - name: long-desc
+        data_type: TEXT
+        zone: body
+";
+
+    /// The same hyphenated `meeting-minutes` type plus a SECOND hyphenated body
+    /// column `extra-notes`. Applied over the live one-column type it plans a
+    /// single `add_column` op carrying hyphenated identifiers (table + column)
+    /// into an `ALTER TABLE ... ADD COLUMN`.
+    const HYPHENATED_TYPE_ADD_COLUMN: &str = "\
+types:
+  - name: meeting-minutes
+    columns:
+      - name: long-desc
+        data_type: TEXT
+        zone: body
+      - name: extra-notes
+        data_type: TEXT
+        zone: body
+";
+
+    /// Renames `meeting-minutes.long-desc` -> `short-desc` via `rename_from`.
+    /// Applied over the live hyphenated type it plans a destructive
+    /// `rename_column` op whose table name AND both from/to column names are
+    /// hyphenated identifiers.
+    const HYPHENATED_RENAME: &str = "\
+types:
+  - name: meeting-minutes
+    columns:
+      - name: short-desc
+        data_type: TEXT
+        zone: body
+        rename_from: long-desc
+";
+
+    /// A hyphenated type with two hyphenated columns and a `unique_together`
+    /// over BOTH of them. The constraint renders inside the CreateType as
+    /// `UNIQUE(\"long-desc\", \"extra-notes\")`; if those constraint columns are
+    /// not quoted the parser rejects the `-` and the apply rolls back.
+    const HYPHENATED_UNIQUE_TOGETHER: &str = "\
+types:
+  - name: meeting-minutes
+    columns:
+      - name: long-desc
+        data_type: TEXT
+        zone: body
+      - name: extra-notes
+        data_type: TEXT
+        zone: body
+    unique_together: [[long-desc, extra-notes]]
+";
+
     fn cmd(
         doc: &str,
         dry_run: bool,
@@ -744,5 +806,171 @@ types:
             svc.execute_sql("SELECT caption, note FROM widget").is_ok(),
             "renamed and added columns must be queryable on the materialized table"
         );
+    }
+
+    #[test]
+    fn apply_hyphenated_type_and_column_succeeds_and_is_idempotent() {
+        // Regression for the schema-apply DDL quoting bug. A type and a column
+        // whose names contain hyphens pass SchemaDoc validation, so the apply
+        // MUST render quoted DDL the engine accepts and round-trips. Before the
+        // fix the rendered DDL is bare (`CREATE TABLE meeting-minutes (...)`),
+        // the SQL parser rejects the `-`, the transactional apply rolls back,
+        // and the error is SCHEMA_APPLY_PARTIAL. dry_run=false drives the real
+        // DDL through the engine, so a bare-identifier impl fails here.
+        let (_tmp, mut svc) = fresh_svc();
+
+        let report = svc
+            .apply_schema(cmd(HYPHENATED_TYPE_AND_COLUMN, false, false))
+            .expect("applying a hyphenated type+column must succeed, not fail mid-plan");
+        assert!(
+            report.value.applied,
+            "a hyphenated type+column apply must report applied=true (no SCHEMA_APPLY_PARTIAL)"
+        );
+        assert_eq!(
+            report.value.ops.len(),
+            1,
+            "creating one hyphenated type must plan exactly one op, got: {:?}",
+            report.value.ops
+        );
+        assert_eq!(report.value.ops[0].kind, "create_type");
+        assert_eq!(report.value.ops[0].table, "meeting-minutes");
+
+        // The type really exists with its hyphenated column: proof the quoted
+        // DDL round-tripped and the engine stored the unquoted inner names.
+        let schema = svc
+            .describe_type("meeting-minutes")
+            .unwrap()
+            .expect("meeting-minutes must exist after a non-dry-run apply");
+        assert!(
+            has_column(&schema, "long-desc"),
+            "applied schema is missing the declared hyphenated column `long-desc`: {:?}",
+            schema.columns
+        );
+
+        // Re-applying the identical doc converges to a no-op: empty plan,
+        // applied=false. Guards against a non-idempotent re-render.
+        let report = svc
+            .apply_schema(cmd(HYPHENATED_TYPE_AND_COLUMN, false, false))
+            .unwrap();
+        assert!(
+            !report.value.applied,
+            "re-applying the converged hyphenated doc must not report applied"
+        );
+        assert!(
+            report.value.ops.is_empty(),
+            "re-applying the converged hyphenated doc must produce no ops, got: {:?}",
+            report.value.ops
+        );
+    }
+
+    #[test]
+    fn apply_adds_hyphenated_column_to_existing_hyphenated_type() {
+        // ALTER path: a hyphenated column added to an existing hyphenated type
+        // renders `ALTER TABLE "meeting-minutes" ADD COLUMN "extra-notes" TEXT`.
+        // Both identifiers must be quoted or the parser rejects the `-` and the
+        // apply rolls back with SCHEMA_APPLY_PARTIAL. Non-destructive, so it
+        // must apply without allow_destructive.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(HYPHENATED_TYPE_AND_COLUMN, false, false))
+            .unwrap();
+
+        let report = svc
+            .apply_schema(cmd(HYPHENATED_TYPE_ADD_COLUMN, false, false))
+            .expect("adding a hyphenated column must succeed, not fail mid-plan");
+        assert!(report.value.applied, "adding a hyphenated column must apply");
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "add_column" && op.table == "meeting-minutes"),
+            "must plan an add_column op on the hyphenated type, got: {:?}",
+            report.value.ops
+        );
+
+        let schema = svc
+            .describe_type("meeting-minutes")
+            .unwrap()
+            .expect("meeting-minutes must exist after the add-column apply");
+        for col in ["long-desc", "extra-notes"] {
+            assert!(
+                has_column(&schema, col),
+                "add-column apply must keep/add hyphenated column `{col}`: {:?}",
+                schema.columns
+            );
+        }
+    }
+
+    #[test]
+    fn apply_renames_hyphenated_column_on_hyphenated_type() {
+        // Destructive rename path: `meeting-minutes.long-desc` -> `short-desc`
+        // renders `ALTER TABLE "meeting-minutes" RENAME COLUMN "long-desc" TO
+        // "short-desc"`. The table name and BOTH column names are hyphenated, so
+        // all three must be quoted for the rename to apply. allow_destructive
+        // because a rename is destructive.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(HYPHENATED_TYPE_AND_COLUMN, false, false))
+            .unwrap();
+
+        let report = svc
+            .apply_schema(cmd(HYPHENATED_RENAME, false, true))
+            .expect("renaming a hyphenated column must succeed, not fail mid-plan");
+        assert!(report.value.applied, "the hyphenated rename must apply");
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "rename_column" && op.table == "meeting-minutes"),
+            "must plan a rename_column op on the hyphenated type, got: {:?}",
+            report.value.ops
+        );
+
+        let schema = svc
+            .describe_type("meeting-minutes")
+            .unwrap()
+            .expect("meeting-minutes must exist after the rename apply");
+        assert!(
+            has_column(&schema, "short-desc"),
+            "rename must produce the new hyphenated column `short-desc`: {:?}",
+            schema.columns
+        );
+        assert!(
+            !has_column(&schema, "long-desc"),
+            "rename must remove the old hyphenated column `long-desc`: {:?}",
+            schema.columns
+        );
+    }
+
+    #[test]
+    fn apply_hyphenated_unique_together_succeeds() {
+        // unique_together over hyphenated columns renders inside the CreateType
+        // as `UNIQUE("long-desc", "extra-notes")`. Those constraint column names
+        // are identifiers and must be quoted independently of the column
+        // definitions; an unquoted `UNIQUE(long-desc, ...)` makes the parser
+        // reject the `-` and the apply rolls back with SCHEMA_APPLY_PARTIAL.
+        // Apply success is the signal that the UNIQUE() identifiers rendered
+        // quoted.
+        let (_tmp, mut svc) = fresh_svc();
+
+        let report = svc
+            .apply_schema(cmd(HYPHENATED_UNIQUE_TOGETHER, false, false))
+            .expect("a hyphenated unique_together create must succeed, not fail mid-plan");
+        assert!(
+            report.value.applied,
+            "a hyphenated unique_together create must apply"
+        );
+
+        let schema = svc
+            .describe_type("meeting-minutes")
+            .unwrap()
+            .expect("meeting-minutes must exist after the unique_together apply");
+        for col in ["long-desc", "extra-notes"] {
+            assert!(
+                has_column(&schema, col),
+                "unique_together create must declare hyphenated column `{col}`: {:?}",
+                schema.columns
+            );
+        }
     }
 }
