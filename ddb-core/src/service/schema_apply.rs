@@ -340,6 +340,25 @@ types:
     unique_together: [[long-desc, extra-notes]]
 ";
 
+    /// Desired-schema YAML for a NORMAL (non-hyphenated, non-allowlisted) type
+    /// `ledger` whose single body column name is the SQL reserved word `primary`.
+    /// `primary` is a clean identifier character-wise (so `SchemaDoc` validation
+    /// accepts it), but a BARE `primary` is rejected by the engine's SQL parser
+    /// — it reads as the start of a `PRIMARY KEY` constraint, not a column name —
+    /// so the apply only round-trips if the renderer double-quotes the
+    /// identifier (forcing identifier interpretation). The name is neither
+    /// hyphenated nor in any plausible allowlist, so this kills both a
+    /// hyphen-only and a hardcoded-name-allowlist quoting impl: only a renderer
+    /// that quotes EVERY identifier survives.
+    const RESERVED_WORD_COLUMN: &str = "\
+types:
+  - name: ledger
+    columns:
+      - name: primary
+        data_type: TEXT
+        zone: body
+";
+
     fn cmd(
         doc: &str,
         dry_run: bool,
@@ -972,5 +991,64 @@ types:
                 schema.columns
             );
         }
+    }
+
+    #[test]
+    fn apply_reserved_word_column_succeeds_and_is_idempotent() {
+        // The ROBUST kill for the DDL-quoting contract. A column named with a SQL
+        // reserved word (`primary`) on a NORMAL, non-hyphenated, non-allowlisted
+        // type (`ledger`). The engine's SQL parser rejects a BARE `primary` (it
+        // reads as the start of a `PRIMARY KEY` constraint, not a column name),
+        // so the only way this apply round-trips is if the renderer double-quotes
+        // the identifier. Because the name is neither hyphenated nor in any
+        // plausible allowlist, this fails against BOTH a hyphen-only quoting impl
+        // and a hardcoded-name-allowlist impl — only a renderer that quotes EVERY
+        // identifier passes. Unlike a render golden, this exercises the real
+        // engine parser, so no allowlist memorization can fake the pass.
+        // dry_run=false drives the real DDL through the engine.
+        let (_tmp, mut svc) = fresh_svc();
+
+        let report = svc
+            .apply_schema(cmd(RESERVED_WORD_COLUMN, false, false))
+            .expect("applying a reserved-word column must succeed, not fail mid-plan");
+        assert!(
+            report.value.applied,
+            "a reserved-word column apply must report applied=true (no SCHEMA_APPLY_PARTIAL)"
+        );
+        assert_eq!(
+            report.value.ops.len(),
+            1,
+            "creating one type must plan exactly one op, got: {:?}",
+            report.value.ops
+        );
+        assert_eq!(report.value.ops[0].kind, "create_type");
+        assert_eq!(report.value.ops[0].table, "ledger");
+
+        // The reserved-word column persists: proof the quoted DDL round-tripped
+        // and the engine stored the unquoted inner name.
+        let schema = svc
+            .describe_type("ledger")
+            .unwrap()
+            .expect("ledger must exist after a non-dry-run apply");
+        assert!(
+            has_column(&schema, "primary"),
+            "applied schema is missing the reserved-word column `primary`: {:?}",
+            schema.columns
+        );
+
+        // Re-applying the identical doc converges to a no-op: empty plan,
+        // applied=false. Guards against a non-idempotent re-render.
+        let report = svc
+            .apply_schema(cmd(RESERVED_WORD_COLUMN, false, false))
+            .unwrap();
+        assert!(
+            !report.value.applied,
+            "re-applying the converged reserved-word doc must not report applied"
+        );
+        assert!(
+            report.value.ops.is_empty(),
+            "re-applying the converged reserved-word doc must produce no ops, got: {:?}",
+            report.value.ops
+        );
     }
 }

@@ -808,6 +808,25 @@ mod tests {
     }
 
     #[test]
+    fn render_create_type_quotes_reserved_word_and_novel_identifiers() {
+        // The render-level pin for NOVEL names: a column named with the SQL
+        // reserved word `order` on a non-allowlisted type `ledger` must still be
+        // double-quoted. Neither name is hyphenated, and neither is in the
+        // finite golden set the other render_* tests use, so this kills a
+        // quote-only-on-hyphen impl AND a quote-only-for-a-hardcoded-name
+        // -allowlist impl: every identifier the render emits is quoted, not just
+        // the ones prior tests happen to exercise. (Non-identifiers — the TEXT
+        // data type — stay unquoted.)
+        let op = PlanOp::CreateType(schema(
+            "ledger",
+            vec![simple_col("order", "TEXT")],
+            false,
+            None,
+        ));
+        assert_eq!(op.render_sql(), r#"CREATE TABLE "ledger" ("order" TEXT)"#);
+    }
+
+    #[test]
     fn render_sql_has_no_trailing_semicolon() {
         // Cross-variant invariant: render_sql never ends with ';'.
         let ops = vec![
