@@ -53,6 +53,13 @@ impl SchemaDoc {
             // safe SQL identifier before it can smuggle DDL.
             validate_identifier("table name", &name)?;
 
+            // Trust-boundary check: the column zone parser (sql_engine::builders)
+            // matches `zone:` case-sensitively and silently coerces any
+            // unrecognized value to Zone::Body, so a typo would converge to the
+            // wrong zone with no error. Reject invalid zone tokens here, while
+            // the raw string still exists (assembly discards it into the enum).
+            validate_zone_tokens(map.get("columns"), &name)?;
+
             // Capture and strip per-column `rename_from:` directives, then hand
             // the cleaned columns to schema_from_parsed via `extra`.
             let columns = strip_renames(map.get("columns"), &name, &mut renames);
@@ -129,6 +136,35 @@ fn validate_identifier(role: &str, ident: &str) -> Result<()> {
             "invalid {role}: {ident:?} is not a safe SQL identifier"
         )))
     }
+}
+
+/// Trust-boundary check for inline column `zone:` declarations.
+/// `parse_optional_column_fields` (`sql_engine::builders`) matches the zone
+/// token with an exact, case-sensitive `match` and silently coerces any
+/// unrecognized value to `Zone::Body`, so a typo (`Frontmatter`) or a
+/// non-string value would converge to the wrong zone with no error. Walk the
+/// raw columns and reject any present `zone:` value that is not exactly one of
+/// the three tokens that parser accepts. An absent `zone:` is fine — the engine
+/// then infers the zone from the column type. This mirrors the accepted set in
+/// `parse_optional_column_fields` exactly, so a doc accepted here is one the
+/// parser reads identically.
+fn validate_zone_tokens(columns: Option<&serde_yaml::Value>, table: &str) -> Result<()> {
+    let Some(seq) = columns.and_then(|c| c.as_sequence()) else {
+        return Ok(());
+    };
+    for col in seq {
+        let Some(map) = col.as_mapping() else { continue };
+        let Some(zone) = map.get("zone") else { continue };
+        if !matches!(
+            zone.as_str(),
+            Some("frontmatter") | Some("body") | Some("reference")
+        ) {
+            return Err(DoogatError::SqlEngine(format!(
+                "invalid zone in type {table:?}: {zone:?} is not one of frontmatter, body, reference"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Validate every interpolation site of an assembled `TableSchema` that
@@ -377,6 +413,84 @@ types:
         assert_eq!(cols[0].effective_zone(), Zone::Body);
         assert_eq!(cols[1].zone, Some(Zone::Frontmatter));
         assert_eq!(cols[1].effective_zone(), Zone::Frontmatter);
+    }
+
+    /// Trust-boundary guard (blind-review IMPORTANT-3): an invalid `zone:`
+    /// token must be REJECTED, not silently coerced to Body. The parser matches
+    /// case-sensitively, so a mis-cased `Frontmatter`, a typo, and a non-string
+    /// value each fail. Without the guard these parse "successfully" and
+    /// converge the column to the wrong (Body) zone — silent wrong state from
+    /// untrusted schema-doc input.
+    #[test]
+    fn invalid_zone_token_is_rejected() {
+        let miscased = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: VARCHAR(50)
+        zone: Frontmatter
+"#;
+        assert!(
+            SchemaDoc::from_yaml(miscased).is_err(),
+            "mis-cased zone 'Frontmatter' must be rejected, not coerced to Body"
+        );
+
+        let typo = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: VARCHAR(50)
+        zone: frontmatte
+"#;
+        assert!(
+            SchemaDoc::from_yaml(typo).is_err(),
+            "typo zone 'frontmatte' must be rejected, not coerced to Body"
+        );
+
+        let non_string = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: VARCHAR(50)
+        zone: 7
+"#;
+        assert!(
+            SchemaDoc::from_yaml(non_string).is_err(),
+            "a non-string zone value must be rejected, not silently ignored"
+        );
+    }
+
+    /// The guard accepts every valid zone token (it mirrors the parser's
+    /// accepted set) and an omitted `zone:` still parses, falling back to type
+    /// inference. Pins that the guard does not over-reject legitimate docs.
+    #[test]
+    fn all_valid_zone_tokens_and_omitted_zone_accepted() {
+        let yaml = r#"
+types:
+  - name: project
+    columns:
+      - name: a
+        data_type: VARCHAR(50)
+        zone: frontmatter
+      - name: b
+        data_type: TEXT
+        zone: body
+      - name: owner
+        data_type: VARCHAR(100)
+        references: contact
+        zone: reference
+      - name: inferred
+        data_type: VARCHAR(50)
+"#;
+        let doc = SchemaDoc::from_yaml(yaml).expect("all valid zone tokens + omitted zone parse");
+        let cols = &doc.types[0].columns;
+        assert_eq!(cols[0].zone, Some(Zone::Frontmatter));
+        assert_eq!(cols[1].zone, Some(Zone::Body));
+        assert_eq!(cols[2].zone, Some(Zone::Reference));
+        assert_eq!(cols[3].zone, None);
     }
 
     /// `required: true` is parsed onto ColumnDef.required; a column without

@@ -547,8 +547,9 @@ fn ffi_singleton_create_exposes_structured_error_context() {
 //
 // `DoogatDriver::apply_schema(schema_doc, dry_run, allow_destructive)` delegates to
 // the core `DoogatService::apply_schema` verb: it diffs a desired-schema YAML doc
-// against live typedefs and applies the minimal migration (forward-recovery, no
-// rollback). It returns a typed `SchemaApplyReportRecord` (NOT a JSON string).
+// against live typedefs and applies the minimal migration atomically (one
+// transaction; a mid-plan failure rolls back). It returns a typed
+// `SchemaApplyReportRecord` (NOT a JSON string).
 
 const APPLY_WIDGET_ONE_COLUMN: &str = "\
 types:
