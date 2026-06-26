@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use sqlparser::ast::Statement;
+use sqlparser::ast::{ColumnOption, Statement};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
@@ -203,6 +203,9 @@ fn validate_data_type(data_type: &str) -> Result<()> {
     if ct.columns.len() != 1 || !ct.constraints.is_empty() {
         return Err(reject());
     }
+    if !ct.columns[0].options.is_empty() {
+        return Err(reject());
+    }
     Ok(())
 }
 
@@ -231,6 +234,12 @@ fn validate_default_value(default_value: &str) -> Result<()> {
         return Err(reject());
     };
     if ct.columns.len() != 1 || !ct.constraints.is_empty() {
+        return Err(reject());
+    }
+    let [option] = ct.columns[0].options.as_slice() else {
+        return Err(reject());
+    };
+    if !matches!(option.option, ColumnOption::Default(_)) {
         return Err(reject());
     }
     Ok(())
