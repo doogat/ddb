@@ -820,6 +820,80 @@ types:
         assert_eq!(cols[3].default_value, Some("TRUE".to_string()));
     }
 
+    /// The decisive accept case against a substring blocklist: a `default_value`
+    /// whose string-literal CONTENT contains a normally-blocked token is a
+    /// single, valid default expression — the tokens are just characters inside
+    /// the quoted string, not column options. A real SQL parser accepts these; a
+    /// dumb substring blocklist on `NOT NULL`/`DROP`/`;`/`--`/`, evil`/
+    /// `REFERENCES` would wrongly reject them. Each must be accepted.
+    #[test]
+    fn accepts_default_values_with_blocked_tokens_as_string_data() {
+        let not_null = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: TEXT
+        default_value: "'NOT NULL'"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(not_null).is_ok(),
+            "a string-literal default whose content contains NOT NULL is valid and must be accepted"
+        );
+
+        let drop = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: TEXT
+        default_value: "'DROP it'"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(drop).is_ok(),
+            "a string-literal default whose content contains DROP is valid and must be accepted"
+        );
+
+        let terminators = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: TEXT
+        default_value: "'a; b -- c'"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(terminators).is_ok(),
+            "a string-literal default whose content contains ; and -- is valid and must be accepted"
+        );
+
+        let comma_evil = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: TEXT
+        default_value: "'0, evil'"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(comma_evil).is_ok(),
+            "a string-literal default whose content contains , evil is valid and must be accepted"
+        );
+
+        let references = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: TEXT
+        default_value: "'REFERENCES other'"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(references).is_ok(),
+            "a string-literal default whose content contains REFERENCES is valid and must be accepted"
+        );
+    }
+
     /// The accept side of the data_type extra-option guard: legitimate bare
     /// types must keep parsing. The new rule that rejects trailing column
     /// options must NOT break parametrized or multi-arg types — `VARCHAR(255)`
@@ -873,6 +947,39 @@ types:
         assert!(
             SchemaDoc::from_yaml(enum_type).is_ok(),
             "a multi-arg ENUM('a','b') type must keep parsing"
+        );
+    }
+
+    /// The decisive accept case against a substring blocklist on the data_type
+    /// guard: an ENUM type whose ALLOWED VALUES are normally-blocked tokens is a
+    /// single, valid type with no column options — the keywords are enum members
+    /// (quoted string literals), not constraints. A real SQL parser accepts
+    /// these; a substring blocklist on `NOT NULL`/`REFERENCES`/`, evil` would
+    /// wrongly reject them. Each must be accepted.
+    #[test]
+    fn accepts_data_types_with_blocked_tokens_as_enum_values() {
+        let keyword_members = r#"
+types:
+  - name: project
+    columns:
+      - name: stage
+        data_type: "ENUM('NOT NULL', 'REFERENCES')"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(keyword_members).is_ok(),
+            "an ENUM whose members are the keywords NOT NULL and REFERENCES is a valid type and must be accepted"
+        );
+
+        let comma_member = r#"
+types:
+  - name: project
+    columns:
+      - name: stage
+        data_type: "ENUM('a, evil', 'b')"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(comma_member).is_ok(),
+            "an ENUM whose member contains , evil is a valid type and must be accepted"
         );
     }
 
