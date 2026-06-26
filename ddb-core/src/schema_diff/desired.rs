@@ -590,6 +590,62 @@ types:
         );
     }
 
+    /// A `data_type` carrying any extra column option is rejected. A
+    /// `data_type` must be a bare, well-formed type and NOTHING more; rendered
+    /// verbatim into DDL, a trailing `REFERENCES`/`NOT NULL`/`UNIQUE`/`CHECK`
+    /// attaches a column-level constraint the structured schema fields never
+    /// declare, smuggling it past the variant-keyed destructive-operation gate.
+    #[test]
+    fn rejects_data_type_with_extra_column_options() {
+        let references = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: "INTEGER REFERENCES contact"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(references).is_err(),
+            "a data_type smuggling a REFERENCES foreign key must be rejected"
+        );
+
+        let not_null = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: "TEXT NOT NULL"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(not_null).is_err(),
+            "a data_type smuggling a NOT NULL constraint must be rejected"
+        );
+
+        let unique = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: "TEXT UNIQUE"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(unique).is_err(),
+            "a data_type smuggling a UNIQUE constraint must be rejected"
+        );
+
+        let check = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: "INTEGER CHECK(priority > 0)"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(check).is_err(),
+            "a data_type smuggling a CHECK constraint must be rejected"
+        );
+    }
+
     /// A `default_value` that smuggles statement-terminating SQL is rejected.
     /// It is rendered verbatim by `render_column` as ` DEFAULT {default}`, so
     /// `0); DROP TABLE users; --` would close the column list and inject a
@@ -627,6 +683,66 @@ types:
         assert!(
             SchemaDoc::from_yaml(yaml).is_err(),
             "a default_value that introduces an extra column must be rejected"
+        );
+    }
+
+    /// A `default_value` carrying any extra column option beyond the default
+    /// itself is rejected. Rendered verbatim as ` DEFAULT {default}`, a
+    /// trailing `NOT NULL`/`REFERENCES ... ON DELETE CASCADE`/`UNIQUE`/`CHECK`
+    /// attaches a column-level constraint the structured schema fields never
+    /// declare, smuggling it past the variant-keyed destructive-operation gate.
+    #[test]
+    fn rejects_default_value_with_extra_column_options() {
+        let not_null = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: INTEGER
+        default_value: "0 NOT NULL"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(not_null).is_err(),
+            "a default_value smuggling a NOT NULL constraint must be rejected"
+        );
+
+        let references = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: INTEGER
+        default_value: "0 REFERENCES contact ON DELETE CASCADE"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(references).is_err(),
+            "a default_value smuggling a REFERENCES ... ON DELETE CASCADE must be rejected"
+        );
+
+        let unique = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: INTEGER
+        default_value: "0 UNIQUE"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(unique).is_err(),
+            "a default_value smuggling a UNIQUE constraint must be rejected"
+        );
+
+        let check = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: INTEGER
+        default_value: "0 CHECK(priority > 0)"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(check).is_err(),
+            "a default_value smuggling a CHECK constraint must be rejected"
         );
     }
 
@@ -702,6 +818,62 @@ types:
         assert_eq!(cols[1].default_value, Some("0".to_string()));
         assert_eq!(cols[2].default_value, Some("CURRENT_TIMESTAMP".to_string()));
         assert_eq!(cols[3].default_value, Some("TRUE".to_string()));
+    }
+
+    /// The accept side of the data_type extra-option guard: legitimate bare
+    /// types must keep parsing. The new rule that rejects trailing column
+    /// options must NOT break parametrized or multi-arg types — `VARCHAR(255)`
+    /// (parens) and `ENUM('a','b')` (parens, quotes, comma) are single
+    /// well-formed types, not extra column options.
+    #[test]
+    fn accepts_legitimate_data_types() {
+        let text = r#"
+types:
+  - name: project
+    columns:
+      - name: notes
+        data_type: TEXT
+"#;
+        assert!(
+            SchemaDoc::from_yaml(text).is_ok(),
+            "a bare TEXT type must keep parsing"
+        );
+
+        let integer = r#"
+types:
+  - name: project
+    columns:
+      - name: priority
+        data_type: INTEGER
+"#;
+        assert!(
+            SchemaDoc::from_yaml(integer).is_ok(),
+            "a bare INTEGER type must keep parsing"
+        );
+
+        let varchar = r#"
+types:
+  - name: project
+    columns:
+      - name: status
+        data_type: VARCHAR(255)
+"#;
+        assert!(
+            SchemaDoc::from_yaml(varchar).is_ok(),
+            "a parametrized VARCHAR(255) type must keep parsing"
+        );
+
+        let enum_type = r#"
+types:
+  - name: project
+    columns:
+      - name: stage
+        data_type: "ENUM('a','b')"
+"#;
+        assert!(
+            SchemaDoc::from_yaml(enum_type).is_ok(),
+            "a multi-arg ENUM('a','b') type must keep parsing"
+        );
     }
 
     /// The accept side of the unique_together guard: a constraint over two
