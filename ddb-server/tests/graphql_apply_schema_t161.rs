@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use ddb_server::actor::ActorHandle;
 use ddb_server::events::EventBus;
 use ddb_server::read_pool::ReadPool;
+use ddb_server::reload::SchemaReloader;
 
 async fn setup(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
     ddb_core::service::DoogatService::init(dir).expect("init repo");
@@ -275,5 +278,63 @@ async fn apply_report_reflects_declared_type_name() {
                 && op_sql_contains(op, "widget")
         }),
         "at least one planned op must target table == 'widget' with SQL naming widget — report must reflect the input doc, not a hardcoded name; got: {report}"
+    );
+}
+
+/// PRD 00161 blind-review IMPORTANT-1: a real (non-dry-run) `applySchema` that
+/// creates a typedef MUST trigger a dynamic-GraphQL-schema reload — exactly as
+/// `executeSql`/`executeBatch` do after DDL — so the newly declared type surfaces
+/// in the dynamic schema without a restart. A `dryRun` apply mutates nothing and
+/// must NOT reload. The reload is observed via `SchemaReloader::version()`, which
+/// increments only on a completed reload.
+#[tokio::test]
+async fn real_apply_triggers_schema_reload_dry_run_does_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (actor, pool) = setup(tmp.path()).await;
+
+    // The reloader owns its own actor/pool clones for the background reload loop;
+    // build_schema registers `Some(reloader)` so the resolver can find it in ctx.
+    let (reloader, _shared) = SchemaReloader::new(actor.clone(), pool.clone());
+    let schema = ddb_server::schema::build_schema(actor, pool, vec![], Some(Arc::clone(&reloader)))
+        .expect("schema must build");
+
+    let schema_lit = serde_json::to_string(GIZMO_YAML).unwrap();
+
+    // Dry-run: plan only, no mutation, so NO reload may fire.
+    let dry_query =
+        format!(r#"mutation {{ applySchema(schema: {schema_lit}, dryRun: true) {{ applied }} }}"#);
+    let version_before_dry = reloader.version();
+    let dry = schema.execute(dry_query).await;
+    assert!(
+        dry.errors.is_empty(),
+        "dry-run apply: expected no GraphQL errors, got: {:?}",
+        dry.errors
+    );
+    assert_eq!(
+        reloader.version(),
+        version_before_dry,
+        "a dry-run applySchema mutates nothing and must NOT trigger a schema reload"
+    );
+
+    // Real apply: creating `gizmo` must trigger a reload so the type is queryable
+    // through the dynamic schema in this same server instance.
+    let real_query = format!(r#"mutation {{ applySchema(schema: {schema_lit}) {{ applied }} }}"#);
+    let version_before_real = reloader.version();
+    let real = schema.execute(real_query).await;
+    assert!(
+        real.errors.is_empty(),
+        "real apply: expected no GraphQL errors, got: {:?}",
+        real.errors
+    );
+    assert_eq!(
+        real.data.clone().into_json().unwrap()["applySchema"]["applied"].as_bool(),
+        Some(true),
+        "real apply must set applied == true"
+    );
+    assert!(
+        reloader.version() > version_before_real,
+        "a real (non-dry-run) applySchema that creates a typedef must trigger a schema reload \
+         (version must increment); before={version_before_real} after={}",
+        reloader.version()
     );
 }

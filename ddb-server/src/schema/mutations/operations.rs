@@ -570,6 +570,15 @@ pub(super) fn build_apply_schema_field() -> Field {
                 .await
                 .map_err(|e| to_graphql_error_from_app(e.into()))?;
             forward_warnings(&ctx, &output.warnings);
+            // Surface newly created/altered typedefs in the dynamic GraphQL
+            // schema immediately, mirroring executeSql/executeBatch after DDL. A
+            // dry run mutates nothing and an empty plan leaves applied == false,
+            // so neither path reloads.
+            if !dry_run && output.value.applied {
+                if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>() {
+                    reloader.trigger_reload_and_wait().await;
+                }
+            }
             Ok(Some(FieldValue::owned_any(schema_apply_report_to_value(
                 &output.value,
             ))))
