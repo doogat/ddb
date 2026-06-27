@@ -8,6 +8,13 @@ fn zone_token(zone: &Zone) -> &'static str {
     }
 }
 
+/// Double-quote a SQL identifier, doubling any embedded `"`. This is the
+/// SQL-correct quoting primitive at the DDL trust boundary; the escape stays
+/// even though `validate_identifier` already rejects `"` (defense-in-depth).
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 /// Render a single column. `include_zone` is `true` for `CREATE TABLE`
 /// columns and `false` for `ADD COLUMN` (which does not accept inline ZONE).
 fn render_column(column: &ColumnDef, include_zone: bool) -> String {
@@ -24,7 +31,7 @@ fn render_column(column: &ColumnDef, include_zone: bool) -> String {
         }
         _ => column.data_type.clone(),
     };
-    let mut s = format!("{} {}", column.name, type_token);
+    let mut s = format!("{} {}", quote_ident(&column.name), type_token);
     if column.required {
         s.push_str(" NOT NULL");
     }
@@ -32,7 +39,7 @@ fn render_column(column: &ColumnDef, include_zone: bool) -> String {
         s.push_str(&format!(" DEFAULT {default}"));
     }
     if let Some(references) = &column.references {
-        s.push_str(&format!(" REFERENCES {references}"));
+        s.push_str(&format!(" REFERENCES {}", quote_ident(references)));
         if column.on_delete == OnDeleteAction::Cascade {
             s.push_str(" ON DELETE CASCADE");
         }
@@ -70,41 +77,67 @@ impl PlanOp {
                 if let Some(constraints) = &schema.unique_together {
                     for cols in constraints {
                         if !cols.is_empty() {
-                            parts.push(format!("UNIQUE({})", cols.join(", ")));
+                            let quoted: Vec<String> =
+                                cols.iter().map(|c| quote_ident(c)).collect();
+                            parts.push(format!("UNIQUE({})", quoted.join(", ")));
                         }
                     }
                 }
-                let mut sql = format!("CREATE TABLE {} ({})", schema.table_name, parts.join(", "));
+                let mut sql = format!(
+                    "CREATE TABLE {} ({})",
+                    quote_ident(&schema.table_name),
+                    parts.join(", ")
+                );
                 if schema.singleton {
                     sql.push_str(" SINGLETON");
                 }
                 sql
             }
             PlanOp::AddColumn { table, column } => {
-                format!("ALTER TABLE {table} ADD COLUMN {}", render_column(column, false))
+                format!(
+                    "ALTER TABLE {} ADD COLUMN {}",
+                    quote_ident(table),
+                    render_column(column, false)
+                )
             }
             PlanOp::AlterColumnType { table, column, new_type } => {
-                format!("ALTER TABLE {table} ALTER COLUMN {column} TYPE {new_type}")
+                format!(
+                    "ALTER TABLE {} ALTER COLUMN {} TYPE {new_type}",
+                    quote_ident(table),
+                    quote_ident(column)
+                )
             }
             PlanOp::SetZone { table, column, zone } => {
-                format!("ALTER TABLE {table} SET ZONE {} FOR {column}", zone_token(zone))
+                format!(
+                    "ALTER TABLE {} SET ZONE {} FOR {}",
+                    quote_ident(table),
+                    zone_token(zone),
+                    quote_ident(column)
+                )
             }
             PlanOp::SetSearchKey { table, column } => match column {
-                Some(col) => format!("ALTER TABLE {table} SET SEARCH KEY {col}"),
-                None => format!("ALTER TABLE {table} DROP SEARCH KEY"),
+                Some(col) => {
+                    format!("ALTER TABLE {} SET SEARCH KEY {}", quote_ident(table), quote_ident(col))
+                }
+                None => format!("ALTER TABLE {} DROP SEARCH KEY", quote_ident(table)),
             },
             PlanOp::SetSingleton { table, on } => {
                 if *on {
-                    format!("ALTER TABLE {table} SET SINGLETON")
+                    format!("ALTER TABLE {} SET SINGLETON", quote_ident(table))
                 } else {
-                    format!("ALTER TABLE {table} DROP SINGLETON")
+                    format!("ALTER TABLE {} DROP SINGLETON", quote_ident(table))
                 }
             }
             PlanOp::RenameColumn { table, from, to } => {
-                format!("ALTER TABLE {table} RENAME COLUMN {from} TO {to}")
+                format!(
+                    "ALTER TABLE {} RENAME COLUMN {} TO {}",
+                    quote_ident(table),
+                    quote_ident(from),
+                    quote_ident(to)
+                )
             }
             PlanOp::DropColumn { table, column } => {
-                format!("ALTER TABLE {table} DROP COLUMN {column}")
+                format!("ALTER TABLE {} DROP COLUMN {}", quote_ident(table), quote_ident(column))
             }
         }
     }
