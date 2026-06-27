@@ -121,14 +121,19 @@ change rather than applied.
 | Code | Kind | Meaning |
 |---|---|---|
 | `SCHEMA_DESTRUCTIVE_BLOCKED` | error | plan contains a drop or rename and `allow_destructive` was not set; nothing mutated |
-| `SCHEMA_APPLY_PARTIAL` | error | an op failed mid-plan; the whole plan rolled back. On CLI and FFI the error context lists the ops that ran before the failure (`applied_ops`) and the failing op (`failed_op`); on GraphQL and REST the detailed message and context are redacted (see note below) |
+| `SCHEMA_APPLY_PARTIAL` | error | an op failed mid-plan; the whole plan rolled back. On CLI and FFI the error context lists the ops that ran before the failure (`applied_ops`) and the failing op (`failed_op`); GraphQL redacts the message to `internal error` and omits the context; REST returns HTTP 500 with the detailed roll-back message (see note below) |
 | `SCHEMA_UNSUPPORTED_CHANGE` | warning | a desired-vs-live difference with no ALTER DDL path; surfaced on every transport |
 
-On GraphQL and REST, `SCHEMA_APPLY_PARTIAL` is in the Internal error category, so the detailed
-message and the `applied_ops` / `failed_op` context are redacted (REST returns it as HTTP 500);
-the full context stays available on CLI and FFI. Because a partial apply rolls the whole plan
-back, re-applying the same desired-schema document is a safe, idempotent no-op (an already-converged
-schema produces an empty plan).
+`SCHEMA_APPLY_PARTIAL` is the Internal error category. The structured `applied_ops` / `failed_op`
+context is exposed only on CLI and FFI. GraphQL redacts the error to a bare `internal error`
+message with no context. REST maps it to HTTP 500 and returns the detailed roll-back summary
+message verbatim in the error body's `message` field (the REST body carries `error` + `message`
+only, not the structured context fields). The GraphQL-vs-REST difference reflects the two server
+error paths — GraphQL's app-contract conversion redacts Internal-category errors, while REST's
+transport classifier passes structured-code messages through; unifying that redaction policy is
+tracked as a separate follow-up. Because a partial apply rolls the whole plan back, re-applying
+the same desired-schema document is a safe, idempotent no-op (an already-converged schema
+produces an empty plan).
 
 ## Interfaces
 

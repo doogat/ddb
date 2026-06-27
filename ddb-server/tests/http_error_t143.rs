@@ -172,14 +172,22 @@ fn schema_destructive_blocked_structured_maps_to_409() {
 
 #[test]
 fn schema_apply_partial_structured_maps_to_500() {
+    // REST passes the SCHEMA_APPLY_PARTIAL message through verbatim: the classify
+    // transport path does NOT redact structured-code messages (unlike the GraphQL
+    // app_contract path, which redacts Internal-category errors to "internal
+    // error"). Pin both the 500 status AND the message passthrough so the
+    // documented REST contract (detailed roll-back summary, not "internal error")
+    // cannot silently drift, and so the GraphQL/REST divergence stays visible.
+    let detail = "schema apply failed after 1 of 2 operations and rolled back: create table failed";
     let e = DoogatError::Structured {
         code: codes::SCHEMA_APPLY_PARTIAL,
-        message: "x".into(),
+        message: detail.into(),
         context: vec![],
     };
     let (status, body) = http_error_response(e);
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(body.0.error, "SCHEMA_APPLY_PARTIAL");
+    assert_eq!(body.0.message, detail);
 }
 
 // ── internal variants → 500 ──────────────────────────────────────────────────
