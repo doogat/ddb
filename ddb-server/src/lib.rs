@@ -73,7 +73,12 @@ pub async fn run(
         attachment_root,
         playground,
         start_time,
-    );
+    )
+    // Make the schema reloader available to the REST apply handler so a real
+    // (non-dry-run) apply can hot-reload the dynamic schema, mirroring GraphQL
+    // applySchema. The outer Extension layer propagates into the nested /rest
+    // router. Clone before `reloader` is moved into pgwire::start below.
+    .layer(Extension(reloader.clone()));
     spawn_maintenance(&cfg, rest_actor.clone());
 
     let addr = format!("{}:{}", cfg.bind, cfg.port);

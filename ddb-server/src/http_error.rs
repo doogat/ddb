@@ -20,8 +20,10 @@ pub fn http_error_response(e: DoogatError) -> (StatusCode, Json<ErrorBody>) {
             ddb_core::error::codes::UNIQUE_VIOLATION
             | ddb_core::error::codes::SINGLETON_VIOLATION
             | ddb_core::error::codes::REFERENCES_VIOLATION
-            | ddb_core::error::codes::CASCADE_CYCLE => StatusCode::CONFLICT,
+            | ddb_core::error::codes::CASCADE_CYCLE
+            | ddb_core::error::codes::SCHEMA_DESTRUCTIVE_BLOCKED => StatusCode::CONFLICT,
             ddb_core::error::codes::SINGLETON_NOT_FOUND => StatusCode::NOT_FOUND,
+            ddb_core::error::codes::SCHEMA_APPLY_PARTIAL => StatusCode::INTERNAL_SERVER_ERROR,
             ddb_core::error::codes::NOT_NULL_VIOLATION
             | ddb_core::error::codes::UNKNOWN_FIELD
             | ddb_core::error::codes::TYPE_NOT_REGISTERED => StatusCode::UNPROCESSABLE_ENTITY,

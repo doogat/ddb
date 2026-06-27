@@ -448,12 +448,23 @@ async fn delete_doogat(
 
 async fn apply_schema(
     Extension(actor): Extension<ActorHandle>,
+    reloader: Option<Extension<std::sync::Arc<crate::reload::SchemaReloader>>>,
     Json(body): Json<ApplySchemaBody>,
 ) -> Result<Json<SchemaApplyResponse>, (StatusCode, Json<ErrorBody>)> {
     let output = actor
         .apply_schema(body.schema, body.dry_run, body.allow_destructive)
         .await
         .map_err(rest_error)?;
+    // Mirror the GraphQL applySchema guard (schema/mutations/operations.rs:577):
+    // a real apply that actually changed something reloads the dynamic schema so
+    // the new type is queryable in this same server instance. Like GraphQL's
+    // `if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>()`, reload only when
+    // a reloader is wired in.
+    if !body.dry_run && output.value.applied {
+        if let Some(Extension(reloader)) = reloader {
+            reloader.trigger_reload_and_wait().await;
+        }
+    }
     let warnings = warnings_to_json(output.warnings);
     Ok(Json(SchemaApplyResponse {
         data: output.value,

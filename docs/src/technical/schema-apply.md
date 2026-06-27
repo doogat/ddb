@@ -121,8 +121,14 @@ change rather than applied.
 | Code | Kind | Meaning |
 |---|---|---|
 | `SCHEMA_DESTRUCTIVE_BLOCKED` | error | plan contains a drop or rename and `allow_destructive` was not set; nothing mutated |
-| `SCHEMA_APPLY_PARTIAL` | error | an op failed mid-plan; the whole plan rolled back. The error context lists the ops that ran before the failure (`applied_ops`) and the failing op (`failed_op`) |
+| `SCHEMA_APPLY_PARTIAL` | error | an op failed mid-plan; the whole plan rolled back. On CLI and FFI the error context lists the ops that ran before the failure (`applied_ops`) and the failing op (`failed_op`); on GraphQL and REST the detailed message and context are redacted (see note below) |
 | `SCHEMA_UNSUPPORTED_CHANGE` | warning | a desired-vs-live difference with no ALTER DDL path; surfaced on every transport |
+
+On GraphQL and REST, `SCHEMA_APPLY_PARTIAL` is in the Internal error category, so the detailed
+message and the `applied_ops` / `failed_op` context are redacted (REST returns it as HTTP 500);
+the full context stays available on CLI and FFI. Because a partial apply rolls the whole plan
+back, re-applying the same desired-schema document is a safe, idempotent no-op (an already-converged
+schema produces an empty plan).
 
 ## Interfaces
 
@@ -133,7 +139,7 @@ and NoSQL HTTP are intentionally absent.
 |---|---|---|
 | CLI | Guaranteed | `ddb schema apply <file> [--dry-run] [--allow-destructive]`; `ddb schema diff <file>` |
 | GraphQL | Guaranteed | `applySchema(schema: String!, dryRun: Boolean, allowDestructive: Boolean): SchemaApplyReport!` |
-| REST | Guaranteed | `POST /schema/apply` body `{schema, dryRun, allowDestructive}` returns `{data: SchemaApplyReport, warnings: []}` |
+| REST | Guaranteed | `POST /rest/schema/apply` body `{schema, dryRun, allowDestructive}` returns `{data: SchemaApplyReport, warnings: []}` |
 | FFI | Guaranteed | `DoogatDriver::apply_schema(schema_doc, dry_run, allow_destructive) -> SchemaApplyReportRecord` |
 | PgWire | Intentionally absent | PgWire is a SQL wire protocol; its equivalent is the imperative DDL it already executes. Declarative apply is a higher-level op with no SQL surface. |
 | NoSQL HTTP | Intentionally absent | Read-only key/value document surface; schema management is out of its workflow. |
