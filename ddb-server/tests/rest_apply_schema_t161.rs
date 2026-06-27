@@ -322,6 +322,13 @@ async fn apply_report_reflects_declared_type_name() {
 /// `SchemaReloader::version()`, which increments only on a completed reload. The
 /// REST router is nested under `/rest`, so this also pins the production mount
 /// path `/rest/schema/apply` (Contract B).
+///
+/// This test pins BOTH halves of the reload guard `if !dry_run && applied`:
+/// - `!dry_run`: a dry-run apply must NOT reload (phase 1).
+/// - `&& applied`: a non-dry-run apply that changes nothing (`applied == false`,
+///   an idempotent empty-plan re-apply) must ALSO NOT reload (phase 3). Without
+///   this third phase, a wrong impl that reloads on EVERY non-dry-run (dropping
+///   the `&& applied` half) would still pass.
 #[tokio::test]
 async fn real_apply_triggers_schema_reload_dry_run_does_not() {
     let tmp = tempfile::tempdir().unwrap();
@@ -369,6 +376,33 @@ async fn real_apply_triggers_schema_reload_dry_run_does_not() {
         reloader.version() > version_before_real,
         "a real (non-dry-run) apply that creates a typedef must trigger a schema reload \
          (version must increment); before={version_before_real} after={}",
+        reloader.version()
+    );
+
+    // No-op re-apply: POST the SAME schema AGAIN with dry_run=false. The `gizmo`
+    // type now exists, so the plan is EMPTY and `applied == false`. This pins the
+    // `&& applied` half of the guard: a non-dry-run apply that changes nothing
+    // MUST NOT reload. A wrong impl that reloads on every non-dry-run (dropping
+    // `&& applied`) would bump the version here and fail this assertion.
+    let version_before_noop = reloader.version();
+    let (noop_status, noop_json) =
+        post_rest_apply(&app, serde_json::json!({ "schema": GIZMO_YAML })).await;
+    assert_eq!(
+        noop_status,
+        StatusCode::OK,
+        "no-op re-apply must return 200; body: {noop_json}"
+    );
+    assert_eq!(
+        noop_json["data"].get("applied").and_then(|v| v.as_bool()),
+        Some(false),
+        "an idempotent re-apply of an already-converged schema executes no ops, \
+         so applied == false; got: {noop_json}"
+    );
+    assert_eq!(
+        reloader.version(),
+        version_before_noop,
+        "a non-dry-run apply that applies nothing (applied == false) MUST NOT trigger a \
+         schema reload — the version must be unchanged; before={version_before_noop} after={}",
         reloader.version()
     );
 }
