@@ -156,6 +156,32 @@ fn unknown_structured_code_maps_to_422_with_code_passthrough() {
     assert_eq!(body.0.error, "SOME_UNKNOWN_CODE");
 }
 
+// ── PRD 00161 schema-apply structured codes (Contract C) ──────────────────────
+
+#[test]
+fn schema_destructive_blocked_structured_maps_to_409() {
+    let e = DoogatError::Structured {
+        code: codes::SCHEMA_DESTRUCTIVE_BLOCKED,
+        message: "x".into(),
+        context: vec![],
+    };
+    let (status, body) = http_error_response(e);
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body.0.error, "SCHEMA_DESTRUCTIVE_BLOCKED");
+}
+
+#[test]
+fn schema_apply_partial_structured_maps_to_500() {
+    let e = DoogatError::Structured {
+        code: codes::SCHEMA_APPLY_PARTIAL,
+        message: "x".into(),
+        context: vec![],
+    };
+    let (status, body) = http_error_response(e);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body.0.error, "SCHEMA_APPLY_PARTIAL");
+}
+
 // ── internal variants → 500 ──────────────────────────────────────────────────
 
 #[test]

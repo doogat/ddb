@@ -579,4 +579,51 @@ mod tests {
         assert_eq!(ext_err(&err, "table"), Value::String("link".into()));
         assert_eq!(ext_err(&err, "column"), Value::String("url".into()));
     }
+
+    // PRD 00161 (Contract D): `SCHEMA_APPLY_PARTIAL` is the `Internal` app-error
+    // category, so the GraphQL conversion MUST redact its message to "internal
+    // error" and expose only the stable `code` — never the partial-apply
+    // `applied_ops` / `failed_op` context (which is available on CLI/FFI only).
+    // This pins the documented redaction contract so it cannot silently drift
+    // into leaking partial-apply internals over the network surface.
+    #[test]
+    fn app_err_schema_apply_partial_redacts_message_and_drops_partial_context() {
+        let app = AppError {
+            code: ddb_core::error::codes::SCHEMA_APPLY_PARTIAL,
+            message: "applied [CREATE TABLE a]; failed at CREATE TABLE b: disk full".into(),
+            category: AppErrorCategory::Internal,
+            field: Some("failed_op".into()),
+            details: vec![
+                (
+                    "applied_ops".into(),
+                    AppErrorDetail::List(vec!["CREATE TABLE a".into()]),
+                ),
+                (
+                    "failed_op".into(),
+                    AppErrorDetail::String("CREATE TABLE b".into()),
+                ),
+            ],
+        };
+        let err = to_graphql_error_from_app(app);
+        let exts = err.extensions.as_ref().expect("extensions should be set");
+
+        // Message redacted — no raw failure detail leaks to the network surface.
+        assert_eq!(err.message, "internal error");
+        assert!(!err.message.contains("CREATE TABLE"));
+        assert!(!err.message.contains("disk full"));
+
+        // Stable code is still exposed so clients can branch on it.
+        assert_eq!(
+            exts.get("code").cloned().unwrap_or(Value::Null),
+            Value::String("SCHEMA_APPLY_PARTIAL".into())
+        );
+
+        // Partial-apply context must NOT leak: no field, no applied_ops, no failed_op.
+        assert!(exts.get("field").is_none(), "field must not leak");
+        assert!(
+            exts.get("applied_ops").is_none(),
+            "applied_ops must not leak"
+        );
+        assert!(exts.get("failed_op").is_none(), "failed_op must not leak");
+    }
 }

@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use ddb_server::actor::ActorHandle;
 use ddb_server::events::EventBus;
 use ddb_server::read_pool::ReadPool;
+use ddb_server::reload::SchemaReloader;
 use tower::ServiceExt; // for `oneshot`
 
 async fn setup(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
@@ -39,6 +42,31 @@ async fn post_apply(
             Request::builder()
                 .method("POST")
                 .uri("/schema/apply")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    (status, json)
+}
+
+/// POST `body` to the production-mounted `/rest/schema/apply` path on a fresh
+/// clone of `app` (oneshot consumes the service). Mirrors [`post_apply`] but
+/// targets the real nested URL so the test exercises the `/rest` mount.
+async fn post_rest_apply(
+    app: &axum::Router,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/rest/schema/apply")
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
                 .unwrap(),
@@ -283,5 +311,64 @@ async fn apply_report_reflects_declared_type_name() {
         !ops.iter()
             .any(|op| op.get("table").and_then(|v| v.as_str()) == Some("gizmo")),
         "no op may target 'gizmo' for a widget-only doc; got: {report}"
+    );
+}
+
+/// PRD 00161 (REST, Contracts A+B): a real (non-dry-run) `POST /rest/schema/apply`
+/// that actually applies (`applied == true`) MUST trigger the dynamic-schema
+/// reload — exactly as the GraphQL `applySchema` mutation does — so a newly
+/// declared type surfaces in this same server instance without a restart. A
+/// dry-run apply mutates nothing and must NOT reload. The reload is observed via
+/// `SchemaReloader::version()`, which increments only on a completed reload. The
+/// REST router is nested under `/rest`, so this also pins the production mount
+/// path `/rest/schema/apply` (Contract B).
+#[tokio::test]
+async fn real_apply_triggers_schema_reload_dry_run_does_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (actor, pool) = setup(tmp.path()).await;
+
+    // The reloader owns its own actor/pool clones for the background reload loop;
+    // the router registers it as an Extension so the apply handler can find it.
+    let (reloader, _shared) = SchemaReloader::new(actor.clone(), pool.clone());
+    let app = axum::Router::new()
+        .nest("/rest", ddb_server::rest::router())
+        .layer(axum::Extension(actor))
+        .layer(axum::Extension(Arc::clone(&reloader)));
+
+    // Dry-run: plan only, no mutation, so NO reload may fire.
+    let version_before_dry = reloader.version();
+    let (dry_status, dry_json) =
+        post_rest_apply(&app, serde_json::json!({ "schema": GIZMO_YAML, "dryRun": true })).await;
+    assert_eq!(
+        dry_status,
+        StatusCode::OK,
+        "dry-run apply must return 200; body: {dry_json}"
+    );
+    assert_eq!(
+        reloader.version(),
+        version_before_dry,
+        "a dry-run apply mutates nothing and must NOT trigger a schema reload"
+    );
+
+    // Real apply: creating `gizmo` must trigger a reload so the type becomes
+    // queryable through the dynamic schema in this same server instance.
+    let version_before_real = reloader.version();
+    let (real_status, real_json) =
+        post_rest_apply(&app, serde_json::json!({ "schema": GIZMO_YAML })).await;
+    assert_eq!(
+        real_status,
+        StatusCode::OK,
+        "real apply must return 200; body: {real_json}"
+    );
+    assert_eq!(
+        real_json["data"].get("applied").and_then(|v| v.as_bool()),
+        Some(true),
+        "real apply must set applied == true; got: {real_json}"
+    );
+    assert!(
+        reloader.version() > version_before_real,
+        "a real (non-dry-run) apply that creates a typedef must trigger a schema reload \
+         (version must increment); before={version_before_real} after={}",
+        reloader.version()
     );
 }
