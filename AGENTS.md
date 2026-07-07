@@ -105,6 +105,7 @@ Follow SOLID and Clean Architecture principles as adapted for Rust. These are ma
 - Do not add concrete adapter construction inside `DoogatService` service modules; inject dependencies or document a temporary exception.
 - User-facing read/write/list paths must not silently drop rows, schemas, or parse failures; return errors or structured warnings.
 - No runtime panics in library/FFI code for mutex, database, filesystem, repository, or user-input state.
+- **Product positioning (do not re-litigate): ddb is a standalone platform for many future downstream apps; jink is the first, not the product. The six transports and 120% parity are deliberate bets to keep ddb flexible and complete so downstreams don't reinvent. See `docs/src/architecture/design-decisions.md` → "Product Positioning". Treating "one consumer, one transport" as over-engineering is a misread — assess within this positioning, not against it.**
 - 120% parity is the product posture: public product capabilities ship across every public application interface. If a capability cannot be applied coherently everywhere, prefer deferring/dropping it or making the interface non-public/specialized for that workflow over shipping drift.
 - CRUD is the minimum `Guaranteed` baseline for every public application interface; exceptions require an explicit maintainer decision that the interface is specialized or not public for that workflow.
 - Every feature PRD needs Transport Impact coverage for CLI, GraphQL, REST, PgWire, FFI, and NoSQL HTTP plus a cross-interface implementation/conformance plan.
@@ -114,6 +115,23 @@ Follow SOLID and Clean Architecture principles as adapted for Rust. These are ma
 - Public response/error/warning shape changes need compatibility/deprecation review and updated developer guidance.
 - A `Guaranteed` capability needs a golden workflow and conformance plan before implementation is considered complete.
 - Contract changes must cover support diagnostics, auth/setup expectations, timeout/performance expectations, and release/migration impact when relevant.
+
+### Data-safety invariants (P0 — violating these risks SILENT data loss)
+
+Full rationale, evidence, and current-gap tracking in `docs/src/technical/invariants.md`. These are non-negotiable; a change that breaks one is wrong even if tests pass.
+
+- **Every git write holds the repo write lock.** All commit/delete/rename paths must run inside the repo-scoped advisory write lock and build trees from `fresh_index()`. Never use the cached `repo.index()` for a write; never add a new write path that skips the lock. (Tracked: 00166, 00167.)
+- **Merges preserve the other side's deletions.** Merge tree-construction must stage `Delta::Deleted`, not just `Added|Modified`. A conflicted merge must never resurrect a file the other side deleted. (Tracked: 00167.)
+- **IDs are minted through one repo-aware path.** No mint path may use `exists = |_| false` or allocate future-dated timestamps. All minting checks actual repo/index existence. The ~1/sec/process ceiling is a known, tracked limitation (00186) — do not "fix" it ad hoc. (Tracked: 00168, 00186.)
+- **Conflict resolution is a pure function of its inputs.** Set stable Automerge actor IDs (derived from blob OIDs / node UUIDs); never rely on default random actor IDs. If a decision claims HLC ordering, the feeding commits must carry an HLC trailer. (Tracked: 00169, 00170.)
+- **One bad file never fails the batch.** Read/list/index paths degrade per-item into structured warnings (as the full rebuild already does); only an explicit `--strict` mode hard-fails. (Tracked: 00172.)
+
+### Coherence invariants
+
+- **One error policy.** Exactly one table maps a code → (category, HTTP status, redaction, FFI variant). Adding an error code means editing that ONE table; transports derive from it and never re-decide redaction or status. No per-transport error switch. (Tracked: 00162; FFI/PgWire legs 00177/00185.)
+- **App-contract-first, FFI included.** Every verb flows through `AppCommand → DoogatService → AppOutput`. FFI is a transport, not exempt — it uses the contract, not raw service methods. Do not add per-verb actor command/reply enum plumbing; it is being replaced by a closure message (00174). (Tracked: 00174-00178.)
+- **A result type has one core definition.** Transports serialize the core type; they must not redefine field subsets. Any new public result field lands in the core type first. (Tracked: 00176.)
+- **Every interpolated SQL identifier is escaped; every value is a bound parameter.** Never `format!` a user-influenced string (type name, column, id) into SQL text without an identifier-quoting helper (`escape_sql_ident` in `indexer/filter.rs` / `quote_ident` in `schema_diff/plan.rs`). Validate type/field-key charset at the write boundary. (Tracked: 00184.)
 
 ## Setup
 

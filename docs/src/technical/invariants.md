@@ -1,0 +1,80 @@
+# System Invariants
+
+Cross-cutting rules that keep ddb safe and coherent. Each is a contract the whole codebase depends on; breaking one is a defect even when the compiler and tests are green, because the failure mode is silent (lost data, divergent nodes, drifted transports). AGENTS.md carries the short enforceable list; this page carries the rationale, the evidence, and — honestly — where the codebase does not yet hold the invariant and which PRD closes the gap.
+
+Status legend: **HOLDS** (enforced today) · **GAP** (invariant defined, code not yet compliant, PRD tracked).
+
+## Data-safety invariants
+
+### I1 — Every git write holds the repo write lock · GAP (00166)
+All commit/delete/rename paths must run inside one repo-scoped, cross-process advisory lock, and must build their tree from `fresh_index()` (never the cached `repo.index()`).
+
+**Why**: without a lock, two processes (a downstream app's `ddb serve` and a user's CLI, or two scripted `ddb create`s) build trees from stale HEADs and overwrite each other's commits with no error; `git maintenance --auto` then prunes the orphaned commit permanently. This is the highest-severity failure class in the system.
+
+**Current gap**: `ddb-core/src/git_ops/mod.rs` write paths have no lock and no compare-and-swap. `delete_file`/`delete_files` additionally use the stale cached index. Closed by **00166** (lock) and **00167** (delete freshness + merge deletion preservation).
+
+**Rule for new code**: any new write path goes through `with_write_lock`. If you find yourself calling `repo.index()` in a write, stop — use `fresh_index()`.
+
+### I2 — Merges preserve the other side's deletions · GAP (00167)
+Merge tree-construction stages `Delta::Deleted`, not only `Added|Modified`.
+
+**Why**: skipping deleted deltas silently resurrects a doogat the other device deleted, and turns a rename (delete+add) into a duplicate. The resurrect-with-marker policy in `sync_manager` only sees git-reported conflicts, so it cannot catch this.
+
+**Current gap**: `ddb-core/src/git_ops/merge.rs` `collect_theirs_only_changes` skips `Deleted`. Closed by **00167**.
+
+### I3 — IDs are minted through one repo-aware path · GAP (00168, 00186)
+No mint path uses `exists = |_| false` or allocates future-dated timestamps; all minting checks actual repo/index existence.
+
+**Why**: three minting paths disagree today (`generate_unique_id`'s per-process static, the raw-FFI/`install_bundled_type` paths with no repo check, and `unique_ids` which claims future seconds). A create landing in a second a batch already claimed overwrites it. The 14-digit second-resolution format caps throughput at ~1 create/sec/process — a known limitation, tracked as an explicit decision in **00186**, not something to patch ad hoc.
+
+**Current gap**: `parser::generate_unique_id`, `service/create.rs` raw path, `service/discovery.rs`, `sql_engine::unique_ids`. Correctness closed by **00168**; the format/throughput decision is **00186**.
+
+### I4 — Conflict resolution is a pure function of its inputs · GAP (00169, 00170)
+Set stable Automerge actor IDs (derived from ours/theirs blob OIDs or node UUIDs). If a decision claims HLC ordering, the commits that feed it must carry an HLC trailer.
+
+**Why**: Automerge breaks scalar/text ties by actor ID. With random actor IDs, two nodes resolving the same conflict independently pick different winners and never converge in one round. And the HLC is currently vestigial — normal write commits carry no trailer, `recv_hlc` has zero callers, and the missing-HLC tie-break defaults disagree by path ("theirs wins" for add/add, "ours wins" for LWW).
+
+**Current gap**: `ddb-core/src/crdt_resolver.rs` sets no actor IDs; `git_ops` write commits append no HLC trailer. Closed by **00169** (determinism) and **00170** (HLC load-bearing).
+
+### I5 — One bad file never fails the batch · GAP (00172)
+Read/list/index paths degrade per-item into structured warnings; only an explicit `--strict` mode hard-fails.
+
+**Why**: doogats are plain markdown users edit with other tools, and sync brings untrusted content. The full rebuild already collects per-file warnings, but the incremental path (`batch_index_changes`) aborts the whole batch on one unparsable file — and `ensure_fresh` gates ~40 entry points on it, so one stray file turns every read *and* write into an error.
+
+**Current gap**: `ddb-core/src/indexer/rebuild.rs` `batch_index_changes`. Closed by **00172**.
+
+## Coherence invariants
+
+### I6 — One error policy · GAP (00162; FFI/PgWire legs 00177/00185)
+Exactly one table maps a code → (category, HTTP status, redaction, FFI variant). Transports derive from it and never re-decide redaction or status.
+
+**Why**: today four mappers disagree (`classify` for GraphQL, `http_error` for REST/NoSQL, the FFI allowlist, and PgWire's raw pass-through), and `From<DoogatError> for AppError` has no `SqlEngine` arm — so a SQL error is `SQL_ERROR`+message on one path and redacted `INTERNAL_ERROR` on another. Every new code otherwise has to be taught up to four places.
+
+**Current gap**: `ddb-server/src/error.rs`, `http_error.rs`, `ddb-core/src/ffi/records.rs:111-126`, `pgwire.rs`. Unified by **00162**; FFI/PgWire wired in **00177**/**00185**.
+
+### I7 — App-contract-first, FFI included · GAP (00174-00178)
+Every verb flows through `AppCommand → DoogatService → AppOutput`. FFI is a transport and uses the contract, not raw service methods. Do not add per-verb actor command/reply enum plumbing.
+
+**Why**: the contract is only wired for create/update/applySchema; read/delete/search command DTOs are dead code, FFI CRUD takes raw markdown and can't surface warnings, and ~1000 LOC of twin-enum actor plumbing grows ~30 lines per verb. Finishing the contract is what makes transports thin and a generated client possible.
+
+**Current gap**: `ddb-core/src/app_contract/` (unused DTOs), `ddb-core/src/ffi/driver.rs` (raw path), `ddb-server/src/actor/` (twin enums). Closed by **00174** (collapse plumbing) → **00175/00176/00177** (route verbs) → **00178** (structured fields).
+
+### I8 — A result type has one core definition · GAP (00176)
+Transports serialize the core type; they must not redefine field subsets. A new public result field lands in the core type first.
+
+**Why**: `SearchResult` has 10 fields in core but FFI exposes 6 and REST 4 — three drifted copies. Any consumer that switches transports silently loses fields.
+
+**Current gap**: `ddb-core/src/ffi/records.rs`, `ddb-server/src/rest.rs`. Closed by **00176**.
+
+### I9 — SQL identifiers are escaped; values are bound · HOLDS in where-filter/schema-apply, GAP in materializer (00184)
+Never `format!` a user-influenced identifier (type name, column, id) into SQL without `escape_sql_ident`; validate type/field-key charset at the write boundary. Values are always `?N` bound parameters.
+
+**Why**: two quoting helpers already exist — `escape_sql_ident` (`ddb-core/src/indexer/filter.rs:7`, used by the where-filter/search path) and `quote_ident` (`ddb-core/src/schema_diff/plan.rs:14`, used by schema-apply DDL, backed by `validate_identifier`). But the materializer and delete paths interpolate table/column/`dtype` bare-quoted with NEITHER. Names derive from attacker-influenceable frontmatter, so a `"`-bearing type name can corrupt the DDL (bounded to single-statement DoS/corruption, not exfiltration). The two-helper duplication is itself worth consolidating.
+
+**Current gap**: `ddb-core/src/indexer/materialize.rs`, `ddb-core/src/service/delete.rs`. Closed by **00184** (apply a canonical helper in both paths + charset-validate at the write boundary).
+
+## Using this page
+
+- Adding a write path, a transport, an error code, or a SQL-emitting path? Find the matching invariant above and satisfy it before you finish.
+- A GAP invariant means the fix is already scoped — reference the PRD, don't re-solve it ad hoc, and don't regress the parts that already hold.
+- When an invariant flips from GAP to HOLDS (its PRD lands), update the status here and remove the "current gap" note.

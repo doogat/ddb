@@ -11,6 +11,7 @@
 
 # Technical Design
 
+- [System Invariants](./technical/invariants.md)
 - [Data Model](./technical/data-model.md)
 - [Parser](./technical/parser.md)
 - [Git Operations](./technical/git-ops.md)

@@ -2,6 +2,19 @@
 
 Architectural choices that constrain the system. New requirements and feature proposals should be checked against these decisions before creating PRDs or writing code. If a proposal conflicts with a decision here, the decision should be revisited and updated first, not silently overridden.
 
+## Product Positioning: ddb Is the Platform, Not jink's Backend
+
+**Decision**: ddb is a standalone backend platform intended for MANY downstream applications over time. jink is the first downstream, not the product; more will follow.
+
+**Why**: The value proposition is a complete, flexible data backend that downstreams consume without reinventing storage, sync, query, or schema logic. Two consequences are deliberate:
+
+- **The many transports (CLI, GraphQL, REST, PgWire, FFI, NoSQL HTTP) are intentional**, not over-engineering. Each future downstream may prefer a different access shape; the surface exists so a new consumer adopts one rather than the platform forcing GraphQL on everyone. That the current downstream (jink) uses only GraphQL is expected at this stage and is NOT evidence the other transports are waste.
+- **120% parity / completeness is intentional.** Capabilities ship across the public interfaces so downstreams never hand-roll what the platform should own. "A downstream reimplements X" is treated as a platform gap to close, not a downstream responsibility.
+
+**Do not re-litigate this in an audit, assessment, or refactor.** Reading "one consumer, one transport" as over-engineering is a misread of the strategy; assess and improve WITHIN this positioning, not against it. Revisit only if the multi-downstream thesis is formally abandoned with new evidence.
+
+**Tradeoff**: Real surplus cost today (maintenance, drift risk, conformance burden across six transports) is carried against downstreams that do not yet exist. Accepted deliberately as a platform bet. Mitigation: the app-contract + conformance work keeps the parity cost sub-linear as capabilities grow.
+
 ## Hybrid Git-CRDT Merge
 
 **Decision**: Use Git for >99% of merges; Automerge CRDT for the rest.
