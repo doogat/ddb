@@ -73,6 +73,19 @@ Note: `read_file` reads from the Git tree, not the filesystem. This ensures cons
 
 All commit methods (`commit_files`, `commit_merge`, `delete_file`) and successful merge paths (`merge_remote`) write the commit-graph file via `git commit-graph write --reachable`. This accelerates `merge_base()` and log traversal. Best-effort: silently ignored if `git` CLI unavailable.
 
+## Write serialization (cross-process lock)
+
+**Source**: `ddb-core/src/git_ops/write_lock.rs`
+
+Every git write path holds a repo-scoped, cross-process advisory lock for its whole critical section, so concurrent writers (a downstream app running `ddb serve` while the user runs the CLI, a script firing two `ddb create`s, or several threads) cannot lose commits.
+
+- **What it guards**: all eight write functions — `commit_file`, `commit_binary_file`, `commit_files`, `delete_file`, `delete_files`, `rename_file`, `commit_batch`, `commit_binary_and_text` — run their bodies inside `GitRepo::with_write_lock`. The lock is held across the entire write → stage → `write_tree` → resolve-parent → `commit` section.
+- **Why**: without it, two processes can each build a tree from the same `HEAD`, then commit in turn; the second resolves a stale parent and force-updates the ref with no compare-and-swap, so the first commit is silently dropped (and later pruned by `git maintenance --auto`). Under the lock, each writer re-resolves `HEAD` and re-reads the index against the latest committed tree.
+- **Mechanism**: an exclusive advisory lock on `<repo_root>/.git/ddb-write.lock`, taken via `fs2` (`flock` on Unix, `LockFileEx` on Windows). `.git/` is never tracked, so the lock file is a pure runtime artifact — never committed, and it survives `git gc`.
+- **Reentrancy**: reentrant within a single process. A write path that delegates to another (`commit_file` → `commit_files`, `rename_file` → `commit_batch`) runs the inner body directly instead of re-acquiring, which a second same-process exclusive lock would otherwise deadlock.
+- **Fail-loud**: acquisition blocks up to a bounded timeout, then returns a retryable `DoogatError::Conflict` naming the lock file rather than hanging forever.
+- **Ordering**: the write lock is the innermost resource. SINGLETON create/upsert paths take a SQLite `BEGIN IMMEDIATE` transaction first, then commit (SQLite-outer, git-inner); no path takes the git lock and then opens a SQLite immediate transaction, so the two cannot deadlock.
+
 ## Remote Operations
 
 | Method | Purpose |

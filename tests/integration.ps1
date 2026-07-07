@@ -2729,6 +2729,68 @@ pass "serve: rellinks pagination with relation filter (totalCount=2, no dupes)"
 gqlq 'mutation { executeSql(sql: "DROP TABLE rellink CASCADE") { message } }' | Out-Null
 gqlq 'mutation { executeSql(sql: "DROP TABLE relcat CASCADE") { message } }' | Out-Null
 
+# 61. Cross-process write lock: no lost commit under concurrent writers (PRD 00162).
+# The advisory lock on .git/ddb-write.lock serializes every git commit critical
+# section across processes, so concurrent writers can't drop each other's
+# commits via a stale-parent HEAD force-update. Both sub-scenarios target
+# DISTINCT doogat ids (so the still-open id-mint race, PRD 00164, can't confound
+# the result) and assert durability against HEAD with `git show`, not the work
+# tree — a lost commit leaves its file on disk but absent from HEAD.
+Set-Location $TMPDIR
+
+# 61.A - N concurrent CLI `ddb update` writers on distinct doogats must all land.
+$wlIds = @()
+for ($i = 1; $i -le 6; $i++) {
+    $wlIds += (ddb create --title "WL seed $i" --body "wl-original-$i")
+}
+$wlJobs = @()
+for ($i = 1; $i -le 6; $i++) {
+    $wlJobs += Start-Job -ScriptBlock {
+        param($ddb, $id, $body)
+        & $ddb update $id --body $body 2>&1 | Out-Null
+        @{ exit = $LASTEXITCODE }
+    } -ArgumentList $DDB, $wlIds[$i - 1], "wl-landed-$i"
+}
+$wlFail = 0
+foreach ($job in $wlJobs) {
+    $res = Receive-Job -Job $job -Wait
+    Remove-Job $job
+    if ([int]$res.exit -ne 0) { $wlFail++ }
+}
+if ($wlFail -ne 0) { throw "61.A: $wlFail concurrent CLI update(s) exited non-zero" }
+for ($i = 1; $i -le 6; $i++) {
+    $committed = & git show "HEAD:ddb/$($wlIds[$i - 1]).md" 2>&1 | Out-String
+    if ($committed -notmatch "wl-landed-$i") { throw "61.A: concurrent update $i is not durable in HEAD (lost commit)" }
+}
+pass "61.A: 6 concurrent CLI updates all landed in HEAD (no lost commit)"
+
+# 61.B - a `ddb serve` (GraphQL) write concurrent with a CLI write; both must land.
+# The PRD's headline deployment: a downstream app runs `ddb serve` while the
+# user runs the CLI against the same repo. Seed both rows via GraphQL so the
+# running server already indexes them, then race one GraphQL update (server
+# process) against one CLI update (separate process).
+$wlServeSeed = gqlq 'mutation { createDoogat(input: { title: "WL serve seed" }) { id } }'
+$wlGid = ([regex]::Match($wlServeSeed, '"id":"([^"]+)"')).Groups[1].Value
+$wlCliSeed = gqlq 'mutation { createDoogat(input: { title: "WL cli seed" }) { id } }'
+$wlCid = ([regex]::Match($wlCliSeed, '"id":"([^"]+)"')).Groups[1].Value
+if (-not $wlGid) { throw "61.B: GraphQL seed returned no id" }
+if (-not $wlCid) { throw "61.B: CLI seed returned no id" }
+$wlCliJob = Start-Job -ScriptBlock {
+    param($ddb, $id)
+    & $ddb update $id --body "wl-cli-landed" 2>&1 | Out-Null
+    @{ exit = $LASTEXITCODE }
+} -ArgumentList $DDB, $wlCid
+$wlServeUpd = gqlq "mutation { updateDoogat(input: { id: `"$wlGid`", title: `"wl-serve-landed`" }) { id } }"
+$wlCliRes = Receive-Job -Job $wlCliJob -Wait
+Remove-Job $wlCliJob
+if ([int]$wlCliRes.exit -ne 0) { throw "61.B: concurrent CLI write exited non-zero" }
+if ($wlServeUpd -notmatch '"id"') { throw "61.B: concurrent GraphQL write failed: $wlServeUpd" }
+$gCommitted = & git show "HEAD:ddb/$wlGid.md" 2>&1 | Out-String
+if ($gCommitted -notmatch "wl-serve-landed") { throw "61.B: serve write not durable in HEAD" }
+$cCommitted = & git show "HEAD:ddb/$wlCid.md" 2>&1 | Out-String
+if ($cCommitted -notmatch "wl-cli-landed") { throw "61.B: CLI write not durable in HEAD" }
+pass "61.B: concurrent ddb serve + CLI writes both landed in HEAD (cross-process lock)"
+
 Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 pass "serve: clean shutdown"

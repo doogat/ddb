@@ -9,6 +9,7 @@ mod cli_create_unregistered_type;
 mod cli_update_app_error;
 mod collision;
 mod common;
+mod concurrent_writes;
 mod conformance;
 mod cross_transport_error;
 mod date_default;

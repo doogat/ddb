@@ -2814,6 +2814,59 @@ pass "serve: rellinks pagination with relation filter (totalCount=2, no dupes)"
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE rellink CASCADE\") { message } }"}' >/dev/null
 gql '{"query":"mutation { executeSql(sql: \"DROP TABLE relcat CASCADE\") { message } }"}' >/dev/null
 
+# 61. Cross-process write lock: no lost commit under concurrent writers (PRD 00162).
+# The advisory lock on .git/ddb-write.lock serializes every git commit critical
+# section across processes, so concurrent writers can't drop each other's
+# commits via a stale-parent HEAD force-update. Both sub-scenarios target
+# DISTINCT doogat ids (so the still-open id-mint race, PRD 00164, can't confound
+# the result) and assert durability against HEAD with `git show`, not the work
+# tree — a lost commit leaves its file on disk but absent from HEAD.
+cd "$TMPDIR"
+
+# 61.A — N concurrent CLI `ddb update` writers on distinct doogats must all land.
+WL_IDS=()
+for i in $(seq 1 6); do
+  WL_IDS+=("$($DDB create --title "WL seed $i" --body "wl-original-$i")")
+done
+set +e
+WL_PIDS=()
+for i in $(seq 1 6); do
+  $DDB update "${WL_IDS[$((i - 1))]}" --body "wl-landed-$i" >/dev/null 2>&1 &
+  WL_PIDS+=("$!")
+done
+WL_FAIL=0
+for pid in "${WL_PIDS[@]}"; do wait "$pid" || WL_FAIL=$((WL_FAIL + 1)); done
+set -e
+[ "$WL_FAIL" -eq 0 ] || fail "61.A: $WL_FAIL concurrent CLI update(s) exited non-zero"
+for i in $(seq 1 6); do
+  git show "HEAD:ddb/${WL_IDS[$((i - 1))]}.md" | grep -q "wl-landed-$i" \
+    || fail "61.A: concurrent update $i is not durable in HEAD (lost commit)"
+done
+pass "61.A: 6 concurrent CLI updates all landed in HEAD (no lost commit)"
+
+# 61.B — a `ddb serve` (GraphQL) write concurrent with a CLI write; both must land.
+# The PRD's headline deployment: a downstream app runs `ddb serve` while the
+# user runs the CLI against the same repo. Seed both rows via GraphQL so the
+# running server already indexes them, then race one GraphQL update (server
+# process) against one CLI update (separate process).
+WL_GID=$(gql '{"query":"mutation { createDoogat(input: { title: \"WL serve seed\" }) { id } }"}' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+WL_CID=$(gql '{"query":"mutation { createDoogat(input: { title: \"WL cli seed\" }) { id } }"}' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+[ -n "$WL_GID" ] || fail "61.B: GraphQL seed returned no id"
+[ -n "$WL_CID" ] || fail "61.B: CLI seed returned no id"
+set +e
+gql "{\"query\":\"mutation { updateDoogat(input: { id: \\\"$WL_GID\\\", title: \\\"wl-serve-landed\\\" }) { id } }\"}" >"$TMPDIR/wl_serve.json" 2>&1 &
+WL_SPID=$!
+$DDB update "$WL_CID" --body "wl-cli-landed" >/dev/null 2>&1 &
+WL_CPID=$!
+wait "$WL_SPID"
+wait "$WL_CPID"; WL_CEXIT=$?
+set -e
+[ "$WL_CEXIT" -eq 0 ] || fail "61.B: concurrent CLI write exited non-zero"
+grep -q '"id"' "$TMPDIR/wl_serve.json" || fail "61.B: concurrent GraphQL write failed: $(cat "$TMPDIR/wl_serve.json")"
+git show "HEAD:ddb/$WL_GID.md" | grep -q "wl-serve-landed" || fail "61.B: serve write not durable in HEAD"
+git show "HEAD:ddb/$WL_CID.md" | grep -q "wl-cli-landed" || fail "61.B: CLI write not durable in HEAD"
+pass "61.B: concurrent ddb serve + CLI writes both landed in HEAD (cross-process lock)"
+
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
 pass "serve: clean shutdown"
