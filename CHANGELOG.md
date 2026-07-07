@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **server**: a REFERENCES column's GraphQL `where:` input type changed from `IDFilter` to `{Target}RelationFilter`. `eq`/`in` keep working identically (back-compat); only clients that referenced the `IDFilter` type name directly in typed GraphQL variables for a relation field must switch to `{Target}RelationFilter`. (PRD 00159)
 
+### Fixed
+
+- **git**: concurrent git writes to one repository are now serialized by a cross-process advisory lock (`.git/ddb-write.lock`), preventing silent commit loss when multiple processes write the same repo — e.g. a `ddb serve` instance and a CLI invocation, or two concurrent CLI writes. Previously, interleaved writes could resolve a stale parent and force-update `HEAD`, dropping a just-committed doogat (which `git maintenance` could then prune). Writes reentrant within one process (`commit_file` → `commit_files`) do not self-deadlock. (PRD 00162)
+
 ## [0.2.6] - 2026-06-19
 
 ### Added

@@ -724,3 +724,44 @@ fn doogat_path_no_type() {
         "ddb/20260315120000.md"
     );
 }
+
+/// Regression guard for the cross-process write lock (PRD 00162): N threads,
+/// each with its OWN `GitRepo` on ONE shared repo, each committing a distinct
+/// doogat, must ALL land in HEAD. Without the lock, two writers can resolve the
+/// same stale parent and force-update the ref, silently dropping a peer's file.
+#[test]
+fn concurrent_commits_land_all_writes_in_head() {
+    use std::sync::Arc;
+
+    let (dir, _repo) = temp_repo();
+    let root = Arc::new(dir.path().to_path_buf());
+    let n = 8;
+
+    let mut handles = Vec::new();
+    for i in 0..n {
+        let root = Arc::clone(&root);
+        handles.push(std::thread::spawn(move || {
+            // Each thread opens its own GitRepo (own git2::Repository, own lock
+            // fd) on the shared repo — the realistic multi-writer shape.
+            let repo = GitRepo::open(root.as_path()).unwrap();
+            let id = format!("2026010100{i:04}"); // distinct 14-digit id
+            let rel = format!("ddb/{id}.md");
+            repo.commit_file(&rel, &format!("content {i}"), &format!("add {id}"))
+                .unwrap();
+        }));
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // Every distinct doogat must be present in HEAD — none lost to a race.
+    let repo = GitRepo::open(root.as_path()).unwrap();
+    let doogats = repo.list_doogats().unwrap();
+    for i in 0..n {
+        let rel = format!("ddb/2026010100{i:04}.md");
+        assert!(
+            doogats.iter().any(|p| p == &rel),
+            "lost update: {rel} missing from HEAD; present = {doogats:?}"
+        );
+    }
+}

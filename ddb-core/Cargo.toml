@@ -13,6 +13,9 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 automerge = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
+# Cross-platform advisory file locking for the repo write lock (Unix flock +
+# Windows LockFileEx); `rustix`'s flock is Unix-only and misses the Windows CI matrix.
+fs2 = "0.4"
 # git2 0.21 dropped ssh/https/cred from default features; restore them so remote sync keeps working
 git2 = { version = "0.21", default-features = false, features = ["ssh", "https"] }
 hostname = "0.4"

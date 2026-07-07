@@ -2,10 +2,12 @@ mod merge;
 mod read;
 mod remote;
 mod rename;
+mod write_lock;
 
 pub use rename::rename_doogat;
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use git2::{IndexAddOption, Oid, Repository, Signature};
 
@@ -30,6 +32,11 @@ pub const CURRENT_FORMAT_VERSION: u32 = 1;
 
 const VERSION_FILE: &str = ".ddb-version";
 const CONFIG_FILE: &str = ".ddb.toml";
+
+/// Default bound on how long a git write waits for the repo write lock before
+/// failing loud with a `Conflict`. Uncontended acquires are sub-millisecond;
+/// this only bites under real cross-process write contention.
+const WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl From<git2::Error> for DoogatError {
     fn from(e: git2::Error) -> Self {
@@ -83,6 +90,22 @@ pub struct GitRepo {
     pub path: PathBuf,
     skip_commit_graph: std::cell::Cell<bool>,
     session_commits: std::sync::atomic::AtomicU32,
+    /// Re-entrancy depth for [`GitRepo::with_write_lock`]. `GitRepo` is `!Sync`
+    /// (it holds `Cell`s), so only the owning thread ever touches this. It lets
+    /// one locked write path call another (`commit_file` → `commit_files`,
+    /// `rename_file` → `commit_batch`) without the process deadlocking on its
+    /// own advisory lock.
+    write_lock_depth: std::cell::Cell<u32>,
+}
+
+/// Resets a `GitRepo`'s write-lock re-entrancy depth to zero on scope exit,
+/// so the flag is cleared even if the wrapped closure panics.
+struct DepthGuard<'a>(&'a std::cell::Cell<u32>);
+
+impl Drop for DepthGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(0);
+    }
 }
 
 impl GitRepo {
@@ -94,6 +117,7 @@ impl GitRepo {
             path: path.to_path_buf(),
             skip_commit_graph: std::cell::Cell::new(false),
             session_commits: std::sync::atomic::AtomicU32::new(0),
+            write_lock_depth: std::cell::Cell::new(0),
         };
 
         // Create standard directories with .gitkeep
@@ -143,6 +167,7 @@ impl GitRepo {
             path: path.to_path_buf(),
             skip_commit_graph: std::cell::Cell::new(false),
             session_commits: std::sync::atomic::AtomicU32::new(0),
+            write_lock_depth: std::cell::Cell::new(0),
         };
 
         git_repo.check_format_version()?;
@@ -250,9 +275,38 @@ impl GitRepo {
         Ok(CommitHash(head.peel_to_commit()?.id().to_string()))
     }
 
+    /// Run `f` while holding the repo-scoped, cross-process write lock.
+    ///
+    /// Serializes the git write critical section (stage → `write_tree` →
+    /// resolve parent → `commit`) against other processes and threads so a
+    /// stale-parent commit can't force-update `HEAD` and silently drop a peer's
+    /// write. See [`write_lock`].
+    ///
+    /// Re-entrant on the owning thread: a write path that calls another
+    /// (`commit_file` → `commit_files`, `rename_file` → `commit_batch`) runs
+    /// the inner body directly instead of re-acquiring, because a second
+    /// exclusive advisory lock from the same process would self-deadlock.
+    ///
+    /// Ordering invariant: this lock is always the innermost resource. The
+    /// SINGLETON create/upsert paths take a SQLite `BEGIN IMMEDIATE` first and
+    /// then commit (SQLite-outer, git-inner); no path takes this lock and then
+    /// opens a SQLite immediate transaction, so the two cannot deadlock.
+    fn with_write_lock<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        if self.write_lock_depth.get() > 0 {
+            // Already holding the process lock on this repo — re-entrant call.
+            return f();
+        }
+        let _os_guard = write_lock::acquire(&self.path, WRITE_LOCK_TIMEOUT)?;
+        self.write_lock_depth.set(1);
+        // Reset the depth on scope exit (incl. panic unwind) before the OS
+        // guard drops, so the re-entrant flag never outlives the held lock.
+        let _depth = DepthGuard(&self.write_lock_depth);
+        f()
+    }
+
     /// Write a file, stage it, and commit.
     pub fn commit_file(&self, rel_path: &str, content: &str, message: &str) -> Result<CommitHash> {
-        self.commit_files(&[(rel_path, content)], message)
+        self.with_write_lock(|| self.commit_files(&[(rel_path, content)], message))
     }
 
     /// Write binary content to a file, stage it, and commit.
@@ -262,63 +316,67 @@ impl GitRepo {
         bytes: &[u8],
         message: &str,
     ) -> Result<CommitHash> {
-        validate_path(&self.path, rel_path)?;
-        let full_path = self.path.join(rel_path);
-        if let Some(parent) = full_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&full_path, bytes)?;
+        self.with_write_lock(|| {
+            validate_path(&self.path, rel_path)?;
+            let full_path = self.path.join(rel_path);
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&full_path, bytes)?;
 
-        let mut index = self.fresh_index()?;
-        index.add_path(Path::new(rel_path))?;
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
+            let mut index = self.fresh_index()?;
+            index.add_path(Path::new(rel_path))?;
+            index.write()?;
+            let tree_oid = index.write_tree()?;
+            let tree = self.repo.find_tree(tree_oid)?;
+            let sig = self.signature()?;
 
-        let parent = self
-            .head_commit()
-            .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
-        self.write_commit_graph();
-        crate::maintenance::check_write_threshold(self);
-        Ok(CommitHash(oid.to_string()))
+            let parent = self
+                .head_commit()
+                .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
+            let oid = self
+                .repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            self.write_commit_graph();
+            crate::maintenance::check_write_threshold(self);
+            Ok(CommitHash(oid.to_string()))
+        })
     }
 
     /// Write multiple files, stage them, and commit.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn commit_files(&self, files: &[(&str, &str)], message: &str) -> Result<CommitHash> {
-        for (rel_path, _) in files {
-            validate_path(&self.path, rel_path)?;
-        }
-        for (rel_path, content) in files {
-            let full_path = self.path.join(rel_path);
-            if let Some(parent) = full_path.parent() {
-                std::fs::create_dir_all(parent)?;
+        self.with_write_lock(|| {
+            for (rel_path, _) in files {
+                validate_path(&self.path, rel_path)?;
             }
-            std::fs::write(&full_path, content)?;
-        }
+            for (rel_path, content) in files {
+                let full_path = self.path.join(rel_path);
+                if let Some(parent) = full_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&full_path, content)?;
+            }
 
-        let mut index = self.fresh_index()?;
-        for (rel_path, _) in files {
-            index.add_path(Path::new(rel_path))?;
-        }
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
+            let mut index = self.fresh_index()?;
+            for (rel_path, _) in files {
+                index.add_path(Path::new(rel_path))?;
+            }
+            index.write()?;
+            let tree_oid = index.write_tree()?;
+            let tree = self.repo.find_tree(tree_oid)?;
+            let sig = self.signature()?;
 
-        let parent = self
-            .head_commit()
-            .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
-        self.write_commit_graph();
-        crate::maintenance::check_write_threshold(self);
-        Ok(CommitHash(oid.to_string()))
+            let parent = self
+                .head_commit()
+                .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
+            let oid = self
+                .repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            self.write_commit_graph();
+            crate::maintenance::check_write_threshold(self);
+            Ok(CommitHash(oid.to_string()))
+        })
     }
 
     /// List all .md files under ddb/ in the HEAD tree.
@@ -341,73 +399,79 @@ impl GitRepo {
     /// Delete a file, stage the removal, and commit.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn delete_file(&self, rel_path: &str, message: &str) -> Result<CommitHash> {
-        validate_path(&self.path, rel_path)?;
-        let full_path = self.path.join(rel_path);
-        if full_path.exists() {
-            std::fs::remove_file(&full_path)?;
-        }
-        let mut index = self.repo.index()?;
-        index.remove_path(Path::new(rel_path))?;
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
-        let parent = self
-            .head_commit()
-            .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
-        self.write_commit_graph();
-        Ok(CommitHash(oid.to_string()))
+        self.with_write_lock(|| {
+            validate_path(&self.path, rel_path)?;
+            let full_path = self.path.join(rel_path);
+            if full_path.exists() {
+                std::fs::remove_file(&full_path)?;
+            }
+            let mut index = self.repo.index()?;
+            index.remove_path(Path::new(rel_path))?;
+            index.write()?;
+            let tree_oid = index.write_tree()?;
+            let tree = self.repo.find_tree(tree_oid)?;
+            let sig = self.signature()?;
+            let parent = self
+                .head_commit()
+                .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
+            let oid = self
+                .repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            self.write_commit_graph();
+            Ok(CommitHash(oid.to_string()))
+        })
     }
 
     /// Delete multiple files, stage the removals, and commit.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn delete_files(&self, paths: &[&str], message: &str) -> Result<CommitHash> {
-        for rel_path in paths {
-            validate_path(&self.path, rel_path)?;
-        }
-        for rel_path in paths {
-            let full_path = self.path.join(rel_path);
-            if full_path.exists() {
-                std::fs::remove_file(&full_path)?;
+        self.with_write_lock(|| {
+            for rel_path in paths {
+                validate_path(&self.path, rel_path)?;
             }
-        }
-        let mut index = self.repo.index()?;
-        for rel_path in paths {
-            index.remove_path(Path::new(rel_path))?;
-        }
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
-        let parent = self
-            .head_commit()
-            .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
-        self.write_commit_graph();
-        Ok(CommitHash(oid.to_string()))
+            for rel_path in paths {
+                let full_path = self.path.join(rel_path);
+                if full_path.exists() {
+                    std::fs::remove_file(&full_path)?;
+                }
+            }
+            let mut index = self.repo.index()?;
+            for rel_path in paths {
+                index.remove_path(Path::new(rel_path))?;
+            }
+            index.write()?;
+            let tree_oid = index.write_tree()?;
+            let tree = self.repo.find_tree(tree_oid)?;
+            let sig = self.signature()?;
+            let parent = self
+                .head_commit()
+                .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
+            let oid = self
+                .repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            self.write_commit_graph();
+            Ok(CommitHash(oid.to_string()))
+        })
     }
 
     /// Rename (move) a file in git: read old content, write to new path, delete old.
     pub fn rename_file(&self, old_path: &str, new_path: &str, message: &str) -> Result<CommitHash> {
-        validate_path(&self.path, old_path)?;
-        validate_path(&self.path, new_path)?;
-        let full_old = self.path.join(old_path);
-        let full_new = self.path.join(new_path);
-        if !full_old.exists() {
-            return Err(DoogatError::NotFound(old_path.to_string()));
-        }
-        if full_new.exists() {
-            return Err(DoogatError::InvalidPath(format!(
-                "target path already exists: {new_path}"
-            )));
-        }
-        let content = std::fs::read_to_string(&full_old)?;
-        self.commit_batch(&[(new_path, &content)], &[old_path], message)
+        self.with_write_lock(|| {
+            validate_path(&self.path, old_path)?;
+            validate_path(&self.path, new_path)?;
+            let full_old = self.path.join(old_path);
+            let full_new = self.path.join(new_path);
+            if !full_old.exists() {
+                return Err(DoogatError::NotFound(old_path.to_string()));
+            }
+            if full_new.exists() {
+                return Err(DoogatError::InvalidPath(format!(
+                    "target path already exists: {new_path}"
+                )));
+            }
+            let content = std::fs::read_to_string(&full_old)?;
+            self.commit_batch(&[(new_path, &content)], &[old_path], message)
+        })
     }
 
     /// Write and/or delete multiple files in a single commit.
@@ -418,44 +482,46 @@ impl GitRepo {
         deletes: &[&str],
         message: &str,
     ) -> Result<CommitHash> {
-        for (rel_path, _) in writes {
-            validate_path(&self.path, rel_path)?;
-        }
-        for rel_path in deletes {
-            validate_path(&self.path, rel_path)?;
-        }
-        for (rel_path, content) in writes {
-            let full_path = self.path.join(rel_path);
-            if let Some(parent) = full_path.parent() {
-                std::fs::create_dir_all(parent)?;
+        self.with_write_lock(|| {
+            for (rel_path, _) in writes {
+                validate_path(&self.path, rel_path)?;
             }
-            std::fs::write(&full_path, content)?;
-        }
-        for rel_path in deletes {
-            let full_path = self.path.join(rel_path);
-            if full_path.exists() {
-                std::fs::remove_file(&full_path)?;
+            for rel_path in deletes {
+                validate_path(&self.path, rel_path)?;
             }
-        }
-        let mut index = self.fresh_index()?;
-        for (rel_path, _) in writes {
-            index.add_path(Path::new(rel_path))?;
-        }
-        for rel_path in deletes {
-            index.remove_path(Path::new(rel_path))?;
-        }
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
-        let parent = self
-            .head_commit()
-            .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
-        self.write_commit_graph();
-        Ok(CommitHash(oid.to_string()))
+            for (rel_path, content) in writes {
+                let full_path = self.path.join(rel_path);
+                if let Some(parent) = full_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&full_path, content)?;
+            }
+            for rel_path in deletes {
+                let full_path = self.path.join(rel_path);
+                if full_path.exists() {
+                    std::fs::remove_file(&full_path)?;
+                }
+            }
+            let mut index = self.fresh_index()?;
+            for (rel_path, _) in writes {
+                index.add_path(Path::new(rel_path))?;
+            }
+            for rel_path in deletes {
+                index.remove_path(Path::new(rel_path))?;
+            }
+            index.write()?;
+            let tree_oid = index.write_tree()?;
+            let tree = self.repo.find_tree(tree_oid)?;
+            let sig = self.signature()?;
+            let parent = self
+                .head_commit()
+                .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
+            let oid = self
+                .repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            self.write_commit_graph();
+            Ok(CommitHash(oid.to_string()))
+        })
     }
 
     /// Write a binary file and one or more text files in a single atomic commit.
@@ -467,43 +533,45 @@ impl GitRepo {
         text_files: &[(&str, &str)],
         message: &str,
     ) -> Result<CommitHash> {
-        validate_path(&self.path, binary_path)?;
-        for (rel_path, _) in text_files {
-            validate_path(&self.path, rel_path)?;
-        }
-        // Write binary
-        let full = self.path.join(binary_path);
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&full, bytes)?;
-
-        // Write text files
-        for (rel_path, content) in text_files {
-            let full_path = self.path.join(rel_path);
-            if let Some(parent) = full_path.parent() {
+        self.with_write_lock(|| {
+            validate_path(&self.path, binary_path)?;
+            for (rel_path, _) in text_files {
+                validate_path(&self.path, rel_path)?;
+            }
+            // Write binary
+            let full = self.path.join(binary_path);
+            if let Some(parent) = full.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(&full_path, content)?;
-        }
+            std::fs::write(&full, bytes)?;
 
-        let mut index = self.fresh_index()?;
-        index.add_path(Path::new(binary_path))?;
-        for (rel_path, _) in text_files {
-            index.add_path(Path::new(rel_path))?;
-        }
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
-        let parent = self
-            .head_commit()
-            .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
-        self.write_commit_graph();
-        Ok(CommitHash(oid.to_string()))
+            // Write text files
+            for (rel_path, content) in text_files {
+                let full_path = self.path.join(rel_path);
+                if let Some(parent) = full_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&full_path, content)?;
+            }
+
+            let mut index = self.fresh_index()?;
+            index.add_path(Path::new(binary_path))?;
+            for (rel_path, _) in text_files {
+                index.add_path(Path::new(rel_path))?;
+            }
+            index.write()?;
+            let tree_oid = index.write_tree()?;
+            let tree = self.repo.find_tree(tree_oid)?;
+            let sig = self.signature()?;
+            let parent = self
+                .head_commit()
+                .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
+            let oid = self
+                .repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            self.write_commit_graph();
+            Ok(CommitHash(oid.to_string()))
+        })
     }
 
     /// Remove any orphaned files in `.crdt/temp/` (best-effort, logs warnings).
