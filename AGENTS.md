@@ -89,6 +89,7 @@ git config core.hooksPath dev/hooks
 - Product Requirement Documents (PRDs) go in `dev/local/prds/` (gitignored), NOT in `docs/`
 - Git worktrees go in `dev/local/worktrees/` (gitignored), nowhere else
 - Releases: use `dev/bin/release` only. Never `gh release create` manually - CI creates the GitHub release with binary artifacts on tag push
+- Never close GitHub issues (`gh issue close`) — the maintainer closes them; report open issues as observations instead
 - Push `master` at the end of each PRD (after the PRD's commits land). This overrides the global autopilot "don't push" default and applies to this repository only — nightly CI (`full-validation.yml`) needs the new commits on `origin/master` to exercise the heavy Tier 2 battery against the latest work.
 
 ## Definition of Done
@@ -140,6 +141,7 @@ Executable feature demos (proof of work) at `dev/local/walkthroughs/{5-digit}-{s
 - Never run `ddb` commands (init, create, SQL, etc.) in the project root. Use `/tmp` or a temp directory. Running in-repo creates `ddb/`, `.ddb/`, `.crdt/`, `.nodes/` artifacts that pollute the source tree and git history
 - E2E tests require the `ddb` binary — run `cargo build -p ddb-cli` before `cargo test -p ddb-e2e`
 - `head_oid()` returns `CommitHash` (a String newtype, access inner via `.0`), not `git2::Oid`
+- Run cargo commands in the foreground only — backgrounded cargo builds/tests contend on the build lock, queue up, and can deadlock the whole session
 - `merge_frontmatter` is called from both `resolve_conflicts` and `resolve_append_log`
 
 ## Commands
