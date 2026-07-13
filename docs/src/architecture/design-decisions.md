@@ -15,6 +15,8 @@ Architectural choices that constrain the system. New requirements and feature pr
 
 **Tradeoff**: Real surplus cost today (maintenance, drift risk, conformance burden across six transports) is carried against downstreams that do not yet exist. Accepted deliberately as a platform bet. Mitigation: the app-contract + conformance work keeps the parity cost sub-linear as capabilities grow.
 
+**Reaffirmed 2026-07-13** (purpose-fit critique): no read-only specialization exceptions for any interface. An interface below the CRUD baseline is a parity gap to close (NoSQL HTTP: PRD 00191), never a candidate for a "specialized" carve-out. The remedy for parity cost is finishing the app contract (00171-00177), not shrinking the surface.
+
 ## Hybrid Git-CRDT Merge
 
 **Decision**: Use Git for >99% of merges; Automerge CRDT for the rest.
@@ -109,6 +111,30 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 **Why**: Broadcast channels are lock-free, support multiple subscribers, and require zero allocation when no subscribers exist. The actor emits events after successful mutations; each WebSocket subscription creates a receiver that filters events by kind/type. This decouples the mutation path from subscription delivery.
 
 **Tradeoff**: Slow clients that can't keep up will miss events (broadcast receiver lag). Acceptable for MVP — clients can refetch state on reconnect. A future improvement could add a replay buffer or persistent event log.
+
+## Mobile Model: Full Replica via FFI Git Sync
+
+**Decision** (2026-07-13): A mobile device participates in the distribution as a full git replica. `DoogatDriver` gains fetch/push/sync over HTTPS-token remotes (PRD 00190); bundle export/import remains the offline fallback. Hosted thin-client access is not the mobile model; it may layer on later behind the server-hardening work (00179) if a downstream needs it.
+
+**Why**: The product statement is "distributed thanks to git, mobile included", and the existing decisions already commit to full-clone semantics on every device. A hosted thin client would trade away offline-first and reintroduce the cache-and-sync layer git exists to provide.
+
+**Tradeoff**: On-device libgit2 credentials, host-scheduled sync (no background magic on iOS), and full-clone storage cost on phones. Accepted; the operating envelope is documented with the FFI sync work.
+
+## PgWire Is a Guaranteed Write Surface (Non-Transactional)
+
+**Decision** (2026-07-13): PgWire keeps DML/DDL. Its writes ride the app contract and the unified error policy (00172/00179) like every other transport. The interface documents its actual semantics: each statement commits independently; there is no rollback after commit and no isolation levels (Postgres transaction verbs are not honored — the docs state precisely how BEGIN/COMMIT/ROLLBACK behave).
+
+**Rejected alternative**: gating PgWire to SELECT-only as a "specialized read interface". Rejected with the general no-specialization ruling above.
+
+**Tradeoff**: PG-protocol clients that assume transactional semantics (ORMs, migration tools) can misbehave; carried deliberately, mitigated by documented semantics and unified, redacted errors.
+
+## Read Freshness: Committed = Visible, Watch Mode Opt-In
+
+**Decision** (2026-07-13): Served reads enforce "committed = visible" via a cheap HEAD-oid staleness probe (no more blanket `skip_stale_check`); a `_typedef` arriving via sync triggers a GraphQL schema reload; an opt-in watch mode (`ddb serve --watch` / `ddb watch`) absorbs external edits into commits after a debounce. A per-transport consistency contract page documents every guarantee. (PRD 00189.)
+
+**Why**: The premise is that the markdown files are the database, so a change committed outside ddb must be served without waiting for an unrelated write. Uncommitted edits are not yet data — unless the operator opts into watch mode, which turns saves into commits rather than indexing uncommitted state.
+
+**Rejected alternative**: indexing the uncommitted working tree directly. Rejected because it breaks the "index derived strictly from git truth" invariant that makes the index safely disposable.
 
 ## Known Limitations
 
