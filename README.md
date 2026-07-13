@@ -132,8 +132,79 @@ dev/bin/release --pre rc.1 minor  # pre-release: v0.2.0-rc.1
 ### Platform packaging (UniFFI bindings)
 
 ```bash
-dev/bin/build-xcframework  # iOS/macOS XCFramework (requires Xcode)
-dev/bin/build-android      # Android .aar (requires NDK, cargo-ndk, kotlinc)
+dev/bin/build-xcframework  # iOS/macOS XCFramework
+dev/bin/build-android      # Android .aar
+```
+
+Both scripts check their prerequisites up front and name anything missing. Install the toolchains below once; after that both builds run unattended.
+
+#### iOS/macOS toolchain (`build-xcframework`)
+
+1. **Rust cross-compilation targets** (the host `aarch64-apple-darwin` target ships with rustup):
+
+   ```bash
+   rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+   ```
+
+2. **Full Xcode.** The Command Line Tools are not enough: `xcodebuild -create-xcframework` only ships with the full app (a 15+ GB download). Install Xcode from the App Store (or `mas install 497799835`), then point the developer tools at it and accept the license:
+
+   ```bash
+   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+   sudo xcodebuild -license accept
+   xcodebuild -runFirstLaunch
+   ```
+
+3. **Verify:**
+
+   ```bash
+   xcodebuild -version              # prints "Xcode <n>", not a CLT error
+   rustup target list --installed   # lists all three ios targets
+   ```
+
+#### Android toolchain (`build-android`)
+
+1. **Rust cross-compilation targets:**
+
+   ```bash
+   rustup target add aarch64-linux-android x86_64-linux-android
+   ```
+
+2. **Android NDK.** Easiest via Homebrew; the cask installs to `$(brew --prefix)/share/android-ndk`:
+
+   ```bash
+   brew install --cask android-ndk
+   export ANDROID_NDK_HOME="$(brew --prefix)/share/android-ndk"   # add to your shell profile
+   ```
+
+   Alternative: install an NDK through Android Studio's SDK Manager and point at the versioned directory instead: `export ANDROID_NDK_HOME=$HOME/Library/Android/sdk/ndk/<version>`.
+
+3. **cargo-ndk** (drives cargo with the NDK toolchains; reads `ANDROID_NDK_HOME`):
+
+   ```bash
+   cargo install cargo-ndk
+   ```
+
+4. **Kotlin compiler + JDK.** `kotlinc` compiles the generated bindings into `classes.jar`, and the `jar` packaging tool comes from a JDK:
+
+   ```bash
+   mise use -g java@temurin-21 kotlin@latest   # mise-managed (shims java, jar, kotlinc)
+   ```
+
+   Or via Homebrew: `brew install --cask temurin && brew install kotlin` (the temurin cask registers with `/usr/libexec/java_home`, which makes the stock `/usr/bin/jar` work).
+
+5. **Verify:**
+
+   ```bash
+   ls "$ANDROID_NDK_HOME"             # NDK contents, not "No such file"
+   command -v cargo-ndk kotlinc jar   # all three resolve
+   rustup target list --installed     # lists both android targets
+   ```
+
+#### Prove the whole chain
+
+```bash
+dev/bin/build-xcframework   # -> out/swift/DoogatDB.xcframework
+dev/bin/build-android       # -> out/kotlin/doogatdb.aar
 ```
 
 ## Documentation
