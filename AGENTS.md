@@ -14,83 +14,23 @@ Hybrid Git-CRDT decentralized database. Git is source of truth; SQLite index is 
 ## Structure
 
 ```text
-ddb-core/src/       Library crate
-  parser/            Three-zone Markdown parsing (frontmatter/body/references)
-  search_query.rs   Search query parsing and normalization to canonical form
-  git_ops/          Git repository CRUD, merge, remote sync
-    merge.rs          Merge/conflict resolution
-    remote.rs         Push/pull/fetch operations
-    read.rs           File reads, diffs, revision queries
-    rename.rs         Rename with backlink rewrite
-  crdt_resolver.rs  Automerge CRDT conflict resolution
-  indexer/          SQLite FTS5 index, type inference, materialization
-    search.rs         FTS5 search, tag queries
-    filter.rs         Search filter/negation SQL building
-    rebuild.rs        Rebuild, reindex, staleness checks
-    ports.rs          Index port-trait impls (DoogatIndex, SqlBackend)
-  service/          DoogatService orchestration for CLI/FFI/server; per-verb submodules (create/read/update/delete/batch, search, sql, ops, discovery, utility)
-  sql_engine/       SQL DDL/DML translation (tables as doogat types)
-  bundled_types.rs  Built-in type templates (project, contact)
-  sync_manager/     Multi-device sync orchestration
-  compaction/       CRDT temp cleanup and git gc
-  consistency/      Detect/apply/migrate auto-fixes
-    migrations.rs     Versioned data migrations
-    zone_migrate.rs   Cross-zone field migration
-  hlc.rs            Hybrid Logical Clock for causal ordering
-  traits.rs         Core trait abstractions (DoogatSource, DoogatStore, GitBackend
-                      supertrait + GitRemote, GitMerge, GitHistory, GitBinary,
-                      GitRename, GitDesktopHooks, DoogatIndex, SqlBackend,
-                      ConflictResolver)
-  ffi/              UniFFI DoogatDriver facade for Swift/Kotlin bindings
-    mod.rs            Module wiring and re-exports
-    driver.rs         DoogatDriver struct and exported methods
-    records.rs        FFI-safe value and error types (SearchResult, DdbError, etc.)
-    tests.rs          FFI unit tests
-  types/            Shared data structures (directory module)
-    value.rs          Value enum, path utilities
-    doogat.rs         Domain model types (DoogatId, ParsedDoogat, etc.)
-    schema.rs         Schema/consistency types (TableSchema, ColumnDef, Fix)
-  error.rs          Error types and Result alias
-  ddb.udl           UniFFI interface definition (documentation reference)
-ddb-core/benches/   Criterion benchmarks
-  crud.rs           CRUD operations at 1K doogats
-  search.rs         FTS5 search, SQL SELECT, reindex at 1K doogats
-ddb-uniffi-bindgen/ UniFFI bindgen binary (isolated from ddb-core)
-ddb-cli/src/        Binary crate
-  main.rs           CLI struct definitions, dispatch, utilities
-  commands/         Subcommand handlers (crud, query, sync, maintenance, discover)
-ddb-server/src/     GraphQL server crate
-  lib.rs            Server entrypoint (axum router, actor spawn)
-  actor/            Thread-safe core bridge (mpsc + oneshot)
-    handlers.rs       Command dispatch logic
-  schema/           Dynamic GraphQL schema from _typedef doogats
-    type_defs.rs      GraphQL type/input/enum definitions
-    queries.rs        Query field resolvers
-    mutations/        Mutation field resolvers (directory module)
-      mod.rs            build_mutation_fields + MutationOutput assembly
-      operations.rs     CRUD/SQL/sync/maintenance mutation fields
-      singleton.rs      Singleton update/upsert fields
-      types.rs          Auxiliary mutation output/input types
-    subscriptions.rs  Subscription field resolvers
-    discovery_queries.rs  Discovery query resolvers (orphans, sequences, etc.)
-  auth.rs           Bearer token generation + middleware
-  config.rs         Server config (~/.config/ddb/)
-  error.rs          DoogatError → GraphQL error mapping
-tests/e2e/          E2E tests (assert_cmd, exercises ddb binary)
-tests/smoke.sh      CLI smoke test (init, CRUD, search, SQL, types, compact)
-tests/integration.sh  Full integration tests (server, sync, CRDT, bundles)
-tests/smoke.ps1     PowerShell port of tests/smoke.sh
-tests/integration.ps1 PowerShell port of tests/integration.sh
-tests/fixtures/     Test fixtures
-dev/bin/             Developer scripts
-  release              Version bump, tag, push
-  build-xcframework    iOS/macOS XCFramework from UniFFI bindings
-  build-android        Android .aar from UniFFI bindings
-  safe-showboat-verify Sandboxed wrapper for `showboat verify` (PRD 00135)
-  showboat-verify-no-contamination-test.sh
-                       Regression test for verify-side contamination
-docs/src/           mdbook documentation (architecture, technical, guide)
+ddb-core/src/        Library crate: parser/ (three-zone Markdown), git_ops/ (repo CRUD, merge,
+                     remote, rename), indexer/ (SQLite FTS5, ports), service/ (DoogatService,
+                     per-verb submodules), sql_engine/, sync_manager/, compaction/, consistency/,
+                     crdt_resolver.rs, hlc.rs, traits.rs (core trait abstractions),
+                     ffi/ (UniFFI DoogatDriver facade), types/ (adapter-neutral shared types)
+ddb-core/benches/    Criterion benchmarks (CRUD + search at 1K doogats)
+ddb-uniffi-bindgen/  UniFFI bindgen binary (isolated from ddb-core)
+ddb-cli/src/         Binary crate: main.rs dispatch + commands/ subcommand handlers
+ddb-server/src/      GraphQL server: lib.rs entrypoint, actor/ core bridge, schema/ dynamic
+                     GraphQL (queries, mutations/, subscriptions), auth.rs, config.rs, error.rs
+tests/               e2e/ (assert_cmd), smoke.sh + integration.sh (+ .ps1 ports), fixtures/
+dev/bin/             Developer scripts (release, build-xcframework, build-android,
+                     safe-showboat-verify + its regression test)
+docs/src/            mdbook documentation (architecture, technical, guide)
 ```
+
+Per-file responsibilities: `docs/src/architecture/modules.md` (Module Summary table).
 
 ## Design Principles
 
@@ -190,88 +130,10 @@ These are authoring obligations, not local execution gates:
 
 ## Showboat Walkthroughs
 
-Executable feature demos built with [showboat](https://github.com/simonw/showboat), a CLI tool by Simon Willison. Each walkthrough is a Markdown file containing commentary and code blocks with real captured output. `showboat verify` re-runs all code blocks and confirms outputs still match.
+Executable feature demos (proof of work) at `dev/local/walkthroughs/{5-digit}-{slug}.md`, built with [showboat](https://github.com/simonw/showboat). Full guide (CLI reference, execution model, CLI/server patterns, regeneration, wrapper regression test): `agent_docs/showboat-walkthroughs.md`. Two safety rules always apply:
 
-### Location and naming
-
-`dev/local/walkthroughs/{5-digit}-{slug}.md` — e.g. `00001-crud-basics.md`
-
-### Installation
-
-Run via uvx (no install needed):
-
-```text
-uvx showboat --help
-```
-
-Or install persistently: `uv tool install showboat` / `pip install showboat`
-
-### Critical rule: showboat CLI only
-
-Agents **must not** edit walkthrough files directly (no `Edit`, `Write`, `sed`, etc.). All content flows through showboat CLI:
-
-| Command | Purpose |
-|---------|---------|
-| `showboat init <file> <title>` | Create new walkthrough |
-| `showboat note <file> <text>` | Add commentary (also accepts stdin) |
-| `showboat exec <file> <lang> <code>` | Run code, capture real output |
-| `showboat pop <file>` | Remove last entry (undo failed exec) |
-| `showboat image <file> <path>` | Embed an image |
-| `showboat verify <file>` | Re-run all blocks, diff against recorded output (never run directly from project root — creates real commits on master; see "Verifying walkthroughs safely" below) |
-| `showboat extract <file>` | Emit commands to recreate file (for rebuilding) |
-
-Output blocks contain real captured output. Direct file editing defeats the purpose — walkthroughs are proof of work.
-
-### Execution model
-
-Each `showboat exec` runs in its own shell. Variables, background jobs, and working directory do **not** persist between calls. Use `--workdir <dir>` to set the working directory for a command.
-
-`exec` prints captured output to stdout and exits with the same code as the executed command, so agents can react to errors. Use `pop` to remove a failed entry before retrying.
-
-### Patterns
-
-**CLI walkthrough** — use `--workdir` with a fixed temp path (not `mktemp`, since the path must be reused across exec calls):
-
-```text
-WD=/tmp/ddb-demo-feature
-showboat init dev/local/walkthroughs/00001-feature.md "Feature Name"
-showboat note dev/local/walkthroughs/00001-feature.md "Initialize a repo."
-showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "mkdir -p $WD && ddb init"
-showboat exec --workdir $WD dev/local/walkthroughs/00001-feature.md bash "ddb create --title 'Test'"
-showboat exec dev/local/walkthroughs/00001-feature.md bash "rm -rf $WD"
-```
-
-**Server walkthrough** — use PID file pattern since background jobs don't persist across exec calls:
-
-```text
-showboat exec --workdir $WD ... bash "ddb serve --port 19201 --pg-port 19202 & echo \$! > /tmp/ddb-serve.pid"
-showboat exec ... bash "sleep 1 && curl -s http://127.0.0.1:19201/graphql -H 'Content-Type: application/json' -d '{...}'"
-showboat exec ... bash "kill \$(cat /tmp/ddb-serve.pid) && rm /tmp/ddb-serve.pid"
-```
-
-### Maintenance
-
-Walkthroughs are local working documents (`dev/local/` is gitignored). They can be regenerated anytime. When CLI output changes cause `showboat verify` to fail, regenerate using `showboat extract` to get the original commands, then re-execute.
-
-### Verifying walkthroughs safely
-
-Never run `showboat verify <walkthrough>` directly from the project root. Use the wrapper:
-
-```text
-dev/bin/safe-showboat-verify <walkthrough> [<walkthrough>...]
-```
-
-`showboat verify` re-executes the walkthrough's bash blocks in **the caller's cwd**. The original `--workdir` from `showboat exec` is not recorded in the rendered Markdown, so verify has no way to honor it. If the cwd is itself a git repo, blocks that auto-commit (e.g. `ddb create`, `ddb query "INSERT INTO ..."`) write real commits to that repo. PRD 00135 documents two `git reset --hard` cleanups caused by this.
-
-The wrapper runs verify inside a throwaway `git worktree` under `dev/local/worktrees/showboat-verify-<id>/` and removes it on exit, so any contamination lands in the worktree, never on the active checkout.
-
-To confirm the wrapper still works after upgrading showboat or editing the wrapper, run the regression test:
-
-```text
-dev/bin/showboat-verify-no-contamination-test.sh
-```
-
-It runs the wrapper against a known walkthrough (a 00050+ fixture exhibiting the contamination pattern) and asserts HEAD, working-tree status, project-root data dirs (`ddb/`, `.ddb/`, `.crdt/`, `.nodes/`), and the worktree list are unchanged afterward. If no contaminating fixture is available, the test fails fast rather than passing vacuously on a self-isolating walkthrough.
+- Never edit walkthrough files directly (no `Edit`, `Write`, `sed`) — all content flows through the showboat CLI (`init`/`note`/`exec`/`pop`/`extract`).
+- Never run `showboat verify` from the project root — it re-executes blocks in the caller's cwd and writes real commits to master. Use `dev/bin/safe-showboat-verify <walkthrough>`.
 
 ## Gotchas
 
@@ -300,28 +162,10 @@ cargo clippy --workspace              Lint
 cargo doc --no-deps --document-private-items   Generate rustdoc
 cd docs && mdbook build               Build documentation
 cd docs && mdbook serve               Serve documentation locally
-
-# Coverage (requires: rustup component add llvm-tools-preview, cargo install cargo-llvm-cov)
-cargo llvm-cov --workspace              Run coverage report (baseline: 70%, target: 80%)
-cargo llvm-cov --workspace --html       Generate HTML coverage report in target/llvm-cov/html/
-cargo llvm-cov --workspace --exclude ddb-e2e --fail-under-lines 70   Fail if below CI threshold
-
-# Performance thresholds (require --release, local only — not run in CI)
-cargo test --release -p ddb-core --test query_thresholds nfr01_
-cargo test --release -p ddb-core --test growth_thresholds nfr02_
-cargo test --release -p ddb-core --test sync_thresholds nfr03_
-
-# Property tests (thorough run, ~20 min at 5000 cases)
-PROPTEST_CASES=5000 cargo test -p ddb-core --test property_tests
-
-# UniFFI binding generation
-cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-  --library target/debug/libddb_core.dylib \
-  --language swift --out-dir out/swift
-cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
-  --library target/debug/libddb_core.dylib \
-  --language kotlin --out-dir out/kotlin
+cargo llvm-cov --workspace            Coverage report (CI gate: 70% lines; needs llvm-tools-preview + cargo-llvm-cov)
 ```
+
+Performance-threshold tests (nfr01-03): `docs/src/technical/performance.md`. UniFFI binding generation: `docs/src/technical/ffi.md`.
 
 ## Documentation
 
