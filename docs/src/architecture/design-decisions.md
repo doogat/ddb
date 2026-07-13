@@ -136,6 +136,21 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 
 **Rejected alternative**: indexing the uncommitted working tree directly. Rejected because it breaks the "index derived strictly from git truth" invariant that makes the index safely disposable.
 
+## V1.0 Finish Line
+
+**Decision** (2026-07-13): v1.0 — "the goal is reached" — is a checkable state, not a drained backlog. Four conditions, each observable:
+
+1. **Safe + coherent**: all nine invariants in `technical/invariants.md` (I1-I9, covering both the data-safety and coherence sets) read HOLDS, each pinned by a regression test.
+2. **Parity proven**: the same golden CRUD + validation workflows pass the conformance harness on all six transports (CLI, GraphQL, REST, PgWire, FFI, NoSQL HTTP), with parity failures blocking CI (PRDs 00174/00175/00191/00192).
+3. **Consumable proven**: jink runs on `ddb-client` + typedef codegen + structured inputs, and the glue-deletion ledger (~2,400 backend + ~1,250 frontend LOC) is measured, not estimated. The migration work happens in jink's repo; the measurement is a v1.0 acceptance item here.
+4. **Distributed proven**: a mobile device operates as a full git replica via FFI sync (00190), and CI generates the bindings and builds the platform artifacts nightly (00193).
+
+**Explicitly NOT required for v1.0** (post-v1 or decision-gated): registry publishing (crates.io / SwiftPM / Maven), a second downstream app, in-process TLS, the PgWire extended/prepared protocol, incremental indexing beyond ~5K doogats, a user-visible conflict journal, foreign-system import tooling.
+
+**Why**: without a finish line, "done" drifts with the backlog. These conditions restate the roadmap end state (Safe / Coherent / Consumable) plus the distribution pillar as observations, so reaching the goal is a check, not a feeling. Source: `dev/local/audit-results/2026-07-13-goal-gap-analysis.md` (G4).
+
+**Tradeoff**: a fixed line can understate new discoveries. Rule: a newly found data-safety gap (P0) joins the v1.0 gate; anything else lands post-v1 unless a maintainer decision promotes it.
+
 ## Known Limitations
 
 | Area | Limitation | Plan |
