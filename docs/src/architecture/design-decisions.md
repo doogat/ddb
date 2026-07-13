@@ -95,6 +95,7 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 | Sync transport | Custom sync protocol (libp2p, etc.) | Git packfiles are already efficient incremental transfer. A second protocol doubles the attack/failure surface. | Git fetch/push |
 | Scalability | Git sparse checkout / sparse index | DDB requires full-clone semantics on every device. Sparse checkout breaks the "all doogats locally available" contract. | Commit-graph, incremental reindex, fsmonitor |
 | Multi-user | Real-time collaborative editing | CRDT merge is designed for async multi-device sync, not live cursors. Real-time adds WebSocket/OT complexity for a single-user system. | Async sync with conflict resolution |
+| Data import | Foreign-system importers (Notion, Obsidian, Evernote converters) | Doogats are plain markdown and batch create verbs exist; format-specific conversion is downstream domain knowledge, not platform storage/sync/query logic (2026-07-13). | Downstream-owned converters over batch create verbs, or write `.md` files and reindex |
 
 ## Per-Parent Batch Loading (Not Page-Level DataLoader)
 
@@ -157,3 +158,4 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 |------|-----------|------|
 | Plugin system | No type-specific behaviors via plugins | Type-driven behavior hooks |
 | Subscriptions | Slow clients miss broadcast events | Replay buffer or persistent event log |
+| Conflict visibility | CRDT auto-resolution reports counts only; no first-class conflict journal | Deferred post-v1 (2026-07-13, see V1.0 Finish Line). Interim: every resolution is a Git merge commit preserving both parents — `git show <merge>` reconstructs it (documented in the sync guide). Revisit when a downstream needs a journal surface |

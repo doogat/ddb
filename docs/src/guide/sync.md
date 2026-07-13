@@ -76,6 +76,19 @@ When both devices edit the same doogat between syncs, Doogat DB resolves conflic
 
 No manual conflict resolution is ever needed.
 
+### Inspecting What a Merge Did
+
+Sync reports how many conflicts were resolved, not what changed. Nothing is lost, though: every resolution lands as a real Git merge commit that keeps both parents, so plain Git reconstructs any decision:
+
+```bash
+git log --merges --oneline -- ddb/{id}.md   # find the merge
+git show <merge-commit> -- ddb/{id}.md      # what the resolution chose
+git show <merge-commit>^1 -- ddb/{id}.md    # this device's side
+git show <merge-commit>^2 -- ddb/{id}.md    # the other device's side
+```
+
+A first-class conflict journal is deliberately deferred — see Known Limitations in [Design Decisions](../architecture/design-decisions.md).
+
 ### Example Scenario
 
 Device A changes the title; Device B adds a reference field:
@@ -159,3 +172,26 @@ ddb status
 ```
 
 Shows the current HEAD, node registration, index staleness, and number of registered nodes.
+
+## Backup and Restore
+
+The Git repository is the database. Doogats, typedefs (`ddb/_typedef/`), attachment blobs (`reference/{doogat_id}/`), CRDT state, and the node registry (`.nodes/`) are all committed — any up-to-date remote is a complete backup, and `ddb sync` (or a plain `git push`) is the backup operation. Two things are derived, machine-local state that never needs backup: the SQLite index in `.ddb/` (gitignored, rebuildable) and the device identity in `.git/ddb-node` (recreated by `ddb register-node`).
+
+### Restore on a New or Replacement Device
+
+```bash
+git clone <remote-url> my-ddb
+cd my-ddb
+ddb register-node "Replacement Laptop"   # fresh device identity
+ddb reindex                              # build the local index (first use would also cold-start it)
+ddb status                               # confirm HEAD, node registration, index freshness
+```
+
+If the restore replaces a dead device, retire the old registration so it stops holding back compaction:
+
+```bash
+ddb node list
+ddb node retire <old-uuid>
+```
+
+`ddb compact` also writes a pre-compaction backup bundle by default (`--no-backup` skips it, `--backup-path` relocates it).
