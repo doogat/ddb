@@ -68,10 +68,10 @@ Full rationale, evidence, and current-gap tracking in `docs/src/technical/invari
 
 ### Coherence invariants
 
-- **One error policy.** Exactly one table maps a code → (category, HTTP status, redaction, FFI variant). Adding an error code means editing that ONE table; transports derive from it and never re-decide redaction or status. No per-transport error switch. (Tracked: 00172 unify-server-error-mapping-paths; FFI/PgWire legs 00176/00179.)
-- **App-contract-first, FFI included.** Every verb flows through `AppCommand → DoogatService → AppOutput`. FFI is a transport, not exempt — it uses the contract, not raw service methods. Do not add per-verb actor command/reply enum plumbing; it is being replaced by a closure message (00171). (Tracked: 00171 collapse-actor-plumbing; route verbs + structured fields 00174-00177.)
-- **A result type has one core definition.** Transports serialize the core type; they must not redefine field subsets. Any new public result field lands in the core type first. (Tracked: 00175 route-search-through-contract.)
-- **Every interpolated SQL identifier is escaped; every value is a bound parameter.** Never `format!` a user-influenced string (type name, column, id) into SQL text without an identifier-quoting helper (`escape_sql_ident` in `indexer/filter.rs` / `quote_ident` in `schema_diff/plan.rs`). Validate type/field-key charset at the write boundary. (Tracked: 00178 sql-identifier-escaping.)
+- **One error policy.** Exactly one table maps a code → (category, HTTP status, redaction, FFI variant). Adding an error code means editing that ONE table; transports derive from it and never re-decide redaction or status. No per-transport error switch. (Tracked: 00173 unify-server-error-mapping-paths; FFI/PgWire legs 00177/00180.)
+- **App-contract-first, FFI included.** Every verb flows through `AppCommand → DoogatService → AppOutput`. FFI is a transport, not exempt — it uses the contract, not raw service methods. Do not add per-verb actor command/reply enum plumbing; it is being replaced by a closure message (00172). (Tracked: 00172 collapse-actor-plumbing; route verbs + structured fields 00175-00178.)
+- **A result type has one core definition.** Transports serialize the core type; they must not redefine field subsets. Any new public result field lands in the core type first. (Tracked: 00176 route-search-through-contract.)
+- **Every interpolated SQL identifier is escaped; every value is a bound parameter.** Never `format!` a user-influenced string (type name, column, id) into SQL text without an identifier-quoting helper (`escape_sql_ident` in `indexer/filter.rs` / `quote_ident` in `schema_diff/plan.rs`). Validate type/field-key charset at the write boundary. (Tracked: 00179 sql-identifier-escaping.)
 
 ## Setup
 

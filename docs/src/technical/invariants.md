@@ -2,7 +2,7 @@
 
 Cross-cutting rules that keep ddb safe and coherent. Each is a contract the whole codebase depends on; breaking one is a defect even when the compiler and tests are green, because the failure mode is silent (lost data, divergent nodes, drifted transports). AGENTS.md carries the short enforceable list; this page carries the rationale, the evidence, and — honestly — where the codebase does not yet hold the invariant and which PRD closes the gap.
 
-Status legend: **HOLDS** (enforced today) · **PARTIAL** (part shipped, remainder tracked) · **GAP** (invariant defined, code not yet compliant, PRD tracked). PRD numbers refer to `dev/local/prds/`; re-synced to the renumbered backlog on 2026-07-08.
+Status legend: **HOLDS** (enforced today) · **PARTIAL** (part shipped, remainder tracked) · **GAP** (invariant defined, code not yet compliant, PRD tracked). PRD numbers refer to `dev/local/prds/`; re-synced to the renumbered backlog on 2026-07-16 (harness-migration PRD inserted at 00171; former 00171-00198 shifted +1).
 
 ## Data-safety invariants
 
@@ -41,37 +41,37 @@ Read/list/index paths degrade per-item into structured warnings; only an explici
 
 **Why**: doogats are plain markdown users edit with other tools, and sync brings untrusted content. The full rebuild already collects per-file warnings, but the incremental path (`batch_index_changes`) aborts the whole batch on one unparsable file — and `ensure_fresh` gates ~40 entry points on it, so one stray file turns every read *and* write into an error.
 
-**Current gap**: `ddb-core/src/indexer/rebuild.rs` `batch_index_changes`. Closed by **00169** (poison-file-reindex-resilience); the quarantine listing surface is **00180**.
+**Current gap**: `ddb-core/src/indexer/rebuild.rs` `batch_index_changes`. Closed by **00169** (poison-file-reindex-resilience); the quarantine listing surface is **00181**.
 
 ## Coherence invariants
 
-### I6 — One error policy · GAP (00172; FFI/PgWire legs 00176/00179)
+### I6 — One error policy · GAP (00173; FFI/PgWire legs 00177/00180)
 Exactly one table maps a code → (category, HTTP status, redaction, FFI variant). Transports derive from it and never re-decide redaction or status.
 
 **Why**: today four mappers disagree (`classify` for GraphQL, `http_error` for REST/NoSQL, the FFI allowlist, and PgWire's raw pass-through), and `From<DoogatError> for AppError` has no `SqlEngine` arm — so a SQL error is `SQL_ERROR`+message on one path and redacted `INTERNAL_ERROR` on another. Every new code otherwise has to be taught up to four places.
 
-**Current gap**: `ddb-server/src/error.rs`, `http_error.rs`, `ddb-core/src/ffi/records.rs:111-126`, `pgwire.rs`. Unified by **00172** (unify-server-error-mapping-paths); FFI/PgWire wired in **00176**/**00179**.
+**Current gap**: `ddb-server/src/error.rs`, `http_error.rs`, `ddb-core/src/ffi/records.rs:111-126`, `pgwire.rs`. Unified by **00173** (unify-server-error-mapping-paths); FFI/PgWire wired in **00177**/**00180**.
 
-### I7 — App-contract-first, FFI included · GAP (00171, 00174-00177)
+### I7 — App-contract-first, FFI included · GAP (00172, 00175-00178)
 Every verb flows through `AppCommand → DoogatService → AppOutput`. FFI is a transport and uses the contract, not raw service methods. Do not add per-verb actor command/reply enum plumbing.
 
 **Why**: the contract is only wired for create/update/applySchema; read/delete/search command DTOs are dead code, FFI CRUD takes raw markdown and can't surface warnings, and ~1000 LOC of twin-enum actor plumbing grows ~30 lines per verb. Finishing the contract is what makes transports thin and a generated client possible.
 
-**Current gap**: `ddb-core/src/app_contract/` (unused DTOs), `ddb-core/src/ffi/driver.rs` (raw path), `ddb-server/src/actor/` (twin enums). Closed by **00171** (collapse-actor-plumbing) → **00174/00175/00176** (route read/delete, search, FFI CRUD) → **00177** (structured-fields input). Whether the remaining verbs (sql passthrough, sync/maintenance, discovery, batch) get AppCommand DTOs or are declared specialized surfaces is decided when this invariant flips to HOLDS.
+**Current gap**: `ddb-core/src/app_contract/` (unused DTOs), `ddb-core/src/ffi/driver.rs` (raw path), `ddb-server/src/actor/` (twin enums). Closed by **00172** (collapse-actor-plumbing) → **00175/00176/00177** (route read/delete, search, FFI CRUD) → **00178** (structured-fields input). Whether the remaining verbs (sql passthrough, sync/maintenance, discovery, batch) get AppCommand DTOs or are declared specialized surfaces is decided when this invariant flips to HOLDS.
 
-### I8 — A result type has one core definition · GAP (00175)
+### I8 — A result type has one core definition · GAP (00176)
 Transports serialize the core type; they must not redefine field subsets. A new public result field lands in the core type first.
 
 **Why**: `SearchResult` has 10 fields in core but FFI exposes 6 and REST 4 — three drifted copies. Any consumer that switches transports silently loses fields.
 
-**Current gap**: `ddb-core/src/ffi/records.rs`, `ddb-server/src/rest.rs`. Closed by **00175** (route-search-through-contract).
+**Current gap**: `ddb-core/src/ffi/records.rs`, `ddb-server/src/rest.rs`. Closed by **00176** (route-search-through-contract).
 
-### I9 — SQL identifiers are escaped; values are bound · HOLDS in where-filter/schema-apply, GAP in materializer (00178)
+### I9 — SQL identifiers are escaped; values are bound · HOLDS in where-filter/schema-apply, GAP in materializer (00179)
 Never `format!` a user-influenced identifier (type name, column, id) into SQL without `escape_sql_ident`; validate type/field-key charset at the write boundary. Values are always `?N` bound parameters.
 
 **Why**: two quoting helpers already exist — `escape_sql_ident` (`ddb-core/src/indexer/filter.rs:7`, used by the where-filter/search path) and `quote_ident` (`ddb-core/src/schema_diff/plan.rs:14`, used by schema-apply DDL, backed by `validate_identifier`). But the materializer and delete paths interpolate table/column/`dtype` bare-quoted with NEITHER. Names derive from attacker-influenceable frontmatter, so a `"`-bearing type name can corrupt the DDL (bounded to single-statement DoS/corruption, not exfiltration). The two-helper duplication is itself worth consolidating.
 
-**Current gap**: `ddb-core/src/indexer/materialize.rs`, `ddb-core/src/service/delete.rs`, plus bare-quoted (schema-resolved) columns in `ddb-server/src/filter.rs`. Closed by **00178** (sql-identifier-escaping: one canonical helper in all three paths + charset-validate at the write boundary).
+**Current gap**: `ddb-core/src/indexer/materialize.rs`, `ddb-core/src/service/delete.rs`, plus bare-quoted (schema-resolved) columns in `ddb-server/src/filter.rs`. Closed by **00179** (sql-identifier-escaping: one canonical helper in all three paths + charset-validate at the write boundary).
 
 ## Using this page
 

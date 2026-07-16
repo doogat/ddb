@@ -15,7 +15,7 @@ Architectural choices that constrain the system. New requirements and feature pr
 
 **Tradeoff**: Real surplus cost today (maintenance, drift risk, conformance burden across six transports) is carried against downstreams that do not yet exist. Accepted deliberately as a platform bet. Mitigation: the app-contract + conformance work keeps the parity cost sub-linear as capabilities grow.
 
-**Reaffirmed 2026-07-13** (purpose-fit critique): no read-only specialization exceptions for any interface. An interface below the CRUD baseline is a parity gap to close (NoSQL HTTP: PRD 00191), never a candidate for a "specialized" carve-out. The remedy for parity cost is finishing the app contract (00171-00177), not shrinking the surface.
+**Reaffirmed 2026-07-13** (purpose-fit critique): no read-only specialization exceptions for any interface. An interface below the CRUD baseline is a parity gap to close (NoSQL HTTP: PRD 00192), never a candidate for a "specialized" carve-out. The remedy for parity cost is finishing the app contract (00172-00178), not shrinking the surface.
 
 ## Hybrid Git-CRDT Merge
 
@@ -115,7 +115,7 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 
 ## Mobile Model: Full Replica via FFI Git Sync
 
-**Decision** (2026-07-13): A mobile device participates in the distribution as a full git replica. `DoogatDriver` gains fetch/push/sync over HTTPS-token remotes (PRD 00190); bundle export/import remains the offline fallback. Hosted thin-client access is not the mobile model; it may layer on later behind the server-hardening work (00179) if a downstream needs it.
+**Decision** (2026-07-13): A mobile device participates in the distribution as a full git replica. `DoogatDriver` gains fetch/push/sync over HTTPS-token remotes (PRD 00191); bundle export/import remains the offline fallback. Hosted thin-client access is not the mobile model; it may layer on later behind the server-hardening work (00180) if a downstream needs it.
 
 **Why**: The product statement is "distributed thanks to git, mobile included", and the existing decisions already commit to full-clone semantics on every device. A hosted thin client would trade away offline-first and reintroduce the cache-and-sync layer git exists to provide.
 
@@ -123,7 +123,7 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 
 ## PgWire Is a Guaranteed Write Surface (Non-Transactional)
 
-**Decision** (2026-07-13): PgWire keeps DML/DDL. Its writes ride the app contract and the unified error policy (00172/00179) like every other transport. The interface documents its actual semantics: each statement commits independently; there is no rollback after commit and no isolation levels (Postgres transaction verbs are not honored — the docs state precisely how BEGIN/COMMIT/ROLLBACK behave).
+**Decision** (2026-07-13): PgWire keeps DML/DDL. Its writes ride the app contract and the unified error policy (00173/00180) like every other transport. The interface documents its actual semantics: each statement commits independently; there is no rollback after commit and no isolation levels (Postgres transaction verbs are not honored — the docs state precisely how BEGIN/COMMIT/ROLLBACK behave).
 
 **Rejected alternative**: gating PgWire to SELECT-only as a "specialized read interface". Rejected with the general no-specialization ruling above.
 
@@ -131,7 +131,7 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 
 ## Read Freshness: Committed = Visible, Watch Mode Opt-In
 
-**Decision** (2026-07-13): Served reads enforce "committed = visible" via a cheap HEAD-oid staleness probe (no more blanket `skip_stale_check`); a `_typedef` arriving via sync triggers a GraphQL schema reload; an opt-in watch mode (`ddb serve --watch` / `ddb watch`) absorbs external edits into commits after a debounce. A per-transport consistency contract page documents every guarantee. (PRD 00189.)
+**Decision** (2026-07-13): Served reads enforce "committed = visible" via a cheap HEAD-oid staleness probe (no more blanket `skip_stale_check`); a `_typedef` arriving via sync triggers a GraphQL schema reload; an opt-in watch mode (`ddb serve --watch` / `ddb watch`) absorbs external edits into commits after a debounce. A per-transport consistency contract page documents every guarantee. (PRD 00190.)
 
 **Why**: The premise is that the markdown files are the database, so a change committed outside ddb must be served without waiting for an unrelated write. Uncommitted edits are not yet data — unless the operator opts into watch mode, which turns saves into commits rather than indexing uncommitted state.
 
@@ -142,9 +142,9 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 **Decision** (2026-07-13): v1.0 — "the goal is reached" — is a checkable state, not a drained backlog. Four conditions, each observable:
 
 1. **Safe + coherent**: all nine invariants in `technical/invariants.md` (I1-I9, covering both the data-safety and coherence sets) read HOLDS, each pinned by a regression test.
-2. **Parity proven**: the same golden CRUD + validation workflows pass the conformance harness on all six transports (CLI, GraphQL, REST, PgWire, FFI, NoSQL HTTP), with parity failures blocking CI (PRDs 00174/00175/00191/00192).
+2. **Parity proven**: the same golden CRUD + validation workflows pass the conformance harness on all six transports (CLI, GraphQL, REST, PgWire, FFI, NoSQL HTTP), with parity failures blocking CI (PRDs 00175/00176/00192/00193).
 3. **Consumable proven**: jink runs on `ddb-client` + typedef codegen + structured inputs, and the glue-deletion ledger (~2,400 backend + ~1,250 frontend LOC) is measured, not estimated. The migration work happens in jink's repo; the measurement is a v1.0 acceptance item here.
-4. **Distributed proven**: a mobile device operates as a full git replica via FFI sync (00190), and CI generates the bindings and builds the platform artifacts nightly (00193).
+4. **Distributed proven**: a mobile device operates as a full git replica via FFI sync (00191), and CI generates the bindings and builds the platform artifacts nightly (00194).
 
 **Explicitly NOT required for v1.0** (post-v1 or decision-gated): registry publishing (crates.io / SwiftPM / Maven), a second downstream app, in-process TLS, the PgWire extended/prepared protocol, incremental indexing beyond ~5K doogats, a user-visible conflict journal, foreign-system import tooling.
 
