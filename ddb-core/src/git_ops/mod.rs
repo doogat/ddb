@@ -405,7 +405,7 @@ impl GitRepo {
             if full_path.exists() {
                 std::fs::remove_file(&full_path)?;
             }
-            let mut index = self.repo.index()?;
+            let mut index = self.fresh_index()?;
             index.remove_path(Path::new(rel_path))?;
             index.write()?;
             let tree_oid = index.write_tree()?;
@@ -435,7 +435,7 @@ impl GitRepo {
                     std::fs::remove_file(&full_path)?;
                 }
             }
-            let mut index = self.repo.index()?;
+            let mut index = self.fresh_index()?;
             for rel_path in paths {
                 index.remove_path(Path::new(rel_path))?;
             }
