@@ -6,12 +6,12 @@ Status legend: **HOLDS** (enforced today) · **PARTIAL** (part shipped, remainde
 
 ## Data-safety invariants
 
-### I1 — Every git write holds the repo write lock · PARTIAL (lock shipped: 00162; delete freshness: 00163)
+### I1 — Every git write holds the repo write lock · PARTIAL (lock shipped for the 8 CRUD paths: 00162; delete freshness + merge/sync lock: 00163)
 All commit/delete/rename paths must run inside one repo-scoped, cross-process advisory lock, and must build their tree from `fresh_index()` (never the cached `repo.index()`).
 
 **Why**: without a lock, two processes (a downstream app's `ddb serve` and a user's CLI, or two scripted `ddb create`s) build trees from stale HEADs and overwrite each other's commits with no error; `git maintenance --auto` then prunes the orphaned commit permanently. This is the highest-severity failure class in the system.
 
-**Current state**: the cross-process advisory lock SHIPPED 2026-07 as **00162** (cross-process-write-lock): `ddb-core/src/git_ops/write_lock.rs`, all eight write functions wrapped in `with_write_lock`. Still open: `delete_file`/`delete_files` build from the stale cached index — closed by **00163** (git-tree-construction-correctness: delete `fresh_index()` + merge deletion preservation).
+**Current state**: the cross-process advisory lock SHIPPED 2026-07 as **00162** (cross-process-write-lock): `ddb-core/src/git_ops/write_lock.rs`, the eight CRUD/rename write functions wrapped in `with_write_lock`. Still open (both closed by **00163**, git-tree-construction-correctness): (a) `delete_file`/`delete_files` build from the stale cached index; (b) **the merge/sync write path runs entirely outside the lock and also stages from the cached index** — `git_ops/merge.rs` merge commit, `perform_normal_merge` commit + forced checkout, and the fast-forward `set_target` + forced checkout (found by the 2026-07-16 assessment; a sync racing a locked CRUD write can revert its worktree file or orphan its commit).
 
 **Rule for new code**: any new write path goes through `with_write_lock`. If you find yourself calling `repo.index()` in a write, stop — use `fresh_index()`.
 

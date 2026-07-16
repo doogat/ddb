@@ -60,7 +60,7 @@ Follow SOLID and Clean Architecture principles as adapted for Rust. These are ma
 
 Full rationale, evidence, and current-gap tracking in `docs/src/technical/invariants.md`. These are non-negotiable; a change that breaks one is wrong even if tests pass.
 
-- **Every git write holds the repo write lock.** All commit/delete/rename paths must run inside the repo-scoped advisory write lock and build trees from `fresh_index()`. Never use the cached `repo.index()` for a write; never add a new write path that skips the lock. (Lock shipped: 00162 cross-process-write-lock, done. Delete-path `fresh_index()` tracked: 00163 git-tree-construction-correctness.)
+- **Every git write holds the repo write lock — merges, sync, and bundle import included.** All commit/delete/rename/merge/checkout-moving paths must run inside the repo-scoped advisory write lock and build trees from fresh state. Never use the cached `repo.index()` for a write; never add a new write path that skips the lock. (Lock shipped for the 8 CRUD paths: 00162, done. Delete-path `fresh_index()` AND the unlocked merge/sync path (`git_ops/merge.rs`) tracked: 00163 git-tree-construction-correctness — found 2026-07-16.)
 - **Merges preserve the other side's deletions.** Merge tree-construction must stage `Delta::Deleted`, not just `Added|Modified`. A conflicted merge must never resurrect a file the other side deleted. (Tracked: 00163 git-tree-construction-correctness.)
 - **IDs are minted through one repo-aware path.** No mint path may use `exists = |_| false` or allocate future-dated timestamps. All minting checks actual repo/index existence. The ~1/sec/process ceiling is a known, tracked limitation (00170) — do not "fix" it ad hoc. (Tracked: 00164 unify-id-minting, 00170 id-throughput-ceiling-decision.)
 - **Conflict resolution is a pure function of its inputs.** Set stable Automerge actor IDs (derived from blob OIDs / node UUIDs); never rely on default random actor IDs. If a decision claims HLC ordering, the feeding commits must carry an HLC trailer. (Tracked: 00165 deterministic-crdt-resolution, 00166 make-hlc-load-bearing.)
@@ -101,7 +101,7 @@ Validation is two-tiered: a fast per-task gate runs locally; the heavy battery i
 A task is NOT complete unless ALL of these pass locally:
 
 1. **Build** — `cargo build` succeeds.
-2. **Lint** — `cargo clippy --workspace` is clean.
+2. **Lint** — `cargo clippy --workspace --all-targets` is clean. (`--all-targets` is required: CI lints test targets too; without it, test-code lints slip through Tier 1 and break Nightly — happened 2026-07.)
 3. **Fast tests** — `cargo test-ci` passes.
 4. **TDD unit tests** — unit tests for the change live alongside the module being touched and pass under `cargo test-ci`.
 
@@ -160,7 +160,7 @@ cargo build -p ddb-core --features profiling   Build with tracing instrumentatio
 ./tests/integration.sh                Full integration tests (runs smoke first)
 cargo test -p ddb-core --test property_tests   Property-based integration tests
 cargo test -p ddb-core --test sync_test        Core sync integration tests
-cargo clippy --workspace              Lint
+cargo clippy --workspace --all-targets   Lint (incl. test targets; matches CI)
 cargo doc --no-deps --document-private-items   Generate rustdoc
 cd docs && mdbook build               Build documentation
 cd docs && mdbook serve               Serve documentation locally
