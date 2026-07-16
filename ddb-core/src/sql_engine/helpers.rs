@@ -1388,7 +1388,7 @@ mod tests {
         // later one does. The later table's ZONE must still be stripped.
         let sql = "CREATE TABLE a (x TEXT); CREATE TABLE b (descr TEXT ZONE frontmatter)";
         let (cleaned, map) = strip_inline_zones(sql).unwrap();
-        assert!(map.get("a").is_none(), "unzoned table absent from map");
+        assert!(!map.contains_key("a"), "unzoned table absent from map");
         assert_eq!(map["b"]["descr"], Zone::Frontmatter);
         assert!(!cleaned.to_lowercase().contains("zone frontmatter"));
         // The first table's body is untouched.
@@ -1451,7 +1451,7 @@ mod tests {
         let (cleaned2, map2) = strip_inline_zones(sql2).unwrap();
         use crate::types::Zone;
         assert_eq!(map2["t"].get("descr"), Some(&Zone::Frontmatter));
-        assert!(map2["t"].get("created").is_none());
+        assert!(!map2["t"].contains_key("created"));
         assert!(cleaned2.to_uppercase().contains("TIME ZONE"));
     }
 
@@ -1530,7 +1530,7 @@ mod tests {
         assert_eq!(map["t"].len(), 1);
         assert_eq!(map["t"]["summary"], Zone::Frontmatter);
         assert!(
-            map.get("fake").is_none(),
+            !map.contains_key("fake"),
             "a CREATE TABLE inside a string literal must not be mapped"
         );
         // The literal default is preserved verbatim.
