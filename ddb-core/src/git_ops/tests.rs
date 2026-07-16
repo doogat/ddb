@@ -765,3 +765,43 @@ fn concurrent_commits_land_all_writes_in_head() {
         );
     }
 }
+
+#[test]
+fn delete_file_builds_tree_from_fresh_index() {
+    let (dir, repo) = temp_repo();
+    repo.commit_file("ddb/g.md", "g content", "add g").unwrap();
+
+    let external = GitRepo::open(dir.path()).unwrap();
+    external
+        .commit_file("ddb/f.md", "f content", "add f")
+        .unwrap();
+
+    repo.delete_file("ddb/g.md", "delete g").unwrap();
+
+    let content = repo.read_file("ddb/f.md").unwrap();
+    assert_eq!(content, "f content");
+    assert!(repo.read_file("ddb/g.md").is_err());
+}
+
+#[test]
+fn delete_files_builds_tree_from_fresh_index() {
+    let (dir, repo) = temp_repo();
+    repo.commit_files(
+        &[("ddb/g1.md", "g1 content"), ("ddb/g2.md", "g2 content")],
+        "add g1 g2",
+    )
+    .unwrap();
+
+    let external = GitRepo::open(dir.path()).unwrap();
+    external
+        .commit_file("ddb/f.md", "f content", "add f")
+        .unwrap();
+
+    repo.delete_files(&["ddb/g1.md", "ddb/g2.md"], "delete g1 g2")
+        .unwrap();
+
+    let content = repo.read_file("ddb/f.md").unwrap();
+    assert_eq!(content, "f content");
+    assert!(repo.read_file("ddb/g1.md").is_err());
+    assert!(repo.read_file("ddb/g2.md").is_err());
+}
