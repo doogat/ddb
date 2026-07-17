@@ -53,6 +53,8 @@ Reads the UUID from `.git/ddb-node`, then loads the corresponding `.nodes/{uuid}
 6. **Commit-graph**: write once (deferred from per-commit writes during sync)
 7. **Reindex**: `index.rebuild_if_stale(repo)` — incremental reindex via `diff_paths` processes only changed files
 
+> **Write-lock coverage**: the merge step's write section (the merge or fast-forward commit, the ref move, and the forced checkout) holds the repo-scoped cross-process write lock and stages its tree from a freshly-read index, so a `ddb sync` racing a concurrent locked CRUD write can neither revert that write's working-tree file nor orphan its commit. See `git-ops.md` § "Write serialization (cross-process lock)". Bundle import's `git merge` subprocess is the one merge path still outside the lock (tracked by 00168).
+
 ### Four-Bucket Conflict Partition
 
 When `merge_remote()` returns `Conflicts`, the conflict list is partitioned into four buckets before resolution:

@@ -6,21 +6,21 @@ Status legend: **HOLDS** (enforced today) · **PARTIAL** (part shipped, remainde
 
 ## Data-safety invariants
 
-### I1 — Every git write holds the repo write lock · PARTIAL (lock shipped for the 8 CRUD paths: 00162; delete freshness + merge/sync lock: 00163)
+### I1 — Every git write holds the repo write lock · PARTIAL (8 CRUD paths: 00162; delete-freshness + merge/sync lock: 00163, shipped; bundle-import leg: 00168)
 All commit/delete/rename paths must run inside one repo-scoped, cross-process advisory lock, and must build their tree from `fresh_index()` (never the cached `repo.index()`).
 
 **Why**: without a lock, two processes (a downstream app's `ddb serve` and a user's CLI, or two scripted `ddb create`s) build trees from stale HEADs and overwrite each other's commits with no error; `git maintenance --auto` then prunes the orphaned commit permanently. This is the highest-severity failure class in the system.
 
-**Current state**: the cross-process advisory lock SHIPPED 2026-07 as **00162** (cross-process-write-lock): `ddb-core/src/git_ops/write_lock.rs`, the eight CRUD/rename write functions wrapped in `with_write_lock`. Still open (both closed by **00163**, git-tree-construction-correctness): (a) `delete_file`/`delete_files` build from the stale cached index; (b) **the merge/sync write path runs entirely outside the lock and also stages from the cached index** — `git_ops/merge.rs` merge commit, `perform_normal_merge` commit + forced checkout, and the fast-forward `set_target` + forced checkout (found by the 2026-07-16 assessment; a sync racing a locked CRUD write can revert its worktree file or orphan its commit).
+**Current state**: the cross-process advisory lock SHIPPED 2026-07 as **00162** (cross-process-write-lock): `ddb-core/src/git_ops/write_lock.rs`, the eight CRUD/rename write functions wrapped in `with_write_lock`. **00163** (git-tree-construction-correctness) then closed two more legs: (a) `delete_file`/`delete_files` now build from `fresh_index()` instead of the stale cached index; (b) the merge/sync write path — `git_ops/merge.rs` `commit_merge`, `merge_remote`'s normal-merge commit + forced checkout (`perform_normal_merge`), and the fast-forward `set_target` + forced checkout — now runs inside `with_write_lock` and stages the merge tree from `fresh_index()` (`git commit-graph write` relocated outside the locked section). One write path is still outside the lock: bundle import (`bundle::merge_bundle_and_resolve` shells out to `git merge` directly), tracked by **00168**. That remaining leg is why this invariant stays PARTIAL, not HOLDS.
 
 **Rule for new code**: any new write path goes through `with_write_lock`. If you find yourself calling `repo.index()` in a write, stop — use `fresh_index()`.
 
-### I2 — Merges preserve the other side's deletions · GAP (00163)
+### I2 — Merges preserve the other side's deletions · GAP (00200)
 Merge tree-construction stages `Delta::Deleted`, not only `Added|Modified`.
 
 **Why**: skipping deleted deltas silently resurrects a doogat the other device deleted, and turns a rename (delete+add) into a duplicate. The resurrect-with-marker policy in `sync_manager` only sees git-reported conflicts, so it cannot catch this.
 
-**Current gap**: `ddb-core/src/git_ops/merge.rs` `collect_theirs_only_changes` skips `Deleted`. Closed by **00163** (git-tree-construction-correctness).
+**Current gap**: `ddb-core/src/git_ops/merge.rs` `collect_theirs_only_changes` skips `Deleted` — and its two-way ours→theirs diff also silently reverts ours' non-conflicting edits (a two-way diff structurally cannot express the three-way merge it simulates; proven empirically in 00163's design review, evidence at `dev/local/designs/00200-make-merge-tree-three-way-v1-evidence.md`). This content-correctness leg moved out of 00163 to **00200** (make-merge-tree-three-way), which rebuilds the conflicted-merge tree from the three-way merge index rather than patching individual delta arms. (00163 shipped only the merge-path locking + fresh staging — the delta-arm semantics are byte-identical until 00200.)
 
 ### I3 — IDs are minted through one repo-aware path · GAP (00164, 00170)
 No mint path uses `exists = |_| false` or allocates future-dated timestamps; all minting checks actual repo/index existence.

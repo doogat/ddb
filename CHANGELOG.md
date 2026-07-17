@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **cli**: `ddb sync` now reports the number of doogats resurrected by a delete-vs-edit conflict resolution as a `resurrected: N` line (printed only when non-zero, alongside the existing collision and singleton-conflict counts). Previously `SyncReport.resurrected` was populated but never surfaced to the operator. (PRD 00163)
 
+### Fixed
+
+- **git**: the merge/sync write path (conflicted-merge commit, normal 3-way merge commit + forced checkout, and fast-forward ref move + forced checkout) now runs inside the same cross-process write lock as the CRUD paths, and stages its merge tree from a freshly-read index. Previously the merge ran entirely outside the lock: a concurrent locked CRUD write could have its working-tree file reverted by the merge's forced checkout, or the merge could commit from a stale parent that `git maintenance --auto` later prunes — the same silent-loss class the 00162 write lock already closed for direct writes. (Bundle import still merges via a `git merge` subprocess outside the lock; tracked separately as 00168.) (PRD 00163)
+
 ## [0.2.7] - 2026-07-17
 
 ### Added
