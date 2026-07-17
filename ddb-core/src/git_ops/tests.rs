@@ -805,3 +805,159 @@ fn delete_files_builds_tree_from_fresh_index() {
     assert!(repo.read_file("ddb/g1.md").is_err());
     assert!(repo.read_file("ddb/g2.md").is_err());
 }
+
+/// Merge write path (PRD 00163): `merge_remote` must run its critical section
+/// under the repo write lock, and a writer that committed while holding that
+/// lock must survive a subsequent merge — its commit stays an ancestor of the
+/// post-merge HEAD and its content stays in the tree.
+///
+/// Fails against the current UNLOCKED merge code: while the helper thread holds
+/// the raw write guard, an unlocked `merge_remote` runs and returns immediately
+/// (before the guard is released), so `released` is still false. Passes once the
+/// merge path holds the lock, because the merge then blocks on the guard until
+/// it is dropped.
+#[test]
+fn merge_blocks_while_write_lock_held() {
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::Arc;
+
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Give origin a change to merge and fetch it into repo_b, but do NOT merge.
+    repo_a
+        .commit_file("ddb/x.md", "from a", "a change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let dir_b_path = dir_b.path().to_path_buf();
+    let released = Arc::new(AtomicBool::new(false));
+    let released_thread = Arc::clone(&released);
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+
+    let handle = std::thread::spawn(move || {
+        // Hold the repo's raw OS write guard across the whole critical window.
+        let guard = super::write_lock::acquire(&dir_b_path, Duration::from_secs(10)).unwrap();
+
+        // Commit a NEW distinct file with raw git2 on refs/heads/master. Raw
+        // git2 on purpose: GitRepo's own write methods would block on the very
+        // lock this thread already holds.
+        let raw = Repository::open(&dir_b_path).unwrap();
+        std::fs::write(dir_b_path.join("ddb/y.md"), "from helper").unwrap();
+        let mut index = raw.index().unwrap();
+        index.add_path(Path::new("ddb/y.md")).unwrap();
+        index.write().unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = raw.find_tree(tree_oid).unwrap();
+        let sig = Signature::now("helper", "helper@local").unwrap();
+        let parent = raw.head().unwrap().peel_to_commit().unwrap();
+        let helper_oid = raw
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "helper commit under lock",
+                &tree,
+                &[&parent],
+            )
+            .unwrap();
+
+        // Signal: guard is held and the locked writer's commit has landed.
+        tx.send(helper_oid.to_string()).unwrap();
+
+        // Hold the guard for a bounded window well under the 10s timeout. An
+        // unlocked merge returns inside this window; a locked one cannot.
+        std::thread::sleep(Duration::from_millis(500));
+        released_thread.store(true, SeqCst);
+        drop(guard);
+    });
+
+    // Wait until the guard is held and the helper commit exists, then merge.
+    let helper_oid = rx.recv().unwrap();
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+
+    // Discriminating assertion: the merge must not have returned until the
+    // guard was released. On unlocked code it returns while `released` is false.
+    assert!(
+        released.load(SeqCst),
+        "merge_remote returned while the write lock was held — it ran unlocked"
+    );
+    handle.join().unwrap();
+
+    // Correctness pin: the racing merge neither orphaned the locked writer's
+    // commit nor dropped its content. This is a fixed-code correctness pin, not
+    // a fail-first discriminator — the race has no reliable injection point on
+    // old code; the ordering flag above is the discriminator.
+    match result {
+        MergeResult::Clean(_) => {}
+        other => panic!("expected a clean merge commit, got {other:?}"),
+    }
+    let head = repo_b.head_oid().unwrap();
+    let head_oid = Oid::from_str(&head.0).unwrap();
+    let helper = Oid::from_str(&helper_oid).unwrap();
+    assert!(
+        repo_b.repo.graph_descendant_of(head_oid, helper).unwrap(),
+        "helper's locked commit is not an ancestor of post-merge HEAD (orphaned)"
+    );
+    assert_eq!(
+        repo_b.read_file("ddb/y.md").unwrap(),
+        "from helper",
+        "helper's committed file was dropped from the merged tree"
+    );
+}
+
+/// Behavior-preservation guard for the merge-tree staging base: a conflicted
+/// merge resolved via `commit_merge` must yield the same observable tree
+/// regardless of the internal staging base — a theirs-only file keeps theirs'
+/// content and a both-sides-changed file carries the resolved content. Passes
+/// on both old and new code (guards against accidental drift, not fail-first).
+#[test]
+fn conflicted_merge_arm_behavior_unchanged() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Shared base file, brought up to date on repo_b via fast-forward.
+    repo_a
+        .commit_file("ddb/x.md", "base", "base x")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    // Theirs: add a theirs-only file AND edit the shared file.
+    repo_a
+        .commit_files(
+            &[("ddb/t.md", "theirs t"), ("ddb/x.md", "theirs x")],
+            "theirs change",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: a conflicting local edit to the shared file.
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours change")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    repo_b
+        .commit_merge(
+            &[("ddb/x.md", "resolved x")],
+            &[],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    // Observable arm outcomes that must not drift under a staging-base change:
+    assert_eq!(repo_b.read_file("ddb/t.md").unwrap(), "theirs t");
+    assert_eq!(repo_b.read_file("ddb/x.md").unwrap(), "resolved x");
+}
