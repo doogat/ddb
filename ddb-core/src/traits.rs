@@ -384,7 +384,7 @@ pub trait GitMerge {
     fn commit_merge(
         &self,
         files: &[(&str, &str)],
-        binary_paths: &[&str],
+        binary: &[(&str, &str)],
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash>;

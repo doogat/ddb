@@ -325,8 +325,8 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             resolved.extend(self.cascade_resolve(normal, strategy.as_deref()));
         }
 
-        self.resolve_binary_ref_conflicts(&binary_ref)?;
-        self.create_conflict_commit(&resolved, &binary_ref, theirs_oid)?;
+        let binary = self.resolve_binary_ref_conflicts(&binary_ref)?;
+        self.create_conflict_commit(&resolved, &binary, theirs_oid)?;
 
         report.collisions_reassigned =
             self.reassign_collision_losers(collision_losers, theirs_oid)?;
@@ -340,7 +340,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     fn create_conflict_commit(
         &mut self,
         resolved: &[crate::types::ResolvedFile],
-        binary_ref: &[ConflictFile],
+        binary: &[(String, String)],
         theirs_oid: &CommitHash,
     ) -> Result<()> {
         let hlc = self.tick_hlc();
@@ -350,9 +350,12 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             .iter()
             .map(|r| (r.path.as_str(), r.content.as_str()))
             .collect();
-        let binary_paths: Vec<&str> = binary_ref.iter().map(|c| c.path.as_str()).collect();
+        let binary: Vec<(&str, &str)> = binary
+            .iter()
+            .map(|(p, o)| (p.as_str(), o.as_str()))
+            .collect();
         self.repo
-            .commit_merge(&files, &binary_paths, &merge_msg, theirs_oid)?;
+            .commit_merge(&files, &binary, &merge_msg, theirs_oid)?;
 
         let commit_oid = self.repo.head_oid()?;
         write_fm_crdt_files(self.repo.repo_path(), &commit_oid, resolved)?;
@@ -456,7 +459,14 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     }
 
     /// Resolve binary reference conflicts via HLC last-write-wins.
-    fn resolve_binary_ref_conflicts(&self, conflicts: &[ConflictFile]) -> Result<()> {
+    /// Returns `(path, winning-blob-OID)` pairs. The winner is materialized into
+    /// the worktree by `commit_merge`'s post-commit `checkout_head`, not here, so a
+    /// merge abort strands no stale winner bytes on disk.
+    fn resolve_binary_ref_conflicts(
+        &self,
+        conflicts: &[ConflictFile],
+    ) -> Result<Vec<(String, String)>> {
+        let mut resolved = Vec::new();
         for conflict in conflicts {
             let theirs_wins = match (&conflict.ours_hlc, &conflict.theirs_hlc) {
                 (Some(ours_hlc), Some(theirs_hlc)) => theirs_hlc >= ours_hlc,
@@ -475,15 +485,10 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
                     conflict.path, winner
                 ))
             })?;
-            let bytes = self.repo.read_blob(oid)?;
-            let full_path = self.repo.repo_path().join(&conflict.path);
-            if let Some(parent) = full_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&full_path, &bytes)?;
             tracing::info!(path = %conflict.path, winner, "binary_lww_resolved");
+            resolved.push((conflict.path.clone(), oid.to_string()));
         }
-        Ok(())
+        Ok(resolved)
     }
 
     /// Three-step merge cascade:

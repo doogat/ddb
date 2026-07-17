@@ -708,11 +708,11 @@ impl crate::traits::GitMerge for GitRepo {
     fn commit_merge(
         &self,
         files: &[(&str, &str)],
-        binary_paths: &[&str],
+        binary: &[(&str, &str)],
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash> {
-        self.commit_merge(files, binary_paths, message, theirs)
+        self.commit_merge(files, binary, message, theirs)
     }
 }
 

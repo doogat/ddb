@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use git2::Oid;
 
 use super::{validate_path, GitRepo};
@@ -7,60 +5,13 @@ use crate::error::{DoogatError, Result};
 use crate::types::{CommitHash, ConflictFile, MergeResult};
 
 impl GitRepo {
-    /// Write resolved files to disk.
-    fn write_resolved_files(&self, files: &[(&str, &str)]) -> Result<()> {
-        for (rel_path, content) in files {
-            let full_path = self.path.join(rel_path);
-            if let Some(parent) = full_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&full_path, content)?;
-        }
-        Ok(())
-    }
-
-    /// Build the merge tree from resolved files, binary paths, and theirs-only changes, then commit.
-    fn build_merge_tree_and_commit(
-        &self,
-        files: &[(&str, &str)],
-        binary_paths: &[&str],
-        theirs_only: &[String],
-        message: &str,
-        our_commit: &git2::Commit,
-        their_commit: &git2::Commit,
-    ) -> Result<CommitHash> {
-        let mut index = self.fresh_index()?;
-        for (rel_path, _) in files {
-            index.add_path(Path::new(rel_path))?;
-        }
-        for path in binary_paths {
-            index.add_path(Path::new(path))?;
-        }
-        for path in theirs_only {
-            index.add_path(Path::new(path))?;
-        }
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
-
-        let oid = self.repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &[our_commit, their_commit],
-        )?;
-        Ok(CommitHash(oid.to_string()))
-    }
-
-    /// Write resolved files and create a merge commit with two parents.
+    /// Create a merge commit with two parents from a true three-way merge tree,
+    /// overlaying the CRDT-resolved blobs onto the conflict entries.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn commit_merge(
         &self,
         files: &[(&str, &str)],
-        binary_paths: &[&str],
+        binary: &[(&str, &str)], // (path, winning-blob-OID) — was `binary_paths: &[&str]`
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash> {
@@ -68,7 +19,7 @@ impl GitRepo {
             for (rel_path, _) in files {
                 validate_path(&self.path, rel_path)?;
             }
-            for rel_path in binary_paths {
+            for (rel_path, _) in binary {
                 validate_path(&self.path, rel_path)?;
             }
 
@@ -78,68 +29,156 @@ impl GitRepo {
             let theirs_oid = Oid::from_str(&theirs.0)?;
             let their_commit = self.repo.find_commit(theirs_oid)?;
 
-            self.write_resolved_files(files)?;
+            // Reuse the clean path's construction: libgit2 computes the true
+            // three-way merge tree (ours-only edits kept, theirs-only kept,
+            // both-edited auto-mergeable files line-merged, theirs-deletions
+            // absent, ours-creates present). Only the conflict entries need
+            // our CRDT-resolved blobs overlaid.
+            let mut merge_index = self.repo.merge_commits(&our_commit, &their_commit, None)?;
 
-            let ours_tree = our_commit.tree()?;
-            let theirs_tree = their_commit.tree()?;
-            let resolved_set: std::collections::HashSet<&str> = files
+            // DIVERGENCE GUARD (fail-loud, in-scope per PRD "conflict-set divergence
+            // handling"). The re-run merge's conflict set MUST equal the set
+            // `sync_manager` resolved (`files` + `binary`). If a concurrent writer
+            // moved HEAD in the resolve→commit window, the re-run set differs — a
+            // path auto-resolved (no longer a conflict) or a new path conflicts —
+            // and our resolved blobs are stale. Checking `has_conflicts()` AFTER the
+            // overlay is NOT sufficient: `conflict_remove` returns Ok (not NotFound)
+            // for an auto-resolved stage-0 path, so the overlay would silently
+            // overwrite libgit2's fresh result and `has_conflicts()` would be false.
+            // Snapshot the conflict paths BEFORE the overlay clears them and compare.
+            // Because the whole tree is built in-memory (no worktree write until the
+            // post-commit checkout), an abort HERE mutates nothing on disk — the
+            // binary winners are overlaid by OID, not pre-written (fixes the stale-
+            // binary-on-abort window a pre-write would leave).
+            let rerun_conflicts = self.collect_conflict_paths(&merge_index)?;
+            let resolved: std::collections::HashSet<&str> = files
                 .iter()
                 .map(|(p, _)| *p)
-                .chain(binary_paths.iter().copied())
+                .chain(binary.iter().map(|(p, _)| *p))
                 .collect();
-            let theirs_only =
-                self.collect_theirs_only_changes(&ours_tree, &theirs_tree, &resolved_set)?;
+            if rerun_conflicts.len() != resolved.len()
+                || !rerun_conflicts.iter().all(|p| resolved.contains(p.as_str()))
+            {
+                return Err(DoogatError::Conflict(
+                    "merge conflict set changed since resolution (HEAD moved during the \
+                     resolve→commit window); retry sync"
+                        .into(),
+                ));
+            }
 
-            self.build_merge_tree_and_commit(
-                files,
-                binary_paths,
-                &theirs_only,
+            self.overlay_resolved_blobs(&mut merge_index, files, binary)?;
+
+            // `write_tree_to` additionally refuses any not-fully-merged index — a
+            // second backstop, though the equality guard above already guarantees the
+            // overlay clears every conflict.
+            let tree_oid = merge_index.write_tree_to(&self.repo)?;
+            let tree = self.repo.find_tree(tree_oid)?;
+            let sig = self.signature()?;
+            let oid = self.repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
                 message,
-                &our_commit,
-                &their_commit,
-            )
+                &tree,
+                &[&our_commit, &their_commit],
+            )?;
+            // Sync the working tree to the committed merge tree — symmetric with
+            // `perform_normal_merge`. This is what removes theirs-deleted files from
+            // the worktree and materializes line-merged and resolved content,
+            // replacing the old manual `write_resolved_files`.
+            self.repo
+                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+            Ok(CommitHash(oid.to_string()))
         })?;
         self.write_commit_graph();
         Ok(hash)
     }
 
-    /// Collect files that were added or modified on theirs but not in our resolved set.
-    /// Writes them to disk and returns their paths for staging.
-    fn collect_theirs_only_changes(
+    /// Overlay CRDT-resolved blobs onto a `merge_commits` index's conflict entries.
+    /// Text blobs are created from `files` (path, resolved-content); binary-reference
+    /// blobs are overlaid by their already-existing winning OID (`binary`: path,
+    /// oid-string) — no worktree read/write, so the whole tree is built in memory and
+    /// an abort before commit mutates nothing on disk. After this, every path the
+    /// resolver produced is a single stage-0 entry; the post-commit `checkout_head`
+    /// materializes both text and binary content into the worktree.
+    fn overlay_resolved_blobs(
         &self,
-        ours_tree: &git2::Tree,
-        theirs_tree: &git2::Tree,
-        resolved_set: &std::collections::HashSet<&str>,
-    ) -> Result<Vec<String>> {
-        let diff = self
-            .repo
-            .diff_tree_to_tree(Some(ours_tree), Some(theirs_tree), None)?;
-        let mut paths = Vec::new();
-
-        for delta in diff.deltas() {
-            if !matches!(delta.status(), git2::Delta::Added | git2::Delta::Modified) {
-                continue;
-            }
-            let path = match delta.new_file().path().and_then(|p| p.to_str()) {
-                Some(p) => p,
-                None => continue,
-            };
-            if resolved_set.contains(path) {
-                continue;
-            }
-            let blob = match self.repo.find_blob(delta.new_file().id()) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            let full = self.path.join(path);
-            if let Some(parent) = full.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&full, blob.content())?;
-            paths.push(path.to_string());
+        index: &mut git2::Index,
+        files: &[(&str, &str)],
+        binary: &[(&str, &str)],
+    ) -> Result<()> {
+        for (path, content) in files {
+            let oid = self.repo.blob(content.as_bytes())?;
+            Self::resolve_index_entry(index, path, oid)?;
         }
+        for (path, oid_str) in binary {
+            let oid = git2::Oid::from_str(oid_str)?;
+            Self::resolve_index_entry(index, path, oid)?;
+        }
+        Ok(())
+    }
 
+    /// Replace any conflict at `path` with a single stage-0 entry for `oid`.
+    /// `conflict_remove` clears the ancestor/ours/theirs stages
+    /// (`git_index_conflict_remove` — keeps stage 0, drops stages 1-3);
+    /// a path with no conflict returns `ErrorCode::NotFound`, which is fine — the
+    /// following `add` installs (or overwrites) the stage-0 entry either way.
+    ///
+    /// NOTE: `Index::add` alone does NOT clear conflict stages — for a stage-0
+    /// insert on a conflicted path, `index_insert` finds no stage-0 existing entry
+    /// and appends stage 0 *alongside* stages 1-3, so `write_tree_to` would still
+    /// refuse the index. The explicit `conflict_remove` is required.
+    fn resolve_index_entry(index: &mut git2::Index, path: &str, oid: git2::Oid) -> Result<()> {
+        match index.conflict_remove(std::path::Path::new(path)) {
+            Ok(()) => {}
+            Err(e) if e.code() == git2::ErrorCode::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        index.add(&Self::stage0_entry(path, oid))?;
+        Ok(())
+    }
+
+    /// The set of paths that still carry conflict entries in `index`. The path is
+    /// taken from the ours side, falling back to theirs (a modify/delete conflict
+    /// has one side absent) — matching `extract_single_conflict`'s path logic. Used
+    /// by the divergence guard to compare the re-run merge's conflicts against the
+    /// set `sync_manager` resolved.
+    fn collect_conflict_paths(
+        &self,
+        index: &git2::Index,
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut paths = std::collections::HashSet::new();
+        for conflict in index.conflicts()? {
+            let conflict = conflict?;
+            if let Some(p) = conflict
+                .our
+                .as_ref()
+                .or(conflict.their.as_ref())
+                .and_then(|e| String::from_utf8(e.path.clone()).ok())
+            {
+                paths.insert(p);
+            }
+        }
         Ok(paths)
+    }
+
+    /// A stage-0 `IndexEntry` for a regular file blob at `path`. Stat fields are
+    /// zeroed; only `id`, `mode`, and `path` affect the written tree.
+    fn stage0_entry(path: &str, oid: git2::Oid) -> git2::IndexEntry {
+        git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0o100644, // GIT_FILEMODE_BLOB
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: oid,
+            flags: 0, // stage 0; `Index::add` recomputes the path-length namemask bits
+            flags_extended: 0,
+            path: path.as_bytes().to_vec(),
+        }
     }
 
     /// Perform a normal (non-fast-forward) merge and return the result.

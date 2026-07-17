@@ -133,14 +133,64 @@ fn clean_merge_validation_falls_back_to_crdt() {
         .unwrap();
     assert_eq!(repo.head_oid().unwrap(), ours_hash);
 
-    let merge_hash = repo
-        .commit_merge(
-            &[(path, merged_invalid)],
-            &[],
+    // Build the synthetic clean-merge commit directly, NOT via `commit_merge`:
+    // ours and theirs edit disjoint zones, so `merge_commits` auto-merges them
+    // cleanly (no conflict) — routing this through `commit_merge` would correctly
+    // trip its divergence guard (the resolved set would not match the empty
+    // re-run conflict set). Overlay the deliberately-invalid content at `path` to
+    // simulate a bad auto-merge, then commit a real 2-parent merge for
+    // `validate_clean_merge_or_fallback` to detect and repair.
+    let ours_commit = repo
+        .repo
+        .find_commit(git2::Oid::from_str(&ours_hash.0).unwrap())
+        .unwrap();
+    let their_commit = repo
+        .repo
+        .find_commit(git2::Oid::from_str(&theirs_hash.0).unwrap())
+        .unwrap();
+    let mut merge_index = repo
+        .repo
+        .merge_commits(&ours_commit, &their_commit, None)
+        .unwrap();
+    assert!(
+        !merge_index.has_conflicts(),
+        "disjoint-zone edits must auto-merge cleanly"
+    );
+    let blob = repo.repo.blob(merged_invalid.as_bytes()).unwrap();
+    merge_index
+        .add(&git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0o100644,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: blob,
+            flags: 0,
+            flags_extended: 0,
+            path: path.as_bytes().to_vec(),
+        })
+        .unwrap();
+    let tree_oid = merge_index.write_tree_to(&repo.repo).unwrap();
+    let tree = repo.repo.find_tree(tree_oid).unwrap();
+    let sig = git2::Signature::now("ddb", "ddb@localhost").unwrap();
+    let merge_oid = repo
+        .repo
+        .commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
             "synthetic clean merge",
-            &theirs_hash,
+            &tree,
+            &[&ours_commit, &their_commit],
         )
         .unwrap();
+    repo.repo
+        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    let merge_hash = crate::types::CommitHash(merge_oid.to_string());
 
     let db_path = dir.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();

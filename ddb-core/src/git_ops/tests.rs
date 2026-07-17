@@ -1433,3 +1433,92 @@ fn conflicted_merge_diverged_head_fails_loud() {
     assert_eq!(repo_b.head_oid().unwrap().0, head_before.0);
     assert_ne!(repo_b.read_file("ddb/x.md").unwrap(), "resolved x");
 }
+
+/// When commit_merge aborts on a divergence, it must NOT have written the binary
+/// winner's bytes to the worktree: the winner is overlaid by OID into the
+/// in-memory tree and materialized only by the post-commit checkout. Fails if a
+/// pre-write leaks stale winner bytes onto disk before the abort.
+#[test]
+fn conflicted_merge_abort_leaves_worktree_clean() {
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_files(
+            &[("ddb/x.md", "base-x"), ("reference/foo/data.bin", "base-bin")],
+            "base",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    // Theirs: edit the shared text file AND the binary reference.
+    repo_a
+        .commit_files(
+            &[
+                ("ddb/x.md", "theirs x"),
+                ("reference/foo/data.bin", "theirs-bin"),
+            ],
+            "theirs change",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: conflict on BOTH the shared text file and the binary reference.
+    repo_b
+        .commit_files(
+            &[
+                ("ddb/x.md", "ours x"),
+                ("reference/foo/data.bin", "ours-bin"),
+            ],
+            "ours change",
+        )
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let (theirs_oid, winner_oid) = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            let bin = conflicts
+                .iter()
+                .find(|c| c.path == "reference/foo/data.bin")
+                .expect("binary reference conflict");
+            let winner = bin
+                .theirs_blob_oid
+                .clone()
+                .expect("theirs blob OID for the binary conflict");
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            (theirs_oid, winner)
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    // Move ours' HEAD so the x.md conflict resolves away (ours converges to
+    // theirs), shrinking the merge's conflict set to just the binary — which no
+    // longer matches the resolved set {x.md, data.bin}. This forces the abort
+    // while leaving the worktree binary at ours' pre-merge bytes.
+    repo_b
+        .commit_file("ddb/x.md", "theirs x", "ours converges to theirs")
+        .unwrap();
+    let head_before = repo_b.head_oid().unwrap();
+
+    let bin_path = dir_b.path().join("reference/foo/data.bin");
+    assert_eq!(std::fs::read(&bin_path).unwrap(), b"ours-bin");
+
+    let merge_result = repo_b.commit_merge(
+        &[("ddb/x.md", "resolved x")],
+        &[("reference/foo/data.bin", winner_oid.as_str())],
+        "merge",
+        &theirs_oid,
+    );
+    assert!(
+        matches!(merge_result, Err(DoogatError::Conflict(_))),
+        "expected Conflict error on diverged HEAD, got {merge_result:?}"
+    );
+
+    // The abort left the worktree binary untouched: still ours' bytes, NOT the
+    // winner ("theirs-bin"). A pre-write would have stranded the winner here.
+    assert_eq!(std::fs::read(&bin_path).unwrap(), b"ours-bin");
+    assert_eq!(repo_b.head_oid().unwrap().0, head_before.0);
+}
