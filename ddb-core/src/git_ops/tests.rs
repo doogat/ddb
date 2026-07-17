@@ -1049,3 +1049,387 @@ fn commit_merge_blocks_while_write_lock_held() {
     assert_eq!(repo_b.read_file("ddb/x.md").unwrap(), "resolved x");
     assert_eq!(repo_b.read_file("ddb/t.md").unwrap(), "theirs t");
 }
+
+/// A conflicted merge must keep ours' non-conflicting edit to a file theirs
+/// never touched. Fails if the merge tree reverts ours' edit back to base.
+#[test]
+fn conflicted_merge_keeps_ours_only_edit() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_files(&[("ddb/x.md", "base-x"), ("ddb/z.md", "base-z")], "base")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    // Theirs: edit only the shared file.
+    repo_a
+        .commit_file("ddb/x.md", "theirs x", "theirs change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: edit z.md AND conflict on the shared file.
+    repo_b.commit_file("ddb/z.md", "ours-z", "ours z").unwrap();
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours x")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    repo_b
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .unwrap();
+
+    // ours' non-conflicting edit survives, AND the conflict carries the passed
+    // resolution (not a re-picked side) — the latter rejects an impl that
+    // ignores `files`.
+    assert_eq!(repo_b.read_file("ddb/z.md").unwrap(), "ours-z");
+    assert_eq!(repo_b.read_file("ddb/x.md").unwrap(), "resolved x");
+}
+
+/// A conflicted merge must keep ours' clean deletion of a file theirs never
+/// touched. Fails if the merge tree resurrects the deleted file.
+#[test]
+fn conflicted_merge_keeps_ours_clean_delete() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_files(&[("ddb/x.md", "base-x"), ("ddb/d.md", "base-d")], "base")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    repo_a
+        .commit_file("ddb/x.md", "theirs x", "theirs change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: delete d.md AND conflict on the shared file.
+    repo_b.delete_file("ddb/d.md", "ours delete d").unwrap();
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours x")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    repo_b
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .unwrap();
+
+    assert!(repo_b.read_file("ddb/d.md").is_err());
+}
+
+/// A conflicted merge must honor theirs' deletion of a file ours never
+/// touched. Fails if the merge tree resurrects the file ours still carries.
+#[test]
+fn conflicted_merge_drops_theirs_deletion() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_files(&[("ddb/x.md", "base-x"), ("ddb/y.md", "base-y")], "base")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    // Theirs: delete y.md AND edit the shared file.
+    repo_a.delete_file("ddb/y.md", "theirs delete y").unwrap();
+    repo_a
+        .commit_file("ddb/x.md", "theirs x", "theirs change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: conflict on the shared file only (y untouched).
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours x")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    repo_b
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .unwrap();
+
+    assert!(repo_b.read_file("ddb/y.md").is_err());
+}
+
+/// A conflicted merge must keep a brand-new doogat ours created that never
+/// existed in base or theirs. Fails if the merge tree drops ours' creation.
+#[test]
+fn conflicted_merge_keeps_ours_created_doogat() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/x.md", "base-x", "base")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    repo_a
+        .commit_file("ddb/x.md", "theirs x", "theirs change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: create a new doogat AND conflict on the shared file.
+    repo_b
+        .commit_file("ddb/n.md", "ours-n", "ours new n")
+        .unwrap();
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours x")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    repo_b
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .unwrap();
+
+    assert_eq!(repo_b.read_file("ddb/n.md").unwrap(), "ours-n");
+}
+
+/// A conflicted merge must auto-merge non-overlapping line edits from both
+/// sides on a file that is NOT passed to commit_merge. Fails if either side's
+/// line edit is dropped.
+#[test]
+fn conflicted_merge_line_merges_both_edits() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_files(
+            &[("ddb/x.md", "base-x"), ("ddb/b4.md", "line1\nline2\nline3\n")],
+            "base",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    // Theirs: edit ONLY line 3 of b4 AND conflict on the shared file.
+    repo_a
+        .commit_files(
+            &[
+                ("ddb/b4.md", "line1\nline2\ntheirs-line3\n"),
+                ("ddb/x.md", "theirs x"),
+            ],
+            "theirs change",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: edit ONLY line 1 of b4 AND conflict on the shared file.
+    repo_b
+        .commit_files(
+            &[
+                ("ddb/b4.md", "ours-line1\nline2\nline3\n"),
+                ("ddb/x.md", "ours x"),
+            ],
+            "ours change",
+        )
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    // b4.md is auto-merged by git; only x.md is passed as resolved.
+    repo_b
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .unwrap();
+
+    let b4 = repo_b.read_file("ddb/b4.md").unwrap();
+    assert!(b4.contains("ours-line1"), "ours' line-1 edit was dropped: {b4:?}");
+    assert!(
+        b4.contains("theirs-line3"),
+        "theirs' line-3 edit was dropped: {b4:?}"
+    );
+}
+
+/// A conflicted merge must carry theirs' rename as one doogat at the new path
+/// and none at the old. Fails if the rename is duplicated or reverted.
+#[test]
+fn conflicted_merge_theirs_rename_single_path() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_files(&[("ddb/x.md", "base-x"), ("ddb/z.md", "base-z")], "base")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    // Theirs: rename z.md -> z2.md AND edit the shared file.
+    repo_a
+        .rename_file("ddb/z.md", "ddb/z2.md", "theirs rename z")
+        .unwrap();
+    repo_a
+        .commit_file("ddb/x.md", "theirs x", "theirs change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours x")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    repo_b
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .unwrap();
+
+    assert!(repo_b.read_file("ddb/z2.md").is_ok());
+    assert!(repo_b.read_file("ddb/z.md").is_err());
+}
+
+/// A conflicted merge must carry ours' rename as one doogat at the new path
+/// and none at the old. Fails if the rename is duplicated or reverted.
+#[test]
+fn conflicted_merge_ours_rename_single_path() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_files(&[("ddb/x.md", "base-x"), ("ddb/w.md", "base-w")], "base")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    repo_a
+        .commit_file("ddb/x.md", "theirs x", "theirs change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours: rename w.md -> w2.md AND conflict on the shared file.
+    repo_b
+        .rename_file("ddb/w.md", "ddb/w2.md", "ours rename w")
+        .unwrap();
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours x")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    repo_b
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .unwrap();
+
+    assert!(repo_b.read_file("ddb/w2.md").is_ok());
+    assert!(repo_b.read_file("ddb/w.md").is_err());
+}
+
+/// If ours' HEAD moves after the conflict set was computed, commit_merge must
+/// fail loud with a Conflict error and leave HEAD untouched (no merge commit).
+/// Fails if commit_merge commits against a stale, diverged base.
+#[test]
+fn conflicted_merge_diverged_head_fails_loud() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/x.md", "base-x", "base")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    repo_a
+        .commit_file("ddb/x.md", "theirs x", "theirs change")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours x")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    // Move ours' HEAD so the x.md conflict is resolved away (ours now matches
+    // theirs), changing the merge's conflict set. The previously-computed
+    // resolution is now stale.
+    repo_b
+        .commit_file("ddb/x.md", "theirs x", "ours converges to theirs")
+        .unwrap();
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_result =
+        repo_b.commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid);
+    assert!(
+        matches!(merge_result, Err(DoogatError::Conflict(_))),
+        "expected Conflict error on diverged HEAD, got {merge_result:?}"
+    );
+
+    // HEAD is unchanged: no merge commit was created.
+    assert_eq!(repo_b.head_oid().unwrap().0, head_before.0);
+    assert_ne!(repo_b.read_file("ddb/x.md").unwrap(), "resolved x");
+}
