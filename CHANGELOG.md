@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-17
+
 ### Added
 
 - **sql**: `CREATE TABLE` columns can now declare their storage zone inline with `<col> <type> ZONE <frontmatter|body|reference>` (e.g. `descr TEXT ZONE frontmatter`), persisted identically to a post-hoc `ALTER TABLE … SET ZONE` and round-tripping through introspection / `ddb fix`. A declared zone overrides the implicit type-based derivation, including the `REFERENCES → reference` default; omitting `ZONE` leaves the existing derivation unchanged. Works for every `CREATE TABLE` in a multi-statement batch regardless of statement order — including batches that open with another statement such as a `CREATE TYPE` (each table's zones are attributed independently) — so batched migrations that drop their post-hoc `SET ZONE` blocks are stripped correctly. (PRD 00160)
@@ -326,7 +328,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error responses never leak internal paths, stack traces, or SQL details
 - quinn-proto upgraded to 0.11.14 (RUSTSEC-2026-0037)
 
-[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/doogat/ddb/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/doogat/ddb/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/doogat/ddb/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/doogat/ddb/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/doogat/ddb/compare/v0.2.3...v0.2.4
