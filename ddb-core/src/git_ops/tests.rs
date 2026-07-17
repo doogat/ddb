@@ -961,3 +961,91 @@ fn conflicted_merge_arm_behavior_unchanged() {
     assert_eq!(repo_b.read_file("ddb/t.md").unwrap(), "theirs t");
     assert_eq!(repo_b.read_file("ddb/x.md").unwrap(), "resolved x");
 }
+
+/// Regression guard for `commit_merge`'s OWN write lock (PRD 00163): it has a
+/// `with_write_lock` wrap separate from `merge_remote`'s, and
+/// `merge_blocks_while_write_lock_held` above only exercises `merge_remote`.
+/// Nothing pins `commit_merge` itself, so removing its wrap passes every other
+/// test.
+///
+/// Fails against an unlocked `commit_merge`: while the helper thread holds the
+/// raw write guard, an unlocked `commit_merge` runs and returns immediately
+/// (before the guard is released), so `released` is still false. Passes once
+/// `commit_merge` holds the lock, because it then blocks on the guard until it
+/// is dropped.
+#[test]
+fn commit_merge_blocks_while_write_lock_held() {
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::Arc;
+
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Reach a Conflicts state so commit_merge is the method under test.
+    repo_a.commit_file("ddb/x.md", "base", "base x").unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let ff = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(matches!(ff, MergeResult::FastForward(_)));
+
+    repo_a
+        .commit_files(
+            &[("ddb/t.md", "theirs t"), ("ddb/x.md", "theirs x")],
+            "theirs change",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/x.md", "ours x", "ours change")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert!(conflicts.iter().any(|c| c.path == "ddb/x.md"));
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let dir_b_path = dir_b.path().to_path_buf();
+    let released = Arc::new(AtomicBool::new(false));
+    let released_thread = Arc::clone(&released);
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+
+    let handle = std::thread::spawn(move || {
+        // Hold the repo's raw OS write guard across the whole critical window.
+        let guard = super::write_lock::acquire(&dir_b_path, Duration::from_secs(10)).unwrap();
+        tx.send(()).unwrap();
+
+        // Hold the guard for a bounded window well under the 10s timeout. An
+        // unlocked commit_merge returns inside this window; a locked one cannot.
+        std::thread::sleep(Duration::from_millis(500));
+        released_thread.store(true, SeqCst);
+        drop(guard);
+    });
+
+    // Wait until the guard is held, then call commit_merge.
+    rx.recv().unwrap();
+    repo_b
+        .commit_merge(
+            &[("ddb/x.md", "resolved x")],
+            &[],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    // Discriminating assertion: commit_merge must not have returned until the
+    // guard was released. On unlocked code it returns while `released` is false.
+    assert!(
+        released.load(SeqCst),
+        "commit_merge returned while the write lock was held — it ran unlocked"
+    );
+    handle.join().unwrap();
+
+    // Light correctness pins.
+    assert_eq!(repo_b.read_file("ddb/x.md").unwrap(), "resolved x");
+    assert_eq!(repo_b.read_file("ddb/t.md").unwrap(), "theirs t");
+}
