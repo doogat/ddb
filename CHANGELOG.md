@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **git**: concurrent git writes to one repository are now serialized by a cross-process advisory lock (`.git/ddb-write.lock`), preventing silent commit loss when multiple processes write the same repo — e.g. a `ddb serve` instance and a CLI invocation, or two concurrent CLI writes. Previously, interleaved writes could resolve a stale parent and force-update `HEAD`, dropping a just-committed doogat (which `git maintenance` could then prune). Writes reentrant within one process (`commit_file` → `commit_files`) do not self-deadlock. (PRD 00162)
+- **git**: deleting doogats now builds the deletion tree from a freshly-read index instead of the process-cached one, so a delete racing an external commit (e.g. another process's create landing in between) no longer silently drops the externally-created file from the repository. (PRD 00163)
 
 ## [0.2.6] - 2026-06-19
 
