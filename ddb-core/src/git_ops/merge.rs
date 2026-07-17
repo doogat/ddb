@@ -29,7 +29,7 @@ impl GitRepo {
         our_commit: &git2::Commit,
         their_commit: &git2::Commit,
     ) -> Result<CommitHash> {
-        let mut index = self.repo.index()?;
+        let mut index = self.fresh_index()?;
         for (rel_path, _) in files {
             index.add_path(Path::new(rel_path))?;
         }
@@ -52,7 +52,6 @@ impl GitRepo {
             &tree,
             &[our_commit, their_commit],
         )?;
-        self.write_commit_graph();
         Ok(CommitHash(oid.to_string()))
     }
 
@@ -65,39 +64,43 @@ impl GitRepo {
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash> {
-        for (rel_path, _) in files {
-            validate_path(&self.path, rel_path)?;
-        }
-        for rel_path in binary_paths {
-            validate_path(&self.path, rel_path)?;
-        }
+        let hash = self.with_write_lock(|| {
+            for (rel_path, _) in files {
+                validate_path(&self.path, rel_path)?;
+            }
+            for rel_path in binary_paths {
+                validate_path(&self.path, rel_path)?;
+            }
 
-        let our_commit = self
-            .head_commit()
-            .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-        let theirs_oid = Oid::from_str(&theirs.0)?;
-        let their_commit = self.repo.find_commit(theirs_oid)?;
+            let our_commit = self
+                .head_commit()
+                .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
+            let theirs_oid = Oid::from_str(&theirs.0)?;
+            let their_commit = self.repo.find_commit(theirs_oid)?;
 
-        self.write_resolved_files(files)?;
+            self.write_resolved_files(files)?;
 
-        let ours_tree = our_commit.tree()?;
-        let theirs_tree = their_commit.tree()?;
-        let resolved_set: std::collections::HashSet<&str> = files
-            .iter()
-            .map(|(p, _)| *p)
-            .chain(binary_paths.iter().copied())
-            .collect();
-        let theirs_only =
-            self.collect_theirs_only_changes(&ours_tree, &theirs_tree, &resolved_set)?;
+            let ours_tree = our_commit.tree()?;
+            let theirs_tree = their_commit.tree()?;
+            let resolved_set: std::collections::HashSet<&str> = files
+                .iter()
+                .map(|(p, _)| *p)
+                .chain(binary_paths.iter().copied())
+                .collect();
+            let theirs_only =
+                self.collect_theirs_only_changes(&ours_tree, &theirs_tree, &resolved_set)?;
 
-        self.build_merge_tree_and_commit(
-            files,
-            binary_paths,
-            &theirs_only,
-            message,
-            &our_commit,
-            &their_commit,
-        )
+            self.build_merge_tree_and_commit(
+                files,
+                binary_paths,
+                &theirs_only,
+                message,
+                &our_commit,
+                &their_commit,
+            )
+        })?;
+        self.write_commit_graph();
+        Ok(hash)
     }
 
     /// Collect files that were added or modified on theirs but not in our resolved set.
@@ -176,41 +179,45 @@ impl GitRepo {
         )?;
         self.repo
             .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
-        self.write_commit_graph();
         Ok(MergeResult::Clean(CommitHash(oid.to_string())))
     }
 
     /// Merge a fetched remote branch, returning the merge result.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn merge_remote(&self, remote: &str, branch: &str) -> Result<MergeResult> {
-        let fetch_head_ref = format!("refs/remotes/{remote}/{branch}");
-        let reference = self
-            .repo
-            .find_reference(&fetch_head_ref)
-            .map_err(|_| DoogatError::NotFound(fetch_head_ref.clone()))?;
-        let annotated = self.repo.reference_to_annotated_commit(&reference)?;
-
-        let (analysis, _pref) = self.repo.merge_analysis(&[&annotated])?;
-
-        if analysis.is_up_to_date() {
-            return Ok(MergeResult::AlreadyUpToDate);
-        }
-
-        if analysis.is_fast_forward() {
-            let target_oid = annotated.id();
-            let mut reference = self
+        let result = self.with_write_lock(|| {
+            let fetch_head_ref = format!("refs/remotes/{remote}/{branch}");
+            let reference = self
                 .repo
-                .find_reference("refs/heads/master")
-                .or_else(|_| self.repo.find_reference("HEAD"))?;
-            reference.set_target(target_oid, "fast-forward")?;
-            self.repo.set_head("refs/heads/master")?;
-            self.repo
-                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
-            self.write_commit_graph();
-            return Ok(MergeResult::FastForward(CommitHash(target_oid.to_string())));
-        }
+                .find_reference(&fetch_head_ref)
+                .map_err(|_| DoogatError::NotFound(fetch_head_ref.clone()))?;
+            let annotated = self.repo.reference_to_annotated_commit(&reference)?;
 
-        self.perform_normal_merge(remote, branch, &annotated)
+            let (analysis, _pref) = self.repo.merge_analysis(&[&annotated])?;
+
+            if analysis.is_up_to_date() {
+                return Ok(MergeResult::AlreadyUpToDate);
+            }
+
+            if analysis.is_fast_forward() {
+                let target_oid = annotated.id();
+                let mut reference = self
+                    .repo
+                    .find_reference("refs/heads/master")
+                    .or_else(|_| self.repo.find_reference("HEAD"))?;
+                reference.set_target(target_oid, "fast-forward")?;
+                self.repo.set_head("refs/heads/master")?;
+                self.repo
+                    .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+                return Ok(MergeResult::FastForward(CommitHash(target_oid.to_string())));
+            }
+
+            self.perform_normal_merge(remote, branch, &annotated)
+        })?;
+        if matches!(result, MergeResult::FastForward(_) | MergeResult::Clean(_)) {
+            self.write_commit_graph();
+        }
+        Ok(result)
     }
 
     /// Read blob content as a string, or return an empty string if the entry is None.
