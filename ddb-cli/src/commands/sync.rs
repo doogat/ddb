@@ -18,6 +18,9 @@ pub(crate) fn sync(
     if report.collisions_reassigned > 0 {
         outln!("  collisions reassigned: {}", report.collisions_reassigned)?;
     }
+    if report.resurrected > 0 {
+        outln!("  resurrected: {}", report.resurrected)?;
+    }
     // PRD 00139 cycle-3 #4: surface SINGLETON conflict resolutions per-row,
     // not just the count. Each line names the table, the surviving winner,
     // and every quarantined loser so operators can audit what landed in

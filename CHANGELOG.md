@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **cli**: `ddb sync` now reports the number of doogats resurrected by a delete-vs-edit conflict resolution as a `resurrected: N` line (printed only when non-zero, alongside the existing collision and singleton-conflict counts). Previously `SyncReport.resurrected` was populated but never surfaced to the operator. (PRD 00163)
+
 ## [0.2.7] - 2026-07-17
 
 ### Added
