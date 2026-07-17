@@ -820,3 +820,108 @@ fn binary_ref_delete_vs_edit_uses_resurrection() {
         "should count as resurrected (delete-vs-edit), not binary LWW"
     );
 }
+
+/// Theirs deletes, ours is untouched → NOT a conflict → file absent, resurrected == 0.
+#[test]
+fn theirs_deleted_ours_untouched_stays_deleted() {
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+    // A creates a text doogat and pushes
+    let id = "20260101120000";
+    repo_a
+        .commit_file(
+            &format!("ddb/{id}.md"),
+            &format!("---\nid: {id}\ntitle: Shared\n---\nbody\n"),
+            "A creates",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // B picks it up
+    repo_b.fetch("origin", "master").unwrap();
+    repo_b.merge_remote("origin", "master").unwrap();
+
+    // A deletes it and pushes
+    repo_a.delete_file(&format!("ddb/{id}.md"), "A deletes").unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // B does NOTHING to the file.
+
+    // B syncs
+    let db_b = dir_b.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+    let index_b = crate::indexer::Index::open(&db_b).unwrap();
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    // The file is gone
+    assert!(
+        !dir_b.path().join(format!("ddb/{id}.md")).exists(),
+        "theirs' deletion must survive when ours is untouched"
+    );
+    assert_eq!(
+        report.resurrected, 0,
+        "non-conflicting deletion must not resurrect"
+    );
+}
+
+/// Theirs deletes, ours edits → delete-vs-edit CONFLICT → edit wins, resurrected == 1.
+#[test]
+fn theirs_deleted_ours_edited_resurrects_with_marker() {
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+    // A creates the shared doogat and pushes
+    let id = "20260101130000";
+    repo_a
+        .commit_file(
+            &format!("ddb/{id}.md"),
+            &format!("---\nid: {id}\ntitle: Shared\n---\nbody\n"),
+            "A creates",
+        )
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // B picks it up
+    repo_b.fetch("origin", "master").unwrap();
+    repo_b.merge_remote("origin", "master").unwrap();
+
+    // A deletes it and pushes
+    repo_a.delete_file(&format!("ddb/{id}.md"), "A deletes").unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // B edits it
+    repo_b
+        .commit_file(
+            &format!("ddb/{id}.md"),
+            &format!("---\nid: {id}\ntitle: Shared\n---\nB edited body\n"),
+            "B edits",
+        )
+        .unwrap();
+
+    // B syncs
+    let db_b = dir_b.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+    let index_b = crate::indexer::Index::open(&db_b).unwrap();
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    // Delete-vs-edit is a conflict
+    assert!(
+        report.conflicts_resolved > 0,
+        "delete-vs-edit is a conflict"
+    );
+    // The file survived
+    let path = dir_b.path().join(format!("ddb/{id}.md"));
+    assert!(path.exists(), "edit wins over delete");
+    // The resurrected marker is in the content
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        content.contains("resurrected: true"),
+        "resurrected doogat carries the frontmatter marker"
+    );
+    assert_eq!(
+        report.resurrected, 1,
+        "delete-vs-edit counts as one resurrection"
+    );
+}
+
