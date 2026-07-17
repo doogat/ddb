@@ -11,7 +11,7 @@ impl GitRepo {
     pub fn commit_merge(
         &self,
         files: &[(&str, &str)],
-        binary: &[(&str, &str)], // (path, winning-blob-OID) — was `binary_paths: &[&str]`
+        binary: &[(&str, &str)], // (path, winning-blob-OID)
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash> {
