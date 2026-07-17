@@ -415,3 +415,44 @@ fn sync_auto_registers_node_when_none_exists() {
     // Subsequent sync should reuse registration
     node.ddb().arg("sync").assert().success();
 }
+
+#[test]
+fn sync_output_reports_resurrected_count() {
+    let setup = TwoNodeSetup::new();
+
+    // Node1 creates a doogat, pushes
+    let out = setup
+        .node1
+        .ddb()
+        .args(["create", "--title", "Doomed", "--body", "original"])
+        .output()
+        .unwrap();
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    push_node1(&setup);
+
+    // Node2 clones and syncs to get the doogat — clean sync, no resurrection
+    let node2_path = setup.clone_node2();
+    DdbTestRepo::ddb_at(&node2_path)
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("resurrected:").not());
+
+    // Node1 deletes the doogat and pushes the deletion
+    setup.node1.ddb().args(["delete", &id]).assert().success();
+    setup.node1.ddb().arg("sync").assert().success();
+
+    // Node2 edits the same doogat — its local edit will win
+    DdbTestRepo::ddb_at(&node2_path)
+        .args(["update", &id, "--body", "edited on desktop"])
+        .assert()
+        .success();
+
+    // Node2 syncs — pull merges node1's deletion against node2's edit,
+    // a delete-vs-edit conflict, so the doogat is resurrected
+    DdbTestRepo::ddb_at(&node2_path)
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("resurrected: 1"));
+}
