@@ -3027,6 +3027,45 @@ $DDB read "$DEL_ID" | grep -q "Edited on desktop"
 $DDB status | grep -q "resurrected"
 pass "delete-vs-edit conflict (edit wins, resurrected)"
 
+# 27c. three-way conflicted merge preserves deletion + local edit (PRD 00200)
+THREE_REMOTE="$(mktemp -d)"
+THREE_OURS="$(mktemp -d)"
+THREE_THEIRS_PARENT="$(mktemp -d)"
+git init --bare "$THREE_REMOTE" >/dev/null 2>&1
+
+# Node "ours": init, add remote, register, create three doogats, push
+cd "$THREE_OURS"
+$DDB init . >/dev/null
+git remote add origin "$THREE_REMOTE"
+$DDB register-node "Ours" >/dev/null
+THREE_A=$($DDB create --title "Conflict doogat" --body "base A")
+THREE_X=$($DDB create --title "Doomed doogat" --body "base X")
+THREE_Y=$($DDB create --title "Survivor doogat" --body "base Y")
+git push -u origin master >/dev/null 2>&1
+
+# Node "theirs": clone, register, edit A + delete X, sync (pushes theirs)
+git clone "$THREE_REMOTE" "$THREE_THEIRS_PARENT/repo" >/dev/null 2>&1
+THREE_THEIRS="$THREE_THEIRS_PARENT/repo"
+cd "$THREE_THEIRS"
+$DDB reindex >/dev/null
+$DDB register-node "Theirs" >/dev/null
+$DDB update "$THREE_A" --title "Theirs A" >/dev/null
+$DDB delete "$THREE_X" >/dev/null
+$DDB sync origin master >/dev/null
+
+# Back on "ours": collide on A, non-conflicting edit on Y, then sync (conflicted merge)
+cd "$THREE_OURS"
+$DDB update "$THREE_A" --title "Ours A" >/dev/null
+$DDB update "$THREE_Y" --body "ours Y edit" >/dev/null
+SYNC_OUT=$($DDB sync origin master)
+
+# Assertions
+echo "$SYNC_OUT" | grep -q "conflicts resolved: 1"
+[ ! -f "ddb/${THREE_X}.md" ]
+$DDB read "$THREE_Y" | grep -q "ours Y edit"
+$DDB read "$THREE_A" | grep -qE "(Theirs A|Ours A)"
+pass "three-way conflicted merge preserves deletion + local edit (PRD 00200)"
+
 echo "=== id collision detection ==="
 
 # 27a. add-add collision: both doogats survive

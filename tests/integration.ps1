@@ -2953,6 +2953,47 @@ $output = ddb status
 if ($output -notmatch "resurrected") { throw "resurrected missing" }
 pass "delete-vs-edit conflict (edit wins, resurrected)"
 
+# 27c. three-way conflicted merge preserves deletion + local edit (PRD 00200)
+$THREE_REMOTE = New-Item -ItemType Directory -Path "$env:TEMP\ddb-three-remote-$(Get-Random)" -Force
+git init --bare $THREE_REMOTE 2>&1 | Out-Null
+
+# Node "ours": init, add remote, register, create three doogats, push
+$THREE_OURS = New-Item -ItemType Directory -Path "$env:TEMP\ddb-three-ours-$(Get-Random)" -Force
+Push-Location $THREE_OURS
+ddb init . | Out-Null
+git remote add origin $THREE_REMOTE
+ddb register-node "Ours" | Out-Null
+$THREE_A = ddb create --title "Conflict doogat" --body "base A"
+$THREE_X = ddb create --title "Doomed doogat" --body "base X"
+$THREE_Y = ddb create --title "Survivor doogat" --body "base Y"
+git push -u origin master 2>&1 | Out-Null
+
+# Node "theirs": clone, register, edit A + delete X, sync (pushes theirs)
+$THREE_THEIRS = New-Item -ItemType Directory -Path "$env:TEMP\ddb-three-theirs-$(Get-Random)" -Force
+git clone $THREE_REMOTE $THREE_THEIRS 2>&1 | Out-Null
+Push-Location $THREE_THEIRS
+ddb reindex | Out-Null
+ddb register-node "Theirs" | Out-Null
+ddb update $THREE_A --title "Theirs A" | Out-Null
+ddb delete $THREE_X | Out-Null
+ddb sync origin master | Out-Null
+
+# Back on "ours": collide on A, non-conflicting edit on Y, then sync (conflicted merge)
+Pop-Location  # back to THREE_OURS
+ddb update $THREE_A --title "Ours A" | Out-Null
+ddb update $THREE_Y --body "ours Y edit" | Out-Null
+$SYNC_OUT = ddb sync origin master
+
+# Assertions
+if ($SYNC_OUT -notmatch "conflicts resolved: 1") { throw "conflict count wrong" }
+if (Test-Path "ddb/$THREE_X.md") { throw "deletion resurrected (W2)" }
+$output = ddb read $THREE_Y
+if ($output -notmatch "ours Y edit") { throw "local edit lost (W1)" }
+$output = ddb read $THREE_A
+if ($output -notmatch "Theirs A|Ours A") { throw "CRDT resolution missing" }
+Pop-Location  # back to NODE2_DIR
+pass "three-way conflicted merge preserves deletion + local edit (PRD 00200)"
+
 Write-Host "=== id collision detection ==="
 
 # 27a. add-add collision: both doogats survive
