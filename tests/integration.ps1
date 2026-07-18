@@ -2936,7 +2936,7 @@ ddb sync origin master | Out-Null
 
 Push-Location $NODE2_DIR
 $RESOLVE_OUT = ddb sync origin master
-if ($RESOLVE_OUT -notmatch "conflicts resolved: [1-9]") { throw "expected a resolved conflict in NODE2's merge sync: $RESOLVE_OUT" }
+if (-not ($RESOLVE_OUT | Select-String '^sync:.*conflicts resolved: [1-9]')) { throw "expected a resolved conflict on NODE2's merge sync: $RESOLVE_OUT" }
 
 Pop-Location  # NODE1_DIR
 ddb sync origin master | Out-Null

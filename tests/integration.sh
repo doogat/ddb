@@ -3012,7 +3012,7 @@ $DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
 RESOLVE_OUT=$($DDB sync origin master)
-echo "$RESOLVE_OUT" | grep -qE "conflicts resolved: [1-9]"
+echo "$RESOLVE_OUT" | grep -qE "^sync:.*conflicts resolved: [1-9]"
 
 cd "$NODE1_DIR"
 $DDB sync origin master >/dev/null

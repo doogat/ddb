@@ -209,4 +209,10 @@ fn swapped_roles_converge_on_same_position_body_insert() {
         "swapped-role SAME-POSITION body inserts must interleave identically:\nA={}\nB={}",
         a, b
     );
+
+    assert!(
+        a.contains("X-side") && a.contains("Y-side"),
+        "both same-position inserts must survive the merge, got: {}",
+        a
+    );
 }
