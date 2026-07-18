@@ -6,6 +6,7 @@ use super::*;
 use crate::git_ops::GitRepo;
 use crate::indexer::Index;
 use crate::types::{ColumnDef, DoogatMeta, ParsedDoogat, TableSchema, Value, Zone};
+use rusqlite::params;
 use sqlparser::ast::{Expr, SetExpr};
 use std::collections::{BTreeMap, BTreeSet};
 use tempfile::TempDir;

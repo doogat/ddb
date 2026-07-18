@@ -9,7 +9,6 @@ pub(crate) mod typed_insert;
 
 pub(crate) use builders::{apply_updates_to_doogat, build_data_doogat};
 
-use rusqlite::params;
 use sqlparser::ast::{ObjectType, Statement};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -123,22 +122,14 @@ impl<'a> SqlEngine<'a> {
     ///
     /// Gets a base timestamp via `generate_unique_id`, then increments by 1
     /// second for each subsequent ID, skipping any that already exist in the
-    /// index.
+    /// repo HEAD tree or the SQLite index.
     fn unique_ids(&mut self, count: usize) -> Result<Vec<DoogatId>> {
         use chrono::NaiveDateTime;
 
-        let mut ids = Vec::with_capacity(count);
-        let first = parser::generate_unique_id(|candidate| {
-            self.index
-                .sql_conn()
-                .query_row(
-                    "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                    params![candidate],
-                    |row| row.get::<_, bool>(0),
-                )
-                .unwrap_or(false)
-        });
+        let exists = crate::id_minting::existence_oracle(self.repo, self.index.sql_conn())?;
 
+        let mut ids = Vec::with_capacity(count);
+        let first = parser::generate_unique_id(&exists);
         let mut ts = NaiveDateTime::parse_from_str(&first.0, "%Y%m%d%H%M%S").map_err(|e| {
             DoogatError::SqlEngine(format!("failed to parse generated id timestamp: {e}"))
         })?;
@@ -148,16 +139,7 @@ impl<'a> SqlEngine<'a> {
             loop {
                 ts += chrono::Duration::seconds(1);
                 let candidate = ts.format("%Y%m%d%H%M%S").to_string();
-                let exists: bool = self
-                    .index
-                    .sql_conn()
-                    .query_row(
-                        "SELECT COUNT(*) > 0 FROM doogats WHERE id = ?1",
-                        params![&candidate],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or(false);
-                if !exists {
+                if !exists(&candidate) {
                     ids.push(DoogatId(candidate));
                     break;
                 }
