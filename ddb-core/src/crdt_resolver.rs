@@ -596,7 +596,6 @@ pub(crate) fn lww_pick(
                 LwwSide::Ours
             }
         }
-        // Missing on either side, or equal HLCs: content-deterministic fallback.
         _ => {
             if theirs_key > ours_key {
                 LwwSide::Theirs
