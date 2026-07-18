@@ -97,6 +97,39 @@ This handles intra-line edits (e.g., one side inserts "brave " into "hello world
 
 Unlike the Map approach for frontmatter, List CRDT preserves both sides of a same-key conflict (e.g. both `- source:: A` and `- source:: B` survive). Output is sorted alphabetically and deduplicated.
 
+## Deterministic Actor Assignment
+
+**PRD 00165**: `merge_frontmatter`, `merge_body`, and `merge_reference` are now **pure functions** of `(ancestor, ours, theirs)`.
+
+Each Automerge doc-build site sets a stable, content-derived actor ID — `derive_actor(zone_content)` feeding `set_actor` at every base and fork site (9 sites total: base + ours-fork + theirs-fork across the three merge functions) — so Automerge's `(Lamport counter, actor id)` tie-break selects the **same winner on every node** regardless of which side that node calls "ours" (swap-symmetric).
+
+### How it works
+
+- `derive_actor(content)` hashes the zone string (SHA-256, first 16 bytes) into a valid `automerge::ActorId`.
+- The actor is assigned immediately after each doc is constructed or forked, **before any op is applied**.
+- The argument to `derive_actor` is always the zone content string itself (never a role label or node UUID), so the same physical content maps to the same actor on every node.
+- For a conflicting same-key scalar, Automerge orders the competing ops by `(Lamport counter, actor id)`. Both fields are now pure functions of the content, so the winning op is identical regardless of the local ours/theirs assignment.
+
+### Per-function sites
+
+| Function | Base doc | Ours fork | Theirs fork | Total |
+|---|---|---|---|---|
+| `merge_frontmatter` | `derive_actor(ancestor)` | `derive_actor(ours)` | `derive_actor(theirs)` | 3 |
+| `merge_body` | `derive_actor(ancestor)` | `derive_actor(ours)` | `derive_actor(theirs)` | 3 |
+| `merge_reference` | `derive_actor(ancestor)` | `derive_actor(ours)` | `derive_actor(theirs)` | 3 |
+
+### List-typed frontmatter fields
+
+List-typed frontmatter fields (e.g. `tags`) do **not** get their determinism from actors — they merge through `merge_list_fields`, whose determinism comes from ancestor-order survivors followed by lexicographically-sorted additions.
+
+### Determinism vs. HLC winner-ordering
+
+Determinism (this change, PRD 00165) is **distinct** from HLC winner-ordering (PRD 00166, a separate change). This PRD guarantees the same tie-break winner every time; it does not decide which side should win.
+
+### Automerge time assumption
+
+Byte-identical CRDT state relies on automerge stamping changes with advisory `time: 0` by default (verified in automerge 0.7.4); a future automerge upgrade must re-verify this assumption.
+
 ## Preset: Last-Writer-Wins
 
 `resolve_lww(conflicts) -> Result<Vec<ResolvedFile>>`

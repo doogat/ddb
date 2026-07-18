@@ -97,6 +97,14 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 | Multi-user | Real-time collaborative editing | CRDT merge is designed for async multi-device sync, not live cursors. Real-time adds WebSocket/OT complexity for a single-user system. | Async sync with conflict resolution |
 | Data import | Foreign-system importers (Notion, Obsidian, Evernote converters) | Doogats are plain markdown and batch create verbs exist; format-specific conversion is downstream domain knowledge, not platform storage/sync/query logic (2026-07-13). | Downstream-owned converters over batch create verbs, or write `.md` files and reindex |
 
+## Persisted CRDT State: Write-Only Scaffolding
+
+**Finding** (verified PRD 00165): `ResolvedFile.fm_crdt_bytes` is written by `sync_manager::write_fm_crdt_files` to `.crdt/temp/{oid}_{id}_fm.crdt`, re-compacted by `compaction` (load-to-re-save only), and wiped wholesale by `GitRepo::open`. No production path loads it back to influence resolution — it is write-only, currently-unread scaffolding.
+
+**Decision**: Retain the write path but document it as currently-unconsumed scaffolding. A future sync-resume / continuity feature would be its only justified consumer. Defer any machinery removal to the hygiene PRD 00199, which owns dead-abstraction pruning; a determinism PRD does not rip out compaction code.
+
+**The real invariant** (not merely "no reader"): "persisted CRDT state is swap-asymmetric (the merge receiver differs across nodes) -> it must remain node-local and never be read back into resolution; adding any reader requires making the persisted bytes swap-symmetric first."
+
 ## Per-Parent Batch Loading (Not Page-Level DataLoader)
 
 **Decision**: REFERENCES fields resolve via per-parent batch calls, not a page-level DataLoader.
