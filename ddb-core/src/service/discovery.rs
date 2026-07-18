@@ -86,7 +86,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             ))
         })?;
 
-        let id = parser::generate_id();
+        let id = self.unique_id()?;
         let full_content = content.replacen("---\n", &format!("---\nid: {}\n", id), 1);
         let path = format!("ddb/_typedef/{}.md", id);
         self.repo

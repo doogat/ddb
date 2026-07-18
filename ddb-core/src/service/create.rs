@@ -421,12 +421,10 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     pub fn create_doogat_raw(&self, content: &str, message: &str) -> Result<String> {
         self.ensure_fresh()?;
         let parsed = parser::parse(content, "new.md")?;
-        let id = parsed
-            .meta
-            .id
-            .as_ref()
-            .map(|z| z.0.clone())
-            .unwrap_or_else(|| parser::generate_id().0);
+        let id = match parsed.meta.id.as_ref() {
+            Some(z) => z.0.clone(),
+            None => self.unique_id()?.0,
+        };
 
         let folder = parsed
             .meta
