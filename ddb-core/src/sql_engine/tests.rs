@@ -5503,6 +5503,42 @@ fn concurrent_inserts_produce_unique_ids_issue_9_f8() {
 }
 
 #[test]
+fn unique_ids_advances_past_committed_but_unindexed_repo_id() {
+    // The SQLite index is a derived cache that can lag behind the git repo
+    // (source of truth). The batch minter must not mint an id that already
+    // exists as a committed doogat in the repo HEAD tree, even if that
+    // doogat was never written into the SQLite `doogats` index.
+    let (_dir, repo, index) = setup();
+
+    let seed_id = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
+    repo.commit_file(
+        &format!("ddb/{seed_id}.md"),
+        "---\ntitle: SeedRow\n---\nbody",
+        "seed repo-only id",
+    )
+    .unwrap();
+
+    let mut engine = SqlEngine::new(&index, &repo);
+    let ids = engine.unique_ids(3).unwrap();
+
+    for (i, id) in ids.iter().enumerate() {
+        assert_ne!(
+            id.0, seed_id,
+            "minted id[{i}] collided with committed-but-unindexed repo id {seed_id}"
+        );
+    }
+
+    let unique: std::collections::HashSet<&String> = ids.iter().map(|id| &id.0).collect();
+    assert_eq!(
+        unique.len(),
+        ids.len(),
+        "expected {} unique minted IDs, got {} — duplicates in: {ids:?}",
+        ids.len(),
+        unique.len()
+    );
+}
+
+#[test]
 fn create_table_unique_constraint_persisted_in_typedef() {
     let (_dir, repo, index) = setup();
     let mut engine = SqlEngine::new(&index, &repo);
