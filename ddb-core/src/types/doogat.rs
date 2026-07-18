@@ -619,4 +619,17 @@ mod tests {
             "application/octet-stream"
         );
     }
+
+    #[test]
+    fn is_valid_shape_accepts_14_digits() {
+        assert!(DoogatId::is_valid_shape("20260718120000"));
+    }
+
+    #[test]
+    fn is_valid_shape_rejects_wrong_length_and_non_digits() {
+        assert!(!DoogatId::is_valid_shape("2026071812000")); // 13 digits
+        assert!(!DoogatId::is_valid_shape("202607181200000")); // 15 digits
+        assert!(!DoogatId::is_valid_shape("")); // empty
+        assert!(!DoogatId::is_valid_shape("2026071812000X")); // non-digit
+    }
 }
