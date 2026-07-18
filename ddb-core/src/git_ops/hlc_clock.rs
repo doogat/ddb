@@ -293,12 +293,26 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let git_repo = crate::git_ops::GitRepo::init(dir.path()).unwrap();
 
-        // A plain init repo's HEAD commit carries no HLC trailer.
+        // Post-chokepoint, GitRepo::init's own bootstrap commit carries an HLC
+        // trailer, so simulate legacy trailer-less history with a raw commit
+        // (bypassing create_commit) whose message has no trailer. `load` seeds
+        // only from HEAD's own message, so a tip with no trailer IS the
+        // "no HEAD trailer" case regardless of what ancestors carry.
+        {
+            let raw = &git_repo.repo;
+            let sig = git2::Signature::now("ddb", "ddb@local").unwrap();
+            let parent = raw.head().unwrap().peel_to_commit().unwrap();
+            let tree = parent.tree().unwrap();
+            raw.commit(Some("HEAD"), &sig, &sig, "legacy commit, no trailer", &tree, &[&parent])
+                .unwrap();
+        }
+
+        // Precondition: this HEAD carries no HLC trailer.
         {
             let head = git_repo.repo.head().unwrap().peel_to_commit().unwrap();
             assert!(
                 crate::hlc::extract_hlc(head.message().unwrap()).is_none(),
-                "precondition: a plain init HEAD must have no HLC trailer"
+                "precondition: this HEAD must have no HLC trailer"
             );
         }
 
