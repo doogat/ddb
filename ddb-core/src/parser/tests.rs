@@ -161,6 +161,31 @@ fn frontmatter_id_fallback_from_filename() {
     assert_eq!(meta.id, Some(DoogatId("20260226130000".into())));
 }
 
+#[test]
+fn frontmatter_id_fallback_rejects_short_numeric_stem() {
+    let meta = parse_frontmatter("", "ddb/123.md").unwrap();
+    assert!(meta.id.is_none());
+}
+
+#[test]
+fn frontmatter_id_fallback_rejects_long_numeric_stem() {
+    let meta = parse_frontmatter("", "ddb/202602261300009.md").unwrap();
+    assert!(meta.id.is_none());
+}
+
+#[test]
+fn frontmatter_id_fallback_rejects_non_numeric_stem() {
+    let meta = parse_frontmatter("", "note.md").unwrap();
+    assert!(meta.id.is_none());
+}
+
+#[test]
+fn frontmatter_explicit_id_overrides_stem_fallback() {
+    let yaml = "id: 20260226120000";
+    let meta = parse_frontmatter(yaml, "ddb/123.md").unwrap();
+    assert_eq!(meta.id, Some(DoogatId("20260226120000".into())));
+}
+
 // -- inline field extraction tests --
 
 #[test]
