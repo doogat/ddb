@@ -7,6 +7,12 @@ fn temp_repo() -> (TempDir, GitRepo) {
     (dir, repo)
 }
 
+/// Read and parse the machine-local node HLC persisted at `<git_dir>/ddb-hlc`.
+fn node_hlc(repo: &GitRepo) -> crate::hlc::Hlc {
+    let raw = std::fs::read_to_string(repo.repo.path().join("ddb-hlc")).unwrap();
+    crate::hlc::Hlc::parse(raw.trim()).unwrap()
+}
+
 fn native_absolute_path() -> &'static str {
     if cfg!(windows) {
         r"C:\Windows\System32\drivers\etc\hosts"
@@ -512,30 +518,64 @@ fn merge_conflicts_populate_hlc() {
 
 #[test]
 fn find_hlc_for_path_returns_hlc_when_trailer_present() {
-    let (_dir, repo) = temp_repo();
+    let (dir, repo) = temp_repo();
     let hlc = crate::hlc::Hlc {
         wall_ms: 1000,
         counter: 1,
         node: "abc".into(),
     };
     let msg = crate::hlc::append_hlc_trailer("add doogat", &hlc);
-    repo.commit_file("ddb/20260226120000.md", "---\ntitle: test\n---\n", &msg)
+
+    // Raw commit so exactly ONE known trailer is present. Committing through the
+    // public write API would append a second, auto-stamped trailer that shadows
+    // this injected one, making the exact-value assertion meaningless.
+    std::fs::write(
+        dir.path().join("ddb/20260226120000.md"),
+        "---\ntitle: test\n---\n",
+    )
+    .unwrap();
+    let raw = &repo.repo;
+    let sig = Signature::now("ddb", "ddb@local").unwrap();
+    let parent = raw.head().unwrap().peel_to_commit().unwrap();
+    let mut index = raw.index().unwrap();
+    index.read_tree(&parent.tree().unwrap()).unwrap();
+    index.add_path(Path::new("ddb/20260226120000.md")).unwrap();
+    index.write().unwrap();
+    let tree = raw.find_tree(index.write_tree().unwrap()).unwrap();
+    raw.commit(Some("HEAD"), &sig, &sig, &msg, &tree, &[&parent])
         .unwrap();
+
     let head = repo.head_commit().unwrap();
     let result = repo.find_hlc_for_path(&head, "ddb/20260226120000.md");
     assert!(result.is_some());
-    assert_eq!(result.unwrap().wall_ms, 1000);
+    let found = result.unwrap();
+    assert_eq!(found.wall_ms, 1000);
+    assert_eq!(found.counter, 1);
+    assert_eq!(found.node, "abc");
 }
 
 #[test]
 fn find_hlc_for_path_returns_none_without_trailer() {
-    let (_dir, repo) = temp_repo();
-    repo.commit_file(
-        "ddb/20260226120000.md",
+    let (dir, repo) = temp_repo();
+
+    // The public write API now always stamps an HLC trailer, so a trailer-less
+    // commit (legacy history) must be built raw to keep this reader case honest.
+    std::fs::write(
+        dir.path().join("ddb/20260226120000.md"),
         "---\ntitle: test\n---\n",
-        "add doogat",
     )
     .unwrap();
+    let raw = &repo.repo;
+    let sig = Signature::now("ddb", "ddb@local").unwrap();
+    let parent = raw.head().unwrap().peel_to_commit().unwrap();
+    let mut index = raw.index().unwrap();
+    index.read_tree(&parent.tree().unwrap()).unwrap();
+    index.add_path(Path::new("ddb/20260226120000.md")).unwrap();
+    index.write().unwrap();
+    let tree = raw.find_tree(index.write_tree().unwrap()).unwrap();
+    raw.commit(Some("HEAD"), &sig, &sig, "add doogat", &tree, &[&parent])
+        .unwrap();
+
     let head = repo.head_commit().unwrap();
     let result = repo.find_hlc_for_path(&head, "ddb/20260226120000.md");
     assert!(result.is_none());
@@ -555,6 +595,130 @@ fn find_hlc_for_path_returns_none_for_untouched_path() {
     let head = repo.head_commit().unwrap();
     let result = repo.find_hlc_for_path(&head, "ddb/99990101000000.md");
     assert!(result.is_none());
+}
+
+/// Every non-merge write path (create, update, rename, delete, batch) must stamp
+/// a parseable `HLC:` trailer on its commit AND advance-and-persist the
+/// machine-local node HLC. After each write the commit that touched the path
+/// carries an HLC (delete and rename included), and the persisted `<git_dir>/ddb-hlc`
+/// strictly increases across the whole sequence. A wrong impl that stamps one
+/// hardcoded trailer, ticks only in memory without persisting, or skips the
+/// delete/rename paths must FAIL this.
+#[test]
+fn every_non_merge_write_stamps_and_advances_hlc() {
+    let (_dir, repo) = temp_repo();
+
+    // The clock is persisted at init, before any write.
+    assert!(
+        repo.repo.path().join("ddb-hlc").exists(),
+        "ddb-hlc must be persisted immediately after init"
+    );
+    let mut prev = node_hlc(&repo);
+
+    // create
+    repo.commit_file("ddb/20260401120000.md", "---\ntitle: a\n---\n", "create a")
+        .unwrap();
+    let head = repo.head_commit().unwrap();
+    assert!(
+        repo.find_hlc_for_path(&head, "ddb/20260401120000.md")
+            .is_some(),
+        "create commit must carry an HLC trailer"
+    );
+    let cur = node_hlc(&repo);
+    assert!(cur > prev, "create must advance the persisted node HLC: {cur} !> {prev}");
+    assert_eq!(
+        repo.find_hlc_for_path(&head, "ddb/20260401120000.md")
+            .unwrap(),
+        node_hlc(&repo),
+        "create commit's stamped HLC trailer must equal the persisted node clock"
+    );
+    // The stamped HLC must carry REAL wall-clock time (the clock is load-bearing,
+    // not a fabricated constant). Rejects a fake clock frozen at epoch+1s.
+    assert!(
+        cur.wall_ms > 1_600_000_000_000 && cur.wall_ms < 10_000_000_000_000,
+        "stamped HLC must carry real wall-clock time, got {}",
+        cur.wall_ms
+    );
+    prev = cur;
+
+    // update (second write to the same path)
+    repo.commit_file("ddb/20260401120000.md", "---\ntitle: a2\n---\n", "update a")
+        .unwrap();
+    let head = repo.head_commit().unwrap();
+    assert!(
+        repo.find_hlc_for_path(&head, "ddb/20260401120000.md")
+            .is_some(),
+        "update commit must carry an HLC trailer"
+    );
+    let cur = node_hlc(&repo);
+    assert!(cur > prev, "update must advance the persisted node HLC: {cur} !> {prev}");
+    assert_eq!(
+        repo.find_hlc_for_path(&head, "ddb/20260401120000.md")
+            .unwrap(),
+        node_hlc(&repo),
+        "update commit's stamped HLC trailer must equal the persisted node clock"
+    );
+    prev = cur;
+
+    // rename (old -> new); the delete step below removes the renamed file
+    repo.rename_file(
+        "ddb/20260401120000.md",
+        "ddb/contact/20260401120000.md",
+        "rename a",
+    )
+    .unwrap();
+    let head = repo.head_commit().unwrap();
+    assert!(
+        repo.find_hlc_for_path(&head, "ddb/contact/20260401120000.md")
+            .is_some(),
+        "rename commit must carry an HLC trailer on the new path"
+    );
+    let cur = node_hlc(&repo);
+    assert!(cur > prev, "rename must advance the persisted node HLC: {cur} !> {prev}");
+    assert_eq!(
+        repo.find_hlc_for_path(&head, "ddb/contact/20260401120000.md")
+            .unwrap(),
+        node_hlc(&repo),
+        "rename commit's stamped HLC trailer must equal the persisted node clock"
+    );
+    prev = cur;
+
+    // delete (removes the renamed file)
+    repo.delete_file("ddb/contact/20260401120000.md", "delete a")
+        .unwrap();
+    let head = repo.head_commit().unwrap();
+    assert!(
+        repo.find_hlc_for_path(&head, "ddb/contact/20260401120000.md")
+            .is_some(),
+        "delete commit must carry an HLC trailer on the deleted path"
+    );
+    let cur = node_hlc(&repo);
+    assert!(cur > prev, "delete must advance the persisted node HLC: {cur} !> {prev}");
+    assert_eq!(
+        repo.find_hlc_for_path(&head, "ddb/contact/20260401120000.md")
+            .unwrap(),
+        node_hlc(&repo),
+        "delete commit's stamped HLC trailer must equal the persisted node clock"
+    );
+    prev = cur;
+
+    // batch write
+    repo.commit_batch(&[("ddb/20260401140000.md", "content b")], &[], "batch b")
+        .unwrap();
+    let head = repo.head_commit().unwrap();
+    assert!(
+        repo.find_hlc_for_path(&head, "ddb/20260401140000.md")
+            .is_some(),
+        "batch commit must carry an HLC trailer"
+    );
+    let cur = node_hlc(&repo);
+    assert!(cur > prev, "batch must advance the persisted node HLC: {cur} !> {prev}");
+    assert_eq!(
+        repo.find_hlc_for_path(&head, "ddb/20260401140000.md")
+            .unwrap(),
+        node_hlc(&repo),
+        "batch commit's stamped HLC trailer must equal the persisted node clock"
+    );
 }
 
 #[test]
