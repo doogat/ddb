@@ -1,4 +1,5 @@
 use crate::crdt_resolver;
+use crate::crdt_resolver::{lww_pick, LwwSide};
 use crate::error::{DoogatError, Result};
 use crate::git_ops::GitRepo;
 use crate::hlc::Hlc;
@@ -130,10 +131,15 @@ fn partition_conflicts(
 fn resolve_add_add_collision(
     conflict: &ConflictFile,
 ) -> (crate::types::ResolvedFile, CollisionLoser) {
-    let theirs_wins = match (&conflict.ours_hlc, &conflict.theirs_hlc) {
-        (Some(ours_hlc), Some(theirs_hlc)) => theirs_hlc >= ours_hlc,
-        _ => true,
-    };
+    let theirs_wins = matches!(
+        lww_pick(
+            conflict.ours_hlc.as_ref(),
+            conflict.theirs_hlc.as_ref(),
+            &conflict.ours,
+            &conflict.theirs,
+        ),
+        LwwSide::Theirs
+    );
 
     let (winner_content, loser_content) = if theirs_wins {
         (conflict.theirs.clone(), conflict.ours.clone())
@@ -465,10 +471,15 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     ) -> Result<Vec<(String, String)>> {
         let mut resolved = Vec::new();
         for conflict in conflicts {
-            let theirs_wins = match (&conflict.ours_hlc, &conflict.theirs_hlc) {
-                (Some(ours_hlc), Some(theirs_hlc)) => theirs_hlc >= ours_hlc,
-                _ => true,
-            };
+            let theirs_wins = matches!(
+                lww_pick(
+                    conflict.ours_hlc.as_ref(),
+                    conflict.theirs_hlc.as_ref(),
+                    conflict.ours_blob_oid.as_deref().unwrap_or(""),
+                    conflict.theirs_blob_oid.as_deref().unwrap_or(""),
+                ),
+                LwwSide::Theirs
+            );
             let winner = if theirs_wins { "theirs" } else { "ours" };
             let winner_oid = if theirs_wins {
                 &conflict.theirs_blob_oid

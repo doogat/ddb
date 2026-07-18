@@ -570,18 +570,53 @@ pub fn resolve_lww(conflicts: Vec<ConflictFile>) -> Result<Vec<ResolvedFile>> {
     Ok(resolved)
 }
 
-/// Pick the winner based on HLC comparison.
-fn pick_lww_winner(conflict: &ConflictFile) -> String {
-    match (&conflict.ours_hlc, &conflict.theirs_hlc) {
-        (Some(ours_hlc), Some(theirs_hlc)) => {
-            if theirs_hlc > ours_hlc {
-                conflict.theirs.clone()
+/// Which side of a conflict wins an LWW decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LwwSide {
+    Ours,
+    Theirs,
+}
+
+/// The one missing/tie HLC rule, applied at every LWW decision site.
+///
+/// Higher HLC wins. When an HLC is absent on either side OR the two HLCs are
+/// equal, the higher content key wins — a role-independent, content-deterministic
+/// fallback that converges under an ours/theirs swap.
+pub(crate) fn lww_pick(
+    ours_hlc: Option<&Hlc>,
+    theirs_hlc: Option<&Hlc>,
+    ours_key: &str,
+    theirs_key: &str,
+) -> LwwSide {
+    match (ours_hlc, theirs_hlc) {
+        (Some(o), Some(t)) if o != t => {
+            if t > o {
+                LwwSide::Theirs
             } else {
-                conflict.ours.clone()
+                LwwSide::Ours
             }
         }
-        // No HLC available — fallback to ours
-        _ => conflict.ours.clone(),
+        // Missing on either side, or equal HLCs: content-deterministic fallback.
+        _ => {
+            if theirs_key > ours_key {
+                LwwSide::Theirs
+            } else {
+                LwwSide::Ours
+            }
+        }
+    }
+}
+
+/// Pick the winner based on HLC comparison.
+fn pick_lww_winner(conflict: &ConflictFile) -> String {
+    match lww_pick(
+        conflict.ours_hlc.as_ref(),
+        conflict.theirs_hlc.as_ref(),
+        &conflict.ours,
+        &conflict.theirs,
+    ) {
+        LwwSide::Ours => conflict.ours.clone(),
+        LwwSide::Theirs => conflict.theirs.clone(),
     }
 }
 
