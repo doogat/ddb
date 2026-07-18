@@ -15,12 +15,12 @@ All commit/delete/rename paths must run inside one repo-scoped, cross-process ad
 
 **Rule for new code**: any new write path goes through `with_write_lock`. If you find yourself calling `repo.index()` in a write, stop — use `fresh_index()`.
 
-### I2 — Merges preserve the other side's deletions · GAP (00200)
+### I2 — Merges preserve the other side's deletions · HOLDS (00200)
 Merge tree-construction stages `Delta::Deleted`, not only `Added|Modified`.
 
 **Why**: skipping deleted deltas silently resurrects a doogat the other device deleted, and turns a rename (delete+add) into a duplicate. The resurrect-with-marker policy in `sync_manager` only sees git-reported conflicts, so it cannot catch this.
 
-**Current gap**: `ddb-core/src/git_ops/merge.rs` `collect_theirs_only_changes` skips `Deleted` — and its two-way ours→theirs diff also silently reverts ours' non-conflicting edits (a two-way diff structurally cannot express the three-way merge it simulates; proven empirically in 00163's design review, evidence at `dev/local/designs/00200-make-merge-tree-three-way-v1-evidence.md`). This content-correctness leg moved out of 00163 to **00200** (make-merge-tree-three-way), which rebuilds the conflicted-merge tree from the three-way merge index rather than patching individual delta arms. (00163 shipped only the merge-path locking + fresh staging — the delta-arm semantics are byte-identical until 00200.)
+**Current state**: closed by **00200** (make-merge-tree-three-way). `commit_merge` now rebuilds the conflicted-merge tree as a true three-way merge — it re-runs `merge_commits(our_commit, their_commit)` in memory and overlays only the CRDT-resolved blobs onto the conflicting paths; every non-conflicting path (theirs' plain deletions, ours' non-conflicting edits, renames) is already correct at stage 0, so libgit2 preserves it instead of the old two-way ours→theirs diff silently resurrecting or reverting it. See `git-ops.md` § "Merge" for the mechanism and `crdt-resolver.md` / `sync.md` for the per-path outcome table.
 
 ### I3 — IDs are minted through one repo-aware path · GAP (00164, 00170)
 No mint path uses `exists = |_| false` or allocates future-dated timestamps; all minting checks actual repo/index existence.

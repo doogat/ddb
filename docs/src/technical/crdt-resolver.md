@@ -158,6 +158,29 @@ After merging all zones, the result is serialized via `parser::serialize()` and 
 - Strategy: non-default crdt_strategy still resolves (with warning)
 - Error: unparseable content correctly returns error (LWW fallback path)
 
+## Deletion Handling
+
+`resolve_conflicts` only ever sees a `ConflictFile` for a path Git itself reports as conflicting — i.e. both sides touched it in an overlapping way. As of PRD 00200, the conflicted-merge tree is rebuilt as a true three-way merge: `commit_merge` re-runs `merge_commits(our_commit, their_commit)` in memory and overlays only the CRDT-resolved blobs onto the conflicting paths; every non-conflicting path is already correct at stage 0 and is left untouched.
+
+This means two deletion scenarios resolve differently, and they should not be conflated:
+
+- **Plain deletion of an untouched doogat** (one side deletes, the other side never touches that path): not a conflict. It never reaches `resolve_conflicts`. The three-way `merge_commits` result already has the path absent at stage 0, so the deletion survives in the merged tree — Git preserves it without any zone-merge logic running.
+- **Delete-vs-edit** (one side deletes, the other side edits the *same* doogat): a real conflict. `sync_manager`'s delete-vs-edit bucket resolves it with the deliberate **resurrect-with-marker** policy — the edit wins, the doogat is kept, and `resurrected: true` is added to its frontmatter (see [Four-Bucket Conflict Partition](sync.md#four-bucket-conflict-partition)).
+
+### Per-path outcome (three-way merge)
+
+| Path shape | Final tree |
+|---|---|
+| both edit same region | CRDT/LWW resolved |
+| ours edits only | ours' edit kept |
+| ours clean-deletes | absent |
+| theirs deletes, ours untouched | absent (preserved deletion, not a conflict) |
+| theirs-only add/edit | theirs' change |
+| ours creates | present |
+| both edit, auto-mergeable (different regions) | both edits (git line-merges) |
+| theirs renames | renamed path only (no duplicate) |
+| delete-vs-edit (theirs deletes, ours edits) | resurrected + `resurrected: true` marker |
+
 ## SINGLETON post-sync sweep
 
 SINGLETON conflict handling finishes **after** git/CRDT merge, not inside

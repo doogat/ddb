@@ -68,6 +68,31 @@ When `merge_remote()` returns `Conflicts`, the conflict list is partitioned into
 
 Each bucket is resolved independently. The resolved files from all four are collected into a single merge commit.
 
+### Three-Way Merge Tree Construction
+
+The four buckets above only cover paths Git itself reports as conflicting. Everything else — a path only one side touched, including a plain deletion — is not a conflict and never enters bucket partitioning at all. As of PRD 00200, the merge commit (`commit_merge`) rebuilds its tree as a true three-way merge: it re-runs `merge_commits(our_commit, their_commit)` in memory and overlays only the four buckets' resolved blobs onto the conflicting paths. Every non-conflicting path is already correct at stage 0 of that re-run, so it is committed as-is.
+
+This distinguishes two deletion scenarios that are easy to conflate:
+
+- **Plain deletion, untouched by the other side**: not a conflict, never enters the delete-vs-edit bucket. The path is simply absent from the three-way merge result, so the deletion survives in the final tree.
+- **Delete-vs-edit** (the **delete-vs-edit** bucket above): a real conflict — one side deletes, the other edits the *same* doogat. This keeps the deliberate resurrect-with-marker policy: the edit wins and `resurrected: true` is added to the frontmatter. Unchanged by PRD 00200.
+
+Before PRD 00200, the merge tree was built by replaying a two-way ours→theirs diff over the resolved paths only, which silently reverted ours' non-conflicting edits back to the base and resurrected paths the other side had plainly deleted (see `invariants.md` § I2).
+
+#### Per-path outcome
+
+| Path shape | Final tree | Before PRD 00200 |
+|---|---|---|
+| both edit same region | resolved by the bucket above (CRDT/LWW/binary) | resolved (ok) |
+| ours edits only | ours' edit kept | reverted to base |
+| ours clean-deletes | absent | resurrected |
+| theirs deletes, ours untouched | absent | resurrected |
+| theirs-only add/edit | theirs' change | theirs' change (ok) |
+| ours creates | present | present (ok) |
+| both edit, auto-mergeable (different regions) | both edits (git line-merges) | theirs' whole blob |
+| theirs renames | renamed path only | old path resurrected → duplicate |
+| delete-vs-edit (theirs deletes, ours edits) | resurrect + `resurrected: true` marker | resurrect + marker (ok, unchanged) |
+
 ### Binary Asset LWW Resolution
 
 Binary files under `reference/` (attachments, images, etc.) are resolved via LWW using HLC timestamps from the conflicting commits. The branch with the higher HLC wins. On tie or missing HLC, "theirs" (remote) wins.

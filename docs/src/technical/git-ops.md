@@ -64,7 +64,7 @@ Future format changes increment `CURRENT_FORMAT_VERSION` and add a migration ste
 |--------|---------|
 | `commit_file(rel_path, content, msg)` | Write, stage, and commit a single file |
 | `commit_files(files, msg)` | Write, stage, and commit multiple files atomically |
-| `commit_merge(files, msg, theirs_oid)` | Write files and create a merge commit with two parents |
+| `commit_merge(files, binary, msg, theirs_oid)` | Rebuild the conflicted-merge tree as a true three-way merge, overlaying only the CRDT-resolved blobs onto conflicting paths, and commit it with two parents |
 | `read_file(rel_path)` | Read file content from HEAD tree (not working directory) |
 | `list_doogats()` | Walk HEAD tree, return all `ddb/*.md` paths |
 | `head_oid()` | Get current HEAD commit OID |
@@ -120,6 +120,20 @@ Remote URLs can be local filesystem paths, SSH URLs, or any Git-compatible trans
 `extract_conflicts(index) -> Result<Vec<ConflictFile>>`
 
 For each conflict entry in the merge index, reads the blob content for ancestor (if present), ours, and theirs. Returns `ConflictFile` structs ready for CRDT resolution.
+
+### Conflicted-Merge Commit (Three-Way)
+
+`commit_merge(files, binary, message, theirs) -> Result<CommitHash>`
+
+Called by `sync_manager` after CRDT/LWW resolution to commit a conflicted merge. As of PRD 00200, the tree is rebuilt as a true three-way merge — the same construction the clean-merge path (`merge_remote`'s normal-merge branch above) already uses:
+
+1. Re-run `merge_commits(our_commit, their_commit)` in memory. Every non-conflicting path is already correct at stage 0 of this fresh three-way result (ours-only edits kept, theirs-only changes kept, both-edited-in-different-regions files line-merged, theirs' plain deletions absent, ours' creates present) — libgit2 preserves it without any special-casing.
+2. **Divergence guard**: snapshot the conflicting paths from this fresh merge index and compare them to the resolved set (`files` + `binary`, the paths `sync_manager` actually resolved). If `HEAD` moved between conflict resolution and this commit, the sets diverge and `commit_merge` fails loud with a retryable `Conflict` rather than committing a stale resolution.
+3. Overlay the resolved blobs onto only the conflicting paths at stage 0 — CRDT/LWW text and delete-vs-edit resurrect markers from `files`, binary LWW winners overlaid by OID (no working-tree write) from `binary`.
+4. Write the resulting tree and commit it with two parents (`[ours, theirs]`).
+5. `checkout_head` force-syncs the worktree to the newly committed merge tree.
+
+This replaces the previous two-way ours→theirs diff, which silently reverted non-conflicting local edits back to the base, resurrected paths the other side had plainly deleted, and (for a path both sides edited in different regions) discarded one side's edit by keeping only theirs' whole blob.
 
 ## Signature
 
