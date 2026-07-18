@@ -3647,13 +3647,15 @@ pass "PRD 00136 / #16: cross-process FK freshness on ddb create"
 cd "$TMPDIR"
 rm -rf "$INT136_DIR"
 
-# 62. PRD 00164 - unified repo-aware ID minting: the batch (createMany /
-# multi-row INSERT) and single (`ddb create`) mint paths agree on "id taken",
-# so back-to-back mints in the same wall-clock second never collide. Pre-fix,
-# the blind single-create path minted now() via exists=|_| false and could
-# reuse an id the batch had just reserved. No `sleep 1` between mints on
-# purpose - that stale workaround for same-second collisions is exactly what
-# this PRD removes.
+# 62. PRD 00164 - unified repo-aware ID minting (end-to-end CLI conformance):
+# the batch (multi-row INSERT) and single (`ddb create`) mint paths agree on
+# "id taken", so back-to-back mints in the same wall-clock second yield
+# distinct, non-colliding ids. No `sleep 1` between mints on purpose - the
+# stale same-second workaround is exactly what this PRD removes. NOTE: `ddb
+# create` is the normal create path, already repo-aware before 00164; the blind
+# `|_| false` paths (create_doogat_raw / install_bundled_type) are pinned by the
+# core Rust regressions (ddb-core/tests/id_mint_collision.rs and
+# raw_create_mint_collision.rs), not by this CLI scenario.
 INT164_DIR="$(mktemp -d)"
 cd "$INT164_DIR"
 $DDB init >/dev/null
