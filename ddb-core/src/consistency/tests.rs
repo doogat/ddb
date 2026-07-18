@@ -284,6 +284,15 @@ fn title_from_path_underscore_slug() {
 }
 
 #[test]
+fn title_from_path_multibyte_stem_does_not_panic() {
+    // Byte 14 lands inside a multibyte char here (each `あ` is 3 UTF-8 bytes;
+    // 6 of them = 18 bytes, char boundaries only at 0/3/6/9/12/15/18). The old
+    // `&filename[..14]` slice panicked on this input; `get(..14)` returns None,
+    // so the stem is not treated as an ID prefix and the raw name is used.
+    assert_eq!(title_from_path("ddb/ああああああ.md"), "ああああああ");
+}
+
+#[test]
 fn detect_title_trim() {
     let mut parsed = empty_parsed();
     parsed.meta.title = Some("  spaced  ".to_string());

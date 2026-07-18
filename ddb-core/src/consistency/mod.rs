@@ -331,12 +331,15 @@ fn title_from_path(path: &str) -> String {
         .unwrap_or(path)
         .trim_end_matches(".md");
 
-    // Strip 14-digit ID prefix (with optional separator)
-    let stripped = if filename.len() >= 14 && DoogatId::is_valid_shape(&filename[..14]) {
-        let rest = &filename[14..];
-        rest.trim_start_matches(['-', '_'])
-    } else {
-        filename
+    // Strip 14-digit ID prefix (with optional separator). `get(..14)` returns
+    // None for a short filename OR when byte 14 splits a multibyte char, so a
+    // non-ASCII filename never panics the slice (is_valid_shape already pins
+    // len == 14 ASCII digits, guaranteeing byte 14 is a char boundary).
+    let stripped = match filename.get(..14) {
+        Some(prefix) if DoogatId::is_valid_shape(prefix) => {
+            filename[14..].trim_start_matches(['-', '_'])
+        }
+        _ => filename,
     };
 
     if stripped.is_empty() {
