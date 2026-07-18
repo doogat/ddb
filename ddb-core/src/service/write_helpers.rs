@@ -238,23 +238,12 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         Ok(())
     }
 
-    /// Generate a unique doogat ID, checking the filesystem for collisions.
-    pub(super) fn unique_id(&self) -> DoogatId {
-        let zk = self.repo_path.join("ddb");
-        parser::generate_unique_id(|candidate| {
-            let filename = format!("{candidate}.md");
-            if zk.join(&filename).exists() {
-                return true;
-            }
-            if let Ok(entries) = std::fs::read_dir(&zk) {
-                for entry in entries.flatten() {
-                    if entry.path().is_dir() && entry.path().join(&filename).exists() {
-                        return true;
-                    }
-                }
-            }
-            false
-        })
+    /// Generate a unique doogat ID via the shared repo-aware oracle (repo HEAD
+    /// tree + `doogats` index). Fallible: a repo/index read failure propagates
+    /// rather than minting a possibly-colliding id.
+    pub(super) fn unique_id(&self) -> Result<DoogatId> {
+        let exists = crate::id_minting::existence_oracle(&self.repo, self.index.sql_conn())?;
+        Ok(parser::generate_unique_id(exists))
     }
 
     /// Best-effort dual-write to the NoSQL mirror via the injected port.

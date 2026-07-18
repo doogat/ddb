@@ -1,15 +1,67 @@
-//! Repo-aware doogat-ID minting support.
-//!
-//! Currently this file carries only the unit tests for `existence_oracle`
-//! (written test-first). The production `existence_oracle` / `index_ids`
-//! functions are added by the implementor; until then this module does not
-//! compile — that is the expected red state.
+//! Repo-aware unique-ID existence oracle shared by every mint path (service
+//! create / batch / raw-create / bundled-install and the SQL engine's batch
+//! INSERT + typedef DDL). PRD 00164.
+
+use std::collections::HashSet;
+
+use rusqlite::Connection;
+
+use crate::error::{DoogatError, Result};
+use crate::parser;
+use crate::traits::DoogatSource;
+
+/// Build the shared existence oracle. A candidate ID is "taken" when a doogat
+/// with that stem exists anywhere under `ddb/` in the repo HEAD tree (root,
+/// type folders, or `_typedef/`) OR the `doogats` index holds a row with that
+/// id. Both sources are snapshotted once into a single set, so a mint
+/// spin/advance loop does not re-query per candidate.
+///
+/// Fails loud, not free: a repo HEAD-walk error or a real index-query error
+/// propagates as `Err`; the one tolerated absence is a missing `doogats` table
+/// on a fresh repo (empty index, not an error).
+pub(crate) fn existence_oracle<R: DoogatSource + ?Sized>(
+    repo: &R,
+    conn: &Connection,
+) -> Result<impl Fn(&str) -> bool> {
+    let mut existing: HashSet<String> = repo
+        .list_doogats()?
+        .iter()
+        .filter_map(|p| parser::extract_id_from_path(p))
+        .collect();
+    existing.extend(index_ids(conn)?);
+    Ok(move |candidate: &str| existing.contains(candidate))
+}
+
+/// Snapshot every id in the `doogats` index. A fresh repo whose index schema is
+/// not yet created has no `doogats` table — that absence is an empty set, not an
+/// error; any other query error propagates.
+fn index_ids(conn: &Connection) -> Result<HashSet<String>> {
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'doogats'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| DoogatError::SqlEngine(format!("id oracle: sqlite_master probe: {e}")))?;
+    if !table_exists {
+        return Ok(HashSet::new());
+    }
+    let mut stmt = conn
+        .prepare("SELECT id FROM doogats")
+        .map_err(|e| DoogatError::SqlEngine(format!("id oracle: prepare: {e}")))?;
+    let ids = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| DoogatError::SqlEngine(format!("id oracle: query: {e}")))?
+        .collect::<rusqlite::Result<HashSet<String>>>()
+        .map_err(|e| DoogatError::SqlEngine(format!("id oracle: row: {e}")))?;
+    Ok(ids)
+}
 
 #[cfg(test)]
 mod tests {
     use crate::git_ops::GitRepo;
     use crate::indexer::Index;
-    use crate::traits::{DoogatIndex, DoogatSource, DoogatStore, SqlBackend};
+    use crate::traits::{DoogatSource, SqlBackend};
     use crate::types::{CommitHash, DiffKind, DoogatId, DoogatMeta, ParsedDoogat};
     use std::path::Path;
     use tempfile::TempDir;

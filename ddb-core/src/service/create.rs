@@ -186,7 +186,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         // public service method that touches the index refreshes on entry.
         // The actor path opts out via `set_skip_stale_check(true)` already.
         self.ensure_fresh()?;
-        let id = self.unique_id();
+        let id = self.unique_id()?;
         let id_str = id.to_string();
 
         let folder = doogat_type

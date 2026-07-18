@@ -294,7 +294,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         // below since defaults can satisfy a NOT NULL column).
         Self::validate_typed_create_pre_defaults(input, schemas)?;
 
-        let id = self.unique_id();
+        let id = self.unique_id()?;
         let id_str = id.to_string();
 
         let folder = input
