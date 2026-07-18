@@ -227,7 +227,7 @@ pub fn parse_frontmatter(yaml: &str, path: &str) -> Result<DoogatMeta> {
             .file_stem()
             .and_then(|s| s.to_str())
         {
-            if stem.chars().all(|c| c.is_ascii_digit()) && !stem.is_empty() {
+            if DoogatId::is_valid_shape(stem) {
                 meta.id = Some(DoogatId(stem.to_owned()));
             }
         }
