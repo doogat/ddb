@@ -44,6 +44,7 @@ pub mod error;
 pub mod ffi;
 pub mod git_ops;
 pub mod hlc;
+mod id_minting;
 pub mod indexer;
 pub mod maintenance;
 pub mod parser;
