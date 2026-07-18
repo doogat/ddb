@@ -3647,4 +3647,26 @@ pass "PRD 00136 / #16: cross-process FK freshness on ddb create"
 cd "$TMPDIR"
 rm -rf "$INT136_DIR"
 
+# 62. PRD 00164 - unified repo-aware ID minting: the batch (createMany /
+# multi-row INSERT) and single (`ddb create`) mint paths agree on "id taken",
+# so back-to-back mints in the same wall-clock second never collide. Pre-fix,
+# the blind single-create path minted now() via exists=|_| false and could
+# reuse an id the batch had just reserved. No `sleep 1` between mints on
+# purpose - that stale workaround for same-second collisions is exactly what
+# this PRD removes.
+INT164_DIR="$(mktemp -d)"
+cd "$INT164_DIR"
+$DDB init >/dev/null
+$DDB query "CREATE TABLE int164 (label TEXT)" >/dev/null
+INT164_BATCH=$($DDB query "INSERT INTO int164 (label) VALUES ('a'), ('b'), ('c')")
+echo "$INT164_BATCH" | grep -qE "^[0-9]{14},[0-9]{14},[0-9]{14}$"
+INT164_SINGLE=$($DDB create --type int164 --title "single 164" --set "label=d")
+echo "$INT164_SINGLE" | grep -qE "^[0-9]{14}$"
+INT164_ALL=$(printf '%s\n%s\n' "$INT164_BATCH" "$INT164_SINGLE" | tr ',' '\n')
+[ "$(printf '%s\n' "$INT164_ALL" | grep -cE '^[0-9]{14}$')" = "4" ]
+[ "$(printf '%s\n' "$INT164_ALL" | sort -u | grep -cE '^[0-9]{14}$')" = "4" ]
+pass "PRD 00164: batch + single mint paths yield distinct ids (no same-second collision)"
+cd "$TMPDIR"
+rm -rf "$INT164_DIR"
+
 echo "=== all integration tests passed ==="

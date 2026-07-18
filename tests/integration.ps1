@@ -3607,5 +3607,25 @@ pass "PRD 00136 / #16: cross-process FK freshness on ddb create"
 Pop-Location
 Remove-Item -Recurse -Force $INT136_DIR
 
+# 62. PRD 00164 - unified repo-aware ID minting: the batch (createMany /
+# multi-row INSERT) and single (ddb create) mint paths agree on "id taken",
+# so back-to-back mints in the same wall-clock second never collide. Pre-fix,
+# the blind single-create path minted now() and could reuse an id the batch
+# had just reserved. No sleep between mints on purpose.
+$INT164_DIR = New-TempDir
+Push-Location $INT164_DIR
+ddb init | Out-Null
+ddb query "CREATE TABLE int164 (label TEXT)" | Out-Null
+$int164Batch = ddb query "INSERT INTO int164 (label) VALUES ('a'), ('b'), ('c')"
+if ($int164Batch -notmatch "(?m)^\d{14},\d{14},\d{14}$") { throw "62: batch insert did not return 3 IDs: $int164Batch" }
+$int164Single = (ddb create --type int164 --title "single 164" --set "label=d").Trim()
+if ($int164Single -notmatch '^\d{14}$') { throw "62: single create id malformed: $int164Single" }
+$int164All = @($int164Batch.Trim() -split ',') + $int164Single
+if ($int164All.Count -ne 4) { throw "62: expected 4 ids, got $($int164All.Count): $($int164All -join ',')" }
+if (($int164All | Sort-Object -Unique).Count -ne 4) { throw "62: mint collision - ids not distinct: $($int164All -join ',')" }
+pass "PRD 00164: batch + single mint paths yield distinct ids (no same-second collision)"
+Pop-Location
+Remove-Item -Recurse -Force $INT164_DIR
+
 Cleanup
 Write-Host "=== all integration tests passed ==="
