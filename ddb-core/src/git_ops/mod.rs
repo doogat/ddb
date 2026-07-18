@@ -97,6 +97,9 @@ pub struct GitRepo {
     /// `rename_file` → `commit_batch`) without the process deadlocking on its
     /// own advisory lock.
     write_lock_depth: std::cell::Cell<u32>,
+    /// Machine-local, monotonic HLC clock persisted to `<git_dir>/ddb-hlc`.
+    /// Every non-merge write commit ticks it and stamps the result as a trailer.
+    hlc_clock: hlc_clock::HlcClock,
 }
 
 /// Resets a `GitRepo`'s write-lock re-entrancy depth to zero on scope exit,
@@ -113,12 +116,14 @@ impl GitRepo {
     /// Initialize a new ddb Git repository.
     pub fn init(path: &Path) -> Result<Self> {
         let repo = Repository::init(path)?;
+        let hlc_clock = hlc_clock::HlcClock::load(&repo);
         let git_repo = Self {
             repo,
             path: path.to_path_buf(),
             skip_commit_graph: std::cell::Cell::new(false),
             session_commits: std::sync::atomic::AtomicU32::new(0),
             write_lock_depth: std::cell::Cell::new(0),
+            hlc_clock,
         };
 
         // Create standard directories with .gitkeep
@@ -163,12 +168,14 @@ impl GitRepo {
     /// Checks format version: rejects repos newer than driver, auto-upgrades v0→v1.
     pub fn open(path: &Path) -> Result<Self> {
         let repo = Repository::open(path)?;
+        let hlc_clock = hlc_clock::HlcClock::load(&repo);
         let git_repo = Self {
             repo,
             path: path.to_path_buf(),
             skip_commit_graph: std::cell::Cell::new(false),
             session_commits: std::sync::atomic::AtomicU32::new(0),
             write_lock_depth: std::cell::Cell::new(0),
+            hlc_clock,
         };
 
         git_repo.check_format_version()?;
@@ -233,7 +240,6 @@ impl GitRepo {
         index.write()?;
         let tree_oid = index.write_tree()?;
         let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
 
         let parent_commit = self.head_commit();
         let parents: Vec<&git2::Commit> = match parent_commit {
@@ -241,9 +247,7 @@ impl GitRepo {
             None => vec![],
         };
 
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)?;
+        let oid = self.create_commit(message, &tree, &parents)?;
         Ok(oid)
     }
 
@@ -251,6 +255,17 @@ impl GitRepo {
         self.repo
             .signature()
             .or_else(|_| Signature::now("ddb", "ddb@local").map_err(|e| e.into()))
+    }
+
+    /// Single chokepoint for non-merge write commits: tick the machine-local
+    /// HLC clock, stamp its value as a trailer on `message`, and commit.
+    fn create_commit(&self, message: &str, tree: &git2::Tree, parents: &[&git2::Commit]) -> Result<Oid> {
+        let hlc = self.hlc_clock.tick();
+        let msg = crate::hlc::append_hlc_trailer(message, &hlc);
+        let sig = self.signature()?;
+        Ok(self
+            .repo
+            .commit(Some("HEAD"), &sig, &sig, &msg, tree, parents)?)
     }
 
     fn head_commit(&self) -> Option<git2::Commit<'_>> {
@@ -330,14 +345,11 @@ impl GitRepo {
             index.write()?;
             let tree_oid = index.write_tree()?;
             let tree = self.repo.find_tree(tree_oid)?;
-            let sig = self.signature()?;
 
             let parent = self
                 .head_commit()
                 .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-            let oid = self
-                .repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            let oid = self.create_commit(message, &tree, &[&parent])?;
             self.write_commit_graph();
             crate::maintenance::check_write_threshold(self);
             Ok(CommitHash(oid.to_string()))
@@ -366,14 +378,11 @@ impl GitRepo {
             index.write()?;
             let tree_oid = index.write_tree()?;
             let tree = self.repo.find_tree(tree_oid)?;
-            let sig = self.signature()?;
 
             let parent = self
                 .head_commit()
                 .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-            let oid = self
-                .repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            let oid = self.create_commit(message, &tree, &[&parent])?;
             self.write_commit_graph();
             crate::maintenance::check_write_threshold(self);
             Ok(CommitHash(oid.to_string()))
@@ -411,13 +420,10 @@ impl GitRepo {
             index.write()?;
             let tree_oid = index.write_tree()?;
             let tree = self.repo.find_tree(tree_oid)?;
-            let sig = self.signature()?;
             let parent = self
                 .head_commit()
                 .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-            let oid = self
-                .repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            let oid = self.create_commit(message, &tree, &[&parent])?;
             self.write_commit_graph();
             Ok(CommitHash(oid.to_string()))
         })
@@ -443,13 +449,10 @@ impl GitRepo {
             index.write()?;
             let tree_oid = index.write_tree()?;
             let tree = self.repo.find_tree(tree_oid)?;
-            let sig = self.signature()?;
             let parent = self
                 .head_commit()
                 .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-            let oid = self
-                .repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            let oid = self.create_commit(message, &tree, &[&parent])?;
             self.write_commit_graph();
             Ok(CommitHash(oid.to_string()))
         })
@@ -513,13 +516,10 @@ impl GitRepo {
             index.write()?;
             let tree_oid = index.write_tree()?;
             let tree = self.repo.find_tree(tree_oid)?;
-            let sig = self.signature()?;
             let parent = self
                 .head_commit()
                 .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-            let oid = self
-                .repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            let oid = self.create_commit(message, &tree, &[&parent])?;
             self.write_commit_graph();
             Ok(CommitHash(oid.to_string()))
         })
@@ -563,13 +563,10 @@ impl GitRepo {
             index.write()?;
             let tree_oid = index.write_tree()?;
             let tree = self.repo.find_tree(tree_oid)?;
-            let sig = self.signature()?;
             let parent = self
                 .head_commit()
                 .ok_or_else(|| DoogatError::Git("repo has no initial commit".into()))?;
-            let oid = self
-                .repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])?;
+            let oid = self.create_commit(message, &tree, &[&parent])?;
             self.write_commit_graph();
             Ok(CommitHash(oid.to_string()))
         })
