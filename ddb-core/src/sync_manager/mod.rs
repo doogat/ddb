@@ -343,9 +343,6 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         binary: &[(String, String)],
         theirs_oid: &CommitHash,
     ) -> Result<()> {
-        let hlc = self.tick_hlc();
-        let merge_msg = crate::hlc::append_hlc_trailer("resolve merge conflicts via CRDT", &hlc);
-
         let files: Vec<(&str, &str)> = resolved
             .iter()
             .map(|r| (r.path.as_str(), r.content.as_str()))
@@ -355,7 +352,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             .map(|(p, o)| (p.as_str(), o.as_str()))
             .collect();
         self.repo
-            .commit_merge(&files, &binary, &merge_msg, theirs_oid)?;
+            .commit_merge(&files, &binary, "resolve merge conflicts via CRDT", theirs_oid)?;
 
         let commit_oid = self.repo.head_oid()?;
         write_fm_crdt_files(self.repo.repo_path(), &commit_oid, resolved)?;

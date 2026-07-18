@@ -73,15 +73,10 @@ impl GitRepo {
             // overlay clears every conflict.
             let tree_oid = merge_index.write_tree_to(&self.repo)?;
             let tree = self.repo.find_tree(tree_oid)?;
-            let sig = self.signature()?;
-            let oid = self.repo.commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                message,
-                &tree,
-                &[&our_commit, &their_commit],
-            )?;
+            if let Some(theirs_hlc) = crate::hlc::extract_hlc(their_commit.message().unwrap_or("")) {
+                self.hlc_clock.recv(&theirs_hlc);
+            }
+            let oid = self.create_commit(message, &tree, &[&our_commit, &their_commit])?;
             // Sync the working tree to the committed merge tree — symmetric with
             // `perform_normal_merge`. This is what removes theirs-deleted files from
             // the worktree and materializes line-merged and resolved content,
@@ -207,15 +202,11 @@ impl GitRepo {
 
         let tree_oid = merge_index.write_tree_to(&self.repo)?;
         let tree = self.repo.find_tree(tree_oid)?;
-        let sig = self.signature()?;
-        let oid = self.repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            &format!("merge {remote}/{branch}"),
-            &tree,
-            &[&our_commit, &their_commit],
-        )?;
+        if let Some(theirs_hlc) = crate::hlc::extract_hlc(their_commit.message().unwrap_or("")) {
+            self.hlc_clock.recv(&theirs_hlc);
+        }
+        let oid =
+            self.create_commit(&format!("merge {remote}/{branch}"), &tree, &[&our_commit, &their_commit])?;
         self.repo
             .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
         Ok(MergeResult::Clean(CommitHash(oid.to_string())))
@@ -248,6 +239,13 @@ impl GitRepo {
                 self.repo.set_head("refs/heads/master")?;
                 self.repo
                     .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+                if let Ok(their_commit) = self.repo.find_commit(target_oid) {
+                    if let Some(theirs_hlc) =
+                        crate::hlc::extract_hlc(their_commit.message().unwrap_or(""))
+                    {
+                        self.hlc_clock.recv(&theirs_hlc);
+                    }
+                }
                 return Ok(MergeResult::FastForward(CommitHash(target_oid.to_string())));
             }
 
