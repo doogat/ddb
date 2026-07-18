@@ -580,4 +580,38 @@ Body for 20260601000000
         assert_eq!(second.conflicts_resolved, 0);
         assert!(repo.read_file("ddb/_conflicts/20260601000000.md").is_ok());
     }
+
+    #[test]
+    fn singleton_sweep_commit_has_single_hlc_trailer() {
+        let (_dir, repo) = temp_repo();
+        let index = test_index();
+        repo.commit_file(
+            "ddb/_typedef/20260510120000.md",
+            singleton_typedef(),
+            "add singleton typedef",
+        )
+        .unwrap();
+        let loser_path = "ddb/20260601000000.md";
+        let loser_content = app_config_row("20260601000000", "dark", "alpha");
+        commit_with_hlc(&repo, loser_path, &loser_content, 1000);
+        commit_with_hlc(
+            &repo,
+            "ddb/20260601000010.md",
+            &app_config_row("20260601000010", "light", "beta"),
+            2000,
+        );
+
+        let resolved_at = test_hlc(9000, 0, "sweep001");
+        let report = singleton_sweep(&repo, &index, &resolved_at).unwrap();
+
+        assert!(report.conflicts_resolved >= 1);
+        let msg = repo.repo.head().unwrap().peel_to_commit().unwrap().message().unwrap().to_string();
+        let trailer_count = msg.lines().filter(|l| l.starts_with("HLC: ")).count();
+        assert_eq!(
+            trailer_count, 1,
+            "sweep commit should carry exactly one HLC trailer, got {trailer_count}: {msg}"
+        );
+        let quarantined = repo.read_file("ddb/_conflicts/20260601000000.md").unwrap();
+        assert!(quarantined.contains("singleton_conflict_resolved_at:"));
+    }
 }
