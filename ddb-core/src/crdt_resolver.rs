@@ -1061,6 +1061,146 @@ mod tests {
         assert!(merged.contains("!"));
     }
 
+    // --- lww_pick: the single tie-break rule shared by all three sites ---
+
+    #[test]
+    fn lww_pick_both_hlc_differ_higher_hlc_wins_theirs() {
+        let ours_hlc = Hlc {
+            wall_ms: 100,
+            counter: 0,
+            node: "aaaaaaaa".into(),
+        };
+        let theirs_hlc = Hlc {
+            wall_ms: 200,
+            counter: 0,
+            node: "bbbbbbbb".into(),
+        };
+        // Content keys deliberately favour ours; the higher HLC must still decide.
+        let pick = lww_pick(Some(&ours_hlc), Some(&theirs_hlc), "zzz_ours", "aaa_theirs");
+        assert_eq!(pick, LwwSide::Theirs);
+    }
+
+    #[test]
+    fn lww_pick_both_hlc_differ_higher_hlc_wins_ours() {
+        let ours_hlc = Hlc {
+            wall_ms: 300,
+            counter: 0,
+            node: "aaaaaaaa".into(),
+        };
+        let theirs_hlc = Hlc {
+            wall_ms: 200,
+            counter: 0,
+            node: "bbbbbbbb".into(),
+        };
+        // Content keys deliberately favour theirs; the higher HLC must still decide.
+        let pick = lww_pick(Some(&ours_hlc), Some(&theirs_hlc), "aaa_ours", "zzz_theirs");
+        assert_eq!(pick, LwwSide::Ours);
+    }
+
+    #[test]
+    fn lww_pick_equal_hlc_picks_higher_content_key() {
+        let hlc = Hlc {
+            wall_ms: 100,
+            counter: 0,
+            node: "samenode".into(),
+        };
+        // Exactly-equal HLCs → content key decides. "theirs_key" > "ours_key" by str `>`.
+        assert_eq!(
+            lww_pick(Some(&hlc), Some(&hlc), "ours_key", "theirs_key"),
+            LwwSide::Theirs
+        );
+        // And the other direction: higher key on ours.
+        assert_eq!(
+            lww_pick(Some(&hlc), Some(&hlc), "zzz_key", "aaa_key"),
+            LwwSide::Ours
+        );
+    }
+
+    #[test]
+    fn lww_pick_equal_wall_ms_and_node_orders_by_counter_not_content() {
+        // Same wall_ms AND same node: the HLC `counter` component must break the
+        // tie, NOT the content key. The higher-`counter` side is given the
+        // LEXICALLY-LOWER content key, so "order by counter" and "fall back to
+        // content key" DISAGREE. Guards against an impl that compares
+        // wall_ms + node but drops counter.
+        let ours_hlc = Hlc {
+            wall_ms: 100,
+            counter: 3, // lower counter
+            node: "samenode".into(),
+        };
+        let theirs_hlc = Hlc {
+            wall_ms: 100,
+            counter: 5, // higher counter
+            node: "samenode".into(),
+        };
+        // Content key favours ours ("zzz" > "aaa"); the higher counter must win.
+        assert_eq!(
+            lww_pick(Some(&ours_hlc), Some(&theirs_hlc), "zzz", "aaa"),
+            LwwSide::Theirs
+        );
+    }
+
+    #[test]
+    fn lww_pick_cross_magnitude_wall_ms_compares_numerically_not_lexically() {
+        // Cross-magnitude wall_ms: the numerically-later side is LEXICALLY lower
+        // in the HLC Display form ("900-..." vs "1000-...", '9' > '1'). The rule
+        // must compare wall_ms numerically (Hlc::Ord), not as a string. Content
+        // key favours ours ("z" > "a") so a fallback would also pick the wrong side.
+        let ours = Hlc {
+            wall_ms: 900,
+            counter: 0,
+            node: "aaaaaaaa".into(),
+        };
+        let theirs = Hlc {
+            wall_ms: 1000,
+            counter: 0,
+            node: "bbbbbbbb".into(),
+        };
+        assert_eq!(lww_pick(Some(&ours), Some(&theirs), "z", "a"), LwwSide::Theirs);
+    }
+
+    #[test]
+    fn lww_pick_missing_hlc_picks_higher_content_key() {
+        let hlc = Hlc {
+            wall_ms: 100,
+            counter: 0,
+            node: "somenode".into(),
+        };
+        // Ours None → content key decides.
+        assert_eq!(lww_pick(None, Some(&hlc), "aaa", "bbb"), LwwSide::Theirs);
+        // Theirs None → content key decides.
+        assert_eq!(lww_pick(Some(&hlc), None, "bbb", "aaa"), LwwSide::Ours);
+        // Both None → content key decides.
+        assert_eq!(lww_pick(None, None, "aaa", "bbb"), LwwSide::Theirs);
+        assert_eq!(lww_pick(None, None, "bbb", "aaa"), LwwSide::Ours);
+    }
+
+    #[test]
+    fn lww_pick_role_swap_converges_on_same_content_key() {
+        // Missing/equal case: the winning CONTENT KEY is invariant under role swap.
+        let ours_key = "alpha";
+        let theirs_key = "omega"; // omega > alpha by str `>`
+
+        let orig = lww_pick(None, None, ours_key, theirs_key);
+        let winning_key_orig = match orig {
+            LwwSide::Ours => ours_key,
+            LwwSide::Theirs => theirs_key,
+        };
+
+        // Swap the (hlc, key) argument pairs; the winning key must not change.
+        let swapped = lww_pick(None, None, theirs_key, ours_key);
+        let winning_key_swapped = match swapped {
+            LwwSide::Ours => theirs_key,
+            LwwSide::Theirs => ours_key,
+        };
+
+        assert_eq!(
+            winning_key_orig, winning_key_swapped,
+            "winning content key must be invariant under role swap"
+        );
+        assert_eq!(winning_key_orig, theirs_key, "the higher content key wins");
+    }
+
     #[test]
     fn lww_picks_later_hlc() {
         let ours_hlc = Hlc {
@@ -1089,22 +1229,26 @@ mod tests {
     }
 
     #[test]
-    fn lww_deterministic_tiebreak() {
+    fn lww_equal_wall_ms_orders_by_hlc_node_not_content() {
+        // Same wall_ms AND same counter: the HLC `node` component must break the
+        // tie, NOT the content key. To tell the two rules apart, the higher-`node`
+        // side is given the LEXICALLY-LOWER content, so "order by HLC node" and
+        // "fall back to content key" DISAGREE on the winner.
         let ours_hlc = Hlc {
             wall_ms: 100,
             counter: 0,
-            node: "aaaaaaaa".into(),
+            node: "aaaaaaaa".into(), // lower node
         };
         let theirs_hlc = Hlc {
             wall_ms: 100,
             counter: 0,
-            node: "zzzzzzzz".into(),
+            node: "zzzzzzzz".into(), // higher node
         };
         let conflicts = vec![ConflictFile {
             path: "ddb/test.md".into(),
             ancestor: None,
-            ours: "ours content".into(),
-            theirs: "theirs content".into(),
+            ours: "zzz body".into(),   // higher content key, but LOWER HLC node
+            theirs: "aaa body".into(), // lower content key, but HIGHER HLC node
             ours_hlc: Some(ours_hlc),
             theirs_hlc: Some(theirs_hlc),
             ours_blob_oid: None,
@@ -1112,12 +1256,16 @@ mod tests {
         }];
 
         let resolved = resolve_lww(conflicts).unwrap();
-        // theirs has higher node string, so theirs wins
-        assert_eq!(resolved[0].content, "theirs content");
+        // Higher HLC node (theirs) wins even though its content key is lower.
+        // A wall_ms-only impl would treat this as a tie, fall back to the content
+        // key, and return "zzz body" (ours) — which is WRONG.
+        assert_eq!(resolved[0].content, "aaa body");
     }
 
     #[test]
-    fn lww_no_hlc_fallback_to_ours() {
+    fn lww_missing_hlc_picks_higher_content_key() {
+        // resolve_lww's content key is the side's full text. With both HLCs
+        // absent, the higher text (str `>`) wins: "theirs content" > "ours content".
         let conflicts = vec![ConflictFile {
             path: "ddb/test.md".into(),
             ancestor: None,
@@ -1130,7 +1278,22 @@ mod tests {
         }];
 
         let resolved = resolve_lww(conflicts).unwrap();
-        assert_eq!(resolved[0].content, "ours content");
+        assert_eq!(resolved[0].content, "theirs content");
+
+        // Role-swap convergence: swap ours/theirs → same winning content.
+        let swapped = vec![ConflictFile {
+            path: "ddb/test.md".into(),
+            ancestor: None,
+            ours: "theirs content".into(),
+            theirs: "ours content".into(),
+            ours_hlc: None,
+            theirs_hlc: None,
+            ours_blob_oid: None,
+            theirs_blob_oid: None,
+        }];
+
+        let resolved_swapped = resolve_lww(swapped).unwrap();
+        assert_eq!(resolved_swapped[0].content, "theirs content");
     }
 
     #[test]

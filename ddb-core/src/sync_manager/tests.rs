@@ -374,39 +374,67 @@ fn add_add_winner_by_hlc() {
 }
 
 #[test]
-fn add_add_hlc_tie_theirs_wins() {
-    // Both HLCs None → theirs wins
+fn add_add_missing_or_equal_hlc_picks_higher_content_key() {
+    // add-add's content key is the side's full text. "Zebra" text > "Apple"
+    // text by str `>` (they diverge at the title line: 'Z' > 'A').
+    let apple = "---\nid: 20260101120000\ntitle: Apple\n---\nApple body\n";
+    let zebra = "---\nid: 20260101120000\ntitle: Zebra\n---\nZebra body\n";
+
+    // Both HLCs None → content key decides → zebra (higher) wins.
     let conflict = ConflictFile {
         path: "ddb/20260101120000.md".into(),
         ancestor: None,
-        ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n".into(),
-        theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
+        ours: apple.into(),
+        theirs: zebra.into(),
         ours_hlc: None,
         theirs_hlc: None,
         ours_blob_oid: None,
         theirs_blob_oid: None,
     };
     let (winner, _loser) = resolve_add_add_collision(&conflict);
-    assert!(winner.content.contains("Theirs body"));
+    assert!(
+        winner.content.contains("Zebra body"),
+        "higher content key wins when both HLCs are missing"
+    );
 
-    // Equal HLCs → theirs wins
+    // Exactly-equal HLCs → content key still decides → zebra wins.
     let hlc = crate::hlc::Hlc {
         wall_ms: 1000,
         counter: 0,
         node: "nodeA".into(),
     };
-    let conflict2 = ConflictFile {
+    let conflict_eq = ConflictFile {
         path: "ddb/20260101120000.md".into(),
         ancestor: None,
-        ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs\n".into(),
-        theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs\n".into(),
+        ours: apple.into(),
+        theirs: zebra.into(),
         ours_hlc: Some(hlc.clone()),
         theirs_hlc: Some(hlc),
         ours_blob_oid: None,
         theirs_blob_oid: None,
     };
-    let (winner2, _) = resolve_add_add_collision(&conflict2);
-    assert!(winner2.content.contains("Theirs"));
+    let (winner_eq, _) = resolve_add_add_collision(&conflict_eq);
+    assert!(
+        winner_eq.content.contains("Zebra body"),
+        "higher content key wins when HLCs are exactly equal"
+    );
+
+    // Role-swap convergence: swap ours/theirs → same winning content.
+    let conflict_swapped = ConflictFile {
+        path: "ddb/20260101120000.md".into(),
+        ancestor: None,
+        ours: zebra.into(),
+        theirs: apple.into(),
+        ours_hlc: None,
+        theirs_hlc: None,
+        ours_blob_oid: None,
+        theirs_blob_oid: None,
+    };
+    let (winner_swapped, _) = resolve_add_add_collision(&conflict_swapped);
+    assert!(
+        winner_swapped.content.contains("Zebra body"),
+        "role swap converges on the same winning content"
+    );
 }
 
 #[test]
@@ -545,171 +573,175 @@ fn setup_binary_sync_pair() -> (
 }
 
 #[test]
-fn binary_lww_ours_wins_higher_hlc() {
-    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+fn binary_higher_hlc_wins_ours() {
+    let (_dir, repo) = temp_repo();
+    register_node(&repo, "Test").unwrap();
+    let mgr = SyncManager::open(&repo).unwrap();
 
-    let bin_path = "reference/test/photo.bin";
-    let ours_bytes = b"OURS_BINARY_CONTENT_AAA";
-    let theirs_bytes = b"THEIRS_BINARY_CONTENT_BBB";
+    let path = "reference/test/photo.bin";
+    // Distinct fake 40-hex blob OIDs; compared as plain strings ("ffff" > "1111").
+    let oid_low = "1111111111111111111111111111111111111111";
+    let oid_high = "ffffffffffffffffffffffffffffffffffffffff";
 
-    // A commits with a LOWER HLC (earlier timestamp)
-    let hlc_a = crate::hlc::Hlc {
-        wall_ms: 1000,
-        counter: 0,
-        node: "aaaaaaaa".into(),
-    };
-    let msg_a = crate::hlc::append_hlc_trailer("A adds binary", &hlc_a);
-    repo_a
-        .commit_binary_file(bin_path, theirs_bytes, &msg_a)
-        .unwrap();
-    repo_a.push("origin", "master").unwrap();
-
-    // B commits with a HIGHER HLC (later timestamp) — this is "ours" from B's perspective
-    let hlc_b = crate::hlc::Hlc {
-        wall_ms: 9000,
-        counter: 0,
-        node: "bbbbbbbb".into(),
-    };
-    let msg_b = crate::hlc::append_hlc_trailer("B adds binary", &hlc_b);
-    repo_b
-        .commit_binary_file(bin_path, ours_bytes, &msg_b)
-        .unwrap();
-
-    // B syncs — ours (B, wall_ms=9000) > theirs (A, wall_ms=1000), ours wins
-    let db_b = dir_b.path().join(".ddb/index.db");
-    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
-    let index_b = crate::indexer::Index::open(&db_b).unwrap();
-    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
-    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
-
-    assert!(
-        report.conflicts_resolved > 0,
-        "should have resolved a conflict"
-    );
-    let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
-    assert_eq!(resolved, ours_bytes, "ours (higher HLC) should win");
-}
-
-#[test]
-fn binary_lww_theirs_wins_higher_hlc() {
-    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
-
-    let bin_path = "reference/test/photo.bin";
-    let ours_bytes = b"OURS_BINARY_CONTENT_AAA";
-    let theirs_bytes = b"THEIRS_BINARY_CONTENT_BBB";
-
-    // A commits with a HIGHER HLC — this will be "theirs" from B's perspective
-    let hlc_a = crate::hlc::Hlc {
+    // Ours carries the higher HLC but the LOWER OID: the HLC must dominate.
+    let ours_hlc = crate::hlc::Hlc {
         wall_ms: 9000,
         counter: 0,
         node: "aaaaaaaa".into(),
     };
-    let msg_a = crate::hlc::append_hlc_trailer("A adds binary", &hlc_a);
-    repo_a
-        .commit_binary_file(bin_path, theirs_bytes, &msg_a)
-        .unwrap();
-    repo_a.push("origin", "master").unwrap();
-
-    // B commits with a LOWER HLC
-    let hlc_b = crate::hlc::Hlc {
+    let theirs_hlc = crate::hlc::Hlc {
         wall_ms: 1000,
         counter: 0,
         node: "bbbbbbbb".into(),
     };
-    let msg_b = crate::hlc::append_hlc_trailer("B adds binary", &hlc_b);
-    repo_b
-        .commit_binary_file(bin_path, ours_bytes, &msg_b)
-        .unwrap();
+    let conflict = ConflictFile {
+        path: path.into(),
+        ancestor: None,
+        ours: String::new(),
+        theirs: String::new(),
+        ours_hlc: Some(ours_hlc),
+        theirs_hlc: Some(theirs_hlc),
+        ours_blob_oid: Some(oid_low.into()),
+        theirs_blob_oid: Some(oid_high.into()),
+    };
 
-    // B syncs — theirs (A, wall_ms=9000) > ours (B, wall_ms=1000), theirs wins
-    let db_b = dir_b.path().join(".ddb/index.db");
-    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
-    let index_b = crate::indexer::Index::open(&db_b).unwrap();
-    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
-    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
-
-    assert!(
-        report.conflicts_resolved > 0,
-        "should have resolved a conflict"
+    let resolved = mgr.resolve_binary_ref_conflicts(&[conflict]).unwrap();
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].0, path);
+    assert_eq!(
+        resolved[0].1, oid_low,
+        "higher HLC (ours) wins even though its blob OID is lower"
     );
-    let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
-    assert_eq!(resolved, theirs_bytes, "theirs (higher HLC) should win");
 }
 
 #[test]
-fn binary_lww_theirs_wins_on_tie() {
-    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+fn binary_higher_hlc_wins_theirs() {
+    let (_dir, repo) = temp_repo();
+    register_node(&repo, "Test").unwrap();
+    let mgr = SyncManager::open(&repo).unwrap();
 
-    let bin_path = "reference/test/photo.bin";
-    let ours_bytes = b"OURS_TIE_CONTENT";
-    let theirs_bytes = b"THEIRS_TIE_CONTENT";
+    let path = "reference/test/photo.bin";
+    let oid_low = "1111111111111111111111111111111111111111";
+    let oid_high = "ffffffffffffffffffffffffffffffffffffffff";
 
-    // Both use identical HLC timestamps
+    // Theirs carries the higher HLC but the LOWER OID: the HLC must dominate.
+    let ours_hlc = crate::hlc::Hlc {
+        wall_ms: 1000,
+        counter: 0,
+        node: "aaaaaaaa".into(),
+    };
+    let theirs_hlc = crate::hlc::Hlc {
+        wall_ms: 9000,
+        counter: 0,
+        node: "bbbbbbbb".into(),
+    };
+    let conflict = ConflictFile {
+        path: path.into(),
+        ancestor: None,
+        ours: String::new(),
+        theirs: String::new(),
+        ours_hlc: Some(ours_hlc),
+        theirs_hlc: Some(theirs_hlc),
+        ours_blob_oid: Some(oid_high.into()),
+        theirs_blob_oid: Some(oid_low.into()),
+    };
+
+    let resolved = mgr.resolve_binary_ref_conflicts(&[conflict]).unwrap();
+    assert_eq!(
+        resolved[0].1, oid_low,
+        "higher HLC (theirs) wins even though its blob OID is lower"
+    );
+}
+
+#[test]
+fn binary_tie_hlc_picks_higher_blob_oid() {
+    let (_dir, repo) = temp_repo();
+    register_node(&repo, "Test").unwrap();
+    let mgr = SyncManager::open(&repo).unwrap();
+
+    let path = "reference/test/photo.bin";
+    let oid_low = "1111111111111111111111111111111111111111";
+    let oid_high = "ffffffffffffffffffffffffffffffffffffffff";
+
+    // Exactly-equal HLCs → the higher blob OID wins.
     let hlc = crate::hlc::Hlc {
         wall_ms: 5000,
         counter: 0,
-        node: "aaaaaaaa".into(),
+        node: "samenode".into(),
     };
+    let conflict = ConflictFile {
+        path: path.into(),
+        ancestor: None,
+        ours: String::new(),
+        theirs: String::new(),
+        ours_hlc: Some(hlc.clone()),
+        theirs_hlc: Some(hlc.clone()),
+        ours_blob_oid: Some(oid_low.into()),
+        theirs_blob_oid: Some(oid_high.into()),
+    };
+    let resolved = mgr.resolve_binary_ref_conflicts(&[conflict]).unwrap();
+    assert_eq!(resolved[0].1, oid_high, "higher blob OID wins on HLC tie");
 
-    let msg_a = crate::hlc::append_hlc_trailer("A adds binary", &hlc);
-    repo_a
-        .commit_binary_file(bin_path, theirs_bytes, &msg_a)
-        .unwrap();
-    repo_a.push("origin", "master").unwrap();
-
-    let msg_b = crate::hlc::append_hlc_trailer("B adds binary", &hlc);
-    repo_b
-        .commit_binary_file(bin_path, ours_bytes, &msg_b)
-        .unwrap();
-
-    // B syncs — tied HLC, theirs wins by convention
-    let db_b = dir_b.path().join(".ddb/index.db");
-    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
-    let index_b = crate::indexer::Index::open(&db_b).unwrap();
-    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
-    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
-
-    assert!(
-        report.conflicts_resolved > 0,
-        "should have resolved a conflict"
+    // Role-swap convergence: swap the OIDs → same winning OID.
+    let swapped = ConflictFile {
+        path: path.into(),
+        ancestor: None,
+        ours: String::new(),
+        theirs: String::new(),
+        ours_hlc: Some(hlc.clone()),
+        theirs_hlc: Some(hlc),
+        ours_blob_oid: Some(oid_high.into()),
+        theirs_blob_oid: Some(oid_low.into()),
+    };
+    let resolved_swapped = mgr.resolve_binary_ref_conflicts(&[swapped]).unwrap();
+    assert_eq!(
+        resolved_swapped[0].1, oid_high,
+        "role swap converges on the same winning OID"
     );
-    let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
-    assert_eq!(resolved, theirs_bytes, "theirs should win on HLC tie");
 }
 
 #[test]
-fn binary_lww_theirs_wins_missing_hlc() {
-    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+fn binary_missing_hlc_picks_higher_blob_oid() {
+    let (_dir, repo) = temp_repo();
+    register_node(&repo, "Test").unwrap();
+    let mgr = SyncManager::open(&repo).unwrap();
 
-    let bin_path = "reference/test/photo.bin";
-    let ours_bytes = b"OURS_NO_HLC";
-    let theirs_bytes = b"THEIRS_NO_HLC";
+    let path = "reference/test/photo.bin";
+    let oid_low = "1111111111111111111111111111111111111111";
+    let oid_high = "ffffffffffffffffffffffffffffffffffffffff";
 
-    // Neither commit includes an HLC trailer
-    repo_a
-        .commit_binary_file(bin_path, theirs_bytes, "A adds binary (no HLC)")
-        .unwrap();
-    repo_a.push("origin", "master").unwrap();
-
-    repo_b
-        .commit_binary_file(bin_path, ours_bytes, "B adds binary (no HLC)")
-        .unwrap();
-
-    // B syncs — no HLC on either side, theirs wins by convention
-    let db_b = dir_b.path().join(".ddb/index.db");
-    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
-    let index_b = crate::indexer::Index::open(&db_b).unwrap();
-    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
-    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
-
-    assert!(
-        report.conflicts_resolved > 0,
-        "should have resolved a conflict"
-    );
-    let resolved = std::fs::read(dir_b.path().join(bin_path)).unwrap();
+    // Both HLCs absent → the higher blob OID wins.
+    let conflict = ConflictFile {
+        path: path.into(),
+        ancestor: None,
+        ours: String::new(),
+        theirs: String::new(),
+        ours_hlc: None,
+        theirs_hlc: None,
+        ours_blob_oid: Some(oid_low.into()),
+        theirs_blob_oid: Some(oid_high.into()),
+    };
+    let resolved = mgr.resolve_binary_ref_conflicts(&[conflict]).unwrap();
     assert_eq!(
-        resolved, theirs_bytes,
-        "theirs should win when both HLCs missing"
+        resolved[0].1, oid_high,
+        "higher blob OID wins when both HLCs are missing"
+    );
+
+    // Role-swap convergence: swap the OIDs → same winning OID.
+    let swapped = ConflictFile {
+        path: path.into(),
+        ancestor: None,
+        ours: String::new(),
+        theirs: String::new(),
+        ours_hlc: None,
+        theirs_hlc: None,
+        ours_blob_oid: Some(oid_high.into()),
+        theirs_blob_oid: Some(oid_low.into()),
+    };
+    let resolved_swapped = mgr.resolve_binary_ref_conflicts(&[swapped]).unwrap();
+    assert_eq!(
+        resolved_swapped[0].1, oid_high,
+        "role swap converges on the same winning OID"
     );
 }
 
@@ -725,30 +757,29 @@ fn binary_lww_preserves_exact_bytes() {
 
     let bin_path = "reference/test/corrupt-if-lossy.bin";
 
-    // A commits the non-UTF8 content with a HIGHER HLC (theirs wins)
-    let hlc_a = crate::hlc::Hlc {
-        wall_ms: 9000,
-        counter: 0,
-        node: "aaaaaaaa".into(),
-    };
-    let msg_a = crate::hlc::append_hlc_trailer("A adds non-utf8 binary", &hlc_a);
+    // Seed A's machine-local HLC clock far into the future BEFORE A commits, so
+    // the write chokepoint auto-stamps a far-future HLC trailer and A's side wins
+    // the LWW tie-break — without hand-injecting the trailer into the commit
+    // message (the auto-stamp would now double that and shadow the injected value).
+    // Format: `{wall_ms}-{counter:04}-{node}` (matches Hlc::Display / Hlc::parse).
+    std::fs::write(
+        repo_a.path.join(".git/ddb-hlc"),
+        "9999999999999-0000-seednode0",
+    )
+    .unwrap();
+
+    // A commits the non-UTF8 content (the far-future-seeded, winning side).
     repo_a
-        .commit_binary_file(bin_path, &non_utf8, &msg_a)
+        .commit_binary_file(bin_path, &non_utf8, "A adds non-utf8 binary")
         .unwrap();
     repo_a.push("origin", "master").unwrap();
 
-    // B commits different content with lower HLC
-    let hlc_b = crate::hlc::Hlc {
-        wall_ms: 1000,
-        counter: 0,
-        node: "bbbbbbbb".into(),
-    };
-    let msg_b = crate::hlc::append_hlc_trailer("B adds placeholder", &hlc_b);
+    // B commits different content at ordinary wall-clock time (the losing side).
     repo_b
-        .commit_binary_file(bin_path, b"placeholder", &msg_b)
+        .commit_binary_file(bin_path, b"placeholder", "B adds placeholder")
         .unwrap();
 
-    // B syncs — theirs (A) wins, content must be byte-exact
+    // B syncs — A (far-future HLC) wins, content must be byte-exact
     let db_b = dir_b.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
     let index_b = crate::indexer::Index::open(&db_b).unwrap();
