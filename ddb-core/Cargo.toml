@@ -43,6 +43,7 @@ nosql = ["redb", "serde_json"]
 vendored = ["git2/vendored-libgit2", "git2/vendored-openssl"]
 
 [dev-dependencies]
+chrono = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
 tempfile = "3"
