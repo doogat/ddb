@@ -29,12 +29,12 @@ No mint path uses `exists = |_| false` or allocates future-dated timestamps; all
 
 **Current gap**: `parser::generate_unique_id`, `service/create.rs` raw path, `service/discovery.rs`, `sql_engine::unique_ids`. Correctness closed by **00164** (unify-id-minting); the format/throughput decision is **00170** (id-throughput-ceiling-decision).
 
-### I4 — Conflict resolution is a pure function of its inputs · GAP (00165, 00166)
+### I4 — Conflict resolution is a pure function of its inputs · HOLDS (00165, 00166)
 Set stable Automerge actor IDs (derived from ours/theirs blob OIDs or node UUIDs). If a decision claims HLC ordering, the commits that feed it must carry an HLC trailer.
 
-**Why**: Automerge breaks scalar/text ties by actor ID. With random actor IDs, two nodes resolving the same conflict independently pick different winners and never converge in one round. And the HLC is currently vestigial — normal write commits carry no trailer, `recv_hlc` has zero callers, and the missing-HLC tie-break defaults disagree by path ("theirs wins" for add/add, "ours wins" for LWW).
+**Why**: Automerge breaks scalar/text ties by actor ID. With random actor IDs, two nodes resolving the same conflict independently pick different winners and never converge in one round. And an HLC that no write commit carries cannot order anything — the LWW decisions it governs fall through to role-dependent defaults that disagree by path ("theirs wins" for add/add, "ours wins" for text LWW), so two devices diverge.
 
-**Current gap**: `ddb-core/src/crdt_resolver.rs` sets no actor IDs; `git_ops` write commits append no HLC trailer. Closed by **00165** (deterministic-crdt-resolution) and **00166** (make-hlc-load-bearing).
+**Current state**: closed by **00165** (deterministic-crdt-resolution) — `crdt_resolver.rs` sets a content-derived actor ID at every doc-build site — and **00166** (make-hlc-load-bearing): every `git_ops` write commit now stamps an `HLC:` trailer from a machine-local clock (the private `create_commit` chokepoint + untracked `.git/ddb-hlc`), merges and fast-forwards absorb the peer's HLC via `HlcClock::recv`, and one content-deterministic `lww_pick` fallback reconciles the two previously-disagreeing missing-HLC defaults. See `sync.md` § "Hybrid Logical Clocks" and `crdt-resolver.md` § "Preset: Last-Writer-Wins".
 
 ### I5 — One bad file never fails the batch · GAP (00169)
 Read/list/index paths degrade per-item into structured warnings; only an explicit `--strict` mode hard-fails.

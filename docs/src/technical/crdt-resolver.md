@@ -124,7 +124,7 @@ List-typed frontmatter fields (e.g. `tags`) do **not** get their determinism fro
 
 ### Determinism vs. HLC winner-ordering
 
-Determinism (this change, PRD 00165) is **distinct** from HLC winner-ordering (PRD 00166, a separate change). This PRD guarantees the same tie-break winner every time; it does not decide which side should win.
+Determinism (PRD 00165) is **distinct** from HLC winner-ordering (PRD 00166). PRD 00165 guarantees the same CRDT tie-break winner every time but does not decide which side should win; PRD 00166 makes the HLC load-bearing so LWW picks the higher-HLC side (with a content-deterministic fallback when an HLC is missing or the two tie). See [Preset: Last-Writer-Wins](#preset-last-writer-wins).
 
 ### Automerge time assumption
 
@@ -134,11 +134,11 @@ Byte-identical CRDT state relies on automerge stamping changes with advisory `ti
 
 `resolve_lww(conflicts) -> Result<Vec<ResolvedFile>>`
 
-Whole-file resolution based on HLC comparison:
+Whole-file resolution based on HLC comparison. As of PRD 00166 every LWW decision site — `pick_lww_winner` here, plus `resolve_add_add_collision` and `resolve_binary_ref_conflicts` in `sync_manager` — routes through one shared `lww_pick(ours_hlc, theirs_hlc, ours_key, theirs_key) -> LwwSide` helper, so the rule lives in exactly one place:
 
-1. Compare `ours_hlc` vs `theirs_hlc`
-2. Higher HLC wins (wall_ms → counter → node string)
-3. If no HLC available, falls back to ours
+1. Compare `ours_hlc` vs `theirs_hlc` (numeric `Hlc` order: wall_ms → counter → node string)
+2. Higher HLC wins
+3. If an HLC is missing on either side, or the two are equal, the side with the higher **content key** wins — the resolved text content for text conflicts, the blob OID for binary references. This is role-independent and converges under an ours/theirs swap (the same determinism guarantee as PRD 00165), replacing the previous "falls back to ours" default.
 
 Used as strategy `preset:last-writer-wins` in typedef `crdt_strategy`, and as the final fallback in the three-step merge cascade.
 
@@ -186,7 +186,7 @@ After merging all zones, the result is serialized via `parser::serialize()` and 
 - Reference: union additions, removals, same-key conflicts, concurrent additions both present
 - Full pipeline: three-zone conflict resolution with re-parse validation
 - Full pipeline: no ancestor (new file on both sides)
-- LWW: later HLC wins, deterministic tiebreak, no-HLC fallback
+- LWW: later HLC wins, deterministic tiebreak, missing/tie content-key fallback (`lww_pick`)
 - Append-log: concurrent entries survive, dedup, non-log sections use text CRDT, empty log
 - Strategy: non-default crdt_strategy still resolves (with warning)
 - Error: unparseable content correctly returns error (LWW fallback path)

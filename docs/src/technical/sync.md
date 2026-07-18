@@ -95,7 +95,7 @@ Before PRD 00200, the merge tree was built by replaying a two-way ours→theirs 
 
 ### Binary Asset LWW Resolution
 
-Binary files under `reference/` (attachments, images, etc.) are resolved via LWW using HLC timestamps from the conflicting commits. The branch with the higher HLC wins. On tie or missing HLC, "theirs" (remote) wins.
+Binary files under `reference/` (attachments, images, etc.) are resolved via LWW using HLC timestamps from the conflicting commits. The branch with the higher HLC wins. On tie or missing HLC, the side with the higher blob OID wins — a role-independent, content-deterministic fallback that converges regardless of which device calls a side "ours" or "theirs" (PRD 00166). Every LWW site shares one `lww_pick` helper (see [crdt-resolver.md](crdt-resolver.md#preset-last-writer-wins)).
 
 Resolution uses raw blob bytes via `ConflictFile.ours_blob_oid` / `theirs_blob_oid` to avoid corruption from UTF-8 lossy conversion. As of PRD 00200 the winning blob is overlaid by its OID onto the conflicting path in the in-memory merge tree (no pre-commit worktree write) and materialized to disk by the post-commit `checkout_head`, alongside text conflict resolutions; an aborted merge therefore strands no stale winner bytes. The losing version remains accessible in Git history as a parent of the merge commit.
 
@@ -103,7 +103,7 @@ Resolution uses raw blob bytes via `ConflictFile.ours_blob_oid` / `theirs_blob_o
 
 When two devices independently create a doogat with the same ID (same-second creation), Git sees a content conflict at that path with no common ancestor. Previously, the CRDT/LWW cascade would pick one version and silently lose the other. Now both doogats survive.
 
-**Winner selection**: Compare HLC timestamps from the conflicting commits. Later HLC wins. On tie or missing HLC, "theirs" (remote) wins. Rationale: the remote doogat may already be linked from other synced devices; reassigning the local doogat minimizes cross-device link breakage.
+**Winner selection**: Compare HLC timestamps from the conflicting commits. Later HLC wins. On tie or missing HLC, the side with the higher content key wins — the same role-independent `lww_pick` fallback used by every LWW site (PRD 00166), so both devices pick the same winner regardless of merge direction. (Before PRD 00166 this defaulted to "theirs wins", which disagreed with the text-LWW "ours wins" default; the unified content-key rule reconciles them.)
 
 **Merge commit**: The winner's content goes into the resolved vec alongside other conflict resolutions, keeping the original path.
 
@@ -165,9 +165,14 @@ pub struct Hlc {
 
 ### Integration
 
-- **Commit trailers**: merge commits include `\n\nHLC: {hlc}` trailer, parsed via `extract_hlc()`
-- **SyncManager**: `tick_hlc()` on local merge, `recv_hlc()` on remote merge, persisted in `NodeConfig.hlc`
+As of PRD 00166 the HLC is **load-bearing** for LWW ordering: every write commit carries a trailer, remote clocks are absorbed on merge, and one content-deterministic fallback covers the missing/tie case.
+
+- **The write clock (`HlcClock`, `.git/ddb-hlc`)**: a machine-local, monotonic HLC counter that stamps a trailer on **every** write commit — create, update, delete, rename, and batch, not just merge commits. `GitRepo` loads it in `open`/`init` and ticks it at one private `create_commit` chokepoint that all write paths route through, so no commit path can ship a trailer-less commit. Its state is the last-issued HLC, persisted atomically (temp + rename) in the untracked `.git/ddb-hlc` file — the same "local, per-device, not git-tracked" pattern as `.git/ddb-node`. The per-commit cost is one small filesystem write under the already-held repo write lock, not an extra git object. This clock is the **only** source of commit-trailer HLCs.
+- **Commit trailers**: `\n\nHLC: {hlc}` in `Hlc::Display` form (`{wall_ms}-{counter:04}-{node}`), parsed via `extract_hlc()`. Because ordinary content commits now carry a trailer, `find_hlc_for_path()` returns `Some(hlc)` at the first commit touching a path. It still caps the ancestry walk at `MAX_REVWALK_DEPTH` (100) commits, logging a `warn` and returning `None` if a path's nearest touch lies beyond that — a miss is then observable rather than a silent degrade.
+- **Absorbing a remote clock**: all three HEAD-advancing sync outcomes advance the local clock past a peer's, under the write lock — the two merge-commit sites (`commit_merge`, `perform_normal_merge`) and the fast-forward branch (which produces no commit) each `extract_hlc()` theirs' commit and call `HlcClock::recv`. A device whose wall clock ran ahead therefore stops winning indefinitely once a peer absorbs its clock. The live merge `recv` is `HlcClock::recv` on the shared write clock, not the older, still-uncalled `SyncManager::recv_hlc`.
+- **`SyncManager::tick_hlc` / `NodeConfig.hlc`**: a **separate**, in-memory per-process marker, deliberately NOT the write clock. It still stamps the singleton sweep's `singleton_conflict_resolved_at` frontmatter marker; the sweep's own commit is auto-stamped by the shared write clock. The two clocks may drift harmlessly — they never feed the same decision.
 - **ConflictFile**: HLC fields populated from commit trailers for LWW resolution. `extract_conflicts()` calls `find_hlc_for_path()` to walk commit ancestry and extract HLC from the most recent commit touching each conflicting path. `validate_clean_merge_or_fallback()` does the same for post-merge validation conflicts.
+- **Corruption recovery**: `.git/ddb-hlc` is a derived cache; the committed trailer on `HEAD` is the durable source of truth. On load the clock seeds from `max(.git/ddb-hlc, extract_hlc(HEAD))` and repairs the file, so a wiped or torn cache can never regress the clock below the last stamped commit. An in-memory floor blocks regression within a process even if the file becomes unreadable. The node discriminator (last in `Hlc::Ord`) may be an ephemeral id before `register_node` writes `.git/ddb-node`; this only affects the node tie-break field, never `wall_ms`/`counter` ordering.
 
 ## Compaction
 
@@ -262,7 +267,7 @@ Each conflicting file is split into three zones and resolved independently:
 
 ### Step 3: LWW fallback
 
-Triggered when Step 2 produces invalid output or errors (e.g., corrupted CRDT state). Compares HLC timestamps on the conflicting commits; the later writer's **entire file** replaces the earlier one. If no HLC is present, defaults to "ours" (local version).
+Triggered when Step 2 produces invalid output or errors (e.g., corrupted CRDT state). Compares HLC timestamps on the conflicting commits; the later writer's **entire file** replaces the earlier one. If an HLC is missing on either side or the two tie, the side with the higher content key wins — a role-independent fallback that converges under an ours/theirs swap (PRD 00166), replacing the earlier "ours wins" default.
 
 ### After compaction
 
@@ -287,7 +292,7 @@ If the reconstructed merge produces invalid markdown (rare edge case), the casca
 | One side deletes, other edits | Edit wins; `resurrected: true` added to frontmatter |
 | Both devices create same ID | Both doogats survive; loser gets new ID, links rewritten |
 | Stale node returns after compaction | Step 2 runs from Git content; usually succeeds |
-| CRDT error + no HLC | Falls back to local version (ours-wins) |
+| CRDT error + no/tied HLC | Falls back to the higher-content-key side (role-independent, converges on both devices) |
 
 **E2E tests proving these paths:**
 - `stale_node_resync_after_compaction` — LWW fallback after CRDT state removed
