@@ -16,7 +16,7 @@ All commit/delete/rename paths must run inside one repo-scoped, cross-process ad
 **Rule for new code**: any new write path goes through `with_write_lock`. If you find yourself calling `repo.index()` in a write, stop — use `fresh_index()`.
 
 ### I2 — Merges preserve the other side's deletions · HOLDS (00200)
-Merge tree-construction stages `Delta::Deleted`, not only `Added|Modified`.
+Merge tree-construction is a true three-way merge (libgit2 `merge_commits`), so a path only the other side deleted is simply absent from the result — never resurrected. (Staging `Delta::Deleted` onto a two-way diff was the naive fix 00200 rejected: it deletes doogats ours created since the merge base.)
 
 **Why**: skipping deleted deltas silently resurrects a doogat the other device deleted, and turns a rename (delete+add) into a duplicate. The resurrect-with-marker policy in `sync_manager` only sees git-reported conflicts, so it cannot catch this.
 

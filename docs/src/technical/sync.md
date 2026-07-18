@@ -53,7 +53,7 @@ Reads the UUID from `.git/ddb-node`, then loads the corresponding `.nodes/{uuid}
 6. **Commit-graph**: write once (deferred from per-commit writes during sync)
 7. **Reindex**: `index.rebuild_if_stale(repo)` — incremental reindex via `diff_paths` processes only changed files
 
-> **Write-lock coverage**: the merge step's write section (the merge or fast-forward commit, the ref move, and the forced checkout) holds the repo-scoped cross-process write lock, and the conflicted-merge path additionally stages its tree from a freshly-read index, so a `ddb sync` racing a concurrent locked CRUD write can neither revert that write's working-tree file nor orphan its commit. See `git-ops.md` § "Write serialization (cross-process lock)". Bundle import's `git merge` subprocess is the one merge path still outside the lock (tracked by 00168).
+> **Write-lock coverage**: the merge step's write section (the merge or fast-forward commit, the ref move, and the forced checkout) holds the repo-scoped cross-process write lock, and the conflicted-merge path additionally rebuilds its tree from a fresh in-memory `merge_commits` three-way merge re-run under the lock (as of PRD 00200), so a `ddb sync` racing a concurrent locked CRUD write can neither revert that write's working-tree file nor orphan its commit. See `git-ops.md` § "Write serialization (cross-process lock)". Bundle import's `git merge` subprocess is the one merge path still outside the lock (tracked by 00168).
 
 ### Four-Bucket Conflict Partition
 
@@ -97,7 +97,7 @@ Before PRD 00200, the merge tree was built by replaying a two-way ours→theirs 
 
 Binary files under `reference/` (attachments, images, etc.) are resolved via LWW using HLC timestamps from the conflicting commits. The branch with the higher HLC wins. On tie or missing HLC, "theirs" (remote) wins.
 
-Resolution uses raw blob bytes via `ConflictFile.ours_blob_oid` / `theirs_blob_oid` to avoid corruption from UTF-8 lossy conversion. The winning blob is written directly to disk and staged alongside text conflict resolutions in the merge commit. The losing version remains accessible in Git history as a parent of the merge commit.
+Resolution uses raw blob bytes via `ConflictFile.ours_blob_oid` / `theirs_blob_oid` to avoid corruption from UTF-8 lossy conversion. As of PRD 00200 the winning blob is overlaid by its OID onto the conflicting path in the in-memory merge tree (no pre-commit worktree write) and materialized to disk by the post-commit `checkout_head`, alongside text conflict resolutions; an aborted merge therefore strands no stale winner bytes. The losing version remains accessible in Git history as a parent of the merge commit.
 
 ### Add-Add Collision Detection
 
