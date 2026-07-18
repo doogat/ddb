@@ -2999,7 +2999,7 @@ echo "$READ_OUT" | grep -q "laptop note"
 echo "$READ_OUT" | grep -q "desktop note"
 pass "reference section conflict (CRDT union)"
 
-# 26b. deterministic CRDT convergence — both nodes reach the SAME title (PRD 00165)
+# 26b. deterministic CRDT convergence smoke — both nodes reach the SAME title after a real conflict resolution (independent-resolution determinism is unit-tested in crdt_determinism.rs) (PRD 00165)
 cd "$NODE1_DIR"
 $DDB sync origin master >/dev/null
 $DDB update "$SYNC_ID" --title "Converge Laptop"
@@ -3011,7 +3011,8 @@ cd "$NODE1_DIR"
 $DDB sync origin master >/dev/null
 
 cd "$NODE2_DIR"
-$DDB sync origin master >/dev/null
+RESOLVE_OUT=$($DDB sync origin master)
+echo "$RESOLVE_OUT" | grep -qE "conflicts resolved: [1-9]"
 
 cd "$NODE1_DIR"
 $DDB sync origin master >/dev/null
@@ -3022,7 +3023,7 @@ cd "$NODE2_DIR"
 T2=$($DDB read "$SYNC_ID" | grep "^title:")
 [ -n "$T1" ] && [ "$T1" = "$T2" ]
 echo "$T1" | grep -qE "(Converge Laptop|Converge Desktop)"
-pass "deterministic CRDT convergence (both nodes same title, PRD 00165)"
+pass "deterministic CRDT convergence smoke (both nodes same title after real conflict resolution, PRD 00165)"
 
 # 27b. delete-vs-edit conflict — edit wins, doogat resurrected
 cd "$NODE1_DIR"

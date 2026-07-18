@@ -189,3 +189,24 @@ fn empty_ancestor_swap_converges() {
         title_a, title_b
     );
 }
+
+// Test 7: concurrent SAME-POSITION body inserts converge identically.
+// PRD 00165 metric #3: two inserts competing at the SAME offset must
+// interleave deterministically (actor-ordered), symmetric under role swap.
+// Distinct from Test 4, which edits different lines and never forces a
+// same-position tie-break.
+#[test]
+fn swapped_roles_converge_on_same_position_body_insert() {
+    let ancestor = "shared line\n";
+    let x = "X-side shared line\n"; // inserts "X-side " at offset 0
+    let y = "Y-side shared line\n"; // inserts "Y-side " at the SAME offset 0
+
+    let a = merge_body(ancestor, x, y).expect("body merge A should succeed");
+    let b = merge_body(ancestor, y, x).expect("body merge B should succeed");
+
+    assert_eq!(
+        a, b,
+        "swapped-role SAME-POSITION body inserts must interleave identically:\nA={}\nB={}",
+        a, b
+    );
+}

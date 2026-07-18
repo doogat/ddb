@@ -2923,7 +2923,7 @@ if ($output -notmatch "laptop note") { throw "laptop note missing" }
 if ($output -notmatch "desktop note") { throw "desktop note missing" }
 pass "reference section conflict (CRDT union)"
 
-# 26b. deterministic CRDT convergence — both nodes reach the SAME title (PRD 00165)
+# 26b. deterministic CRDT convergence smoke — both nodes reach the SAME title after a real conflict resolution (independent-resolution determinism is unit-tested in crdt_determinism.rs) (PRD 00165)
 Pop-Location  # NODE1_DIR
 ddb sync origin master | Out-Null
 ddb update $SYNC_ID --title "Converge Laptop"
@@ -2935,7 +2935,8 @@ Pop-Location  # NODE1_DIR
 ddb sync origin master | Out-Null
 
 Push-Location $NODE2_DIR
-ddb sync origin master | Out-Null
+$RESOLVE_OUT = ddb sync origin master
+if ($RESOLVE_OUT -notmatch "conflicts resolved: [1-9]") { throw "expected a resolved conflict in NODE2's merge sync: $RESOLVE_OUT" }
 
 Pop-Location  # NODE1_DIR
 ddb sync origin master | Out-Null
@@ -2947,7 +2948,7 @@ if (-not $T1) { throw "title missing on node1" }
 if (-not $T2) { throw "title missing on node2" }
 if ($T1.ToString() -ne $T2.ToString()) { throw "titles differ: node1=$T1 node2=$T2" }
 if ($T1.ToString() -notmatch "(Converge Laptop|Converge Desktop)") { throw "unexpected title: $T1" }
-pass "deterministic CRDT convergence (both nodes same title, PRD 00165)"
+pass "deterministic CRDT convergence smoke (both nodes same title after real conflict resolution, PRD 00165)"
 
 # 27b. delete-vs-edit conflict
 Pop-Location  # NODE1_DIR
