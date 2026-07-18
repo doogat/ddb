@@ -4,6 +4,105 @@
 // production `HlcClock` implementation is added ABOVE this test module by the
 // implementer (a `pub(crate) struct HlcClock` with `load` / `tick` / `recv`).
 
+use std::path::PathBuf;
+
+use crate::hlc::Hlc;
+
+/// Larger of two optional HLCs (`None` if both are `None`).
+fn max_opt(a: Option<Hlc>, b: Option<Hlc>) -> Option<Hlc> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.max(y)),
+        (Some(x), None) | (None, Some(x)) => Some(x),
+        (None, None) => None,
+    }
+}
+
+/// Machine-local, monotonic Hybrid Logical Clock cached in `<git_dir>/ddb-hlc`.
+///
+/// The durable source of truth for causality is git (HLC commit trailers); the
+/// `ddb-hlc` file is a best-effort cache that keeps short-lived processes and
+/// two clocks over the same repo monotonic without walking history each tick.
+pub(crate) struct HlcClock {
+    state_path: PathBuf,
+    node_id: String,
+    floor: std::cell::RefCell<Option<Hlc>>,
+}
+
+impl HlcClock {
+    /// Load the clock, seeding from the on-disk cache and/or the HEAD trailer.
+    ///
+    /// Never panics. The node id comes from `<git_dir>/ddb-node` when present,
+    /// else a fresh ephemeral uuid (the file is neither created nor written).
+    /// The recovery seed is the larger of the parsed `ddb-hlc` line and HEAD's
+    /// HLC trailer; when present it is written back to repair the cache.
+    pub(crate) fn load(repo: &git2::Repository) -> Self {
+        let git_dir = repo.path();
+        let state_path = git_dir.join("ddb-hlc");
+
+        let node_id = std::fs::read_to_string(git_dir.join("ddb-node"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let from_file = std::fs::read_to_string(&state_path)
+            .ok()
+            .and_then(|s| Hlc::parse(s.trim()).ok());
+        let from_head = match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
+            Some(commit) => crate::hlc::extract_hlc(commit.message().unwrap_or("")),
+            None => None,
+        };
+        let seed = max_opt(from_file, from_head);
+
+        let clock = Self {
+            state_path,
+            node_id,
+            floor: std::cell::RefCell::new(seed.clone()),
+        };
+        if let Some(h) = &seed {
+            clock.persist(h);
+        }
+        clock
+    }
+
+    /// Tick for a local event: advance past the on-disk and in-memory floor.
+    pub(crate) fn tick(&self) -> Hlc {
+        let base = max_opt(self.read_persisted(), self.floor.borrow().clone());
+        let h = Hlc::now(&self.node_id, &base);
+        *self.floor.borrow_mut() = Some(h.clone());
+        self.persist(&h);
+        h
+    }
+
+    /// Merge a remote clock in, folding it against the accumulated local floor.
+    pub(crate) fn recv(&self, remote: &Hlc) -> Hlc {
+        let base = max_opt(self.read_persisted(), self.floor.borrow().clone());
+        let h = Hlc::recv(&self.node_id, &base, remote);
+        *self.floor.borrow_mut() = Some(h.clone());
+        self.persist(&h);
+        h
+    }
+
+    /// Read and parse the persisted `ddb-hlc` line; `None` if missing/corrupt.
+    fn read_persisted(&self) -> Option<Hlc> {
+        std::fs::read_to_string(&self.state_path)
+            .ok()
+            .and_then(|s| Hlc::parse(s.trim()).ok())
+    }
+
+    /// Best-effort atomic persist (temp file + rename); warns, never fails.
+    fn persist(&self, h: &Hlc) {
+        let tmp = self.state_path.with_extension("tmp");
+        if let Err(e) = std::fs::write(&tmp, h.to_string()) {
+            tracing::warn!("failed to write ddb-hlc temp file: {e}");
+            return;
+        }
+        if let Err(e) = std::fs::rename(&tmp, &self.state_path) {
+            tracing::warn!("failed to persist ddb-hlc: {e}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::hlc::Hlc;
@@ -44,7 +143,11 @@ mod tests {
 
         let mut last: Option<Hlc> = None;
         for i in 0..50 {
-            let next = if i % 2 == 0 { clock_a.tick() } else { clock_b.tick() };
+            let next = if i % 2 == 0 {
+                clock_a.tick()
+            } else {
+                clock_b.tick()
+            };
             if let Some(prev) = &last {
                 assert!(
                     next > *prev,
@@ -323,7 +426,10 @@ mod tests {
     fn load_on_headless_repo_ticks_from_wall_clock_without_panic() {
         let dir = TempDir::new().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
-        assert!(repo.head().is_err(), "expected a headless repo for this case");
+        assert!(
+            repo.head().is_err(),
+            "expected a headless repo for this case"
+        );
 
         let clock = super::HlcClock::load(&repo);
         let hlc = clock.tick();
