@@ -185,7 +185,7 @@ CREATE TABLE memberships (cat TEXT, sort_order INTEGER DEFAULT NEXT(cat))
 
 `INSERT INTO t (cols) VALUES (...), (...), (...)` creates N doogats in a single git commit.
 
-- **ID generation**: `unique_ids(count)` generates a base timestamp via `generate_unique_id`, then increments by 1 second per subsequent row — no sleeping between rows
+- **ID generation**: `unique_ids(count)` builds a repo-aware existence oracle once (HEAD tree + `doogats` index), mints the base timestamp via `generate_unique_id`, then advances +1 second per subsequent row, skipping any second the oracle reports already taken. Because single creates (`create` / `create_doogat_raw` / `install_bundled_type`) consult the same oracle, a later same-second single create sees this reserved block and waits on the wall clock until it passes rather than minting into it — so batch and single mint paths never collide (PRD 00164). IDs stay 14-digit `YYYYMMDDHHmmss`.
 - **Single commit**: all N files staged and committed together via `commit_files`
 - **Return value**: comma-separated list of DoogatIds (e.g. `20260310120000,20260310120001,20260310120002`)
 - **Transaction-aware**: within a `BEGIN`/`COMMIT` block, writes are buffered as usual

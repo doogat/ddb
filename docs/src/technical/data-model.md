@@ -35,6 +35,8 @@ pub struct DoogatId(pub String);
 
 A 14-digit timestamp string (`YYYYMMDDHHmmss`), e.g. `"20260226120000"`. Custom `Deserialize` implementation accepts both YAML integer and string representations for backward compatibility.
 
+New IDs are minted through one repo-aware path. `DoogatService::unique_id` (`create` / `batch` / `create_doogat_raw` / `install_bundled_type`) and `SqlEngine::unique_ids` (multi-row `INSERT` / typedef DDL) both consult a shared existence oracle built from the current HEAD tree *and* the `doogats` index, so every path agrees on which second is already taken. `generate_unique_id` only mints the current wall second and waits until the oracle reports it free — it never fabricates a future second — so two same-second mints via different paths advance to distinct seconds instead of colliding. The format is unchanged; the sub-second throughput ceiling (one id per second per process) is tracked as PRD 00170. Shape validation uses one definition, `DoogatId::is_valid_shape` (exactly 14 digits). (PRD 00164)
+
 ## Doogat Structures
 
 ### DoogatMeta
