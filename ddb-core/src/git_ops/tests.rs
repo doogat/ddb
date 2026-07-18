@@ -481,27 +481,33 @@ fn diff_paths_unreachable_oid_returns_error() {
 
 #[test]
 fn merge_conflicts_populate_hlc() {
-    let (_da, repo_a, _db, repo_b, _bare) = setup_two_repos();
+    let (dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_repos();
 
-    let hlc_a = crate::hlc::Hlc {
-        wall_ms: 5000,
+    // Control each repo's clock by PRE-SEEDING its machine-local `.git/ddb-hlc`
+    // with a far-future value before the write; the write API's auto-stamp then
+    // carries that `wall_ms` through (a below-wall-now seed would be superseded
+    // by wall-now). Commit with a PLAIN message — the API stamps its own trailer,
+    // so a manual `append_hlc_trailer` would be shadowed by it. theirs (repo_a)
+    // is seeded strictly LOWER than ours (repo_b) so the ordering is observable.
+    let theirs_seed = crate::hlc::Hlc {
+        wall_ms: u64::MAX / 2,
         counter: 0,
-        node: "aaa".into(),
+        node: "theirsss".into(),
     };
-    let msg_a = crate::hlc::append_hlc_trailer("A edits", &hlc_a);
+    std::fs::write(dir_a.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
     repo_a
-        .commit_file("ddb/note.md", "version A", &msg_a)
+        .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
     repo_a.push("origin", "master").unwrap();
 
-    let hlc_b = crate::hlc::Hlc {
-        wall_ms: 6000,
+    let ours_seed = crate::hlc::Hlc {
+        wall_ms: u64::MAX / 2 + 1_000_000,
         counter: 0,
-        node: "bbb".into(),
+        node: "oursssss".into(),
     };
-    let msg_b = crate::hlc::append_hlc_trailer("B edits", &hlc_b);
+    std::fs::write(dir_b.path().join(".git/ddb-hlc"), ours_seed.to_string()).unwrap();
     repo_b
-        .commit_file("ddb/note.md", "version B", &msg_b)
+        .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
     repo_b.fetch("origin", "master").unwrap();
 
@@ -509,8 +515,18 @@ fn merge_conflicts_populate_hlc() {
     match result {
         MergeResult::Conflicts(conflicts, _) => {
             assert_eq!(conflicts.len(), 1);
-            assert_eq!(conflicts[0].ours_hlc.as_ref().unwrap().wall_ms, 6000);
-            assert_eq!(conflicts[0].theirs_hlc.as_ref().unwrap().wall_ms, 5000);
+            let ours_hlc = conflicts[0].ours_hlc.as_ref().unwrap();
+            let theirs_hlc = conflicts[0].theirs_hlc.as_ref().unwrap();
+            // Each side's conflict HLC reflects its OWN far-future seed ...
+            assert_eq!(ours_hlc.wall_ms, ours_seed.wall_ms);
+            assert_eq!(theirs_hlc.wall_ms, theirs_seed.wall_ms);
+            // ... and ours (seeded higher) orders after theirs.
+            assert!(
+                ours_hlc.wall_ms > theirs_hlc.wall_ms,
+                "ours' seeded HLC must order after theirs': {} !> {}",
+                ours_hlc.wall_ms,
+                theirs_hlc.wall_ms
+            );
         }
         other => panic!("expected Conflicts, got {:?}", other),
     }
@@ -1685,4 +1701,282 @@ fn conflicted_merge_abort_leaves_worktree_clean() {
     // winner ("theirs-bin"). A pre-write would have stranded the winner here.
     assert_eq!(std::fs::read(&bin_path).unwrap(), b"ours-bin");
     assert_eq!(repo_b.head_oid().unwrap().0, head_before.0);
+}
+
+/// A clean (non-fast-forward) merge commit must carry a parseable HLC trailer
+/// AND absorb the peer's clock: a peer skewed FAR into the future forces the
+/// merge commit's own HLC `wall_ms >= that far-future seed`. Ours (repo_b) keeps
+/// a normal wall-clock clock, so the ONLY way to reach the far-future band is by
+/// absorbing theirs. A merge that stamps but does not absorb fails the `>=`
+/// bound; a merge that absorbs but does not stamp fails `is_some` via `expect`.
+#[test]
+fn clean_merge_commit_carries_hlc_trailer_and_absorbs_theirs() {
+    let (dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Peer (theirs, repo_a) is skewed far into the future; seed its `.git/ddb-hlc`
+    // then commit a theirs-only file with a plain message so the auto-stamp
+    // carries the far-future wall_ms.
+    let far_future = u64::MAX / 2;
+    let theirs_seed = crate::hlc::Hlc {
+        wall_ms: far_future,
+        counter: 0,
+        node: "theirsss".into(),
+    };
+    std::fs::write(dir_a.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
+    repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours diverges on a DIFFERENT file, so the merge is clean (non-FF).
+    repo_b.commit_file("ddb/b.md", "from b", "add b").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let merge_oid = match result {
+        MergeResult::Clean(oid) => oid,
+        other => panic!("expected a clean merge commit, got {other:?}"),
+    };
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(
+        merge_commit.id().to_string(),
+        merge_oid.0,
+        "HEAD must be the returned clean-merge commit"
+    );
+    let hlc = crate::hlc::extract_hlc(merge_commit.message().unwrap())
+        .expect("clean merge commit must carry an HLC trailer");
+    assert_eq!(
+        hlc.wall_ms, far_future,
+        "merge/next-write must absorb theirs' EXACT far-future wall_ms, not merely reach it: {} != {}",
+        hlc.wall_ms, far_future
+    );
+}
+
+/// A fast-forward merge produces NO merge commit, but must STILL absorb the
+/// peer's clock: after fast-forwarding a peer skewed far into the future, ours'
+/// NEXT ordinary write carries an HLC whose `wall_ms >= that far-future seed`.
+/// Ours (repo_b) keeps a normal clock, so a FF that fails to absorb ticks the
+/// next write from ~wall-now (far below the seed) and fails the `>=` bound.
+#[test]
+fn fast_forward_absorbs_theirs_hlc_into_next_write() {
+    let (dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Peer (repo_a) skewed far into the future; ours (repo_b) stays at wall-clock.
+    let far_future = u64::MAX / 2;
+    let theirs_seed = crate::hlc::Hlc {
+        wall_ms: far_future,
+        counter: 0,
+        node: "theirsss".into(),
+    };
+    std::fs::write(dir_a.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
+    repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours has no diverging commit, so the merge fast-forwards (no merge commit).
+    repo_b.fetch("origin", "master").unwrap();
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(
+        matches!(result, MergeResult::FastForward(_)),
+        "expected a fast-forward merge, got {result:?}"
+    );
+
+    // The FF created no merge commit, but must have absorbed theirs' clock: the
+    // NEXT ordinary write advances past the far-future seed.
+    repo_b
+        .commit_file("ddb/c.md", "from b", "next write")
+        .unwrap();
+    let next = repo_b.head_commit().unwrap();
+    let hlc = crate::hlc::extract_hlc(next.message().unwrap())
+        .expect("ordinary write after fast-forward must carry an HLC trailer");
+    assert_eq!(
+        hlc.wall_ms, far_future,
+        "merge/next-write must absorb theirs' EXACT far-future wall_ms, not merely reach it: {} != {}",
+        hlc.wall_ms, far_future
+    );
+}
+
+/// A conflict-resolution merge commit (produced by `commit_merge` after a
+/// conflicted `merge_remote`) must carry a parseable HLC trailer AND absorb the
+/// peer's clock: a peer skewed far into the future forces the resolution
+/// commit's own HLC `wall_ms >= that far-future seed`. Ours (repo_b) keeps a
+/// normal clock, so a resolution that stamps but does not absorb fails the `>=`
+/// bound; one that absorbs but does not stamp fails `is_some` via `expect`.
+#[test]
+fn resolved_merge_commit_carries_hlc_trailer_and_absorbs_theirs() {
+    let (dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Peer (theirs, repo_a) skewed far into the future; ours (repo_b) at wall-clock.
+    let far_future = u64::MAX / 2;
+    let theirs_seed = crate::hlc::Hlc {
+        wall_ms: far_future,
+        counter: 0,
+        node: "theirsss".into(),
+    };
+    std::fs::write(dir_a.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours conflicts on the SAME file with a normal clock.
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(
+        merge_commit.id().to_string(),
+        merge_oid.0,
+        "HEAD must be the returned resolution merge commit"
+    );
+    let hlc = crate::hlc::extract_hlc(merge_commit.message().unwrap())
+        .expect("resolution merge commit must carry an HLC trailer");
+    assert_eq!(
+        hlc.wall_ms, far_future,
+        "merge/next-write must absorb theirs' EXACT far-future wall_ms, not merely reach it: {} != {}",
+        hlc.wall_ms, far_future
+    );
+}
+
+/// Ordinary-peer mirror of `clean_merge_commit_carries_hlc_trailer_and_absorbs_theirs`:
+/// with a NON-skewed peer, the clean merge commit's HLC trailer must land in the
+/// wall-clock band, NOT a far-future constant. Paired with its far-future sibling, no
+/// hardcoded constant can satisfy both cases — the merge must genuinely fold in theirs'
+/// HLC.
+#[test]
+fn clean_merge_ordinary_peer_stamps_wall_clock_band() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Peer (theirs, repo_a) is NOT seeded: it commits with its natural
+    // current-wall-clock HLC.
+    repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours diverges on a DIFFERENT file, so the merge is clean (non-FF).
+    repo_b.commit_file("ddb/b.md", "from b", "add b").unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let merge_oid = match result {
+        MergeResult::Clean(oid) => oid,
+        other => panic!("expected a clean merge commit, got {other:?}"),
+    };
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(
+        merge_commit.id().to_string(),
+        merge_oid.0,
+        "HEAD must be the returned clean-merge commit"
+    );
+    let hlc = crate::hlc::extract_hlc(merge_commit.message().unwrap())
+        .expect("clean merge commit must carry an HLC trailer");
+    assert!(
+        hlc.wall_ms > 1_600_000_000_000 && hlc.wall_ms < 10_000_000_000_000,
+        "with an ordinary (non-skewed) peer the trailer must be in the wall-clock band, not a far-future constant: {}",
+        hlc.wall_ms
+    );
+}
+
+/// Ordinary-peer mirror of `fast_forward_absorbs_theirs_hlc_into_next_write`: with a
+/// NON-skewed peer, the post-fast-forward next write's HLC trailer must land in the
+/// wall-clock band, NOT a far-future constant.
+#[test]
+fn fast_forward_ordinary_peer_next_write_wall_clock_band() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Peer (repo_a) is NOT seeded: it commits at its natural wall clock.
+    repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours has no diverging commit, so the merge fast-forwards (no merge commit).
+    repo_b.fetch("origin", "master").unwrap();
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    assert!(
+        matches!(result, MergeResult::FastForward(_)),
+        "expected a fast-forward merge, got {result:?}"
+    );
+
+    // The next ordinary write carries an HLC in the wall-clock band.
+    repo_b
+        .commit_file("ddb/c.md", "from b", "next write")
+        .unwrap();
+    let next = repo_b.head_commit().unwrap();
+    let hlc = crate::hlc::extract_hlc(next.message().unwrap())
+        .expect("ordinary write after fast-forward must carry an HLC trailer");
+    assert!(
+        hlc.wall_ms > 1_600_000_000_000 && hlc.wall_ms < 10_000_000_000_000,
+        "with an ordinary (non-skewed) peer the trailer must be in the wall-clock band, not a far-future constant: {}",
+        hlc.wall_ms
+    );
+}
+
+/// Ordinary-peer mirror of
+/// `resolved_merge_commit_carries_hlc_trailer_and_absorbs_theirs`: with a NON-skewed
+/// peer, the conflict-resolution merge commit's HLC trailer must land in the wall-clock
+/// band, NOT a far-future constant.
+#[test]
+fn resolved_merge_ordinary_peer_stamps_wall_clock_band() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    // Peer (theirs, repo_a) is NOT seeded: it commits at its natural wall clock.
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // Ours conflicts on the SAME file with a normal clock.
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(
+        merge_commit.id().to_string(),
+        merge_oid.0,
+        "HEAD must be the returned resolution merge commit"
+    );
+    let hlc = crate::hlc::extract_hlc(merge_commit.message().unwrap())
+        .expect("resolution merge commit must carry an HLC trailer");
+    assert!(
+        hlc.wall_ms > 1_600_000_000_000 && hlc.wall_ms < 10_000_000_000_000,
+        "with an ordinary (non-skewed) peer the trailer must be in the wall-clock band, not a far-future constant: {}",
+        hlc.wall_ms
+    );
 }
