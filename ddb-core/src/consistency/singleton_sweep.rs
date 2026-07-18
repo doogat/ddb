@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::error::{DoogatError, Result};
-use crate::hlc::{append_hlc_trailer, Hlc};
+use crate::hlc::Hlc;
 use crate::indexer::Index;
 use crate::sql_engine::schema_from_parsed;
 use crate::traits::{DoogatStore, GitHistory};
@@ -135,13 +135,10 @@ pub fn singleton_sweep(
             .map(|(path, content)| (path.as_str(), content.as_str()))
             .collect();
         let delete_refs: Vec<&str> = deletes.iter().map(String::as_str).collect();
-        let message = append_hlc_trailer(
-            &format!(
-                "fix: resolve {} singleton conflicts across {} tables",
-                report.conflicts_resolved,
-                report.details.len()
-            ),
-            resolved_at,
+        let message = format!(
+            "fix: resolve {} singleton conflicts across {} tables",
+            report.conflicts_resolved,
+            report.details.len()
         );
         repo.commit_batch(&write_refs, &delete_refs, &message)?;
     }
@@ -188,6 +185,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::hlc::append_hlc_trailer;
     use crate::git_ops::GitRepo;
 
     fn temp_repo() -> (TempDir, GitRepo) {
