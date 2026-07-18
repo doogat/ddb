@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use automerge::{transaction::Transactable, AutoCommit, ObjType, ReadDoc};
+use sha2::{Digest, Sha256};
 
 use crate::error::{DoogatError, Result};
 use crate::hlc::Hlc;
@@ -11,6 +12,15 @@ impl From<automerge::AutomergeError> for DoogatError {
     fn from(e: automerge::AutomergeError) -> Self {
         Self::Automerge(e.to_string())
     }
+}
+
+/// Derive a stable Automerge actor from content bytes.
+/// Symmetric under ours/theirs swap: the SAME physical content always maps to the SAME actor on
+/// every node, so Automerge's actor-ordered tie-break picks the same winner regardless of which
+/// side a node calls "ours". 16 bytes = valid ActorId.
+fn derive_actor(content: &str) -> automerge::ActorId {
+    let digest = Sha256::digest(content.as_bytes());
+    automerge::ActorId::from(&digest[..16])
 }
 
 /// Resolve all conflict files using per-zone CRDT merge strategies.
@@ -116,12 +126,14 @@ pub fn merge_frontmatter(ancestor: &str, ours: &str, theirs: &str) -> Result<(St
 
     // Merge scalars via Automerge Map CRDT
     let mut doc = AutoCommit::new();
+    doc.set_actor(derive_actor(ancestor));
     let map_id = doc.put_object(automerge::ROOT, "frontmatter", ObjType::Map)?;
     for (k, v) in &ancestor_scalars {
         doc.put(&map_id, k.as_str(), v.as_str())?;
     }
 
     let mut doc_ours = doc.fork();
+    doc_ours.set_actor(derive_actor(ours));
     let ours_map_id = doc_ours
         .get(&automerge::ROOT, "frontmatter")?
         .map(|(_, id)| id)
@@ -134,6 +146,7 @@ pub fn merge_frontmatter(ancestor: &str, ours: &str, theirs: &str) -> Result<(St
     )?;
 
     let mut doc_theirs = doc.fork();
+    doc_theirs.set_actor(derive_actor(theirs));
     let theirs_map_id = doc_theirs
         .get(&automerge::ROOT, "frontmatter")?
         .map(|(_, id)| id)
@@ -155,7 +168,11 @@ pub fn merge_frontmatter(ancestor: &str, ours: &str, theirs: &str) -> Result<(St
     let mut merged = BTreeMap::new();
     for key in doc_ours.keys(&merged_map_id) {
         if let Some((value, _)) = doc_ours.get(&merged_map_id, key.as_str())? {
-            merged.insert(key, FmValue::Scalar(value.to_string()));
+            let scalar = value
+                .to_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| value.to_string());
+            merged.insert(key, FmValue::Scalar(scalar));
         }
     }
 
@@ -246,24 +263,21 @@ fn merge_list_fields(
             merged.remove(r);
         }
 
-        // Preserve original order from ours, then append new items from theirs
-        let ours_list = ours.get(key).map(|v| v.as_slice()).unwrap_or_default();
-        let mut ordered: Vec<String> = ours_list
+        // Survivors in ANCESTOR order (the shared merge base → identical on every node),
+        // then all added items sorted lexicographically (deterministic AND role-independent).
+        let ancestor_list = ancestor.get(key).map(|v| v.as_slice()).unwrap_or_default();
+        let mut ordered: Vec<String> = ancestor_list
             .iter()
             .filter(|s| merged.contains(s.as_str()))
             .cloned()
             .collect();
-        // Add items from merged that aren't already in ordered
-        let extra: Vec<String> = {
-            let ordered_set: HashSet<&str> = ordered.iter().map(|s| s.as_str()).collect();
-            merged
-                .iter()
-                .filter(|s| !ordered_set.contains(*s))
-                .map(|s| s.to_string())
-                .collect()
-        };
-        ordered.extend(extra);
-
+        let mut additions: Vec<String> = merged
+            .iter()
+            .filter(|s| !ancestor_list.iter().any(|a| a == *s))
+            .map(|s| s.to_string())
+            .collect();
+        additions.sort();
+        ordered.extend(additions);
         result.insert(key.clone(), FmValue::List(ordered));
     }
     result
@@ -314,41 +328,17 @@ fn map_to_yaml(map: &BTreeMap<String, FmValue>) -> String {
     for (k, v) in map {
         match v {
             FmValue::Scalar(s) => {
-                let clean_v =
-                    if let Some(unquoted) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-                        if yaml_needs_quotes(unquoted) {
-                            s.as_str()
-                        } else {
-                            unquoted
-                        }
-                    } else {
-                        s.as_str()
-                    };
-                out.push_str(&format!("{k}: {clean_v}\n"));
+                out.push_str(&format!("{k}: {}\n", crate::parser::yaml_quote(s)));
             }
             FmValue::List(items) => {
                 out.push_str(&format!("{k}:\n"));
                 for item in items {
-                    if yaml_needs_quotes(item) {
-                        out.push_str(&format!("  - \"{item}\"\n"));
-                    } else {
-                        out.push_str(&format!("  - {item}\n"));
-                    }
+                    out.push_str(&format!("  - {}\n", crate::parser::yaml_quote(item)));
                 }
             }
         }
     }
     out
-}
-
-fn yaml_needs_quotes(s: &str) -> bool {
-    s.contains(':')
-        || s.contains('[')
-        || s.contains(']')
-        || s.contains('{')
-        || s.contains('}')
-        || s.contains('#')
-        || s.contains("[[")
 }
 
 fn apply_scalar_diff(
@@ -374,11 +364,13 @@ fn apply_scalar_diff(
 #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
 pub fn merge_body(ancestor: &str, ours: &str, theirs: &str) -> Result<String> {
     let mut doc = AutoCommit::new();
+    doc.set_actor(derive_actor(ancestor));
     let text_id = doc.put_object(automerge::ROOT, "body", ObjType::Text)?;
     doc.splice_text(&text_id, 0, 0, ancestor)?;
 
     // Fork for ours
     let mut doc_ours = doc.fork();
+    doc_ours.set_actor(derive_actor(ours));
     let ours_text_id = doc_ours
         .get(&automerge::ROOT, "body")?
         .map(|(_, id)| id)
@@ -387,6 +379,7 @@ pub fn merge_body(ancestor: &str, ours: &str, theirs: &str) -> Result<String> {
 
     // Fork for theirs
     let mut doc_theirs = doc.fork();
+    doc_theirs.set_actor(derive_actor(theirs));
     let theirs_text_id = doc_theirs
         .get(&automerge::ROOT, "body")?
         .map(|(_, id)| id)
@@ -481,6 +474,7 @@ pub fn merge_reference(ancestor: &str, ours: &str, theirs: &str) -> Result<Strin
 
     // Seed Automerge doc with ancestor state as a List
     let mut doc = AutoCommit::new();
+    doc.set_actor(derive_actor(ancestor));
     let list_id = doc.put_object(automerge::ROOT, "refs", ObjType::List)?;
     for (i, line) in ancestor_lines.iter().enumerate() {
         doc.insert(&list_id, i, line.as_str())?;
@@ -488,11 +482,13 @@ pub fn merge_reference(ancestor: &str, ours: &str, theirs: &str) -> Result<Strin
 
     // Fork for ours — apply diffs
     let mut doc_ours = doc.fork();
+    doc_ours.set_actor(derive_actor(ours));
     let ours_list = refs_list_id(&mut doc_ours)?;
     apply_list_diff(&mut doc_ours, &ours_list, &ancestor_lines, &ours_lines)?;
 
     // Fork for theirs — apply diffs
     let mut doc_theirs = doc.fork();
+    doc_theirs.set_actor(derive_actor(theirs));
     let theirs_list = refs_list_id(&mut doc_theirs)?;
     apply_list_diff(
         &mut doc_theirs,
@@ -1276,5 +1272,39 @@ mod tests {
 
         let result = resolve_conflicts(conflicts, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn derive_actor_same_content_same_actor() {
+        let content = "title: A\nx: 1";
+        let a = derive_actor(content);
+        let b = derive_actor(content);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn derive_actor_different_content_different_actor() {
+        let a = derive_actor("title: A\nx: 1");
+        let b = derive_actor("title: B\nx: 2");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn derive_actor_produces_valid_actor_id() {
+        let actor = derive_actor("title: A\nx: 1");
+        assert_eq!(actor.to_bytes().len(), 16);
+    }
+
+    #[test]
+    fn merge_frontmatter_is_byte_identical_on_re_resolution() {
+        let ancestor = "title: Base\nstatus: open";
+        let ours = "title: Base\nstatus: ours";
+        let theirs = "title: Base\nstatus: theirs";
+
+        let (yaml_a, bytes_a) = merge_frontmatter(ancestor, ours, theirs).unwrap();
+        let (yaml_b, bytes_b) = merge_frontmatter(ancestor, ours, theirs).unwrap();
+
+        assert_eq!(yaml_a, yaml_b);
+        assert_eq!(bytes_a, bytes_b);
     }
 }

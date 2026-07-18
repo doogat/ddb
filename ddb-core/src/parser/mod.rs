@@ -615,7 +615,7 @@ pub fn rewrite_links(content: &str, old_target: &str, new_target: &str) -> Strin
 }
 
 /// Quote a YAML string value if it contains special characters.
-fn yaml_quote(s: &str) -> String {
+pub(crate) fn yaml_quote(s: &str) -> String {
     if s.contains(':')
         || s.contains('[')
         || s.contains(']')
