@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::indexer::Index;
 use crate::traits::DoogatStore;
 use crate::types::{
-    ColumnDef, DoogatFix, Fix, FixReport, ParsedDoogat, TableSchema, TitleSource, Zone,
+    ColumnDef, DoogatFix, DoogatId, Fix, FixReport, ParsedDoogat, TableSchema, TitleSource, Zone,
 };
 use regex::Regex;
 use std::sync::OnceLock;
@@ -332,7 +332,7 @@ fn title_from_path(path: &str) -> String {
         .trim_end_matches(".md");
 
     // Strip 14-digit ID prefix (with optional separator)
-    let stripped = if filename.len() >= 14 && filename[..14].chars().all(|c| c.is_ascii_digit()) {
+    let stripped = if filename.len() >= 14 && DoogatId::is_valid_shape(&filename[..14]) {
         let rest = &filename[14..];
         rest.trim_start_matches(['-', '_'])
     } else {

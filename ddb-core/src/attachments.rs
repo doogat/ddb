@@ -28,7 +28,7 @@ fn validate_attachment_filename(filename: &str) -> Result<()> {
 
 /// Validate that a doogat ID is a 14-digit numeric string.
 fn validate_doogat_id_format(id: &DoogatId) -> Result<()> {
-    if id.0.len() != 14 || !id.0.chars().all(|c| c.is_ascii_digit()) {
+    if !DoogatId::is_valid_shape(&id.0) {
         return Err(crate::error::DoogatError::Validation(format!(
             "invalid doogat ID format: '{}' (expected 14 digits)",
             id.0

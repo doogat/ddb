@@ -8,6 +8,15 @@ use super::value::Value;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct DoogatId(pub String);
 
+impl DoogatId {
+    /// True when `s` has the canonical doogat-ID shape: exactly 14 ASCII digits
+    /// (`YYYYMMDDHHmmss`). Single source of truth for ID shape validation; every
+    /// ad-hoc 14-digit check routes here (PRD 00164).
+    pub fn is_valid_shape(s: &str) -> bool {
+        s.len() == 14 && s.chars().all(|c| c.is_ascii_digit())
+    }
+}
+
 impl fmt::Display for DoogatId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)

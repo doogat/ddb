@@ -202,7 +202,7 @@ async fn serve_attachment(
     use axum::response::IntoResponse;
 
     // Prevent path traversal: doogat_id must be 14 digits, filename must be clean
-    let id_ok = doogat_id.len() == 14 && doogat_id.chars().all(|c| c.is_ascii_digit());
+    let id_ok = ddb_core::types::DoogatId::is_valid_shape(&doogat_id);
     let name_ok = !filename.is_empty()
         && !filename.contains("..")
         && !filename.contains('/')
