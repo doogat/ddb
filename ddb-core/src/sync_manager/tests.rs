@@ -956,3 +956,78 @@ fn theirs_deleted_ours_edited_resurrects_with_marker() {
     );
 }
 
+/// PRD 00166 Success Metric 5: a device skewed ahead does not win indefinitely.
+/// Once its HLC is absorbed by the peer during merge, the peer's subsequent writes
+/// tie or exceed that peer's former lead, so the skewed lead is not permanent.
+/// This exercises the full SyncManager::sync path (not the low-level merge primitive).
+#[test]
+fn skewed_peer_does_not_win_indefinitely() {
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_binary_sync_pair();
+
+    let far_future: u64 = u64::MAX / 2;
+    let bin_path = "reference/test/asset.bin";
+
+    // Seed A's clock far into the future BEFORE A commits, so the write
+    // chokepoint auto-stamps a far-future HLC trailer.
+    std::fs::write(
+        repo_a.path.join(".git/ddb-hlc"),
+        format!("{far_future}-0000-skewnodeA"),
+    )
+    .unwrap();
+
+    // A commits and pushes (far-future HLC, winning side in round 1).
+    repo_a
+        .commit_binary_file(bin_path, b"A_CONTENT", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    // B commits a different edit at ordinary wall-clock time (lower HLC).
+    repo_b
+        .commit_binary_file(bin_path, b"B_CONTENT", "B edits")
+        .unwrap();
+
+    // B syncs — A (far-future HLC) wins round 1.
+    let db_b = dir_b.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+    let index_b = crate::indexer::Index::open(&db_b).unwrap();
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    assert!(
+        report.conflicts_resolved > 0,
+        "should have resolved a conflict"
+    );
+
+    // ROUND-1 assertion: the skewed peer (A) wins.
+    let round1 = std::fs::read(dir_b.path().join(bin_path)).unwrap();
+    assert_eq!(
+        round1, b"A_CONTENT",
+        "round 1: skewed peer (A) wins with far-future HLC"
+    );
+
+    // ABSORPTION assertion: B absorbed A's far-future clock during the merge.
+    let raw = std::fs::read_to_string(repo_b.repo.path().join("ddb-hlc")).unwrap();
+    let b_hlc = crate::hlc::Hlc::parse(raw.trim()).unwrap();
+    assert!(
+        b_hlc.wall_ms >= far_future,
+        "B must absorb A's far-future clock, not stay behind: {} < {far_future}",
+        b_hlc.wall_ms
+    );
+
+    // CATCH-UP assertion: B's next write now carries HLC >= A's former lead.
+    repo_b
+        .commit_binary_file(bin_path, b"B_ROUND2", "B round 2")
+        .unwrap();
+    let head = repo_b.head_oid().unwrap();
+    let head_oid = git2::Oid::from_str(&head.0).unwrap();
+    let head_commit = repo_b.repo.find_commit(head_oid).unwrap();
+    let next = repo_b
+        .find_hlc_for_path(&head_commit, bin_path)
+        .expect("B's commit must carry an HLC trailer");
+    assert!(
+        next.wall_ms >= far_future,
+        "B's next write must meet/exceed the once-dominant peer's HLC: {} < {far_future}",
+        next.wall_ms
+    );
+}
+

@@ -3388,12 +3388,13 @@ $DDB reindex >/dev/null
 $DDB register-node "BinNode2" >/dev/null
 
 # Node1: modify binary with higher HLC (later wall_ms)
+# Trailer uses the real load-bearing `HLC: {wall_ms}-{counter:04}-{node}` format read by extract_hlc (PRD 00166).
 cd "$BIN_NODE1"
 printf 'NODE1_WINS_CONTENT' > reference/test/photo.bin
 git add reference/test/photo.bin
 git commit -m "node1 update binary
 
-ddb-hlc: 9999999999999.0.BinNode1" >/dev/null
+HLC: 9999999999999-0000-BinNode1" >/dev/null
 git push origin master >/dev/null 2>&1
 
 # Node2: modify same binary with lower HLC
@@ -3402,7 +3403,7 @@ printf 'NODE2_LOSES_CONTENT' > reference/test/photo.bin
 git add reference/test/photo.bin
 git commit -m "node2 update binary
 
-ddb-hlc: 1000000000000.0.BinNode2" >/dev/null
+HLC: 1000000000000-0000-BinNode2" >/dev/null
 
 # Sync node2 — should resolve conflict via LWW, node1 (higher HLC) wins
 SYNC_OUT=$($DDB sync origin master)

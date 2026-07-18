@@ -3369,16 +3369,17 @@ ddb register-node "BinNode2" | Out-Null
 Pop-Location
 
 # Node1: modify binary with higher HLC
+# Trailer uses the real load-bearing `HLC: {wall_ms}-{counter:04}-{node}` format read by extract_hlc (PRD 00166).
 [System.IO.File]::WriteAllText("$BIN_NODE1/reference/test/photo.bin", "NODE1_WINS_CONTENT")
 git add reference/test/photo.bin
-git commit -m "node1 update binary`n`nddb-hlc: 9999999999999.0.BinNode1" 2>$null | Out-Null
+git commit -m "node1 update binary`n`nHLC: 9999999999999-0000-BinNode1" 2>$null | Out-Null
 git push origin master 2>$null | Out-Null
 
 # Node2: modify same binary with lower HLC
 Push-Location $BIN_NODE2
 [System.IO.File]::WriteAllText("$BIN_NODE2/reference/test/photo.bin", "NODE2_LOSES_CONTENT")
 git add reference/test/photo.bin
-git commit -m "node2 update binary`n`nddb-hlc: 1000000000000.0.BinNode2" 2>$null | Out-Null
+git commit -m "node2 update binary`n`nHLC: 1000000000000-0000-BinNode2" 2>$null | Out-Null
 
 $syncOut = ddb sync origin master
 if ($syncOut -notmatch "conflicts resolved: 1") { throw "expected 1 conflict resolved: $syncOut" }
