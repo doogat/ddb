@@ -613,6 +613,67 @@ fn find_hlc_for_path_returns_none_for_untouched_path() {
     assert!(result.is_none());
 }
 
+#[test]
+fn find_hlc_for_path_reaches_beyond_old_revwalk_cap() {
+    // PRD 00166 scope addition: the revwalk depth cap must not silently drop an
+    // HLC that lives deeper than the OLD cap (100). A doogat touched once, then
+    // buried under 120 unrelated commits (>100 old cap, <1000 new cap), must
+    // still resolve its HLC. This FAILS if MAX_REVWALK_DEPTH regresses to 100
+    // (the walk warns + returns None at depth 100, before reaching the touch at
+    // depth 120) and passes at 1000.
+    let (dir, repo) = temp_repo();
+    let hlc = crate::hlc::Hlc {
+        wall_ms: 4242,
+        counter: 7,
+        node: "deep".into(),
+    };
+    let msg = crate::hlc::append_hlc_trailer("add deep doogat", &hlc);
+    let raw = &repo.repo;
+    let sig = Signature::now("ddb", "ddb@local").unwrap();
+
+    // Bottom commit: touches the target path, carries the known HLC trailer.
+    // Raw commit so exactly one known trailer is present (the public write API
+    // would auto-stamp a second, shadowing trailer).
+    std::fs::write(
+        dir.path().join("ddb/20260226120000.md"),
+        "---\ntitle: deep\n---\n",
+    )
+    .unwrap();
+    let parent = raw.head().unwrap().peel_to_commit().unwrap();
+    let mut index = raw.index().unwrap();
+    index.read_tree(&parent.tree().unwrap()).unwrap();
+    index.add_path(Path::new("ddb/20260226120000.md")).unwrap();
+    index.write().unwrap();
+    let tree = raw.find_tree(index.write_tree().unwrap()).unwrap();
+    raw.commit(Some("HEAD"), &sig, &sig, &msg, &tree, &[&parent])
+        .unwrap();
+
+    // Bury it under 120 commits that touch only an UNRELATED path.
+    for i in 0..120 {
+        std::fs::write(dir.path().join("ddb/_filler.md"), format!("filler {i}\n")).unwrap();
+        let parent = raw.head().unwrap().peel_to_commit().unwrap();
+        let mut index = raw.index().unwrap();
+        index.read_tree(&parent.tree().unwrap()).unwrap();
+        index.add_path(Path::new("ddb/_filler.md")).unwrap();
+        index.write().unwrap();
+        let tree = raw.find_tree(index.write_tree().unwrap()).unwrap();
+        raw.commit(Some("HEAD"), &sig, &sig, "filler", &tree, &[&parent])
+            .unwrap();
+    }
+
+    let head = repo.head_commit().unwrap();
+    let result = repo.find_hlc_for_path(&head, "ddb/20260226120000.md");
+    assert!(
+        result.is_some(),
+        "HLC buried 120 commits deep must resolve after the cap was raised to 1000 \
+         (regresses to None if MAX_REVWALK_DEPTH drops back to 100)"
+    );
+    let found = result.unwrap();
+    assert_eq!(found.wall_ms, 4242);
+    assert_eq!(found.counter, 7);
+    assert_eq!(found.node, "deep");
+}
+
 /// Every non-merge write path (create, update, rename, delete, batch) must stamp
 /// a parseable `HLC:` trailer on its commit AND advance-and-persist the
 /// machine-local node HLC. After each write the commit that touched the path

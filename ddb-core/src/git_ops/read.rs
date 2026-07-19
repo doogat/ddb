@@ -79,7 +79,7 @@ impl GitRepo {
     /// Walk ancestors of `commit` to find the HLC trailer from the most recent
     /// commit that touched `path`.
     pub fn find_hlc_for_path(&self, commit: &git2::Commit, path: &str) -> Option<crate::hlc::Hlc> {
-        const MAX_REVWALK_DEPTH: usize = 100;
+        const MAX_REVWALK_DEPTH: usize = 1000;
 
         let mut revwalk = self.repo.revwalk().ok()?;
         revwalk.push(commit.id()).ok()?;
