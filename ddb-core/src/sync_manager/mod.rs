@@ -127,7 +127,8 @@ fn partition_conflicts(
     (binary_ref, delete_edit, add_add, normal)
 }
 
-/// Pick winner from an add-add collision. Later HLC wins; theirs on tie/missing.
+/// Pick winner from an add-add collision via the unified `lww_pick`: higher HLC
+/// wins; on a missing or equal HLC the higher content key wins (PRD 00166).
 fn resolve_add_add_collision(
     conflict: &ConflictFile,
 ) -> (crate::types::ResolvedFile, CollisionLoser) {

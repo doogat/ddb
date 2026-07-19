@@ -1,8 +1,8 @@
 // Machine-local, monotonic HLC clock persisted to `<git_dir>/ddb-hlc`.
 //
-// This file currently holds only the behavior tests for `HlcClock`. The
-// production `HlcClock` implementation is added ABOVE this test module by the
-// implementer (a `pub(crate) struct HlcClock` with `load` / `tick` / `recv`).
+// Holds the `pub(crate) struct HlcClock` (`load` / `tick` / `recv`) that stamps
+// every write-commit trailer from a machine-local monotonic clock, plus its
+// behavior tests below.
 
 use std::path::PathBuf;
 

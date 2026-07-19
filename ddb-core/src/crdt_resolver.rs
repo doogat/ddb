@@ -554,9 +554,10 @@ fn apply_list_diff(
     Ok(())
 }
 
-/// Resolve conflicts using Last-Writer-Wins by HLC comparison.
-/// Higher HLC wins. Tie-break: higher node string wins.
-/// If no HLC available, falls back to "ours".
+/// Resolve conflicts using Last-Writer-Wins via the unified `lww_pick`.
+/// Higher HLC wins (numeric `Hlc::Ord`). When an HLC is missing on either side
+/// or the two are exactly equal, the higher content key wins — a role-independent
+/// fallback (PRD 00166), replacing the earlier "ours" default.
 pub fn resolve_lww(conflicts: Vec<ConflictFile>) -> Result<Vec<ResolvedFile>> {
     let mut resolved = Vec::new();
     for conflict in conflicts {
