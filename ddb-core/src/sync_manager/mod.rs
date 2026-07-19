@@ -863,14 +863,6 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         hlc
     }
 
-    /// Merge a remote HLC into local state.
-    pub fn recv_hlc(&mut self, remote: &Hlc) -> Hlc {
-        let last = self.node.hlc.as_ref().and_then(|s| Hlc::parse(s).ok());
-        let hlc = Hlc::recv(&self.node.uuid, &last, remote);
-        self.node.hlc = Some(hlc.to_string());
-        hlc
-    }
-
     /// Update node's known_heads and last_sync.
     pub fn update_sync_state(&mut self) -> Result<()> {
         let head = self.repo.head_oid()?.to_string();
