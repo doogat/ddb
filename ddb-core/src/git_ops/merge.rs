@@ -220,7 +220,17 @@ impl GitRepo {
                 continue;
             }
             let blob = self.repo.find_blob(entry.id)?;
-            let content = String::from_utf8_lossy(blob.content()).to_string();
+            let content = match std::str::from_utf8(blob.content()) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %entry_path,
+                        error = %e,
+                        "skipping non-UTF-8 blob in collision link-rewrite scan"
+                    );
+                    continue;
+                }
+            };
             if !content.contains(old_id) {
                 continue;
             }
@@ -239,7 +249,7 @@ impl GitRepo {
                 continue;
             }
 
-            let by_id = crate::parser::rewrite_links(&content, old_id, new_id);
+            let by_id = crate::parser::rewrite_links(content, old_id, new_id);
             let rewritten_content =
                 crate::parser::rewrite_links(&by_id, old_path_no_ext, new_path_no_ext);
             if rewritten_content != content {
