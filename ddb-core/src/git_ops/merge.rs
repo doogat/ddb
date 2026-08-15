@@ -70,7 +70,7 @@ impl GitRepo {
             }
 
             self.overlay_resolved_blobs(&mut merge_index, files, binary)?;
-            self.fold_losers_into_index(&mut merge_index, losers, &their_commit, theirs)?;
+            self.fold_losers_into_index(&mut merge_index, losers, &their_commit)?;
 
             // `write_tree_to` additionally refuses any not-fully-merged index — a
             // second backstop, though the equality guard above already guarantees the
@@ -128,7 +128,6 @@ impl GitRepo {
         merge_index: &mut git2::Index,
         losers: &[crate::types::CollisionLoser],
         their_commit: &git2::Commit,
-        _theirs_oid: &CommitHash,
     ) -> Result<()> {
         for loser in losers {
             let type_name = loser.type_name.as_deref();
