@@ -123,6 +123,15 @@ impl GitRepo {
     /// each loser's id derivation sees every prior loser's already-taken id —
     /// this is what makes two losers in the same call land at distinct paths
     /// even if their computed candidates are close together.
+    ///
+    /// Atomic-abort contract: a loser that fails to fold (e.g. `rewrite_id_field`
+    /// finds no frontmatter block to rewrite) aborts this call via `?`, which
+    /// aborts `commit_merge` before its single `create_commit` — nothing lands,
+    /// not the winner, not an earlier loser in the same batch. Per-loser
+    /// degradation is deliberately not offered here: landing the winner while
+    /// silently dropping a loser is exactly the half-resolved data-loss shape
+    /// PRD 00167 removed. The repo's "one bad file never fails the batch" P0
+    /// invariant scopes to read/list/index paths, not to this git write path.
     fn fold_losers_into_index(
         &self,
         merge_index: &mut git2::Index,
@@ -179,7 +188,13 @@ impl GitRepo {
         let new_id =
             crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, exists);
         taken_ids.insert(new_id.0.clone());
-        let new_content = crate::parser::rewrite_id_field(&loser.content, &new_id.0)?;
+        let new_content =
+            crate::parser::rewrite_id_field(&loser.content, &new_id.0).map_err(|e| {
+                DoogatError::Conflict(format!(
+                    "collision loser at {} (old id {}) could not be rewritten: {e}",
+                    loser.old_path, loser.old_id
+                ))
+            })?;
         let new_path =
             crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
 

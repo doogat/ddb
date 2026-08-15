@@ -120,9 +120,14 @@ fn partition_conflicts(
 
 /// Pick winner from an add-add collision via the unified `lww_pick`: higher HLC
 /// wins; on a missing or equal HLC the higher content key wins (PRD 00166).
+///
+/// Errors when the LOSING side's blob OID is missing — that OID seeds
+/// `id_minting::derive_content_id`, so a missing seed must reject rather than
+/// silently derive the same id as the old one (PRD 00167). The winner's blob
+/// OID is never consulted here, so its absence is not an error.
 fn resolve_add_add_collision(
     conflict: &ConflictFile,
-) -> (crate::types::ResolvedFile, crate::types::CollisionLoser) {
+) -> Result<(crate::types::ResolvedFile, crate::types::CollisionLoser)> {
     let theirs_wins = matches!(
         lww_pick(
             conflict.ours_hlc.as_ref(),
@@ -161,9 +166,19 @@ fn resolve_add_add_collision(
     };
 
     let losing_blob_oid = if theirs_wins {
-        conflict.ours_blob_oid.clone().unwrap_or_default()
+        conflict.ours_blob_oid.clone().ok_or_else(|| {
+            DoogatError::Sync(format!(
+                "add-add collision at {}: losing side (ours) has no recorded blob OID",
+                conflict.path
+            ))
+        })?
     } else {
-        conflict.theirs_blob_oid.clone().unwrap_or_default()
+        conflict.theirs_blob_oid.clone().ok_or_else(|| {
+            DoogatError::Sync(format!(
+                "add-add collision at {}: losing side (theirs) has no recorded blob OID",
+                conflict.path
+            ))
+        })?
     };
 
     let loser = crate::types::CollisionLoser {
@@ -176,7 +191,7 @@ fn resolve_add_add_collision(
         theirs_won: theirs_wins,
     };
 
-    (resolved, loser)
+    Ok((resolved, loser))
 }
 
 /// Ensures `skip_commit_graph` is reset when sync exits (success or error).
@@ -314,7 +329,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         }
 
         for conflict in &add_add {
-            let (winner, loser) = resolve_add_add_collision(conflict);
+            let (winner, loser) = resolve_add_add_collision(conflict)?;
             resolved.push(winner);
             collision_losers.push(loser);
         }

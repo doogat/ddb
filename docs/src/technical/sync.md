@@ -118,6 +118,8 @@ When two devices independently create a doogat with the same ID (same-second cre
 5. The loser's new blob and every rewritten file are overlaid onto `merge_index` alongside the winner, then committed together in ONE `create_commit` call. `report.collisions_reassigned` is read from `collision_losers.len()` once `commit_merge` returns `Ok`, not from a second commit's return value.
 6. `tracing::warn!` still emits with old/new IDs and paths.
 
+**Atomic-abort contract**: if a loser cannot be rewritten (e.g. `rewrite_id_field` finds no frontmatter block), `fold_losers_into_index` aborts before `commit_merge`'s single `create_commit` call — the whole conflict-resolution commit fails and nothing lands, not the winner and not any other loser already folded in the same batch.
+
 **Reporting**: `SyncReport.collisions_reassigned` counts reassigned doogats. The CLI displays this when > 0.
 
 ### Three-Step Merge Cascade

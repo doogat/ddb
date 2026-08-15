@@ -280,9 +280,9 @@ pub struct CollisionLoser {
     pub type_name: Option<String>,
     /// Git blob OID of the losing side's content (`conflict.ours_blob_oid` or
     /// `conflict.theirs_blob_oid`, whichever side `lww_pick` did not choose).
-    /// Add-add conflicts always populate both blob OIDs (`partition_conflicts`
-    /// only routes conflicts with non-empty `ours` AND `theirs` here), so this
-    /// is `unwrap_or_default()` at the one construction site, never a panic.
+    /// A `CollisionLoser` is only ever constructed once `resolve_add_add_collision`
+    /// has confirmed this OID is present — a missing losing-side blob OID is
+    /// rejected with `DoogatError::Sync` before construction, never defaulted.
     pub losing_blob_oid: String,
     /// Which side `lww_pick` chose: `true` when theirs won, `false` when ours
     /// won. Since PRD 00166 either side can win, the loser's inbound-link
