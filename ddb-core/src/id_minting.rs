@@ -248,4 +248,120 @@ mod tests {
         let source = FailingSource;
         assert!(super::existence_oracle(&source, index.sql_conn()).is_err());
     }
+
+    /// Build a forced-collision `exists` closure for `derive_content_id`: the
+    /// first two candidates it is asked about are reported taken, everything
+    /// after is free. Returns the closure alongside a shared log of the
+    /// candidates it reported taken, so a test can assert the function actually
+    /// advanced past them rather than ignoring `exists` altogether.
+    fn forced_collision_exists() -> (
+        std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+        impl Fn(&str) -> bool,
+    ) {
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen_for_closure = std::rc::Rc::clone(&seen);
+        let exists = move |candidate: &str| {
+            let mut taken = seen_for_closure.borrow_mut();
+            if taken.len() < 2 {
+                taken.push(candidate.to_string());
+                true
+            } else {
+                false
+            }
+        };
+        (seen, exists)
+    }
+
+    #[test]
+    fn same_inputs_produce_same_id() {
+        // Determinism: same (old_id, blob_oid) pair, no forced collisions, must
+        // yield the same id every time — no wall-clock or randomness involved.
+        let old_id = "20200101000000";
+        let blob_oid = "abc123deadbeef0011223344";
+
+        let first = super::derive_content_id(old_id, blob_oid, |_: &str| false);
+        let second = super::derive_content_id(old_id, blob_oid, |_: &str| false);
+
+        assert_eq!(
+            first, second,
+            "same (old_id, blob_oid) pair must always derive the same id"
+        );
+    }
+
+    #[test]
+    fn different_blob_oid_produces_different_id() {
+        // Content-addressed, not just old-ID-addressed: same old_id, different
+        // blob_oid must derive a different id. Also kills a constant-return
+        // cheat (e.g. always "00000000000000") that same_inputs_produce_same_id
+        // alone would not catch.
+        let old_id = "20200101000000";
+
+        let from_blob_a =
+            super::derive_content_id(old_id, "blob-aaaaaaaaaaaaaaaa", |_: &str| false);
+        let from_blob_b =
+            super::derive_content_id(old_id, "blob-bbbbbbbbbbbbbbbb", |_: &str| false);
+
+        assert_ne!(
+            from_blob_a, from_blob_b,
+            "same old_id with a different blob_oid must derive a different id"
+        );
+    }
+
+    #[test]
+    fn advances_past_forced_collisions_deterministically() {
+        // Two independent calls, identical (old_id, blob_oid) and identical
+        // forced-collision exists closures (first 2 candidates asked report
+        // taken, rest free), must converge on the identical final id — and that
+        // final id must not be one of the candidates reported taken, proving the
+        // function actually consulted `exists` and advanced rather than
+        // returning a candidate regardless of collisions.
+        let old_id = "20200101000000";
+        let blob_oid = "abc123deadbeef0011223344";
+
+        let (seen_first, exists_first) = forced_collision_exists();
+        let first = super::derive_content_id(old_id, blob_oid, exists_first);
+
+        let (seen_second, exists_second) = forced_collision_exists();
+        let second = super::derive_content_id(old_id, blob_oid, exists_second);
+
+        assert_eq!(
+            first, second,
+            "two independent calls with identical inputs and identical forced-collision \
+             exists closures must converge on the identical final id"
+        );
+
+        let taken_candidates = seen_first.borrow();
+        assert!(
+            !taken_candidates
+                .iter()
+                .any(|candidate| *candidate == first.0),
+            "the final id must not be one of the candidates the exists closure reported taken"
+        );
+        assert_eq!(
+            taken_candidates.len(),
+            2,
+            "the forced-collision closure must have been consulted for the first 2 candidates"
+        );
+        drop(taken_candidates);
+        assert!(
+            !seen_second.borrow().is_empty(),
+            "the second independent call must also have consulted its exists closure"
+        );
+    }
+
+    #[test]
+    fn returns_id_with_valid_shape() {
+        // Shape: every returned id is exactly 14 ASCII digits, per
+        // DoogatId::is_valid_shape.
+        let id =
+            super::derive_content_id("20200101000000", "abc123deadbeef0011223344", |_: &str| {
+                false
+            });
+
+        assert!(
+            DoogatId::is_valid_shape(&id.0),
+            "derived id must satisfy DoogatId::is_valid_shape, got {:?}",
+            id.0
+        );
+    }
 }
