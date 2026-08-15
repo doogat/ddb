@@ -438,6 +438,136 @@ fn add_add_missing_or_equal_hlc_picks_higher_content_key() {
 }
 
 #[test]
+fn add_add_loser_blob_oid_is_ours_when_theirs_wins() {
+    let earlier = crate::hlc::Hlc {
+        wall_ms: 1000,
+        counter: 0,
+        node: "nodeA".into(),
+    };
+    let later = crate::hlc::Hlc {
+        wall_ms: 2000,
+        counter: 0,
+        node: "nodeB".into(),
+    };
+    let ours_oid = "oid-ours-a";
+    let theirs_oid = "oid-theirs-a";
+    let conflict = ConflictFile {
+        path: "ddb/20260101120000.md".into(),
+        ancestor: None,
+        ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n".into(),
+        theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
+        ours_hlc: Some(earlier),
+        theirs_hlc: Some(later),
+        ours_blob_oid: Some(ours_oid.into()),
+        theirs_blob_oid: Some(theirs_oid.into()),
+    };
+    let (winner, loser) = resolve_add_add_collision(&conflict);
+    // Theirs has the later HLC, so theirs wins and ours is the losing side.
+    assert!(winner.content.contains("Theirs body"));
+    assert_eq!(
+        loser.losing_blob_oid, ours_oid,
+        "losing_blob_oid must carry the losing (ours) side's blob OID, not the winner's"
+    );
+}
+
+#[test]
+fn add_add_loser_blob_oid_is_theirs_when_ours_wins() {
+    let later = crate::hlc::Hlc {
+        wall_ms: 2000,
+        counter: 0,
+        node: "nodeA".into(),
+    };
+    let earlier = crate::hlc::Hlc {
+        wall_ms: 1000,
+        counter: 0,
+        node: "nodeB".into(),
+    };
+    let ours_oid = "oid-ours-b";
+    let theirs_oid = "oid-theirs-b";
+    let conflict = ConflictFile {
+        path: "ddb/20260101120000.md".into(),
+        ancestor: None,
+        ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n".into(),
+        theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
+        ours_hlc: Some(later),
+        theirs_hlc: Some(earlier),
+        ours_blob_oid: Some(ours_oid.into()),
+        theirs_blob_oid: Some(theirs_oid.into()),
+    };
+    let (winner, loser) = resolve_add_add_collision(&conflict);
+    // Ours has the later HLC, so ours wins and theirs is the losing side.
+    assert!(winner.content.contains("Ours body"));
+    assert_eq!(
+        loser.losing_blob_oid, theirs_oid,
+        "losing_blob_oid must carry the losing (theirs) side's blob OID, not the winner's"
+    );
+}
+
+#[test]
+fn add_add_loser_blob_oid_empty_when_ours_oid_missing() {
+    let earlier = crate::hlc::Hlc {
+        wall_ms: 1000,
+        counter: 0,
+        node: "nodeA".into(),
+    };
+    let later = crate::hlc::Hlc {
+        wall_ms: 2000,
+        counter: 0,
+        node: "nodeB".into(),
+    };
+    let theirs_oid = "oid-theirs-c";
+    let conflict = ConflictFile {
+        path: "ddb/20260101120000.md".into(),
+        ancestor: None,
+        ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n".into(),
+        theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
+        ours_hlc: Some(earlier),
+        theirs_hlc: Some(later),
+        ours_blob_oid: None,
+        theirs_blob_oid: Some(theirs_oid.into()),
+    };
+    let (winner, loser) = resolve_add_add_collision(&conflict);
+    // Theirs wins (later HLC); the losing side (ours) has no blob OID recorded.
+    assert!(winner.content.contains("Theirs body"));
+    assert_eq!(
+        loser.losing_blob_oid, "",
+        "missing blob OID on the losing side must default to empty string, not the winner's OID"
+    );
+}
+
+#[test]
+fn add_add_loser_blob_oid_empty_when_theirs_oid_missing() {
+    let later = crate::hlc::Hlc {
+        wall_ms: 2000,
+        counter: 0,
+        node: "nodeA".into(),
+    };
+    let earlier = crate::hlc::Hlc {
+        wall_ms: 1000,
+        counter: 0,
+        node: "nodeB".into(),
+    };
+    let ours_oid = "oid-ours-d";
+    let conflict = ConflictFile {
+        path: "ddb/20260101120000.md".into(),
+        ancestor: None,
+        ours: "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n".into(),
+        theirs: "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n".into(),
+        ours_hlc: Some(later),
+        theirs_hlc: Some(earlier),
+        ours_blob_oid: Some(ours_oid.into()),
+        theirs_blob_oid: None,
+    };
+    let (winner, loser) = resolve_add_add_collision(&conflict);
+    // Ours wins (later HLC); the losing side (theirs) has no blob OID recorded.
+    assert!(winner.content.contains("Ours body"));
+    assert_eq!(
+        loser.losing_blob_oid, "",
+        "missing blob OID on the losing side must default to empty string, not the winner's OID"
+    );
+}
+
+#[test]
 fn update_frontmatter_id_replaces_id() {
     let content = "---\nid: 20260101120000\ntitle: Test\n---\nBody\n";
     let updated = update_frontmatter_id(content, "20260301120000").unwrap();
