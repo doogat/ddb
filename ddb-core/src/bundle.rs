@@ -377,6 +377,7 @@ fn verify_extracted_checksum(dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::git_ops::GitRepo;
+    use crate::traits::GitHistory;
 
     fn temp_repo() -> (::tempfile::TempDir, GitRepo) {
         let dir = ::tempfile::TempDir::new().unwrap();
@@ -492,6 +493,92 @@ mod tests {
         // Verify content was imported
         let content = repo2.read_file("ddb/20260301000000.md").unwrap();
         assert!(content.contains("title: test"));
+    }
+
+    #[test]
+    fn conflicting_full_bundle_import_resolves_with_real_merge_commit() {
+        // Node 1: create the shared ancestor commit.
+        let (dir1, repo1) = temp_repo();
+        let path = "ddb/20260301000000.md";
+        repo1
+            .commit_file(
+                path,
+                "---\nid: 20260301000000\ntitle: Ancestor\n---\nShared body\n",
+                "add ancestor",
+            )
+            .unwrap();
+
+        // Node 2: clone Node 1's repo at this point so both nodes share the
+        // ancestor commit as a real merge base.
+        let dir2 = ::tempfile::TempDir::new().unwrap();
+        git2::Repository::clone(dir1.path().to_str().unwrap(), dir2.path()).unwrap();
+        let repo2 = GitRepo::open(dir2.path()).unwrap();
+        repo2
+            .repo
+            .config()
+            .unwrap()
+            .set_bool("commit.gpgsign", false)
+            .unwrap();
+
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+
+        // Both nodes edit the SAME line of the SAME doogat differently,
+        // diverging from the shared ancestor commit above -- a real conflict.
+        repo1
+            .commit_file(
+                path,
+                "---\nid: 20260301000000\ntitle: Ancestor\n---\nNode1 body\n",
+                "Node1 edits",
+            )
+            .unwrap();
+        repo2
+            .commit_file(
+                path,
+                "---\nid: 20260301000000\ntitle: Ancestor\n---\nNode2 body\n",
+                "Node2 edits",
+            )
+            .unwrap();
+
+        // Node1 exports a full bundle; Node2 imports it.
+        let bundle_path = dir1.path().join("conflict.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let report = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path)
+            .expect("a resolvable conflict must not fail the import");
+
+        assert!(
+            report.conflicts_resolved > 0,
+            "a real conflict must be counted as resolved, not silently dropped (got {})",
+            report.conflicts_resolved
+        );
+
+        let head = repo2.head_oid().unwrap().0;
+        assert_eq!(
+            repo2.commit_parent_count(&head).unwrap(),
+            2,
+            "a resolved conflict must land in a real 2-parent merge commit"
+        );
+
+        assert!(
+            repo2
+                .repo
+                .find_reference("refs/remotes/bundle/master")
+                .is_err(),
+            "the bundle ref must be deleted after a successful import"
+        );
+
+        let content = repo2.read_file(path).unwrap();
+        assert!(
+            content.contains("id: 20260301000000"),
+            "the resolved doogat must still be readable at HEAD, got: {content}"
+        );
     }
 
     #[test]
