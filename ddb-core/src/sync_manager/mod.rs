@@ -268,7 +268,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     }
 
     /// Dispatch on merge result, resolving conflicts if needed.
-    fn apply_merge_result(
+    pub(crate) fn apply_merge_result(
         &mut self,
         merge_result: MergeResult,
         index: &Index,
