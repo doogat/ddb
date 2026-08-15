@@ -2041,3 +2041,191 @@ fn resolved_merge_ordinary_peer_stamps_wall_clock_band() {
         hlc.wall_ms
     );
 }
+
+/// `commit_merge` folds a CRDT collision loser into the SAME single merge
+/// commit as the winner — closing the crash window where a stranded loser
+/// would live only in a second, separate commit. Fails if the loser's content
+/// is dropped, landed at the wrong path/id, or landed via a SECOND commit
+/// chained after the winner's (the "direct parent" check below rejects that
+/// two-commit shape: a chained loser-commit would make the final HEAD's
+/// parent the intermediate winner-only commit, not `head_before`).
+#[test]
+fn commit_merge_folds_single_loser_into_same_commit_as_winner() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let loser_content = "---\nid: 20260301120000\ntitle: Loser Note\n---\nLoser body.\n";
+    let losing_blob_oid = repo_b
+        .repo
+        .blob(loser_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid,
+    };
+
+    let expected_id =
+        crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |_| false);
+    let expected_path =
+        super::doogat_path(&expected_id.0, loser.type_name.as_deref(), loser.folder);
+    let expected_content =
+        crate::parser::rewrite_id_field(&loser.content, &expected_id.0).unwrap();
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD: the returned commit must be a \
+         direct child of ours' pre-merge HEAD, not a commit chained after an \
+         intermediate winner-only commit"
+    );
+
+    assert_eq!(repo_b.read_file("ddb/note.md").unwrap(), "resolved");
+    assert_eq!(repo_b.read_file(&expected_path).unwrap(), expected_content);
+}
+
+/// Two losers passed to the SAME `commit_merge` call must both land in that
+/// one commit, at two distinct paths — neither dropped, overwritten by the
+/// other, nor split across separate commits. Fails if either loser's content
+/// is missing, if the two losers collide onto the same path, or if the
+/// resulting HEAD is not a direct child of ours' pre-merge HEAD.
+#[test]
+fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let loser1_content = "---\nid: 20260301120000\ntitle: Loser One\n---\nLoser one body.\n";
+    let loser1_blob_oid = repo_b
+        .repo
+        .blob(loser1_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser1 = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser1_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: loser1_blob_oid,
+    };
+
+    let loser2_content = "---\nid: 20260301130000\ntitle: Loser Two\n---\nLoser two body.\n";
+    let loser2_blob_oid = repo_b
+        .repo
+        .blob(loser2_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser2 = crate::types::CollisionLoser {
+        old_id: "20260301130000".to_string(),
+        old_path: "ddb/20260301130000.md".to_string(),
+        content: loser2_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: loser2_blob_oid,
+    };
+
+    let expected_id1 =
+        crate::id_minting::derive_content_id(&loser1.old_id, &loser1.losing_blob_oid, |_| false);
+    let expected_path1 =
+        super::doogat_path(&expected_id1.0, loser1.type_name.as_deref(), loser1.folder);
+    let expected_content1 =
+        crate::parser::rewrite_id_field(&loser1.content, &expected_id1.0).unwrap();
+
+    let expected_id2 =
+        crate::id_minting::derive_content_id(&loser2.old_id, &loser2.losing_blob_oid, |_| false);
+    let expected_path2 =
+        super::doogat_path(&expected_id2.0, loser2.type_name.as_deref(), loser2.folder);
+    let expected_content2 =
+        crate::parser::rewrite_id_field(&loser2.content, &expected_id2.0).unwrap();
+
+    assert_ne!(
+        expected_path1, expected_path2,
+        "test setup invalid: the two losers must not naturally collide"
+    );
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser1, loser2],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD for a multi-loser call"
+    );
+
+    assert_eq!(repo_b.read_file("ddb/note.md").unwrap(), "resolved");
+    assert_eq!(
+        repo_b.read_file(&expected_path1).unwrap(),
+        expected_content1
+    );
+    assert_eq!(
+        repo_b.read_file(&expected_path2).unwrap(),
+        expected_content2
+    );
+}
