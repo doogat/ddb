@@ -855,6 +855,82 @@ fn serialize_canonical_yaml_key_ordering() {
     assert!(alpha_idx < zeta_idx);
 }
 
+// -- rewrite_id_field tests --
+
+#[test]
+fn rewrite_id_field_replaces_existing_id() {
+    let content = "\
+---
+id: 20260226120000
+title: Test Note
+---
+Body content.";
+
+    let result = rewrite_id_field(content, "20260301120000").unwrap();
+
+    let reparsed = parse(&result, "collision-loser").unwrap();
+    assert_eq!(reparsed.meta.id, Some(DoogatId("20260301120000".into())));
+}
+
+#[test]
+fn rewrite_id_field_sets_id_when_absent() {
+    let content = "\
+---
+title: No Id Note
+---
+Body content.";
+
+    let result = rewrite_id_field(content, "20260301120000").unwrap();
+
+    let reparsed = parse(&result, "collision-loser").unwrap();
+    assert_eq!(reparsed.meta.id, Some(DoogatId("20260301120000".into())));
+}
+
+#[test]
+fn rewrite_id_field_preserves_everything_else() {
+    let content = "\
+---
+id: 20260226120000
+title: Keep Me
+date: 2026-02-26
+type: permanent
+tags:
+  - test
+  - demo
+custom_field: hello
+---
+Body content here.
+
+Some more body.
+---
+- source:: Wikipedia
+- tags:: test";
+
+    let result = rewrite_id_field(content, "20260301120000").unwrap();
+
+    let reparsed = parse(&result, "collision-loser").unwrap();
+    assert_eq!(reparsed.meta.id, Some(DoogatId("20260301120000".into())));
+    assert_eq!(reparsed.meta.title.as_deref(), Some("Keep Me"));
+    assert_eq!(reparsed.meta.date.as_deref(), Some("2026-02-26"));
+    assert_eq!(reparsed.meta.doogat_type.as_deref(), Some("permanent"));
+    assert_eq!(reparsed.meta.tags, vec!["test", "demo"]);
+    assert!(reparsed.body.contains("Body content here."));
+    assert!(reparsed.body.contains("Some more body."));
+    assert!(reparsed.reference_section.contains("- source:: Wikipedia"));
+    assert!(reparsed.reference_section.contains("- tags:: test"));
+    assert!(
+        result.contains("custom_field: hello"),
+        "custom extra field should survive unchanged: {result}"
+    );
+}
+
+#[test]
+fn rewrite_id_field_propagates_parse_error() {
+    let content = "No frontmatter delimiters at all, just plain text.";
+    let result = rewrite_id_field(content, "20260301120000");
+    assert!(result.is_err());
+}
+
 // -- top-level parse tests --
 
 #[test]
