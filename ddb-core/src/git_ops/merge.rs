@@ -6,12 +6,15 @@ use crate::types::{CommitHash, ConflictFile, MergeResult};
 
 impl GitRepo {
     /// Create a merge commit with two parents from a true three-way merge tree,
-    /// overlaying the CRDT-resolved blobs onto the conflict entries.
+    /// overlaying the CRDT-resolved blobs onto the conflict entries and folding
+    /// each collision loser's reassigned content into the SAME commit (PRD 00167
+    /// — never a second commit for losers).
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn commit_merge(
         &self,
         files: &[(&str, &str)],
         binary: &[(&str, &str)], // (path, winning-blob-OID)
+        losers: &[crate::types::CollisionLoser],
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash> {
@@ -67,6 +70,7 @@ impl GitRepo {
             }
 
             self.overlay_resolved_blobs(&mut merge_index, files, binary)?;
+            self.fold_losers_into_index(&mut merge_index, losers, &their_commit, theirs)?;
 
             // `write_tree_to` additionally refuses any not-fully-merged index — a
             // second backstop, though the equality guard above already guarantees the
@@ -111,6 +115,128 @@ impl GitRepo {
             Self::resolve_index_entry(index, path, oid)?;
         }
         Ok(())
+    }
+
+    /// Fold each collision loser's reassigned content (new deterministic ID,
+    /// rewritten frontmatter, rewritten inbound links) into `merge_index`, inside
+    /// the same merge commit as the winner. Losers are processed sequentially so
+    /// each loser's `exists` closure sees every prior loser's already-overlaid
+    /// path — this is what makes two losers in the same call land at distinct
+    /// paths even if their computed candidates are close together.
+    fn fold_losers_into_index(
+        &self,
+        merge_index: &mut git2::Index,
+        losers: &[crate::types::CollisionLoser],
+        their_commit: &git2::Commit,
+        _theirs_oid: &CommitHash,
+    ) -> Result<()> {
+        for loser in losers {
+            let type_name = loser.type_name.as_deref();
+            let folder = loser.folder;
+            let exists = |candidate: &str| -> bool {
+                let flat_path = crate::git_ops::doogat_path(candidate, None, false);
+                if merge_index
+                    .get_path(std::path::Path::new(&flat_path), 0)
+                    .is_some()
+                {
+                    return true;
+                }
+                if folder {
+                    let folder_path = crate::git_ops::doogat_path(candidate, type_name, true);
+                    if merge_index
+                        .get_path(std::path::Path::new(&folder_path), 0)
+                        .is_some()
+                    {
+                        return true;
+                    }
+                }
+                false
+            };
+            let new_id = crate::id_minting::derive_content_id(
+                &loser.old_id,
+                &loser.losing_blob_oid,
+                exists,
+            );
+            let new_content = crate::parser::rewrite_id_field(&loser.content, &new_id.0)?;
+            let new_path = crate::git_ops::doogat_path(&new_id.0, type_name, folder);
+
+            let old_path_no_ext = loser
+                .old_path
+                .strip_suffix(".md")
+                .unwrap_or(&loser.old_path);
+            let new_path_no_ext = new_path.strip_suffix(".md").unwrap_or(&new_path);
+
+            let rewritten_links = self.scan_and_rewrite_links_in_index(
+                merge_index,
+                their_commit,
+                &loser.old_id,
+                old_path_no_ext,
+                &new_id.0,
+                new_path_no_ext,
+            )?;
+
+            let oid = self.repo.blob(new_content.as_bytes())?;
+            Self::resolve_index_entry(merge_index, &new_path, oid)?;
+
+            for (path, content) in rewritten_links {
+                let oid = self.repo.blob(content.as_bytes())?;
+                Self::resolve_index_entry(merge_index, &path, oid)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Scan every `ddb/*.md` entry in `index` for inline references to `old_id`
+    /// (frontmatter id, ID-form links, or path-form links), skipping any
+    /// reference that also appears in `their_commit`'s tree at the same path —
+    /// that reference belongs to the winner side, not the loser, so it must not
+    /// be rewritten. Does not write to `index`; returns `(path,
+    /// rewritten_content)` pairs for `fold_losers_into_index` to overlay.
+    fn scan_and_rewrite_links_in_index(
+        &self,
+        index: &git2::Index,
+        their_commit: &git2::Commit,
+        old_id: &str,
+        old_path_no_ext: &str,
+        new_id: &str,
+        new_path_no_ext: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let mut rewritten = Vec::new();
+        for entry in index.iter() {
+            let Ok(entry_path) = String::from_utf8(entry.path.clone()) else {
+                continue;
+            };
+            if !entry_path.starts_with("ddb/") || !entry_path.ends_with(".md") {
+                continue;
+            }
+            let blob = self.repo.find_blob(entry.id)?;
+            let content = String::from_utf8_lossy(blob.content()).to_string();
+            if !content.contains(old_id) {
+                continue;
+            }
+
+            let theirs_also_contains = match their_commit
+                .tree()?
+                .get_path(std::path::Path::new(&entry_path))
+            {
+                Ok(their_entry) => {
+                    let their_blob = self.repo.find_blob(their_entry.id())?;
+                    String::from_utf8_lossy(their_blob.content()).contains(old_id)
+                }
+                Err(_) => false,
+            };
+            if theirs_also_contains {
+                continue;
+            }
+
+            let by_id = crate::parser::rewrite_links(&content, old_id, new_id);
+            let rewritten_content =
+                crate::parser::rewrite_links(&by_id, old_path_no_ext, new_path_no_ext);
+            if rewritten_content != content {
+                rewritten.push((entry_path, rewritten_content));
+            }
+        }
+        Ok(rewritten)
     }
 
     /// Replace any conflict at `path` with a single stage-0 entry for `oid`.

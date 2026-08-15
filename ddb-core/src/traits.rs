@@ -385,6 +385,7 @@ pub trait GitMerge {
         &self,
         files: &[(&str, &str)],
         binary: &[(&str, &str)],
+        losers: &[crate::types::CollisionLoser],
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash>;

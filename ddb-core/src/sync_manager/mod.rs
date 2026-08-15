@@ -350,7 +350,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             .map(|(p, o)| (p.as_str(), o.as_str()))
             .collect();
         self.repo
-            .commit_merge(&files, &binary, "resolve merge conflicts via CRDT", theirs_oid)?;
+            .commit_merge(&files, &binary, &[], "resolve merge conflicts via CRDT", theirs_oid)?;
 
         let commit_oid = self.repo.head_oid()?;
         write_fm_crdt_files(self.repo.repo_path(), &commit_oid, resolved)?;

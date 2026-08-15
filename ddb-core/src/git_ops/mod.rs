@@ -707,10 +707,11 @@ impl crate::traits::GitMerge for GitRepo {
         &self,
         files: &[(&str, &str)],
         binary: &[(&str, &str)],
+        losers: &[crate::types::CollisionLoser],
         message: &str,
         theirs: &CommitHash,
     ) -> Result<CommitHash> {
-        self.commit_merge(files, binary, message, theirs)
+        self.commit_merge(files, binary, losers, message, theirs)
     }
 }
 

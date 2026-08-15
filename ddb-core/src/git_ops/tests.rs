@@ -1193,6 +1193,7 @@ fn conflicted_merge_arm_behavior_unchanged() {
         .commit_merge(
             &[("ddb/x.md", "resolved x")],
             &[],
+            &[],
             "merge origin/master",
             &theirs_oid,
         )
@@ -1273,6 +1274,7 @@ fn commit_merge_blocks_while_write_lock_held() {
         .commit_merge(
             &[("ddb/x.md", "resolved x")],
             &[],
+            &[],
             "merge origin/master",
             &theirs_oid,
         )
@@ -1328,7 +1330,7 @@ fn conflicted_merge_keeps_ours_only_edit() {
     };
 
     repo_b
-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
         .unwrap();
 
     // ours' non-conflicting edit survives, AND the conflict carries the passed
@@ -1374,7 +1376,7 @@ fn conflicted_merge_keeps_ours_clean_delete() {
     };
 
     repo_b
-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
         .unwrap();
 
     assert!(repo_b.read_file("ddb/d.md").is_err());
@@ -1417,7 +1419,7 @@ fn conflicted_merge_drops_theirs_deletion() {
     };
 
     repo_b
-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
         .unwrap();
 
     assert!(repo_b.read_file("ddb/y.md").is_err());
@@ -1461,7 +1463,7 @@ fn conflicted_merge_keeps_ours_created_doogat() {
     };
 
     repo_b
-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
         .unwrap();
 
     assert_eq!(repo_b.read_file("ddb/n.md").unwrap(), "ours-n");
@@ -1520,7 +1522,7 @@ fn conflicted_merge_line_merges_both_edits() {
 
     // b4.md is auto-merged by git; only x.md is passed as resolved.
     repo_b
-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
         .unwrap();
 
     let b4 = repo_b.read_file("ddb/b4.md").unwrap();
@@ -1569,7 +1571,7 @@ fn conflicted_merge_theirs_rename_single_path() {
     };
 
     repo_b
-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
         .unwrap();
 
     assert!(repo_b.read_file("ddb/z2.md").is_ok());
@@ -1614,7 +1616,7 @@ fn conflicted_merge_ours_rename_single_path() {
     };
 
     repo_b
-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid)
+        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
         .unwrap();
 
     assert!(repo_b.read_file("ddb/w2.md").is_ok());
@@ -1664,7 +1666,7 @@ fn conflicted_merge_diverged_head_fails_loud() {
     let head_before = repo_b.head_oid().unwrap();
 
     let merge_result =
-        repo_b.commit_merge(&[("ddb/x.md", "resolved x")], &[], "merge", &theirs_oid);
+        repo_b.commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid);
     assert!(
         matches!(merge_result, Err(DoogatError::Conflict(_))),
         "expected Conflict error on diverged HEAD, got {merge_result:?}"
@@ -1750,6 +1752,7 @@ fn conflicted_merge_abort_leaves_worktree_clean() {
     let merge_result = repo_b.commit_merge(
         &[("ddb/x.md", "resolved x")],
         &[("reference/foo/data.bin", winner_oid.as_str())],
+        &[],
         "merge",
         &theirs_oid,
     );
@@ -1897,6 +1900,7 @@ fn resolved_merge_commit_carries_hlc_trailer_and_absorbs_theirs() {
         .commit_merge(
             &[("ddb/note.md", "resolved")],
             &[],
+            &[],
             "merge origin/master",
             &theirs_oid,
         )
@@ -2021,6 +2025,7 @@ fn resolved_merge_ordinary_peer_stamps_wall_clock_band() {
     let merge_oid = repo_b
         .commit_merge(
             &[("ddb/note.md", "resolved")],
+            &[],
             &[],
             "merge origin/master",
             &theirs_oid,

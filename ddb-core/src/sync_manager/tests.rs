@@ -257,6 +257,7 @@ fn lww_fallback_when_crdt_produces_invalid_output() {
         .commit_merge(
             &[(path, merged_invalid)],
             &[],
+            &[],
             "synthetic merge with invalid content",
             &theirs_hash,
         )
