@@ -175,14 +175,13 @@ impl GitRepo {
         winner_commit: &git2::Commit,
         taken_ids: &mut std::collections::HashSet<String>,
     ) -> Result<()> {
-        let type_name = loser.type_name.as_deref();
-        let folder = loser.folder;
         let exists = |candidate: &str| -> bool { taken_ids.contains(candidate) };
         let new_id =
             crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, exists);
         taken_ids.insert(new_id.0.clone());
         let new_content = crate::parser::rewrite_id_field(&loser.content, &new_id.0)?;
-        let new_path = crate::git_ops::doogat_path(&new_id.0, type_name, folder);
+        let new_path =
+            crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
 
         tracing::warn!(
             old_id = %loser.old_id,
@@ -225,7 +224,7 @@ impl GitRepo {
     /// `lww_pick` chose (`CollisionLoser::theirs_won`); since PRD 00166 ours can
     /// win too, keying this on theirs would corrupt the winner's own backlinks.
     /// Does not write to `index`; returns `(path, rewritten_content)` pairs for
-    /// `fold_losers_into_index` to overlay.
+    /// `fold_one_loser` to overlay.
     fn scan_and_rewrite_links_in_index(
         &self,
         index: &git2::Index,
@@ -259,17 +258,7 @@ impl GitRepo {
                 continue;
             }
 
-            let winner_also_contains = match winner_commit
-                .tree()?
-                .get_path(std::path::Path::new(&entry_path))
-            {
-                Ok(winner_entry) => {
-                    let winner_blob = self.repo.find_blob(winner_entry.id())?;
-                    String::from_utf8_lossy(winner_blob.content()).contains(old_id)
-                }
-                Err(_) => false,
-            };
-            if winner_also_contains {
+            if self.winner_tree_mentions_id(winner_commit, &entry_path, old_id)? {
                 continue;
             }
 
@@ -281,6 +270,26 @@ impl GitRepo {
             }
         }
         Ok(rewritten)
+    }
+
+    /// True when `winner_commit`'s tree holds `entry_path` and that blob also
+    /// mentions `old_id`: the reference was written against the doogat that KEPT
+    /// `old_id`, so the loser's rewrite must leave it alone. A path absent from
+    /// the winner's tree is not a winner reference, hence `false`.
+    fn winner_tree_mentions_id(
+        &self,
+        winner_commit: &git2::Commit,
+        entry_path: &str,
+        old_id: &str,
+    ) -> Result<bool> {
+        let Ok(winner_entry) = winner_commit
+            .tree()?
+            .get_path(std::path::Path::new(entry_path))
+        else {
+            return Ok(false);
+        };
+        let winner_blob = self.repo.find_blob(winner_entry.id())?;
+        Ok(String::from_utf8_lossy(winner_blob.content()).contains(old_id))
     }
 
     /// Replace any conflict at `path` with a single stage-0 entry for `oid`.
