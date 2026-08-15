@@ -20,7 +20,9 @@ traits (depends: error, types, rusqlite — defines DoogatSource, DoogatStore,
   │      │
   │      └──> crdt_resolver (depends: error, types, parser, traits)
   │
-  ├──> git_ops (depends: error, types, traits — implements DoogatSource/Store/GitBackend)
+  ├──> id_minting (depends: error, types, traits, parser — called from git_ops)
+  │
+  ├──> git_ops (depends: error, types, traits, id_minting — implements DoogatSource/Store/GitBackend)
   │      │
   │      ├──> indexer (depends: error, types, traits, parser, sql_engine
   │      │             — accepts &impl DoogatSource, implements DoogatIndex)
@@ -70,6 +72,7 @@ traits (depends: error, types, rusqlite — defines DoogatSource, DoogatStore,
 | `error` | `DoogatError` enum + `Result<T>` alias | thiserror only |
 | `types` | Domain types (directory module: `mod.rs` config types, `value.rs` Value enum/path utilities, `doogat.rs` domain model types, `schema.rs` schema/consistency types) | no adapter crates |
 | `traits` | Core trait abstractions (DoogatSource, DoogatStore, DoogatIndex, SqlBackend, ConflictResolver, GitBackend supertrait + sub-traits: GitRemote, GitMerge, GitHistory, GitBinary, GitRename, GitDesktopHooks) plus service-facing ports `IndexPort` (supertrait of DoogatIndex+SqlBackend), `TypedMaterializationPort`, `NoSqlMirrorPort` (with `NoopMirror` default) that let `DoogatService` depend on injectable index/mirror abstractions instead of concrete adapters | error, types, rusqlite (via SqlBackend) |
+| `id_minting` | Repo-aware ID existence oracle (HEAD tree + index) and deterministic content-ID derivation for sync collision losers | rusqlite, sha2 |
 | `parser` | Parse/serialize three-zone Markdown | regex, chrono, serde_yaml |
 | `search_query` | Search query parsing and normalization to canonical form | — (std only) |
 | `git_ops` | Git repository CRUD + merge; implements DoogatSource/Store/GitBackend (directory module: `mod.rs` struct/init/CRUD/traits, `read.rs` file reads/diffs/revision queries, `merge.rs` merge/conflict resolution, `remote.rs` push/pull/fetch, `rename.rs` rename with backlink rewrite) | git2 |
