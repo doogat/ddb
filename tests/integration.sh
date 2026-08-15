@@ -3190,6 +3190,28 @@ $DDB bundle import "$TMPDIR/delta-bundle.tar" | grep -q "imported"
 $DDB read "$DELTA_ID" | grep -q "Delta note"
 pass "delta bundle export + import"
 
+# 28a. bundle-import conflict recovery — nodes diverge WITHOUT git-remote sync,
+# a real conflict is resolved through bundle import, and re-importing the same
+# bundle afterward is a no-op (PRD 00168)
+cd "$NODE1_DIR"
+$DDB update "$SYNC_ID" --title "Bundle Laptop Title"
+$DDB bundle export --full --output "$TMPDIR/conflict-bundle.tar"
+
+cd "$NODE2_DIR"
+$DDB update "$SYNC_ID" --title "Bundle Desktop Title"
+IMPORT_OUT=$($DDB bundle import "$TMPDIR/conflict-bundle.tar")
+echo "$IMPORT_OUT" | grep -q "imported: conflicts resolved: 1"
+
+TITLE=$($DDB read "$SYNC_ID" | grep "^title:")
+echo "$TITLE" | grep -qE "(Bundle Laptop Title|Bundle Desktop Title)"
+
+# re-importing the SAME bundle must not error: its commits are already
+# ancestors of local HEAD, so the merge classifies as already-up-to-date
+# and resolves zero (new) conflicts.
+IMPORT_OUT2=$($DDB bundle import "$TMPDIR/conflict-bundle.tar")
+echo "$IMPORT_OUT2" | grep -q "imported: conflicts resolved: 0"
+pass "bundle-import conflict recovery (real conflict resolved, second import no-op)"
+
 # 29. update-bin help + rollback
 $DDB update-bin --help | grep -q "Update ddb"
 $DDB update-bin --help | grep -q "\-\-rollback"
