@@ -2,6 +2,7 @@ mod alter_column_type;
 mod alter_singleton;
 mod alter_table_rename;
 mod attachments;
+mod bundle_import_conflict_recovery;
 mod cascade_delete;
 mod checkboxes;
 mod cli_create_fk_freshness;
