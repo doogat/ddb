@@ -3232,3 +3232,38 @@ fn commit_merge_logs_distinct_reassignment_warn_per_loser() {
         "reassignment log is missing loser2's old path or its new path: {captured:?}"
     );
 }
+
+#[test]
+fn delete_remote_ref_removes_existing_ref() {
+    let (_da, _repo_a, _db, repo_b, _bare) = setup_two_repos();
+    repo_b.fetch("origin", "master").unwrap();
+
+    // Precondition: the remote-tracking ref exists after fetch.
+    assert!(repo_b
+        .repo
+        .find_reference("refs/remotes/origin/master")
+        .is_ok());
+
+    repo_b.delete_remote_ref("origin", "master").unwrap();
+
+    let err = repo_b
+        .repo
+        .find_reference("refs/remotes/origin/master")
+        .err()
+        .unwrap();
+    assert_eq!(err.code(), git2::ErrorCode::NotFound);
+}
+
+#[test]
+fn delete_remote_ref_missing_ref_returns_ok() {
+    let (_da, _repo_a, _db, repo_b, _bare) = setup_two_repos();
+
+    // Precondition: no ref exists for this remote/branch pair — it was never fetched.
+    assert!(repo_b
+        .repo
+        .find_reference("refs/remotes/origin/no-such-branch")
+        .is_err());
+
+    let result = repo_b.delete_remote_ref("origin", "no-such-branch");
+    assert!(result.is_ok());
+}
