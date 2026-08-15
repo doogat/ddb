@@ -2682,3 +2682,172 @@ fn commit_merge_derives_identical_id_for_identical_loser_on_independent_nodes() 
     );
     assert_eq!(content_1, content_2);
 }
+
+/// The collision link-rewrite scan must leave a non-UTF-8 `ddb/**.md` blob
+/// byte-for-byte untouched even when it mentions the loser's old id, while
+/// still rewriting a sibling VALID-UTF-8 linker to the loser's new id and
+/// still landing the whole thing as one successful merge commit. Fails if
+/// the non-UTF-8 blob's bytes differ at all from what was committed (the old
+/// lossy-decode-then-recommit path replaces invalid bytes with U+FFFD), if
+/// the merge fails outright because of the undecodable blob, or if the
+/// valid-UTF-8 linker stops getting rewritten (which would mean the scan was
+/// gutted to "skip everything" rather than fixed to "skip only what it can't
+/// decode").
+#[test]
+fn commit_merge_leaves_non_utf8_linker_untouched_but_still_rewrites_valid_linker() {
+    let (_dir_a, repo_a, dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+
+    let loser_content = "---\nid: 20260301120000\ntitle: Loser Note\n---\nLoser body.\n";
+    let losing_blob_oid = repo_b
+        .repo
+        .blob(loser_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid,
+        theirs_won: true,
+    };
+
+    let expected_id =
+        crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |_| false);
+    let expected_path =
+        super::doogat_path(&expected_id.0, loser.type_name.as_deref(), loser.folder);
+    let expected_content =
+        crate::parser::rewrite_id_field(&loser.content, &expected_id.0).unwrap();
+
+    // Valid-UTF-8 linker, committed only on repo_b (the losing side, since
+    // `theirs_won: true` means repo_a is the winner). It mentions the
+    // loser's old id and must still be rewritten to the loser's new id.
+    let valid_linker_content = format!(
+        "---\nid: 20260301999999\ntitle: Valid Linker\n---\nsee [[{}]] again\n",
+        loser.old_id
+    );
+    repo_b
+        .commit_file("ddb/linker.md", &valid_linker_content, "add valid linker")
+        .unwrap();
+
+    // Non-UTF-8 linker, committed only on repo_b. `commit_file` takes `&str`
+    // and cannot hold invalid UTF-8, so this one goes through git2 directly.
+    let mut invalid_bytes =
+        format!("---\nid: 20991231235959\ntitle: Bad Linker\n---\nsee [[{}]] ", loser.old_id)
+            .into_bytes();
+    invalid_bytes.push(0xFF); // lone continuation byte: invalid at any position
+    invalid_bytes.extend_from_slice(b" and more\n");
+
+    assert!(
+        std::str::from_utf8(&invalid_bytes).is_err(),
+        "fixture guard: the non-UTF-8 fixture must actually be invalid UTF-8, \
+         otherwise this test degrades into a plain-ASCII test"
+    );
+    assert!(
+        invalid_bytes
+            .windows(loser.old_id.len())
+            .any(|w| w == loser.old_id.as_bytes()),
+        "fixture guard: the non-UTF-8 fixture must contain the loser's old id \
+         as bytes, otherwise the scan never has a reason to look at this file"
+    );
+
+    let abs = dir_b.path().join("ddb/non_utf8_linker.md");
+    std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+    std::fs::write(&abs, &invalid_bytes).unwrap();
+
+    let mut index = repo_b.repo.index().unwrap();
+    index
+        .add_path(std::path::Path::new("ddb/non_utf8_linker.md"))
+        .unwrap();
+    index.write().unwrap();
+    let commit_tree = repo_b.repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::now("ddb", "ddb@localhost").unwrap();
+    let parent = repo_b.repo.head().unwrap().peel_to_commit().unwrap();
+    repo_b
+        .repo
+        .commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "add non-utf8 linker",
+            &commit_tree,
+            &[&parent],
+        )
+        .unwrap();
+
+    repo_b.fetch("origin", "master").unwrap();
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(
+                conflicts.len(),
+                1,
+                "only ddb/note.md should conflict; the linker files are clean \
+                 additions on repo_b's side"
+            );
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            std::slice::from_ref(&loser),
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD: the merge must still \
+         succeed as a single commit even with an undecodable blob in the tree"
+    );
+
+    // Winner and reassigned loser both land as they normally would.
+    assert_eq!(repo_b.read_file("ddb/note.md").unwrap(), "resolved");
+    assert_eq!(repo_b.read_file(&expected_path).unwrap(), expected_content);
+
+    // The non-UTF-8 blob must be byte-for-byte untouched: not decoded, not
+    // partially rewritten, not re-encoded.
+    let merged_tree = repo_b.head_commit().unwrap().tree().unwrap();
+    let entry = merged_tree
+        .get_path(std::path::Path::new("ddb/non_utf8_linker.md"))
+        .unwrap();
+    let blob = repo_b.repo.find_blob(entry.id()).unwrap();
+    assert_eq!(
+        blob.content(),
+        invalid_bytes.as_slice(),
+        "non-UTF-8 blob must survive the collision link-rewrite scan byte-for-byte"
+    );
+
+    // The valid-UTF-8 sibling linker must still be rewritten -- proves the
+    // scan wasn't just gutted to skip everything.
+    let rewritten = repo_b.read_file("ddb/linker.md").unwrap();
+    assert!(
+        !rewritten.contains(&loser.old_id),
+        "valid-UTF-8 linker still references the loser's old id after merge: {rewritten:?}"
+    );
+    assert!(
+        rewritten.contains(&expected_id.0),
+        "valid-UTF-8 linker was not rewritten to the loser's new id: {rewritten:?}"
+    );
+}
