@@ -107,14 +107,16 @@ When two devices independently create a doogat with the same ID (same-second cre
 
 **Merge commit**: The winner's content goes into the resolved vec alongside other conflict resolutions, keeping the original path.
 
-**Post-merge loser reassignment** (`reassign_collision_losers()`):
+**Atomic loser reassignment** (PRD 00167 — folded into `commit_merge`; was a separate `reassign_collision_losers()` commit before):
 
-1. Generate a new unique ID via `generate_unique_id()`, checking both filesystem and the winner's ID for collisions.
-2. Update the loser's frontmatter `id` field to the new ID.
-3. Compute the new path via `doogat_path(new_id, type_name, folder)`, respecting folder-typed storage (e.g., `ddb/contact/{new_id}.md`).
-4. Walk the HEAD tree scanning all `.md` files for references to the old ID. For each file containing the old ID, call `rewrite_links()` twice: once for the bare ID form, once for the path form (minus `.md`).
-5. Commit the loser at its new path plus all rewritten files atomically: `fix: reassign collided doogat ID {old} -> {new}`.
-6. Emit `tracing::warn!` with old/new IDs and paths.
+`git_ops::merge::commit_merge` takes a `losers: &[CollisionLoser]` parameter and folds the winner, the loser(s), and their link rewrites into the SAME in-memory merge index before the single `write_tree_to` + `create_commit` call. There is no longer an intermediate state where the winner is committed and the loser is not — that state never exists on disk, because there is only one `create_commit` call for the whole operation.
+
+1. `id_minting::derive_content_id` derives the loser's new ID deterministically from `(old_id, losing_blob_oid)` — a SHA-256-seeded candidate sequence, content-addressed rather than wall-clock-minted, so two nodes resolving the identical collision independently compute the identical new ID with no coordination. Existence is checked against the in-memory `merge_index` being built (the exact tree about to be committed), not a separately-queried oracle.
+2. `parser::rewrite_id_field` updates the loser's frontmatter `id` field to the new ID.
+3. The new path is computed via `doogat_path(new_id, type_name, folder)`, respecting folder-typed storage (e.g., `ddb/contact/{new_id}.md`).
+4. `scan_and_rewrite_links_in_index` walks the in-memory index (not a committed HEAD tree — there is no intermediate HEAD anymore) for `.md` files referencing the old ID, rewriting both the bare-ID and path forms via `rewrite_links()`, skipping any file where the winner's own tree version already carries the old ID.
+5. The loser's new blob and every rewritten file are overlaid onto `merge_index` alongside the winner, then committed together in ONE `create_commit` call. `report.collisions_reassigned` is read from `collision_losers.len()` once `commit_merge` returns `Ok`, not from a second commit's return value.
+6. `tracing::warn!` still emits with old/new IDs and paths.
 
 **Reporting**: `SyncReport.collisions_reassigned` counts reassigned doogats. The CLI displays this when > 0.
 

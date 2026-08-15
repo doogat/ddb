@@ -37,6 +37,8 @@ A 14-digit timestamp string (`YYYYMMDDHHmmss`), e.g. `"20260226120000"`. Custom 
 
 New IDs are minted through one repo-aware path. `DoogatService::unique_id` (`create` / `batch` / `create_doogat_raw` / `install_bundled_type`) and `SqlEngine::unique_ids` (multi-row `INSERT` / typedef DDL) both consult a shared existence oracle built from the current HEAD tree *and* the `doogats` index, so every path agrees on which second is already taken. `generate_unique_id` only mints the current wall second and waits until the oracle reports it free — it never fabricates a future second — so two same-second mints via different paths advance to distinct seconds instead of colliding. The format is unchanged; the sub-second throughput ceiling (one id per second per process) is tracked as PRD 00170. Shape validation uses one definition, `DoogatId::is_valid_shape` (exactly 14 digits). (PRD 00164)
 
+**Collision-loser IDs are not plausible timestamps.** PRD 00167's collision-loser reassignment mints the loser's new ID via `id_minting::derive_content_id`, seeded from `(old_id, losing_blob_oid)` through SHA-256 rather than the wall clock. The result still satisfies `DoogatId::is_valid_shape` (exactly 14 ASCII digits), but the digits are not a real `YYYYMMDDHHmmss` calendar date — nothing in the codebase currently parses an arbitrary stored `DoogatId` as a date (date parsing only ever runs on IDs the parsing code itself just generated), so this is safe today. A future feature that wanted to derive a creation date from an ID would need to special-case content-addressed IDs.
+
 ## Doogat Structures
 
 ### DoogatMeta

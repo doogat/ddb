@@ -29,6 +29,8 @@ No mint path uses `exists = |_| false` or allocates future-dated timestamps; all
 
 **Current gap**: `parser::generate_unique_id`, `service/create.rs` raw path, `service/discovery.rs`, `sql_engine::unique_ids`. Correctness closed by **00164** (unify-id-minting); the format/throughput decision is **00170** (id-throughput-ceiling-decision).
 
+**A second, deliberately separate mint path**: PRD 00167 (atomic sync collision-loser reassignment) adds `id_minting::derive_content_id`, a deterministic sibling of `existence_oracle` for reassigning a collision loser's ID. It is content-addressed (seeded from `(old_id, losing_blob_oid)`) rather than wall-clock-minted, and checks existence against the in-memory merge-tree index being built inside `commit_merge` — the freshest possible state, with no separately-queried oracle and no TOCTOU window. This path is additive, not a fix to the four gap paths above: it is repo-aware by construction (never `exists = |_| false`, never a future-dated timestamp) and does not change I3's GAP status, which still tracks the four paths listed above.
+
 ### I4 — Conflict resolution is a pure function of its inputs · HOLDS (00165, 00166)
 Set stable Automerge actor IDs (derived from ours/theirs blob OIDs or node UUIDs). If a decision claims HLC ordering, the commits that feed it must carry an HLC trailer.
 
