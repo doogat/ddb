@@ -324,10 +324,9 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         }
 
         let binary = self.resolve_binary_ref_conflicts(&binary_ref)?;
-        self.create_conflict_commit(&resolved, &binary, theirs_oid)?;
+        self.create_conflict_commit(&resolved, &binary, &collision_losers, theirs_oid)?;
 
-        report.collisions_reassigned =
-            self.reassign_collision_losers(collision_losers, theirs_oid)?;
+        report.collisions_reassigned = collision_losers.len();
         report.conflicts_resolved = count;
         report.commits_transferred = 1;
 
@@ -339,6 +338,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         &mut self,
         resolved: &[crate::types::ResolvedFile],
         binary: &[(String, String)],
+        losers: &[crate::types::CollisionLoser],
         theirs_oid: &CommitHash,
     ) -> Result<()> {
         let files: Vec<(&str, &str)> = resolved
@@ -350,7 +350,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             .map(|(p, o)| (p.as_str(), o.as_str()))
             .collect();
         self.repo
-            .commit_merge(&files, &binary, &[], "resolve merge conflicts via CRDT", theirs_oid)?;
+            .commit_merge(&files, &binary, losers, "resolve merge conflicts via CRDT", theirs_oid)?;
 
         let commit_oid = self.repo.head_oid()?;
         write_fm_crdt_files(self.repo.repo_path(), &commit_oid, resolved)?;
@@ -661,133 +661,6 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             .get("crdt_strategy")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-    }
-
-    /// After the merge commit, reassign IDs for collision losers and rewrite links.
-    fn reassign_collision_losers(
-        &self,
-        losers: Vec<crate::types::CollisionLoser>,
-        theirs_oid: &CommitHash,
-    ) -> Result<usize> {
-        let mut count = 0;
-        for loser in &losers {
-            self.reassign_single_loser(loser, theirs_oid)?;
-            count += 1;
-        }
-        Ok(count)
-    }
-
-    /// Generate a new ID for one collision loser, rewrite links, and commit.
-    fn reassign_single_loser(
-        &self,
-        loser: &crate::types::CollisionLoser,
-        theirs_oid: &CommitHash,
-    ) -> Result<()> {
-        let winner_id = loser.old_id.clone();
-        let loser_type = loser.type_name.as_deref();
-        let loser_folder = loser.folder;
-        let new_id = parser::generate_unique_id(|candidate| {
-            self.id_exists_in_repo(candidate, &winner_id, loser_type, loser_folder)
-        });
-
-        let updated_content = parser::rewrite_id_field(&loser.content, &new_id.0)?;
-        let new_path =
-            crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
-
-        let old_path_no_ext = loser.old_path.trim_end_matches(".md");
-        let new_path_no_ext = new_path.trim_end_matches(".md");
-        let rewrites = self.scan_and_rewrite_links(
-            &loser.old_id,
-            old_path_no_ext,
-            &new_id.0,
-            new_path_no_ext,
-            &theirs_oid.0,
-        )?;
-
-        let mut files: Vec<(String, String)> = vec![(new_path.clone(), updated_content)];
-        files.extend(rewrites);
-
-        let file_refs: Vec<(&str, &str)> = files
-            .iter()
-            .map(|(p, c)| (p.as_str(), c.as_str()))
-            .collect();
-        self.repo.commit_files(
-            &file_refs,
-            &format!(
-                "fix: reassign collided doogat ID {} -> {}",
-                loser.old_id, new_id.0
-            ),
-        )?;
-
-        tracing::warn!(
-            old_id = %loser.old_id,
-            new_id = %new_id.0,
-            old_path = %loser.old_path,
-            new_path = %new_path,
-            "collision resolved: doogat ID reassigned"
-        );
-        Ok(())
-    }
-
-    /// Check whether a candidate ID already exists in the repo (winner ID or on-disk).
-    fn id_exists_in_repo(
-        &self,
-        candidate: &str,
-        winner_id: &str,
-        loser_type: Option<&str>,
-        loser_folder: bool,
-    ) -> bool {
-        if candidate == winner_id {
-            return true;
-        }
-        let flat = crate::git_ops::doogat_path(candidate, None, false);
-        if self.repo.read_file(&flat).is_ok() {
-            return true;
-        }
-        if loser_folder {
-            let typed = crate::git_ops::doogat_path(candidate, loser_type, true);
-            return self.repo.read_file(&typed).is_ok();
-        }
-        false
-    }
-
-    /// Walk the HEAD tree and rewrite wikilinks from old ID/path to new ID/path.
-    /// Skips files where theirs' (winner's) tree version already references the
-    /// old ID - those links point to the winner and should remain unchanged.
-    fn scan_and_rewrite_links(
-        &self,
-        old_id: &str,
-        old_path_no_ext: &str,
-        new_id: &str,
-        new_path_no_ext: &str,
-        theirs_oid: &str,
-    ) -> Result<Vec<(String, String)>> {
-        let head_oid = self.repo.head_oid()?;
-        let head_files = self.repo.walk_tree_files(&head_oid.0, "ddb/")?;
-        let mut rewrites = Vec::new();
-
-        for (full_path, content) in &head_files {
-            if !full_path.ends_with(".md") {
-                continue;
-            }
-            if content.contains(old_id) {
-                // Skip if theirs' version of this file also references the
-                // old ID - that reference is to the winner, not the loser.
-                if let Ok(theirs_content) = self.repo.read_file_at(theirs_oid, full_path) {
-                    if theirs_content.contains(old_id) {
-                        continue;
-                    }
-                }
-
-                let rewritten = parser::rewrite_links(content, old_id, new_id);
-                let rewritten = parser::rewrite_links(&rewritten, old_path_no_ext, new_path_no_ext);
-                if rewritten != *content {
-                    rewrites.push((full_path.clone(), rewritten));
-                }
-            }
-        }
-
-        Ok(rewrites)
     }
 
     /// Detect and mark nodes as stale if they haven't synced within `stale_ttl_days`.
