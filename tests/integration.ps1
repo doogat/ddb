@@ -3122,6 +3122,25 @@ $output = ddb read $DELTA_ID
 if ($output -notmatch "Delta note") { throw "delta content missing" }
 pass "delta bundle export + import"
 
+# 28a. bundle-import conflict recovery — nodes diverge WITHOUT git-remote sync,
+# a real conflict is resolved through bundle import, and re-importing the same
+# bundle afterward is a no-op (PRD 00168)
+Push-Location $NODE1_DIR
+ddb update $SYNC_ID --title "Bundle Laptop Title" | Out-Null
+ddb bundle export --full --output (Join-Path $TMPDIR "conflict-bundle.tar") | Out-Null
+Pop-Location  # back to NODE2_DIR
+ddb update $SYNC_ID --title "Bundle Desktop Title" | Out-Null
+$importOut = ddb bundle import (Join-Path $TMPDIR "conflict-bundle.tar")
+if ($importOut -notmatch "imported: conflicts resolved: 1") { throw "bundle import conflict not resolved" }
+$titleOut = ddb read $SYNC_ID
+if ($titleOut -notmatch "Bundle Laptop Title|Bundle Desktop Title") { throw "bundle import title mismatch" }
+# re-importing the SAME bundle must not error: its commits are already
+# ancestors of local HEAD, so the merge classifies as already-up-to-date
+# and resolves zero (new) conflicts.
+$importOut2 = ddb bundle import (Join-Path $TMPDIR "conflict-bundle.tar")
+if ($importOut2 -notmatch "imported: conflicts resolved: 0") { throw "second bundle import should be no-op" }
+pass "bundle-import conflict recovery (real conflict resolved, second import no-op)"
+
 # 29. update-bin help + rollback
 $output = ddb update-bin --help
 if ($output -notmatch "Update ddb") { throw "update-bin help failed" }
