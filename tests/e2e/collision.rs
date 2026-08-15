@@ -276,3 +276,124 @@ fn add_add_collision_link_rewritten() {
         "old wikilink should be rewritten: {linker_content2}"
     );
 }
+
+// ── Test: add-add collision — resolves in a single merge commit ────
+
+#[test]
+fn add_add_collision_resolves_in_single_commit() {
+    let setup = MultiNodeSetup::new(2);
+
+    let colliding_id = "20260101120000";
+
+    // Node 0 creates a doogat with the colliding ID via direct file commit
+    commit_doogat(
+        &setup.nodes[0],
+        colliding_id,
+        "From Node 0",
+        "Body from node zero",
+    );
+    MultiNodeSetup::push(&setup.nodes[0]);
+
+    // Node 1 creates a doogat with the SAME ID (before syncing)
+    commit_doogat(
+        &setup.nodes[1],
+        colliding_id,
+        "From Node 1",
+        "Body from node one",
+    );
+
+    // Capture node 1's HEAD immediately before it syncs
+    let pre_sync_head = String::from_utf8(
+        std::process::Command::new("git")
+            .current_dir(&setup.nodes[1])
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    // Node 1 syncs — this should detect the add-add collision
+    DdbTestRepo::ddb_at(&setup.nodes[1])
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("collisions reassigned: 1"));
+
+    // Capture node 1's HEAD after sync
+    let post_sync_head = String::from_utf8(
+        std::process::Command::new("git")
+            .current_dir(&setup.nodes[1])
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    // Exactly 2 commits should land on node 1's own branch: the atomic
+    // winner+loser merge commit, plus sync's trailing "update sync state"
+    // bookkeeping commit — never separate winner and loser commits.
+    // `--first-parent` is required here: a plain `pre..post` range also
+    // picks up node 0's fetched doogat commit (the merge's other parent),
+    // which isn't part of node 1's own commit chain.
+    let commit_count: usize = String::from_utf8(
+        std::process::Command::new("git")
+            .current_dir(&setup.nodes[1])
+            .args([
+                "rev-list",
+                "--first-parent",
+                "--count",
+                &format!("{pre_sync_head}..{post_sync_head}"),
+            ])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .parse()
+    .unwrap();
+
+    assert_eq!(
+        commit_count, 2,
+        "collision resolution should land in exactly 2 commits on node 1's \
+         own branch (one atomic merge commit + one sync-state bookkeeping \
+         commit), not separate winner/loser commits"
+    );
+
+    // The merge commit is HEAD's parent (the bookkeeping commit is HEAD).
+    // Verify it has exactly two parents, proving it's a real merge commit
+    // rather than two sequential single-parent commits.
+    let merge_commit = String::from_utf8(
+        std::process::Command::new("git")
+            .current_dir(&setup.nodes[1])
+            .args(["rev-parse", "HEAD~1"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+
+    let parents = String::from_utf8(
+        std::process::Command::new("git")
+            .current_dir(&setup.nodes[1])
+            .args(["log", "-1", "--format=%P", &merge_commit])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    let parent_count = parents.split_whitespace().count();
+
+    assert_eq!(
+        parent_count, 2,
+        "collision resolution must land in a single two-parent merge commit: {parents}"
+    );
+}
