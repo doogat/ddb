@@ -361,9 +361,7 @@ mod tests {
 
         let taken_candidates = seen_first.borrow();
         assert!(
-            !taken_candidates
-                .iter()
-                .any(|candidate| *candidate == first.0),
+            !taken_candidates.contains(&first.0),
             "the final id must not be one of the candidates the exists closure reported taken"
         );
         assert_eq!(
