@@ -178,13 +178,6 @@ fn resolve_add_add_collision(
     (resolved, loser)
 }
 
-/// Update the `id` field in a doogat's frontmatter.
-fn update_frontmatter_id(content: &str, new_id: &str) -> Result<String> {
-    let mut parsed = parser::parse(content, "collision-loser")?;
-    parsed.meta.id = Some(crate::types::DoogatId(new_id.to_string()));
-    Ok(parser::serialize(&parsed))
-}
-
 /// Ensures `skip_commit_graph` is reset when sync exits (success or error).
 struct SkipCommitGraphResetGuard<'a, G: GitBackend> {
     repo: &'a G,
@@ -697,7 +690,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             self.id_exists_in_repo(candidate, &winner_id, loser_type, loser_folder)
         });
 
-        let updated_content = update_frontmatter_id(&loser.content, &new_id.0)?;
+        let updated_content = parser::rewrite_id_field(&loser.content, &new_id.0)?;
         let new_path =
             crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
 

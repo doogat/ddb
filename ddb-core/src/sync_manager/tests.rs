@@ -568,16 +568,6 @@ fn add_add_loser_blob_oid_empty_when_theirs_oid_missing() {
 }
 
 #[test]
-fn update_frontmatter_id_replaces_id() {
-    let content = "---\nid: 20260101120000\ntitle: Test\n---\nBody\n";
-    let updated = update_frontmatter_id(content, "20260301120000").unwrap();
-    assert!(updated.contains("id: 20260301120000"));
-    assert!(!updated.contains("id: 20260101120000"));
-    assert!(updated.contains("title: Test"));
-    assert!(updated.contains("Body"));
-}
-
-#[test]
 fn add_add_full_sync_both_survive() {
     // Two repos, bare remote, same-ID collision, both survive after sync.
     let bare_dir = tempfile::TempDir::new().unwrap();

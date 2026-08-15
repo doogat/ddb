@@ -710,6 +710,14 @@ pub fn serialize(doogat: &crate::types::ParsedDoogat) -> String {
     out
 }
 
+/// Update the `id` field in a doogat's frontmatter. Pure content transform —
+/// no `GitBackend` dependency — used by collision-loser reassignment.
+pub(crate) fn rewrite_id_field(content: &str, new_id: &str) -> Result<String> {
+    let mut parsed = parse(content, "collision-loser")?;
+    parsed.meta.id = Some(crate::types::DoogatId(new_id.to_string()));
+    Ok(serialize(&parsed))
+}
+
 /// Extract checkbox items from body text.
 ///
 /// Parses `- [ ]`, `- [x]`, `- [i]` items with optional date prefix and due date.
