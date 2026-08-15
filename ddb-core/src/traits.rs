@@ -373,6 +373,9 @@ pub trait GitRemote {
 
     /// Push to a remote branch.
     fn push(&self, remote: &str, branch: &str) -> Result<()>;
+
+    /// Delete a remote-tracking ref, if it exists.
+    fn delete_remote_ref(&self, remote: &str, branch: &str) -> Result<()>;
 }
 
 /// Merge operations (merge remote branches, create merge commits).

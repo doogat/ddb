@@ -696,6 +696,10 @@ impl crate::traits::GitRemote for GitRepo {
     fn push(&self, remote: &str, branch: &str) -> Result<()> {
         self.push(remote, branch)
     }
+
+    fn delete_remote_ref(&self, remote: &str, branch: &str) -> Result<()> {
+        self.delete_remote_ref(remote, branch)
+    }
 }
 
 impl crate::traits::GitMerge for GitRepo {

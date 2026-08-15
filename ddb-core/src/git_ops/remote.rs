@@ -22,4 +22,19 @@ impl GitRepo {
         remote.push(&[&refspec], None)?;
         Ok(())
     }
+
+    /// Delete a remote-tracking ref (`refs/remotes/{remote}/{branch}`), if it exists.
+    pub fn delete_remote_ref(&self, remote: &str, branch: &str) -> Result<()> {
+        self.with_write_lock(|| {
+            let ref_name = format!("refs/remotes/{remote}/{branch}");
+            match self.repo.find_reference(&ref_name) {
+                Ok(mut reference) => {
+                    reference.delete()?;
+                    Ok(())
+                }
+                Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(()),
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
 }
