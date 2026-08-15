@@ -2237,3 +2237,448 @@ fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
         expected_content2
     );
 }
+
+/// Widens the loser-id occupancy check beyond the loser's own type/folder: an id
+/// already used by a file under a DIFFERENT type folder must still block the
+/// naive derivation and force an advance. Fails if the loser lands at the
+/// naturally-derived id (whether at the occupied path or at its own-type path
+/// sharing the same id), or if the occupying file's content is disturbed.
+#[test]
+fn commit_merge_advances_loser_past_id_occupied_in_different_type_folder() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    let loser_content = "---\nid: 20260301120000\ntitle: Loser Meeting\n---\nLoser body.\n";
+    let losing_blob_oid = repo_b
+        .repo
+        .blob(loser_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/meeting/20260301120000.md".to_string(),
+        content: loser_content.to_string(),
+        folder: true,
+        type_name: Some("meeting".to_string()),
+        losing_blob_oid,
+        theirs_won: true,
+    };
+
+    let natural_id =
+        crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |_| false);
+    let natural_path_own_type =
+        super::doogat_path(&natural_id.0, loser.type_name.as_deref(), loser.folder);
+
+    // Occupy the natural id under a type folder that is NOT the loser's own type.
+    let occupying_path = super::doogat_path(&natural_id.0, Some("project"), true);
+    assert_ne!(
+        occupying_path, natural_path_own_type,
+        "test setup invalid: the occupying path must be under a different type \
+         folder than the loser's own"
+    );
+    let occupying_content = format!(
+        "---\nid: {}\ntitle: Occupant\n---\nOccupant body.\n",
+        natural_id.0
+    );
+    repo_b
+        .commit_file(
+            &occupying_path,
+            &occupying_content,
+            "add occupying project doogat",
+        )
+        .unwrap();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let expected_advanced_id = crate::id_minting::derive_content_id(
+        &loser.old_id,
+        &loser.losing_blob_oid,
+        |candidate| candidate == natural_id.0.as_str(),
+    );
+    assert_ne!(
+        expected_advanced_id.0, natural_id.0,
+        "test setup invalid: the naturally-derived id must really be the one \
+         occupied under the foreign type folder, otherwise this degrades into a \
+         no-collision test"
+    );
+    let expected_advanced_path = super::doogat_path(
+        &expected_advanced_id.0,
+        loser.type_name.as_deref(),
+        loser.folder,
+    );
+    let expected_advanced_content =
+        crate::parser::rewrite_id_field(&loser.content, &expected_advanced_id.0).unwrap();
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD: the returned commit must be a \
+         direct child of ours' pre-merge HEAD, not a commit chained after an \
+         intermediate winner-only commit"
+    );
+
+    assert_eq!(
+        repo_b.read_file(&occupying_path).unwrap(),
+        occupying_content,
+        "the file occupying the naturally-derived id under a different type \
+         folder must survive the merge unchanged"
+    );
+    assert!(
+        repo_b.read_file(&natural_path_own_type).is_err(),
+        "the loser must not be written at the naturally-derived id under its own \
+         type folder either -- the id is taken repo-wide, not just at the exact \
+         occupied path"
+    );
+    assert_eq!(
+        repo_b.read_file(&expected_advanced_path).unwrap(),
+        expected_advanced_content,
+        "the loser must land at the advanced id with its frontmatter id rewritten"
+    );
+}
+
+/// Widens the loser-id occupancy check to `ddb/_typedef/`, a shape `doogat_path`
+/// cannot even produce (no `_typedef` arm -- it's written literally). An id
+/// already used by a typedef file must still block the naive derivation and
+/// force an advance. Fails if the loser lands at the naturally-derived id, or if
+/// the typedef file's content is disturbed.
+#[test]
+fn commit_merge_advances_loser_past_id_occupied_in_typedef() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    let loser_content = "---\nid: 20260301120000\ntitle: Loser Note\n---\nLoser body.\n";
+    let losing_blob_oid = repo_b
+        .repo
+        .blob(loser_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid,
+        theirs_won: true,
+    };
+
+    let natural_id =
+        crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |_| false);
+    let natural_path = super::doogat_path(&natural_id.0, loser.type_name.as_deref(), loser.folder);
+
+    // Occupy the natural id under ddb/_typedef/ -- a shape `doogat_path` cannot
+    // even produce; it's written literally.
+    let occupying_path = format!("ddb/_typedef/{}.md", natural_id.0);
+    assert_ne!(
+        occupying_path, natural_path,
+        "test setup invalid: the occupying typedef path must differ from the \
+         loser's own natural path"
+    );
+    let occupying_content = format!(
+        "---\nid: {}\ntitle: Occupant Typedef\n---\nOccupant body.\n",
+        natural_id.0
+    );
+    repo_b
+        .commit_file(&occupying_path, &occupying_content, "add occupying typedef")
+        .unwrap();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let expected_advanced_id = crate::id_minting::derive_content_id(
+        &loser.old_id,
+        &loser.losing_blob_oid,
+        |candidate| candidate == natural_id.0.as_str(),
+    );
+    assert_ne!(
+        expected_advanced_id.0, natural_id.0,
+        "test setup invalid: the naturally-derived id must really be the one \
+         occupied under ddb/_typedef/, otherwise this degrades into a \
+         no-collision test"
+    );
+    let expected_advanced_path = super::doogat_path(
+        &expected_advanced_id.0,
+        loser.type_name.as_deref(),
+        loser.folder,
+    );
+    let expected_advanced_content =
+        crate::parser::rewrite_id_field(&loser.content, &expected_advanced_id.0).unwrap();
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD: the returned commit must be a \
+         direct child of ours' pre-merge HEAD, not a commit chained after an \
+         intermediate winner-only commit"
+    );
+
+    assert_eq!(
+        repo_b.read_file(&occupying_path).unwrap(),
+        occupying_content,
+        "the typedef file occupying the naturally-derived id must survive the \
+         merge unchanged"
+    );
+    assert!(
+        repo_b.read_file(&natural_path).is_err(),
+        "the loser must not be written at the id already occupied under \
+         ddb/_typedef/"
+    );
+    assert_eq!(
+        repo_b.read_file(&expected_advanced_path).unwrap(),
+        expected_advanced_content,
+        "the loser must land at the advanced id with its frontmatter id rewritten"
+    );
+}
+
+/// Two losers in the SAME `commit_merge` call whose naturally-derived ids
+/// collide with EACH OTHER (nothing yet in the repo is occupied) must still
+/// land at two distinct paths: the second loser has to see the first loser's
+/// just-assigned id as taken. Fails if the in-batch collision tracking
+/// regresses while widening the repo-wide occupancy check -- e.g. if either
+/// loser's content is dropped or both land at the same path.
+#[test]
+fn commit_merge_advances_second_loser_past_first_losers_in_batch_assigned_id() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    // Both losers share the same old_id and the same content, so they derive
+    // the SAME natural id -- an in-batch collision with nothing yet in the repo.
+    let shared_old_id = "20260301120000".to_string();
+    let shared_content = "---\nid: 20260301120000\ntitle: Shared Loser\n---\nShared body.\n";
+    let shared_blob_oid = repo_b
+        .repo
+        .blob(shared_content.as_bytes())
+        .unwrap()
+        .to_string();
+
+    let loser1 = crate::types::CollisionLoser {
+        old_id: shared_old_id.clone(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: shared_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: shared_blob_oid.clone(),
+        theirs_won: true,
+    };
+    let loser2 = loser1.clone();
+
+    let natural_id =
+        crate::id_minting::derive_content_id(&shared_old_id, &shared_blob_oid, |_| false);
+    let expected_id2 =
+        crate::id_minting::derive_content_id(&shared_old_id, &shared_blob_oid, |candidate| {
+            candidate == natural_id.0.as_str()
+        });
+    assert_ne!(
+        expected_id2.0, natural_id.0,
+        "test setup invalid: the two losers must really share a natural id, \
+         otherwise this degrades into a no-collision test"
+    );
+
+    let expected_path1 =
+        super::doogat_path(&natural_id.0, loser1.type_name.as_deref(), loser1.folder);
+    let expected_content1 =
+        crate::parser::rewrite_id_field(&loser1.content, &natural_id.0).unwrap();
+
+    let expected_path2 =
+        super::doogat_path(&expected_id2.0, loser2.type_name.as_deref(), loser2.folder);
+    let expected_content2 =
+        crate::parser::rewrite_id_field(&loser2.content, &expected_id2.0).unwrap();
+
+    assert_ne!(
+        expected_path1, expected_path2,
+        "test setup invalid: the second loser's advanced path must differ from \
+         the first loser's path"
+    );
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser1, loser2],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD for a multi-loser call"
+    );
+
+    assert_eq!(repo_b.read_file(&expected_path1).unwrap(), expected_content1);
+    assert_eq!(repo_b.read_file(&expected_path2).unwrap(), expected_content2);
+}
+
+/// Folds an identical single flat/untyped loser into an identical (freshly
+/// constructed) add-add conflict on its own `setup_two_repos` node, returning
+/// where the loser landed and what it holds there.
+fn fold_flat_loser_and_read_result() -> (String, String) {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let loser_content = "---\nid: 20260301120000\ntitle: Loser Note\n---\nLoser body.\n";
+    let losing_blob_oid = repo_b
+        .repo
+        .blob(loser_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let expected_id =
+        crate::id_minting::derive_content_id("20260301120000", &losing_blob_oid, |_| false);
+    let expected_path = super::doogat_path(&expected_id.0, None, false);
+
+    let loser = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid,
+        theirs_won: true,
+    };
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let merge_oid = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser],
+            "merge origin/master",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD, not one chained after an \
+         intermediate winner-only commit"
+    );
+
+    let content = repo_b.read_file(&expected_path).unwrap();
+    (expected_path, content)
+}
+
+/// Two independent nodes folding the identical loser against an identically-
+/// constructed merge tree must derive the identical id -- content-addressed,
+/// not coordinated. Fails if the assigned id or path depends on anything
+/// node-local instead of purely on the loser's content and what it's folded
+/// against.
+#[test]
+fn commit_merge_derives_identical_id_for_identical_loser_on_independent_nodes() {
+    let (path_1, content_1) = fold_flat_loser_and_read_result();
+    let (path_2, content_2) = fold_flat_loser_and_read_result();
+
+    assert_eq!(
+        path_1, path_2,
+        "two independent nodes folding the identical loser against an \
+         identically-constructed merge tree must derive the identical id"
+    );
+    assert_eq!(content_1, content_2);
+}
