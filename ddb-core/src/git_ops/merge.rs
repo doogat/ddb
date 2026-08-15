@@ -130,33 +130,35 @@ impl GitRepo {
         our_commit: &git2::Commit,
         their_commit: &git2::Commit,
     ) -> Result<()> {
+        // Snapshot every doogat id already present anywhere under `ddb/` -- other
+        // type folders and `ddb/_typedef/` included, neither of which
+        // `doogat_path` can even address -- once, up front. An id is taken
+        // repo-wide, not just at the loser's own flat/type-folder path. Kept
+        // current as each loser lands (mirrors `id_minting::existence_oracle`'s
+        // snapshot-then-answer idiom, but against the in-memory merge tree
+        // instead of HEAD) so a later loser in the same batch still sees an
+        // earlier loser's just-assigned id as taken.
+        let mut taken_ids: std::collections::HashSet<String> = merge_index
+            .iter()
+            .filter_map(|entry| {
+                let path = String::from_utf8(entry.path.clone()).ok()?;
+                if !path.starts_with("ddb/") || !path.ends_with(".md") {
+                    return None;
+                }
+                crate::parser::extract_id_from_path(&path)
+            })
+            .collect();
+
         for loser in losers {
             let type_name = loser.type_name.as_deref();
             let folder = loser.folder;
-            let exists = |candidate: &str| -> bool {
-                let flat_path = crate::git_ops::doogat_path(candidate, None, false);
-                if merge_index
-                    .get_path(std::path::Path::new(&flat_path), 0)
-                    .is_some()
-                {
-                    return true;
-                }
-                if folder {
-                    let folder_path = crate::git_ops::doogat_path(candidate, type_name, true);
-                    if merge_index
-                        .get_path(std::path::Path::new(&folder_path), 0)
-                        .is_some()
-                    {
-                        return true;
-                    }
-                }
-                false
-            };
+            let exists = |candidate: &str| -> bool { taken_ids.contains(candidate) };
             let new_id = crate::id_minting::derive_content_id(
                 &loser.old_id,
                 &loser.losing_blob_oid,
                 exists,
             );
+            taken_ids.insert(new_id.0.clone());
             let new_content = crate::parser::rewrite_id_field(&loser.content, &new_id.0)?;
             let new_path = crate::git_ops::doogat_path(&new_id.0, type_name, folder);
 
