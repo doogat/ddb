@@ -3061,11 +3061,30 @@ Set-Content -Path "ddb/$COLL_ID.md" -Value $collContentB -NoNewline
 git add "ddb/$COLL_ID.md" 2>&1 | Out-Null
 git commit -m "B creates $COLL_ID" 2>&1 | Out-Null
 
+# B syncs — collision detected and resolved (single commit, atomic)
+$collBHeadBefore = git rev-parse HEAD
 $collOut = ddb sync origin master
 if ($collOut -notmatch "collisions reassigned: 1") { throw "collision not detected: $collOut" }
 $collFiles = @(Get-ChildItem "ddb/*.md" | Where-Object { $_.Name -notmatch "^_" })
 if ($collFiles.Count -ne 2) { throw "expected 2 doogats after collision, got $($collFiles.Count)" }
+$collBHeadAfter = git rev-parse HEAD
+# sync() always appends one more single-parent "update sync state" commit
+# (finalize_sync -> update_sync_state) after resolution, so the resolution
+# itself landing atomically means exactly 2 new commits here, not 1 — the
+# two-parent winner+loser merge commit, then the trailing state commit.
+$collCommitCount = [int](git rev-list --count "$collBHeadBefore..$collBHeadAfter")
+if ($collCommitCount -ne 2) { throw "expected 2 commits after collision sync, got $collCommitCount" }
 pass "add-add collision: both doogats survive"
+
+# 27a2. add-add collision: single commit + both nodes converge
+git push origin master 2>&1 | Out-Null
+Push-Location $COLL_A
+ddb sync origin master 2>&1 | Out-Null
+$collAFiles = @(Get-ChildItem "ddb/*.md" | Where-Object { $_.Name -notmatch "^_" } | Sort-Object Name | Select-Object -ExpandProperty Name)
+Pop-Location
+$collBFiles = @(Get-ChildItem "ddb/*.md" | Where-Object { $_.Name -notmatch "^_" } | Sort-Object Name | Select-Object -ExpandProperty Name)
+if (($collAFiles -join ",") -ne ($collBFiles -join ",")) { throw "nodes did not converge: A=[$($collAFiles -join ',')] B=[$($collBFiles -join ',')]" }
+pass "add-add collision: single commit + both nodes converge"
 Pop-Location  # leave COLL_B
 
 Pop-Location  # leave COLL_A
