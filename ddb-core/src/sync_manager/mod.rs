@@ -763,14 +763,6 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     pub fn local_uuid(&self) -> Result<String> {
         Ok(self.node.uuid.clone())
     }
-
-    /// Resolve any conflicts left after a merge (e.g. from bundle import).
-    /// Returns the number of conflicts resolved.
-    pub fn resolve_post_merge_conflicts(&self, index: &crate::indexer::Index) -> Result<usize> {
-        let head = self.repo.head_oid()?;
-        let merge_hash = crate::types::CommitHash(head.to_string());
-        self.validate_clean_merge_or_fallback(merge_hash, index)
-    }
 }
 
 #[cfg(test)]

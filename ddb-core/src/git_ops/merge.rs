@@ -381,8 +381,11 @@ impl GitRepo {
         let our_commit = self
             .head_commit()
             .ok_or_else(|| DoogatError::Parse("no HEAD".into()))?;
-        let _ancestor = self.repo.merge_base(our_commit.id(), their_commit.id())?;
-
+        // No merge-base guard: bundle import shares this path and merges
+        // unrelated histories on purpose (a fresh repo importing an
+        // established bundle has no common ancestor). `merge_commits` computes
+        // the merge fine without one; a `merge_base` guard here would only
+        // reject that case with "no merge base found".
         let mut merge_index = self.repo.merge_commits(&our_commit, &their_commit, None)?;
 
         if merge_index.has_conflicts() {

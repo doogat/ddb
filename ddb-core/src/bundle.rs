@@ -107,34 +107,20 @@ fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()
     Ok(())
 }
 
-/// Merge bundle/master into local master, resolving conflicts if needed.
-/// Uses `--allow-unrelated-histories` because a freshly init'd repo may have
-/// a different root commit than the bundle's history.
+/// Merge bundle/master into local master, resolving conflicts via the same
+/// libgit2 + CRDT pipeline the network-sync path uses (`SyncManager::apply_merge_result`).
+/// No CLI `git merge`, no stderr parsing, no MERGE_HEAD: `merge_commits` computes the
+/// merge entirely in memory, so a resolution failure here leaves the repo exactly as
+/// it was before this call (see Risks — no `git merge --abort` step is needed).
 fn merge_bundle_and_resolve(
     repo: &impl GitBackend,
     sync_mgr: &mut SyncManager<impl GitBackend>,
     index: &crate::indexer::Index,
-) -> Result<usize> {
-    let merge_output = std::process::Command::new("git")
-        .args([
-            "merge",
-            "refs/remotes/bundle/master",
-            "--no-edit",
-            "--allow-unrelated-histories",
-        ])
-        .current_dir(repo.repo_path())
-        .output()?;
-
-    if merge_output.status.success() {
-        return Ok(0);
-    }
-
-    let stderr = String::from_utf8_lossy(&merge_output.stderr);
-    if stderr.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
-        sync_mgr.resolve_post_merge_conflicts(index)
-    } else {
-        Err(DoogatError::Sync(format!("git merge failed: {stderr}")))
-    }
+) -> Result<SyncReport> {
+    let merge_result = repo.merge_remote("bundle", "master")?;
+    sync_mgr
+        .apply_merge_result(merge_result, index)
+        .map_err(|e| DoogatError::Sync(format!("bundle merge failed: {e}")))
 }
 
 /// Import node registration files from the bundle into the repo.
@@ -175,25 +161,15 @@ pub fn import_bundle(
         toml::from_str(&manifest_str).map_err(|e| DoogatError::Toml(e.to_string()))?;
 
     unbundle_git_objects(repo, &work_dir)?;
-    let conflicts_resolved = merge_bundle_and_resolve(repo, sync_mgr, index)?;
+    let mut report = merge_bundle_and_resolve(repo, sync_mgr, index)?;
     import_node_registrations(repo, &work_dir)?;
 
-    let _ = std::process::Command::new("git")
-        .args(["update-ref", "-d", "refs/remotes/bundle/master"])
-        .current_dir(repo.repo_path())
-        .output();
+    repo.delete_remote_ref("bundle", "master")?;
 
     index.rebuild(repo)?;
 
-    Ok(SyncReport {
-        direction: "bundle-import".to_string(),
-        commits_transferred: 0, // unbundle doesn't expose a count
-        conflicts_resolved,
-        resurrected: 0,
-        collisions_reassigned: 0,
-        singleton_conflicts_resolved: 0,
-        singleton_conflicts: Vec::new(),
-    })
+    report.direction = "bundle-import".to_string();
+    Ok(report)
 }
 
 /// Parse and verify a bundle without importing.
