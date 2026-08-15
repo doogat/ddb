@@ -188,9 +188,9 @@ Historical note: issue #16 (PRD 00136) surfaced when `create_doogat_with_extra` 
    - **Fast-forward** or **clean merge** -- commit directly and update the index.
    - **Conflicts** -- collect `ConflictFile` structs for each conflicted path.
 3. Conflicts are partitioned into three buckets: **delete-vs-edit** (one side empty), **add-add** (no ancestor, both sides non-empty), and **normal** (everything else). Each bucket has its own resolution strategy.
-4. For add-add collisions, the later HLC wins; the loser is stashed for post-merge ID reassignment. Delete-vs-edit conflicts resurrect the surviving edit. Normal conflicts go through `crdt_resolver::resolve_conflicts()` (see Module Connections below).
+4. For add-add collisions, `crdt_resolver::lww_pick` chooses the winner: the higher HLC wins, falling back to the higher content key when either HLC is missing or the two are equal. That fallback is role-independent, so both devices pick the same winner regardless of merge direction. The loser is carried into the same merge as a `CollisionLoser` — it is not stashed for a later commit. Delete-vs-edit conflicts resurrect the surviving edit. Normal conflicts go through `crdt_resolver::resolve_conflicts()` (see Module Connections below).
 5. All resolved files are committed in a single merge commit.
-6. Post-merge: collision losers get new IDs, wikilinks are rewritten across the tree, and each reassignment is committed atomically.
+6. Collision losers are folded into that same commit, never a second one (`git_ops::merge::fold_losers_into_index`). Each loser's new ID is derived by `id_minting::derive_content_id` from `(old_id, losing_blob_oid)` — content-addressed rather than wall-clock-minted, so two nodes resolving the same collision independently agree on it with no coordination — and is checked against every ID already present anywhere under `ddb/` in the merge tree. The loser's frontmatter `id` is rewritten, and inbound wikilinks naming the old ID are rewritten in the same index, skipping any reference the winning side's own tree already carries so the winner's backlinks are left intact.
 7. The HLC is updated via `Hlc::recv()` to maintain causal ordering.
 8. `indexer::Index::rebuild()` or an incremental reindex refreshes the SQLite index.
 9. Node known-heads and last-sync timestamps are updated in `.nodes/{uuid}.toml`.
