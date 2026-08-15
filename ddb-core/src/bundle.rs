@@ -557,6 +557,202 @@ mod tests {
         );
     }
 
+    /// Reachability: a bundle-import merge failure (add/add collision loser
+    /// with no frontmatter, so `rewrite_id_field` cannot rewrite its id) must
+    /// leave `refs/remotes/bundle/master` in place. `import_bundle` only
+    /// deletes that ref after a successful merge, so bundle data must stay
+    /// reachable for a retry when the merge itself fails.
+    #[test]
+    fn conflicting_bundle_import_leaves_bundle_ref_reachable_on_merge_failure() {
+        // Node 1: create the shared ancestor commit.
+        let (dir1, repo1) = temp_repo();
+        repo1
+            .commit_file(
+                "ddb/20260301000000.md",
+                "---\nid: 20260301000000\ntitle: Ancestor\n---\nShared body\n",
+                "add ancestor",
+            )
+            .unwrap();
+
+        // Node 2: clone Node 1's repo at this point so both nodes share the
+        // ancestor commit as a real merge base.
+        let dir2 = ::tempfile::TempDir::new().unwrap();
+        git2::Repository::clone(dir1.path().to_str().unwrap(), dir2.path()).unwrap();
+        let repo2 = GitRepo::open(dir2.path()).unwrap();
+        repo2
+            .repo
+            .config()
+            .unwrap()
+            .set_bool("commit.gpgsign", false)
+            .unwrap();
+
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+
+        // Both nodes independently add a NEW doogat at the SAME path, absent
+        // from the shared ancestor -- a real add/add collision. The losing
+        // side (Node1, "theirs" from repo2's merge-remote perspective) has no
+        // frontmatter block at all, so `rewrite_id_field` cannot rewrite its
+        // id and `commit_merge` must abort the whole merge commit atomically.
+        let collision_path = "ddb/20260302000000.md";
+        let loser_content = "Just a plain body with no frontmatter block at all.\n";
+        assert!(
+            crate::parser::rewrite_id_field(loser_content, "20260302999999").is_err(),
+            "test setup invalid: rewrite_id_field must fail on frontmatter-less content"
+        );
+
+        // Node1 (theirs) is seeded with a strictly LOWER HLC so it loses the
+        // add/add collision to Node2 (ours) under lww_pick's tie-break rule.
+        let theirs_seed = crate::hlc::Hlc {
+            wall_ms: u64::MAX / 2,
+            counter: 0,
+            node: "theirsss".into(),
+        };
+        std::fs::write(dir1.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
+        repo1
+            .commit_file(collision_path, loser_content, "Node1 adds loser")
+            .unwrap();
+
+        let ours_seed = crate::hlc::Hlc {
+            wall_ms: u64::MAX / 2 + 1_000_000,
+            counter: 0,
+            node: "oursssss".into(),
+        };
+        std::fs::write(dir2.path().join(".git/ddb-hlc"), ours_seed.to_string()).unwrap();
+        repo2
+            .commit_file(
+                collision_path,
+                "---\nid: 20260302000000\ntitle: Winner\n---\nWinner body\n",
+                "Node2 adds winner",
+            )
+            .unwrap();
+
+        // Node1 exports a full bundle; Node2's import must fail because the
+        // add/add collision loser cannot be rewritten.
+        let bundle_path = dir1.path().join("collision.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let result = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path);
+        assert!(
+            matches!(result, Err(DoogatError::Sync(_))),
+            "an unresolvable add/add collision must fail the import with a Sync error, got {result:?}"
+        );
+
+        assert!(
+            repo2
+                .repo
+                .find_reference("refs/remotes/bundle/master")
+                .is_ok(),
+            "the bundle ref must survive a failed import so its data stays reachable"
+        );
+        assert!(
+            repo2
+                .repo
+                .revparse_single("refs/remotes/bundle/master")
+                .is_ok(),
+            "the bundle ref must still resolve to the unbundled commits after a failed import"
+        );
+    }
+
+    /// Clean-repo-on-error: the bundle-import merge path never shells out to
+    /// CLI `git merge` (`merge_remote`/`merge_commits` compute the merge
+    /// entirely in memory), so a merge failure must never leave a MERGE_HEAD
+    /// file or unmerged index entries behind -- there is no `git merge
+    /// --abort` step because none is needed.
+    #[test]
+    fn conflicting_bundle_import_leaves_repo_clean_on_merge_failure() {
+        // Node 1: create the shared ancestor commit.
+        let (dir1, repo1) = temp_repo();
+        repo1
+            .commit_file(
+                "ddb/20260301000000.md",
+                "---\nid: 20260301000000\ntitle: Ancestor\n---\nShared body\n",
+                "add ancestor",
+            )
+            .unwrap();
+
+        // Node 2: clone Node 1's repo at this point so both nodes share the
+        // ancestor commit as a real merge base.
+        let dir2 = ::tempfile::TempDir::new().unwrap();
+        git2::Repository::clone(dir1.path().to_str().unwrap(), dir2.path()).unwrap();
+        let repo2 = GitRepo::open(dir2.path()).unwrap();
+        repo2
+            .repo
+            .config()
+            .unwrap()
+            .set_bool("commit.gpgsign", false)
+            .unwrap();
+
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+
+        // Both nodes independently add a NEW doogat at the SAME path, absent
+        // from the shared ancestor -- a real add/add collision. The losing
+        // side (Node1, "theirs" from repo2's merge-remote perspective) has no
+        // frontmatter block at all, so `rewrite_id_field` cannot rewrite its
+        // id and `commit_merge` must abort the whole merge commit atomically.
+        let collision_path = "ddb/20260302000000.md";
+        let loser_content = "Just a plain body with no frontmatter block at all.\n";
+        assert!(
+            crate::parser::rewrite_id_field(loser_content, "20260302999999").is_err(),
+            "test setup invalid: rewrite_id_field must fail on frontmatter-less content"
+        );
+
+        let theirs_seed = crate::hlc::Hlc {
+            wall_ms: u64::MAX / 2,
+            counter: 0,
+            node: "theirsss".into(),
+        };
+        std::fs::write(dir1.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
+        repo1
+            .commit_file(collision_path, loser_content, "Node1 adds loser")
+            .unwrap();
+
+        let ours_seed = crate::hlc::Hlc {
+            wall_ms: u64::MAX / 2 + 1_000_000,
+            counter: 0,
+            node: "oursssss".into(),
+        };
+        std::fs::write(dir2.path().join(".git/ddb-hlc"), ours_seed.to_string()).unwrap();
+        repo2
+            .commit_file(
+                collision_path,
+                "---\nid: 20260302000000\ntitle: Winner\n---\nWinner body\n",
+                "Node2 adds winner",
+            )
+            .unwrap();
+
+        let bundle_path = dir1.path().join("collision.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let result = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path);
+        assert!(
+            matches!(result, Err(DoogatError::Sync(_))),
+            "an unresolvable add/add collision must fail the import with a Sync error, got {result:?}"
+        );
+
+        assert!(
+            !dir2.path().join(".git/MERGE_HEAD").exists(),
+            "no CLI `git merge` runs on the bundle-import path, so no MERGE_HEAD file should ever exist"
+        );
+        assert!(
+            !repo2.repo.index().unwrap().has_conflicts(),
+            "an in-memory merge failure must never leave unmerged entries in the repo index"
+        );
+    }
+
     #[test]
     fn delta_export_targets_node_and_uses_known_heads() {
         let (_dir, repo) = temp_repo();
