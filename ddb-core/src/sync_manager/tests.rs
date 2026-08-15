@@ -1332,6 +1332,10 @@ struct BacklinkOutcome {
     /// Content read back from `ddb/{CONTESTED_ID}.md` AFTER the merge commit -
     /// the committed tree, not the resolver's return value.
     committed_winner: String,
+    /// Content the resolver set aside as the loser, before the merge commit.
+    loser_content: String,
+    /// Content read back from the loser's new path AFTER the merge commit.
+    committed_loser: String,
     /// The reassigned, content-derived ID the loser now lives under.
     loser_new_id: String,
     /// Post-merge content of each linker that existed only on this node's side,
@@ -1434,6 +1438,7 @@ fn resolve_collision_with_backlinks(
     let loser_path =
         crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
     let winner_content = winner.content.clone();
+    let loser_content = loser.content.clone();
 
     repo_ours
         .commit_merge(
@@ -1445,7 +1450,7 @@ fn resolve_collision_with_backlinks(
         )
         .unwrap();
 
-    repo_ours
+    let committed_loser = repo_ours
         .read_file(&loser_path)
         .expect("the loser must be reassigned to its content-derived path");
 
@@ -1462,6 +1467,8 @@ fn resolve_collision_with_backlinks(
         committed_winner: repo_ours
             .read_file(&contested_path)
             .expect("the winner must still occupy the contested path after the merge"),
+        loser_content,
+        committed_loser,
         loser_new_id: new_id.0,
         ours_linkers: read_back(ours_linkers),
         theirs_linkers: read_back(theirs_linkers),
@@ -1491,6 +1498,34 @@ fn assert_winner_kept_contested_id(outcome: &BacklinkOutcome, winner_body: &str)
         outcome.committed_winner, outcome.winner_content,
         "the committed tree must hold exactly the doogat the resolver picked; the \
          loser reassignment must not touch the winner's own file"
+    );
+}
+
+/// The mirror of `assert_winner_kept_contested_id` for the losing side: the
+/// reassignment only removes the duplicate ID if the loser's COMMITTED file
+/// actually declares the new ID and has stopped claiming the contested one -
+/// otherwise two doogats still answer to `CONTESTED_ID`, which is the exact
+/// state this whole reassignment exists to prevent. Nothing but the ID field may
+/// change, so the loser's own body survives the move.
+fn assert_loser_moved_to_its_new_id(outcome: &BacklinkOutcome) {
+    let new_id = &outcome.loser_new_id;
+    assert!(
+        outcome.committed_loser.contains(&format!("id: {new_id}")),
+        "the reassigned loser must declare its new ID {new_id}, got {:?}",
+        outcome.committed_loser
+    );
+    assert!(
+        !outcome
+            .committed_loser
+            .contains(&format!("id: {CONTESTED_ID}")),
+        "the loser must stop claiming the contested ID {CONTESTED_ID} - leaving it there \
+         means two doogats share one ID, got {:?}",
+        outcome.committed_loser
+    );
+    assert_eq!(
+        outcome.committed_loser,
+        crate::parser::rewrite_id_field(&outcome.loser_content, new_id).unwrap(),
+        "the reassignment must rewrite the loser's ID field and change nothing else"
     );
 }
 
@@ -1564,6 +1599,7 @@ fn ours_wins_keeps_every_ours_side_backlink_on_the_unchanged_winner_id() {
     );
 
     assert_winner_kept_contested_id(&outcome, "kite body");
+    assert_loser_moved_to_its_new_id(&outcome);
     assert_backlinks_untouched(
         &outcome.ours_linkers,
         &ours_linkers,
@@ -1599,6 +1635,7 @@ fn ours_wins_rewrites_every_theirs_side_backlink_to_the_losers_new_id() {
     );
 
     assert_winner_kept_contested_id(&outcome, "willow body");
+    assert_loser_moved_to_its_new_id(&outcome);
     assert_backlinks_follow_loser(
         &outcome.theirs_linkers,
         &theirs_linkers,
@@ -1610,6 +1647,13 @@ fn ours_wins_rewrites_every_theirs_side_backlink_to_the_losers_new_id() {
 /// THEIRS wins: the mirror image, pinned so a winner-scoped rewrite cannot
 /// silently invert it - every peer backlink points at the winner and stays put,
 /// while every ours-side backlink follows the loser to its new ID.
+///
+/// Two of the linkers here deliberately contradict their own side's wording, so
+/// no rewrite decision can be read off what a file happens to say: a losing-side
+/// linker shares no word with either contested doogat (yet must be rewritten),
+/// and a winning-side linker is named after the LOSER (yet must be left alone).
+/// Which files move is decided by which side WON, not by which doogat they read
+/// like.
 #[test]
 fn theirs_wins_keeps_theirs_side_backlinks_and_rewrites_ours_side_backlinks() {
     let ours_doc = make_contested_doc("Otter Draft", "otter body");
@@ -1617,10 +1661,12 @@ fn theirs_wins_keeps_theirs_side_backlinks_and_rewrites_ours_side_backlinks() {
     let ours_linkers = vec![
         make_linker("20250101010000", "Otter Atlas"),
         make_linker("20250202020000", "Otter Ledger"),
+        make_linker("20250505050000", "Quarterly Roundup"),
     ];
     let theirs_linkers = vec![
         make_linker("20250303030000", "Badger Atlas"),
         make_linker("20250404040000", "Badger Ledger"),
+        make_linker("20250606060000", "Otter Retrospective"),
     ];
 
     let outcome = resolve_collision_with_backlinks(
@@ -1633,6 +1679,7 @@ fn theirs_wins_keeps_theirs_side_backlinks_and_rewrites_ours_side_backlinks() {
     );
 
     assert_winner_kept_contested_id(&outcome, "badger body");
+    assert_loser_moved_to_its_new_id(&outcome);
     assert_backlinks_untouched(
         &outcome.theirs_linkers,
         &theirs_linkers,
@@ -1689,6 +1736,8 @@ fn both_nodes_converge_on_the_same_backlink_targets_after_role_swap() {
     // contested ID whichever side it arrives from.
     assert_winner_kept_contested_id(&on_bravo, "alpha body");
     assert_winner_kept_contested_id(&on_alpha, "alpha body");
+    assert_loser_moved_to_its_new_id(&on_bravo);
+    assert_loser_moved_to_its_new_id(&on_alpha);
     assert_eq!(
         on_bravo.committed_winner, on_alpha.committed_winner,
         "both nodes must keep the same doogat at the contested ID"
