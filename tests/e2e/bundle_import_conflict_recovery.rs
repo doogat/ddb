@@ -8,15 +8,12 @@ use predicates::prelude::*;
 fn bundle_import_recovers_real_conflict_and_reimport_is_noop() {
     let setup = MultiNodeSetup::new(2);
 
-    // Create a shared doogat on node0, push, and sync to node1 so both have it.
     let id = MultiNodeSetup::create(&setup.nodes[0], "Shared", "original body");
     MultiNodeSetup::push(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
 
-    // Node 0: update the shared doogat's title ("Laptop" side).
     MultiNodeSetup::update(&setup.nodes[0], &id, "Bundle Laptop Title", "laptop body");
 
-    // Export a full bundle from node 0.
     let bundle_path = setup.remote_dir.path().join("conflict.bundle.tar");
     DdbTestRepo::ddb_at(&setup.nodes[0])
         .args(["bundle", "export", "--full", "--output"])
@@ -24,14 +21,11 @@ fn bundle_import_recovers_real_conflict_and_reimport_is_noop() {
         .assert()
         .success();
 
-    assert!(bundle_path.exists(), "bundle file should exist");
-
     // Node 1: update the SAME doogat's title to a different value ("Desktop" side).
     // This is the conflicting local write — node 1 has NOT synced/fetched node 0's
     // update, so the two nodes diverge only through the bundle (air-gapped scenario).
     MultiNodeSetup::update(&setup.nodes[1], &id, "Bundle Desktop Title", "desktop body");
 
-    // Node 1: import node 0's bundle. A real conflict should be detected and resolved.
     DdbTestRepo::ddb_at(&setup.nodes[1])
         .args(["bundle", "import"])
         .arg(&bundle_path)
