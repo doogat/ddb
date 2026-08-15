@@ -2238,6 +2238,113 @@ fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
     );
 }
 
+/// A merge commit is atomic by construction: if ANY loser in a multi-loser batch
+/// cannot be rewritten (here, the second loser's content has no frontmatter block
+/// at all, so `rewrite_id_field` has no id field to rewrite), `commit_merge` must
+/// commit NOTHING — not HEAD, not the winner, not the first (otherwise-valid)
+/// loser. Landing the winner while silently dropping a loser is the half-resolved
+/// data-loss shape this PRD removed; the correct behavior is to abort the whole
+/// batch. Fails if the abort still lets the winner or the first loser land, or if
+/// HEAD moves despite the error.
+#[test]
+fn commit_merge_commits_nothing_when_one_loser_in_the_batch_cannot_be_rewritten() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    // First loser: well-formed, would land successfully on its own.
+    let loser1_content = "---\nid: 20260301120000\ntitle: Loser One\n---\nLoser one body.\n";
+    let loser1_blob_oid = repo_b
+        .repo
+        .blob(loser1_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser1 = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser1_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: loser1_blob_oid,
+        theirs_won: true,
+    };
+    let expected_id1 =
+        crate::id_minting::derive_content_id(&loser1.old_id, &loser1.losing_blob_oid, |_| false);
+    let expected_path1 =
+        super::doogat_path(&expected_id1.0, loser1.type_name.as_deref(), loser1.folder);
+
+    // Second loser: no frontmatter block at all, so there is no id field for
+    // `rewrite_id_field` to rewrite. Confirmed to fail below before relying on
+    // it to trigger the abort.
+    let loser2_content = "Just a plain body with no frontmatter block at all.\n";
+    assert!(
+        crate::parser::rewrite_id_field(loser2_content, "20260301999999").is_err(),
+        "test setup invalid: rewrite_id_field must fail on frontmatter-less content"
+    );
+    let loser2_blob_oid = repo_b
+        .repo
+        .blob(loser2_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser2 = crate::types::CollisionLoser {
+        old_id: "20260301130000".to_string(),
+        old_path: "ddb/20260301130000.md".to_string(),
+        content: loser2_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: loser2_blob_oid,
+        theirs_won: true,
+    };
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let result = repo_b.commit_merge(
+        &[("ddb/note.md", "resolved")],
+        &[],
+        &[loser1, loser2],
+        "merge origin/master",
+        &theirs_oid,
+    );
+
+    assert!(
+        result.is_err(),
+        "commit_merge must fail atomically when one loser in the batch cannot be rewritten"
+    );
+
+    let head_after = repo_b.head_oid().unwrap();
+    assert_eq!(
+        head_after.0, head_before.0,
+        "HEAD must not move when the batch commit aborts"
+    );
+
+    assert_eq!(
+        repo_b.read_file("ddb/note.md").unwrap(),
+        "version B",
+        "the winner's resolved content must not land when the batch aborts"
+    );
+    assert!(
+        repo_b.read_file(&expected_path1).is_err(),
+        "the first loser must not land either — the commit is atomic"
+    );
+}
+
 /// Widens the loser-id occupancy check beyond the loser's own type/folder: an id
 /// already used by a file under a DIFFERENT type folder must still block the
 /// naive derivation and force an advance. Fails if the loser lands at the
