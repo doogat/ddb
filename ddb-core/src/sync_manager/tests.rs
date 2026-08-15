@@ -717,11 +717,16 @@ fn add_add_collision_resolves_in_single_commit() {
 
     assert_eq!(report.collisions_reassigned, 1);
 
+    // `sync()` always appends one more single-parent "update sync state" commit
+    // (via `finalize_sync` -> `update_sync_state`) after resolution, regardless
+    // of how resolution itself was committed - so the commit under test is
+    // HEAD's parent, not HEAD itself.
     let new_head = repo_b.head_oid().unwrap();
-    let merge_commit = repo_b
+    let head_commit = repo_b
         .repo
         .find_commit(git2::Oid::from_str(&new_head.0).unwrap())
         .unwrap();
+    let merge_commit = head_commit.parent(0).unwrap();
 
     assert_eq!(
         merge_commit.parent_count(),
