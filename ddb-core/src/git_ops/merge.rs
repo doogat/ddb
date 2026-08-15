@@ -70,7 +70,7 @@ impl GitRepo {
             }
 
             self.overlay_resolved_blobs(&mut merge_index, files, binary)?;
-            self.fold_losers_into_index(&mut merge_index, losers, &their_commit)?;
+            self.fold_losers_into_index(&mut merge_index, losers, &our_commit, &their_commit)?;
 
             // `write_tree_to` additionally refuses any not-fully-merged index — a
             // second backstop, though the equality guard above already guarantees the
@@ -127,6 +127,7 @@ impl GitRepo {
         &self,
         merge_index: &mut git2::Index,
         losers: &[crate::types::CollisionLoser],
+        our_commit: &git2::Commit,
         their_commit: &git2::Commit,
     ) -> Result<()> {
         for loser in losers {
@@ -165,9 +166,14 @@ impl GitRepo {
                 .unwrap_or(&loser.old_path);
             let new_path_no_ext = new_path.strip_suffix(".md").unwrap_or(&new_path);
 
+            let winner_commit = if loser.theirs_won {
+                their_commit
+            } else {
+                our_commit
+            };
             let rewritten_links = self.scan_and_rewrite_links_in_index(
                 merge_index,
-                their_commit,
+                winner_commit,
                 &loser.old_id,
                 old_path_no_ext,
                 &new_id.0,
@@ -187,14 +193,17 @@ impl GitRepo {
 
     /// Scan every `ddb/*.md` entry in `index` for inline references to `old_id`
     /// (frontmatter id, ID-form links, or path-form links), skipping any
-    /// reference that also appears in `their_commit`'s tree at the same path —
-    /// that reference belongs to the winner side, not the loser, so it must not
-    /// be rewritten. Does not write to `index`; returns `(path,
-    /// rewritten_content)` pairs for `fold_losers_into_index` to overlay.
+    /// reference that also appears in `winner_commit`'s tree at the same path —
+    /// that reference was written against the doogat that KEPT `old_id`, not the
+    /// loser, so it must not be rewritten. `winner_commit` is whichever side
+    /// `lww_pick` chose (`CollisionLoser::theirs_won`); since PRD 00166 ours can
+    /// win too, keying this on theirs would corrupt the winner's own backlinks.
+    /// Does not write to `index`; returns `(path, rewritten_content)` pairs for
+    /// `fold_losers_into_index` to overlay.
     fn scan_and_rewrite_links_in_index(
         &self,
         index: &git2::Index,
-        their_commit: &git2::Commit,
+        winner_commit: &git2::Commit,
         old_id: &str,
         old_path_no_ext: &str,
         new_id: &str,
@@ -214,17 +223,17 @@ impl GitRepo {
                 continue;
             }
 
-            let theirs_also_contains = match their_commit
+            let winner_also_contains = match winner_commit
                 .tree()?
                 .get_path(std::path::Path::new(&entry_path))
             {
-                Ok(their_entry) => {
-                    let their_blob = self.repo.find_blob(their_entry.id())?;
-                    String::from_utf8_lossy(their_blob.content()).contains(old_id)
+                Ok(winner_entry) => {
+                    let winner_blob = self.repo.find_blob(winner_entry.id())?;
+                    String::from_utf8_lossy(winner_blob.content()).contains(old_id)
                 }
                 Err(_) => false,
             };
-            if theirs_also_contains {
+            if winner_also_contains {
                 continue;
             }
 

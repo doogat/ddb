@@ -284,6 +284,11 @@ pub struct CollisionLoser {
     /// only routes conflicts with non-empty `ours` AND `theirs` here), so this
     /// is `unwrap_or_default()` at the one construction site, never a panic.
     pub losing_blob_oid: String,
+    /// Which side `lww_pick` chose: `true` when theirs won, `false` when ours
+    /// won. Since PRD 00166 either side can win, the loser's inbound-link
+    /// rewrite keys the winner's tree off this flag — theirs' tree when it is
+    /// `true`, ours' tree when it is `false`.
+    pub theirs_won: bool,
 }
 
 #[derive(Debug, Clone, Default)]

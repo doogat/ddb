@@ -173,6 +173,7 @@ fn resolve_add_add_collision(
         folder,
         type_name,
         losing_blob_oid,
+        theirs_won: theirs_wins,
     };
 
     (resolved, loser)

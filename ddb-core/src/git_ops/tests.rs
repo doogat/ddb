@@ -2090,6 +2090,7 @@ fn commit_merge_folds_single_loser_into_same_commit_as_winner() {
         folder: false,
         type_name: None,
         losing_blob_oid,
+        theirs_won: true,
     };
 
     let expected_id =
@@ -2167,6 +2168,7 @@ fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
         folder: false,
         type_name: None,
         losing_blob_oid: loser1_blob_oid,
+        theirs_won: true,
     };
 
     let loser2_content = "---\nid: 20260301130000\ntitle: Loser Two\n---\nLoser two body.\n";
@@ -2182,6 +2184,7 @@ fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
         folder: false,
         type_name: None,
         losing_blob_oid: loser2_blob_oid,
+        theirs_won: true,
     };
 
     let expected_id1 =
