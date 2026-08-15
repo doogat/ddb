@@ -1327,31 +1327,37 @@ fn make_linker(id: &str, title: &str) -> (String, String) {
 
 /// What one node ended up with after resolving and committing the collision.
 struct BacklinkOutcome {
-    /// Content kept at the contested path - lets a test verify which side its
-    /// setup actually made win instead of assuming it.
+    /// Content the resolver picked as the winner, before the merge commit.
     winner_content: String,
+    /// Content read back from `ddb/{CONTESTED_ID}.md` AFTER the merge commit -
+    /// the committed tree, not the resolver's return value.
+    committed_winner: String,
     /// The reassigned, content-derived ID the loser now lives under.
     loser_new_id: String,
-    /// Post-merge content of the linker that existed only on this node's side.
-    ours_linker: String,
-    /// Post-merge content of the linker that arrived only from the peer.
-    theirs_linker: String,
+    /// Post-merge content of each linker that existed only on this node's side,
+    /// in the order the caller supplied them.
+    ours_linkers: Vec<String>,
+    /// Post-merge content of each linker that arrived only from the peer, in the
+    /// order the caller supplied them.
+    theirs_linkers: Vec<String>,
 }
 
 /// Drive one add-add collision to a committed merge on a node whose own doogat
 /// is `ours_doc` and whose peer contributes `theirs_doc`, both at
-/// `ddb/{CONTESTED_ID}.md`. Each side also owns a doogat linking to
+/// `ddb/{CONTESTED_ID}.md`. Each side also owns one or more doogats linking to
 /// `CONTESTED_ID` (`(path, content)` pairs), so the caller can assert which
-/// backlinks the merge rewrote.
+/// backlinks the merge rewrote. IDs, titles and bodies are all caller-supplied:
+/// nothing about which side wins, or which files must move, is knowable from a
+/// literal baked into the fixture.
 ///
 /// Winner selection is the real `resolve_add_add_collision`, driven by the two
 /// HLCs, so callers control - and must verify - which side wins.
 fn resolve_collision_with_backlinks(
     ours_doc: &str,
-    ours_linker: (&str, &str),
+    ours_linkers: &[(String, String)],
     ours_hlc: crate::hlc::Hlc,
     theirs_doc: &str,
-    theirs_linker: (&str, &str),
+    theirs_linkers: &[(String, String)],
     theirs_hlc: crate::hlc::Hlc,
 ) -> BacklinkOutcome {
     let bare_dir = tempfile::TempDir::new().unwrap();
@@ -1370,19 +1376,23 @@ fn resolve_collision_with_backlinks(
 
     let contested_path = format!("ddb/{CONTESTED_ID}.md");
 
-    // Peer creates its doogat at the contested ID plus a doogat linking to it.
-    repo_peer
-        .commit_file(theirs_linker.0, theirs_linker.1, "peer adds linker")
-        .unwrap();
+    // Peer creates its doogat at the contested ID plus its doogats linking to it.
+    for (path, content) in theirs_linkers {
+        repo_peer
+            .commit_file(path, content, "peer adds linker")
+            .unwrap();
+    }
     repo_peer
         .commit_file(&contested_path, theirs_doc, "peer creates contested")
         .unwrap();
     repo_peer.push("origin", "master").unwrap();
 
-    // The node under test independently mints the same ID, with its own linker.
-    repo_ours
-        .commit_file(ours_linker.0, ours_linker.1, "node adds linker")
-        .unwrap();
+    // The node under test independently mints the same ID, with its own linkers.
+    for (path, content) in ours_linkers {
+        repo_ours
+            .commit_file(path, content, "node adds linker")
+            .unwrap();
+    }
     repo_ours
         .commit_file(&contested_path, ours_doc, "node creates contested")
         .unwrap();
@@ -1439,185 +1449,261 @@ fn resolve_collision_with_backlinks(
         .read_file(&loser_path)
         .expect("the loser must be reassigned to its content-derived path");
 
+    // Every read below comes from HEAD after the merge commit, i.e. the
+    // committed tree - never from the resolver's in-memory return value.
+    let read_back = |linkers: &[(String, String)]| -> Vec<String> {
+        linkers
+            .iter()
+            .map(|(path, _)| repo_ours.read_file(path).unwrap())
+            .collect()
+    };
     BacklinkOutcome {
         winner_content,
+        committed_winner: repo_ours
+            .read_file(&contested_path)
+            .expect("the winner must still occupy the contested path after the merge"),
         loser_new_id: new_id.0,
-        ours_linker: repo_ours.read_file(ours_linker.0).unwrap(),
-        theirs_linker: repo_ours.read_file(theirs_linker.0).unwrap(),
+        ours_linkers: read_back(ours_linkers),
+        theirs_linkers: read_back(theirs_linkers),
     }
 }
 
-/// OURS wins: the winner keeps the contested ID, so ours' backlink already
-/// points at the surviving doogat and must come out of the merge byte-for-byte
-/// unchanged. Fails if the loser-reassignment rewrite is scoped to "every file
-/// that did not come from theirs" instead of "every file that did not come
-/// from the WINNING side".
-#[test]
-fn ours_wins_keeps_ours_side_backlink_on_the_unchanged_winner_id() {
-    let ours_doc = make_contested_doc("From B", "B body");
-    let theirs_doc = make_contested_doc("From A", "A body");
-    let (ours_linker_path, ours_linker) = make_linker("20260202090000", "B Linker");
-    let (theirs_linker_path, theirs_linker) = make_linker("20260303090000", "A Linker");
-
-    let outcome = resolve_collision_with_backlinks(
-        &ours_doc,
-        (ours_linker_path.as_str(), ours_linker.as_str()),
-        make_hlc(2000, "nodeB"),
-        &theirs_doc,
-        (theirs_linker_path.as_str(), theirs_linker.as_str()),
-        make_hlc(1000, "nodeA"),
-    );
-
+/// The contested path must still hold the winner after the merge: the unchanged
+/// contested ID and the winner's body, byte-for-byte what the resolver picked.
+/// Doubles as the setup check - a test states the body it expects to win, so a
+/// setup that silently produced the other winner fails here instead of quietly
+/// asserting the wrong direction.
+fn assert_winner_kept_contested_id(outcome: &BacklinkOutcome, winner_body: &str) {
     assert!(
-        outcome.winner_content.contains("B body"),
-        "test setup invalid: the higher HLC must make OURS the winner, got winner content {:?}",
-        outcome.winner_content
+        outcome
+            .committed_winner
+            .contains(&format!("id: {CONTESTED_ID}")),
+        "the winner must still carry the contested ID at ddb/{CONTESTED_ID}.md, got {:?}",
+        outcome.committed_winner
+    );
+    assert!(
+        outcome.committed_winner.contains(winner_body),
+        "test setup invalid: the higher HLC must make the expected side win, so \
+         ddb/{CONTESTED_ID}.md should hold {winner_body:?}, got {:?}",
+        outcome.committed_winner
     );
     assert_eq!(
-        outcome.ours_linker, ours_linker,
-        "ours won, so ours' backlink points at the WINNER's unchanged ID and must \
-         survive untouched; it was repointed at the loser's new ID {}",
-        outcome.loser_new_id
+        outcome.committed_winner, outcome.winner_content,
+        "the committed tree must hold exactly the doogat the resolver picked; the \
+         loser reassignment must not touch the winner's own file"
     );
 }
 
-/// OURS wins: the peer's backlink was written against the doogat that lost, so
-/// it must follow that doogat to its new content-derived ID. Leaving it on
-/// `CONTESTED_ID` would silently re-aim it at a different doogat (the winner).
+/// Backlinks on the WINNING side already point at the ID the winner keeps, so
+/// every one of them must survive the merge byte-for-byte.
+fn assert_backlinks_untouched(
+    after: &[String],
+    before: &[(String, String)],
+    winning_side: &str,
+    loser_new_id: &str,
+) {
+    assert_eq!(after.len(), before.len(), "one result per linker");
+    for (got, (path, want)) in after.iter().zip(before) {
+        assert_eq!(
+            got, want,
+            "{winning_side} won, so {path} points at the WINNER's unchanged ID and must \
+             survive untouched; the merge repointed it (the loser's new ID is {loser_new_id})"
+        );
+    }
+}
+
+/// Backlinks on the LOSING side were written against the doogat that lost, so
+/// every one of them must follow it to its new ID - and nothing else in those
+/// files may change, which also rules out a rewrite that overwrites the wrong
+/// file or writes the same content everywhere.
+fn assert_backlinks_follow_loser(
+    after: &[String],
+    before: &[(String, String)],
+    losing_side: &str,
+    loser_new_id: &str,
+) {
+    assert_eq!(after.len(), before.len(), "one result per linker");
+    for (got, (path, before_content)) in after.iter().zip(before) {
+        let expected = before_content.replace(
+            &format!("[[{CONTESTED_ID}]]"),
+            &format!("[[{loser_new_id}]]"),
+        );
+        assert_eq!(
+            got, &expected,
+            "{losing_side} lost, so {path} must be repointed at the loser's new ID \
+             {loser_new_id} with the rest of the file untouched"
+        );
+    }
+}
+
+/// OURS wins: the winner keeps the contested ID, so EVERY ours-side backlink
+/// already points at the surviving doogat and must come out of the merge
+/// byte-for-byte unchanged. Fails if the loser-reassignment rewrite is scoped to
+/// "every file that did not come from theirs" instead of "every file that did
+/// not come from the WINNING side".
 #[test]
-fn ours_wins_rewrites_theirs_side_backlink_to_the_losers_new_id() {
-    let ours_doc = make_contested_doc("From B", "B body");
-    let theirs_doc = make_contested_doc("From A", "A body");
-    let (ours_linker_path, ours_linker) = make_linker("20260202090000", "B Linker");
-    let (theirs_linker_path, theirs_linker) = make_linker("20260303090000", "A Linker");
+fn ours_wins_keeps_every_ours_side_backlink_on_the_unchanged_winner_id() {
+    let ours_doc = make_contested_doc("Kite Draft", "kite body");
+    let theirs_doc = make_contested_doc("Heron Draft", "heron body");
+    let ours_linkers = vec![
+        make_linker("20260404110000", "Kite Index"),
+        make_linker("20260505120000", "Kite Journal"),
+    ];
+    let theirs_linkers = vec![
+        make_linker("20260606130000", "Heron Index"),
+        make_linker("20260707140000", "Heron Journal"),
+    ];
 
     let outcome = resolve_collision_with_backlinks(
         &ours_doc,
-        (ours_linker_path.as_str(), ours_linker.as_str()),
-        make_hlc(2000, "nodeB"),
+        &ours_linkers,
+        make_hlc(2000, "nodeKite"),
         &theirs_doc,
-        (theirs_linker_path.as_str(), theirs_linker.as_str()),
-        make_hlc(1000, "nodeA"),
+        &theirs_linkers,
+        make_hlc(1000, "nodeHeron"),
     );
 
-    assert!(
-        outcome.winner_content.contains("B body"),
-        "test setup invalid: the higher HLC must make OURS the winner, got winner content {:?}",
-        outcome.winner_content
+    assert_winner_kept_contested_id(&outcome, "kite body");
+    assert_backlinks_untouched(
+        &outcome.ours_linkers,
+        &ours_linkers,
+        "ours",
+        &outcome.loser_new_id,
     );
-    assert!(
-        outcome
-            .theirs_linker
-            .contains(&format!("[[{}]]", outcome.loser_new_id)),
-        "ours won, so theirs' backlink pointed at the LOSER and must be repointed at \
-         its new ID {}, got {:?}",
-        outcome.loser_new_id,
-        outcome.theirs_linker
+}
+
+/// OURS wins: the peer's backlinks were written against the doogat that lost, so
+/// EVERY one of them must follow that doogat to its new content-derived ID.
+/// Leaving any on `CONTESTED_ID` would silently re-aim it at a different doogat
+/// (the winner); rewriting only one of them strands the rest.
+#[test]
+fn ours_wins_rewrites_every_theirs_side_backlink_to_the_losers_new_id() {
+    let ours_doc = make_contested_doc("Willow Draft", "willow body");
+    let theirs_doc = make_contested_doc("Cedar Draft", "cedar body");
+    let ours_linkers = vec![
+        make_linker("20261111150000", "Willow Ledger"),
+        make_linker("20261212160000", "Willow Digest"),
+    ];
+    let theirs_linkers = vec![
+        make_linker("20260808170000", "Cedar Ledger"),
+        make_linker("20260909180000", "Cedar Digest"),
+    ];
+
+    let outcome = resolve_collision_with_backlinks(
+        &ours_doc,
+        &ours_linkers,
+        make_hlc(2000, "nodeWillow"),
+        &theirs_doc,
+        &theirs_linkers,
+        make_hlc(1000, "nodeCedar"),
     );
-    assert!(
-        !outcome
-            .theirs_linker
-            .contains(&format!("[[{CONTESTED_ID}]]")),
-        "theirs' backlink must not still point at the contested ID, which now belongs \
-         to the winner's doogat, got {:?}",
-        outcome.theirs_linker
+
+    assert_winner_kept_contested_id(&outcome, "willow body");
+    assert_backlinks_follow_loser(
+        &outcome.theirs_linkers,
+        &theirs_linkers,
+        "theirs",
+        &outcome.loser_new_id,
     );
 }
 
 /// THEIRS wins: the mirror image, pinned so a winner-scoped rewrite cannot
-/// silently invert it - the peer's backlink points at the winner and stays put,
-/// while ours' backlink follows the loser to its new ID.
+/// silently invert it - every peer backlink points at the winner and stays put,
+/// while every ours-side backlink follows the loser to its new ID.
 #[test]
-fn theirs_wins_keeps_theirs_side_backlink_and_rewrites_ours_side_backlink() {
-    let ours_doc = make_contested_doc("From B", "B body");
-    let theirs_doc = make_contested_doc("From A", "A body");
-    let (ours_linker_path, ours_linker) = make_linker("20260202090000", "B Linker");
-    let (theirs_linker_path, theirs_linker) = make_linker("20260303090000", "A Linker");
+fn theirs_wins_keeps_theirs_side_backlinks_and_rewrites_ours_side_backlinks() {
+    let ours_doc = make_contested_doc("Otter Draft", "otter body");
+    let theirs_doc = make_contested_doc("Badger Draft", "badger body");
+    let ours_linkers = vec![
+        make_linker("20250101010000", "Otter Atlas"),
+        make_linker("20250202020000", "Otter Ledger"),
+    ];
+    let theirs_linkers = vec![
+        make_linker("20250303030000", "Badger Atlas"),
+        make_linker("20250404040000", "Badger Ledger"),
+    ];
 
     let outcome = resolve_collision_with_backlinks(
         &ours_doc,
-        (ours_linker_path.as_str(), ours_linker.as_str()),
-        make_hlc(1000, "nodeB"),
+        &ours_linkers,
+        make_hlc(1000, "nodeOtter"),
         &theirs_doc,
-        (theirs_linker_path.as_str(), theirs_linker.as_str()),
-        make_hlc(2000, "nodeA"),
+        &theirs_linkers,
+        make_hlc(2000, "nodeBadger"),
     );
 
-    assert!(
-        outcome.winner_content.contains("A body"),
-        "test setup invalid: the higher HLC must make THEIRS the winner, got winner content {:?}",
-        outcome.winner_content
+    assert_winner_kept_contested_id(&outcome, "badger body");
+    assert_backlinks_untouched(
+        &outcome.theirs_linkers,
+        &theirs_linkers,
+        "theirs",
+        &outcome.loser_new_id,
     );
-    assert_eq!(
-        outcome.theirs_linker, theirs_linker,
-        "theirs won, so theirs' backlink points at the WINNER's unchanged ID and must \
-         survive untouched; it was repointed at the loser's new ID {}",
-        outcome.loser_new_id
-    );
-    assert!(
-        outcome
-            .ours_linker
-            .contains(&format!("[[{}]]", outcome.loser_new_id)),
-        "theirs won, so ours' backlink pointed at the LOSER and must be repointed at \
-         its new ID {}, got {:?}",
-        outcome.loser_new_id,
-        outcome.ours_linker
-    );
-    assert!(
-        !outcome.ours_linker.contains(&format!("[[{CONTESTED_ID}]]")),
-        "ours' backlink must not still point at the contested ID, which now belongs \
-         to the winner's doogat, got {:?}",
-        outcome.ours_linker
+    assert_backlinks_follow_loser(
+        &outcome.ours_linkers,
+        &ours_linkers,
+        "ours",
+        &outcome.loser_new_id,
     );
 }
 
 /// Two nodes resolve the SAME collision with the ours/theirs roles reversed
-/// (node B sees A's doogat arrive; node A sees B's). Each node's doogat and
-/// linker keep their identity across the swap, so both nodes must end up with
-/// the same link target in each linker - otherwise the two replicas disagree
-/// about which doogat a link points at.
+/// (node Bravo sees Alpha's doogat arrive; node Alpha sees Bravo's). Every
+/// doogat and linker keeps its identity across the swap, so both nodes must end
+/// up with the same link target in each linker - otherwise the two replicas
+/// disagree about which doogat a link points at.
 #[test]
 fn both_nodes_converge_on_the_same_backlink_targets_after_role_swap() {
-    let doc_a = make_contested_doc("From A", "A body");
-    let doc_b = make_contested_doc("From B", "B body");
-    let (linker_a_path, linker_a) = make_linker("20260303090000", "A Linker");
-    let (linker_b_path, linker_b) = make_linker("20260202090000", "B Linker");
+    let doc_alpha = make_contested_doc("Alpha Draft", "alpha body");
+    let doc_bravo = make_contested_doc("Bravo Draft", "bravo body");
+    let linkers_alpha = vec![
+        make_linker("20240505050000", "Alpha Roster"),
+        make_linker("20240606060000", "Alpha Digest"),
+    ];
+    let linkers_bravo = vec![
+        make_linker("20240707070000", "Bravo Roster"),
+        make_linker("20240808080000", "Bravo Digest"),
+    ];
 
-    // On node B: B's doogat is "ours", A's arrives as "theirs".
-    let on_b = resolve_collision_with_backlinks(
-        &doc_b,
-        (linker_b_path.as_str(), linker_b.as_str()),
-        make_hlc(1000, "nodeB"),
-        &doc_a,
-        (linker_a_path.as_str(), linker_a.as_str()),
-        make_hlc(2000, "nodeA"),
+    // On node Bravo: Bravo's doogat is "ours", Alpha's arrives as "theirs".
+    let on_bravo = resolve_collision_with_backlinks(
+        &doc_bravo,
+        &linkers_bravo,
+        make_hlc(1000, "nodeBravo"),
+        &doc_alpha,
+        &linkers_alpha,
+        make_hlc(2000, "nodeAlpha"),
     );
 
-    // On node A: the same collision, roles (and their HLCs) reversed.
-    let on_a = resolve_collision_with_backlinks(
-        &doc_a,
-        (linker_a_path.as_str(), linker_a.as_str()),
-        make_hlc(2000, "nodeA"),
-        &doc_b,
-        (linker_b_path.as_str(), linker_b.as_str()),
-        make_hlc(1000, "nodeB"),
+    // On node Alpha: the same collision, roles (and their HLCs) reversed.
+    let on_alpha = resolve_collision_with_backlinks(
+        &doc_alpha,
+        &linkers_alpha,
+        make_hlc(2000, "nodeAlpha"),
+        &doc_bravo,
+        &linkers_bravo,
+        make_hlc(1000, "nodeBravo"),
     );
 
+    // Alpha's HLC is the higher one on both nodes, so Alpha's doogat keeps the
+    // contested ID whichever side it arrives from.
+    assert_winner_kept_contested_id(&on_bravo, "alpha body");
+    assert_winner_kept_contested_id(&on_alpha, "alpha body");
     assert_eq!(
-        on_b.winner_content, on_a.winner_content,
+        on_bravo.committed_winner, on_alpha.committed_winner,
         "both nodes must keep the same doogat at the contested ID"
     );
     assert_eq!(
-        on_b.loser_new_id, on_a.loser_new_id,
+        on_bravo.loser_new_id, on_alpha.loser_new_id,
         "both nodes must mint the same new ID for the losing doogat"
     );
     assert_eq!(
-        on_b.ours_linker, on_a.theirs_linker,
-        "B's linker must end up pointing at the same doogat on both nodes"
+        on_bravo.ours_linkers, on_alpha.theirs_linkers,
+        "Bravo's linkers must end up pointing at the same doogat on both nodes"
     );
     assert_eq!(
-        on_b.theirs_linker, on_a.ours_linker,
-        "A's linker must end up pointing at the same doogat on both nodes"
+        on_bravo.theirs_linkers, on_alpha.ours_linkers,
+        "Alpha's linkers must end up pointing at the same doogat on both nodes"
     );
 }
 
