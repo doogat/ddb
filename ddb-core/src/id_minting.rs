@@ -5,10 +5,12 @@
 use std::collections::HashSet;
 
 use rusqlite::Connection;
+use sha2::Digest;
 
 use crate::error::{DoogatError, Result};
 use crate::parser;
 use crate::traits::DoogatSource;
+use crate::types::DoogatId;
 
 /// Build the shared existence oracle. A candidate ID is "taken" when a doogat
 /// with that stem exists anywhere under `ddb/` in the repo HEAD tree (root,
@@ -55,6 +57,33 @@ fn index_ids(conn: &Connection) -> Result<HashSet<String>> {
         .collect::<rusqlite::Result<HashSet<String>>>()
         .map_err(|e| DoogatError::SqlEngine(format!("id oracle: row: {e}")))?;
     Ok(ids)
+}
+
+/// Derive a deterministic 14-digit `DoogatId` from `(old_id, blob_oid)`. Two
+/// nodes resolving the identical collision compute the identical seed and the
+/// identical advance sequence on a taken candidate, so they agree on the
+/// loser's new ID with no coordination — content-addressed, not time-addressed,
+/// unlike `parser::generate_unique_id`. PRD 00167.
+///
+/// `exists` is caller-supplied so callers can check against whatever state is
+/// freshest for them (here: the in-memory merge-tree index being built, not a
+/// separately-queried oracle — see `git_ops::merge::fold_losers_into_index`).
+pub(crate) fn derive_content_id(
+    old_id: &str,
+    blob_oid: &str,
+    exists: impl Fn(&str) -> bool,
+) -> DoogatId {
+    let mut attempt: u64 = 0;
+    loop {
+        let seed = format!("{old_id}:{blob_oid}:{attempt}");
+        let digest = sha2::Sha256::digest(seed.as_bytes());
+        let n = u64::from_be_bytes(digest[0..8].try_into().unwrap());
+        let candidate = format!("{:014}", n % 100_000_000_000_000);
+        if !exists(&candidate) {
+            return DoogatId(candidate);
+        }
+        attempt += 1;
+    }
 }
 
 #[cfg(test)]
