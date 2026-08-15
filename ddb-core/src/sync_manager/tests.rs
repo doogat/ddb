@@ -1756,3 +1756,123 @@ fn both_nodes_converge_on_the_same_backlink_targets_after_role_swap() {
     );
 }
 
+/// Runs the same add-add collision through the real `SyncManager::sync` path in a
+/// freshly built pair of repos, with `a_pushes_first` controlling which node pushes
+/// first and therefore which node performs the resolution. Returns the sorted
+/// surviving doogat filenames from whichever node resolved the collision.
+fn resolve_collision_with_push_order(a_pushes_first: bool) -> Vec<String> {
+    let (dir_a, repo_a, dir_b, repo_b, _bare_dir) = setup_binary_sync_pair();
+
+    // Both create the same-ID doogat, same content, same commit order (A then B)
+    // in every call, regardless of which node pushes first.
+    let id = "20260101120000";
+    repo_a
+        .commit_file(
+            &format!("ddb/{id}.md"),
+            &format!("---\nid: {id}\ntitle: From A\n---\nA body\n"),
+            "A creates",
+        )
+        .unwrap();
+    // Force B's commit into a strictly later millisecond than A's. Without this,
+    // both commits can land in the same wall-clock millisecond, and `lww_pick`
+    // then falls through to the HLC counter/node tiebreak. `setup_binary_sync_pair`
+    // already puts A's clock ahead of B's inside that shared millisecond (its
+    // `Hlc::recv` bumps A's counter past B's during peer registration), so a
+    // same-millisecond tie picks A, while a millisecond boundary landing between
+    // these two commits picks B - the winner becomes a coin flip on scheduling
+    // jitter, and the two universes below can disagree. Sleeping past the
+    // millisecond boundary here guarantees B.wall_ms > A.wall_ms every time, so
+    // `lww_pick` always takes the wall-clock branch and never reaches the
+    // counter/node tiebreak, making the winner deterministic across universes.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    repo_b
+        .commit_file(
+            &format!("ddb/{id}.md"),
+            &format!("---\nid: {id}\ntitle: From B\n---\nB body\n"),
+            "B creates",
+        )
+        .unwrap();
+
+    let resolver_dir = if a_pushes_first {
+        repo_a.push("origin", "master").unwrap();
+        let db_b = dir_b.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+        let index_b = crate::indexer::Index::open(&db_b).unwrap();
+        let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+        let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+        assert_eq!(
+            report.collisions_reassigned, 1,
+            "A pushes first: B must reassign exactly one collision"
+        );
+        dir_b.path()
+    } else {
+        repo_b.push("origin", "master").unwrap();
+        let db_a = dir_a.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
+        let index_a = crate::indexer::Index::open(&db_a).unwrap();
+        let mut mgr_a = SyncManager::open(&repo_a).unwrap();
+        let report = mgr_a.sync("origin", "master", &index_a).unwrap();
+        assert_eq!(
+            report.collisions_reassigned, 1,
+            "B pushes first: A must reassign exactly one collision"
+        );
+        dir_a.path()
+    };
+
+    let mut files: Vec<String> = std::fs::read_dir(resolver_dir.join("ddb"))
+        .unwrap()
+        .filter_map(|e| {
+            let name = e.unwrap().file_name().to_string_lossy().to_string();
+            if name.ends_with(".md") && !name.starts_with('_') {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+    files.sort();
+
+    assert_eq!(
+        files.len(),
+        2,
+        "both doogats should survive (a_pushes_first={a_pushes_first}): {files:?}"
+    );
+
+    files
+}
+
+/// Resolving the SAME add-add collision in two independent universes that differ
+/// ONLY in which node pushes first (and therefore which node performs the
+/// resolution) must land on the same winner and the same reassigned loser ID. A
+/// wall-clock-minted loser ID would fail this (the two universes resolve at
+/// different instants), and a role-dependent winner rule like "theirs always
+/// wins" would also fail it, since the roles are swapped between universes.
+#[test]
+fn add_add_collision_resolution_is_independent_of_push_direction() {
+    let id = "20260101120000";
+
+    // Universe 1: A pushes first, B fetches and resolves.
+    let universe_1 = resolve_collision_with_push_order(true);
+    // Universe 2: freshly built repos, byte-identical content, same commit order -
+    // but B pushes first and A resolves.
+    let universe_2 = resolve_collision_with_push_order(false);
+
+    assert_eq!(
+        universe_1, universe_2,
+        "resolution must be independent of which node pushes first: universe 1 \
+         (A pushes first) produced {universe_1:?}, universe 2 (B pushes first) \
+         produced {universe_2:?}"
+    );
+
+    let winner_name = format!("{id}.md");
+    assert!(
+        universe_1.contains(&winner_name),
+        "the winner must keep the originally-colliding id: {universe_1:?}"
+    );
+    assert!(
+        universe_1.iter().any(|f| f != &winner_name),
+        "a real reassignment must have happened: the other filename must not equal \
+         the colliding id: {universe_1:?}"
+    );
+}
+
