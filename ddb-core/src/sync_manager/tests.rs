@@ -439,6 +439,61 @@ fn add_add_missing_or_equal_hlc_picks_higher_content_key() {
 }
 
 #[test]
+fn add_add_loser_blob_oid_role_swap_converges() {
+    // Two nodes independently observe the same collision with ours/theirs
+    // reversed. Both must derive the same losing_blob_oid, since that value
+    // feeds the new loser ID mint - if it diverged, the two nodes would mint
+    // different IDs for the same losing content.
+    let earlier = crate::hlc::Hlc {
+        wall_ms: 1000,
+        counter: 0,
+        node: "nodeA".into(),
+    };
+    let later = crate::hlc::Hlc {
+        wall_ms: 2000,
+        counter: 0,
+        node: "nodeB".into(),
+    };
+    let ours_oid = "oid-ours-swap";
+    let theirs_oid = "oid-theirs-swap";
+    let ours_body = "---\nid: 20260101120000\ntitle: Ours\n---\nOurs body\n";
+    let theirs_body = "---\nid: 20260101120000\ntitle: Theirs\n---\nTheirs body\n";
+
+    let conflict = ConflictFile {
+        path: "ddb/20260101120000.md".into(),
+        ancestor: None,
+        ours: ours_body.into(),
+        theirs: theirs_body.into(),
+        ours_hlc: Some(earlier.clone()),
+        theirs_hlc: Some(later.clone()),
+        ours_blob_oid: Some(ours_oid.into()),
+        theirs_blob_oid: Some(theirs_oid.into()),
+    };
+    let (_winner, loser) = resolve_add_add_collision(&conflict);
+
+    // Role-swapped: ours/theirs, their HLCs, and their blob OIDs all swapped
+    // together, mirroring lww_pick_role_swap_converges_on_same_content_key.
+    let conflict_swapped = ConflictFile {
+        path: "ddb/20260101120000.md".into(),
+        ancestor: None,
+        ours: theirs_body.into(),
+        theirs: ours_body.into(),
+        ours_hlc: Some(later),
+        theirs_hlc: Some(earlier),
+        ours_blob_oid: Some(theirs_oid.into()),
+        theirs_blob_oid: Some(ours_oid.into()),
+    };
+    let (_winner_swapped, loser_swapped) = resolve_add_add_collision(&conflict_swapped);
+
+    assert_eq!(
+        loser.losing_blob_oid, loser_swapped.losing_blob_oid,
+        "two nodes observing the same collision with ours/theirs swapped must \
+         derive the same losing_blob_oid, or they would mint different loser IDs \
+         for the same content"
+    );
+}
+
+#[test]
 fn add_add_loser_blob_oid_is_ours_when_theirs_wins() {
     let earlier = crate::hlc::Hlc {
         wall_ms: 1000,
