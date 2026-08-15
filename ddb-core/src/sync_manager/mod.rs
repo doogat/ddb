@@ -165,21 +165,17 @@ fn resolve_add_add_collision(
         fm_crdt_bytes: None,
     };
 
-    let losing_blob_oid = if theirs_wins {
-        conflict.ours_blob_oid.clone().ok_or_else(|| {
-            DoogatError::Sync(format!(
-                "add-add collision at {}: losing side (ours) has no recorded blob OID",
-                conflict.path
-            ))
-        })?
+    let (losing_oid, losing_side) = if theirs_wins {
+        (&conflict.ours_blob_oid, "ours")
     } else {
-        conflict.theirs_blob_oid.clone().ok_or_else(|| {
-            DoogatError::Sync(format!(
-                "add-add collision at {}: losing side (theirs) has no recorded blob OID",
-                conflict.path
-            ))
-        })?
+        (&conflict.theirs_blob_oid, "theirs")
     };
+    let losing_blob_oid = losing_oid.clone().ok_or_else(|| {
+        DoogatError::Sync(format!(
+            "add-add collision at {}: losing side ({losing_side}) has no recorded blob OID",
+            conflict.path
+        ))
+    })?;
 
     let loser = crate::types::CollisionLoser {
         old_id,
