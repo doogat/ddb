@@ -3135,12 +3135,31 @@ printf -- '---\nid: %s\ntitle: From B\ndate: 2026-01-01\n---\nBody B\n' "$COLL_I
 git add "ddb/${COLL_ID}.md"
 git commit -m "B creates $COLL_ID" >/dev/null 2>&1
 
-# B syncs — collision detected and resolved
+# B syncs — collision detected and resolved (single commit, atomic)
+COLL_B_HEAD_BEFORE=$(git rev-parse HEAD)
 COLL_OUT=$($DDB sync origin master)
 echo "$COLL_OUT" | grep -q "collisions reassigned: 1"
 COLL_COUNT=$(find ddb -name '*.md' ! -name '_*' | wc -l | tr -d ' ')
 [ "$COLL_COUNT" -eq 2 ]
+COLL_B_HEAD_AFTER=$(git rev-parse HEAD)
+# sync() always appends one more single-parent "update sync state" commit
+# (finalize_sync -> update_sync_state) after resolution, so the resolution
+# itself landing atomically means exactly 2 new commits here, not 1 — the
+# two-parent winner+loser merge commit, then the trailing state commit.
+COLL_COMMIT_COUNT=$(git rev-list --count "$COLL_B_HEAD_BEFORE".."$COLL_B_HEAD_AFTER" | tr -d ' ')
+[ "$COLL_COMMIT_COUNT" -eq 2 ]
 pass "add-add collision: both doogats survive"
+
+# 27a2. add-add collision: single commit + both nodes converge
+cd "$COLL_B"
+git push origin master >/dev/null 2>&1
+cd "$COLL_A"
+$DDB sync origin master >/dev/null
+COLL_A_FILES=$(find ddb -name '*.md' ! -name '_*' | sort)
+cd "$COLL_B"
+COLL_B_FILES=$(find ddb -name '*.md' ! -name '_*' | sort)
+[ "$COLL_A_FILES" = "$COLL_B_FILES" ]
+pass "add-add collision: single commit + both nodes converge"
 
 echo "=== bundle sync ==="
 
