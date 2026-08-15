@@ -2851,3 +2851,277 @@ fn commit_merge_leaves_non_utf8_linker_untouched_but_still_rewrites_valid_linker
         "valid-UTF-8 linker was not rewritten to the loser's new id: {rewritten:?}"
     );
 }
+
+/// Captures `tracing` output emitted on the current thread. `commit_merge`
+/// runs synchronously, so installing this as the thread-local default
+/// subscriber for the duration of the call (via `tracing::subscriber::with_default`)
+/// is enough to observe its logging without leaking into or being clobbered
+/// by other tests running in parallel.
+#[derive(Clone, Default)]
+struct CapturedLogs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+    type Writer = Self;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// A collision loser reassigned by `commit_merge` must leave a WARN-level
+/// audit trail carrying its old id, its new (derived) id, its old path, and
+/// its new path -- the only durable record of an identity change that would
+/// otherwise be discoverable only by diffing trees after the fact. Fails if
+/// no event is captured at all (nothing logged, or logged below WARN and so
+/// dropped by the WARN-level subscriber filter installed below), or if the
+/// captured text is missing any of the four values.
+#[test]
+fn commit_merge_logs_reassignment_warn_with_old_and_new_identity() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let loser_content = "---\nid: 20260301120000\ntitle: Loser Note\n---\nLoser body.\n";
+    let losing_blob_oid = repo_b
+        .repo
+        .blob(loser_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid,
+        theirs_won: true,
+    };
+
+    let expected_id =
+        crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |_| false);
+    let expected_path =
+        super::doogat_path(&expected_id.0, loser.type_name.as_deref(), loser.folder);
+    assert_ne!(
+        expected_id.0, loser.old_id,
+        "test setup invalid: the loser's derived id must differ from its old id, \
+         otherwise this test cannot tell a reassignment record from a no-op"
+    );
+
+    let old_id = loser.old_id.clone();
+    let old_path = loser.old_path.clone();
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let logs = CapturedLogs::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(logs.clone())
+        .with_max_level(tracing::Level::WARN)
+        .with_ansi(false)
+        .finish();
+    let merge_oid = tracing::subscriber::with_default(subscriber, || {
+        repo_b.commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser],
+            "merge origin/master",
+            &theirs_oid,
+        )
+    })
+    .unwrap();
+    let captured = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD: restoring the reassignment log \
+         must not come at the cost of the merge's single-commit atomicity"
+    );
+
+    assert!(
+        !captured.trim().is_empty(),
+        "expected a WARN-level reassignment event to be captured under a WARN-max-level \
+         subscriber; got no output at all, which means either nothing was logged or it \
+         was logged below WARN and filtered out"
+    );
+    assert!(
+        captured.contains(&old_id),
+        "reassignment log is missing the loser's OLD id: {captured:?}"
+    );
+    assert!(
+        captured.contains(&expected_id.0),
+        "reassignment log is missing the loser's NEW (derived) id: {captured:?}"
+    );
+    assert!(
+        captured.contains(&old_path),
+        "reassignment log is missing the loser's OLD path: {captured:?}"
+    );
+    assert!(
+        captured.contains(&expected_path),
+        "reassignment log is missing the loser's NEW path: {captured:?}"
+    );
+}
+
+/// Two collision losers folded into the SAME `commit_merge` call must each
+/// leave their OWN WARN-level reassignment record: both old/new id pairs and
+/// both old/new path pairs must appear in the captured output. Fails an
+/// implementation that logs only the first loser (or only the last), which
+/// would silently drop half the audit trail for a multi-loser merge.
+#[test]
+fn commit_merge_logs_distinct_reassignment_warn_per_loser() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+
+    let result = repo_b.merge_remote("origin", "master").unwrap();
+    let theirs_oid = match result {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+
+    let loser1_content = "---\nid: 20260301120000\ntitle: Loser One\n---\nLoser one body.\n";
+    let loser1_blob_oid = repo_b
+        .repo
+        .blob(loser1_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser1 = crate::types::CollisionLoser {
+        old_id: "20260301120000".to_string(),
+        old_path: "ddb/20260301120000.md".to_string(),
+        content: loser1_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: loser1_blob_oid,
+        theirs_won: true,
+    };
+
+    let loser2_content = "---\nid: 20260301130000\ntitle: Loser Two\n---\nLoser two body.\n";
+    let loser2_blob_oid = repo_b
+        .repo
+        .blob(loser2_content.as_bytes())
+        .unwrap()
+        .to_string();
+    let loser2 = crate::types::CollisionLoser {
+        old_id: "20260301130000".to_string(),
+        old_path: "ddb/20260301130000.md".to_string(),
+        content: loser2_content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: loser2_blob_oid,
+        theirs_won: true,
+    };
+
+    let expected_id1 =
+        crate::id_minting::derive_content_id(&loser1.old_id, &loser1.losing_blob_oid, |_| false);
+    let expected_path1 =
+        super::doogat_path(&expected_id1.0, loser1.type_name.as_deref(), loser1.folder);
+    let expected_id2 =
+        crate::id_minting::derive_content_id(&loser2.old_id, &loser2.losing_blob_oid, |_| false);
+    let expected_path2 =
+        super::doogat_path(&expected_id2.0, loser2.type_name.as_deref(), loser2.folder);
+
+    assert_ne!(
+        expected_id1.0, loser1.old_id,
+        "test setup invalid: loser1's derived id must differ from its old id"
+    );
+    assert_ne!(
+        expected_id2.0, loser2.old_id,
+        "test setup invalid: loser2's derived id must differ from its old id"
+    );
+    assert_ne!(
+        expected_id1.0, expected_id2.0,
+        "test setup invalid: the two losers must not derive the same new id"
+    );
+
+    let old_id1 = loser1.old_id.clone();
+    let old_path1 = loser1.old_path.clone();
+    let old_id2 = loser2.old_id.clone();
+    let old_path2 = loser2.old_path.clone();
+
+    let head_before = repo_b.head_oid().unwrap();
+
+    let logs = CapturedLogs::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(logs.clone())
+        .with_max_level(tracing::Level::WARN)
+        .with_ansi(false)
+        .finish();
+    let merge_oid = tracing::subscriber::with_default(subscriber, || {
+        repo_b.commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser1, loser2],
+            "merge origin/master",
+            &theirs_oid,
+        )
+    })
+    .unwrap();
+    let captured = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), merge_oid.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "expected exactly one new commit on HEAD for a multi-loser call: restoring \
+         the reassignment log must not come at the cost of the merge's single-commit \
+         atomicity"
+    );
+
+    assert!(
+        captured.contains(&old_id1) && captured.contains(&expected_id1.0),
+        "reassignment log is missing loser1's old id or its new (derived) id: {captured:?}"
+    );
+    assert!(
+        captured.contains(&old_path1) && captured.contains(&expected_path1),
+        "reassignment log is missing loser1's old path or its new path: {captured:?}"
+    );
+    assert!(
+        captured.contains(&old_id2) && captured.contains(&expected_id2.0),
+        "reassignment log is missing loser2's old id or its new (derived) id: {captured:?}"
+    );
+    assert!(
+        captured.contains(&old_path2) && captured.contains(&expected_path2),
+        "reassignment log is missing loser2's old path or its new path: {captured:?}"
+    );
+}
