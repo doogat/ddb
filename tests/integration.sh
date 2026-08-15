@@ -3146,7 +3146,9 @@ COLL_B_HEAD_AFTER=$(git rev-parse HEAD)
 # (finalize_sync -> update_sync_state) after resolution, so the resolution
 # itself landing atomically means exactly 2 new commits here, not 1 — the
 # two-parent winner+loser merge commit, then the trailing state commit.
-COLL_COMMIT_COUNT=$(git rev-list --count "$COLL_B_HEAD_BEFORE".."$COLL_B_HEAD_AFTER" | tr -d ' ')
+# --first-parent is required: a plain range also walks the merge's other
+# parent (the peer's fetched commits), which isn't part of this node's own chain.
+COLL_COMMIT_COUNT=$(git rev-list --first-parent --count "$COLL_B_HEAD_BEFORE".."$COLL_B_HEAD_AFTER" | tr -d ' ')
 [ "$COLL_COMMIT_COUNT" -eq 2 ]
 pass "add-add collision: both doogats survive"
 
