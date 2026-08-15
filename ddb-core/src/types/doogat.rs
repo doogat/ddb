@@ -269,6 +269,23 @@ pub struct ResolvedFile {
     pub fm_crdt_bytes: Option<Vec<u8>>,
 }
 
+/// Info stashed during collision resolution for loser reassignment, folded into
+/// the same merge commit as the winner (PRD 00167 — was two separate commits).
+#[derive(Debug, Clone)]
+pub struct CollisionLoser {
+    pub old_id: String,
+    pub old_path: String,
+    pub content: String,
+    pub folder: bool,
+    pub type_name: Option<String>,
+    /// Git blob OID of the losing side's content (`conflict.ours_blob_oid` or
+    /// `conflict.theirs_blob_oid`, whichever side `lww_pick` did not choose).
+    /// Add-add conflicts always populate both blob OIDs (`partition_conflicts`
+    /// only routes conflicts with non-empty `ours` AND `theirs` here), so this
+    /// is `unwrap_or_default()` at the one construction site, never a panic.
+    pub losing_blob_oid: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CompactOptions {
     pub force: bool,

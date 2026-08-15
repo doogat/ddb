@@ -90,15 +90,6 @@ fn write_fm_crdt_files(
     Ok(())
 }
 
-/// Info stashed during collision resolution for post-merge loser reassignment.
-struct CollisionLoser {
-    old_id: String,
-    old_path: String,
-    content: String,
-    folder: bool,
-    type_name: Option<String>,
-}
-
 /// Partition conflicts into four buckets: binary references, delete-vs-edit,
 /// add-add collisions, and normal (content) conflicts.
 fn partition_conflicts(
@@ -131,7 +122,7 @@ fn partition_conflicts(
 /// wins; on a missing or equal HLC the higher content key wins (PRD 00166).
 fn resolve_add_add_collision(
     conflict: &ConflictFile,
-) -> (crate::types::ResolvedFile, CollisionLoser) {
+) -> (crate::types::ResolvedFile, crate::types::CollisionLoser) {
     let theirs_wins = matches!(
         lww_pick(
             conflict.ours_hlc.as_ref(),
@@ -169,12 +160,19 @@ fn resolve_add_add_collision(
         fm_crdt_bytes: None,
     };
 
-    let loser = CollisionLoser {
+    let losing_blob_oid = if theirs_wins {
+        conflict.ours_blob_oid.clone().unwrap_or_default()
+    } else {
+        conflict.theirs_blob_oid.clone().unwrap_or_default()
+    };
+
+    let loser = crate::types::CollisionLoser {
         old_id,
         old_path: conflict.path.clone(),
         content: loser_content,
         folder,
         type_name,
+        losing_blob_oid,
     };
 
     (resolved, loser)
@@ -314,7 +312,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         let (binary_ref, delete_edit, add_add, normal) = partition_conflicts(conflicts);
 
         let mut resolved = Self::resolve_delete_edit_conflicts(&delete_edit);
-        let mut collision_losers: Vec<CollisionLoser> = Vec::new();
+        let mut collision_losers: Vec<crate::types::CollisionLoser> = Vec::new();
 
         report.resurrected = delete_edit.len();
         if report.resurrected > 0 {
@@ -675,7 +673,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     /// After the merge commit, reassign IDs for collision losers and rewrite links.
     fn reassign_collision_losers(
         &self,
-        losers: Vec<CollisionLoser>,
+        losers: Vec<crate::types::CollisionLoser>,
         theirs_oid: &CommitHash,
     ) -> Result<usize> {
         let mut count = 0;
@@ -687,7 +685,11 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
     }
 
     /// Generate a new ID for one collision loser, rewrite links, and commit.
-    fn reassign_single_loser(&self, loser: &CollisionLoser, theirs_oid: &CommitHash) -> Result<()> {
+    fn reassign_single_loser(
+        &self,
+        loser: &crate::types::CollisionLoser,
+        theirs_oid: &CommitHash,
+    ) -> Result<()> {
         let winner_id = loser.old_id.clone();
         let loser_type = loser.type_name.as_deref();
         let loser_folder = loser.folder;
