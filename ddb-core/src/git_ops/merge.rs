@@ -120,9 +120,9 @@ impl GitRepo {
     /// Fold each collision loser's reassigned content (new deterministic ID,
     /// rewritten frontmatter, rewritten inbound links) into `merge_index`, inside
     /// the same merge commit as the winner. Losers are processed sequentially so
-    /// each loser's `exists` closure sees every prior loser's already-overlaid
-    /// path — this is what makes two losers in the same call land at distinct
-    /// paths even if their computed candidates are close together.
+    /// each loser's id derivation sees every prior loser's already-taken id —
+    /// this is what makes two losers in the same call land at distinct paths
+    /// even if their computed candidates are close together.
     fn fold_losers_into_index(
         &self,
         merge_index: &mut git2::Index,
@@ -130,15 +130,28 @@ impl GitRepo {
         our_commit: &git2::Commit,
         their_commit: &git2::Commit,
     ) -> Result<()> {
-        // Snapshot every doogat id already present anywhere under `ddb/` -- other
-        // type folders and `ddb/_typedef/` included, neither of which
-        // `doogat_path` can even address -- once, up front. An id is taken
-        // repo-wide, not just at the loser's own flat/type-folder path. Kept
-        // current as each loser lands (mirrors `id_minting::existence_oracle`'s
-        // snapshot-then-answer idiom, but against the in-memory merge tree
-        // instead of HEAD) so a later loser in the same batch still sees an
-        // earlier loser's just-assigned id as taken.
-        let mut taken_ids: std::collections::HashSet<String> = merge_index
+        let mut taken_ids = Self::collect_taken_ids(merge_index);
+        for loser in losers {
+            let winner_commit = if loser.theirs_won {
+                their_commit
+            } else {
+                our_commit
+            };
+            self.fold_one_loser(merge_index, loser, winner_commit, &mut taken_ids)?;
+        }
+        Ok(())
+    }
+
+    /// Snapshot every doogat id already present anywhere under `ddb/` -- other
+    /// type folders and `ddb/_typedef/` included, neither of which
+    /// `doogat_path` can even address -- once, up front. An id is taken
+    /// repo-wide, not just at the loser's own flat/type-folder path. Kept
+    /// current as each loser lands (mirrors `id_minting::existence_oracle`'s
+    /// snapshot-then-answer idiom, but against the in-memory merge tree
+    /// instead of HEAD) so a later loser in the same batch still sees an
+    /// earlier loser's just-assigned id as taken.
+    fn collect_taken_ids(merge_index: &git2::Index) -> std::collections::HashSet<String> {
+        merge_index
             .iter()
             .filter_map(|entry| {
                 let path = String::from_utf8(entry.path.clone()).ok()?;
@@ -147,56 +160,59 @@ impl GitRepo {
                 }
                 crate::parser::extract_id_from_path(&path)
             })
-            .collect();
+            .collect()
+    }
 
-        for loser in losers {
-            let type_name = loser.type_name.as_deref();
-            let folder = loser.folder;
-            let exists = |candidate: &str| -> bool { taken_ids.contains(candidate) };
-            let new_id = crate::id_minting::derive_content_id(
-                &loser.old_id,
-                &loser.losing_blob_oid,
-                exists,
-            );
-            taken_ids.insert(new_id.0.clone());
-            let new_content = crate::parser::rewrite_id_field(&loser.content, &new_id.0)?;
-            let new_path = crate::git_ops::doogat_path(&new_id.0, type_name, folder);
+    /// Fold one collision loser's reassigned content (new deterministic ID,
+    /// rewritten frontmatter, rewritten inbound links) into `merge_index`.
+    /// `taken_ids` is threaded through by mutable reference and updated with
+    /// the newly derived id before returning, so the next loser processed in
+    /// the same `fold_losers_into_index` call sees it as taken.
+    fn fold_one_loser(
+        &self,
+        merge_index: &mut git2::Index,
+        loser: &crate::types::CollisionLoser,
+        winner_commit: &git2::Commit,
+        taken_ids: &mut std::collections::HashSet<String>,
+    ) -> Result<()> {
+        let type_name = loser.type_name.as_deref();
+        let folder = loser.folder;
+        let exists = |candidate: &str| -> bool { taken_ids.contains(candidate) };
+        let new_id =
+            crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, exists);
+        taken_ids.insert(new_id.0.clone());
+        let new_content = crate::parser::rewrite_id_field(&loser.content, &new_id.0)?;
+        let new_path = crate::git_ops::doogat_path(&new_id.0, type_name, folder);
 
-            tracing::warn!(
-                old_id = %loser.old_id,
-                new_id = %new_id.0,
-                old_path = %loser.old_path,
-                new_path = %new_path,
-                "collision resolved: doogat ID reassigned"
-            );
+        tracing::warn!(
+            old_id = %loser.old_id,
+            new_id = %new_id.0,
+            old_path = %loser.old_path,
+            new_path = %new_path,
+            "collision resolved: doogat ID reassigned"
+        );
 
-            let old_path_no_ext = loser
-                .old_path
-                .strip_suffix(".md")
-                .unwrap_or(&loser.old_path);
-            let new_path_no_ext = new_path.strip_suffix(".md").unwrap_or(&new_path);
+        let old_path_no_ext = loser
+            .old_path
+            .strip_suffix(".md")
+            .unwrap_or(&loser.old_path);
+        let new_path_no_ext = new_path.strip_suffix(".md").unwrap_or(&new_path);
 
-            let winner_commit = if loser.theirs_won {
-                their_commit
-            } else {
-                our_commit
-            };
-            let rewritten_links = self.scan_and_rewrite_links_in_index(
-                merge_index,
-                winner_commit,
-                &loser.old_id,
-                old_path_no_ext,
-                &new_id.0,
-                new_path_no_ext,
-            )?;
+        let rewritten_links = self.scan_and_rewrite_links_in_index(
+            merge_index,
+            winner_commit,
+            &loser.old_id,
+            old_path_no_ext,
+            &new_id.0,
+            new_path_no_ext,
+        )?;
 
-            let oid = self.repo.blob(new_content.as_bytes())?;
-            Self::resolve_index_entry(merge_index, &new_path, oid)?;
+        let oid = self.repo.blob(new_content.as_bytes())?;
+        Self::resolve_index_entry(merge_index, &new_path, oid)?;
 
-            for (path, content) in rewritten_links {
-                let oid = self.repo.blob(content.as_bytes())?;
-                Self::resolve_index_entry(merge_index, &path, oid)?;
-            }
+        for (path, content) in rewritten_links {
+            let oid = self.repo.blob(content.as_bytes())?;
+            Self::resolve_index_entry(merge_index, &path, oid)?;
         }
         Ok(())
     }
