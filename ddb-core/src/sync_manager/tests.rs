@@ -660,6 +660,86 @@ fn add_add_full_sync_both_survive() {
     assert_eq!(sorted_a, sorted_b, "nodes should converge");
 }
 
+#[test]
+fn add_add_collision_resolves_in_single_commit() {
+    // Same same-ID collision setup as `add_add_full_sync_both_survive`, but this
+    // test asserts on the git commit shape of the resolution rather than file
+    // survival: winner + reassigned loser must land in exactly one two-parent
+    // merge commit built directly on B's pre-sync HEAD (no intermediate
+    // "reassign" commit between "before sync" and the final merge commit).
+    let bare_dir = tempfile::TempDir::new().unwrap();
+    git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+    let (_dir_a, repo_a) = temp_repo();
+    repo_a
+        .add_remote("origin", bare_dir.path().to_str().unwrap())
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    register_node(&repo_a, "A").unwrap();
+    repo_a.push("origin", "master").unwrap();
+
+    let dir_b = tempfile::TempDir::new().unwrap();
+    git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
+    let repo_b = GitRepo::open(dir_b.path()).unwrap();
+    register_node(&repo_b, "B").unwrap();
+    repo_b.push("origin", "master").unwrap();
+
+    // Sync A to get B's node
+    repo_a.fetch("origin", "master").unwrap();
+    repo_a.merge_remote("origin", "master").unwrap();
+
+    // Both create the same-ID doogat
+    let id = "20260101120000";
+    repo_a
+        .commit_file(
+            &format!("ddb/{id}.md"),
+            &format!("---\nid: {id}\ntitle: From A\n---\nA body\n"),
+            "A creates",
+        )
+        .unwrap();
+    repo_b
+        .commit_file(
+            &format!("ddb/{id}.md"),
+            &format!("---\nid: {id}\ntitle: From B\n---\nB body\n"),
+            "B creates",
+        )
+        .unwrap();
+
+    // A pushes, then capture B's HEAD immediately before B syncs.
+    repo_a.push("origin", "master").unwrap();
+    let pre_sync_head = repo_b.head_oid().unwrap();
+
+    let db_b = dir_b.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+    let index_b = crate::indexer::Index::open(&db_b).unwrap();
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    assert_eq!(report.collisions_reassigned, 1);
+
+    let new_head = repo_b.head_oid().unwrap();
+    let merge_commit = repo_b
+        .repo
+        .find_commit(git2::Oid::from_str(&new_head.0).unwrap())
+        .unwrap();
+
+    assert_eq!(
+        merge_commit.parent_count(),
+        2,
+        "collision resolution must land in a single two-parent merge commit"
+    );
+
+    let pre_sync_oid = git2::Oid::from_str(&pre_sync_head.0).unwrap();
+    let parent_oids: Vec<git2::Oid> = (0..merge_commit.parent_count())
+        .map(|i| merge_commit.parent_id(i).unwrap())
+        .collect();
+    assert!(
+        parent_oids.contains(&pre_sync_oid),
+        "one parent of the merge commit must be exactly B's pre-sync HEAD, proving \
+         no intermediate commit was created between 'before sync' and the final merge commit"
+    );
+}
+
 /// Helper: set up two repos (A, B) with a shared bare remote, both registered
 /// as sync nodes. Returns (dir_a, repo_a, dir_b, repo_b, bare_dir).
 fn setup_binary_sync_pair() -> (
