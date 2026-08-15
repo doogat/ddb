@@ -162,6 +162,14 @@ impl GitRepo {
             let new_content = crate::parser::rewrite_id_field(&loser.content, &new_id.0)?;
             let new_path = crate::git_ops::doogat_path(&new_id.0, type_name, folder);
 
+            tracing::warn!(
+                old_id = %loser.old_id,
+                new_id = %new_id.0,
+                old_path = %loser.old_path,
+                new_path = %new_path,
+                "collision resolved: doogat ID reassigned"
+            );
+
             let old_path_no_ext = loser
                 .old_path
                 .strip_suffix(".md")
