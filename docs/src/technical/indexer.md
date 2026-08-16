@@ -36,7 +36,7 @@ The `fields` column (4th FTS5 column) contains space-joined frontmatter extra va
 
 The `_ddb_boost` table stores `max(search_boost)` per type, derived from typedef column definitions during materialization. When a search is filtered to a single type that has boosted columns, the FTS5 `bm25()` weight for the `fields` column is set to that type's max boost value (e.g. `bm25(_ddb_fts, 1.0, 1.0, 1.0, 2.0)` for a type with `search_boost: 2.0`). Unfiltered searches and types without boosts use a weight of 1.0.
 
-**Auto-upgrade**: on open, the indexer detects old 3-column FTS5 schemas (missing `fields`) or missing `_ddb_boost` table. When detected, all tables are dropped and recreated from the current schema. FTS5 virtual tables cannot be ALTERed, so a full drop/recreate is required.
+**Schema versioning**: `PRAGMA user_version` stores `Index::SCHEMA_VERSION` and is checked on every open. A database stamped with a different non-zero version is dropped and recreated from the current schema. Version `0` means the database is unstamped, so it falls back to the legacy probe for the FTS5 `fields` column; this preserves the previous upgrade behavior for existing indexes. FTS5 virtual tables cannot be altered, so an upgrade requires a full drop/recreate. This decision logic lives in `schema_version.rs`.
 
 WAL journal mode is enabled for better concurrent read performance.
 
@@ -112,12 +112,26 @@ currently produces two warnings because de-duplication between those stages has
 not yet been implemented. An unreadable file, including invalid UTF-8, produces
 one warning: the consistency scan encounters the read error and continues
 without adding a second malformed-YAML warning.
+The summarized verb-envelope `AppWarning` deduplicates genuine skips by path, so a single double-reported file no longer renders a misleading `(+1 more)` suffix.
+
+Frontmatter is capped at 256 KiB at the parse boundary. Oversized frontmatter is rejected before YAML parsing and follows the same lenient malformed-file skip path.
 
 ### incremental_reindex
 
-`incremental_reindex(repo: &impl DoogatSource, old_head: &str) -> Result<RebuildReport>`
+```rust
+pub fn incremental_reindex(
+    &self,
+    repo: &impl DoogatSource,
+    old_head: &str,
+    strict: bool,
+) -> Result<crate::types::RebuildReport>
+```
 
 Diffs `old_head` against the current HEAD and processes only changed files. Added or modified doogats are re-indexed; deleted doogats are removed. Falls back to full `rebuild` if the diff fails (e.g. old HEAD unreachable after gc).
+
+By default, an unreadable or malformed file in the change-set is collected as a `ConsistencyWarning` and skipped while the remaining files continue to index, so one bad file no longer aborts the batch. Passing `strict: true` to this method restores the old fail-fast behavior, while the production implicit/background path always passes `false`. The user-facing `DoogatService::reindex_strict()` and `ddb reindex --strict` provide the same fail-fast policy through the strict full-rebuild path (`locked_explicit_rebuild` → `rebuild_strict`), rather than by calling `incremental_reindex` with `true`.
+
+If a modified file becomes unreadable or malformed, the lenient path evicts its previously indexed data after collecting the warning: the base row, satellite rows, FTS row, and materialized type-table row are removed rather than retained as stale content. The strict path returns before this poison-file eviction.
 
 When multiple files are changed (2+), uses `batch_index()` (single transaction) instead of per-doogat `index_doogat()` for better throughput.
 
