@@ -1236,4 +1236,103 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn bundle_merge_error_preserves_conflict_variant_and_message() {
+        let result =
+            bundle_merge_error(DoogatError::Conflict("retry after lock timeout".to_string()));
+        match result {
+            DoogatError::Conflict(msg) => assert_eq!(msg, "retry after lock timeout"),
+            other => panic!("a Conflict input must pass through unchanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bundle_merge_error_wraps_non_conflict_variants_as_sync_with_prefix() {
+        let cases: Vec<(DoogatError, &str)> = vec![
+            (
+                DoogatError::NotFound("refs/remotes/bundle/master".to_string()),
+                "refs/remotes/bundle/master",
+            ),
+            (
+                DoogatError::Git("failed to fetch objects".to_string()),
+                "failed to fetch objects",
+            ),
+            (
+                DoogatError::Validation("bad frontmatter".to_string()),
+                "bad frontmatter",
+            ),
+        ];
+
+        for (input, original_text) in cases {
+            let message = match bundle_merge_error(input) {
+                DoogatError::Sync(msg) => msg,
+                other => panic!("non-Conflict errors must be wrapped as Sync, got {other:?}"),
+            };
+            assert!(
+                message.starts_with("bundle merge failed: "),
+                "message must start with the exact prefix, got: {message}"
+            );
+            assert!(
+                message.contains(original_text),
+                "original error text must be preserved, got: {message}"
+            );
+        }
+    }
+
+    /// Reproduces the live failure: a bundle exported from a `main`-branch
+    /// repo carries `refs/heads/main` but no `refs/heads/master`, so the
+    /// merge engine's lookup of `refs/remotes/bundle/master` fails with
+    /// `NotFound`. That raw variant must not escape `import_bundle` -- it
+    /// must surface as the documented `Sync` contract.
+    #[test]
+    fn bundle_import_from_main_branch_repo_reports_sync_not_raw_not_found() {
+        let (dir1, repo1) = temp_repo();
+        repo1
+            .commit_file(
+                "ddb/20260301000000.md",
+                "---\nid: 20260301000000\ntitle: test\n---\nBody\n",
+                "add",
+            )
+            .unwrap();
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+
+        // Rehome the history onto `main`, then drop `master` entirely.
+        let head = repo1.repo.head().unwrap().peel_to_commit().unwrap();
+        repo1.repo.branch("main", &head, false).unwrap();
+        repo1.repo.set_head("refs/heads/main").unwrap();
+        let mut master = repo1
+            .repo
+            .find_branch("master", git2::BranchType::Local)
+            .unwrap();
+        master.delete().unwrap();
+
+        let bundle_path = dir1.path().join("main-branch.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        // A freshly-initialised repo merges `bundle/master`, which this
+        // bundle never provides.
+        let (dir2, repo2) = temp_repo();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let result = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path);
+        assert!(
+            !matches!(result, Err(DoogatError::NotFound(_))),
+            "a merge-engine failure must not escape as a raw NotFound, got {result:?}"
+        );
+        let err = result.expect_err("importing a bundle with no master branch must fail");
+        assert!(
+            matches!(err, DoogatError::Sync(_)),
+            "the merge-engine failure must surface as Sync, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("bundle merge failed"),
+            "the Sync message must contain the mapping prefix, got: {err}"
+        );
+    }
 }
