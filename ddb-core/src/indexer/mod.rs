@@ -4,6 +4,7 @@ pub(crate) mod materialize;
 mod ports;
 mod rebuild;
 mod resolve;
+mod schema_version;
 mod search;
 
 use std::path::{Path, PathBuf};
@@ -165,22 +166,7 @@ impl Index {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
 
-        // Detect a schema needing upgrade. A `user_version` of 0 means
-        // unstamped (every index created before this change) — defer to the
-        // legacy FTS-column-text probe so existing on-disk indexes upgrade
-        // exactly as before. A non-zero value that isn't SCHEMA_VERSION means
-        // this DB was stamped by a different schema shape and must be
-        // dropped unconditionally, without consulting the legacy probe.
-        let read_needs_drop = |conn: &Connection| -> Result<bool> {
-            let stamped: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            Ok(if stamped == 0 {
-                Self::needs_schema_upgrade(conn)
-            } else {
-                stamped != Self::SCHEMA_VERSION
-            })
-        };
-
-        let mut needs_drop = read_needs_drop(&conn)?;
+        let needs_drop = schema_version::needs_drop(&conn)?;
 
         // FTS5 virtual tables cannot be ALTERed, so an upgrade drops all
         // tables and recreates them from the current SCHEMA_DDL. Serialize
@@ -195,14 +181,7 @@ impl Index {
         // this one had just recreated. `locked_rebuild` holds its guard across
         // the whole rebuild for the same reason.
         let _guard = if needs_drop {
-            match &db_dir {
-                Some(dir) => Some(write_lock::acquire(
-                    dir,
-                    REBUILD_LOCK_FILE_NAME,
-                    REBUILD_LOCK_TIMEOUT,
-                )?),
-                None => None,
-            }
+            Self::acquire_rebuild_lock(&db_dir)?
         } else {
             // Nothing destructive to do: never take the lock, so opening an
             // up-to-date index does not serialize against a live rebuild.
@@ -210,29 +189,7 @@ impl Index {
         };
 
         if needs_drop {
-            // Another process may have finished the upgrade while we waited.
-            // Without this, the loser drops and recreates tables the winner
-            // has already rebuilt — and if the winner has started indexing
-            // into them, the loser's drop destroys that work.
-            needs_drop = read_needs_drop(&conn)?;
-
-            if needs_drop {
-                tracing::info!("index schema outdated, dropping tables for upgrade");
-                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-                let mut stmt = conn.prepare(
-                    "SELECT name FROM sqlite_master \
-                     WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'",
-                )?;
-                let tables: Vec<String> = stmt
-                    .query_map([], |row| row.get(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                drop(stmt);
-                for table in &tables {
-                    conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{table}\""))?;
-                }
-                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-            }
+            schema_version::drop_tables_if_still_outdated(&conn)?;
         }
 
         conn.execute_batch(Self::SCHEMA_DDL)?;
@@ -242,29 +199,23 @@ impl Index {
         Ok(Self { conn, db_dir })
     }
 
-    /// Check whether the existing schema needs upgrading (e.g. old 3-column
-    /// FTS5 table missing `fields`, or missing `_ddb_boost` table).
-    fn needs_schema_upgrade(conn: &Connection) -> bool {
-        let fts_exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master \
-                 WHERE type='table' AND name='_ddb_fts'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-        if !fts_exists {
-            return false; // fresh DB, SCHEMA_DDL will create everything
+    /// Take the cross-process rebuild lock beside the index file, or `None`
+    /// when there is no directory to lock (in-memory indexes share nothing).
+    ///
+    /// The guard unlocks on drop, so every caller MUST bind it to a named
+    /// variable that lives to the end of the destructive section. `let _ =
+    /// Self::acquire_rebuild_lock(..)` releases the lock immediately.
+    fn acquire_rebuild_lock(
+        db_dir: &Option<PathBuf>,
+    ) -> Result<Option<write_lock::WriteLockGuard>> {
+        match db_dir {
+            Some(dir) => Ok(Some(write_lock::acquire(
+                dir,
+                REBUILD_LOCK_FILE_NAME,
+                REBUILD_LOCK_TIMEOUT,
+            )?)),
+            None => Ok(None),
         }
-        // Check FTS5 column list via sqlite_master DDL for the `fields` column
-        let sql: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='_ddb_fts'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or_default();
-        !sql.contains("fields")
     }
 
     /// Drop every table (internal + materialized) so the schema can be

@@ -2,7 +2,6 @@ use rayon::prelude::*;
 use rusqlite::params;
 
 use crate::error::Result;
-use crate::git_ops::write_lock;
 use crate::traits::DoogatSource;
 use crate::types::ParsedDoogat;
 
@@ -211,76 +210,63 @@ impl Index {
             let contents = repo.read_files_batch(paths)?;
             let mut parsed = Vec::with_capacity(contents.len());
             let mut warnings = Vec::new();
-            for (path, content_result) in contents {
-                let content = match content_result {
-                    Ok(content) => content,
-                    Err(e) => {
-                        if strict {
-                            return Err(e);
-                        }
-                        tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping unreadable file");
-                        warnings.push(crate::types::ConsistencyWarning::UnreadableFile {
-                            path,
-                            error: e.to_string(),
-                        });
-                        continue;
-                    }
-                };
-                match crate::parser::parse(&content, &path) {
-                    Ok(doogat) => parsed.push(doogat),
-                    Err(e) => {
-                        if strict {
-                            return Err(e);
-                        }
-                        tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping malformed file");
-                        warnings.push(crate::types::ConsistencyWarning::MalformedYaml {
-                            path,
-                            error: e.to_string(),
-                        });
-                    }
-                }
+            for (path, content) in contents {
+                let doogat = Self::parse_changed_path(&path, content, strict, &mut warnings)?;
+                parsed.extend(doogat);
             }
             let count = self.batch_index(&parsed)?;
             Ok((count, parsed, warnings))
         } else if let Some(path) = paths.first() {
-            let content = match repo.read_file(path) {
-                Ok(content) => content,
-                Err(e) => {
-                    if strict {
-                        return Err(e);
-                    }
-                    tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping unreadable file");
-                    return Ok((
-                        0,
-                        Vec::new(),
-                        vec![crate::types::ConsistencyWarning::UnreadableFile {
-                            path: path.clone(),
-                            error: e.to_string(),
-                        }],
-                    ));
+            let mut warnings = Vec::new();
+            let content = repo.read_file(path);
+            match Self::parse_changed_path(path, content, strict, &mut warnings)? {
+                Some(parsed) => {
+                    self.index_doogat(&parsed)?;
+                    Ok((1, vec![parsed], Vec::new()))
                 }
-            };
-            let parsed = match crate::parser::parse(&content, path) {
-                Ok(doogat) => doogat,
-                Err(e) => {
-                    if strict {
-                        return Err(e);
-                    }
-                    tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping malformed file");
-                    return Ok((
-                        0,
-                        Vec::new(),
-                        vec![crate::types::ConsistencyWarning::MalformedYaml {
-                            path: path.clone(),
-                            error: e.to_string(),
-                        }],
-                    ));
-                }
-            };
-            self.index_doogat(&parsed)?;
-            Ok((1, vec![parsed], Vec::new()))
+                None => Ok((0, Vec::new(), warnings)),
+            }
         } else {
             Ok((0, Vec::new(), Vec::new()))
+        }
+    }
+
+    /// Decide what one changed path contributes: a parsed doogat, or nothing
+    /// plus a warning pushed onto `warnings`. `strict: true` propagates the
+    /// read/parse error instead of warning.
+    fn parse_changed_path(
+        path: &str,
+        content: Result<String>,
+        strict: bool,
+        warnings: &mut Vec<crate::types::ConsistencyWarning>,
+    ) -> Result<Option<ParsedDoogat>> {
+        let content = match content {
+            Ok(content) => content,
+            Err(e) => {
+                if strict {
+                    return Err(e);
+                }
+                tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping unreadable file");
+                warnings.push(crate::types::ConsistencyWarning::UnreadableFile {
+                    path: path.to_string(),
+                    error: e.to_string(),
+                });
+                return Ok(None);
+            }
+        };
+        match crate::parser::parse(&content, path) {
+            Ok(doogat) => Ok(Some(doogat)),
+            Err(e) => {
+                if strict {
+                    return Err(e);
+                }
+                tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping malformed file");
+                warnings.push(crate::types::ConsistencyWarning::MalformedYaml {
+                    path: path.to_string(),
+                    error: e.to_string(),
+                });
+                Ok(None)
+            }
         }
     }
 
@@ -553,14 +539,7 @@ impl Index {
         &self,
         repo: &impl DoogatSource,
     ) -> Result<crate::types::RebuildReport> {
-        let _guard = match &self.db_dir {
-            Some(dir) => Some(write_lock::acquire(
-                dir,
-                super::REBUILD_LOCK_FILE_NAME,
-                super::REBUILD_LOCK_TIMEOUT,
-            )?),
-            None => None,
-        };
+        let _guard = Self::acquire_rebuild_lock(&self.db_dir)?;
         if self.check_integrity()? && !self.is_stale(repo)? {
             return Ok(crate::types::RebuildReport::default());
         }
@@ -577,14 +556,7 @@ impl Index {
         repo: &impl DoogatSource,
         strict: bool,
     ) -> Result<crate::types::RebuildReport> {
-        let _guard = match &self.db_dir {
-            Some(dir) => Some(write_lock::acquire(
-                dir,
-                super::REBUILD_LOCK_FILE_NAME,
-                super::REBUILD_LOCK_TIMEOUT,
-            )?),
-            None => None,
-        };
+        let _guard = Self::acquire_rebuild_lock(&self.db_dir)?;
         if strict {
             self.rebuild_strict(repo)
         } else {
