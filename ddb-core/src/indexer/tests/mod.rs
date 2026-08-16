@@ -6085,6 +6085,50 @@ fn doogat_title(idx: &Index, id: &str) -> String {
         .unwrap()
 }
 
+/// Every satellite table that hangs off a doogat. Eviction has to empty all of
+/// them: leaving one populated keeps the doogat reachable through joins after
+/// the index has declared the file unreadable.
+const SATELLITE_TABLES: [&str; 5] = [
+    "_ddb_tags",
+    "_ddb_fields",
+    "_ddb_links",
+    "_ddb_aliases",
+    "_ddb_checkboxes",
+];
+
+/// Rows a doogat still owns in one satellite table. `_ddb_links` names its
+/// owning column `source_id`; the rest use `doogat_id`.
+fn count_satellite_rows(idx: &Index, table: &str, id: &str) -> i64 {
+    let owner = if table == "_ddb_links" {
+        "source_id"
+    } else {
+        "doogat_id"
+    };
+    idx.conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM \"{table}\" WHERE \"{owner}\" = ?1"),
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+/// Rows left in the full-text index carrying `title`.
+///
+/// `_ddb_fts` is keyed by the `doogats` rowid, so once the `doogats` row is
+/// deleted the FTS row is orphaned and can only be observed by its content —
+/// which is exactly the state that keeps `ddb search` serving pre-edit text
+/// for a file the index has declared unreadable.
+fn count_fts_rows_titled(idx: &Index, title: &str) -> i64 {
+    idx.conn
+        .query_row(
+            "SELECT COUNT(*) FROM _ddb_fts WHERE title = ?1",
+            rusqlite::params![title],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
 #[test]
 fn incremental_reindex_evicts_rows_for_a_doogat_modified_into_malformed_yaml() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -6096,12 +6140,25 @@ fn incremental_reindex_evicts_rows_for_a_doogat_modified_into_malformed_yaml() {
         "add a",
     )
     .unwrap();
-    repo.commit_file(
-        "ddb/20290102000000.md",
-        "---\nid: 20290102000000\ntitle: B\n---\nBody B.",
-        "add b",
-    )
-    .unwrap();
+    // B carries something in every satellite table plus a title no other row
+    // in this repo shares, so a partial eviction that misses one table — or
+    // leaves the orphaned FTS row behind — is observable.
+    let b_content = "\
+---
+id: 20290102000000
+title: Quixotic Beacon B
+tags:
+  - beacon/poison
+aliases:
+  - Beacon Alias
+beacon_field: kept
+---
+- [ ] beacon task
+
+See [[beacon-target]] for details.
+";
+    repo.commit_file("ddb/20290102000000.md", b_content, "add b")
+        .unwrap();
     repo.commit_file(
         "ddb/20290103000000.md",
         "---\nid: 20290103000000\ntitle: C\n---\nBody C.",
@@ -6115,13 +6172,25 @@ fn incremental_reindex_evicts_rows_for_a_doogat_modified_into_malformed_yaml() {
     assert_eq!(idx.rebuild(&repo).unwrap().indexed, 3);
     let old_head = idx.stored_head_oid().unwrap();
 
-    // Without this pre-assert the eviction assertion below could pass against
-    // an index that never held B's row in the first place.
+    // Without these pre-asserts the eviction assertions below could pass
+    // against an index that never held B's rows in the first place.
     assert_eq!(
         count_doogat_rows(&idx, "20290102000000"),
         1,
         "B must be indexed before it is poisoned, or the eviction assertion cannot fail"
     );
+    assert_eq!(
+        count_fts_rows_titled(&idx, "Quixotic Beacon B"),
+        1,
+        "B must be searchable before it is poisoned, or the FTS assertion cannot fail"
+    );
+    for table in SATELLITE_TABLES {
+        assert!(
+            count_satellite_rows(&idx, table, "20290102000000") > 0,
+            "B must own rows in {table} before it is poisoned, \
+             or the eviction assertion for that table cannot fail"
+        );
+    }
 
     // One commit modifies all three: A and C stay well-formed, B turns into
     // malformed YAML.
@@ -6147,6 +6216,23 @@ fn incremental_reindex_evicts_rows_for_a_doogat_modified_into_malformed_yaml() {
         "a doogat modified into malformed YAML must have its pre-edit rows evicted, \
          not left behind while the stored HEAD advances"
     );
+
+    // Eviction has to be COMPLETE. A surviving FTS row keeps `ddb search`
+    // answering with the pre-edit title and body of a file the index has
+    // already declared unreadable — the exact stale read this rule prevents.
+    assert_eq!(
+        count_fts_rows_titled(&idx, "Quixotic Beacon B"),
+        0,
+        "the poisoned doogat must leave no full-text row behind, \
+         or search still returns its pre-edit content"
+    );
+    for table in SATELLITE_TABLES {
+        assert_eq!(
+            count_satellite_rows(&idx, table, "20290102000000"),
+            0,
+            "the poisoned doogat must leave no row behind in {table}"
+        );
+    }
 
     // The batch must not be aborted, and the surviving rows must carry the
     // NEW content — an implementation that evicts the whole change-set, or
@@ -6224,10 +6310,28 @@ Widget
     repo.commit_file("ddb/20290202000000.md", data_content, "add item")
         .unwrap();
 
+    // A sibling of the SAME type, left untouched by the poisoning commit. With
+    // only one row in `items`, "delete the poisoned row" and "empty the whole
+    // table" are indistinguishable.
+    let sibling_content = "\
+---
+id: 20290203000000
+title: Gadget
+type: items
+count: 7
+---
+
+## name
+
+Gadget
+";
+    repo.commit_file("ddb/20290203000000.md", sibling_content, "add sibling item")
+        .unwrap();
+
     let db_path = dir.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
     let idx = Index::open(&db_path).unwrap();
-    assert_eq!(idx.rebuild(&repo).unwrap().indexed, 2);
+    assert_eq!(idx.rebuild(&repo).unwrap().indexed, 3);
     let old_head = idx.stored_head_oid().unwrap();
 
     assert_eq!(
@@ -6235,6 +6339,11 @@ Widget
         1,
         "the typed doogat must be materialized before it is poisoned, \
          or the eviction assertion cannot fail"
+    );
+    assert_eq!(
+        count_type_table_rows(&idx, "items", "20290203000000"),
+        1,
+        "the sibling must be materialized too, or its survival cannot be checked"
     );
 
     repo.commit_file(
@@ -6256,6 +6365,18 @@ Widget
         count_doogat_rows(&idx, "20290202000000"),
         0,
         "the poisoned typed doogat must also lose its row in doogats"
+    );
+    // Eviction is scoped to the poisoned doogat. Emptying the type table is a
+    // failure, not a pass.
+    assert_eq!(
+        count_type_table_rows(&idx, "items", "20290203000000"),
+        1,
+        "an untouched sibling row in the same type table must survive the eviction"
+    );
+    assert_eq!(
+        count_doogat_rows(&idx, "20290203000000"),
+        1,
+        "the untouched sibling must also keep its row in doogats"
     );
     assert_eq!(
         count_doogat_rows(&idx, "20290201000000"),
@@ -6426,5 +6547,31 @@ fn incremental_reindex_strict_returns_err_for_a_change_set_with_a_poisoned_file(
     assert!(
         result.is_err(),
         "strict mode must fail the reindex on a poison file instead of skipping it"
+    );
+
+    // Returning Err is only half the contract: the abort must leave the index
+    // exactly as it was. An implementation that evicts (or re-indexes) first
+    // and errors afterwards has already damaged a previously-good index by the
+    // time the caller sees the failure. The full-rebuild path defends against
+    // this same ordering hazard; the incremental path must too.
+    assert_eq!(
+        count_doogat_rows(&idx, "20290501000000"),
+        1,
+        "a strict abort must not evict the poisoned doogat's previously-indexed row"
+    );
+    assert_eq!(
+        doogat_title(&idx, "20290501000000"),
+        "A",
+        "the poisoned doogat's row must still carry its ORIGINAL pre-edit title after a strict abort"
+    );
+    assert_eq!(
+        doogat_title(&idx, "20290502000000"),
+        "B",
+        "the good file in the same change-set must not have been re-indexed by an aborted strict run"
+    );
+    assert_eq!(
+        idx.stored_head_oid().as_deref(),
+        Some(old_head.as_str()),
+        "a strict abort must leave the stored HEAD at old_head"
     );
 }
