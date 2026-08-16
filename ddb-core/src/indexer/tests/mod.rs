@@ -6032,3 +6032,399 @@ fn rebuild_strict_reports_err_naming_the_over_cap_frontmatter_path() {
         "strict rebuild error must name the offending path, got: {err}"
     );
 }
+
+// -- a file modified into a poison file loses its stale rows --
+//
+// Every assertion below reads `idx.conn` directly. Reading back through a
+// CLI/GraphQL/service path would call `ensure_fresh`, which reindexes before
+// answering and would repair the very staleness under test, so those
+// assertions could never fail.
+
+/// The SET of paths named by a report's warnings. Asserting on the set rather
+/// than the count keeps these tests from binding how many times one bad path
+/// gets reported.
+fn warned_paths(warnings: &[crate::types::ConsistencyWarning]) -> std::collections::BTreeSet<&str> {
+    warnings
+        .iter()
+        .map(|w| match w {
+            crate::types::ConsistencyWarning::MalformedYaml { path, .. }
+            | crate::types::ConsistencyWarning::UnreadableFile { path, .. }
+            | crate::types::ConsistencyWarning::CrossZoneDuplicate { path, .. }
+            | crate::types::ConsistencyWarning::MissingRequired { path, .. } => path.as_str(),
+        })
+        .collect()
+}
+
+fn count_doogat_rows(idx: &Index, id: &str) -> i64 {
+    idx.conn
+        .query_row(
+            "SELECT COUNT(*) FROM doogats WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn count_type_table_rows(idx: &Index, table: &str, id: &str) -> i64 {
+    idx.conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM \"{table}\" WHERE id = ?1"),
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn doogat_title(idx: &Index, id: &str) -> String {
+    idx.conn
+        .query_row(
+            "SELECT title FROM doogats WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn incremental_reindex_evicts_rows_for_a_doogat_modified_into_malformed_yaml() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20290101000000.md",
+        "---\nid: 20290101000000\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20290102000000.md",
+        "---\nid: 20290102000000\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20290103000000.md",
+        "---\nid: 20290103000000\ntitle: C\n---\nBody C.",
+        "add c",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    assert_eq!(idx.rebuild(&repo).unwrap().indexed, 3);
+    let old_head = idx.stored_head_oid().unwrap();
+
+    // Without this pre-assert the eviction assertion below could pass against
+    // an index that never held B's row in the first place.
+    assert_eq!(
+        count_doogat_rows(&idx, "20290102000000"),
+        1,
+        "B must be indexed before it is poisoned, or the eviction assertion cannot fail"
+    );
+
+    // One commit modifies all three: A and C stay well-formed, B turns into
+    // malformed YAML.
+    let modifications: Vec<(&str, &str)> = vec![
+        (
+            "ddb/20290101000000.md",
+            "---\nid: 20290101000000\ntitle: Modified A\n---\nUpdated body A.",
+        ),
+        ("ddb/20290102000000.md", "---\n: invalid yaml [\n---\nbody"),
+        (
+            "ddb/20290103000000.md",
+            "---\nid: 20290103000000\ntitle: Modified C\n---\nUpdated body C.",
+        ),
+    ];
+    repo.commit_files(&modifications, "modify 3, poison 1")
+        .unwrap();
+
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
+
+    assert_eq!(
+        count_doogat_rows(&idx, "20290102000000"),
+        0,
+        "a doogat modified into malformed YAML must have its pre-edit rows evicted, \
+         not left behind while the stored HEAD advances"
+    );
+
+    // The batch must not be aborted, and the surviving rows must carry the
+    // NEW content — an implementation that evicts the whole change-set, or
+    // one that skips indexing after a poison file, fails here.
+    assert_eq!(
+        report.indexed, 2,
+        "both well-formed files in the change-set must still be indexed"
+    );
+    assert_eq!(
+        doogat_title(&idx, "20290101000000"),
+        "Modified A",
+        "A's row must reflect its post-edit content"
+    );
+    assert_eq!(
+        doogat_title(&idx, "20290103000000"),
+        "Modified C",
+        "C's row must reflect its post-edit content"
+    );
+
+    // Eviction is in ADDITION to the warning, not instead of it.
+    assert_eq!(
+        warned_paths(&report.warnings),
+        std::collections::BTreeSet::from(["ddb/20290102000000.md"]),
+        "the skip warning must name the poison file and no other path, got {:?}",
+        report.warnings
+    );
+    assert!(
+        report.warnings.iter().any(|w| matches!(
+            w,
+            crate::types::ConsistencyWarning::MalformedYaml { path, .. }
+            if path == "ddb/20290102000000.md"
+        )),
+        "eviction must not replace the MalformedYaml warning for the poison file, got {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn incremental_reindex_evicts_materialized_type_rows_for_a_poisoned_typed_doogat() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    let typedef_content = "\
+---
+id: 20290201000000
+title: items
+type: _typedef
+columns:
+  - name: name
+    data_type: TEXT
+    zone: body
+  - name: count
+    data_type: INTEGER
+    zone: frontmatter
+---\n";
+    repo.commit_file(
+        "ddb/_typedef/20290201000000.md",
+        typedef_content,
+        "add typedef",
+    )
+    .unwrap();
+
+    let data_content = "\
+---
+id: 20290202000000
+title: Widget
+type: items
+count: 42
+---
+
+## name
+
+Widget
+";
+    repo.commit_file("ddb/20290202000000.md", data_content, "add item")
+        .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    assert_eq!(idx.rebuild(&repo).unwrap().indexed, 2);
+    let old_head = idx.stored_head_oid().unwrap();
+
+    assert_eq!(
+        count_type_table_rows(&idx, "items", "20290202000000"),
+        1,
+        "the typed doogat must be materialized before it is poisoned, \
+         or the eviction assertion cannot fail"
+    );
+
+    repo.commit_file(
+        "ddb/20290202000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "poison the item",
+    )
+    .unwrap();
+
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
+
+    assert_eq!(
+        count_type_table_rows(&idx, "items", "20290202000000"),
+        0,
+        "a typed doogat modified into malformed YAML must lose its materialized \
+         type-table row, not keep serving pre-edit column values"
+    );
+    assert_eq!(
+        count_doogat_rows(&idx, "20290202000000"),
+        0,
+        "the poisoned typed doogat must also lose its row in doogats"
+    );
+    assert_eq!(
+        count_doogat_rows(&idx, "20290201000000"),
+        1,
+        "the untouched typedef must survive the eviction"
+    );
+    assert_eq!(
+        warned_paths(&report.warnings),
+        std::collections::BTreeSet::from(["ddb/20290202000000.md"]),
+        "the skip warning must still be reported for the poisoned typed doogat, got {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn incremental_reindex_evicts_rows_for_a_doogat_modified_into_unreadable_bytes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20290301000000.md",
+        "---\nid: 20290301000000\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20290302000000.md",
+        "---\nid: 20290302000000\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    assert_eq!(idx.rebuild(&repo).unwrap().indexed, 2);
+    let old_head = idx.stored_head_oid().unwrap();
+
+    assert_eq!(
+        count_doogat_rows(&idx, "20290302000000"),
+        1,
+        "B must be indexed before it is poisoned, or the eviction assertion cannot fail"
+    );
+
+    commit_file_bytes(
+        &repo,
+        "ddb/20290302000000.md",
+        &[0xFF, 0xFE, 0xFD],
+        "poison b with invalid utf-8",
+    );
+
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
+
+    assert_eq!(
+        count_doogat_rows(&idx, "20290302000000"),
+        0,
+        "a doogat modified into unreadable bytes must have its pre-edit rows evicted"
+    );
+    assert_eq!(
+        count_doogat_rows(&idx, "20290301000000"),
+        1,
+        "a doogat outside the change-set must keep its rows"
+    );
+    assert_eq!(
+        warned_paths(&report.warnings),
+        std::collections::BTreeSet::from(["ddb/20290302000000.md"]),
+        "the skip warning must name the unreadable file and no other path, got {:?}",
+        report.warnings
+    );
+    assert!(
+        report.warnings.iter().any(|w| matches!(
+            w,
+            crate::types::ConsistencyWarning::UnreadableFile { path, .. }
+            if path == "ddb/20290302000000.md"
+        )),
+        "eviction must not replace the UnreadableFile warning, got {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn incremental_reindex_skips_a_newly_added_malformed_file_without_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20290401000000.md",
+        "---\nid: 20290401000000\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    assert_eq!(idx.rebuild(&repo).unwrap().indexed, 1);
+    let old_head = idx.stored_head_oid().unwrap();
+
+    // Added, never indexed before: there is nothing to evict.
+    repo.commit_file(
+        "ddb/20290402000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add a malformed doogat",
+    )
+    .unwrap();
+
+    let report = idx
+        .incremental_reindex(&repo, &old_head, false)
+        .expect("a newly added malformed file must be skipped, not turned into an error");
+
+    assert_eq!(
+        report.indexed, 0,
+        "the malformed addition is the only change, so nothing can be indexed"
+    );
+    assert_eq!(
+        count_doogat_rows(&idx, "20290402000000"),
+        0,
+        "a never-indexed malformed file must have no row"
+    );
+    assert_eq!(
+        count_doogat_rows(&idx, "20290401000000"),
+        1,
+        "evicting nothing must not disturb the already-indexed doogat"
+    );
+    assert_eq!(
+        warned_paths(&report.warnings),
+        std::collections::BTreeSet::from(["ddb/20290402000000.md"]),
+        "the newly added malformed file must still be warned about, got {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn incremental_reindex_strict_returns_err_for_a_change_set_with_a_poisoned_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20290501000000.md",
+        "---\nid: 20290501000000\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20290502000000.md",
+        "---\nid: 20290502000000\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    assert_eq!(idx.rebuild(&repo).unwrap().indexed, 2);
+    let old_head = idx.stored_head_oid().unwrap();
+
+    let modifications: Vec<(&str, &str)> = vec![
+        ("ddb/20290501000000.md", "---\n: invalid yaml [\n---\nbody"),
+        (
+            "ddb/20290502000000.md",
+            "---\nid: 20290502000000\ntitle: Modified B\n---\nUpdated body B.",
+        ),
+    ];
+    repo.commit_files(&modifications, "modify 2, poison 1")
+        .unwrap();
+
+    let result = idx.incremental_reindex(&repo, &old_head, true);
+    assert!(
+        result.is_err(),
+        "strict mode must fail the reindex on a poison file instead of skipping it"
+    );
+}
