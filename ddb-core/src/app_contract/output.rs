@@ -199,6 +199,11 @@ mod tests {
             "message must not point at the unshipped `ddb doctor` command, got: {}",
             app_warning.message
         );
+        assert!(
+            app_warning.message.contains("ddb reindex"),
+            "a message carrying a count suffix must point at the real, shipped `ddb reindex` command, got: {}",
+            app_warning.message
+        );
     }
 
     #[test]
@@ -272,6 +277,11 @@ mod tests {
         assert!(
             !app_warning.message.contains("ddb doctor"),
             "message must not point at the unshipped `ddb doctor` command, got: {}",
+            app_warning.message
+        );
+        assert!(
+            app_warning.message.contains("ddb reindex"),
+            "a message carrying a count suffix must point at the real, shipped `ddb reindex` command, got: {}",
             app_warning.message
         );
     }
