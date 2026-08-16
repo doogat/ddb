@@ -4658,3 +4658,616 @@ fn batch_index_changes_single_malformed_file_strict_mode_returns_err() {
         "strict mode must fail on a single malformed file"
     );
 }
+
+// ── cross-process serialization of the destructive full rebuild ──
+
+/// A `DoogatSource` that delegates to a real `GitRepo` but parks inside
+/// `list_doogats` on its FIRST call until the test releases it.
+///
+/// `Index::rebuild` calls `list_doogats` AFTER `drop_all_tables()` +
+/// `SCHEMA_DDL`, so a parked call means the rebuild is sitting inside the
+/// destructive section right now. That is what lets these tests assert on
+/// CONTENTION — no second party can take the lock while a rebuild is mid-flight
+/// — instead of on elapsed time or a lock file's existence. Both of those are
+/// forgeable by an implementation that serializes nothing: a `sleep` fakes the
+/// timing and a `File::create` fakes the file.
+struct ParkingSource {
+    inner: GitRepo,
+    entered: std::sync::mpsc::Sender<()>,
+    resume: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    parked_once: std::sync::atomic::AtomicBool,
+}
+
+impl ParkingSource {
+    /// Returns the source, the `entered` receiver (signalled once the rebuild
+    /// is inside the destructive section) and the `resume` sender (which lets
+    /// the rebuild finish).
+    fn new(
+        inner: GitRepo,
+    ) -> (
+        Self,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        (
+            Self {
+                inner,
+                entered: entered_tx,
+                resume: std::sync::Mutex::new(Some(resume_rx)),
+                parked_once: std::sync::atomic::AtomicBool::new(false),
+            },
+            entered_rx,
+            resume_tx,
+        )
+    }
+}
+
+impl DoogatSource for ParkingSource {
+    fn list_doogats(&self) -> Result<Vec<String>> {
+        if !self
+            .parked_once
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            // First call only. Later calls (the rebuild's consistency pass)
+            // run straight through, so the rebuild completes once resumed.
+            let resume = self
+                .resume
+                .lock()
+                .unwrap()
+                .take()
+                .expect("the resume channel is taken exactly once");
+            self.entered.send(()).unwrap();
+            resume.recv().unwrap();
+        }
+        self.inner.list_doogats()
+    }
+
+    fn read_file(&self, path: &str) -> Result<String> {
+        self.inner.read_file(path)
+    }
+
+    fn head_oid(&self) -> Result<crate::types::CommitHash> {
+        self.inner.head_oid()
+    }
+
+    fn diff_paths(
+        &self,
+        old_oid: &str,
+        new_oid: &str,
+    ) -> Result<Vec<(crate::types::DiffKind, String)>> {
+        self.inner.diff_paths(old_oid, new_oid)
+    }
+}
+
+/// Run `idx.rebuild_if_stale(&repo)` on a worker thread, block until it parks
+/// inside the destructive section, run `probe` while it is stuck there, then
+/// let it finish. Returns the index (so the caller can query the resulting
+/// rows) and the call's own result.
+fn probe_rebuild_mid_flight<P: FnOnce()>(
+    idx: Index,
+    repo: GitRepo,
+    probe: P,
+) -> (Index, Result<Option<crate::types::RebuildReport>>) {
+    let (source, entered, resume) = ParkingSource::new(repo);
+    let worker = std::thread::spawn(move || {
+        let result = idx.rebuild_if_stale(&source);
+        (idx, result)
+    });
+
+    entered.recv().expect(
+        "the rebuild never reached list_doogats — it returned before entering the \
+         destructive section, so there was nothing to probe",
+    );
+    probe();
+    resume.send(()).expect("the parked rebuild vanished");
+    worker.join().unwrap()
+}
+
+/// Try to take `<dir>/ddb-rebuild.lock` without waiting: `Err` means someone
+/// else owns it at this instant, `Ok` means it is free. `write_lock::acquire`
+/// checks `start.elapsed() >= timeout` on contention, so a zero timeout answers
+/// immediately instead of blocking.
+fn try_take_rebuild_lock(dir: &Path) -> Result<crate::git_ops::write_lock::WriteLockGuard> {
+    crate::git_ops::write_lock::acquire(
+        dir,
+        "ddb-rebuild.lock",
+        std::time::Duration::from_millis(0),
+    )
+}
+
+#[test]
+fn rebuild_if_stale_waits_for_a_held_rebuild_lock_before_rebuilding() {
+    // N cold-start processes each decide the index is stale and run the
+    // destructive `rebuild` (drop_all_tables + recreate). Unserialized, one
+    // drops the tables while another queries and the loser sees
+    // "no such table: _ddb_fts". Every implicit path to the destructive
+    // rebuild must therefore hold <index-dir>/ddb-rebuild.lock.
+    //
+    // Discriminator: while the rebuild is provably parked inside the
+    // destructive section, a second party must NOT be able to take that lock.
+    // This is the invariant itself, not a proxy for it — an implementation that
+    // only sleeps, or that takes the guard with `let _ = acquire(..)` (dropped
+    // at the end of the statement, before the destructive work), lets the probe
+    // succeed and fails here.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260401000000.md",
+        "---\nid: 20260401000000\ntitle: Contended\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let db_dir = dir.path().join(".ddb");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    // Fresh index: no stored HEAD, so rebuild_if_stale takes the destructive
+    // full-rebuild branch rather than an incremental reindex.
+    let idx = Index::open(&db_dir.join("index.db")).unwrap();
+
+    let probe_dir = db_dir.clone();
+    let (idx, result) = probe_rebuild_mid_flight(idx, repo, move || {
+        assert!(
+            try_take_rebuild_lock(&probe_dir).is_err(),
+            "a second party took <index-dir>/ddb-rebuild.lock while a rebuild was \
+             mid-flight between drop_all_tables() and its repopulation — the \
+             destructive section runs unlocked"
+        );
+    });
+
+    let report = result.expect("a rebuild holding the lock must still succeed");
+    let report = report.expect("a fresh index with no stored HEAD must run the full rebuild");
+    assert_eq!(
+        report.indexed, 1,
+        "the serialized rebuild must still index the repo's doogat"
+    );
+    let rows: i64 = idx
+        .conn
+        .query_row("SELECT COUNT(*) FROM doogats", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        rows, 1,
+        "the serialized rebuild must leave the index populated, not dropped"
+    );
+    // A guard that is acquired but never dropped deadlocks the next caller.
+    assert!(
+        try_take_rebuild_lock(&db_dir).is_ok(),
+        "the rebuild lock was still held after rebuild_if_stale returned — the \
+         guard is never released and the next process would block forever"
+    );
+}
+
+#[test]
+fn rebuild_if_stale_blocks_until_a_foreign_rebuild_lock_holder_releases() {
+    // The mirror direction of the test above. There, a rebuild held the lock and
+    // an outside probe had to fail; here an outside holder owns the lock and the
+    // REBUILD must wait for it. Without this direction, an implementation that
+    // asks for the lock with a zero timeout and reads contention as "someone
+    // else is already rebuilding, so there is nothing left for me to do" passes:
+    // it returns Ok in under a millisecond while the holder may be parked
+    // between drop_all_tables() and repopulation, and its caller then serves an
+    // empty index as success. Waiting, not giving up, is what the lock buys.
+    //
+    // The TEST is the foreign lock holder here, standing in for the other
+    // process that is already rebuilding, so no ParkingSource is needed.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260408000000.md",
+        "---\nid: 20260408000000\ntitle: Waiting\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let db_dir = dir.path().join(".ddb");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    // Fresh index: no stored HEAD, so rebuild_if_stale takes the destructive
+    // full-rebuild branch and must therefore contend for the lock.
+    let idx = Index::open(&db_dir.join("index.db")).unwrap();
+
+    let held = crate::git_ops::write_lock::acquire(
+        &db_dir,
+        "ddb-rebuild.lock",
+        std::time::Duration::from_secs(10),
+    )
+    .expect("the test must be able to take the rebuild lock first");
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = idx.rebuild_if_stale(&repo);
+        tx.send(result).expect("the waiting test hung up early");
+        idx
+    });
+
+    // Bounded window, well under the acquire timeout, so a correct
+    // implementation waits it out and still succeeds afterwards.
+    match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("the rebuild worker died before returning a result")
+        }
+        Ok(early) => panic!(
+            "rebuild_if_stale returned {early:?} while another holder still owned \
+             <index-dir>/ddb-rebuild.lock — it skipped the lock instead of waiting for \
+             it, so it can report success over an index the holder has dropped and not \
+             yet repopulated"
+        ),
+    }
+
+    std::mem::drop(held);
+
+    let idx = worker.join().unwrap();
+    let report = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the rebuild never returned after the lock was released")
+        .expect("a rebuild that waited for the lock must then succeed, not error out")
+        .expect("a fresh index with no stored HEAD must run the full rebuild");
+    assert_eq!(
+        report.indexed, 1,
+        "the rebuild that waited for the lock must still index the repo's doogat"
+    );
+    let rows: i64 = idx
+        .conn
+        .query_row("SELECT COUNT(*) FROM doogats", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        rows, 1,
+        "the rebuild that waited for the lock must leave the index populated"
+    );
+}
+
+#[test]
+fn rebuild_if_stale_after_a_completed_rebuild_reports_nothing_and_keeps_rows() {
+    // A second rebuild_if_stale over an index whose stored HEAD is current
+    // reports nothing to do AND leaves the earlier rows in place, so an
+    // implementation that rebuilds unconditionally inside the lock (or drops
+    // the tables without repopulating them) cannot pass.
+    //
+    // Scope note: this is the SEQUENTIAL case, which short-circuits on the
+    // outer staleness check before the lock is ever reached. The post-lock
+    // re-check — the loser of a real race skipping the winner's work — is
+    // bound by `two_racing_cold_start_rebuilds_...` below.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260402000000.md",
+        "---\nid: 20260402000000\ntitle: Once\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let db_dir = dir.path().join(".ddb");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    let idx = Index::open(&db_dir.join("index.db")).unwrap();
+
+    let first = idx
+        .rebuild_if_stale(&repo)
+        .unwrap()
+        .expect("the first call must run the full rebuild and store HEAD");
+    assert_eq!(first.indexed, 1);
+
+    let second = idx.rebuild_if_stale(&repo).unwrap();
+    assert!(
+        second.is_none(),
+        "a second rebuild_if_stale over a healthy, current index must report \
+         nothing to do, not repeat the destructive rebuild (got {second:?})"
+    );
+
+    let ids = idx.query_raw("SELECT id FROM doogats ORDER BY id").unwrap();
+    assert_eq!(
+        ids.len(),
+        1,
+        "the doogats indexed by the first pass must survive the second call"
+    );
+    assert_eq!(ids[0][0], "20260402000000");
+}
+
+#[test]
+fn in_memory_index_rebuild_creates_no_rebuild_lock_file() {
+    // `Index::open_in_memory()` has no db file and therefore no directory to
+    // lock: the rebuild must degrade to unlocked instead of locking a bogus
+    // path.
+    //
+    // Scope note: this binds the DEGRADATION only — no stray lock artifacts,
+    // and a rebuild that still works without a lock directory. It says nothing
+    // about serialization; the contention tests above own that.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260403000000.md",
+        "---\nid: 20260403000000\ntitle: Memory\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let idx = Index::open_in_memory().unwrap();
+    let report = idx
+        .rebuild_if_stale(&repo)
+        .expect("an in-memory index must rebuild without a lock directory")
+        .expect("a fresh in-memory index with no stored HEAD must run the full rebuild");
+    assert_eq!(report.indexed, 1);
+
+    for candidate in [
+        dir.path().join("ddb-rebuild.lock"),
+        dir.path().join(".git").join("ddb-rebuild.lock"),
+        dir.path().join(".ddb").join("ddb-rebuild.lock"),
+        std::env::current_dir().unwrap().join("ddb-rebuild.lock"),
+    ] {
+        assert!(
+            !candidate.exists(),
+            "an in-memory index has no directory to lock, but a rebuild through \
+             it created {}",
+            candidate.display()
+        );
+    }
+}
+
+#[test]
+fn rebuild_through_open_memory_path_creates_no_lock_file_in_the_working_dir() {
+    // `Path::new(":memory:").parent()` is Some("") — NOT None. An
+    // implementation that derives the lock directory from the db path without
+    // handling this creates a stray `ddb-rebuild.lock` in the process's cwd
+    // (the crate root under `cargo test`), polluting the repo and making every
+    // `:memory:`-backed test contend with every other.
+    //
+    // Scope note: this binds the lock-DIRECTORY derivation for the `":memory:"`
+    // path, not serialization. The contention tests above own that.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260404000000.md",
+        "---\nid: 20260404000000\ntitle: Trap\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let idx = in_memory_index(); // Index::open(Path::new(":memory:"))
+    let report = idx
+        .rebuild_if_stale(&repo)
+        .expect("a `:memory:`-pathed index must rebuild without erroring on an empty lock dir")
+        .expect("a fresh `:memory:`-pathed index with no stored HEAD must run the full rebuild");
+    assert_eq!(report.indexed, 1);
+
+    let stray = std::env::current_dir().unwrap().join("ddb-rebuild.lock");
+    assert!(
+        !stray.exists(),
+        "a rebuild through Index::open(\":memory:\") created a stray lock file at {} — \
+         `Path::new(\":memory:\").parent()` is Some(\"\"), which resolves to the cwd",
+        stray.display()
+    );
+}
+
+#[test]
+fn rebuild_lock_file_sits_beside_the_index_db_not_in_the_git_dir() {
+    // The rebuild lock guards the SQLite index and lives in the index db's own
+    // directory. It must not be relocated into `.git/`, where it would collide
+    // with the git write lock's scope; the two are different files in
+    // different directories and are never held together.
+    //
+    // Location is asserted by WHERE THE CONTENTION IS, not by `Path::exists()`
+    // — an implementation that merely touches a file satisfies existence
+    // without locking anything. Mid-rebuild, the lock beside the db must be
+    // unavailable while the same name inside `.git/` is still free.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260405000000.md",
+        "---\nid: 20260405000000\ntitle: Located\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let db_dir = dir.path().join(".ddb");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    let idx = Index::open(&db_dir.join("index.db")).unwrap();
+
+    let probe_db_dir = db_dir.clone();
+    let probe_git_dir = dir.path().join(".git");
+    let (_idx, result) = probe_rebuild_mid_flight(idx, repo, move || {
+        assert!(
+            try_take_rebuild_lock(&probe_db_dir).is_err(),
+            "no lock was held beside the index db at {} while the rebuild was \
+             mid-flight",
+            probe_db_dir.display()
+        );
+        // Checked BEFORE the probe below, which would create the file itself.
+        assert!(
+            !probe_git_dir.join("ddb-rebuild.lock").exists(),
+            "the rebuild lock must not live in .git/ — that is the git write lock's directory"
+        );
+        assert!(
+            !probe_db_dir.join("ddb-write.lock").exists(),
+            "the git write lock must not be taken in the index directory; the rebuild \
+             lock is a distinct lock with a distinct name"
+        );
+        assert!(
+            try_take_rebuild_lock(&probe_git_dir).is_ok(),
+            "a rebuild lock inside .git/ was held during the rebuild — the lock \
+             belongs beside the index db, not in the git write lock's directory"
+        );
+    });
+
+    result
+        .expect("the rebuild must succeed")
+        .expect("a fresh index with no stored HEAD must run the full rebuild");
+}
+
+#[test]
+fn rebuild_if_stale_waits_for_the_rebuild_lock_when_diff_paths_fails() {
+    // The destructive rebuild has a THIRD implicit entry point, in a different
+    // function from the two branches of `rebuild_if_stale`:
+    // `incremental_reindex` falls back to the full `rebuild` when
+    // `repo.diff_paths(old_head, new_head)` errors (e.g. the stored HEAD went
+    // unreachable after a gc). That fallback drops and recreates the tables
+    // just like the others, so it must hold <index-dir>/ddb-rebuild.lock too.
+    //
+    // Fixture: seeding stored HEAD to the all-zeros OID is what steers
+    // execution here, and it is load-bearing — do not "simplify" it away. It
+    // makes `is_stale` true (it differs from the real HEAD) AND
+    // `stored_head_oid()` return `Some`, so `rebuild_if_stale` routes into
+    // `incremental_reindex`; the zeros OID is unreachable in the repo, so
+    // `diff_paths` errors and execution lands in the fallback. The parking
+    // source delegates `diff_paths` to the real `GitRepo`, so that routing
+    // still happens through it.
+    //
+    // Discriminator, as above: while the fallback rebuild is parked inside the
+    // destructive section, nobody else may take the lock.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260406000000.md",
+        "---\nid: 20260406000000\ntitle: Fallback\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let db_dir = dir.path().join(".ddb");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    let idx = Index::open(&db_dir.join("index.db")).unwrap();
+    idx.conn
+        .execute(
+            "INSERT OR REPLACE INTO _ddb_meta (key, value) VALUES ('head', ?1)",
+            rusqlite::params!["0000000000000000000000000000000000000000"],
+        )
+        .unwrap();
+
+    let probe_dir = db_dir.clone();
+    let (idx, result) = probe_rebuild_mid_flight(idx, repo, move || {
+        assert!(
+            try_take_rebuild_lock(&probe_dir).is_err(),
+            "a second party took <index-dir>/ddb-rebuild.lock while the \
+             diff-failure fallback was mid-flight — incremental_reindex reaches \
+             the destructive rebuild unserialized"
+        );
+    });
+
+    let report = result.expect("a diff-failure fallback that holds the lock must still succeed");
+    let report = report.expect("a stale index with an unreachable stored HEAD must rebuild");
+    assert_eq!(
+        report.indexed, 1,
+        "the serialized fallback rebuild must still index the repo's doogat"
+    );
+    let rows: i64 = idx
+        .conn
+        .query_row("SELECT COUNT(*) FROM doogats", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        rows, 1,
+        "the serialized fallback rebuild must leave the index populated, not dropped"
+    );
+    // A guard that is acquired but never dropped deadlocks the next caller.
+    assert!(
+        try_take_rebuild_lock(&db_dir).is_ok(),
+        "the rebuild lock was still held after the fallback returned — the guard \
+         is never released and the next process would block forever"
+    );
+}
+
+#[test]
+fn two_racing_cold_start_rebuilds_run_the_destructive_work_only_once() {
+    // Double-checked locking: the loser must re-check integrity/staleness AFTER
+    // it wins the lock, not only before it asks for one. An implementation that
+    // re-checks only outside the lock still passes the sequential
+    // `..._after_a_completed_rebuild_...` case above (that one short-circuits on
+    // the outer staleness check and never reaches the lock), but here it drops
+    // and recreates the tables a second time on top of the winner's rows.
+    //
+    // The loser has TWO legal shapes and this test accepts both on purpose:
+    //   - it evaluated the OUTER staleness check after the winner had already
+    //     finished -> `Ok(None)`;
+    //   - it got past that check first, then blocked on the lock, and its
+    //     post-lock re-check found the index fresh -> `Ok(Some(report))` with
+    //     `indexed == 0`.
+    // Do not "tighten" this into "exactly one returns Some" — which of the two
+    // shapes appears is a timing coin flip and the tightened form would flake.
+    // The destructive work is the unambiguous signal: exactly one call may
+    // report having indexed anything.
+    //
+    // Each worker also reads the index on ITS OWN handle the instant its call
+    // returns, before any thread joins. That binds the invariant the caller
+    // actually depends on — when rebuild_if_stale returns Ok, the index is
+    // complete and queryable NOW — which is strictly stronger than counting who
+    // did the work. A loser that treats contention as "nothing left to do" and
+    // returns while the winner is still repopulating reads 0 rows here (or no
+    // table at all) and fails, even though its report looks innocent.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20260407000000.md",
+        "---\nid: 20260407000000\ntitle: Raced\n---\nBody.",
+        "add doogat",
+    )
+    .unwrap();
+
+    let db_dir = dir.path().join(".ddb");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    let db_path = db_dir.join("index.db");
+
+    // Genuinely cold start on both sides: two independent index handles over
+    // one db file, two independent repo handles, released together.
+    let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let idx = Index::open(&db_path).unwrap();
+        let repo = GitRepo::open(dir.path()).unwrap();
+        let start = std::sync::Arc::clone(&start);
+        workers.push(std::thread::spawn(move || {
+            start.wait();
+            let result = idx.rebuild_if_stale(&repo);
+            // Read on this call's own handle, immediately, before any join:
+            // what did THIS caller get to see the moment it was told "Ok"?
+            let seen: std::result::Result<i64, String> = idx
+                .conn
+                .query_row("SELECT COUNT(*) FROM doogats", [], |row| row.get(0))
+                .map_err(|e| e.to_string());
+            (result, seen)
+        }));
+    }
+
+    let outcomes: Vec<(Option<crate::types::RebuildReport>, _)> = workers
+        .into_iter()
+        .map(|w| {
+            let (result, seen) = w.join().unwrap();
+            (
+                result.expect(
+                    "the loser of the race must wait for the lock and return Ok, not error out",
+                ),
+                seen,
+            )
+        })
+        .collect();
+
+    for (report, seen) in &outcomes {
+        match seen {
+            Ok(1) => {}
+            other => panic!(
+                "a racing rebuild_if_stale returned Ok({report:?}) but the index it handed \
+                 back to its own caller held {other:?} rows, not the repo's 1 — it returned \
+                 while the other call was still between drop_all_tables() and repopulation, \
+                 so success was reported over a wiped index"
+            ),
+        }
+    }
+
+    let rebuilders = outcomes
+        .iter()
+        .filter(|(r, _)| r.as_ref().is_some_and(|report| report.indexed > 0))
+        .count();
+    assert_eq!(
+        rebuilders, 1,
+        "exactly one of two racing cold-start calls may run the destructive \
+         rebuild; the other must re-check after winning the lock and skip it \
+         (got {outcomes:?})"
+    );
+
+    let idx = Index::open(&db_path).unwrap();
+    let ids = idx.query_raw("SELECT id FROM doogats ORDER BY id").unwrap();
+    assert_eq!(
+        ids.len(),
+        1,
+        "a raced double rebuild leaves the index dropped or duplicated; it must \
+         hold exactly the repo's one doogat (got {ids:?})"
+    );
+    assert_eq!(ids[0][0], "20260407000000");
+}
