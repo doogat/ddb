@@ -211,9 +211,22 @@ fn find_separators_after(lines: &[&str], fm_end: usize) -> Vec<usize> {
     positions
 }
 
+/// Generous cap on a single doogat's frontmatter block, checked before
+/// `serde_yaml::from_str` runs. Bounds parse cost against an adversarial or
+/// corrupt synced file; degrades into the standard MalformedYaml skip path
+/// rather than a fatal error (no new ConsistencyWarning variant needed —
+/// this reuses the existing parse-error to MalformedYaml classification).
+const MAX_FRONTMATTER_BYTES: usize = 256 * 1024; // 256 KiB
+
 /// Parse YAML frontmatter string into DoogatMeta.
 /// Falls back to filename-based ID when `id` field is missing.
 pub fn parse_frontmatter(yaml: &str, path: &str) -> Result<DoogatMeta> {
+    if yaml.len() > MAX_FRONTMATTER_BYTES {
+        return Err(DoogatError::Parse(format!(
+            "frontmatter exceeds {MAX_FRONTMATTER_BYTES} byte cap ({} bytes)",
+            yaml.len()
+        )));
+    }
     let raw: RawDoogatMeta = if yaml.trim().is_empty() {
         RawDoogatMeta::default()
     } else {
