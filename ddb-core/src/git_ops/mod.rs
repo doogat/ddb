@@ -3,7 +3,7 @@ mod merge;
 mod read;
 mod remote;
 mod rename;
-mod write_lock;
+pub(crate) mod write_lock;
 
 pub use rename::rename_doogat;
 
@@ -312,7 +312,7 @@ impl GitRepo {
             // Already holding the process lock on this repo — re-entrant call.
             return f();
         }
-        let _os_guard = write_lock::acquire(&self.path, WRITE_LOCK_TIMEOUT)?;
+        let _os_guard = write_lock::acquire(&self.path.join(".git"), "ddb-write.lock", WRITE_LOCK_TIMEOUT)?;
         self.write_lock_depth.set(1);
         // Reset the depth on scope exit (incl. panic unwind) before the OS
         // guard drops, so the re-entrant flag never outlives the held lock.

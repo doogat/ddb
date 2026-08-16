@@ -6,11 +6,14 @@
 //! firing two `ddb create`s, or several threads in one process — cannot lose
 //! commits by resolving a stale parent and force-updating `HEAD`.
 //!
-//! The lock is an exclusive advisory lock on `<repo_root>/.git/ddb-write.lock`,
-//! taken via [`fs2`], which speaks both Unix `flock` and Windows `LockFileEx`.
-//! (`rustix`'s `flock` is Unix-only and would leave the Windows CI matrix
-//! unguarded.) `.git/` is never tracked, so the lock file is a pure runtime
-//! artifact that survives `git gc` and is never committed.
+//! The lock is an exclusive advisory lock on `<lock_dir>/<lock_name>`, taken via
+//! [`fs2`], which speaks both Unix `flock` and Windows `LockFileEx`. (`rustix`'s
+//! `flock` is Unix-only and would leave the Windows CI matrix unguarded.)
+//!
+//! The git write lock (`.git/ddb-write.lock`) and the index rebuild lock
+//! (`.ddb/ddb-rebuild.lock`) are never held simultaneously by the same call
+//! stack. If a future change needs both, fully release one before acquiring the
+//! other — never acquire the second while the first is still held.
 
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -20,8 +23,7 @@ use fs2::FileExt;
 
 use crate::error::{DoogatError, Result};
 
-/// Advisory lock file name, created inside the repo's `.git/` directory.
-const LOCK_FILE_NAME: &str = "ddb-write.lock";
+
 
 /// Poll cadence while blocked on a contended lock. Uncontended acquires take
 /// the fast path (first `try_lock_exclusive` succeeds, no sleep).
@@ -43,13 +45,13 @@ impl Drop for WriteLockGuard {
     }
 }
 
-/// Acquire an exclusive advisory lock on `<repo_root>/.git/ddb-write.lock`,
-/// creating the lock file (and its parent `.git/` directory) if absent.
+/// Acquire an exclusive advisory lock on `<lock_dir>/<lock_name>`,
+/// creating the lock file (and its parent directory) if absent.
 ///
 /// Blocks up to `timeout`, polling with `try_lock_exclusive`, then fails loud
 /// with a retryable [`DoogatError::Conflict`] rather than hanging forever.
-pub fn acquire(repo_root: &Path, timeout: Duration) -> Result<WriteLockGuard> {
-    let lock_path = repo_root.join(".git").join(LOCK_FILE_NAME);
+pub fn acquire(lock_dir: &Path, lock_name: &str, timeout: Duration) -> Result<WriteLockGuard> {
+    let lock_path = lock_dir.join(lock_name);
     // A real repo already has `.git/`; create it if missing so the primitive
     // is usable on a bare path (and so a fresh checkout never trips here).
     if let Some(parent) = lock_path.parent() {
