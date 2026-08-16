@@ -13,6 +13,21 @@ fn temp_repo() -> (::tempfile::TempDir, GitRepo) {
     (dir, repo)
 }
 
+/// Clone `source` into a fresh temp dir, so both repos share every commit made
+/// so far as a real merge base. Counterpart to [`temp_repo`], which makes an
+/// unrelated repo instead.
+fn cloned_repo(source: &::tempfile::TempDir) -> (::tempfile::TempDir, GitRepo) {
+    let dir = ::tempfile::TempDir::new().unwrap();
+    git2::Repository::clone(source.path().to_str().unwrap(), dir.path()).unwrap();
+    let repo = GitRepo::open(dir.path()).unwrap();
+    repo.repo
+        .config()
+        .unwrap()
+        .set_bool("commit.gpgsign", false)
+        .unwrap();
+    (dir, repo)
+}
+
 #[test]
 fn full_bundle_export_and_verify() {
     let (_dir, repo) = temp_repo();
@@ -133,15 +148,7 @@ fn conflicting_full_bundle_import_resolves_with_real_merge_commit() {
 
     // Node 2: clone Node 1's repo at this point so both nodes share the
     // ancestor commit as a real merge base.
-    let dir2 = ::tempfile::TempDir::new().unwrap();
-    git2::Repository::clone(dir1.path().to_str().unwrap(), dir2.path()).unwrap();
-    let repo2 = GitRepo::open(dir2.path()).unwrap();
-    repo2
-        .repo
-        .config()
-        .unwrap()
-        .set_bool("commit.gpgsign", false)
-        .unwrap();
+    let (dir2, repo2) = cloned_repo(&dir1);
 
     crate::sync_manager::register_node(&repo1, "Node1").unwrap();
     crate::sync_manager::register_node(&repo2, "Node2").unwrap();
@@ -224,15 +231,7 @@ fn import_with_unresolvable_collision(
 
     // Node 2: clone Node 1's repo at this point so both nodes share the
     // ancestor commit as a real merge base.
-    let dir2 = ::tempfile::TempDir::new().unwrap();
-    git2::Repository::clone(dir1.path().to_str().unwrap(), dir2.path()).unwrap();
-    let repo2 = GitRepo::open(dir2.path()).unwrap();
-    repo2
-        .repo
-        .config()
-        .unwrap()
-        .set_bool("commit.gpgsign", false)
-        .unwrap();
+    let (dir2, repo2) = cloned_repo(&dir1);
 
     crate::sync_manager::register_node(&repo1, "Node1").unwrap();
     crate::sync_manager::register_node(&repo2, "Node2").unwrap();
