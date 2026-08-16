@@ -15,6 +15,20 @@ impl DoogatId {
     pub fn is_valid_shape(s: &str) -> bool {
         s.len() == 14 && s.chars().all(|c| c.is_ascii_digit())
     }
+
+    /// True when `s` is not merely 14 digits but a real `YYYYMMDDHHmmss` calendar
+    /// stamp. Test-only: the reported regression minted `66177401297366`
+    /// (month 74, hour 29, minute 73), which no repo-aware mint path could produce.
+    #[cfg(test)]
+    pub(crate) fn is_calendar_shaped(s: &str) -> bool {
+        let field = |from: usize, to: usize| s[from..to].parse::<u32>().unwrap_or(u32::MAX);
+        Self::is_valid_shape(s)
+            && (1..=12).contains(&field(4, 6))
+            && (1..=31).contains(&field(6, 8))
+            && field(8, 10) <= 23
+            && field(10, 12) <= 59
+            && field(12, 14) <= 59
+    }
 }
 
 impl fmt::Display for DoogatId {

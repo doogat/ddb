@@ -486,16 +486,6 @@ mod tests {
         // (month 74, hour 29, minute 73), which no repo-aware mint path could
         // produce. EVERY derived id must parse as a real date and time, so a
         // scheme that is calendar-valid only some of the time fails here.
-        let is_calendar_shaped = |id: &str| -> bool {
-            let field = |from: usize, to: usize| id[from..to].parse::<u32>().unwrap_or(u32::MAX);
-            DoogatId::is_valid_shape(id)
-                && (1..=12).contains(&field(4, 6))
-                && (1..=31).contains(&field(6, 8))
-                && field(8, 10) <= 23
-                && field(10, 12) <= 59
-                && field(12, 14) <= 59
-        };
-
         let invalid: Vec<String> = (0..200)
             .map(|i| {
                 super::derive_content_id(
@@ -505,7 +495,7 @@ mod tests {
                 )
                 .0
             })
-            .filter(|id| !is_calendar_shaped(id))
+            .filter(|id| !DoogatId::is_calendar_shaped(id))
             .collect();
 
         assert!(
