@@ -126,6 +126,10 @@ pub enum ConsistencyWarning {
         path: String,
         error: String,
     },
+    UnreadableFile {
+        path: String,
+        error: String,
+    },
     CrossZoneDuplicate {
         path: String,
         key: String,
