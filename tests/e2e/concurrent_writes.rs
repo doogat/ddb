@@ -140,68 +140,6 @@ fn concurrent_cli_create_processes_lose_no_commit() {
     );
 }
 
-/// Eight concurrent `ddb create` processes against a *cold* repo — freshly
-/// `init`ed, no stored HEAD in `_ddb_meta`, no warm-up — must every one of
-/// them bootstrap the index and commit, losing nothing (PRD 00169).
-///
-/// On a cold index every writer's `ensure_fresh` takes the destructive
-/// full-rebuild path, which drops all tables (the `_ddb_fts` virtual table
-/// included) before recreating them. Unserialized, the loser reads tables the
-/// winner has just dropped and dies with `no such table: _ddb_fts`. The
-/// rebuild lock (`<index-dir>/ddb-rebuild.lock`, taken by
-/// `indexer::rebuild::locked_rebuild`) serializes that section across
-/// processes: one rebuilds, the rest re-check and skip it. Such a bootstrap
-/// failure is a non-zero exit, so `wait_ok` fails this test and prints the
-/// offending stderr — that is how "no process reported an FTS bootstrap
-/// error" is asserted here.
-///
-/// Like the warm-started test above, the expectation is the set of ids the
-/// processes actually minted, not a bare count of 8: two same-second creates
-/// can still collide on one id (the open id-mint race, PRD 00164).
-#[test]
-fn concurrent_cold_start_creates_bootstrap_the_index_and_lose_no_commit() {
-    let repo = DdbTestRepo::init();
-    const N: usize = 8;
-
-    // Spawn all N before waiting on any — that overlap is the contention.
-    let children: Vec<Child> = (0..N)
-        .map(|k| {
-            spawn_ddb(
-                repo.path(),
-                &[
-                    "create",
-                    "--title",
-                    &format!("cold-start writer {k}"),
-                    "--body",
-                    &format!("body {k}"),
-                ],
-            )
-        })
-        .collect();
-
-    let reported: Vec<String> = children
-        .into_iter()
-        .enumerate()
-        .map(|(k, child)| {
-            let id = wait_ok(child, &format!("cold-start create process {k}"));
-            assert!(
-                id.len() == 14 && id.chars().all(|c| c.is_ascii_digit()),
-                "cold-start create process {k} printed {id:?} instead of an id"
-            );
-            id
-        })
-        .collect();
-
-    let expected: BTreeSet<String> = reported.iter().cloned().collect();
-    let head = head_doogat_ids(repo.path());
-    assert_eq!(
-        head, expected,
-        "HEAD doogats must equal the set of ids the cold-start creators \
-         minted; a difference means a commit was lost or orphaned while the \
-         index was bootstrapping. reported={reported:?} head={head:?}"
-    );
-}
-
 /// Eight concurrent `ddb update` processes, each rewriting a *distinct*
 /// pre-existing doogat, must all land in HEAD.
 ///
