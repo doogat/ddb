@@ -931,3 +931,121 @@ fn apply_schema_surfaces_unsupported_change_as_warning() {
         report.warnings
     );
 }
+
+// --- reindex() FFI warnings tests ---
+//
+// `Index::rebuild` already collects per-file parse failures into the core
+// `RebuildReport.warnings: Vec<ConsistencyWarning>`. `DoogatDriver::reindex()` must
+// surface the FULL per-file list as `RebuildWarningRecord { code, message }` entries
+// (unlike the AppOutput facades, which summarize to at most one warning).
+
+const VALID_DOOGAT: &str = "---
+title: Valid Doogat
+---
+Body
+";
+
+const POISON_DOOGAT_UNCLOSED_BRACKET: &str = "---
+title: [unclosed
+---
+Body
+";
+
+const POISON_DOOGAT_TAB_INDENT: &str = "---
+title: broken
+\tbad: value
+---
+Body
+";
+
+fn commit_doogat(driver: &DoogatDriver, path: &str, content: &str) {
+    let svc = driver.svc.lock().unwrap();
+    svc.repo.commit_file(path, content, "add doogat").unwrap();
+}
+
+#[test]
+fn reindex_clean_repo_yields_empty_warnings() {
+    let (_tmp, driver) = fresh_driver();
+
+    let report = driver.reindex().unwrap();
+
+    assert!(
+        report.warnings.is_empty(),
+        "clean repo should yield an empty warnings list, got {} entries",
+        report.warnings.len()
+    );
+}
+
+#[test]
+fn reindex_malformed_yaml_file_reports_stable_code_and_path() {
+    let (_tmp, driver) = fresh_driver();
+    let poison_path = "ddb/20260101000001.md";
+    commit_doogat(&driver, poison_path, POISON_DOOGAT_UNCLOSED_BRACKET);
+
+    let report = driver.reindex().unwrap();
+
+    let warning = report
+        .warnings
+        .iter()
+        .find(|w| w.message.contains(poison_path))
+        .expect("a warning naming the poison file path should be present");
+    assert_eq!(warning.code, "MALFORMED_YAML");
+}
+
+#[test]
+fn reindex_two_poison_files_returns_full_per_file_list() {
+    let (_tmp, driver) = fresh_driver();
+    let poison_path_a = "ddb/20260101000002.md";
+    let poison_path_b = "ddb/20260101000003.md";
+    commit_doogat(&driver, poison_path_a, POISON_DOOGAT_UNCLOSED_BRACKET);
+    commit_doogat(&driver, poison_path_b, POISON_DOOGAT_TAB_INDENT);
+
+    let report = driver.reindex().unwrap();
+    let messages: Vec<&str> = report.warnings.iter().map(|w| w.message.as_str()).collect();
+
+    // Not asserted as an exact count: `Index::rebuild` reports each unparseable file
+    // from two separate phases (parallel_parse AND collect_consistency_warnings), so
+    // two poison files yield four entries today, not two. That duplication is
+    // pre-existing core behavior and out of scope here. What this test binds is the
+    // FFI-specific contract: the list is the full per-file one (more than the
+    // at-most-one entry the summarizing AppOutput path would give), not a summary.
+    assert!(
+        report.warnings.len() > 1,
+        "the FFI warnings list must carry more than the single summarized entry the AppOutput path would give, got {} entries: {messages:?}",
+        report.warnings.len()
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(poison_path_a)),
+        "warnings must name {poison_path_a}, got {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(poison_path_b)),
+        "warnings must name {poison_path_b}, got {messages:?}"
+    );
+    assert!(
+        messages.iter().all(|m| !m.contains("more, see ddb doctor")),
+        "FFI warnings must not carry the AppOutput summarizing suffix, got {messages:?}"
+    );
+}
+
+#[test]
+fn reindex_succeeds_and_indexes_healthy_doogat_despite_poison_file() {
+    let (_tmp, driver) = fresh_driver();
+    let poison_path = "ddb/20260101000004.md";
+    commit_doogat(&driver, poison_path, POISON_DOOGAT_UNCLOSED_BRACKET);
+    commit_doogat(&driver, "ddb/20260101000005.md", VALID_DOOGAT);
+
+    let report = driver
+        .reindex()
+        .expect("reindex must succeed (Ok) even with a poison file present");
+
+    assert_eq!(
+        report.indexed, 1,
+        "the healthy doogat must still be indexed, got indexed={}",
+        report.indexed
+    );
+    assert!(
+        !report.warnings.is_empty(),
+        "the poison file must still be surfaced as a warning, not silently dropped"
+    );
+}
