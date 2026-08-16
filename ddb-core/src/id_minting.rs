@@ -369,6 +369,16 @@ mod tests {
             2,
             "the forced-collision closure must have been consulted for the first 2 candidates"
         );
+        let malformed: Vec<&String> = taken_candidates
+            .iter()
+            .filter(|asked| !DoogatId::is_valid_shape(asked.as_str()))
+            .collect();
+        assert!(
+            malformed.is_empty(),
+            "the exists oracle must be asked about CANDIDATE IDS, not internal seed strings: \
+             a real oracle holds 14-digit ids and can never answer \"taken\" for anything \
+             else, so the collision loop would silently stop advancing; got {malformed:?}"
+        );
         drop(taken_candidates);
         assert!(
             !seen_second.borrow().is_empty(),
@@ -410,13 +420,15 @@ mod tests {
     }
 
     #[test]
-    fn derived_ids_spread_across_many_distinct_days() {
-        // Any scheme that pins part of the stamp to a constant (one fixed
-        // date, one fixed year) shrinks the id space and multiplies collisions
-        // while still looking like a 14-digit id. Asserting on the COUNT of
-        // distinct `YYYYMMDD` prefixes rather than on any specific date keeps
-        // this from pinning an implementation choice: a single-day scheme
-        // yields exactly 1.
+    fn distinct_collisions_derive_distinct_ids_across_the_whole_stamp() {
+        // Any scheme that pins part of the stamp to a constant (one fixed date,
+        // one fixed year, always midnight) shrinks the derivable id space while
+        // still looking like a valid 14-digit stamp — and a small codomain
+        // means the reassigned losers collide with each other. The load-bearing
+        // assertion is that 200 distinct collisions derive 200 DISTINCT ids;
+        // the field-spread assertions below say where the variation must live.
+        // All three assert on counts, never on a specific date or time, so none
+        // of them pins an implementation choice.
         let ids: Vec<String> = (0..200)
             .map(|i| {
                 super::derive_content_id(
@@ -428,9 +440,26 @@ mod tests {
             })
             .collect();
 
+        let distinct_ids: std::collections::HashSet<&String> = ids.iter().collect();
+        assert_eq!(
+            distinct_ids.len(),
+            200,
+            "200 distinct collisions must derive 200 distinct ids; got {} — the derivable \
+             id space is too small, so reassigned losers collide with each other",
+            distinct_ids.len()
+        );
+
+        let time_suffixes: std::collections::HashSet<&str> =
+            ids.iter().map(|id| &id[8..14]).collect();
+        assert!(
+            time_suffixes.len() >= 20,
+            "the time-of-day half of the stamp must carry real variation, not a pinned \
+             constant like midnight; got {} distinct HHmmss suffixes",
+            time_suffixes.len()
+        );
+
         let day_prefixes: std::collections::HashSet<&str> =
             ids.iter().map(|id| &id[0..8]).collect();
-
         assert!(
             day_prefixes.len() >= 20,
             "200 distinct collisions must not all land on a handful of days; got {} distinct \

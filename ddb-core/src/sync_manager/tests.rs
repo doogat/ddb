@@ -1955,10 +1955,15 @@ fn partition_classifies_ancestorless_conflicts_by_doogat_path_shape() {
             "ddb/_typedef/20260101120000.md".into(),
             ExpectedBucket::AddAdd,
         ),
-        // Right directory, wrong extension.
+        // Right directory, wrong extension. An extension denylist is no more a
+        // rule than a path denylist, so these span many extensions - including
+        // an extensionless dotfile.
         ("ddb/anything.txt".into(), ExpectedBucket::Normal),
         ("ddb/notes.txt".into(), ExpectedBucket::Normal),
         ("ddb/note/x.png".into(), ExpectedBucket::Normal),
+        ("ddb/index.json".into(), ExpectedBucket::Normal),
+        ("ddb/.gitkeep".into(), ExpectedBucket::Normal),
+        ("ddb/notes.yaml".into(), ExpectedBucket::Normal),
         // Doogat-looking name, wrong directory.
         ("ddbx/20260101120000.md".into(), ExpectedBucket::Normal),
         ("other/ddb/20260101120000.md".into(), ExpectedBucket::Normal),
@@ -1970,9 +1975,10 @@ fn partition_classifies_ancestorless_conflicts_by_doogat_path_shape() {
         ("Cargo.toml".into(), ExpectedBucket::Normal),
         (".github/workflows/ci.yml".into(), ExpectedBucket::Normal),
     ];
-    // Generated paths no denylist could enumerate ahead of time: only a rule
-    // keyed on the path shape routes these correctly.
-    expected.extend((0..64).map(|i| (format!("assets/{i}.bin"), ExpectedBucket::Normal)));
+    // Generated paths no denylist could enumerate ahead of time. They live
+    // UNDER `ddb/` so they constrain the extension half of the rule: a
+    // classifier that only asks "is it under ddb/?" misroutes every one.
+    expected.extend((0..64).map(|i| (format!("ddb/asset{i}.bin"), ExpectedBucket::Normal)));
 
     let conflicts: Vec<ConflictFile> = expected
         .iter()
