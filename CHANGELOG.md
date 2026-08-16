@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **cli**: `ddb sync` now reports the number of doogats resurrected by a delete-vs-edit conflict resolution as a `resurrected: N` line (printed only when non-zero, alongside the existing collision and singleton-conflict counts). Previously `SyncReport.resurrected` was populated but never surfaced to the operator. (PRD 00163)
 - **service**: `create`, `update`, and `apply_schema` now report files that a background freshness reindex had to skip, as a single `REINDEX_SKIPPED_FILES` warning on the result envelope. A repo containing an unreadable or malformed file previously produced a silently partial index. (PRD 00169)
+- **ffi**: `RebuildReport` gained a `warnings` field carrying one `RebuildWarningRecord { code, message }` per file the reindex skipped, so Swift/Kotlin consumers of `reindex()` see the full per-file list instead of a silently partial index. Codes are the stable `MALFORMED_YAML`, `UNREADABLE_FILE`, `CROSS_ZONE_DUPLICATE`, and `MISSING_REQUIRED` strings. (PRD 00169)
 
 ### Changed
 

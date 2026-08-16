@@ -13,9 +13,10 @@ pub use error::{AppError, AppErrorCategory, AppErrorDetail, SCHEMA_UNSUPPORTED_C
 mod output;
 pub use output::{AppOutput, AppWarning};
 pub(crate) use output::{
-    describe_consistency_warning, describe_consistency_warning_code,
-    summarize_reindex_warnings, REINDEX_SKIPPED_FILES,
+    describe_consistency_warning, describe_consistency_warning_code, summarize_reindex_warnings,
 };
+#[cfg(test)]
+pub(crate) use output::REINDEX_SKIPPED_FILES;
 
 mod commands;
 pub use commands::{

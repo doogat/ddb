@@ -10,7 +10,7 @@ use crate::service::DoogatService;
 
 use super::records::{
     empty_error_context, AttachmentInfo, DdbError, PaginatedSearchResult, RebuildReport,
-    SchemaApplyReportRecord, SearchResult, SqlResultRecord, TypeSchemaRecord,
+    RebuildWarningRecord, SchemaApplyReportRecord, SearchResult, SqlResultRecord, TypeSchemaRecord,
 };
 
 /// High-level facade for mobile/desktop FFI consumers.
@@ -121,6 +121,15 @@ impl DoogatDriver {
                 indexed: report.indexed as u64,
                 tables_materialized: report.tables_materialized as u64,
                 types_inferred: report.types_inferred,
+                warnings: report
+                    .warnings
+                    .into_iter()
+                    .map(|w| RebuildWarningRecord {
+                        code: crate::app_contract::describe_consistency_warning_code(&w)
+                            .to_string(),
+                        message: crate::app_contract::describe_consistency_warning(&w),
+                    })
+                    .collect(),
             })
         })
     }

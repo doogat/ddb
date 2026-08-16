@@ -30,10 +30,16 @@ dictionary SearchResult {
     string updated_at;
 };
 
+dictionary RebuildWarningRecord {
+    string code;
+    string message;
+};
+
 dictionary RebuildReport {
     u64 indexed;
     u64 tables_materialized;
     sequence<string> types_inferred;
+    sequence<RebuildWarningRecord> warnings;
 };
 
 dictionary SqlResultRecord {

@@ -168,12 +168,20 @@ impl From<crate::types::PaginatedSearchResult> for PaginatedSearchResult {
     }
 }
 
+/// FFI-safe reindex warning (one per skipped/poisoned file).
+#[derive(Debug, uniffi::Record)]
+pub struct RebuildWarningRecord {
+    pub code: String,
+    pub message: String,
+}
+
 /// FFI-safe rebuild report.
 #[derive(uniffi::Record)]
 pub struct RebuildReport {
     pub indexed: u64,
     pub tables_materialized: u64,
     pub types_inferred: Vec<String>,
+    pub warnings: Vec<RebuildWarningRecord>,
 }
 
 /// FFI-safe attachment metadata.
