@@ -3743,4 +3743,61 @@ pass "PRD 00164: batch + single mint paths yield distinct ids (no same-second co
 cd "$TMPDIR"
 rm -rf "$INT164_DIR"
 
+# 63. PRD 00169 - poison-file skip warning through GraphQL extensions.
+# A doogat planted by a raw git commit (bypassing ddb CLI) with unparseable
+# frontmatter triggers a REINDEX_SKIPPED_FILES warning. The warning surfaces
+# on the FIRST mutation that calls ensure_fresh() after the poison commit,
+# because ensure_fresh() reindexes, records the skip, and leaves the index
+# fresh. A SECOND mutation sees nothing stale and returns warnings: [].
+#
+# Load-bearing ordering: the server is started BEFORE the poison file is
+# planted so its stored HEAD predates the poison commit. The assertion is
+# against the very first createDoogat after the commit. Do not add a
+# warm-up call before this assertion - it would consume the warning and
+# silently turn the check into a false pass.
+
+INT169_DIR="$(mktemp -d)"
+cd "$INT169_DIR"
+$DDB init . >/dev/null
+
+# Seed one ordinary doogat so the index is non-empty and HEAD exists.
+$DDB create --title "seed" --body "seed body" >/dev/null
+
+# Start server on its own port (distinct from the now-dead 19200-range server).
+INT169_PORT=$((20200 + (RANDOM % 700)))
+INT169_PG_PORT=$((INT169_PORT + 1))
+$DDB serve --port "$INT169_PORT" --pg-port "$INT169_PG_PORT" &
+INT169_PID=$!
+for i in $(seq 1 20); do
+  if curl -sf "http://127.0.0.1:$INT169_PORT/graphql" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"query":"{ typeDefs { name } }"}' >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.2
+done
+
+# Now plant the poison file (same shape as smoke.sh section 32).
+printf '%s\n' '---' ': invalid yaml [' '---' 'body' > "ddb/29990101000000.md"
+git -C "$INT169_DIR" add -A
+git -C "$INT169_DIR" commit -m "add poison doogat" >/dev/null
+
+# First createDoogat after the poison commit - this is where the warning fires.
+INT169_RESP=$(curl -sf "http://127.0.0.1:$INT169_PORT/graphql" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"mutation { createDoogat(input: { title: \"after poison\" }) { id title } }"}')
+
+assert_gql_ok "$INT169_RESP"
+printf '%s' "$INT169_RESP" | jq -e '.extensions.warnings | length == 1
+       and (.[0].code == "REINDEX_SKIPPED_FILES")
+       and (.[0].message | test("29990101000000"))' >/dev/null
+pass "PRD 00169: poison file surfaces REINDEX_SKIPPED_FILES warning in GraphQL extensions"
+
+kill "$INT169_PID" 2>/dev/null || true
+wait "$INT169_PID" 2>/dev/null || true
+cd "$TMPDIR"
+rm -rf "$INT169_DIR"
+
 echo "=== all integration tests passed ==="
