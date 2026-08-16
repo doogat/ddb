@@ -135,9 +135,17 @@ fn delete_all_bundle_refs(repo: &impl GitBackend) -> Result<()> {
 
 /// Merge bundle/master into local master, resolving conflicts via the same
 /// libgit2 + CRDT pipeline the network-sync path uses (`SyncManager::apply_merge_result`).
-/// No CLI `git merge`, no stderr parsing, no MERGE_HEAD: `merge_commits` computes the
-/// merge entirely in memory, so a resolution failure here leaves the repo exactly as
-/// it was before this call (see Risks — no `git merge --abort` step is needed).
+/// Bundle import opts out of the unrelated-histories guard explicitly, because a
+/// fresh repo importing an established bundle has no common ancestor by design.
+///
+/// No CLI `git merge`, no stderr parsing, no MERGE_HEAD. On the CONFLICTED path
+/// `merge_commits` computes the merge entirely in memory, so a resolution failure
+/// there leaves the repo exactly as it was before this call (see Risks — no
+/// `git merge --abort` step is needed). That guarantee does NOT extend to the
+/// clean-merge path: `perform_normal_merge` creates the merge commit and force-checks-out
+/// the worktree before `apply_merge_result` validates it, so a failure after that
+/// point leaves `HEAD` moved. No data is lost either way — the bundle ref survives
+/// until the import lands.
 fn merge_bundle_and_resolve(
     repo: &impl GitBackend,
     sync_mgr: &mut SyncManager<impl GitBackend>,

@@ -53,7 +53,7 @@ Reads the UUID from `.git/ddb-node`, then loads the corresponding `.nodes/{uuid}
 6. **Commit-graph**: write once (deferred from per-commit writes during sync)
 7. **Reindex**: `index.rebuild_if_stale(repo)` — incremental reindex via `diff_paths` processes only changed files
 
-> **Write-lock coverage**: the merge step's write section (the merge or fast-forward commit, the ref move, and the forced checkout) holds the repo-scoped cross-process write lock, and the conflicted-merge path additionally rebuilds its tree from a fresh in-memory `merge_commits` three-way merge re-run under the lock (as of PRD 00200), so a `ddb sync` racing a concurrent locked CRUD write can neither revert that write's working-tree file nor orphan its commit. See `git-ops.md` § "Write serialization (cross-process lock)". Bundle import's `git merge` subprocess is the one merge path still outside the lock (tracked by 00168).
+> **Write-lock coverage**: the merge step's write section (the merge or fast-forward commit, the ref move, and the forced checkout) holds the repo-scoped cross-process write lock, and the conflicted-merge path additionally rebuilds its tree from a fresh in-memory `merge_commits` three-way merge re-run under the lock (as of PRD 00200), so a `ddb sync` racing a concurrent locked CRUD write can neither revert that write's working-tree file nor orphan its commit. See `git-ops.md` § "Write serialization (cross-process lock)". Bundle import now merges through this same locked engine (00168); only its unbundle/fetch object-preparation leg, which writes git objects and `refs/remotes/bundle/*`, still runs outside the lock.
 
 ### Four-Bucket Conflict Partition
 

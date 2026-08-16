@@ -10,8 +10,8 @@ All callers access git operations through the `GitBackend` trait (defined in `tr
 
 `GitBackend` extends `DoogatSource + DoogatStore` with:
 
-- **Remote ops**: `add_remote`, `fetch`, `push`
-- **Merge ops**: `merge_remote`, `commit_merge`
+- **Remote ops**: `add_remote`, `fetch`, `push`, `delete_remote_ref`
+- **Merge ops**: `merge_remote`, `commit_merge`, `merge_remote_allowing_unrelated`
 - **Binary file ops**: `commit_binary_file`, `commit_binary_and_text`, `read_blob`
 - **Commit introspection**: `merge_base`, `commit_parent_count`, `commit_parent_oid`, `read_file_at`, `walk_tree_files`
 - **History queries**: `find_hlc_for_path`, `revision_date`
@@ -134,6 +134,10 @@ Called by `sync_manager` after CRDT/LWW resolution to commit a conflicted merge.
 5. `checkout_head` force-syncs the worktree to the newly committed merge tree.
 
 This replaces the previous two-way ours→theirs diff, which silently reverted non-conflicting local edits back to the base, resurrected paths the other side had plainly deleted, and (for a path both sides edited in different regions) discarded one side's edit by keeping only theirs' whole blob.
+
+### Unrelated Histories Guard
+
+`merge_remote` rejects a merge whose two sides share no common ancestor — a misconfigured remote would otherwise silently union two unrelated trees. `merge_remote_allowing_unrelated` is the explicit opt-out bundle import uses, since importing an established bundle into a fresh repo legitimately has no common ancestor. The exemption is chosen by the call site, not by the remote's name.
 
 ## Signature
 

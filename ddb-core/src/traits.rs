@@ -363,7 +363,7 @@ pub trait ConflictResolver {
     ) -> Result<Vec<ResolvedFile>>;
 }
 
-/// Remote repository operations (add, fetch, push).
+/// Remote repository operations (add, fetch, push, delete a remote-tracking ref).
 pub trait GitRemote {
     /// Register a named remote.
     fn add_remote(&self, name: &str, url: &str) -> Result<()>;

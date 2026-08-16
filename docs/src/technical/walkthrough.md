@@ -338,8 +338,8 @@ Eleven traits define the module boundaries (see `traits.rs`):
 
 - **DoogatSource** -- Read-only access to doogat storage: `list_doogats()`, `read_file()`, `head_oid()`, `diff_paths()`, and `read_files_batch()`. Implemented by `GitRepo`. The batch read has a default sequential implementation that concrete types can override.
 - **DoogatStore** -- Read-write access extending DoogatSource: `commit_file()`, `commit_files()`, `delete_file()`, `delete_files()`, and `commit_batch()`. Implemented by `GitRepo`.
-- **GitRemote** -- Remote operations: `add_remote()`, `fetch()`, `push()`.
-- **GitMerge** -- Merge operations: `merge_remote()`, `commit_merge()`.
+- **GitRemote** -- Remote operations: `add_remote()`, `fetch()`, `push()`, `delete_remote_ref()`.
+- **GitMerge** -- Merge operations: `merge_remote()`, `commit_merge()`, `merge_remote_allowing_unrelated()`.
 - **GitHistory** -- Commit introspection, tree walking, history queries: `merge_base()`, `commit_parent_count()`, `commit_parent_oid()`, `read_file_at()`, `walk_tree_files()`, `find_hlc_for_path()`, `revision_date()`.
 - **GitBinary** -- Binary file operations: `commit_binary_file()`, `commit_binary_and_text()`, `read_blob()`.
 - **GitRename** -- File rename: `rename_file()`.
