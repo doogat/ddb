@@ -58,7 +58,7 @@ pub(crate) fn summarize_reindex_warnings(warnings: Vec<ConsistencyWarning>) -> O
     let message = if skip_paths.len() == 1 {
         first_description
     } else {
-        format!("{first_description} (+{} more)", skip_paths.len() - 1)
+        format!("{first_description} (+{} more; run `ddb reindex` for the full list)", skip_paths.len() - 1)
     };
     Some(AppWarning { code: REINDEX_SKIPPED_FILES, message })
 }
