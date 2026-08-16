@@ -893,13 +893,14 @@ pass "cli still answers queries after a strict reindex abort"
 # Gap 1: `ddb reindex`'s OWN report (not the tracing subscriber on stderr) must
 # name skipped paths. With RUST_LOG=error the tracing channel is silenced, so
 # this binds the command's own report output, not the channel section 32
-# binds. This assertion is expected to FAIL against the current binary:
-# reindex() only prints "indexed N doogats" / "N warning(s)", never the
-# skipped path itself; the implementation change that makes it pass is a
-# separate task.
+# binds. Written fail-first: against the pre-fix binary reindex() printed only
+# "indexed N doogats" / "N warning(s)" and this assertion failed; the
+# per-warning lines it now binds ship in the same change.
 $env:RUST_LOG = "error"
 $output = & $DDB reindex 2>&1 | Out-String
+$reindexQuietExit = $LASTEXITCODE
 Remove-Item Env:\RUST_LOG -ErrorAction SilentlyContinue
+if ($reindexQuietExit -ne 0) { throw "reindex should succeed with RUST_LOG=error, got exit ${reindexQuietExit}: $output" }
 if ($output -notmatch [regex]::Escape($poisonPath)) { throw "reindex should name skipped path in its own report even with RUST_LOG=error, got: $output" }
 pass "reindex names skipped path in its own report even with RUST_LOG=error"
 
