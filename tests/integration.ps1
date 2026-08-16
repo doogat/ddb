@@ -3700,5 +3700,79 @@ pass "PRD 00164: batch + single mint paths yield distinct ids (no same-second co
 Pop-Location
 Remove-Item -Recurse -Force $INT164_DIR
 
+# 63. PRD 00169 - poison-file skip warning through GraphQL extensions.
+# A doogat planted by a raw git commit (bypassing ddb CLI) with unparseable
+# frontmatter triggers a REINDEX_SKIPPED_FILES warning. The warning surfaces
+# on the FIRST mutation that calls ensure_fresh() after the poison commit,
+# because ensure_fresh() reindexes, records the skip, and leaves the index
+# fresh. A SECOND mutation sees nothing stale and returns warnings: [].
+#
+# Load-bearing ordering: the server is started BEFORE the poison file is
+# planted so its stored HEAD predates the poison commit. The assertion is
+# against the very first createDoogat after the commit. Do not add a
+# warm-up call before this assertion - it would consume the warning and
+# silently turn the check into a false pass.
+
+$INT169_DIR = New-TempDir
+Push-Location $INT169_DIR
+ddb init | Out-Null
+
+# Seed one ordinary doogat so the index is non-empty and HEAD exists.
+ddb create --title "seed" --body "seed body" | Out-Null
+
+# Start own server on its own port (distinct from the now-dead 19200-range server).
+$int169Port = 20200 + (Get-Random -Maximum 700)
+$int169PgPort = $int169Port + 1
+$int169Server = Start-Process -FilePath $DDB -ArgumentList "serve","--port","$int169Port","--pg-port","$int169PgPort" -PassThru -NoNewWindow
+
+# Wait for server to start.
+for ($i = 0; $i -lt 20; $i++) {
+    try {
+        $null = Invoke-WebRequest -Uri "http://127.0.0.1:$int169Port/graphql" `
+            -Method POST -ContentType "application/json" `
+            -Headers @{ Authorization = "Bearer $TOKEN" } `
+            -Body '{"query":"{ typeDefs { name } }"}' -ErrorAction Stop
+        break
+    } catch {
+        Start-Sleep -Milliseconds 200
+    }
+}
+
+# Now plant the poison file (same shape as smoke.ps1 section 32).
+@"
+---
+: invalid yaml [
+---
+body
+"@ | Set-Content -Path "ddb/29990101000000.md" -NoNewline
+git -C $INT169_DIR add -A
+git -C $INT169_DIR commit -m "add poison doogat" | Out-Null
+
+# First createDoogat after the poison commit - this is where the warning fires.
+$int169Resp = Invoke-WebRequest -Uri "http://127.0.0.1:$int169Port/graphql" `
+    -Method POST -ContentType "application/json" `
+    -Headers @{ Authorization = "Bearer $TOKEN" } `
+    -Body '{"query":"mutation { createDoogat(input: { title: \"after poison\" }) { id title } }"}' -ErrorAction Stop
+if ($int169Resp.Content -is [byte[]]) { $int169Content = [System.Text.Encoding]::UTF8.GetString($int169Resp.Content) } else { $int169Content = $int169Resp.Content }
+
+assertGqlOk $int169Content "63: first createDoogat after poison commit"
+$int169Obj = $int169Content | ConvertFrom-Json
+if ($int169Obj.extensions.warnings.Count -ne 1) {
+    throw "63: expected one warning, got: $($int169Obj.extensions.warnings | ConvertTo-Json -Compress)"
+}
+if ($int169Obj.extensions.warnings[0].code -ne "REINDEX_SKIPPED_FILES") {
+    throw "63: expected code REINDEX_SKIPPED_FILES, got: $($int169Obj.extensions.warnings[0].code)"
+}
+if ($int169Obj.extensions.warnings[0].message -notmatch "29990101000000") {
+    throw "63: expected message to mention '29990101000000', got: $($int169Obj.extensions.warnings[0].message)"
+}
+pass "PRD 00169: poison file surfaces REINDEX_SKIPPED_FILES warning in GraphQL extensions"
+
+# Cleanup
+Stop-Process -Id $int169Server.Id -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+Pop-Location
+Remove-Item -Recurse -Force $INT169_DIR
+
 Cleanup
 Write-Host "=== all integration tests passed ==="
