@@ -309,6 +309,55 @@ fn merge_detects_conflicts() {
     }
 }
 
+/// Two independently initialised repos with NO common ancestor: repo A can
+/// fetch repo B's history under the given remote name, but the histories
+/// share no merge base.
+fn setup_unrelated_repos(remote_name: &str) -> (TempDir, GitRepo, TempDir, GitRepo) {
+    let dir_a = TempDir::new().unwrap();
+    let repo_a = GitRepo::init(dir_a.path()).unwrap();
+    repo_a
+        .commit_file("ddb/a.md", "from a", "a commit")
+        .unwrap();
+
+    let dir_b = TempDir::new().unwrap();
+    let repo_b = GitRepo::init(dir_b.path()).unwrap();
+    repo_b
+        .commit_file("ddb/b.md", "from b", "b commit")
+        .unwrap();
+
+    repo_a
+        .add_remote(remote_name, dir_b.path().to_str().unwrap())
+        .unwrap();
+    repo_a.fetch(remote_name, "master").unwrap();
+
+    (dir_a, repo_a, dir_b, repo_b)
+}
+
+#[test]
+fn merge_remote_rejects_unrelated_histories() {
+    let (_da, repo_a, _db, _repo_b) = setup_unrelated_repos("origin");
+    let err = repo_a.merge_remote("origin", "master").unwrap_err();
+    assert!(matches!(err, DoogatError::Git(_)));
+}
+
+#[test]
+fn merge_remote_rejects_unrelated_histories_when_remote_named_bundle() {
+    let (_da, repo_a, _db, _repo_b) = setup_unrelated_repos("bundle");
+    let err = repo_a.merge_remote("bundle", "master").unwrap_err();
+    assert!(matches!(err, DoogatError::Git(_)));
+}
+
+#[test]
+fn merge_remote_allowing_unrelated_permits_no_common_ancestor() {
+    let (_da, repo_a, _db, _repo_b) = setup_unrelated_repos("bundle");
+    let result = repo_a.merge_remote_allowing_unrelated("bundle", "master");
+    assert!(
+        result.is_ok(),
+        "expected unrelated-history merge to proceed, got {:?}",
+        result
+    );
+}
+
 #[test]
 fn delete_files_removes_multiple() {
     let (_dir, repo) = temp_repo();
