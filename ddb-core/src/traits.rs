@@ -175,6 +175,15 @@ pub trait IndexPort: DoogatIndex + SqlBackend {
     /// unlocked destructive rebuild by omission.
     fn locked_rebuild(&self, repo: &impl DoogatSource) -> Result<crate::types::RebuildReport>;
 
+    /// Explicit, user-invoked rebuild: serialized against concurrent
+    /// destructive rebuilds, and unconditional — it does NOT re-check
+    /// integrity/staleness, because the caller asked for a rebuild.
+    fn locked_explicit_rebuild(
+        &self,
+        repo: &impl DoogatSource,
+        strict: bool,
+    ) -> Result<crate::types::RebuildReport>;
+
     /// Whether the index is stale relative to the repository HEAD.
     fn is_stale(&self, repo: &impl DoogatSource) -> Result<bool>;
 

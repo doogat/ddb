@@ -56,7 +56,7 @@ pub(crate) fn run(cli: crate::Cli) -> ddb_core::error::Result<()> {
             no_backup,
             backup_path,
         } => maintenance::compact(repo, force, dry_run, no_backup, backup_path),
-        Command::Reindex => maintenance::reindex(repo),
+        Command::Reindex { strict } => maintenance::reindex(repo, strict),
         Command::Fix {
             dry_run,
             verbose,

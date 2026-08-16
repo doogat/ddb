@@ -55,9 +55,9 @@ pub(crate) fn compact(
     Ok(())
 }
 
-pub(crate) fn reindex(repo: &std::path::Path) -> ddb_core::error::Result<()> {
+pub(crate) fn reindex(repo: &std::path::Path, strict: bool) -> ddb_core::error::Result<()> {
     let svc = DoogatService::open(repo)?;
-    let report = svc.reindex()?;
+    let report = if strict { svc.reindex_strict()? } else { svc.reindex()? };
     outln!("indexed {} doogats", report.indexed)?;
     if !report.warnings.is_empty() {
         outln!("{} warning(s)", report.warnings.len())?;

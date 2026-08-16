@@ -40,7 +40,11 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     }
 
     pub fn reindex(&self) -> Result<RebuildReport> {
-        self.index.locked_rebuild(&self.repo)
+        self.index.locked_explicit_rebuild(&self.repo, false)
+    }
+
+    pub fn reindex_strict(&self) -> Result<RebuildReport> {
+        self.index.locked_explicit_rebuild(&self.repo, true)
     }
 
     pub fn rebuild_if_stale(&self) -> Result<()> {

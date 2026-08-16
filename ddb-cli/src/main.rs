@@ -363,7 +363,11 @@ enum Command {
         backup_path: Option<PathBuf>,
     },
     /// Rebuild the search index
-    Reindex,
+    Reindex {
+        /// Fail on the first unreadable or malformed file instead of skipping it
+        #[arg(long)]
+        strict: bool,
+    },
     /// Auto-fix consistency issues across doogats
     Fix {
         /// Report fixes without modifying files

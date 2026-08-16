@@ -431,18 +431,57 @@ impl Index {
     /// Indexes all doogats first, collects warnings, then materializes typed tables.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn rebuild(&self, repo: &impl DoogatSource) -> Result<crate::types::RebuildReport> {
+        self.rebuild_inner(repo, false)
+    }
+
+    /// Strict full rebuild: aborts with `Err` naming the offending path on the
+    /// first unreadable or malformed file, instead of skipping it and
+    /// continuing like the lenient `rebuild`.
+    pub(crate) fn rebuild_strict(
+        &self,
+        repo: &impl DoogatSource,
+    ) -> Result<crate::types::RebuildReport> {
+        self.rebuild_inner(repo, true)
+    }
+
+    /// Shared body for `rebuild` (lenient) and `rebuild_strict`. Reads and
+    /// parses the corpus BEFORE the destructive drop+recreate, so a strict
+    /// abort on a poison file never touches a previously-indexed index.
+    fn rebuild_inner(
+        &self,
+        repo: &impl DoogatSource,
+        strict: bool,
+    ) -> Result<crate::types::RebuildReport> {
         tracing::info!("rebuild_triggered");
+
+        let paths = repo.list_doogats()?;
+
+        // Phase 1: sequential git reads + parallel parsing (rayon). Runs
+        // before the destructive drop so a strict abort leaves any
+        // previously-indexed rows intact.
+        let (parsed, parse_warnings) = Self::parallel_parse(repo, &paths)?;
+
+        if strict {
+            if let Some(first) = parse_warnings.first() {
+                let detail = match first {
+                    crate::types::ConsistencyWarning::UnreadableFile { path, error }
+                    | crate::types::ConsistencyWarning::MalformedYaml { path, error } => {
+                        format!("{path}: {error}")
+                    }
+                    other => format!("{other:?}"),
+                };
+                return Err(crate::error::DoogatError::Index(format!(
+                    "strict rebuild aborted: {detail}"
+                )));
+            }
+        }
 
         // Drop and recreate all tables so schema changes take effect
         // without needing migrations — the index is a rebuildable cache.
         self.drop_all_tables()?;
         self.conn.execute_batch(Self::SCHEMA_DDL)?;
 
-        let paths = repo.list_doogats()?;
         let mut report = crate::types::RebuildReport::default();
-
-        // Phase 1: sequential git reads + parallel parsing (rayon)
-        let (parsed, parse_warnings) = Self::parallel_parse(repo, &paths)?;
         report.warnings.extend(parse_warnings);
 
         // Phase 2: batch index all parsed doogats (single transaction)
@@ -502,6 +541,31 @@ impl Index {
             return Ok(crate::types::RebuildReport::default());
         }
         self.rebuild(repo)
+    }
+
+    /// Explicit, user-invoked rebuild: serialized against concurrent
+    /// destructive rebuilds like `locked_rebuild`, but unconditional — it
+    /// does NOT re-check integrity/staleness, because the caller (`ddb
+    /// reindex`) asked for a rebuild regardless of the index's current state.
+    /// `strict` selects `rebuild_strict` over the lenient `rebuild`.
+    pub(crate) fn locked_explicit_rebuild(
+        &self,
+        repo: &impl DoogatSource,
+        strict: bool,
+    ) -> Result<crate::types::RebuildReport> {
+        let _guard = match &self.db_dir {
+            Some(dir) => Some(write_lock::acquire(
+                dir,
+                super::REBUILD_LOCK_FILE_NAME,
+                super::REBUILD_LOCK_TIMEOUT,
+            )?),
+            None => None,
+        };
+        if strict {
+            self.rebuild_strict(repo)
+        } else {
+            self.rebuild(repo)
+        }
     }
 
     /// Rebuild if stale or corrupt. Uses incremental reindex when possible.

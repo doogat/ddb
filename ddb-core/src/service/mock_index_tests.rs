@@ -149,6 +149,13 @@ impl IndexPort for MockIndex {
     fn locked_rebuild(&self, _repo: &impl DoogatSource) -> Result<RebuildReport> {
         Ok(RebuildReport::default())
     }
+    fn locked_explicit_rebuild(
+        &self,
+        _repo: &impl DoogatSource,
+        _strict: bool,
+    ) -> Result<RebuildReport> {
+        Ok(RebuildReport::default())
+    }
     fn is_stale(&self, _repo: &impl DoogatSource) -> Result<bool> {
         Ok(false)
     }
