@@ -391,4 +391,90 @@ mod tests {
             id.0
         );
     }
+
+    #[test]
+    fn different_old_id_produces_different_id() {
+        // The colliding id is part of what identifies the collision: two
+        // different doogats whose losing blobs happen to be identical must
+        // still be reassigned to different ids. An implementation that ignores
+        // `old_id` derives the SAME id for both and silently re-collides them.
+        let blob_oid = "abc123deadbeef0011223344";
+
+        let from_old_a = super::derive_content_id("20200101000000", blob_oid, |_: &str| false);
+        let from_old_b = super::derive_content_id("20991231235959", blob_oid, |_: &str| false);
+
+        assert_ne!(
+            from_old_a, from_old_b,
+            "same blob_oid with a different old_id must derive a different id"
+        );
+    }
+
+    #[test]
+    fn derived_ids_spread_across_many_distinct_days() {
+        // Any scheme that pins part of the stamp to a constant (one fixed
+        // date, one fixed year) shrinks the id space and multiplies collisions
+        // while still looking like a 14-digit id. Asserting on the COUNT of
+        // distinct `YYYYMMDD` prefixes rather than on any specific date keeps
+        // this from pinning an implementation choice: a single-day scheme
+        // yields exactly 1.
+        let ids: Vec<String> = (0..200)
+            .map(|i| {
+                super::derive_content_id(
+                    &format!("2026010100{i:04}"),
+                    &format!("blob-oid-{i:04}"),
+                    |_: &str| false,
+                )
+                .0
+            })
+            .collect();
+
+        let day_prefixes: std::collections::HashSet<&str> =
+            ids.iter().map(|id| &id[0..8]).collect();
+
+        assert!(
+            day_prefixes.len() >= 20,
+            "200 distinct collisions must not all land on a handful of days; got {} distinct \
+             YYYYMMDD prefixes: {:?}",
+            day_prefixes.len(),
+            day_prefixes
+        );
+    }
+
+    #[test]
+    fn every_derived_id_is_a_real_calendar_stamp() {
+        // A DoogatId is a `YYYYMMDDHHmmss` stamp, not just any fourteen digits:
+        // the reported regression reassigned a doogat to `66177401297366`
+        // (month 74, hour 29, minute 73), which no repo-aware mint path could
+        // produce. EVERY derived id must parse as a real date and time, so a
+        // scheme that is calendar-valid only some of the time fails here.
+        let is_calendar_shaped = |id: &str| -> bool {
+            let field = |from: usize, to: usize| id[from..to].parse::<u32>().unwrap_or(u32::MAX);
+            DoogatId::is_valid_shape(id)
+                && (1..=12).contains(&field(4, 6))
+                && (1..=31).contains(&field(6, 8))
+                && field(8, 10) <= 23
+                && field(10, 12) <= 59
+                && field(12, 14) <= 59
+        };
+
+        let invalid: Vec<String> = (0..200)
+            .map(|i| {
+                super::derive_content_id(
+                    &format!("2026010100{i:04}"),
+                    &format!("blob-oid-{i:04}"),
+                    |_: &str| false,
+                )
+                .0
+            })
+            .filter(|id| !is_calendar_shaped(id))
+            .collect();
+
+        assert!(
+            invalid.is_empty(),
+            "every derived id must be a valid YYYYMMDDHHmmss stamp (month 1-12, day 1-31, \
+             hour <= 23, minute <= 59, second <= 59); {} of 200 were not, first offenders: {:?}",
+            invalid.len(),
+            invalid.iter().take(5).collect::<Vec<_>>()
+        );
+    }
 }

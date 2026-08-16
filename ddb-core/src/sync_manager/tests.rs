@@ -1932,35 +1932,92 @@ fn conflict_paths(bucket: &[ConflictFile]) -> Vec<&str> {
     bucket.iter().map(|c| c.path.as_str()).collect()
 }
 
+/// The bucket an ancestor-less conflict must land in, decided purely by
+/// whether its path names a doogat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpectedBucket {
+    AddAdd,
+    Normal,
+}
+
 #[test]
-fn partition_routes_ancestorless_non_doogat_conflicts_to_normal() {
+fn partition_classifies_ancestorless_conflicts_by_doogat_path_shape() {
     // Unrelated histories give EVERY conflicting path `ancestor: None`, so an
-    // absent ancestor alone cannot mean "doogat add/add id collision". None of
-    // these paths is a doogat: two live outside `ddb/`, one is under `ddb/`
-    // but is not a `.md` file, one is a root dotfile and one is a `.toml`.
-    let non_doogats = [
-        ".gitignore",
-        "README.md",
-        "docs/notes.md",
-        "ddb/notes.txt",
-        ".nodes/x.toml",
+    // absent ancestor alone cannot mean "doogat add/add id collision". The rule
+    // is the path: a doogat lives under `ddb/` and ends in `.md`. Each doogat
+    // shape below is paired with a near miss that must NOT be treated as one,
+    // so a lookup table of known paths cannot stand in for the rule.
+    let mut expected: Vec<(String, ExpectedBucket)> = vec![
+        // Doogats: top level, under a type directory, under `_typedef`.
+        ("ddb/20260101120000.md".into(), ExpectedBucket::AddAdd),
+        ("ddb/note/20260101120000.md".into(), ExpectedBucket::AddAdd),
+        (
+            "ddb/_typedef/20260101120000.md".into(),
+            ExpectedBucket::AddAdd,
+        ),
+        // Right directory, wrong extension.
+        ("ddb/anything.txt".into(), ExpectedBucket::Normal),
+        ("ddb/notes.txt".into(), ExpectedBucket::Normal),
+        ("ddb/note/x.png".into(), ExpectedBucket::Normal),
+        // Doogat-looking name, wrong directory.
+        ("ddbx/20260101120000.md".into(), ExpectedBucket::Normal),
+        ("other/ddb/20260101120000.md".into(), ExpectedBucket::Normal),
+        // Ordinary repo files, including the ones the live regression hit.
+        (".gitignore".into(), ExpectedBucket::Normal),
+        ("README.md".into(), ExpectedBucket::Normal),
+        ("docs/notes.md".into(), ExpectedBucket::Normal),
+        (".nodes/x.toml".into(), ExpectedBucket::Normal),
+        ("Cargo.toml".into(), ExpectedBucket::Normal),
+        (".github/workflows/ci.yml".into(), ExpectedBucket::Normal),
     ];
-    let conflicts: Vec<ConflictFile> =
-        non_doogats.iter().map(|p| ancestorless_conflict(p)).collect();
+    // Generated paths no denylist could enumerate ahead of time: only a rule
+    // keyed on the path shape routes these correctly.
+    expected.extend((0..64).map(|i| (format!("assets/{i}.bin"), ExpectedBucket::Normal)));
+
+    let conflicts: Vec<ConflictFile> = expected
+        .iter()
+        .map(|(path, _)| ancestorless_conflict(path))
+        .collect();
 
     let (binary_ref, delete_edit, add_add, normal) = partition_conflicts(conflicts);
 
     assert!(
-        add_add.is_empty(),
-        "a missing ancestor alone must not classify a non-doogat file as a doogat add/add collision; got {:?}",
-        conflict_paths(&add_add)
+        binary_ref.is_empty(),
+        "no path is under reference/; got {:?}",
+        conflict_paths(&binary_ref)
     );
-    assert!(binary_ref.is_empty(), "no path is under reference/");
-    assert!(delete_edit.is_empty(), "both sides are non-empty");
+    assert!(
+        delete_edit.is_empty(),
+        "both sides are non-empty; got {:?}",
+        conflict_paths(&delete_edit)
+    );
+
+    let add_add_paths = conflict_paths(&add_add);
+    let normal_paths = conflict_paths(&normal);
+    let bucket_of = |path: &str| -> Option<ExpectedBucket> {
+        if add_add_paths.contains(&path) {
+            Some(ExpectedBucket::AddAdd)
+        } else if normal_paths.contains(&path) {
+            Some(ExpectedBucket::Normal)
+        } else {
+            None
+        }
+    };
+
+    let misrouted: Vec<String> = expected
+        .iter()
+        .filter(|(path, want)| bucket_of(path) != Some(*want))
+        .map(|(path, want)| format!("{path}: expected {want:?}, got {:?}", bucket_of(path)))
+        .collect();
+    assert!(
+        misrouted.is_empty(),
+        "every ancestor-less conflict must be bucketed by whether its path is a doogat \
+         (under `ddb/`, ending in `.md`), not by the absent ancestor; misrouted: {misrouted:#?}"
+    );
     assert_eq!(
-        conflict_paths(&normal),
-        non_doogats,
-        "non-doogat ancestor-less conflicts belong in the ordinary conflict bucket"
+        add_add.len() + normal.len(),
+        expected.len(),
+        "every conflict must be accounted for exactly once"
     );
 }
 
