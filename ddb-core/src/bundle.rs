@@ -161,9 +161,16 @@ fn merge_bundle_and_resolve(
 /// mean "retryable" in the merge path — it is overloaded across a retryable
 /// class (write-lock acquire timeout; the resolve→commit window guard) and a
 /// terminal one (a collision loser whose id cannot be rewritten; a binary
-/// conflict missing its blob OID). Both classes reach here through the same
-/// `apply_merge_result` call, so they cannot be told apart at this boundary,
-/// and the terminal case is the one bundle import must report as `Sync`.
+/// conflict missing its blob OID). Either wrapped call can raise either class —
+/// `merge_remote` takes the write lock itself, and `apply_merge_result` raises
+/// both the window guard and the terminal collision failure — so they cannot be
+/// told apart at this boundary, and the terminal case is the one bundle import
+/// must report as `Sync`.
+///
+/// The cost is that a genuinely retryable write-lock timeout also reports as
+/// `Sync` (public category `Internal`) rather than `Conflict` (`409`). Fixing
+/// that properly means reclassifying the terminal errors at their source, which
+/// changes a public error shape and so belongs to its own PRD.
 fn bundle_merge_error(e: DoogatError) -> DoogatError {
     DoogatError::Sync(format!("bundle merge failed: {e}"))
 }
@@ -1260,8 +1267,8 @@ mod tests {
     /// other variant. `Conflict` is NOT a reliable "retryable" marker here: the
     /// merge path raises it both for genuinely retryable failures (write-lock
     /// acquire timeout, the resolve→commit window guard) and for terminal ones
-    /// (a collision loser whose id cannot be rewritten). Both arrive through the
-    /// same `apply_merge_result` call, and the terminal case is exactly what
+    /// (a collision loser whose id cannot be rewritten). Either wrapped call can
+    /// raise either class, and the terminal case is exactly what
     /// `conflicting_bundle_import_leaves_repo_clean_on_merge_failure` and
     /// `kept_bundle_ref_survives_a_later_import_under_fetch_prune` require to be
     /// reported as `Sync`. Letting `Conflict` through would break the documented
