@@ -53,10 +53,19 @@ Steps:
 2. Verify SHA-256 checksum
 3. Parse manifest
 4. `git bundle unbundle` + `git fetch` from bundle
-5. `git merge` bundle refs into local master
-6. Resolve conflicts via CRDT cascade (if any)
+5. Merge bundle refs into local master via `GitRepo::merge_remote` — the same write-locked libgit2 merge engine `ddb sync` uses
+6. Resolve conflicts via the CRDT cascade (`SyncManager::apply_merge_result`), producing a real merge commit and the true resolved-conflict count
 7. Import node registrations
-8. Rebuild index
+8. Delete `refs/remotes/bundle/master` (only reached after a successful merge)
+9. Rebuild index
+
+## Conflict Recovery
+
+A conflicted import is resolved, not silently dropped. `merge_bundle_and_resolve` detects conflicts from git's merge state (unmerged index entries), never from `stderr` text, and drives them through the same conflict-resolution cascade `ddb sync` uses (three-way git merge → CRDT per-zone merge → LWW fallback — see `sync.md` § "Conflict Resolution Cascade"). The resolution lands as a real two-parent merge commit reporting the true conflict count.
+
+`refs/remotes/bundle/master` is deleted only after that merge commit succeeds, so the unbundled data stays reachable — and therefore un-prunable by `git gc` — until the import actually lands. On an unresolvable merge, `import_bundle` returns a `Sync` error and the ref is left in place so the next import attempt can retry against the same data; no `git merge --abort` step is needed because the merge is computed entirely in memory (libgit2's `merge_commits`) and never touches the worktree or creates `MERGE_HEAD` on conflict.
+
+Re-importing the same bundle after a successful import is a no-op: its commits are already ancestors of local HEAD, so the merge classifies as already-up-to-date and reports zero (new) conflicts.
 
 ## Pre-compaction Backup
 
