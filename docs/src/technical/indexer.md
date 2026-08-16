@@ -93,6 +93,26 @@ pub struct RebuildReport {
 }
 ```
 
+#### Poison-file handling
+
+By default, `ddb reindex` is lenient: it collects unreadable or malformed
+doogats as warnings, skips them, indexes the rest of the corpus, and exits
+successfully. Each warning names the skipped path.
+
+`ddb reindex --strict` instead aborts on the first unreadable or malformed
+doogat and returns a non-zero exit status with the offending path in the error.
+The strict validation pass runs before the destructive drop-and-recreate phase,
+so an existing healthy index remains intact and continues to answer queries
+after the command fails.
+
+There is a known warning-count wart for malformed files. The parallel parse
+stage reports the parse failure, then the consistency-warning stage re-walks
+the corpus and reports the same path again. One malformed file therefore
+currently produces two warnings because de-duplication between those stages has
+not yet been implemented. An unreadable file, including invalid UTF-8, produces
+one warning: the consistency scan encounters the read error and continues
+without adding a second malformed-YAML warning.
+
 ### incremental_reindex
 
 `incremental_reindex(repo: &impl DoogatSource, old_head: &str) -> Result<RebuildReport>`
@@ -207,7 +227,8 @@ pub enum ConsistencyWarning {
 }
 ```
 
-Warnings don't prevent indexing — doogats are always indexed best-effort.
+Warnings don't prevent healthy doogats from being indexed; malformed or
+unreadable doogats are skipped in the default lenient rebuild mode.
 
 ## Alias Resolution
 

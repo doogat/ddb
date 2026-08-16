@@ -710,4 +710,27 @@ $DDB query "SELECT wlabel FROM smoke_widget" >/dev/null
 $DDB schema apply "$TMPDIR/smoke_schema.yaml" | grep -qv "create_type"
 pass "schema apply/diff: dry-run plan, real create, idempotent re-apply (PRD 00161)"
 
+# 32. poison-file reindex resilience (PRD 00169)
+POISON_PATH="ddb/29990101000000.md"
+printf '%s\n' '---' ': invalid yaml [' '---' 'body' > "$POISON_PATH"
+git -C "$TMPDIR" add -A && git -C "$TMPDIR" commit -m "add poison doogat" >/dev/null
+
+REINDEX_OUTPUT=$($DDB reindex 2>&1)
+echo "$REINDEX_OUTPUT" | grep -q "$POISON_PATH"
+pass "lenient reindex skips poison file and names its path"
+
+! $DDB reindex --strict >/dev/null 2>"$TMPDIR/reindex_strict.err"
+grep -q "$POISON_PATH" "$TMPDIR/reindex_strict.err"
+pass "strict reindex fails and names the poison path"
+
+# NOTE: this asserts the CLI stays usable after a strict abort, NOT that the
+# abort was non-destructive. `ddb query` calls `ensure_fresh` (service/sql.rs),
+# which would silently rebuild a dropped index before answering, so this check
+# cannot fail on the wipe-then-error scenario. The non-destructive property is
+# bound properly at unit level by
+# `indexer::tests::rebuild_strict_aborting_leaves_previously_indexed_rows_intact`.
+# Do not relabel this as an index-preservation check.
+$DDB query "SELECT id FROM doogats WHERE id = '$ID1'" | grep -q "$ID1"
+pass "cli still answers queries after a strict reindex abort"
+
 echo "=== all smoke tests passed ==="

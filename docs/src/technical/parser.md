@@ -30,6 +30,12 @@ The parser handles splitting Markdown into three zones, extracting metadata, and
 
 Deserializes YAML into `DoogatMeta`. If the `id` field is missing, falls back to extracting a numeric ID from the filename stem (e.g., `ddb/20260226130000.md` → `DoogatId("20260226130000")`).
 
+The frontmatter block is limited to 256 KiB, measured in bytes. The parser
+checks this limit before passing the block to `serde_yaml`; a block exactly at
+the limit is accepted, while a larger block returns a normal parse error. The
+indexer treats that error like any other malformed file: lenient rebuilds skip
+it with a warning, and strict rebuilds abort.
+
 ## Inline Field Extraction
 
 `extract_inline_fields(body, reference) -> Result<Vec<InlineField>>`

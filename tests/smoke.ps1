@@ -856,5 +856,37 @@ $output = ddb schema apply $schemaFile
 if ($output -match "create_type") { throw "re-apply must be a no-op, got: $output" }
 pass "schema apply/diff: dry-run plan, real create, idempotent re-apply (PRD 00161)"
 
+# 32. poison-file reindex resilience (PRD 00169)
+$poisonPath = "ddb/29990101000000.md"
+@"
+---
+: invalid yaml [
+---
+body
+"@ | Set-Content -Path $poisonPath -NoNewline
+git -C $TMPDIR add -A
+git -C $TMPDIR commit -m "add poison doogat" | Out-Null
+
+$output = & $DDB reindex 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) { throw "lenient reindex should succeed, got: $output" }
+if ($output -notmatch [regex]::Escape($poisonPath)) { throw "lenient reindex should name poison path, got: $output" }
+pass "lenient reindex skips poison file and names its path"
+
+$output = & $DDB reindex --strict 2>&1 | Out-String
+if ($LASTEXITCODE -eq 0) { throw "strict reindex should fail" }
+if ($output -notmatch [regex]::Escape($poisonPath)) { throw "strict reindex should name poison path, got: $output" }
+pass "strict reindex fails and names the poison path"
+
+# NOTE: this asserts the CLI stays usable after a strict abort, NOT that the
+# abort was non-destructive. `ddb query` calls `ensure_fresh` (service/sql.rs),
+# which would silently rebuild a dropped index before answering, so this check
+# cannot fail on the wipe-then-error scenario. The non-destructive property is
+# bound properly at unit level by
+# `indexer::tests::rebuild_strict_aborting_leaves_previously_indexed_rows_intact`.
+# Do not relabel this as an index-preservation check.
+$output = ddb query "SELECT id FROM doogats WHERE id = '$ID1'"
+if ($output -notmatch $ID1) { throw "cli should still answer queries after a strict reindex abort, got: $output" }
+pass "cli still answers queries after a strict reindex abort"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="
