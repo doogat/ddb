@@ -719,7 +719,14 @@ REINDEX_OUTPUT=$($DDB reindex 2>&1)
 echo "$REINDEX_OUTPUT" | grep -q "$POISON_PATH"
 pass "lenient reindex skips poison file and names its path"
 
-! $DDB reindex --strict >/dev/null 2>"$TMPDIR/reindex_strict.err"
+# Capture the exit code explicitly rather than using `! $DDB ...`: bash exempts
+# a `!`-inverted command from errexit, so a `--strict` that regressed to lenient
+# (exit 0) would NOT stop the script here, and the grep below would still match
+# the poison path in stderr — the warning is logged either way. That combination
+# would print a passing "strict reindex fails" line for a broken --strict.
+STRICT_RC=0
+$DDB reindex --strict >/dev/null 2>"$TMPDIR/reindex_strict.err" || STRICT_RC=$?
+[ "$STRICT_RC" -ne 0 ]
 grep -q "$POISON_PATH" "$TMPDIR/reindex_strict.err"
 pass "strict reindex fails and names the poison path"
 
