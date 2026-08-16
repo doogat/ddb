@@ -23,8 +23,6 @@ use fs2::FileExt;
 
 use crate::error::{DoogatError, Result};
 
-
-
 /// Poll cadence while blocked on a contended lock. Uncontended acquires take
 /// the fast path (first `try_lock_exclusive` succeeds, no sleep).
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -52,8 +50,8 @@ impl Drop for WriteLockGuard {
 /// with a retryable [`DoogatError::Conflict`] rather than hanging forever.
 pub fn acquire(lock_dir: &Path, lock_name: &str, timeout: Duration) -> Result<WriteLockGuard> {
     let lock_path = lock_dir.join(lock_name);
-    // A real repo already has `.git/`; create it if missing so the primitive
-    // is usable on a bare path (and so a fresh checkout never trips here).
+    // Create `lock_dir` (including nested ancestors) if absent, so callers
+    // never have to pre-create it and a fresh checkout never trips here.
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
