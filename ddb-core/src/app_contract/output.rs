@@ -141,7 +141,7 @@ mod tests {
         assert_eq!(app_warning.code, crate::app_contract::REINDEX_SKIPPED_FILES);
         assert_eq!(app_warning.message, expected_message);
         assert!(
-            !app_warning.message.contains("more, see ddb doctor"),
+            !app_warning.message.contains("ddb doctor"),
             "a single-warning summary must carry no count suffix at all, got: {}",
             app_warning.message
         );
@@ -151,20 +151,116 @@ mod tests {
     fn summarize_reindex_warnings_with_multiple_warnings_appends_remaining_count() {
         let first = malformed_yaml("ddb/20260101000000.md", "invalid frontmatter");
         let first_description = crate::app_contract::describe_consistency_warning(&first);
+        let advisory_path = "ddb/20260101000002.md";
         let warnings = vec![
             first,
             unreadable_file("ddb/20260101000001.md", "permission denied"),
-            cross_zone_duplicate("ddb/20260101000002.md", "title"),
+            cross_zone_duplicate(advisory_path, "title"),
         ];
 
         let result = crate::app_contract::summarize_reindex_warnings(warnings);
 
         let app_warning = result.expect("multiple input warnings must summarize to Some");
         assert_eq!(app_warning.code, crate::app_contract::REINDEX_SKIPPED_FILES);
-        // 3 input warnings -> N-1 = 2 "more". Asserts the exact count, not
-        // just presence of a suffix, so a hardcoded "+1" fails here.
-        let expected_message = format!("{} (+2 more, see ddb doctor)", first_description);
-        assert_eq!(app_warning.message, expected_message);
+        assert!(
+            app_warning.message.starts_with(&first_description),
+            "message must still describe the first skip warning, got: {}",
+            app_warning.message
+        );
+        // Only 2 of the 3 inputs are skip variants (the third is an advisory
+        // CrossZoneDuplicate, whose file WAS indexed successfully) -> N-1 = 1
+        // "more". A count derived from the raw 3-warning length would wrongly
+        // say "+2 more".
+        assert!(
+            app_warning.message.contains("+1 more"),
+            "expected the skip-only deduplicated remainder (+1 more), got: {}",
+            app_warning.message
+        );
+        assert!(
+            !app_warning.message.contains(advisory_path),
+            "an advisory-only path must never appear in the REINDEX_SKIPPED_FILES message, got: {}",
+            app_warning.message
+        );
+        assert!(
+            !app_warning.message.contains("ddb doctor"),
+            "message must not point at the unshipped `ddb doctor` command, got: {}",
+            app_warning.message
+        );
+    }
+
+    #[test]
+    fn summarize_reindex_warnings_with_only_advisory_variants_returns_none() {
+        // CrossZoneDuplicate and MissingRequired mean the file WAS indexed
+        // successfully; an advisory-only input must never be reported as a
+        // REINDEX_SKIPPED_FILES warning.
+        let warnings = vec![
+            cross_zone_duplicate("ddb/a.md", "title"),
+            missing_required("ddb/b.md", "task", "due_date"),
+        ];
+
+        let result = crate::app_contract::summarize_reindex_warnings(warnings);
+
+        assert!(
+            result.is_none(),
+            "advisory-only input must not produce a REINDEX_SKIPPED_FILES warning"
+        );
+    }
+
+    #[test]
+    fn summarize_reindex_warnings_with_duplicate_skip_path_yields_single_file_message_with_no_count_suffix(
+    ) {
+        // The same file can be reported as a skip by two different sources
+        // (e.g. parallel_parse and collect_consistency_warnings). It must
+        // still count as a single file.
+        let warnings = vec![
+            malformed_yaml("ddb/dup.md", "reported by parallel_parse"),
+            malformed_yaml("ddb/dup.md", "reported by collect_consistency_warnings"),
+        ];
+
+        let result = crate::app_contract::summarize_reindex_warnings(warnings);
+
+        let app_warning = result.expect("a duplicated skip path must still summarize to Some");
+        assert_eq!(app_warning.code, crate::app_contract::REINDEX_SKIPPED_FILES);
+        assert_eq!(
+            app_warning.message.matches("ddb/dup.md").count(),
+            1,
+            "the same path reported twice must appear exactly once in the message, got: {}",
+            app_warning.message
+        );
+        assert!(
+            !app_warning.message.contains("more"),
+            "a single distinct skip path must carry no count suffix at all, got: {}",
+            app_warning.message
+        );
+    }
+
+    #[test]
+    fn summarize_reindex_warnings_with_duplicate_and_distinct_skip_paths_counts_distinct_remainder_only(
+    ) {
+        let warnings = vec![
+            malformed_yaml("ddb/a.md", "invalid frontmatter (first report)"),
+            unreadable_file("ddb/b.md", "permission denied"),
+            malformed_yaml("ddb/a.md", "invalid frontmatter (second report)"),
+            malformed_yaml("ddb/c.md", "invalid frontmatter"),
+        ];
+
+        let result = crate::app_contract::summarize_reindex_warnings(warnings);
+
+        let app_warning = result.expect("skip warnings must summarize to Some");
+        assert_eq!(app_warning.code, crate::app_contract::REINDEX_SKIPPED_FILES);
+        // 3 distinct skip paths (a, b, c) after deduplicating the repeated
+        // "a" entry -> N-1 = 2 "more". An undeduplicated count would say
+        // "+3 more" instead.
+        assert!(
+            app_warning.message.contains("+2 more"),
+            "expected the deduplicated remainder (+2 more), got: {}",
+            app_warning.message
+        );
+        assert!(
+            !app_warning.message.contains("ddb doctor"),
+            "message must not point at the unshipped `ddb doctor` command, got: {}",
+            app_warning.message
+        );
     }
 
     #[test]
