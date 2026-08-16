@@ -92,6 +92,7 @@ fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()
     let output = std::process::Command::new("git")
         .args([
             "fetch",
+            "--no-prune",
             path_to_str(&git_bundle_path)?,
             "refs/heads/*:refs/remotes/bundle/*",
         ])
@@ -102,6 +103,31 @@ fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()
             "git fetch from bundle failed: {}",
             String::from_utf8_lossy(&output.stderr)
         )));
+    }
+
+    Ok(())
+}
+
+/// Delete every ref under `refs/remotes/bundle/*`, not just `master`. The
+/// fetch in `unbundle_git_objects` maps `refs/heads/*` onto
+/// `refs/remotes/bundle/*`, so a multi-branch bundle creates several bundle
+/// refs; a successful import must clear the whole namespace.
+fn delete_all_bundle_refs(repo: &impl GitBackend) -> Result<()> {
+    let output = std::process::Command::new("git")
+        .args(["for-each-ref", "--format=%(refname)", "refs/remotes/bundle/"])
+        .current_dir(repo.repo_path())
+        .output()?;
+    if !output.status.success() {
+        return Err(DoogatError::Sync(format!(
+            "git for-each-ref failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some(branch) = line.strip_prefix("refs/remotes/bundle/") {
+            repo.delete_remote_ref("bundle", branch)?;
+        }
     }
 
     Ok(())
@@ -164,7 +190,7 @@ pub fn import_bundle(
     let mut report = merge_bundle_and_resolve(repo, sync_mgr, index)?;
     import_node_registrations(repo, &work_dir)?;
 
-    repo.delete_remote_ref("bundle", "master")?;
+    delete_all_bundle_refs(repo)?;
 
     index.rebuild(repo)?;
 
