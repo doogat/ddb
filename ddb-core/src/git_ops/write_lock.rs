@@ -90,27 +90,30 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    /// Name used by tests that only care about mutual exclusion, not identity.
+    const TEST_LOCK_NAME: &str = "test.lock";
+
     /// The lock must exclude a second acquirer from the critical section until
     /// the first guard is released — the core mutual-exclusion guarantee.
     #[test]
     fn second_acquire_blocks_until_first_guard_released() {
         let dir = TempDir::new().unwrap();
-        let root = dir.path().to_path_buf();
+        let lock_dir = dir.path().to_path_buf();
 
         // `in_section` is true exactly while thread 1 holds the lock. If the
         // lock is broken, thread 2 enters its section while this is still true.
         let in_section = Arc::new(AtomicBool::new(false));
         let violated = Arc::new(AtomicBool::new(false));
 
-        let g1 = acquire(&root, Duration::from_secs(5)).unwrap();
+        let g1 = acquire(&lock_dir, TEST_LOCK_NAME, Duration::from_secs(5)).unwrap();
         in_section.store(true, SeqCst);
 
-        let root2 = root.clone();
+        let lock_dir2 = lock_dir.clone();
         let in_section2 = in_section.clone();
         let violated2 = violated.clone();
         let t2 = std::thread::spawn(move || {
             // Must block here until g1 is released below.
-            let _g2 = acquire(&root2, Duration::from_secs(5)).unwrap();
+            let _g2 = acquire(&lock_dir2, TEST_LOCK_NAME, Duration::from_secs(5)).unwrap();
             if in_section2.load(SeqCst) {
                 violated2.store(true, SeqCst);
             }
@@ -134,12 +137,12 @@ mod tests {
     #[test]
     fn acquire_times_out_when_lock_held() {
         let dir = TempDir::new().unwrap();
-        let root = dir.path().to_path_buf();
+        let lock_dir = dir.path().to_path_buf();
 
-        let _g1 = acquire(&root, Duration::from_secs(5)).unwrap();
+        let _g1 = acquire(&lock_dir, TEST_LOCK_NAME, Duration::from_secs(5)).unwrap();
 
         let start = Instant::now();
-        let err = acquire(&root, Duration::from_millis(100)).unwrap_err();
+        let err = acquire(&lock_dir, TEST_LOCK_NAME, Duration::from_millis(100)).unwrap_err();
         let elapsed = start.elapsed();
 
         assert!(
@@ -160,11 +163,74 @@ mod tests {
     #[test]
     fn acquire_succeeds_after_release() {
         let dir = TempDir::new().unwrap();
-        let root = dir.path().to_path_buf();
+        let lock_dir = dir.path().to_path_buf();
 
-        let g1 = acquire(&root, Duration::from_secs(5)).unwrap();
+        let g1 = acquire(&lock_dir, TEST_LOCK_NAME, Duration::from_secs(5)).unwrap();
         std::mem::drop(g1);
         // Same-path re-acquire must succeed immediately now that it is free.
-        let _g2 = acquire(&root, Duration::from_millis(200)).unwrap();
+        let _g2 = acquire(&lock_dir, TEST_LOCK_NAME, Duration::from_millis(200)).unwrap();
+    }
+
+    /// Two different lock names inside the same directory are independent
+    /// locks: holding one must not exclude an acquirer of the other. This is
+    /// the whole point of generalizing `acquire` to take an explicit name.
+    #[test]
+    fn different_lock_names_in_same_directory_do_not_exclude() {
+        let dir = TempDir::new().unwrap();
+        let lock_dir = dir.path().to_path_buf();
+
+        let _g1 = acquire(&lock_dir, "a.lock", Duration::from_secs(5)).unwrap();
+
+        let start = Instant::now();
+        // Must succeed promptly, not wait out the timeout: "b.lock" is a
+        // distinct lock from "a.lock" in the same directory.
+        let _g2 = acquire(&lock_dir, "b.lock", Duration::from_secs(2)).unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "acquiring a different lock name blocked as if it shared the held lock ({elapsed:?})"
+        );
+    }
+
+    /// The same lock name in two different directories does not exclude:
+    /// the lock's identity is `<lock_dir>/<lock_name>`, not the name alone.
+    #[test]
+    fn same_lock_name_in_different_directories_does_not_exclude() {
+        let dir_a = TempDir::new().unwrap();
+        let dir_b = TempDir::new().unwrap();
+
+        let _g1 = acquire(dir_a.path(), TEST_LOCK_NAME, Duration::from_secs(5)).unwrap();
+
+        let start = Instant::now();
+        // Same name, different directory — must not contend with `_g1`.
+        let _g2 = acquire(dir_b.path(), TEST_LOCK_NAME, Duration::from_secs(2)).unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "acquiring the same lock name in a different directory blocked as if it shared \
+             the held lock ({elapsed:?})"
+        );
+    }
+
+    /// `acquire` creates `lock_dir` — including nested, not-yet-existing
+    /// ancestors — rather than erroring when it is absent.
+    #[test]
+    fn acquire_creates_lock_dir_when_absent() {
+        let dir = TempDir::new().unwrap();
+        let lock_dir = dir.path().join("nested").join("does-not-exist-yet");
+        assert!(!lock_dir.exists());
+
+        let _g1 = acquire(&lock_dir, TEST_LOCK_NAME, Duration::from_secs(5)).unwrap();
+
+        assert!(
+            lock_dir.is_dir(),
+            "acquire did not create the (nested) lock directory"
+        );
+        assert!(
+            lock_dir.join(TEST_LOCK_NAME).is_file(),
+            "acquire did not create the lock file inside the created directory"
+        );
     }
 }

@@ -1127,7 +1127,12 @@ fn merge_blocks_while_write_lock_held() {
 
     let handle = std::thread::spawn(move || {
         // Hold the repo's raw OS write guard across the whole critical window.
-        let guard = super::write_lock::acquire(&dir_b_path, Duration::from_secs(10)).unwrap();
+        let guard = super::write_lock::acquire(
+            &dir_b_path.join(".git"),
+            "ddb-write.lock",
+            Duration::from_secs(10),
+        )
+        .unwrap();
 
         // Commit a NEW distinct file with raw git2 on refs/heads/master. Raw
         // git2 on purpose: GitRepo's own write methods would block on the very
@@ -1307,7 +1312,12 @@ fn commit_merge_blocks_while_write_lock_held() {
 
     let handle = std::thread::spawn(move || {
         // Hold the repo's raw OS write guard across the whole critical window.
-        let guard = super::write_lock::acquire(&dir_b_path, Duration::from_secs(10)).unwrap();
+        let guard = super::write_lock::acquire(
+            &dir_b_path.join(".git"),
+            "ddb-write.lock",
+            Duration::from_secs(10),
+        )
+        .unwrap();
         tx.send(()).unwrap();
 
         // Hold the guard for a bounded window well under the 10s timeout. An
