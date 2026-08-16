@@ -68,8 +68,8 @@ Full index rebuild using a parallel pipeline. Drops all tables (internal and mat
 
 Phases:
 
-1. **Drop & recreate** — drop every table (FK checks disabled for drop order), recreate internal schema from `SCHEMA_DDL`
-2. **Parallel parse** — `parallel_parse()` reads all files from git sequentially via `read_files_batch()` (optimal for pack I/O), then parses in parallel using rayon `par_iter()`. Parse errors become warnings, not failures.
+1. **Parallel parse** — `parallel_parse()` reads all files from git sequentially via `read_files_batch()` (optimal for pack I/O), then parses in parallel using rayon `par_iter()`. Parse errors become warnings, not failures. This runs **before** the destructive drop, so a `--strict` abort leaves any previously-indexed rows intact.
+2. **Drop & recreate** — drop every table (FK checks disabled for drop order), recreate internal schema from `SCHEMA_DDL`
 3. **Batch index** — `batch_index()` writes all parsed doogats to SQLite in a single `BEGIN IMMEDIATE`/`COMMIT` transaction. Per-doogat errors are logged and skipped.
 4. **Consistency warnings** — detect malformed YAML, cross-zone duplicates, missing required fields
 5. **Cached materialization** — `materialize_all_types_from()` creates typed SQLite tables using the already-parsed data (no redundant git reads). Schema inference and row population both filter the in-memory `Vec<ParsedDoogat>` by type.
@@ -222,6 +222,7 @@ Scans all doogats and produces advisory warnings:
 ```rust
 pub enum ConsistencyWarning {
     MalformedYaml { path: String, error: String },
+    UnreadableFile { path: String, error: String },
     CrossZoneDuplicate { path: String, key: String },
     MissingRequired { path: String, type_name: String, field: String },
 }
