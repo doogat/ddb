@@ -180,16 +180,30 @@ impl Index {
         // tables and recreates them from the current SCHEMA_DDL. Serialize
         // that destructive work against other processes the same way
         // `locked_rebuild` does.
-        if needs_drop {
-            let _guard = match &db_dir {
+        //
+        // The guard is bound HERE, outside the branch, so it outlives the
+        // recreate and the stamp below — not just the drop loop. Between
+        // dropping and stamping, the database has no tables AND still carries
+        // the old version: a second process that acquired the lock in that
+        // window would re-check, still see a mismatch, and drop the tables
+        // this one had just recreated. `locked_rebuild` holds its guard across
+        // the whole rebuild for the same reason.
+        let _guard = if needs_drop {
+            match &db_dir {
                 Some(dir) => Some(write_lock::acquire(
                     dir,
                     REBUILD_LOCK_FILE_NAME,
                     REBUILD_LOCK_TIMEOUT,
                 )?),
                 None => None,
-            };
+            }
+        } else {
+            // Nothing destructive to do: never take the lock, so opening an
+            // up-to-date index does not serialize against a live rebuild.
+            None
+        };
 
+        if needs_drop {
             // Another process may have finished the upgrade while we waited.
             // Without this, the loser drops and recreates tables the winner
             // has already rebuilt — and if the winner has started indexing
@@ -218,7 +232,7 @@ impl Index {
         conn.execute_batch(Self::SCHEMA_DDL)?;
         // stamp unconditionally: covers both the fresh-DB path and the
         // just-upgraded path
-        conn.execute_batch(&format!("PRAGMA user_version = {};", Self::SCHEMA_VERSION))?;
+        conn.pragma_update(None, "user_version", Self::SCHEMA_VERSION)?;
         Ok(Self { conn, db_dir })
     }
 
