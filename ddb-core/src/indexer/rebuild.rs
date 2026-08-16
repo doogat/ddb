@@ -95,30 +95,28 @@ impl Index {
 
         let (to_index_paths, to_delete, typedef_changed) = Self::partition_changes(&changes);
 
-        // Capture pre-delete types so we can also evict the deleted rows
-        // from their materialized type tables.
-        let mut delete_types: Vec<(String, String)> = Vec::new();
-        for id in &to_delete {
-            let t: Option<String> = self
-                .conn
-                .query_row(
-                    "SELECT type FROM doogats WHERE id = ?1",
-                    rusqlite::params![id],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .ok()
-                .flatten();
-            if let Some(t) = t {
-                if !t.is_empty() && t != "_typedef" {
-                    delete_types.push((id.clone(), t));
-                }
-            }
-            self.remove_doogat(id)?;
-        }
-        self.unmaterialize_data_doogats(&delete_types)?;
+        self.evict_doogats(&to_delete)?;
 
         let (indexed, parsed_changes, warnings) =
             self.batch_index_changes(repo, &to_index_paths, strict)?;
+
+        // A file the change-set turned into a poison file was skipped above.
+        // Without this, its pre-edit rows survive while the stored HEAD advances
+        // past the commit that broke it, leaving the index serving content the
+        // file no longer holds. Evicting AFTER the parse keeps a strict abort
+        // (which already returned via `?`) from touching a good index.
+        let poisoned: Vec<String> = warnings
+            .iter()
+            .filter_map(|w| match w {
+                crate::types::ConsistencyWarning::UnreadableFile { path, .. }
+                | crate::types::ConsistencyWarning::MalformedYaml { path, .. } => {
+                    crate::parser::extract_id_from_path(path)
+                }
+                _ => None,
+            })
+            .collect();
+        self.evict_doogats(&poisoned)?;
+
         let mut report = crate::types::RebuildReport {
             indexed,
             warnings,
@@ -142,6 +140,32 @@ impl Index {
             "incremental_reindex_complete"
         );
         Ok(report)
+    }
+
+    /// Evict doogats from `doogats`, their satellite tables, the FTS index and
+    /// their materialized type table. Each doogat's type is captured BEFORE its
+    /// row is removed, so the type table can be cleaned too. Evicting an ID the
+    /// index never held is a no-op.
+    fn evict_doogats(&self, ids: &[String]) -> Result<()> {
+        let mut evicted_types: Vec<(String, String)> = Vec::new();
+        for id in ids {
+            let t: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT type FROM doogats WHERE id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten();
+            if let Some(t) = t {
+                if !t.is_empty() && t != "_typedef" {
+                    evicted_types.push((id.clone(), t));
+                }
+            }
+            self.remove_doogat(id)?;
+        }
+        self.unmaterialize_data_doogats(&evicted_types)
     }
 
     /// Separate diff entries into paths to index (added/modified) and IDs to
