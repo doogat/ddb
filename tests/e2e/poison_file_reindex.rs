@@ -95,19 +95,13 @@ fn lenient_reindex_skips_poison_file_and_indexes_the_rest() {
         "the skip must name the poison path so it is never silent: stderr={stderr:?}"
     );
 
-    // The valid doogats stay queryable around the skipped file.
-    let query = repo
-        .ddb()
-        .args(["query", "SELECT id FROM doogats"])
-        .output()
-        .expect("ddb query failed to run");
-    let rows = String::from_utf8_lossy(&query.stdout).into_owned();
-    for id in &ids {
-        assert!(
-            rows.contains(id.as_str()),
-            "valid doogat {id} must remain queryable after the skip: rows={rows:?}"
-        );
-    }
+    // Deliberately NOT asserted here: a `ddb query` read-back showing the valid
+    // doogats. `execute_sql` calls `ensure_fresh` (`service/sql.rs:11-14`),
+    // which rebuilds a stale index before answering — so that check passes even
+    // if this `reindex` indexed nothing at all, and proves only that the CLI
+    // still works. The `indexed N doogats` assertion above is what actually
+    // binds this reindex to having indexed the valid files. Same self-heal
+    // hazard the NOTE at `tests/smoke.sh:733-739` records.
 }
 
 /// `--strict` is the opt-in hard failure: over the same corpus the command must
