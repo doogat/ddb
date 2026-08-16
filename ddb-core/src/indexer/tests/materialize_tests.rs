@@ -1346,7 +1346,7 @@ fn incremental_reindex_only_processes_changed_files() {
     .unwrap();
     let old_head = idx.stored_head_oid().unwrap();
 
-    let report = idx.incremental_reindex(&repo, &old_head).unwrap();
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
     assert_eq!(report.indexed, 1); // Only the modified file
 
     // Verify the modification is reflected
@@ -1384,7 +1384,7 @@ fn incremental_reindex_handles_deletes() {
         .unwrap();
     let old_head = idx.stored_head_oid().unwrap();
 
-    let report = idx.incremental_reindex(&repo, &old_head).unwrap();
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
     assert_eq!(report.indexed, 0); // No adds/modifies
 
     // Verify deletion
@@ -1412,7 +1412,7 @@ fn incremental_reindex_fallback_on_bad_oid() {
 
     // Use a fake old HEAD — should fall back to full rebuild
     let report = idx
-        .incremental_reindex(&repo, "0000000000000000000000000000000000000000")
+        .incremental_reindex(&repo, "0000000000000000000000000000000000000000", false)
         .unwrap();
     assert_eq!(report.indexed, 1); // Full rebuild found 1 doogat
 }
@@ -1438,7 +1438,7 @@ fn typedef_change_triggers_rematerialization() {
     repo.commit_file("ddb/_typedef/20260301100100.md", typedef2, "modify typedef")
         .unwrap();
 
-    let report = idx.incremental_reindex(&repo, &old_head).unwrap();
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
     assert!(
         report.tables_materialized > 0,
         "typedef change should trigger rematerialization"
@@ -1657,7 +1657,7 @@ fn incremental_reindex_materializes_new_typed_doogat() {
     )
     .unwrap();
     let old_head = idx.stored_head_oid().unwrap();
-    let report = idx.incremental_reindex(&repo, &old_head).unwrap();
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
     assert_eq!(report.indexed, 1);
 
     let rows1 = idx
@@ -1712,7 +1712,7 @@ fn incremental_reindex_unmaterializes_deleted_typed_doogat() {
     repo.delete_file("ddb/20240103000000.md", "delete second")
         .unwrap();
     let old_head = idx.stored_head_oid().unwrap();
-    idx.incremental_reindex(&repo, &old_head).unwrap();
+    idx.incremental_reindex(&repo, &old_head, false).unwrap();
 
     let rows = idx
         .query_raw("SELECT id FROM category ORDER BY id")

@@ -161,7 +161,7 @@ fn bench_incremental_reindex(c: &mut Criterion) {
                 (dir, repo, index, old_head)
             },
             |(_dir, repo, index, old_head)| {
-                index.incremental_reindex(&repo, &old_head).unwrap();
+                index.incremental_reindex(&repo, &old_head, false).unwrap();
             },
         );
     });
@@ -229,7 +229,7 @@ fn bench_incremental_reindex_batch(c: &mut Criterion) {
                 (dir, repo, index, old_head)
             },
             |(_dir, repo, index, old_head)| {
-                index.incremental_reindex(&repo, &old_head).unwrap();
+                index.incremental_reindex(&repo, &old_head, false).unwrap();
             },
         );
     });

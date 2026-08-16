@@ -928,7 +928,7 @@ fn incremental_batch_mode_multi_change() {
     ];
     repo.commit_files(&modifications, "modify 3").unwrap();
 
-    let report = idx.incremental_reindex(&repo, &old_head).unwrap();
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
     assert_eq!(report.indexed, 3);
 
     // Verify modifications

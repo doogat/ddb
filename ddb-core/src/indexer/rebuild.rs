@@ -54,6 +54,7 @@ impl Index {
         &self,
         repo: &impl DoogatSource,
         old_head: &str,
+        strict: bool,
     ) -> Result<crate::types::RebuildReport> {
         let new_head = repo.head_oid()?.to_string();
 
@@ -115,9 +116,11 @@ impl Index {
         }
         self.unmaterialize_data_doogats(&delete_types)?;
 
-        let (indexed, parsed_changes) = self.batch_index_changes(repo, &to_index_paths)?;
+        let (indexed, parsed_changes, warnings) =
+            self.batch_index_changes(repo, &to_index_paths, strict)?;
         let mut report = crate::types::RebuildReport {
             indexed,
+            warnings,
             ..Default::default()
         };
 
@@ -170,30 +173,89 @@ impl Index {
         (to_index_paths, to_delete, typedef_changed)
     }
 
-    /// Read changed files from the repo, parse them, and index. Returns the
-    /// number of doogats indexed and the parsed doogats themselves so
-    /// callers can also rematerialize affected type tables.
-    fn batch_index_changes(
+    /// Read + parse a batch of changed paths, collecting per-file read/parse
+    /// failures as warnings instead of aborting (mirrors `parallel_parse`).
+    /// `strict: true` restores the old fatal-on-first-error behavior.
+    pub(super) fn batch_index_changes(
         &self,
         repo: &impl DoogatSource,
         paths: &[String],
-    ) -> Result<(usize, Vec<ParsedDoogat>)> {
+        strict: bool,
+    ) -> Result<(usize, Vec<ParsedDoogat>, Vec<crate::types::ConsistencyWarning>)> {
         if paths.len() > 1 {
             let contents = repo.read_files_batch(paths)?;
             let mut parsed = Vec::with_capacity(contents.len());
+            let mut warnings = Vec::new();
             for (path, content_result) in contents {
-                let content = content_result?;
-                parsed.push(crate::parser::parse(&content, &path)?);
+                let content = match content_result {
+                    Ok(content) => content,
+                    Err(e) => {
+                        if strict {
+                            return Err(e);
+                        }
+                        tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping unreadable file");
+                        warnings.push(crate::types::ConsistencyWarning::UnreadableFile {
+                            path,
+                            error: e.to_string(),
+                        });
+                        continue;
+                    }
+                };
+                match crate::parser::parse(&content, &path) {
+                    Ok(doogat) => parsed.push(doogat),
+                    Err(e) => {
+                        if strict {
+                            return Err(e);
+                        }
+                        tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping malformed file");
+                        warnings.push(crate::types::ConsistencyWarning::MalformedYaml {
+                            path,
+                            error: e.to_string(),
+                        });
+                    }
+                }
             }
             let count = self.batch_index(&parsed)?;
-            Ok((count, parsed))
+            Ok((count, parsed, warnings))
         } else if let Some(path) = paths.first() {
-            let content = repo.read_file(path)?;
-            let parsed = crate::parser::parse(&content, path)?;
+            let content = match repo.read_file(path) {
+                Ok(content) => content,
+                Err(e) => {
+                    if strict {
+                        return Err(e);
+                    }
+                    tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping unreadable file");
+                    return Ok((
+                        0,
+                        Vec::new(),
+                        vec![crate::types::ConsistencyWarning::UnreadableFile {
+                            path: path.clone(),
+                            error: e.to_string(),
+                        }],
+                    ));
+                }
+            };
+            let parsed = match crate::parser::parse(&content, path) {
+                Ok(doogat) => doogat,
+                Err(e) => {
+                    if strict {
+                        return Err(e);
+                    }
+                    tracing::warn!(path = %path, error = %e, "batch_index_changes: skipping malformed file");
+                    return Ok((
+                        0,
+                        Vec::new(),
+                        vec![crate::types::ConsistencyWarning::MalformedYaml {
+                            path: path.clone(),
+                            error: e.to_string(),
+                        }],
+                    ));
+                }
+            };
             self.index_doogat(&parsed)?;
-            Ok((1, vec![parsed]))
+            Ok((1, vec![parsed], Vec::new()))
         } else {
-            Ok((0, Vec::new()))
+            Ok((0, Vec::new(), Vec::new()))
         }
     }
 
@@ -329,14 +391,18 @@ impl Index {
         let contents = repo.read_files_batch(paths)?;
 
         // Step 2: parallel parse (CPU-bound, benefits from rayon)
-        let results: Vec<(String, std::result::Result<ParsedDoogat, String>)> = contents
+        // Err payload is (is_read_error, error_text) so the sequential step below
+        // can log the error and pick the matching warning variant without cloning
+        // the path.
+        type ParseOutcome = std::result::Result<ParsedDoogat, (bool, String)>;
+        let results: Vec<(String, ParseOutcome)> = contents
             .into_par_iter()
             .map(|(path, content_result)| match content_result {
                 Ok(content) => match crate::parser::parse(&content, &path) {
                     Ok(parsed) => (path, Ok(parsed)),
-                    Err(e) => (path, Err(e.to_string())),
+                    Err(e) => (path, Err((false, e.to_string()))),
                 },
-                Err(e) => (path, Err(e.to_string())),
+                Err(e) => (path, Err((true, e.to_string()))),
             })
             .collect();
 
@@ -346,10 +412,13 @@ impl Index {
         for (path, result) in results {
             match result {
                 Ok(z) => parsed.push(z),
-                Err(e) => {
+                Err((is_read_error, e)) => {
                     tracing::warn!(path = %path, error = %e, "parallel_parse: skipping doogat");
-                    warnings
-                        .push(crate::types::ConsistencyWarning::MalformedYaml { path, error: e });
+                    warnings.push(if is_read_error {
+                        crate::types::ConsistencyWarning::UnreadableFile { path, error: e }
+                    } else {
+                        crate::types::ConsistencyWarning::MalformedYaml { path, error: e }
+                    });
                 }
             }
         }
@@ -440,7 +509,7 @@ impl Index {
         // routes its writes through nesting-tolerant helpers, so it composes
         // with an enclosing transaction.
         if let Some(old_head) = self.stored_head_oid() {
-            Ok(Some(self.incremental_reindex(repo, &old_head)?))
+            Ok(Some(self.incremental_reindex(repo, &old_head, false)?))
         } else if in_transaction {
             // No stored HEAD inside a transaction: the only option would be a
             // full rebuild, which is unsafe here. Leave the index as-is; the
