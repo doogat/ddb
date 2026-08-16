@@ -7,10 +7,12 @@ mod resolve;
 mod search;
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
 use crate::error::{DoogatError, Result};
+use crate::git_ops::write_lock;
 use crate::traits::DoogatSource;
 use crate::types::{ParsedDoogat, QueryValue};
 
@@ -24,6 +26,14 @@ pub use crate::types::{PaginatedSearchResult, SearchResult};
 pub use materialize::{
     is_core_column, junction_parent_id_column, junction_ref_id_column, junction_table_name,
 };
+
+/// Rebuild lock file name, placed under the index's own directory (NOT `.git/`
+/// — this lock protects the SQLite index, not the git repo).
+const REBUILD_LOCK_FILE_NAME: &str = "ddb-rebuild.lock";
+
+/// How long a rebuild waits for another process's rebuild before failing loud
+/// with a retryable `Conflict`.
+const REBUILD_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Index {
     pub(crate) conn: Connection,
@@ -114,19 +124,23 @@ impl Index {
         );
     ";
 
+    /// Current index schema version, stamped into `PRAGMA user_version`.
+    /// Bump this whenever `SCHEMA_DDL` changes shape; a DB carrying a
+    /// different non-zero value is dropped and recreated on open.
+    const SCHEMA_VERSION: i64 = 1;
+
     /// Open (or create) the SQLite index database.
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
-        let mut index = Self::configure_connection(conn)?;
         // `Path::parent()` yields `Some("")` — not `None` — for a bare relative
         // filename such as `":memory:"`. Filter that out so such a path stays
         // unlocked (like `open_in_memory`) instead of dropping a lock file at a
         // cwd-relative path.
-        index.db_dir = path
+        let db_dir = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .map(|p| p.to_path_buf());
-        Ok(index)
+        Self::configure_connection(conn, db_dir)
     }
 
     /// Open an isolated in-memory SQLite index.
@@ -135,38 +149,77 @@ impl Index {
     /// without paying filesystem setup costs on every case.
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        Self::configure_connection(conn)
+        Self::configure_connection(conn, None)
     }
 
-    /// `db_dir` is left unset (no rebuild lock); `open` fills it in for
-    /// on-disk databases.
-    fn configure_connection(conn: Connection) -> Result<Self> {
+    /// `db_dir` places the cross-process rebuild lock beside the index file
+    /// for on-disk databases; pass `None` for in-memory or otherwise
+    /// unlocked connections.
+    fn configure_connection(conn: Connection, db_dir: Option<PathBuf>) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
 
-        // Detect old 3-column FTS5 schema and upgrade if needed.
-        // FTS5 virtual tables cannot be ALTERed, so we drop all tables
-        // and recreate from the current SCHEMA_DDL.
-        if Self::needs_schema_upgrade(&conn) {
-            tracing::info!("index schema outdated, dropping tables for upgrade");
-            conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-            let mut stmt = conn.prepare(
-                "SELECT name FROM sqlite_master \
-                 WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'",
-            )?;
-            let tables: Vec<String> = stmt
-                .query_map([], |row| row.get(0))?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(stmt);
-            for table in &tables {
-                conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{table}\""))?;
+        // Detect a schema needing upgrade. A `user_version` of 0 means
+        // unstamped (every index created before this change) — defer to the
+        // legacy FTS-column-text probe so existing on-disk indexes upgrade
+        // exactly as before. A non-zero value that isn't SCHEMA_VERSION means
+        // this DB was stamped by a different schema shape and must be
+        // dropped unconditionally, without consulting the legacy probe.
+        let read_needs_drop = |conn: &Connection| -> Result<bool> {
+            let stamped: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            Ok(if stamped == 0 {
+                Self::needs_schema_upgrade(conn)
+            } else {
+                stamped != Self::SCHEMA_VERSION
+            })
+        };
+
+        let mut needs_drop = read_needs_drop(&conn)?;
+
+        // FTS5 virtual tables cannot be ALTERed, so an upgrade drops all
+        // tables and recreates them from the current SCHEMA_DDL. Serialize
+        // that destructive work against other processes the same way
+        // `locked_rebuild` does.
+        if needs_drop {
+            let _guard = match &db_dir {
+                Some(dir) => Some(write_lock::acquire(
+                    dir,
+                    REBUILD_LOCK_FILE_NAME,
+                    REBUILD_LOCK_TIMEOUT,
+                )?),
+                None => None,
+            };
+
+            // Another process may have finished the upgrade while we waited.
+            // Without this, the loser drops and recreates tables the winner
+            // has already rebuilt — and if the winner has started indexing
+            // into them, the loser's drop destroys that work.
+            needs_drop = read_needs_drop(&conn)?;
+
+            if needs_drop {
+                tracing::info!("index schema outdated, dropping tables for upgrade");
+                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+                let mut stmt = conn.prepare(
+                    "SELECT name FROM sqlite_master \
+                     WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'",
+                )?;
+                let tables: Vec<String> = stmt
+                    .query_map([], |row| row.get(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                drop(stmt);
+                for table in &tables {
+                    conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{table}\""))?;
+                }
+                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
             }
-            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         }
 
         conn.execute_batch(Self::SCHEMA_DDL)?;
-        Ok(Self { conn, db_dir: None })
+        // stamp unconditionally: covers both the fresh-DB path and the
+        // just-upgraded path
+        conn.execute_batch(&format!("PRAGMA user_version = {};", Self::SCHEMA_VERSION))?;
+        Ok(Self { conn, db_dir })
     }
 
     /// Check whether the existing schema needs upgrading (e.g. old 3-column

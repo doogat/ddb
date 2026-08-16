@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use rayon::prelude::*;
 use rusqlite::params;
 
@@ -9,14 +7,6 @@ use crate::traits::DoogatSource;
 use crate::types::ParsedDoogat;
 
 use super::Index;
-
-/// Rebuild lock file name, placed under the index's own directory (NOT `.git/`
-/// — this lock protects the SQLite index, not the git repo).
-const REBUILD_LOCK_FILE_NAME: &str = "ddb-rebuild.lock";
-
-/// How long a rebuild waits for another process's rebuild before failing loud
-/// with a retryable `Conflict`.
-const REBUILD_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl Index {
     /// Check if index is stale (HEAD changed since last rebuild).
@@ -503,8 +493,8 @@ impl Index {
         let _guard = match &self.db_dir {
             Some(dir) => Some(write_lock::acquire(
                 dir,
-                REBUILD_LOCK_FILE_NAME,
-                REBUILD_LOCK_TIMEOUT,
+                super::REBUILD_LOCK_FILE_NAME,
+                super::REBUILD_LOCK_TIMEOUT,
             )?),
             None => None,
         };
