@@ -1,4 +1,6 @@
-use crate::app_contract::{AppOutput, AppWarning, CreateCommand, UnregisteredTypePolicy};
+use crate::app_contract::{
+    summarize_reindex_warnings, AppOutput, AppWarning, CreateCommand, UnregisteredTypePolicy,
+};
 use crate::error::{DoogatError, Result};
 use crate::git_ops;
 use crate::parser;
@@ -54,7 +56,11 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     /// title_template rendering, SINGLETON Ignore semantics, NOT_NULL_VIOLATION,
     /// TYPE_NOT_REGISTERED, and field validation.
     pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>> {
-        if let Some(output) = self.try_baseonly_unregistered(&cmd)? {
+        let reindex_warnings = self.ensure_fresh()?;
+        if let Some(mut output) = self.try_baseonly_unregistered(&cmd)? {
+            output
+                .warnings
+                .extend(summarize_reindex_warnings(reindex_warnings));
             return Ok(output);
         }
 
@@ -73,10 +79,11 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             .pop()
             .ok_or_else(|| DoogatError::Validation("batch_create returned empty".into()))?;
 
-        let warnings = self
+        let mut warnings: Vec<AppWarning> = self
             .title_from_template_warning(caller_title.is_none(), doogat_type.as_deref(), &value)
             .into_iter()
             .collect();
+        warnings.extend(summarize_reindex_warnings(reindex_warnings));
 
         Ok(AppOutput { value, warnings })
     }

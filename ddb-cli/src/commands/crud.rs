@@ -22,17 +22,6 @@ pub(crate) fn create(
     set: Vec<String>,
 ) -> ddb_core::error::Result<()> {
     let svc = DoogatService::open(repo)?;
-    // PRD 00136 / #16: defence-in-depth, mirroring `attach`/`detach`.
-    // The service-layer `create_doogat_with_extra` already calls
-    // `ensure_fresh` (PRD 00136 T2), so this CLI-level call is
-    // redundant today; it exists so a future refactor that drops the
-    // service-layer guard still leaves freshness intact at the CLI
-    // boundary. `rebuild_if_stale` itself respects `skip_stale_check`,
-    // so both layers honour the actor's opt-out. The call is cheap
-    // (HEAD-unchanged short-circuit) and keeps the CLI's freshness
-    // behaviour self-consistent across the create / update / delete /
-    // attach / detach surfaces.
-    svc.rebuild_if_stale()?;
     let tags_list: Vec<String> = tags
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();

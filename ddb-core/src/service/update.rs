@@ -1,4 +1,4 @@
-use crate::app_contract::{AppOutput, UpdateCommand};
+use crate::app_contract::{summarize_reindex_warnings, AppOutput, UpdateCommand};
 use crate::error::{DoogatError, Result};
 use crate::parser;
 use crate::sql_engine::apply_updates_to_doogat;
@@ -119,10 +119,11 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
     /// App facade entrypoint: update a doogat from an `UpdateCommand`.
     /// Mirrors `DoogatService::create`. Delegates to `update_doogat_parsed`
-    /// and wraps the result in `AppOutput`. Update emits no warnings today,
-    /// so `warnings` is always empty; the envelope keeps the warning channel
-    /// available for callers.
+    /// and wraps the result in `AppOutput`. `warnings` carries at most one
+    /// `REINDEX_SKIPPED_FILES` entry, summarizing any files the up-front
+    /// freshness reindex had to skip.
     pub fn update(&self, cmd: UpdateCommand) -> Result<AppOutput<ParsedDoogat>> {
+        let reindex_warnings = self.ensure_fresh()?;
         let extra = ExtraFieldUpdates {
             set: &cmd.fields,
             unset: &cmd.unset_fields,
@@ -137,7 +138,9 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         )?;
         Ok(AppOutput {
             value,
-            warnings: Vec::new(),
+            warnings: summarize_reindex_warnings(reindex_warnings)
+                .into_iter()
+                .collect(),
         })
     }
 

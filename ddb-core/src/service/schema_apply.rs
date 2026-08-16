@@ -5,7 +5,10 @@
 //! The whole plan flushes as one git commit on success; a mid-plan failure rolls
 //! the transaction back so nothing reaches git (PRD 00161 task 10 + task 11).
 
-use crate::app_contract::{AppOutput, AppWarning, ApplySchemaCommand, SCHEMA_UNSUPPORTED_CHANGE};
+use crate::app_contract::{
+    summarize_reindex_warnings, AppOutput, AppWarning, ApplySchemaCommand,
+    SCHEMA_UNSUPPORTED_CHANGE,
+};
 use crate::error::{codes, DoogatError, ErrorValue, Result};
 use crate::schema_diff::{self, plan::SchemaApplyReport};
 use crate::sql_engine::SqlEngine;
@@ -45,6 +48,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         &mut self,
         cmd: ApplySchemaCommand,
     ) -> Result<AppOutput<SchemaApplyReport>> {
+        let reindex_warnings = self.ensure_fresh()?;
         let doc = schema_diff::desired::SchemaDoc::from_yaml(&cmd.schema_doc)?;
         let live: Vec<Option<TableSchema>> = doc
             .types
@@ -53,7 +57,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             .collect::<Result<Vec<_>>>()?;
         let plan = schema_diff::diff(&doc, &live);
 
-        let warnings: Vec<AppWarning> = plan
+        let mut warnings: Vec<AppWarning> = plan
             .unsupported
             .iter()
             .map(|m| AppWarning {
@@ -61,6 +65,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                 message: m.clone(),
             })
             .collect();
+        warnings.extend(summarize_reindex_warnings(reindex_warnings));
 
         if cmd.dry_run {
             return Ok(AppOutput {

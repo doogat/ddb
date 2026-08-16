@@ -5,6 +5,7 @@ use crate::git_ops::GitRepo;
 use crate::indexer::Index;
 use crate::sql_engine::TransactionBuffer;
 use crate::traits::{GitBackend, IndexPort, NoSqlMirrorPort};
+use crate::types::ConsistencyWarning;
 
 mod batch;
 mod concrete_index;
@@ -113,14 +114,16 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         self.skip_stale_check = skip;
     }
 
-    fn ensure_fresh(&self) -> Result<()> {
+    fn ensure_fresh(&self) -> Result<Vec<ConsistencyWarning>> {
         if !self.skip_stale_check {
-            self.index.rebuild_if_stale(&self.repo)?;
+            if let Some(report) = self.index.rebuild_if_stale(&self.repo)? {
+                return Ok(report.warnings);
+            }
         }
         // skip_stale_check: ReadPool path — actor keeps the index
         // current, so readers trust WAL visibility without querying
         // _ddb_meta (avoids SQLite lock contention on Windows).
-        Ok(())
+        Ok(Vec::new())
     }
 }
 
