@@ -1049,4 +1049,191 @@ mod tests {
             "a successful import must delete every bundle ref, not just master; leftover: {leftover:?}"
         );
     }
+
+    /// A reassigned collision id must be a real `YYYYMMDDHHmmss` stamp, not
+    /// merely fourteen digits: the reported regression minted
+    /// `66177401297366` (month 74, hour 29, minute 73), which no repo-aware
+    /// mint path could ever produce.
+    fn is_calendar_shaped_id(id: &str) -> bool {
+        let field = |from: usize, to: usize| id[from..to].parse::<u32>().unwrap_or(u32::MAX);
+        crate::types::DoogatId::is_valid_shape(id)
+            && (1..=12).contains(&field(4, 6))
+            && (1..=31).contains(&field(6, 8))
+            && field(8, 10) <= 23
+            && field(10, 12) <= 59
+            && field(12, 14) <= 59
+    }
+
+    /// Two separately `init`-ed repos have UNRELATED histories, so every
+    /// conflicting path arrives with `ancestor: None`. A conflicting
+    /// NON-doogat file (`.gitignore`) must be resolved by the ordinary
+    /// conflict path; routing it into the doogat add/add collision resolver
+    /// kills the documented full-bundle bootstrap with an unrecoverable
+    /// frontmatter parse error.
+    #[test]
+    fn unrelated_history_import_resolves_conflicting_non_doogat_file() {
+        let (dir1, repo1) = temp_repo();
+        repo1
+            .commit_file(".gitignore", "node_modules/\n", "Node1 gitignore")
+            .unwrap();
+        repo1
+            .commit_file(
+                "ddb/20260301000000.md",
+                "---\nid: 20260301000000\ntitle: Node1 doc\n---\nNode1 body\n",
+                "Node1 doogat",
+            )
+            .unwrap();
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+
+        let bundle_path = dir1.path().join("unrelated-nondoogat.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        // Node 2 is initialized on its own -- NOT cloned -- so the two
+        // histories share no merge base.
+        let (dir2, repo2) = temp_repo();
+        repo2
+            .commit_file(".gitignore", "target/\n", "Node2 gitignore")
+            .unwrap();
+        repo2
+            .commit_file(
+                "ddb/20260302000000.md",
+                "---\nid: 20260302000000\ntitle: Node2 doc\n---\nNode2 body\n",
+                "Node2 doogat",
+            )
+            .unwrap();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let result = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path);
+        if let Err(err) = &result {
+            let message = err.to_string();
+            assert!(
+                !message.contains("could not be rewritten: parse: no frontmatter opening ---"),
+                "a conflicting non-doogat file must not be routed through the doogat add/add collision resolver, got: {message}"
+            );
+        }
+        let report =
+            result.expect("an unrelated-history import with a conflicting .gitignore must succeed");
+        assert_eq!(report.direction, "bundle-import");
+        assert_eq!(
+            report.collisions_reassigned, 0,
+            "no doogat id collides here, so nothing may be reassigned"
+        );
+
+        let gitignore = repo2.read_file(".gitignore").unwrap();
+        assert!(
+            gitignore.contains("target/") || gitignore.contains("node_modules/"),
+            "the conflicting .gitignore must keep one side's content, got: {gitignore}"
+        );
+
+        assert!(repo2
+            .read_file("ddb/20260301000000.md")
+            .unwrap()
+            .contains("Node1 body"));
+        assert!(repo2
+            .read_file("ddb/20260302000000.md")
+            .unwrap()
+            .contains("Node2 body"));
+    }
+
+    /// Same unrelated-history shape, but both sides independently hold the
+    /// SAME doogat id. That IS a genuine add/add collision: both documents
+    /// must survive and the reassigned loser must get a real 14-digit
+    /// `YYYYMMDDHHmmss` id, never a silent duplicate under an invalid one.
+    #[test]
+    fn unrelated_history_import_reassigns_colliding_doogat_to_valid_id() {
+        let path = "ddb/20260301000000.md";
+
+        let (dir1, repo1) = temp_repo();
+        repo1
+            .commit_file(
+                path,
+                "---\nid: 20260301000000\ntitle: Node1\n---\nNode1 body\n",
+                "Node1 adds",
+            )
+            .unwrap();
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+
+        let bundle_path = dir1.path().join("unrelated-collision.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        // Node 2 is initialized on its own -- NOT cloned -- so the two
+        // histories share no merge base.
+        let (dir2, repo2) = temp_repo();
+        repo2
+            .commit_file(
+                path,
+                "---\nid: 20260301000000\ntitle: Node2\n---\nNode2 body\n",
+                "Node2 adds",
+            )
+            .unwrap();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let report = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path)
+            .expect("a same-id collision across unrelated histories must resolve, not fail");
+        assert_eq!(report.direction, "bundle-import");
+        assert!(
+            report.collisions_reassigned > 0,
+            "the duplicated doogat id must be reported as a reassignment, got {}",
+            report.collisions_reassigned
+        );
+
+        let tree = repo2
+            .repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .tree()
+            .unwrap();
+        let ddb_entry = tree
+            .get_name("ddb")
+            .expect("the ddb/ directory must exist at HEAD after an import");
+        let ddb_tree = repo2.repo.find_tree(ddb_entry.id()).unwrap();
+        let stems: Vec<String> = ddb_tree
+            .iter()
+            .filter_map(|entry| entry.name().ok().map(str::to_string))
+            .filter_map(|name| name.strip_suffix(".md").map(str::to_string))
+            .collect();
+
+        assert_eq!(
+            stems.len(),
+            2,
+            "both colliding documents must survive the reassignment, got {stems:?}"
+        );
+        for stem in &stems {
+            assert!(
+                is_calendar_shaped_id(stem),
+                "every surviving doogat must live under a valid 14-digit YYYYMMDDHHmmss id, got ddb/{stem}.md"
+            );
+        }
+
+        let bodies: Vec<String> = stems
+            .iter()
+            .map(|stem| repo2.read_file(&format!("ddb/{stem}.md")).unwrap())
+            .collect();
+        assert!(
+            bodies.iter().any(|body| body.contains("Node1 body")),
+            "the imported side must survive, got {bodies:?}"
+        );
+        assert!(
+            bodies.iter().any(|body| body.contains("Node2 body")),
+            "the local side must survive, got {bodies:?}"
+        );
+        for (stem, body) in stems.iter().zip(&bodies) {
+            assert!(
+                body.contains(&format!("id: {stem}")),
+                "a reassigned doogat's frontmatter id must match its filename, got ddb/{stem}.md: {body}"
+            );
+        }
+    }
 }

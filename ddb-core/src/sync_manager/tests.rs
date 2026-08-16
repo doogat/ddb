@@ -1913,3 +1913,109 @@ fn add_add_collision_resolution_is_independent_of_push_direction() {
     );
 }
 
+/// A both-sides-present conflict with no merge base, i.e. the shape every
+/// conflicting path takes when two unrelated histories are merged.
+fn ancestorless_conflict(path: &str) -> ConflictFile {
+    ConflictFile {
+        path: path.into(),
+        ancestor: None,
+        ours: "ours side content\n".into(),
+        theirs: "theirs side content\n".into(),
+        ours_hlc: None,
+        theirs_hlc: None,
+        ours_blob_oid: Some("oid-ours-partition".into()),
+        theirs_blob_oid: Some("oid-theirs-partition".into()),
+    }
+}
+
+fn conflict_paths(bucket: &[ConflictFile]) -> Vec<&str> {
+    bucket.iter().map(|c| c.path.as_str()).collect()
+}
+
+#[test]
+fn partition_routes_ancestorless_non_doogat_conflicts_to_normal() {
+    // Unrelated histories give EVERY conflicting path `ancestor: None`, so an
+    // absent ancestor alone cannot mean "doogat add/add id collision". None of
+    // these paths is a doogat: two live outside `ddb/`, one is under `ddb/`
+    // but is not a `.md` file, one is a root dotfile and one is a `.toml`.
+    let non_doogats = [
+        ".gitignore",
+        "README.md",
+        "docs/notes.md",
+        "ddb/notes.txt",
+        ".nodes/x.toml",
+    ];
+    let conflicts: Vec<ConflictFile> =
+        non_doogats.iter().map(|p| ancestorless_conflict(p)).collect();
+
+    let (binary_ref, delete_edit, add_add, normal) = partition_conflicts(conflicts);
+
+    assert!(
+        add_add.is_empty(),
+        "a missing ancestor alone must not classify a non-doogat file as a doogat add/add collision; got {:?}",
+        conflict_paths(&add_add)
+    );
+    assert!(binary_ref.is_empty(), "no path is under reference/");
+    assert!(delete_edit.is_empty(), "both sides are non-empty");
+    assert_eq!(
+        conflict_paths(&normal),
+        non_doogats,
+        "non-doogat ancestor-less conflicts belong in the ordinary conflict bucket"
+    );
+}
+
+#[test]
+fn partition_keeps_ancestorless_doogat_conflicts_in_add_add() {
+    // Doogats live under `ddb/` and end in `.md`: at the top level, under a
+    // type directory, or under `_typedef`.
+    let doogats = [
+        "ddb/20260101120000.md",
+        "ddb/note/20260101120001.md",
+        "ddb/_typedef/20260101120002.md",
+    ];
+    let conflicts: Vec<ConflictFile> = doogats.iter().map(|p| ancestorless_conflict(p)).collect();
+
+    let (binary_ref, delete_edit, add_add, normal) = partition_conflicts(conflicts);
+
+    assert_eq!(
+        conflict_paths(&add_add),
+        doogats,
+        "an ancestor-less conflict on a doogat file is still an add/add id collision"
+    );
+    assert!(binary_ref.is_empty());
+    assert!(delete_edit.is_empty());
+    assert!(
+        normal.is_empty(),
+        "doogat collisions must not fall through to the ordinary bucket; got {:?}",
+        conflict_paths(&normal)
+    );
+}
+
+#[test]
+fn partition_preserves_delete_edit_binary_ref_and_ancestor_rules() {
+    // Delete/edit: one side emptied a file that existed in the merge base.
+    let mut delete_edit_conflict = ancestorless_conflict("ddb/20260101120000.md");
+    delete_edit_conflict.ancestor = Some("---\nid: 20260101120000\n---\nBase\n".into());
+    delete_edit_conflict.ours = String::new();
+
+    // Binary reference attachment with a real merge base.
+    let mut binary_conflict = ancestorless_conflict("reference/photo.png");
+    binary_conflict.ancestor = Some("base bytes".into());
+
+    // Ordinary edit/edit on a doogat with a real merge base.
+    let mut normal_conflict = ancestorless_conflict("ddb/20260101120003.md");
+    normal_conflict.ancestor = Some("---\nid: 20260101120003\n---\nBase\n".into());
+
+    let (binary_ref, delete_edit, add_add, normal) =
+        partition_conflicts(vec![delete_edit_conflict, binary_conflict, normal_conflict]);
+
+    assert_eq!(conflict_paths(&delete_edit), ["ddb/20260101120000.md"]);
+    assert_eq!(conflict_paths(&binary_ref), ["reference/photo.png"]);
+    assert_eq!(conflict_paths(&normal), ["ddb/20260101120003.md"]);
+    assert!(
+        add_add.is_empty(),
+        "a conflict with a merge base is never an add/add collision; got {:?}",
+        conflict_paths(&add_add)
+    );
+}
+
