@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **cli**: `ddb reindex` now prints one line per skipped file (path and reason) from the rebuild report itself, in addition to the existing `indexed N doogats` and `N warning(s)` lines. Previously the paths reached the user only through the tracing subscriber, so `RUST_LOG=error` or `--log-dir` left the command naming nothing. `ddb_core::app_contract::describe_consistency_warning` is now public so transports render warnings through the one core definition. (PRD 00169)
 - **traits**: `GitRemote` gained a required `delete_remote_ref` method with no default implementation. (PRD 00168)
 - **traits**: `GitMerge` gained a required `merge_remote_allowing_unrelated` method with no default implementation. A default that silently delegated to `merge_remote` would defeat bundle import for an implementor who forgot to override it, so the compile break is the intended, safer failure. Anyone implementing `GitBackend` outside this crate must add both new methods to compile. (PRD 00168)
 - **sync**: `SyncReport.commits_transferred` now reflects the real merge result for bundle import instead of a hardcoded `0`. It is `0` or `1`, set on the merge and fast-forward paths. (PRD 00168)

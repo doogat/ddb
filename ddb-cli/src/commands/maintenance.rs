@@ -62,6 +62,12 @@ pub(crate) fn reindex(repo: &std::path::Path, strict: bool) -> ddb_core::error::
     if !report.warnings.is_empty() {
         outln!("{} warning(s)", report.warnings.len())?;
     }
+    for warning in &report.warnings {
+        outln!(
+            "{}",
+            ddb_core::app_contract::describe_consistency_warning(warning)
+        )?;
+    }
     Ok(())
 }
 
