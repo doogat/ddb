@@ -1052,6 +1052,7 @@ name = "ddb-e2e"
 version = "0.2.7"
 dependencies = [
  "assert_cmd",
+ "ddb-core",
  "predicates",
  "rand 0.9.4",
  "reqwest",

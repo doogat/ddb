@@ -114,6 +114,14 @@ fn wait_ok(child: Child, label: &str) -> String {
 /// Folding colliding ids into the expected set keeps this test blind to that
 /// race. (The deterministic no-lost-update proof lives in the update test
 /// below, where target ids are distinct by construction.)
+///
+/// The index side of guarantee 2 is asserted by opening `.ddb/index.db`
+/// DIRECTLY with `ddb_core::indexer::Index::open`, never through `ddb query`,
+/// `ddb search`, GraphQL, or any other CLI path. Those all call `ensure_fresh`,
+/// which would silently rebuild an index that lost rows *before* answering, so
+/// a read-back through them cannot fail and would prove nothing. `Index::open`
+/// runs no rebuild, so it reports the rows the cold-start writers actually
+/// left. Do not "simplify" this back into a CLI read-back.
 #[test]
 fn concurrent_cold_start_creates_bootstrap_the_index_and_lose_no_commit() {
     let repo = DdbTestRepo::init();
@@ -154,6 +162,22 @@ fn concurrent_cold_start_creates_bootstrap_the_index_and_lose_no_commit() {
         "HEAD doogats must equal the set of ids the concurrent creators \
          minted; a difference means a cross-process commit was lost or \
          orphaned. reported={reported:?} head={head:?}"
+    );
+
+    let index = ddb_core::indexer::Index::open(&repo.path().join(".ddb").join("index.db"))
+        .expect("the cold-start writers must have left an openable index");
+    let indexed: BTreeSet<String> = index
+        .query_raw("SELECT id FROM doogats")
+        .expect("reading ids straight out of the index must succeed")
+        .into_iter()
+        .filter_map(|row| row.into_iter().next())
+        .collect();
+    assert_eq!(
+        indexed, expected,
+        "the SQLite index must hold exactly the ids the concurrent creators \
+         minted; a difference means one writer's bootstrap dropped index rows \
+         another writer had already indexed and never restored them. \
+         expected={expected:?} indexed={indexed:?}"
     );
 }
 

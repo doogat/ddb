@@ -5599,6 +5599,120 @@ fn configure_connection_for_a_schema_already_at_current_version_does_not_wait_on
     std::mem::drop(held);
 }
 
+#[test]
+fn configure_connection_re_checks_after_the_lock_and_spares_a_peers_finished_upgrade() {
+    // The post-lock re-check: a waiter whose *unlocked* pre-check saw an
+    // outdated schema must re-read `PRAGMA user_version` once it finally holds
+    // <index-dir>/ddb-rebuild.lock, and skip the destructive drop when the peer
+    // it waited on already performed the upgrade. Without it the waiter drops
+    // and recreates tables the winner had rebuilt, destroying whatever the
+    // winner had already indexed into them.
+    //
+    // DISCRIMINATING — proven, so do not read a single green run as proof.
+    // With the re-check deleted (the inner `if needs_drop` made unconditional)
+    // this test fails at the final assertion with the sentinel gone:
+    //
+    //     assertion `left == right` failed: the waiter destroyed a peer's
+    //     finished upgrade [...]
+    //       left: 0
+    //      right: 1
+    //
+    // Only the mid-window between the drop and the stamp is out of reach here;
+    // that needs a rusqlite authorizer/progress hook and is out of scope.
+    let dir = tempfile::TempDir::new().unwrap();
+    let db_path = dir.path().join("index.db");
+
+    // An on-disk index carrying the pre-v1 schema — 3-column `_ddb_fts`,
+    // `user_version` left at 0. That is what the waiter's pre-check sees.
+    let seed = Connection::open(&db_path).unwrap();
+    seed.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
+            title, body, tags,
+            tokenize = 'porter unicode61'
+        );",
+    )
+    .unwrap();
+    std::mem::drop(seed);
+
+    // Stand in for the peer process that is mid-upgrade: hold the rebuild lock
+    // before the waiter can take it.
+    let held = crate::git_ops::write_lock::acquire(
+        dir.path(),
+        "ddb-rebuild.lock",
+        std::time::Duration::from_secs(10),
+    )
+    .expect("the test must be able to take the rebuild lock first");
+
+    let waiter_path = db_path.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = Index::open(&waiter_path);
+        tx.send(result).expect("the waiting test hung up early");
+    });
+
+    let assert_parked = |stage: &str| match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("the waiter thread died before returning a result ({stage})")
+        }
+        Ok(_) => panic!(
+            "Index::open returned while the rebuild lock was still held \
+             externally ({stage}) — the waiter never parked on the lock, so \
+             this run says nothing about the post-lock re-check"
+        ),
+    };
+
+    // Let the waiter run its pre-check, decide `needs_drop`, and block.
+    assert_parked("before the peer's upgrade");
+
+    // The upgrade the peer would have performed, out of band on a second
+    // connection: recreate the current schema, stamp it, index a sentinel row.
+    let peer = Connection::open(&db_path).unwrap();
+    peer.execute_batch("DROP TABLE IF EXISTS _ddb_fts;").unwrap();
+    peer.execute_batch(Index::SCHEMA_DDL).unwrap();
+    peer.pragma_update(None, "user_version", Index::SCHEMA_VERSION)
+        .unwrap();
+    peer.execute(
+        "INSERT INTO doogats (id, path, title) VALUES (?1, ?2, ?3)",
+        params![
+            "20260101000000",
+            "ddb/20260101000000.md",
+            "peer upgrade sentinel"
+        ],
+    )
+    .unwrap();
+    std::mem::drop(peer);
+
+    // Still parked. This is what keeps the run from being vacuous: the waiter
+    // is inside the locked region carrying `needs_drop == true` from its
+    // pre-check. Had that pre-check run late enough to see the fresh stamp, it
+    // would never have taken the lock and would already have returned.
+    assert_parked("after the peer's upgrade");
+
+    std::mem::drop(held);
+
+    let idx = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("Index::open never returned after the rebuild lock was released")
+        .expect("Index::open should succeed once it can take the rebuild lock");
+    worker.join().unwrap();
+
+    let survivors: i64 = idx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM doogats WHERE id = ?1",
+            params!["20260101000000"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        survivors, 1,
+        "the waiter destroyed a peer's finished upgrade: after acquiring the \
+         rebuild lock it re-ran the drop instead of re-reading \
+         `PRAGMA user_version` and skipping it"
+    );
+}
+
 // ── --strict full rebuild + unconditional explicit reindex (`ddb reindex --strict`) ──
 
 #[test]
