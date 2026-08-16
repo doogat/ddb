@@ -2510,8 +2510,8 @@ fn upgrade_old_3col_fts_to_4col() {
     assert!(old_insert.is_ok(), "old 3-column insert should work");
 
     // Now run configure_connection which should detect and upgrade
-    let idx =
-        Index::configure_connection(conn).expect("configure_connection should upgrade old schema");
+    let idx = Index::configure_connection(conn, None)
+        .expect("configure_connection should upgrade old schema");
 
     // After upgrade: FTS should accept 4 columns
     idx.conn
@@ -2531,6 +2531,169 @@ fn upgrade_old_3col_fts_to_4col() {
         )
         .unwrap();
     assert!(boost_exists, "_ddb_boost should exist after upgrade");
+}
+
+#[test]
+fn reopening_an_up_to_date_on_disk_index_does_not_rebuild_and_keeps_rows() {
+    // AC3: a DB already stamped with the current SCHEMA_VERSION must trigger
+    // no drop+recreate on open — rows written before the reopen must survive
+    // it. AC4 (fresh-DB leg): the first open of a brand-new file stamps
+    // user_version to SCHEMA_VERSION once SCHEMA_DDL has run.
+    let dir = tempfile::TempDir::new().unwrap();
+    let db_path = dir.path().join("index.db");
+
+    let idx = Index::open(&db_path).unwrap();
+    let version: i64 = idx
+        .conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        version, 1,
+        "a freshly created index must be stamped with the current schema \
+         version once SCHEMA_DDL has run"
+    );
+
+    idx.conn
+        .execute(
+            "INSERT INTO _ddb_meta (key, value) VALUES ('sentinel', 'present')",
+            [],
+        )
+        .unwrap();
+    drop(idx);
+
+    let idx2 = Index::open(&db_path).unwrap();
+    let sentinel: String = idx2
+        .conn
+        .query_row(
+            "SELECT value FROM _ddb_meta WHERE key = 'sentinel'",
+            [],
+            |row| row.get(0),
+        )
+        .expect(
+            "the row written before the second open must survive it — an \
+             unconditional rebuild would drop and recreate the table that \
+             held it",
+        );
+    assert_eq!(sentinel, "present");
+
+    let version2: i64 = idx2
+        .conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        version2, 1,
+        "reopening an up-to-date index must leave it stamped at the current \
+         schema version"
+    );
+}
+
+#[test]
+fn version_mismatch_forces_drop_without_consulting_legacy_probe() {
+    // AC2: a `user_version` that is non-zero and does not equal SCHEMA_VERSION
+    // must force the drop+recreate unconditionally, even when the legacy
+    // FTS-column-text probe would say the schema needs no upgrade (a
+    // 4-column FTS table is already present). If the version check deferred
+    // to the legacy probe here, the sentinel row below would survive.
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
+            title, body, tags, fields,
+            tokenize = 'porter unicode61'
+        );
+        CREATE TABLE IF NOT EXISTS _ddb_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+        INSERT INTO _ddb_meta (key, value) VALUES ('sentinel', 'present');
+        PRAGMA user_version = 2;",
+    )
+    .unwrap();
+
+    let idx = Index::configure_connection(conn, None)
+        .expect("configure_connection should upgrade a version-mismatched schema");
+
+    let sentinel_count: i64 = idx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM _ddb_meta WHERE key = 'sentinel'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        sentinel_count, 0,
+        "a user_version of 2 (neither 0 nor SCHEMA_VERSION) must force the \
+         drop+recreate unconditionally; the sentinel row survived, which \
+         means the legacy FTS probe (which would say this 4-column schema \
+         needs no upgrade) was consulted instead of the version stamp"
+    );
+
+    let version: i64 = idx
+        .conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        version, 1,
+        "after the forced drop+recreate, the schema must be restamped to \
+         SCHEMA_VERSION"
+    );
+}
+
+#[test]
+fn unstamped_but_compliant_schema_is_not_dropped_and_gets_stamped() {
+    // AC1: user_version == 0 means "unstamped", not "needs upgrade". Every
+    // index that exists on a user's disk today is exactly this case:
+    // unstamped (0, SQLite's default) AND already 4-column FTS, because the
+    // 3-col upgrade shipped long ago. For a 0 stamp the legacy
+    // needs_schema_upgrade probe must be consulted, and it must say "no
+    // upgrade needed" here. A wrong implementation that reads
+    // `0 != SCHEMA_VERSION` as "needs drop" would silently blow away and
+    // rebuild the index of every existing user on their next command — the
+    // worst regression this task could ship.
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
+            title, body, tags, fields,
+            tokenize = 'porter unicode61'
+        );
+        CREATE TABLE IF NOT EXISTS _ddb_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+        INSERT INTO _ddb_meta (key, value) VALUES ('sentinel', 'present');",
+    )
+    .unwrap();
+    // user_version is deliberately left unset — SQLite defaults it to 0.
+
+    let idx = Index::configure_connection(conn, None).expect(
+        "configure_connection should succeed for an unstamped, already-compliant schema",
+    );
+
+    let sentinel_count: i64 = idx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM _ddb_meta WHERE key = 'sentinel'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        sentinel_count, 1,
+        "an unstamped (user_version == 0) schema that is already 4-column FTS \
+         must not be dropped — the legacy probe says no upgrade is needed, but \
+         the sentinel row was destroyed anyway, which means the version check \
+         forced a drop without consulting it"
+    );
+
+    let version: i64 = idx
+        .conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        version, 1,
+        "an unstamped but compliant schema must be stamped to SCHEMA_VERSION \
+         so the next open does not re-run the legacy probe"
+    );
 }
 
 #[test]
@@ -5270,4 +5433,168 @@ fn two_racing_cold_start_rebuilds_run_the_destructive_work_only_once() {
          hold exactly the repo's one doogat (got {ids:?})"
     );
     assert_eq!(ids[0][0], "20260407000000");
+}
+
+// ── cross-process serialization of the schema-upgrade drop ──
+
+#[test]
+fn configure_connection_with_no_db_dir_upgrades_without_leaving_a_stray_rebuild_lock_file() {
+    // AC6: the lock is skipped when there is no directory to lock (db_dir is
+    // `None` — this is what `open_in_memory()` and the bare `":memory:"`
+    // path both resolve to). A fresh in-memory DB has no `_ddb_fts` table,
+    // so needs_schema_upgrade returns false and the destructive branch never
+    // runs — meaning no implementation would attempt to take a lock there
+    // anyway, correct or not, so that shape cannot bind this criterion.
+    // Building an old 3-column-FTS schema (the upgrade_old_3col_fts_to_4col
+    // fixture shape) forces the drop+recreate branch to actually fire with
+    // `db_dir == None`, which is the only moment a bogus lock directory
+    // could be derived.
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
+            title, body, tags,
+            tokenize = 'porter unicode61'
+        );",
+    )
+    .unwrap();
+
+    let idx = Index::configure_connection(conn, None)
+        .expect("configure_connection should upgrade an old schema even with no db_dir");
+
+    idx.conn
+        .execute(
+            "INSERT INTO _ddb_fts (title, body, tags, fields) VALUES (?1, ?2, ?3, ?4)",
+            params!["t", "b", "tag", "field_data"],
+        )
+        .expect("after the upgrade, FTS5 should accept 4 columns");
+
+    let stray = std::env::current_dir().unwrap().join("ddb-rebuild.lock");
+    assert!(
+        !stray.exists(),
+        "configure_connection(conn, None) created a stray rebuild lock file \
+         at {} while running the destructive schema-upgrade drop — a `None` \
+         db_dir must skip the lock, not derive a bogus lock directory",
+        stray.display()
+    );
+}
+
+#[test]
+fn configure_connection_holds_the_rebuild_lock_during_the_destructive_drop() {
+    // AC5: the destructive branch — whichever check fired — must run while
+    // holding the same cross-process lock `locked_rebuild` uses:
+    // write_lock::acquire(db_dir, "ddb-rebuild.lock", ...) on
+    // <index-dir>/ddb-rebuild.lock.
+    //
+    // `configure_connection`'s drop branch makes no external call to park
+    // inside (unlike `Index::rebuild`, which calls out to a `DoogatSource`),
+    // so this observes contention from the other direction: hold the lock
+    // ourselves first, and confirm the destructive open does not complete
+    // until we release it.
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let held = crate::git_ops::write_lock::acquire(
+        dir.path(),
+        "ddb-rebuild.lock",
+        std::time::Duration::from_secs(10),
+    )
+    .expect("the test must be able to take the rebuild lock first");
+
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
+            title, body, tags,
+            tokenize = 'porter unicode61'
+        );",
+    )
+    .unwrap();
+
+    let lock_dir = dir.path().to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = Index::configure_connection(conn, Some(lock_dir));
+        tx.send(result).expect("the waiting test hung up early");
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("the worker thread died before returning a result")
+        }
+        Ok(_) => panic!(
+            "configure_connection returned while the rebuild lock was still \
+             held externally — the destructive schema-upgrade drop does not \
+             hold <index-dir>/ddb-rebuild.lock"
+        ),
+    }
+
+    std::mem::drop(held);
+
+    let idx = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("configure_connection never returned after the lock was released")
+        .expect("configure_connection should upgrade the schema once it can take the lock");
+    worker.join().unwrap();
+
+    idx.conn
+        .execute(
+            "INSERT INTO _ddb_fts (title, body, tags, fields) VALUES (?1, ?2, ?3, ?4)",
+            params!["t", "b", "tag", "field_data"],
+        )
+        .expect("after the upgrade, FTS5 should accept 4 columns");
+}
+
+#[test]
+fn configure_connection_for_a_schema_already_at_current_version_does_not_wait_on_the_rebuild_lock()
+{
+    // AC7: the non-destructive open path must not serialize against a
+    // concurrent rebuild. Hold the rebuild lock externally (standing in for
+    // another process's in-flight destructive rebuild) and confirm that
+    // opening a schema already at SCHEMA_VERSION completes without waiting
+    // for it — only the drop+recreate branch may hold that lock.
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let held = crate::git_ops::write_lock::acquire(
+        dir.path(),
+        "ddb-rebuild.lock",
+        std::time::Duration::from_secs(10),
+    )
+    .expect("the test must be able to take the rebuild lock first");
+
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS _ddb_fts USING fts5(
+            title, body, tags, fields,
+            tokenize = 'porter unicode61'
+        );
+        PRAGMA user_version = 1;",
+    )
+    .unwrap();
+
+    let lock_dir = dir.path().to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = Index::configure_connection(conn, Some(lock_dir));
+        tx.send(result).expect("the waiting test hung up early");
+    });
+
+    let idx = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect(
+            "configure_connection for a schema already at SCHEMA_VERSION \
+             waited on <index-dir>/ddb-rebuild.lock even though it needed no \
+             destructive work",
+        )
+        .expect("configure_connection should succeed for a schema already at SCHEMA_VERSION");
+    worker.join().unwrap();
+
+    let version: i64 = idx
+        .conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        version, 1,
+        "an already-current schema must remain stamped at SCHEMA_VERSION"
+    );
+
+    std::mem::drop(held);
 }
