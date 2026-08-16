@@ -3753,7 +3753,7 @@ $int169Resp = Invoke-WebRequest -Uri "http://127.0.0.1:$int169Port/graphql" `
     -Method POST -ContentType "application/json" `
     -Headers @{ Authorization = "Bearer $TOKEN" } `
     -Body '{"query":"mutation { createDoogat(input: { title: \"after poison\" }) { id title } }"}' -ErrorAction Stop
-if ($int169Resp.Content -is [byte[]]) { $int169Content = [System.Text.Encoding]::UTF8.GetString($int169Resp.Content) } else { $int169Content = $int169Resp.Content }
+$int169Content = content $int169Resp
 
 assertGqlOk $int169Content "63: first createDoogat after poison commit"
 $int169Obj = $int169Content | ConvertFrom-Json
@@ -3768,11 +3768,14 @@ if ($int169Obj.extensions.warnings[0].message -notmatch "29990101000000") {
 }
 pass "PRD 00169: poison file surfaces REINDEX_SKIPPED_FILES warning in GraphQL extensions"
 
-# Cleanup
+# Cleanup. The removal is guarded the way the Cleanup function guards its own
+# (lines 38-46): this dir hosted a live server, and $ErrorActionPreference is
+# "Stop" for the whole file, so a handle Windows has not released yet would
+# abort the entire run here - after the assertion above already passed.
 Stop-Process -Id $int169Server.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 Pop-Location
-Remove-Item -Recurse -Force $INT169_DIR
+Remove-Item -Recurse -Force $INT169_DIR -ErrorAction SilentlyContinue
 
 Cleanup
 Write-Host "=== all integration tests passed ==="
