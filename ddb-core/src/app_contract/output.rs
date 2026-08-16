@@ -26,6 +26,51 @@ pub struct AppOutput<T> {
     pub warnings: Vec<AppWarning>,
 }
 
+use crate::types::ConsistencyWarning;
+
+/// Stable code attached to the summarized reindex-skip warning.
+pub const REINDEX_SKIPPED_FILES: &str = "REINDEX_SKIPPED_FILES";
+
+/// Summarize skipped/consistency warnings from an implicit background
+/// reindex into at most ONE AppWarning — an incidental discovery during an
+/// unrelated write should not flood the verb's response envelope on a
+/// large corrupt corpus. The full per-file list is not lost: it is logged
+/// (`tracing::warn!` per file, already emitted by `batch_index_changes`/
+/// `parallel_parse`) and will be the 00181 doctor surface's job to list.
+pub(crate) fn summarize_reindex_warnings(warnings: Vec<ConsistencyWarning>) -> Option<AppWarning> {
+    if warnings.is_empty() {
+        return None;
+    }
+    let first = describe_consistency_warning(&warnings[0]);
+    let message = if warnings.len() == 1 {
+        first
+    } else {
+        format!("{first} (+{} more, see ddb doctor)", warnings.len() - 1)
+    };
+    Some(AppWarning { code: REINDEX_SKIPPED_FILES, message })
+}
+
+pub(crate) fn describe_consistency_warning(w: &ConsistencyWarning) -> String {
+    match w {
+        ConsistencyWarning::UnreadableFile { path, error } => format!("{path}: unreadable ({error})"),
+        ConsistencyWarning::MalformedYaml { path, error } => format!("{path}: malformed ({error})"),
+        ConsistencyWarning::CrossZoneDuplicate { path, key } => format!("{path}: duplicate key '{key}'"),
+        ConsistencyWarning::MissingRequired { path, field, .. } => format!("{path}: missing required field '{field}'"),
+    }
+}
+
+/// Stable per-variant code for the FFI `RebuildWarningRecord` (`ffi/driver.rs`
+/// needs a `&'static str` code alongside `describe_consistency_warning`'s
+/// human message).
+pub(crate) fn describe_consistency_warning_code(w: &ConsistencyWarning) -> &'static str {
+    match w {
+        ConsistencyWarning::UnreadableFile { .. } => "UNREADABLE_FILE",
+        ConsistencyWarning::MalformedYaml { .. } => "MALFORMED_YAML",
+        ConsistencyWarning::CrossZoneDuplicate { .. } => "CROSS_ZONE_DUPLICATE",
+        ConsistencyWarning::MissingRequired { .. } => "MISSING_REQUIRED",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // All references below go through `crate::app_contract::...` (never
