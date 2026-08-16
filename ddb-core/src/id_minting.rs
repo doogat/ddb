@@ -78,7 +78,17 @@ pub(crate) fn derive_content_id(
         let seed = format!("{old_id}:{blob_oid}:{attempt}");
         let digest = sha2::Sha256::digest(seed.as_bytes());
         let n = u64::from_be_bytes(digest[0..8].try_into().unwrap());
-        let candidate = format!("{:014}", n % 100_000_000_000_000);
+        // A DoogatId is a `YYYYMMDDHHmmss` stamp, not merely fourteen digits,
+        // so render the hash in mixed radix: every field takes the next digit
+        // of `n` in its own base. Days stop at 28, which leaves no month-length
+        // or leap-year case to get wrong, and the codomain still holds
+        // 100 * 12 * 28 * 86_400 ≈ 2.9e9 stamps, so distinct collisions keep
+        // deriving distinct ids.
+        let year = 2000 + (n / (86_400 * 28 * 12)) % 100;
+        let month = 1 + (n / (86_400 * 28)) % 12;
+        let day = 1 + (n / 86_400) % 28;
+        let (hour, minute, second) = ((n / 3_600) % 24, (n / 60) % 60, n % 60);
+        let candidate = format!("{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}");
         if !exists(&candidate) {
             return DoogatId(candidate);
         }

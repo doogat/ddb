@@ -90,6 +90,13 @@ fn write_fm_crdt_files(
     Ok(())
 }
 
+/// A doogat file lives under `ddb/` and ends in `.md` — the same shape
+/// `git_ops::merge`, `git_ops::read` and `traits` use to recognize stored
+/// doogats.
+fn is_doogat_path(path: &str) -> bool {
+    path.starts_with("ddb/") && path.ends_with(".md")
+}
+
 /// Partition conflicts into four buckets: binary references, delete-vs-edit,
 /// add-add collisions, and normal (content) conflicts.
 fn partition_conflicts(
@@ -109,7 +116,7 @@ fn partition_conflicts(
             delete_edit.push(c);
         } else if c.path.starts_with("reference/") {
             binary_ref.push(c);
-        } else if c.ancestor.is_none() {
+        } else if c.ancestor.is_none() && is_doogat_path(&c.path) {
             add_add.push(c);
         } else {
             normal.push(c);
