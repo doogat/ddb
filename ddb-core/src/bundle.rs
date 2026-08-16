@@ -144,7 +144,7 @@ fn merge_bundle_and_resolve(
     index: &crate::indexer::Index,
 ) -> Result<SyncReport> {
     let merge_result = repo
-        .merge_remote("bundle", "master")
+        .merge_remote_allowing_unrelated("bundle", "master")
         .map_err(bundle_merge_error)?;
     sync_mgr
         .apply_merge_result(merge_result, index)

@@ -376,18 +376,20 @@ impl GitRepo {
         remote: &str,
         branch: &str,
         annotated: &git2::AnnotatedCommit,
+        allow_unrelated: bool,
     ) -> Result<MergeResult> {
         let their_commit = self.repo.find_commit(annotated.id())?;
         let our_commit = self
             .head_commit()
             .ok_or_else(|| DoogatError::Parse("no HEAD".into()))?;
-        // Bundle import merges unrelated histories on purpose (a fresh repo
-        // importing an established bundle has no common ancestor), so it
-        // skips the ancestor guard. Network sync keeps it: an `origin` merge
-        // with no common ancestor is almost always a misconfigured remote,
-        // and should keep failing loudly instead of silently unioning two
-        // unrelated trees.
-        if remote != "bundle" {
+        // The unrelated-histories guard is skipped only when the caller
+        // explicitly opts in via `merge_remote_allowing_unrelated` (bundle
+        // import: a fresh repo importing an established bundle has no common
+        // ancestor by design). Ordinary `merge_remote` always enforces it: a
+        // sync merge with no common ancestor is almost always a
+        // misconfigured remote, and should keep failing loudly instead of
+        // silently unioning two unrelated trees.
+        if !allow_unrelated {
             self.repo.merge_base(our_commit.id(), their_commit.id())?;
         }
 
@@ -414,9 +416,34 @@ impl GitRepo {
         Ok(MergeResult::Clean(CommitHash(oid.to_string())))
     }
 
-    /// Merge a fetched remote branch, returning the merge result.
+    /// Merge a fetched remote branch, returning the merge result. Always
+    /// enforces the unrelated-histories guard.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
     pub fn merge_remote(&self, remote: &str, branch: &str) -> Result<MergeResult> {
+        self.merge_remote_with_policy(remote, branch, false)
+    }
+
+    /// Merge a fetched remote branch whose history is expected to share no
+    /// common ancestor with the local one (bundle import). Identical to
+    /// `merge_remote` except that the unrelated-histories guard is not applied.
+    #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
+    pub fn merge_remote_allowing_unrelated(
+        &self,
+        remote: &str,
+        branch: &str,
+    ) -> Result<MergeResult> {
+        self.merge_remote_with_policy(remote, branch, true)
+    }
+
+    /// Shared implementation behind `merge_remote` and
+    /// `merge_remote_allowing_unrelated`; `allow_unrelated` is the only
+    /// difference in behavior between the two.
+    fn merge_remote_with_policy(
+        &self,
+        remote: &str,
+        branch: &str,
+        allow_unrelated: bool,
+    ) -> Result<MergeResult> {
         let result = self.with_write_lock(|| {
             let fetch_head_ref = format!("refs/remotes/{remote}/{branch}");
             let reference = self
@@ -451,7 +478,7 @@ impl GitRepo {
                 return Ok(MergeResult::FastForward(CommitHash(target_oid.to_string())));
             }
 
-            self.perform_normal_merge(remote, branch, &annotated)
+            self.perform_normal_merge(remote, branch, &annotated, allow_unrelated)
         })?;
         if matches!(result, MergeResult::FastForward(_) | MergeResult::Clean(_)) {
             self.write_commit_graph();

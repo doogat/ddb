@@ -707,6 +707,10 @@ impl crate::traits::GitMerge for GitRepo {
         self.merge_remote(remote, branch)
     }
 
+    fn merge_remote_allowing_unrelated(&self, remote: &str, branch: &str) -> Result<MergeResult> {
+        self.merge_remote_allowing_unrelated(remote, branch)
+    }
+
     fn commit_merge(
         &self,
         files: &[(&str, &str)],

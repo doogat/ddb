@@ -383,6 +383,11 @@ pub trait GitMerge {
     /// Merge a fetched remote branch, returning the merge result.
     fn merge_remote(&self, remote: &str, branch: &str) -> Result<MergeResult>;
 
+    /// Merge a fetched remote branch whose history is expected to share no
+    /// common ancestor with the local one (bundle import). Identical to
+    /// `merge_remote` except that the unrelated-histories guard is not applied.
+    fn merge_remote_allowing_unrelated(&self, remote: &str, branch: &str) -> Result<MergeResult>;
+
     /// Create a merge commit with resolved files and two parents.
     fn commit_merge(
         &self,
