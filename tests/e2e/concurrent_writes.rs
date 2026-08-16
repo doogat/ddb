@@ -81,28 +81,45 @@ fn wait_ok(child: Child, label: &str) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
-/// Eight concurrent `ddb create` processes must not lose a commit: every id
-/// they report as created is durable in HEAD, and HEAD holds nothing beyond
-/// exactly that set.
+/// Eight concurrent `ddb create` processes against a *cold* repo must each
+/// bootstrap the index and must not lose a commit: every id they report as
+/// created is durable in HEAD, and HEAD holds nothing beyond exactly that set.
+///
+/// This binds TWO guarantees, because the repo starts cold (PRD 00169 removed
+/// the warm-up create this test used to need):
+///
+/// 1. **The git write lock (PRD 00162)**: no distinct committed id is ever
+///    silently dropped from HEAD by a stale-parent force-update.
+/// 2. **The index rebuild lock (PRD 00169)**: on a cold index (no stored HEAD
+///    in `_ddb_meta`) every writer's `ensure_fresh` takes the destructive
+///    full-rebuild path, which drops all tables — `_ddb_fts` and `_ddb_boost`
+///    included — before recreating them. Unserialized, the loser reads tables
+///    the winner just dropped and dies with `no such table: _ddb_fts`. That
+///    failure is a non-zero exit, so `wait_ok` fails this test and prints the
+///    offending stderr; that is how "no writer hit a bootstrap error" is
+///    asserted here. The git write lock does NOT cover this — it serializes
+///    git commits, not SQLite index bootstrap.
+///
+/// Guarantee 2 was verified to discriminate: with the rebuild lock neutered,
+/// this scenario fails with `no such table: _ddb_boost` — but only on roughly
+/// one run in three (macOS, debug, 8 writers). A single green run is therefore
+/// not proof the lock is present; a red one is proof it is missing.
 ///
 /// The assertion is framed around the *distinct ids the processes actually
 /// minted*, not a bare count of 8. `ddb create` mints a 14-digit
 /// second-resolution id and checks only the on-disk `ddb/` directory before
 /// the commit lock is taken, so two same-second creates in separate processes
 /// can mint the *same* id and land on one `ddb/<id>.md`. That is the
-/// still-open id-mint race (PRD 00164), orthogonal to the write lock. Folding
-/// colliding ids into the expected set keeps this test measuring *only* the
-/// write-lock guarantee: no distinct committed id is ever silently dropped
-/// from HEAD. (The deterministic no-lost-update proof lives in the update test
+/// still-open id-mint race (PRD 00164), orthogonal to both locks above.
+/// Folding colliding ids into the expected set keeps this test blind to that
+/// race. (The deterministic no-lost-update proof lives in the update test
 /// below, where target ids are distinct by construction.)
 #[test]
-fn concurrent_cli_create_processes_lose_no_commit() {
+fn concurrent_cold_start_creates_bootstrap_the_index_and_lose_no_commit() {
     let repo = DdbTestRepo::init();
 
-    // No warm-up create: PRD 00169's rebuild lock now serializes the
-    // destructive cold-start index rebuild across processes, so the concurrent
-    // writers can start from a cold index. (The warm-up used to hide that
-    // race, which PRD 00162's git write lock does not cover.)
+    // No warm-up create on purpose: a cold index is what exercises the
+    // rebuild lock. The warm-up this test used to carry hid that race.
     const N: usize = 8;
     // Spawn all N before waiting on any — that overlap is the contention.
     let children: Vec<Child> = (0..N)
