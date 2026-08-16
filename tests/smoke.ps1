@@ -888,5 +888,44 @@ $output = ddb query "SELECT id FROM doogats WHERE id = '$ID1'"
 if ($output -notmatch $ID1) { throw "cli should still answer queries after a strict reindex abort, got: $output" }
 pass "cli still answers queries after a strict reindex abort"
 
+# 33. reindex report + ddb create AppWarning surface skipped files (PRD 00169 gap closure)
+
+# Gap 1: `ddb reindex`'s OWN report (not the tracing subscriber on stderr) must
+# name skipped paths. With RUST_LOG=error the tracing channel is silenced, so
+# this binds the command's own report output, not the channel section 32
+# binds. This assertion is expected to FAIL against the current binary:
+# reindex() only prints "indexed N doogats" / "N warning(s)", never the
+# skipped path itself; the implementation change that makes it pass is a
+# separate task.
+$env:RUST_LOG = "error"
+$output = & $DDB reindex 2>&1 | Out-String
+Remove-Item Env:\RUST_LOG -ErrorAction SilentlyContinue
+if ($output -notmatch [regex]::Escape($poisonPath)) { throw "reindex should name skipped path in its own report even with RUST_LOG=error, got: $output" }
+pass "reindex names skipped path in its own report even with RUST_LOG=error"
+
+# Gap 2: the AppWarning envelope (write_warnings, printed to stderr for verbs
+# like `ddb create`) is a DIFFERENT channel from the tracing output bound
+# above and in section 32. Commit a NEW poison file and make `ddb create` the
+# FIRST ddb invocation after that commit: the freshness reindex that surfaces
+# REINDEX_SKIPPED_FILES fires once per staleness, and section 32 already
+# consumed it for $poisonPath.
+$poisonPath2 = "ddb/29990101000001.md"
+@"
+---
+: invalid yaml [
+---
+body
+"@ | Set-Content -Path $poisonPath2 -NoNewline
+git -C $TMPDIR add -A
+git -C $TMPDIR commit -m "add second poison doogat" | Out-Null
+
+$createAfterPoisonErr = Join-Path $TMPDIR "create_after_poison.err"
+& $DDB create --title "After poison" --body "triggers freshness reindex" 2>$createAfterPoisonErr | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "create after poison commit should succeed: $(Get-Content $createAfterPoisonErr -Raw)" }
+if ((Get-Content $createAfterPoisonErr -Raw) -notmatch "REINDEX_SKIPPED_FILES") {
+    throw "ddb create should surface REINDEX_SKIPPED_FILES AppWarning after a poison commit, got: $(Get-Content $createAfterPoisonErr -Raw)"
+}
+pass "ddb create surfaces REINDEX_SKIPPED_FILES AppWarning after a poison commit"
+
 Cleanup
 Write-Host "=== all smoke tests passed ==="

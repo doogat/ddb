@@ -740,4 +740,31 @@ pass "strict reindex fails and names the poison path"
 $DDB query "SELECT id FROM doogats WHERE id = '$ID1'" | grep -q "$ID1"
 pass "cli still answers queries after a strict reindex abort"
 
+# 33. reindex report + ddb create AppWarning surface skipped files (PRD 00169 gap closure)
+
+# Gap 1: `ddb reindex`'s OWN report (the outln! lines, not the tracing
+# subscriber on stderr) must name skipped paths. With RUST_LOG=error the
+# tracing channel is silenced, so this binds the command's own report output,
+# not the channel section 32 binds. This assertion is expected to FAIL against
+# the current binary: reindex() only prints "indexed N doogats" / "N
+# warning(s)", never the skipped path itself; the implementation change that
+# makes it pass is a separate task.
+QUIET_REINDEX_OUTPUT=$(RUST_LOG=error $DDB reindex 2>&1)
+echo "$QUIET_REINDEX_OUTPUT" | grep -q "$POISON_PATH"
+pass "reindex names skipped path in its own report even with RUST_LOG=error"
+
+# Gap 2: the AppWarning envelope (write_warnings, printed to stderr for verbs
+# like `ddb create`) is a DIFFERENT channel from the tracing output bound
+# above and in section 32. Commit a NEW poison file and make `ddb create` the
+# FIRST ddb invocation after that commit: the freshness reindex that surfaces
+# REINDEX_SKIPPED_FILES fires once per staleness, and section 32 already
+# consumed it for $POISON_PATH.
+POISON_PATH2="ddb/29990101000001.md"
+printf '%s\n' '---' ': invalid yaml [' '---' 'body' > "$POISON_PATH2"
+git -C "$TMPDIR" add -A && git -C "$TMPDIR" commit -m "add second poison doogat" >/dev/null
+
+$DDB create --title "After poison" --body "triggers freshness reindex" >/dev/null 2>"$TMPDIR/create_after_poison.err"
+grep -q "REINDEX_SKIPPED_FILES" "$TMPDIR/create_after_poison.err"
+pass "ddb create surfaces REINDEX_SKIPPED_FILES AppWarning after a poison commit"
+
 echo "=== all smoke tests passed ==="
