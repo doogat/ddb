@@ -146,12 +146,12 @@ fn delete_all_bundle_refs(repo: &impl GitBackend) -> Result<()> {
 /// the worktree before `apply_merge_result` validates it, so a failure after that
 /// point leaves `HEAD` moved. No data is lost either way — the bundle ref survives
 /// until the import lands.
-fn merge_bundle_and_resolve(
-    repo: &impl GitBackend,
-    sync_mgr: &mut SyncManager<impl GitBackend>,
+fn merge_bundle_and_resolve<G: GitBackend>(
+    sync_mgr: &mut SyncManager<G>,
     index: &crate::indexer::Index,
 ) -> Result<SyncReport> {
-    let merge_result = repo
+    let merge_result = sync_mgr
+        .repo
         .merge_remote_allowing_unrelated("bundle", "master")
         .map_err(bundle_merge_error)?;
     sync_mgr
@@ -221,7 +221,7 @@ pub fn import_bundle(
         toml::from_str(&manifest_str).map_err(|e| DoogatError::Toml(e.to_string()))?;
 
     unbundle_git_objects(repo, &work_dir)?;
-    let mut report = merge_bundle_and_resolve(repo, sync_mgr, index)?;
+    let mut report = merge_bundle_and_resolve(sync_mgr, index)?;
     import_node_registrations(repo, &work_dir)?;
 
     delete_all_bundle_refs(repo)?;
