@@ -825,4 +825,202 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("nonexistent-uuid"));
     }
+
+    /// Drive an import whose merge FAILS (add/add collision whose loser has
+    /// no frontmatter), which by design leaves `refs/remotes/bundle/master`
+    /// in place. Returns node 1's and node 2's temp dirs; node 2's repo is
+    /// reopened by the caller so no borrow of it escapes this helper.
+    fn stage_failed_bundle_import() -> (::tempfile::TempDir, ::tempfile::TempDir) {
+        let (dir1, repo1) = temp_repo();
+        repo1
+            .commit_file(
+                "ddb/20260301000000.md",
+                "---\nid: 20260301000000\ntitle: Ancestor\n---\nShared body\n",
+                "add ancestor",
+            )
+            .unwrap();
+
+        let dir2 = ::tempfile::TempDir::new().unwrap();
+        git2::Repository::clone(dir1.path().to_str().unwrap(), dir2.path()).unwrap();
+        let repo2 = GitRepo::open(dir2.path()).unwrap();
+        repo2
+            .repo
+            .config()
+            .unwrap()
+            .set_bool("commit.gpgsign", false)
+            .unwrap();
+
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+
+        let collision_path = "ddb/20260302000000.md";
+        let theirs_seed = crate::hlc::Hlc {
+            wall_ms: u64::MAX / 2,
+            counter: 0,
+            node: "theirsss".into(),
+        };
+        std::fs::write(dir1.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
+        repo1
+            .commit_file(
+                collision_path,
+                "Just a plain body with no frontmatter block at all.\n",
+                "Node1 adds loser",
+            )
+            .unwrap();
+
+        let ours_seed = crate::hlc::Hlc {
+            wall_ms: u64::MAX / 2 + 1_000_000,
+            counter: 0,
+            node: "oursssss".into(),
+        };
+        std::fs::write(dir2.path().join(".git/ddb-hlc"), ours_seed.to_string()).unwrap();
+        repo2
+            .commit_file(
+                collision_path,
+                "---\nid: 20260302000000\ntitle: Winner\n---\nWinner body\n",
+                "Node2 adds winner",
+            )
+            .unwrap();
+
+        let bundle_path = dir1.path().join("collision.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let result = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path);
+        assert!(
+            matches!(result, Err(DoogatError::Sync(_))),
+            "setup invalid: the collision import must fail, got {result:?}"
+        );
+
+        (dir1, dir2)
+    }
+
+    /// Export a full bundle whose branch set deliberately EXCLUDES `master`,
+    /// so a pruning fetch into `refs/remotes/bundle/*` has something to prune.
+    fn export_bundle_without_master(output: &Path) {
+        let (_dir, repo) = temp_repo();
+        repo.commit_file(
+            "ddb/20260401000000.md",
+            "---\nid: 20260401000000\ntitle: Sidecar\n---\nSidecar body\n",
+            "add sidecar doogat",
+        )
+        .unwrap();
+        crate::sync_manager::register_node(&repo, "Node3").unwrap();
+        let mgr = SyncManager::open(&repo).unwrap();
+
+        // Rehome the history onto a non-master branch, then drop `master`.
+        let head = repo.repo.head().unwrap().peel_to_commit().unwrap();
+        repo.repo.branch("sidecar", &head, false).unwrap();
+        repo.repo.set_head("refs/heads/sidecar").unwrap();
+        let mut master = repo
+            .repo
+            .find_branch("master", git2::BranchType::Local)
+            .unwrap();
+        master.delete().unwrap();
+
+        export_full_bundle(&repo, &mgr, output).unwrap();
+    }
+
+    /// Reachability under `fetch.prune`: a failed import keeps
+    /// `refs/remotes/bundle/master` so its data stays reachable for a retry.
+    /// A LATER import of a different bundle must not silently take that
+    /// reachability away, even when the repo has `fetch.prune = true` (a
+    /// common global git setting) and the new bundle carries no `master`.
+    #[test]
+    fn kept_bundle_ref_survives_a_later_import_under_fetch_prune() {
+        let (_dir1, dir2) = stage_failed_bundle_import();
+        let repo2 = GitRepo::open(dir2.path()).unwrap();
+        repo2
+            .repo
+            .config()
+            .unwrap()
+            .set_bool("fetch.prune", true)
+            .unwrap();
+
+        let kept = repo2
+            .repo
+            .revparse_single("refs/remotes/bundle/master")
+            .expect("setup invalid: the failed import must have kept the bundle ref")
+            .id();
+
+        let other_bundle = dir2.path().join("other.bundle.tar");
+        export_bundle_without_master(&other_bundle);
+
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+        let index2 = crate::indexer::Index::open(&dir2.path().join(".ddb/index.db")).unwrap();
+        // Whether this second import succeeds is not the property under test;
+        // the first bundle's data staying reachable is.
+        let _ = import_bundle(&repo2, &mut mgr2, &index2, &other_bundle);
+
+        let survivor = repo2
+            .repo
+            .revparse_single("refs/remotes/bundle/master")
+            .expect("a later import must not prune the bundle ref a failed import kept");
+        assert_eq!(
+            survivor.id(),
+            kept,
+            "the kept bundle ref must still name the first bundle's commit"
+        );
+        assert!(
+            repo2.repo.find_commit(kept).is_ok(),
+            "the commit the kept bundle ref names must still be present"
+        );
+    }
+
+    /// Cleanup completeness: the import fetch maps `refs/heads/*` onto
+    /// `refs/remotes/bundle/*`, so a multi-branch bundle creates several
+    /// bundle refs. A successful import must clear the whole namespace, not
+    /// just `master`, or stale bundle refs pile up in the repo.
+    #[test]
+    fn successful_import_deletes_every_bundle_ref_not_just_master() {
+        let (dir1, repo1) = temp_repo();
+        repo1
+            .commit_file(
+                "ddb/20260301000000.md",
+                "---\nid: 20260301000000\ntitle: test\n---\nBody",
+                "add",
+            )
+            .unwrap();
+        crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+        let mgr1 = SyncManager::open(&repo1).unwrap();
+
+        // A second branch besides `master`, so the bundle carries two heads.
+        let head1 = repo1.repo.head().unwrap().peel_to_commit().unwrap();
+        repo1.repo.branch("feature", &head1, false).unwrap();
+
+        let bundle_path = dir1.path().join("multi-branch.bundle.tar");
+        export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+
+        let (dir2, repo2) = temp_repo();
+        crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+        let db2 = dir2.path().join(".ddb/index.db");
+        std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
+        let index2 = crate::indexer::Index::open(&db2).unwrap();
+
+        let report = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path)
+            .expect("a clean multi-branch bundle must import successfully");
+        assert_eq!(report.direction, "bundle-import");
+        let content = repo2.read_file("ddb/20260301000000.md").unwrap();
+        assert!(
+            content.contains("title: test"),
+            "the imported doogat must be readable at HEAD, got: {content}"
+        );
+
+        let mut refs = repo2.repo.references_glob("refs/remotes/bundle/*").unwrap();
+        let leftover: Vec<String> = refs
+            .names()
+            .filter_map(|n| n.ok())
+            .map(str::to_string)
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "a successful import must delete every bundle ref, not just master; leftover: {leftover:?}"
+        );
+    }
 }
