@@ -138,8 +138,8 @@ impl Index {
         Self::configure_connection(conn)
     }
 
-    /// Prepare a connection and wrap it in an `Index`. `db_dir` is left unset
-    /// (no rebuild lock); `open` fills it in for on-disk databases.
+    /// `db_dir` is left unset (no rebuild lock); `open` fills it in for
+    /// on-disk databases.
     fn configure_connection(conn: Connection) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
