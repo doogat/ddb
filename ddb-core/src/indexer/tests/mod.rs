@@ -5598,3 +5598,345 @@ fn configure_connection_for_a_schema_already_at_current_version_does_not_wait_on
 
     std::mem::drop(held);
 }
+
+// ── --strict full rebuild + unconditional explicit reindex (`ddb reindex --strict`) ──
+
+#[test]
+fn rebuild_strict_reports_err_naming_the_malformed_yaml_path() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280101000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20280102000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add bad",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let result = idx.rebuild_strict(&repo);
+    let err = result.expect_err("a strict rebuild must abort on a malformed-YAML file");
+    assert!(
+        err.to_string().contains("20280102000000.md"),
+        "strict rebuild error must name the offending path, got: {err}"
+    );
+}
+
+#[test]
+fn rebuild_strict_reports_err_naming_the_unreadable_file_path() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280201000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    commit_file_bytes(
+        &repo,
+        "ddb/20280202000000.md",
+        &[0xFF, 0xFE, 0xFD],
+        "add unreadable",
+    );
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let result = idx.rebuild_strict(&repo);
+    let err = result.expect_err("a strict rebuild must abort on an unreadable file");
+    assert!(
+        err.to_string().contains("20280202000000.md"),
+        "strict rebuild error must name the offending path, got: {err}"
+    );
+}
+
+#[test]
+fn rebuild_strict_over_a_clean_corpus_indexes_everything_with_no_warnings() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280301000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20280302000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let report = idx
+        .rebuild_strict(&repo)
+        .expect("a strict rebuild over a clean corpus must succeed");
+    assert_eq!(report.indexed, 2);
+    assert!(
+        report.warnings.is_empty(),
+        "a clean corpus must produce no warnings, got {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn rebuild_strict_aborting_leaves_previously_indexed_rows_intact() {
+    // The single most important property: the abort must happen BEFORE the
+    // destructive drop+recreate. Build a good index first, then commit a
+    // poison file, then call rebuild_strict — it must abort, and the rows
+    // indexed by the earlier, successful rebuild must still be there
+    // afterwards. An implementation that drops the tables first and only then
+    // discovers the poison file wipes the index and reports an error, which
+    // is strictly worse than either lenient collect-and-skip or a clean
+    // failure.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280401000000.md",
+        "---\nid: 20280401000000\ntitle: Good\n---\nBody good.",
+        "add good",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let first = idx.rebuild(&repo).unwrap();
+    assert_eq!(
+        first.indexed, 1,
+        "test sanity: the good doogat must be indexed before the poison file lands"
+    );
+
+    repo.commit_file(
+        "ddb/20280402000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add bad",
+    )
+    .unwrap();
+
+    let result = idx.rebuild_strict(&repo);
+    assert!(
+        result.is_err(),
+        "a strict rebuild over a corpus containing a poison file must abort"
+    );
+
+    let ids = idx.query_raw("SELECT id FROM doogats ORDER BY id").unwrap();
+    assert_eq!(
+        ids.len(),
+        1,
+        "the row indexed before the aborted strict rebuild must still be \
+         present (got {ids:?}) — the destructive drop must not run before the \
+         strict rebuild detects the poison file"
+    );
+    assert_eq!(ids[0][0], "20280401000000");
+}
+
+#[test]
+fn explicit_reindex_rebuilds_unconditionally_even_when_index_is_fresh_and_healthy() {
+    // Regression test for the `indexed 0 doogats` bug: `DoogatService::reindex()`
+    // used to route through `locked_rebuild`, which re-checks
+    // integrity/staleness after taking the lock and skips the rebuild entirely
+    // once the index is healthy and current. That re-check is correct for the
+    // IMPLICIT paths, but the EXPLICIT `ddb reindex` command must rebuild
+    // unconditionally.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280501000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20280502000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    // Get the index healthy and current first.
+    idx.rebuild_if_stale(&repo)
+        .unwrap()
+        .expect("the first rebuild_if_stale must run the full rebuild");
+    assert!(
+        idx.check_integrity().unwrap(),
+        "test sanity: the index must be structurally sound before the explicit reindex"
+    );
+    assert!(
+        !idx.is_stale(&repo).unwrap(),
+        "test sanity: the index must be current before the explicit reindex"
+    );
+
+    let report = idx.locked_explicit_rebuild(&repo, false).unwrap();
+    assert_eq!(
+        report.indexed, 2,
+        "an explicit reindex over a fresh, healthy index must still rebuild \
+         and report the repo's 2 doogats, not 0 — routing through the \
+         implicit re-check silently skips the rebuild (the `indexed 0 \
+         doogats` bug)"
+    );
+}
+
+#[test]
+fn explicit_reindex_still_serializes_against_a_held_rebuild_lock() {
+    // The explicit path must not have traded the cross-process rebuild lock
+    // away along with the re-check: it still takes
+    // <index-dir>/ddb-rebuild.lock, same as locked_rebuild.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+    repo.commit_file(
+        "ddb/20280601000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+
+    let db_dir = dir.path().join(".ddb");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    let idx = Index::open(&db_dir.join("index.db")).unwrap();
+
+    let held = crate::git_ops::write_lock::acquire(
+        &db_dir,
+        "ddb-rebuild.lock",
+        std::time::Duration::from_secs(10),
+    )
+    .expect("the test must be able to take the rebuild lock first");
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = idx.locked_explicit_rebuild(&repo, false);
+        tx.send(result).expect("the waiting test hung up early");
+        idx
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("the explicit-reindex worker died before returning a result")
+        }
+        Ok(early) => panic!(
+            "locked_explicit_rebuild returned {early:?} while another holder \
+             still owned <index-dir>/ddb-rebuild.lock — the explicit reindex \
+             traded the lock away along with the re-check"
+        ),
+    }
+
+    std::mem::drop(held);
+
+    let idx = worker.join().unwrap();
+    let report = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("locked_explicit_rebuild never returned after the lock was released")
+        .expect("locked_explicit_rebuild that waited for the lock must then succeed, not error out");
+    assert_eq!(
+        report.indexed, 1,
+        "the explicit reindex that waited for the lock must still index the repo's doogat"
+    );
+    let rows: i64 = idx
+        .conn
+        .query_row("SELECT COUNT(*) FROM doogats", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        rows, 1,
+        "the explicit reindex that waited for the lock must leave the index populated"
+    );
+}
+
+#[test]
+fn lenient_explicit_reindex_over_a_poison_file_indexes_the_good_doogats_and_warns() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280701000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20280702000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20280703000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add bad",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let report = idx.locked_explicit_rebuild(&repo, false).unwrap();
+
+    assert_eq!(
+        report.indexed, 2,
+        "the lenient explicit reindex must index both good doogats"
+    );
+
+    // The poison file is currently reported TWICE, from two independent
+    // stages that `Index::rebuild` runs in sequence: `parallel_parse` (the
+    // `crate::parser::parse` Err arm in rebuild.rs) pushes a MalformedYaml
+    // warning for it, and `collect_consistency_warnings` then walks the
+    // corpus again, re-parses every file, and pushes a second MalformedYaml
+    // warning for the same path. That duplication is a known, pre-existing
+    // wart tracked for the review phase — fixing it is out of scope here.
+    // Asserting `warnings.len() == 1` would bind the wart and break the day
+    // someone legitimately de-duplicates the list, so instead this test
+    // asserts on the SET of paths the warnings name: it must contain the
+    // poison file and nothing else (never either good doogat), regardless of
+    // how many times that one path is repeated.
+    assert!(
+        !report.warnings.is_empty(),
+        "a poison file must produce at least one warning"
+    );
+    let warned_paths: std::collections::BTreeSet<&str> = report
+        .warnings
+        .iter()
+        .map(|w| match w {
+            crate::types::ConsistencyWarning::MalformedYaml { path, .. }
+            | crate::types::ConsistencyWarning::UnreadableFile { path, .. }
+            | crate::types::ConsistencyWarning::CrossZoneDuplicate { path, .. }
+            | crate::types::ConsistencyWarning::MissingRequired { path, .. } => path.as_str(),
+        })
+        .collect();
+    assert_eq!(
+        warned_paths,
+        std::collections::BTreeSet::from(["ddb/20280703000000.md"]),
+        "every warning must name the poison file and no other path, got {:?}",
+        report.warnings
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, crate::types::ConsistencyWarning::MalformedYaml { .. })),
+        "at least one warning must be the MalformedYaml variant, got {:?}",
+        report.warnings
+    );
+}
