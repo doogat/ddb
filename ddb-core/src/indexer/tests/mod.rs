@@ -6268,6 +6268,22 @@ See [[beacon-target]] for details.
         "eviction must not replace the MalformedYaml warning for the poison file, got {:?}",
         report.warnings
     );
+
+    // Skipping a poison file must still CONVERGE. Gating `store_head` on an
+    // empty warning list would leave the index permanently stale for any repo
+    // holding one bad file: every `ensure_fresh` re-diffs the same range and
+    // re-emits the same warnings, forever.
+    let new_head = repo.head_oid().unwrap();
+    assert_eq!(
+        idx.stored_head_oid().as_deref(),
+        Some(new_head.0.as_str()),
+        "a lenient reindex that skipped a poison file must still advance the stored HEAD"
+    );
+    assert!(
+        !idx.is_stale(&repo).unwrap(),
+        "the index must report itself fresh after a lenient reindex, \
+         or it never converges on a repo containing a poison file"
+    );
 }
 
 #[test]
@@ -6312,14 +6328,26 @@ Widget
 
     // A sibling of the SAME type, left untouched by the poisoning commit. With
     // only one row in `items`, "delete the poisoned row" and "empty the whole
-    // table" are indistinguishable.
+    // table" are indistinguishable. It carries something in every satellite
+    // table plus a title no other row shares, so an "eviction" that wipes the
+    // satellite tables or the full-text index corpus-wide is observable on a
+    // doogat the change-set never touched.
     let sibling_content = "\
 ---
 id: 20290203000000
-title: Gadget
+title: Serendipitous Gadget
 type: items
 count: 7
+tags:
+  - gadget/survivor
+aliases:
+  - Gadget Alias
+gadget_field: kept
 ---
+
+- [ ] gadget task
+
+See [[gadget-target]] for details.
 
 ## name
 
@@ -6345,6 +6373,22 @@ Gadget
         1,
         "the sibling must be materialized too, or its survival cannot be checked"
     );
+    // The survivor is checked at the same resolution as the victim: without
+    // these pre-asserts, a corpus-wide wipe of the satellite tables and the FTS
+    // index would leave the survival assertions below trivially true.
+    assert_eq!(
+        count_fts_rows_titled(&idx, "Serendipitous Gadget"),
+        1,
+        "the sibling must be searchable before the poisoning, \
+         or its FTS survival cannot be checked"
+    );
+    for table in SATELLITE_TABLES {
+        assert!(
+            count_satellite_rows(&idx, table, "20290203000000") > 0,
+            "the sibling must own rows in {table} before the poisoning, \
+             or its survival in that table cannot be checked"
+        );
+    }
 
     repo.commit_file(
         "ddb/20290202000000.md",
@@ -6378,6 +6422,23 @@ Gadget
         1,
         "the untouched sibling must also keep its row in doogats"
     );
+    // Scoped means scoped everywhere, not just in `doogats` and the type table.
+    // Wiping the satellite tables or the FTS index corpus-wide would strip every
+    // untouched doogat of its tags, fields, links, aliases, checkboxes and
+    // full-text row, so `ddb search` answers nothing until a full reindex.
+    assert_eq!(
+        count_fts_rows_titled(&idx, "Serendipitous Gadget"),
+        1,
+        "the untouched sibling must keep its full-text row: evicting one poison file \
+         must not empty the search index for the rest of the corpus"
+    );
+    for table in SATELLITE_TABLES {
+        assert!(
+            count_satellite_rows(&idx, table, "20290203000000") > 0,
+            "the untouched sibling must keep its rows in {table}: eviction is scoped to \
+             the poisoned doogat, not a corpus-wide wipe"
+        );
+    }
     assert_eq!(
         count_doogat_rows(&idx, "20290201000000"),
         1,
@@ -6388,6 +6449,22 @@ Gadget
         std::collections::BTreeSet::from(["ddb/20290202000000.md"]),
         "the skip warning must still be reported for the poisoned typed doogat, got {:?}",
         report.warnings
+    );
+
+    // Skipping a poison file must still CONVERGE. Gating `store_head` on an
+    // empty warning list would leave the index permanently stale for any repo
+    // holding one bad file: every `ensure_fresh` re-diffs the same range and
+    // re-emits the same warning, forever.
+    let new_head = repo.head_oid().unwrap();
+    assert_eq!(
+        idx.stored_head_oid().as_deref(),
+        Some(new_head.0.as_str()),
+        "a lenient reindex that skipped a poison file must still advance the stored HEAD"
+    );
+    assert!(
+        !idx.is_stale(&repo).unwrap(),
+        "the index must report itself fresh after a lenient reindex, \
+         or it never converges on a repo containing a poison file"
     );
 }
 
@@ -6454,6 +6531,22 @@ fn incremental_reindex_evicts_rows_for_a_doogat_modified_into_unreadable_bytes()
         )),
         "eviction must not replace the UnreadableFile warning, got {:?}",
         report.warnings
+    );
+
+    // Skipping a poison file must still CONVERGE. Gating `store_head` on an
+    // empty warning list would leave the index permanently stale for any repo
+    // holding one bad file: every `ensure_fresh` re-diffs the same range and
+    // re-emits the same warnings, forever.
+    let new_head = repo.head_oid().unwrap();
+    assert_eq!(
+        idx.stored_head_oid().as_deref(),
+        Some(new_head.0.as_str()),
+        "a lenient reindex that skipped a poison file must still advance the stored HEAD"
+    );
+    assert!(
+        !idx.is_stale(&repo).unwrap(),
+        "the index must report itself fresh after a lenient reindex, \
+         or it never converges on a repo containing a poison file"
     );
 }
 
