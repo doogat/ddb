@@ -5940,3 +5940,95 @@ fn lenient_explicit_reindex_over_a_poison_file_indexes_the_good_doogats_and_warn
         report.warnings
     );
 }
+
+// -- over-cap frontmatter is a poison file like any other --
+
+#[test]
+fn rebuild_lenient_skips_the_over_cap_frontmatter_path_and_warns() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280801000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+
+    // A 300 KiB frontmatter value comfortably exceeds the 256 KiB
+    // MAX_FRONTMATTER_BYTES cap while remaining syntactically valid YAML (a
+    // plain scalar value can be any length), so the rejection can only be
+    // attributed to the cap, never to a YAML syntax error.
+    let oversized_value = "a".repeat(300 * 1024);
+    let content = format!("---\ntitle: {oversized_value}\n---\nBody B.");
+    repo.commit_file("ddb/20280802000000.md", &content, "add oversized")
+        .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let report = idx.rebuild(&repo).unwrap();
+
+    assert_eq!(
+        report.indexed, 1,
+        "the lenient rebuild must index the normal-sized doogat"
+    );
+
+    // The over-cap file is a poison file like any other malformed-YAML file:
+    // `Index::rebuild` reports it from two independent stages
+    // (`parallel_parse`'s `crate::parser::parse` Err arm, and
+    // `collect_consistency_warnings` re-walking and re-parsing the corpus
+    // afterwards), so ONE over-cap file yields TWO warnings. Assert on the
+    // SET of warned paths, not the count, so a future de-duplication does
+    // not turn this test red.
+    let warned: std::collections::BTreeSet<&str> = report
+        .warnings
+        .iter()
+        .map(|w| match w {
+            crate::types::ConsistencyWarning::MalformedYaml { path, .. }
+            | crate::types::ConsistencyWarning::UnreadableFile { path, .. }
+            | crate::types::ConsistencyWarning::CrossZoneDuplicate { path, .. }
+            | crate::types::ConsistencyWarning::MissingRequired { path, .. } => path.as_str(),
+        })
+        .collect();
+    assert!(
+        warned.contains("ddb/20280802000000.md"),
+        "the over-cap file must be warned about, got {:?}",
+        report.warnings
+    );
+    assert!(
+        !warned.contains("ddb/20280801000000.md"),
+        "the normal-sized file must NOT be warned about, got {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn rebuild_strict_reports_err_naming_the_over_cap_frontmatter_path() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20280901000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+
+    let oversized_value = "a".repeat(300 * 1024);
+    let content = format!("---\ntitle: {oversized_value}\n---\nBody B.");
+    repo.commit_file("ddb/20280902000000.md", &content, "add oversized")
+        .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let result = idx.rebuild_strict(&repo);
+    let err = result.expect_err("a strict rebuild must abort on an over-cap frontmatter file");
+    assert!(
+        err.to_string().contains("20280902000000.md"),
+        "strict rebuild error must name the offending path, got: {err}"
+    );
+}

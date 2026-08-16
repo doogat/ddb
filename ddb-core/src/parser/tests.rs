@@ -186,6 +186,55 @@ fn frontmatter_explicit_id_overrides_stem_fallback() {
     assert_eq!(meta.id, Some(DoogatId("20260226120000".into())));
 }
 
+// -- frontmatter byte cap tests --
+
+#[test]
+fn frontmatter_at_exactly_the_byte_cap_still_parses() {
+    let prefix = "title: ";
+    let pad_len = MAX_FRONTMATTER_BYTES - prefix.len();
+    let yaml = format!("{prefix}{}", "a".repeat(pad_len));
+    assert_eq!(yaml.len(), MAX_FRONTMATTER_BYTES);
+
+    let meta = parse_frontmatter(&yaml, "note.md")
+        .expect("frontmatter exactly at the cap must still parse");
+    assert_eq!(meta.title.as_deref(), Some("a".repeat(pad_len).as_str()));
+}
+
+#[test]
+fn frontmatter_one_byte_over_the_cap_fails() {
+    let prefix = "title: ";
+    let pad_len = MAX_FRONTMATTER_BYTES - prefix.len() + 1;
+    let yaml = format!("{prefix}{}", "a".repeat(pad_len));
+    assert_eq!(yaml.len(), MAX_FRONTMATTER_BYTES + 1);
+
+    let result = parse_frontmatter(&yaml, "note.md");
+    assert!(
+        result.is_err(),
+        "frontmatter one byte over the cap must be rejected"
+    );
+}
+
+#[test]
+fn frontmatter_over_cap_error_states_cap_and_actual_size() {
+    let prefix = "title: ";
+    let pad_len = MAX_FRONTMATTER_BYTES - prefix.len() + 1;
+    let yaml = format!("{prefix}{}", "a".repeat(pad_len));
+    let actual_len = yaml.len();
+    assert_eq!(actual_len, MAX_FRONTMATTER_BYTES + 1);
+
+    let err = parse_frontmatter(&yaml, "note.md")
+        .expect_err("over-cap frontmatter must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&MAX_FRONTMATTER_BYTES.to_string()),
+        "error must state the configured cap ({MAX_FRONTMATTER_BYTES}), got: {msg}"
+    );
+    assert!(
+        msg.contains(&actual_len.to_string()),
+        "error must state the actual frontmatter size ({actual_len}), got: {msg}"
+    );
+}
+
 // -- inline field extraction tests --
 
 #[test]
