@@ -4187,3 +4187,474 @@ fn rematerialize_never_exposes_missing_table_to_concurrent_reader() {
          rematerialize; the drop+recreate must be atomic to other connections"
     );
 }
+
+// ── incremental reindex: collect-and-skip per-file failures, strict opt-in ──
+
+/// Helper: commit a file with raw (possibly non-UTF-8) byte content, so a
+/// read/decode failure can be triggered against a real `GitRepo`.
+fn commit_file_bytes(repo: &GitRepo, rel_path: &str, content: &[u8], message: &str) {
+    let full_path = repo.path.join(rel_path);
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&full_path, content).unwrap();
+
+    let git_repo = &repo.repo;
+    let mut index = git_repo.index().unwrap();
+    index.add_path(std::path::Path::new(rel_path)).unwrap();
+    index.write().unwrap();
+    let tree_oid = index.write_tree().unwrap();
+    let tree = git_repo.find_tree(tree_oid).unwrap();
+
+    let sig = git2::Signature::now("ddb", "ddb@test").unwrap();
+
+    let parents: Vec<git2::Commit<'_>> = match git_repo.head() {
+        Ok(head) => vec![head.peel_to_commit().unwrap()],
+        Err(_) => vec![],
+    };
+    let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
+
+    git_repo
+        .commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
+        .unwrap();
+}
+
+#[test]
+fn batch_index_changes_skips_malformed_file_and_indexes_rest() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270101000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270102000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270103000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add bad",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec![
+        "ddb/20270101000000.md".to_string(),
+        "ddb/20270102000000.md".to_string(),
+        "ddb/20270103000000.md".to_string(),
+    ];
+    let (indexed, parsed, warnings) = idx.batch_index_changes(&repo, &paths, false).unwrap();
+
+    assert_eq!(indexed, 2);
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(warnings.len(), 1);
+    if let crate::types::ConsistencyWarning::MalformedYaml { path, .. } = &warnings[0] {
+        assert_eq!(path, "ddb/20270103000000.md");
+    } else {
+        panic!("expected MalformedYaml warning, got {:?}", warnings[0]);
+    }
+}
+
+#[test]
+fn batch_index_changes_strict_mode_returns_err_on_malformed_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270201000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270202000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270203000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add bad",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec![
+        "ddb/20270201000000.md".to_string(),
+        "ddb/20270202000000.md".to_string(),
+        "ddb/20270203000000.md".to_string(),
+    ];
+    let result = idx.batch_index_changes(&repo, &paths, true);
+    assert!(
+        result.is_err(),
+        "strict mode must fail the whole batch on a malformed file"
+    );
+}
+
+#[test]
+fn batch_index_changes_skips_unreadable_file_and_indexes_rest() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270301000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270302000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    commit_file_bytes(
+        &repo,
+        "ddb/20270303000000.md",
+        &[0xFF, 0xFE, 0xFD],
+        "add unreadable",
+    );
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec![
+        "ddb/20270301000000.md".to_string(),
+        "ddb/20270302000000.md".to_string(),
+        "ddb/20270303000000.md".to_string(),
+    ];
+    let (indexed, parsed, warnings) = idx.batch_index_changes(&repo, &paths, false).unwrap();
+
+    assert_eq!(indexed, 2);
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(warnings.len(), 1);
+    if let crate::types::ConsistencyWarning::UnreadableFile { path, .. } = &warnings[0] {
+        assert_eq!(path, "ddb/20270303000000.md");
+    } else {
+        panic!("expected UnreadableFile warning, got {:?}", warnings[0]);
+    }
+}
+
+#[test]
+fn batch_index_changes_strict_mode_returns_err_on_unreadable_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270401000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270402000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    commit_file_bytes(
+        &repo,
+        "ddb/20270403000000.md",
+        &[0xFF, 0xFE, 0xFD],
+        "add unreadable",
+    );
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec![
+        "ddb/20270401000000.md".to_string(),
+        "ddb/20270402000000.md".to_string(),
+        "ddb/20270403000000.md".to_string(),
+    ];
+    let result = idx.batch_index_changes(&repo, &paths, true);
+    assert!(
+        result.is_err(),
+        "strict mode must fail the whole batch on an unreadable file"
+    );
+}
+
+#[test]
+fn batch_index_changes_distinguishes_read_and_parse_failures() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270501000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270502000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add malformed",
+    )
+    .unwrap();
+    commit_file_bytes(
+        &repo,
+        "ddb/20270503000000.md",
+        &[0xFF, 0xFE, 0xFD],
+        "add unreadable",
+    );
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec![
+        "ddb/20270501000000.md".to_string(),
+        "ddb/20270502000000.md".to_string(),
+        "ddb/20270503000000.md".to_string(),
+    ];
+    let (indexed, parsed, warnings) = idx.batch_index_changes(&repo, &paths, false).unwrap();
+
+    assert_eq!(indexed, 1);
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(warnings.len(), 2);
+
+    let malformed = warnings.iter().find(|w| {
+        matches!(
+            w,
+            crate::types::ConsistencyWarning::MalformedYaml { path, .. }
+            if path == "ddb/20270502000000.md"
+        )
+    });
+    assert!(
+        malformed.is_some(),
+        "expected a MalformedYaml warning for the malformed path, got {warnings:?}"
+    );
+
+    let unreadable = warnings.iter().find(|w| {
+        matches!(
+            w,
+            crate::types::ConsistencyWarning::UnreadableFile { path, .. }
+            if path == "ddb/20270503000000.md"
+        )
+    });
+    assert!(
+        unreadable.is_some(),
+        "expected an UnreadableFile warning for the unreadable path, got {warnings:?}"
+    );
+}
+
+#[test]
+fn batch_index_changes_single_malformed_file_skipped_with_warning() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270601000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add bad",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec!["ddb/20270601000000.md".to_string()];
+    let (indexed, parsed, warnings) = idx.batch_index_changes(&repo, &paths, false).unwrap();
+
+    assert_eq!(indexed, 0);
+    assert!(parsed.is_empty());
+    assert_eq!(warnings.len(), 1);
+    if let crate::types::ConsistencyWarning::MalformedYaml { path, .. } = &warnings[0] {
+        assert_eq!(path, "ddb/20270601000000.md");
+    } else {
+        panic!("expected MalformedYaml warning, got {:?}", warnings[0]);
+    }
+}
+
+#[test]
+fn batch_index_changes_all_valid_files_returns_zero_warnings() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270701000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270702000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270703000000.md",
+        "---\ntitle: C\n---\nBody C.",
+        "add c",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec![
+        "ddb/20270701000000.md".to_string(),
+        "ddb/20270702000000.md".to_string(),
+        "ddb/20270703000000.md".to_string(),
+    ];
+    let (indexed, parsed, warnings) = idx.batch_index_changes(&repo, &paths, false).unwrap();
+
+    assert_eq!(indexed, 3);
+    assert_eq!(parsed.len(), 3);
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn incremental_reindex_report_carries_warnings_for_poison_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20270801000000.md",
+        "---\ntitle: A\n---\nBody A.",
+        "add a",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270802000000.md",
+        "---\ntitle: B\n---\nBody B.",
+        "add b",
+    )
+    .unwrap();
+    repo.commit_file(
+        "ddb/20270803000000.md",
+        "---\ntitle: C\n---\nBody C.",
+        "add c",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+    let report = idx.rebuild(&repo).unwrap();
+    assert_eq!(report.indexed, 3);
+    let old_head = idx.stored_head_oid().unwrap();
+
+    // Modify all 3 doogats in a single commit; poison the middle one with
+    // malformed YAML so the change-set has both good and bad files.
+    let modifications: Vec<(&str, &str)> = vec![
+        (
+            "ddb/20270801000000.md",
+            "---\ntitle: Modified A\n---\nUpdated body A.",
+        ),
+        ("ddb/20270802000000.md", "---\n: invalid yaml [\n---\nbody"),
+        (
+            "ddb/20270803000000.md",
+            "---\ntitle: Modified C\n---\nUpdated body C.",
+        ),
+    ];
+    repo.commit_files(&modifications, "modify 3, poison 1")
+        .unwrap();
+
+    let report = idx.incremental_reindex(&repo, &old_head, false).unwrap();
+    assert_eq!(report.indexed, 2);
+    assert_eq!(report.warnings.len(), 1);
+    if let crate::types::ConsistencyWarning::MalformedYaml { path, .. } = &report.warnings[0] {
+        assert_eq!(path, "ddb/20270802000000.md");
+    } else {
+        panic!(
+            "expected RebuildReport.warnings to carry a MalformedYaml warning, got {:?}",
+            report.warnings[0]
+        );
+    }
+}
+
+#[test]
+fn batch_index_changes_single_unreadable_file_skipped_with_warning() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    commit_file_bytes(
+        &repo,
+        "ddb/20270901000000.md",
+        &[0xFF, 0xFE, 0xFD],
+        "add unreadable",
+    );
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec!["ddb/20270901000000.md".to_string()];
+    let (indexed, parsed, warnings) = idx.batch_index_changes(&repo, &paths, false).unwrap();
+
+    assert_eq!(indexed, 0);
+    assert!(parsed.is_empty());
+    assert_eq!(warnings.len(), 1);
+    if let crate::types::ConsistencyWarning::UnreadableFile { path, .. } = &warnings[0] {
+        assert_eq!(path, "ddb/20270901000000.md");
+    } else {
+        panic!("expected UnreadableFile warning, got {:?}", warnings[0]);
+    }
+}
+
+#[test]
+fn batch_index_changes_single_unreadable_file_strict_mode_returns_err() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    commit_file_bytes(
+        &repo,
+        "ddb/20271001000000.md",
+        &[0xFF, 0xFE, 0xFD],
+        "add unreadable",
+    );
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec!["ddb/20271001000000.md".to_string()];
+    let result = idx.batch_index_changes(&repo, &paths, true);
+    assert!(
+        result.is_err(),
+        "strict mode must fail on a single unreadable file"
+    );
+}
+
+#[test]
+fn batch_index_changes_single_malformed_file_strict_mode_returns_err() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = GitRepo::init(dir.path()).unwrap();
+
+    repo.commit_file(
+        "ddb/20271101000000.md",
+        "---\n: invalid yaml [\n---\nbody",
+        "add bad",
+    )
+    .unwrap();
+
+    let db_path = dir.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let idx = Index::open(&db_path).unwrap();
+
+    let paths = vec!["ddb/20271101000000.md".to_string()];
+    let result = idx.batch_index_changes(&repo, &paths, true);
+    assert!(
+        result.is_err(),
+        "strict mode must fail on a single malformed file"
+    );
+}
