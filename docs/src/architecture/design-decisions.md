@@ -41,6 +41,24 @@ Architectural choices that constrain the system. New requirements and feature pr
 
 **Tradeoff**: Filesystem browsing is opaque without the CLI or index. The `search` and `query` commands compensate.
 
+**Superseded in part** (2026-08-16): the ID-only filename rule stands; the 14-digit-only ID shape is superseded by the next entry.
+
+## ID Format: UTC Timestamp Plus Per-Node Suffix
+
+**Decision** (2026-08-16, PRD 00170): Doogat IDs keep the 14-digit `YYYYMMDDHHmmss` prefix but mint it from **UTC** instead of local time, followed by a fixed-width, zero-padded sub-second suffix that carries a genuine per-node discriminator (sourced the way `HlcClock` sources its node id, from `.git/ddb-node`), never a bare local counter. This entry records the shape; the format change itself ships in a follow-up implementation PRD.
+
+**Why**: The defect is identity correctness, not throughput. Under local-time, second-resolution minting, two devices can independently mint the *identical* ID with zero coordination (and a DST fold repeats a second on one device); the collision is only caught reactively at merge time by `resolve_add_add_collision` + `derive_content_id`. UTC plus a per-node discriminator gives each device a disjoint ID space, so fresh mints are collision-free at mint and the merge-time repair drops back to a backstop for legacy IDs.
+
+**Deciding factor — downstream ID parsing.** Both live options fix identity correctness equally well, so the choice turned on migration surface alone: the chosen shape keeps a digit-only 14-character prefix, so consumers (including jink) that prefix-parse the ID and every stored `[[20260226120000]]` wikilink keep working unchanged. Only exact-length validators need updating.
+
+**Rejected — HLC-derived identity**: `Hlc::to_string()` renders `{wall_ms}-{counter:04}-{node}` (e.g. `1755000000000-0042-a1b2c3d4`), which breaks every digit-based parser with no salvageable digit-only prefix, costs the date legibility that wikilinks rely on, and does not zero-pad `wall_ms`, so raw lexical sort is not structurally guaranteed the way a fixed-width stamp is. Its collision story is the strongest of the three, but not better in kind than the chosen shape — both are collision-free at mint — so it loses on migration surface.
+
+**Rejected — keep second-resolution local time**: overruled by the maintainer pre-decision of 2026-07-13. Keeping it means permanently accepting cross-device collision and the DST fold as designed behavior, with reactive merge-time repair as the only defense. It lost on identity correctness; throughput was never the deciding factor.
+
+**Throughput**: today the mint spin-waits for the wall second to advance, capping creates at **~1 per second per process**. The chosen shape removes that wall-clock throttle entirely; the estimate (unbenchmarked) is **10^4-10^5 creates/sec/process**, bound by candidate computation plus an in-memory existence check with no per-mint disk write. HLC-derived identity would land at an estimated **10^3-10^4 creates/sec/process** if it reused the persisted `HlcClock`, which writes and renames `.git/ddb-hlc` on every tick.
+
+**Tradeoff**: IDs get longer, so `DoogatId::is_valid_shape`'s "exactly 14 ASCII digits" invariant must be relaxed and any downstream exact-length validator updated. New IDs also read as UTC, not local wall time. Evidence: `dev/local/notes/00170-id-format-blast-radius.md`.
+
 ## SQLite Index as Derived Cache
 
 **Decision**: The SQLite index is always rebuildable from Git. It's a read-only cache, not a source of truth.
