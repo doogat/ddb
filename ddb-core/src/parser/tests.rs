@@ -192,12 +192,13 @@ fn frontmatter_explicit_id_overrides_stem_fallback() {
 fn frontmatter_at_exactly_the_byte_cap_still_parses() {
     let prefix = "title: ";
     let pad_len = MAX_FRONTMATTER_BYTES - prefix.len();
-    let yaml = format!("{prefix}{}", "a".repeat(pad_len));
+    let filler = "a".repeat(pad_len);
+    let yaml = format!("{prefix}{filler}");
     assert_eq!(yaml.len(), MAX_FRONTMATTER_BYTES);
 
     let meta = parse_frontmatter(&yaml, "note.md")
         .expect("frontmatter exactly at the cap must still parse");
-    assert_eq!(meta.title.as_deref(), Some("a".repeat(pad_len).as_str()));
+    assert_eq!(meta.title.as_deref(), Some(filler.as_str()));
 }
 
 #[test]
