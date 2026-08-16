@@ -38,14 +38,27 @@ pub const REINDEX_SKIPPED_FILES: &str = "REINDEX_SKIPPED_FILES";
 /// (`tracing::warn!` per file, already emitted by `batch_index_changes`/
 /// `parallel_parse`) and will be the 00181 doctor surface's job to list.
 pub(crate) fn summarize_reindex_warnings(warnings: Vec<ConsistencyWarning>) -> Option<AppWarning> {
-    if warnings.is_empty() {
-        return None;
+    let mut skip_paths: Vec<&str> = Vec::new();
+    let mut first_description = None;
+    for warning in &warnings {
+        let path = match warning {
+            ConsistencyWarning::UnreadableFile { path, .. } => path,
+            ConsistencyWarning::MalformedYaml { path, .. } => path,
+            ConsistencyWarning::CrossZoneDuplicate { .. } | ConsistencyWarning::MissingRequired { .. } => continue,
+        };
+        if skip_paths.contains(&path.as_str()) {
+            continue;
+        }
+        skip_paths.push(path.as_str());
+        if first_description.is_none() {
+            first_description = Some(describe_consistency_warning(warning));
+        }
     }
-    let first = describe_consistency_warning(&warnings[0]);
-    let message = if warnings.len() == 1 {
-        first
+    let first_description = first_description?;
+    let message = if skip_paths.len() == 1 {
+        first_description
     } else {
-        format!("{first} (+{} more, see ddb doctor)", warnings.len() - 1)
+        format!("{first_description} (+{} more)", skip_paths.len() - 1)
     };
     Some(AppWarning { code: REINDEX_SKIPPED_FILES, message })
 }
