@@ -142,6 +142,13 @@ impl crate::traits::IndexPort for Index {
         self.rebuild(repo)
     }
 
+    fn locked_rebuild(
+        &self,
+        repo: &impl crate::traits::DoogatSource,
+    ) -> Result<crate::types::RebuildReport> {
+        self.locked_rebuild(repo)
+    }
+
     fn is_stale(&self, repo: &impl crate::traits::DoogatSource) -> Result<bool> {
         self.is_stale(repo)
     }

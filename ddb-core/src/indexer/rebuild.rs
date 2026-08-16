@@ -1,11 +1,22 @@
+use std::time::Duration;
+
 use rayon::prelude::*;
 use rusqlite::params;
 
 use crate::error::Result;
+use crate::git_ops::write_lock;
 use crate::traits::DoogatSource;
 use crate::types::ParsedDoogat;
 
 use super::Index;
+
+/// Rebuild lock file name, placed under the index's own directory (NOT `.git/`
+/// — this lock protects the SQLite index, not the git repo).
+const REBUILD_LOCK_FILE_NAME: &str = "ddb-rebuild.lock";
+
+/// How long a rebuild waits for another process's rebuild before failing loud
+/// with a retryable `Conflict`.
+const REBUILD_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl Index {
     /// Check if index is stale (HEAD changed since last rebuild).
@@ -81,7 +92,7 @@ impl Index {
                     return Ok(crate::types::RebuildReport::default());
                 }
                 tracing::warn!(error = %e, "diff_paths failed, falling back to full rebuild");
-                return self.rebuild(repo);
+                return self.locked_rebuild(repo);
             }
         };
 
@@ -473,6 +484,36 @@ impl Index {
         Ok(report)
     }
 
+    /// Run the destructive full `rebuild` serialized against concurrent
+    /// rebuilds in other processes.
+    ///
+    /// `rebuild` drops every table before repopulating it, so two cold-start
+    /// processes racing on one index leave the loser querying tables that no
+    /// longer exist. Every *implicit* path to `rebuild` therefore goes through
+    /// here: take `<index-dir>/ddb-rebuild.lock`, then re-verify the rebuild is
+    /// still needed (the process we waited for may already have done it) and
+    /// only then do the destructive work.
+    ///
+    /// In-memory indexes have no directory to lock and nothing to share, so
+    /// they degrade to an unserialized rebuild.
+    pub(crate) fn locked_rebuild(
+        &self,
+        repo: &impl DoogatSource,
+    ) -> Result<crate::types::RebuildReport> {
+        let _guard = match &self.db_dir {
+            Some(dir) => Some(write_lock::acquire(
+                dir,
+                REBUILD_LOCK_FILE_NAME,
+                REBUILD_LOCK_TIMEOUT,
+            )?),
+            None => None,
+        };
+        if self.check_integrity()? && !self.is_stale(repo)? {
+            return Ok(crate::types::RebuildReport::default());
+        }
+        self.rebuild(repo)
+    }
+
     /// Rebuild if stale or corrupt. Uses incremental reindex when possible.
     ///
     /// PRD 00157: when reached as a *nested* call from inside an open write
@@ -499,7 +540,7 @@ impl Index {
             let corrupt = !self.check_integrity()?;
             if corrupt {
                 tracing::warn!("index corruption detected, forcing full rebuild");
-                return Ok(Some(self.rebuild(repo)?));
+                return Ok(Some(self.locked_rebuild(repo)?));
             }
         }
         if !self.is_stale(repo)? {
@@ -516,7 +557,7 @@ impl Index {
             // next outermost ensure_fresh will rebuild if still needed.
             Ok(None)
         } else {
-            Ok(Some(self.rebuild(repo)?))
+            Ok(Some(self.locked_rebuild(repo)?))
         }
     }
 }

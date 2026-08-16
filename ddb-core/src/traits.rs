@@ -168,6 +168,13 @@ pub trait IndexPort: DoogatIndex + SqlBackend {
     /// Full rebuild of the index from the repository.
     fn rebuild(&self, repo: &impl DoogatSource) -> Result<crate::types::RebuildReport>;
 
+    /// Rebuild, serialized against concurrent destructive rebuilds in other
+    /// processes. Implementors backed by a real on-disk index MUST take the
+    /// rebuild lock; in-memory or mock implementors have nothing to serialize.
+    /// Required rather than defaulted so a new implementor cannot inherit an
+    /// unlocked destructive rebuild by omission.
+    fn locked_rebuild(&self, repo: &impl DoogatSource) -> Result<crate::types::RebuildReport>;
+
     /// Whether the index is stale relative to the repository HEAD.
     fn is_stale(&self, repo: &impl DoogatSource) -> Result<bool>;
 

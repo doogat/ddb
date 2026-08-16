@@ -6,7 +6,7 @@ mod rebuild;
 mod resolve;
 mod search;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection};
 
@@ -27,6 +27,10 @@ pub use materialize::{
 
 pub struct Index {
     pub(crate) conn: Connection,
+    /// Directory holding the index db file, used to place the cross-process
+    /// rebuild lock beside it. `None` for in-memory indexes, which have no
+    /// directory to lock and so rebuild unserialized.
+    db_dir: Option<PathBuf>,
 }
 
 impl Index {
@@ -113,7 +117,16 @@ impl Index {
     /// Open (or create) the SQLite index database.
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
-        Self::configure_connection(conn)
+        let mut index = Self::configure_connection(conn)?;
+        // `Path::parent()` yields `Some("")` — not `None` — for a bare relative
+        // filename such as `":memory:"`. Filter that out so such a path stays
+        // unlocked (like `open_in_memory`) instead of dropping a lock file at a
+        // cwd-relative path.
+        index.db_dir = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|p| p.to_path_buf());
+        Ok(index)
     }
 
     /// Open an isolated in-memory SQLite index.
@@ -125,6 +138,8 @@ impl Index {
         Self::configure_connection(conn)
     }
 
+    /// Prepare a connection and wrap it in an `Index`. `db_dir` is left unset
+    /// (no rebuild lock); `open` fills it in for on-disk databases.
     fn configure_connection(conn: Connection) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
@@ -151,7 +166,7 @@ impl Index {
         }
 
         conn.execute_batch(Self::SCHEMA_DDL)?;
-        Ok(Self { conn })
+        Ok(Self { conn, db_dir: None })
     }
 
     /// Check whether the existing schema needs upgrading (e.g. old 3-column
