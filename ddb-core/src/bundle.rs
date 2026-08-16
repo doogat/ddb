@@ -143,10 +143,29 @@ fn merge_bundle_and_resolve(
     sync_mgr: &mut SyncManager<impl GitBackend>,
     index: &crate::indexer::Index,
 ) -> Result<SyncReport> {
-    let merge_result = repo.merge_remote("bundle", "master")?;
+    let merge_result = repo
+        .merge_remote("bundle", "master")
+        .map_err(bundle_merge_error)?;
     sync_mgr
         .apply_merge_result(merge_result, index)
-        .map_err(|e| DoogatError::Sync(format!("bundle merge failed: {e}")))
+        .map_err(bundle_merge_error)
+}
+
+/// Map a merge-engine failure onto the documented bundle-import error
+/// contract: every failure of the merge sequence surfaces as `Sync` with the
+/// `"bundle merge failed: "` prefix, so no raw variant escapes `import_bundle`
+/// and the same failure cannot report two different classes depending on which
+/// call it came from.
+///
+/// This deliberately wraps `DoogatError::Conflict` too. `Conflict` does not
+/// mean "retryable" in the merge path — it is overloaded across a retryable
+/// class (write-lock acquire timeout; the resolve→commit window guard) and a
+/// terminal one (a collision loser whose id cannot be rewritten; a binary
+/// conflict missing its blob OID). Both classes reach here through the same
+/// `apply_merge_result` call, so they cannot be told apart at this boundary,
+/// and the terminal case is the one bundle import must report as `Sync`.
+fn bundle_merge_error(e: DoogatError) -> DoogatError {
+    DoogatError::Sync(format!("bundle merge failed: {e}"))
 }
 
 /// Import node registration files from the bundle into the repo.
@@ -1237,18 +1256,36 @@ mod tests {
         }
     }
 
+    /// A `Conflict` from the merge sequence is wrapped as `Sync` like every
+    /// other variant. `Conflict` is NOT a reliable "retryable" marker here: the
+    /// merge path raises it both for genuinely retryable failures (write-lock
+    /// acquire timeout, the resolve→commit window guard) and for terminal ones
+    /// (a collision loser whose id cannot be rewritten). Both arrive through the
+    /// same `apply_merge_result` call, and the terminal case is exactly what
+    /// `conflicting_bundle_import_leaves_repo_clean_on_merge_failure` and
+    /// `kept_bundle_ref_survives_a_later_import_under_fetch_prune` require to be
+    /// reported as `Sync`. Letting `Conflict` through would break the documented
+    /// "every bundle-import failure is a `Sync`" contract.
     #[test]
-    fn bundle_merge_error_preserves_conflict_variant_and_message() {
-        let result =
-            bundle_merge_error(DoogatError::Conflict("retry after lock timeout".to_string()));
-        match result {
-            DoogatError::Conflict(msg) => assert_eq!(msg, "retry after lock timeout"),
-            other => panic!("a Conflict input must pass through unchanged, got {other:?}"),
-        }
+    fn bundle_merge_error_wraps_conflict_as_sync_because_conflict_is_not_retryable_here() {
+        let message = match bundle_merge_error(DoogatError::Conflict(
+            "collision loser at ddb/x.md could not be rewritten".to_string(),
+        )) {
+            DoogatError::Sync(msg) => msg,
+            other => panic!("a merge-path Conflict must be wrapped as Sync, got {other:?}"),
+        };
+        assert!(
+            message.starts_with("bundle merge failed: "),
+            "message must start with the exact prefix, got: {message}"
+        );
+        assert!(
+            message.contains("collision loser at ddb/x.md could not be rewritten"),
+            "original error text must be preserved, got: {message}"
+        );
     }
 
     #[test]
-    fn bundle_merge_error_wraps_non_conflict_variants_as_sync_with_prefix() {
+    fn bundle_merge_error_wraps_every_variant_as_sync_with_prefix() {
         let cases: Vec<(DoogatError, &str)> = vec![
             (
                 DoogatError::NotFound("refs/remotes/bundle/master".to_string()),
@@ -1267,7 +1304,7 @@ mod tests {
         for (input, original_text) in cases {
             let message = match bundle_merge_error(input) {
                 DoogatError::Sync(msg) => msg,
-                other => panic!("non-Conflict errors must be wrapped as Sync, got {other:?}"),
+                other => panic!("every merge-path error must be wrapped as Sync, got {other:?}"),
             };
             assert!(
                 message.starts_with("bundle merge failed: "),
