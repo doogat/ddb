@@ -127,6 +127,12 @@ impl Index {
     /// Current index schema version, stamped into `PRAGMA user_version`.
     /// Bump this whenever `SCHEMA_DDL` changes shape; a DB carrying a
     /// different non-zero value is dropped and recreated on open.
+    ///
+    /// The `user_version == 0` fallback to `needs_schema_upgrade` is a
+    /// one-time v0 -> v1 migration check, NOT a general conformance test: that
+    /// probe only looks for the FTS5 `fields` column. Once a DB is stamped,
+    /// the stamp alone decides. So a future bump must not assume the fallback
+    /// validates the full `SCHEMA_DDL` shape — it never did.
     const SCHEMA_VERSION: i64 = 1;
 
     /// Open (or create) the SQLite index database.
