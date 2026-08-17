@@ -11,7 +11,6 @@ fn integration_38f_execute_batch_multi_statement() {
     );
     assert!(r.get("errors").is_none(), "CREATE batchfoo failed: {r}");
 
-    // Multi-statement INSERT batch
     let result = server.graphql_with_vars(
         r#"mutation($stmts: [String!]!) { executeBatch(statements: $stmts) { message } }"#,
         serde_json::json!({ "stmts": [

@@ -5,21 +5,18 @@ fn integration_38b_rest_structured_references_object() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    // Create category type
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "CREATE TABLE mvcategory (name TEXT)" }),
     );
     assert!(r.get("errors").is_none(), "CREATE mvcategory failed: {r}");
 
-    // Create bookmark type with REFERENCES
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "CREATE TABLE mvbookmark (mvcategory TEXT REFERENCES mvcategory)" }),
     );
     assert!(r.get("errors").is_none(), "CREATE mvbookmark failed: {r}");
 
-    // Insert a category
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "INSERT INTO mvcategory (name) VALUES ('Science')" }),
@@ -33,7 +30,6 @@ fn integration_38b_rest_structured_references_object() {
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    // Insert a bookmark linked to the category
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({
@@ -47,7 +43,6 @@ fn integration_38b_rest_structured_references_object() {
         .to_string();
     assert!(!bm_id.is_empty(), "bookmark ID empty");
 
-    // REST GET the bookmark and inspect the references envelope
     let resp = server.rest_get(&format!("/doogats/{bm_id}"));
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().unwrap();
