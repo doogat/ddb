@@ -32,6 +32,7 @@ mod integration_graphql_jink;
 mod integration_graphql_refs;
 mod integration_graphql_server;
 mod integration_hyphenated_type;
+mod integration_id_poison;
 mod integration_junction_sync;
 mod integration_nosql_cli;
 mod integration_orderby_base_fields;
