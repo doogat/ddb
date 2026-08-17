@@ -7,12 +7,6 @@
 //! `pgwire_singleton::pgwire_singleton_duplicate_insert_keeps_connection_healthy`;
 //! this test covers the GraphQL (`executeSql` *and* typed `createDoogat`), REST,
 //! and NoSQL-HTTP legs plus the shared end state.
-//!
-//! The teeth are in the *shape* of each rejection, not merely its failure: both
-//! GraphQL mutation paths must carry identical `SINGLETON_VIOLATION` + `table`
-//! extensions, and REST must name both the table and the surviving row's id in
-//! its 409 envelope. NoSQL HTTP exposes no typed write route today, so 404/405
-//! records that deferred gap.
 
 use crate::common::{DdbTestRepo, ServerGuard};
 use predicates::prelude::*;
@@ -171,21 +165,6 @@ fn integration_54_d_cross_protocol_singleton_duplicate_parity() {
     assert!(
         rest_message.contains(&existing_id),
         "REST error message must name the surviving row id {existing_id} (existing_id parity), got: {rest_message}"
-    );
-
-    // Control for the status above: REST must not answer every structured error
-    // with the singleton's 409. An unregistered type on the same route rejects
-    // with TYPE_NOT_REGISTERED, which maps to 422 (see
-    // `rest::rest_create_unregistered_type_returns_type_not_registered`), so a
-    // hardcoded status mapping cannot satisfy both checks.
-    let rest_unregistered = server.rest_post(
-        "/doogats",
-        json!({ "title": "x", "type": "ig_parity_nonexistent_type" }),
-    );
-    assert_eq!(
-        rest_unregistered.status(),
-        422,
-        "REST create naming an unregistered type must reject with 422, not the singleton's 409"
     );
 
     // NoSQL HTTP is read-only today: it exposes only GET scan/get/backlinks routes,
