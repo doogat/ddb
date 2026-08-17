@@ -34,6 +34,7 @@ mod integration_singleton_flow;
 mod integration_sql_writes;
 mod integration_tags_filter;
 mod integration_typed_write_polish;
+mod integration_warnings_update;
 mod integration_write_recovery;
 mod junction_tables;
 mod link_kinds;
