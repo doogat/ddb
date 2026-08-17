@@ -26,6 +26,7 @@ mod integration_graphql_jink;
 mod integration_graphql_refs;
 mod integration_graphql_server;
 mod integration_junction_sync;
+mod integration_orderby_base_fields;
 mod integration_rest_pgwire;
 mod integration_sql_writes;
 mod integration_tags_filter;

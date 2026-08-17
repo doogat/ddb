@@ -1,17 +1,4 @@
-use crate::common::{DdbTestRepo, ServerGuard};
-
-/// Run a `SELECT ...` via `executeSql` and return the first row's first
-/// column as a string. See integration_sql_writes.rs for the row shape.
-fn select_scalar(server: &ServerGuard, sql: &str) -> String {
-    let escaped = sql.replace('"', "\\\"");
-    let query = format!(r#"mutation {{ executeSql(sql: "{escaped}") {{ rows }} }}"#);
-    let result = server.graphql(&query);
-    assert!(result.get("errors").is_none(), "SELECT failed: {result}");
-    let rows = result["data"]["executeSql"]["rows"].as_array().unwrap();
-    let row_json = rows[0].as_str().unwrap();
-    let row: Vec<String> = serde_json::from_str(row_json).unwrap();
-    row[0].clone()
-}
+use crate::common::{select_scalar, DdbTestRepo, ServerGuard};
 
 #[test]
 fn integration_44_e1_join_pin_graphql() {
