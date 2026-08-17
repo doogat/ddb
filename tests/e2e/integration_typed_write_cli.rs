@@ -1,9 +1,11 @@
-//! Ports tests/integration.sh §48 (lines 3563-3621, PRD 00129), §49 (lines
-//! 3626-3669, PRD 00133) and §44.L (lines 3674-3693, PRD 00134): typed
-//! write blockers (CREATE INDEX no-op/rejection, ON DELETE CASCADE/RESTRICT,
-//! cascade cycle detection), CLI typed `create` populating REFERENCES
-//! columns and rejecting wrong-type FKs, and CLI `create` populating an
-//! auto-generated junction table atomically.
+//! Ports tests/integration.sh §48 (lines 3563-3621, PRD 00129, CREATE INDEX
+//! + CASCADE + cycle-detection halves only — the RESTRICT-blocks-delete
+//! half is already covered by cascade_delete.rs), §49 (lines 3626-3669, PRD
+//! 00133) and §44.L (lines 3674-3693, PRD 00134): typed write blockers
+//! (CREATE INDEX no-op/rejection, ON DELETE CASCADE, cascade cycle
+//! detection), CLI typed `create` populating REFERENCES columns and
+//! rejecting wrong-type FKs, and CLI `create` populating an auto-generated
+//! junction table atomically.
 
 use crate::common::DdbTestRepo;
 use predicates::prelude::*;
@@ -30,6 +32,7 @@ fn integration_48_typed_write_blockers_and_cascade() {
         ])
         .output()
         .unwrap();
+    assert!(idx_out.status.success());
     let idx_combined = format!(
         "{}{}",
         String::from_utf8_lossy(&idx_out.stdout),
@@ -113,43 +116,6 @@ fn integration_48_typed_write_blockers_and_cascade() {
         String::from_utf8_lossy(&after_mem.stderr)
     );
     assert!(!after_mem_combined.contains(&mem_id));
-
-    // §2: ON DELETE RESTRICT (default) blocks parent delete.
-    repo.ddb()
-        .args([
-            "query",
-            "CREATE TABLE p9_blocker (title TEXT, link VARCHAR(255) NOT NULL REFERENCES p9_link(id))",
-        ])
-        .assert()
-        .success();
-
-    let link2_out = repo
-        .ddb()
-        .args([
-            "query",
-            "INSERT INTO p9_link (title, url) VALUES ('R Parent', 'https://r')",
-        ])
-        .output()
-        .unwrap();
-    let link2_id = String::from_utf8_lossy(&link2_out.stdout).trim().to_string();
-    std::thread::sleep(std::time::Duration::from_secs(1));
-
-    repo.ddb()
-        .args([
-            "query",
-            &format!("INSERT INTO p9_blocker (title, link) VALUES ('Block', '{link2_id}')"),
-        ])
-        .assert()
-        .success();
-
-    let restrict_out = repo.ddb().args(["delete", &link2_id]).output().unwrap();
-    assert!(!restrict_out.status.success());
-    let restrict_combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&restrict_out.stdout),
-        String::from_utf8_lossy(&restrict_out.stderr)
-    );
-    assert!(restrict_combined.contains("NOT NULL REFERENCES from p9_blocker.link"));
 
     // §2: cascade cycle detection.
     repo.ddb()
