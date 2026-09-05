@@ -233,8 +233,10 @@ content, found by walking history from `HEAD` (`find_hlc_for_path`). A merge
 commit counts as the author of a path only when its blob differs from every
 parent's blob (a genuine conflict resolution); a merge whose blob equals one
 parent's merely transported that side's file, and the walk continues down that
-parent to the real authoring commit. This is what keeps a merge's own (later)
-trailer from outranking the write it carried in (PRD 00202).
+parent's lineage only (a discarded side is never consulted) to the real
+authoring commit. This is what keeps a merge's own (later) trailer, or a
+rejected side's later write, from outranking the write the merge kept
+(PRD 00202).
 
 Each losing row keeps its original body and reference content, moves to
 `ddb/_conflicts/{id}.md`, and gains these frontmatter overlays:
