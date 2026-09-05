@@ -929,6 +929,163 @@ fn find_hlc_for_path_walks_past_a_trailerless_transport_merge() {
     );
 }
 
+/// PRD 00202 (backlog review B01): a transparent merge must be followed only
+/// into the parent whose blob it KEPT. Here A writes x=old (HLC 1000), its
+/// descendant B rewrites x=new (HLC 2000), and an ours-style merge with
+/// parents [A, B] keeps x=old. A whole-DAG topological walk visits B before A
+/// and answers 2000 for content the merge discarded; the retained-lineage
+/// walk answers A's 1000. FAILS on the whole-DAG walk.
+#[test]
+fn find_hlc_for_path_follows_the_retained_parent_not_the_discarded_one() {
+    let (dir, repo) = temp_repo();
+    let raw = &repo.repo;
+    let base = raw.head().unwrap().peel_to_commit().unwrap();
+    let base_tree = base.tree().unwrap();
+
+    let a_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/x.md", "x old\n")],
+        &[&base],
+        &hlc_msg("A writes x old", 1000, "aaaaaaaa"),
+        true,
+    );
+    let a = raw.find_commit(a_oid).unwrap();
+    let a_tree = a.tree().unwrap();
+    let b_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &a_tree,
+        &[("ddb/x.md", "x new\n")],
+        &[&a],
+        &hlc_msg("B rewrites x new", 2000, "bbbbbbbb"),
+        false,
+    );
+    let b = raw.find_commit(b_oid).unwrap();
+    // The merge keeps A's blob (ours strategy): B's rewrite is discarded.
+    let merge_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &a_tree,
+        &[("ddb/x.md", "x old\n")],
+        &[&a, &b],
+        &hlc_msg("merge B into A, keeping ours", 5000, "aaaaaaaa"),
+        true,
+    );
+    let merge = raw.find_commit(merge_oid).unwrap();
+
+    let x = repo.find_hlc_for_path(&merge, "ddb/x.md").unwrap();
+    assert_eq!(
+        x.wall_ms, 1000,
+        "the discarded lineage's later write must not answer for content the merge kept"
+    );
+}
+
+/// PRD 00202 (B01, mirror case): the same DAG with a theirs-style merge that
+/// keeps B's blob resolves to B's HLC — the retained side, whichever it is.
+#[test]
+fn find_hlc_for_path_follows_the_retained_second_parent() {
+    let (dir, repo) = temp_repo();
+    let raw = &repo.repo;
+    let base = raw.head().unwrap().peel_to_commit().unwrap();
+    let base_tree = base.tree().unwrap();
+
+    let a_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/x.md", "x old\n")],
+        &[&base],
+        &hlc_msg("A writes x old", 1000, "aaaaaaaa"),
+        true,
+    );
+    let a = raw.find_commit(a_oid).unwrap();
+    let a_tree = a.tree().unwrap();
+    let b_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &a_tree,
+        &[("ddb/x.md", "x new\n")],
+        &[&a],
+        &hlc_msg("B rewrites x new", 2000, "bbbbbbbb"),
+        false,
+    );
+    let b = raw.find_commit(b_oid).unwrap();
+    let merge_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &a_tree,
+        &[("ddb/x.md", "x new\n")],
+        &[&a, &b],
+        &hlc_msg("merge B into A, keeping theirs", 5000, "aaaaaaaa"),
+        true,
+    );
+    let merge = raw.find_commit(merge_oid).unwrap();
+
+    let x = repo.find_hlc_for_path(&merge, "ddb/x.md").unwrap();
+    assert_eq!(x.wall_ms, 2000, "the kept side's authoring commit answers");
+}
+
+/// PRD 00202 (B01, several matching parents): when the file changed on neither
+/// side since their common base, both parents match the merge's blob and both
+/// lineages lead to the same authoring commit; the answer is that commit's HLC
+/// regardless of which parent is followed first.
+#[test]
+fn find_hlc_for_path_resolves_through_either_matching_parent() {
+    let (dir, repo) = temp_repo();
+    let raw = &repo.repo;
+    let root = raw.head().unwrap().peel_to_commit().unwrap();
+    let root_tree = root.tree().unwrap();
+
+    let base_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &root_tree,
+        &[("ddb/x.md", "x shared\n")],
+        &[&root],
+        &hlc_msg("base authors x", 500, "cccccccc"),
+        true,
+    );
+    let base = raw.find_commit(base_oid).unwrap();
+    let base_tree = base.tree().unwrap();
+    let a_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/a.md", "a\n")],
+        &[&base],
+        &hlc_msg("A touches a", 1000, "aaaaaaaa"),
+        true,
+    );
+    let a = raw.find_commit(a_oid).unwrap();
+    let a_tree = a.tree().unwrap();
+    let b_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/b.md", "b\n")],
+        &[&base],
+        &hlc_msg("B touches b", 2000, "bbbbbbbb"),
+        false,
+    );
+    let b = raw.find_commit(b_oid).unwrap();
+    let merge_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &a_tree,
+        &[("ddb/b.md", "b\n")],
+        &[&a, &b],
+        &hlc_msg("merge B into A", 5000, "aaaaaaaa"),
+        true,
+    );
+    let merge = raw.find_commit(merge_oid).unwrap();
+
+    let x = repo.find_hlc_for_path(&merge, "ddb/x.md").unwrap();
+    assert_eq!(x.wall_ms, 500, "both lineages lead to the base author");
+    assert_eq!(x.node, "cccccccc");
+}
+
 /// Every non-merge write path (create, update, rename, delete, batch) must stamp
 /// a parseable `HLC:` trailer on its commit AND advance-and-persist the
 /// machine-local node HLC. After each write the commit that touched the path
