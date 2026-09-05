@@ -1,11 +1,10 @@
-//! Ports tests/integration.sh §48 (lines 3563-3621, PRD 00129, CREATE INDEX
-//! + CASCADE + cycle-detection halves only — the RESTRICT-blocks-delete
-//! half is already covered by cascade_delete.rs), §49 (lines 3626-3669, PRD
-//! 00133) and §44.L (lines 3674-3693, PRD 00134): typed write blockers
-//! (CREATE INDEX no-op/rejection, ON DELETE CASCADE, cascade cycle
-//! detection), CLI typed `create` populating REFERENCES columns and
-//! rejecting wrong-type FKs, and CLI `create` populating an auto-generated
-//! junction table atomically.
+//! Ports tests/integration.sh §48 (lines 3563-3621, PRD 00129, CREATE INDEX +
+//! CASCADE + cycle-detection halves only — the RESTRICT-blocks-delete half is
+//! already covered by cascade_delete.rs), §49 (lines 3626-3669, PRD 00133) and
+//! §44.L (lines 3674-3693, PRD 00134): typed write blockers (CREATE INDEX
+//! no-op/rejection, ON DELETE CASCADE, cascade cycle detection), CLI typed
+//! `create` populating REFERENCES columns and rejecting wrong-type FKs, and CLI
+//! `create` populating an auto-generated junction table atomically.
 
 use crate::common::DdbTestRepo;
 use predicates::prelude::*;
