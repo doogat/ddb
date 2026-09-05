@@ -97,10 +97,17 @@ impl GitRepo {
         None
     }
 
-    /// Check whether `oid` touched `path`. Returns `Some(Some(hlc))` if it
-    /// touched the path and carried an HLC trailer, `Some(None)` if it touched
-    /// the path but had no trailer (caller should stop walking), or `None` if
-    /// the commit didn't touch the path at all (caller should keep walking).
+    /// Check whether `oid` authored a change to `path`. Returns `Some(Some(hlc))`
+    /// if it did and carried an HLC trailer, `Some(None)` if it did but had no
+    /// trailer (caller should stop walking), or `None` if the commit did not
+    /// author a change to the path (caller should keep walking).
+    ///
+    /// A merge commit authored a change only when its entry for `path` differs
+    /// from EVERY parent's entry. Equal to any parent means the merge merely
+    /// transported that side's file, and the authoring commit lies further down
+    /// that parent's history — diffing against `parent(0)` alone made every
+    /// merged-in file look like the merge's own write, so a trailer-stamped
+    /// merge outranked the real author (PRD 00202).
     fn check_commit_for_hlc(&self, oid: git2::Oid, path: &str) -> Option<Option<crate::hlc::Hlc>> {
         let c = match self.repo.find_commit(oid) {
             Ok(c) => c,
@@ -117,32 +124,45 @@ impl GitRepo {
             }
         };
 
-        let parent_tree = c.parent(0).ok().and_then(|p| p.tree().ok());
-        let diff = match self
-            .repo
-            .diff_tree_to_tree(parent_tree.as_ref(), Some(&c_tree), None)
-        {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!(oid = %oid, error = %e, "skipping undiffable commit in HLC revwalk");
-                return None;
-            }
+        let touches_path = if c.parent_count() > 1 {
+            Self::merge_authored_path(&c, &c_tree, path)
+        } else {
+            let parent_tree = c.parent(0).ok().and_then(|p| p.tree().ok());
+            let diff = match self
+                .repo
+                .diff_tree_to_tree(parent_tree.as_ref(), Some(&c_tree), None)
+            {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(oid = %oid, error = %e, "skipping undiffable commit in HLC revwalk");
+                    return None;
+                }
+            };
+            diff.deltas().any(|delta| {
+                delta
+                    .new_file()
+                    .path()
+                    .or_else(|| delta.old_file().path())
+                    .and_then(|p| p.to_str())
+                    .is_some_and(|p| p == path)
+            })
         };
-
-        let touches_path = diff.deltas().any(|delta| {
-            delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .and_then(|p| p.to_str())
-                .is_some_and(|p| p == path)
-        });
 
         if touches_path {
             Some(crate::hlc::extract_hlc(c.message().unwrap_or("")))
         } else {
             None
         }
+    }
+
+    /// `path`'s blob in the merge differs from its blob in every parent (an
+    /// absent entry counts as a distinct value). Equal to any parent means the
+    /// merge transported that side's file rather than authoring it.
+    fn merge_authored_path(c: &git2::Commit<'_>, c_tree: &git2::Tree<'_>, path: &str) -> bool {
+        let entry_id = |tree: &git2::Tree<'_>| tree.get_path(Path::new(path)).ok().map(|e| e.id());
+        let own = entry_id(c_tree);
+        c.parents()
+            .all(|parent| parent.tree().ok().as_ref().and_then(&entry_id) != own)
     }
 
     /// Diff two commit OIDs, returning changed doogat paths with their change kind.
