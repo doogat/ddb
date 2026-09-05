@@ -192,9 +192,14 @@ fn integration_54_d_cross_protocol_singleton_duplicate_parity() {
         count_stdout.lines().any(|line| line.trim() == "1"),
         "singleton must still hold exactly one row after the rejected duplicates, got: {count_stdout}"
     );
-    repo.ddb()
+    let theme = repo
+        .ddb()
         .args(["query", "SELECT theme FROM ig_parity_cfg"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("p1"));
+        .success();
+    assert_eq!(
+        String::from_utf8_lossy(&theme.get_output().stdout).trim(),
+        "p1",
+        "rejected duplicate inserts must preserve the seed theme"
+    );
 }
