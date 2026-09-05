@@ -60,7 +60,10 @@ fn integration_44_j_auto_junction_atomic_graphql() {
     let cat_a = server.graphql(
         r#"mutation { executeSql(sql: "INSERT INTO j134_cat (title, label) VALUES (\"alpha\", \"alpha\")") { message } }"#,
     );
-    assert!(cat_a.get("errors").is_none(), "insert cat_a failed: {cat_a}");
+    assert!(
+        cat_a.get("errors").is_none(),
+        "insert cat_a failed: {cat_a}"
+    );
     let cat_a_id = cat_a["data"]["executeSql"]["message"]
         .as_str()
         .unwrap()
@@ -69,11 +72,19 @@ fn integration_44_j_auto_junction_atomic_graphql() {
     let cat_b = server.graphql(
         r#"mutation { executeSql(sql: "INSERT INTO j134_cat (title, label) VALUES (\"beta\", \"beta\")") { message } }"#,
     );
-    assert!(cat_b.get("errors").is_none(), "insert cat_b failed: {cat_b}");
+    assert!(
+        cat_b.get("errors").is_none(),
+        "insert cat_b failed: {cat_b}"
+    );
     let cat_b_id = cat_b["data"]["executeSql"]["message"]
         .as_str()
         .unwrap()
         .to_string();
+    assert!(!cat_a_id.is_empty() && !cat_b_id.is_empty());
+    assert_ne!(
+        cat_a_id, cat_b_id,
+        "category inserts must return distinct ids"
+    );
 
     let bm = server.graphql(&format!(
         r#"mutation {{ executeSql(sql: "INSERT INTO j134_bm (url, category) VALUES ('https://j134.example', '{cat_a_id}')") {{ message }} }}"#
@@ -200,10 +211,7 @@ fn integration_44_m_parent_junction_cleanup_graphql() {
     let bm = server.graphql(&format!(
         r#"mutation {{ executeSql(sql: "INSERT INTO pdc_bm (url, pdc_cat) VALUES ('https://pdc.example', '{cat_id}')") {{ message }} }}"#
     ));
-    assert!(
-        bm.get("errors").is_none(),
-        "insert pdc_bm row failed: {bm}"
-    );
+    assert!(bm.get("errors").is_none(), "insert pdc_bm row failed: {bm}");
     let bm_id = bm["data"]["executeSql"]["message"]
         .as_str()
         .unwrap()

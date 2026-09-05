@@ -35,10 +35,15 @@ fn tag_count_group_by() {
 #[test]
 fn tag_join_filters_doogats() {
     let repo = DdbTestRepo::init();
-    repo.ddb()
+    let created = repo
+        .ddb()
         .args(["create", "--title", "HasRust", "--tags", "rust"])
         .assert()
         .success();
+    let id = String::from_utf8_lossy(&created.get_output().stdout)
+        .trim()
+        .to_owned();
+    assert!(!id.is_empty(), "tagged fixture must return an id");
     std::thread::sleep(std::time::Duration::from_secs(1));
     repo.ddb()
         .args(["create", "--title", "NoPython", "--tags", "python"])
@@ -55,12 +60,24 @@ fn tag_join_filters_doogats() {
         .success()
         .stdout(predicate::str::contains("HasRust"))
         .stdout(predicate::str::contains("NoPython").not());
+
+    repo.ddb()
+        .args([
+            "query",
+            "SELECT z.id, z.title FROM doogats z JOIN _ddb_tags t ON t.doogat_id = z.id WHERE t.tag LIKE '%rust%'",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&id))
+        .stdout(predicate::str::contains("HasRust"))
+        .stdout(predicate::str::contains("NoPython").not());
 }
 
 #[test]
 fn body_hashtag_indexed_with_source() {
     let repo = DdbTestRepo::init();
-    repo.ddb()
+    let created = repo
+        .ddb()
         .args([
             "create",
             "--title",
@@ -72,6 +89,9 @@ fn body_hashtag_indexed_with_source() {
         ])
         .assert()
         .success();
+    let id = String::from_utf8_lossy(&created.get_output().stdout)
+        .trim()
+        .to_owned();
 
     // Both frontmatter and body tags should be present with correct source
     repo.ddb()
@@ -80,6 +100,25 @@ fn body_hashtag_indexed_with_source() {
         .success()
         .stdout(predicate::str::contains("body-tag"))
         .stdout(predicate::str::contains("frontmatter-tag"));
+
+    repo.ddb()
+        .args([
+            "update",
+            &id,
+            "--body",
+            "Updated with #gtd/act/next hashtag",
+        ])
+        .assert()
+        .success();
+    repo.ddb().arg("reindex").assert().success();
+    repo.ddb()
+        .args([
+            "query",
+            "SELECT tag, source FROM _ddb_tags WHERE tag = 'gtd/act/next'",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("gtd/act/next | body"));
 }
 
 #[test]

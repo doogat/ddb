@@ -23,6 +23,10 @@ fn cascade_delete_cleans_junction_table() {
         .args(["query", "INSERT INTO category (label) VALUES ('tech')"])
         .output()
         .unwrap();
+    assert!(
+        cat_out.status.success(),
+        "fixture command failed: {cat_out:?}"
+    );
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -35,6 +39,10 @@ fn cascade_delete_cleans_junction_table() {
         ])
         .output()
         .unwrap();
+    assert!(
+        bm_out.status.success(),
+        "fixture command failed: {bm_out:?}"
+    );
     let bm_id = String::from_utf8_lossy(&bm_out.stdout).trim().to_string();
 
     // Link bookmark -> category
@@ -106,6 +114,10 @@ fn cascade_delete_cleans_owned_junction_when_parent_deleted() {
         .args(["query", "INSERT INTO category (label) VALUES ('alpha')"])
         .output()
         .unwrap();
+    assert!(
+        cat_out.status.success(),
+        "fixture command failed: {cat_out:?}"
+    );
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -124,6 +136,10 @@ fn cascade_delete_cleans_owned_junction_when_parent_deleted() {
         ])
         .output()
         .unwrap();
+    assert!(
+        bm_out.status.success(),
+        "fixture command failed: {bm_out:?}"
+    );
     let bm_id = String::from_utf8_lossy(&bm_out.stdout).trim().to_string();
 
     // Sanity: junction row exists keyed by the bookmark (parent) side.
@@ -186,6 +202,10 @@ fn cascade_delete_removes_wikilink_from_referencing_file() {
         .args(["query", "INSERT INTO category (label) VALUES ('tech')"])
         .output()
         .unwrap();
+    assert!(
+        cat_out.status.success(),
+        "fixture command failed: {cat_out:?}"
+    );
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -198,6 +218,10 @@ fn cascade_delete_removes_wikilink_from_referencing_file() {
         ])
         .output()
         .unwrap();
+    assert!(
+        bm_out.status.success(),
+        "fixture command failed: {bm_out:?}"
+    );
     let bm_id = String::from_utf8_lossy(&bm_out.stdout).trim().to_string();
 
     // Link bookmark -> category (creates wikilink in reference section)
@@ -257,6 +281,10 @@ fn cascade_delete_via_ddb_delete_cleans_junction_and_refs() {
         .args(["query", "INSERT INTO category (label) VALUES ('tech')"])
         .output()
         .unwrap();
+    assert!(
+        cat_out.status.success(),
+        "fixture command failed: {cat_out:?}"
+    );
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -269,6 +297,10 @@ fn cascade_delete_via_ddb_delete_cleans_junction_and_refs() {
         ])
         .output()
         .unwrap();
+    assert!(
+        bm_out.status.success(),
+        "fixture command failed: {bm_out:?}"
+    );
     let bm_id = String::from_utf8_lossy(&bm_out.stdout).trim().to_string();
 
     // Link bookmark -> category via junction
@@ -350,6 +382,10 @@ fn delete_rejected_by_not_null_references_sql_issue_10() {
         ])
         .output()
         .unwrap();
+    assert!(
+        link_out.status.success(),
+        "fixture command failed: {link_out:?}"
+    );
     let link_id = String::from_utf8_lossy(&link_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -361,6 +397,10 @@ fn delete_rejected_by_not_null_references_sql_issue_10() {
         ])
         .output()
         .unwrap();
+    assert!(
+        cat_out.status.success(),
+        "fixture command failed: {cat_out:?}"
+    );
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
 
     repo.ddb()
@@ -400,6 +440,21 @@ fn delete_rejected_by_not_null_references_sql_issue_10() {
         .assert()
         .success()
         .stdout(predicate::str::contains("1"));
+
+    // Removing the blocker restores the same parent's normal delete path.
+    repo.ddb()
+        .args([
+            "query",
+            &format!("DELETE FROM \"category-membership\" WHERE link_id = '{link_id}'"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 row(s) affected"));
+    repo.ddb()
+        .args(["query", &format!("DELETE FROM link WHERE id = '{link_id}'")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 row(s) affected"));
 }
 
 #[test]
@@ -437,6 +492,10 @@ fn delete_rejected_by_not_null_references_cli_issue_10() {
         ])
         .output()
         .unwrap();
+    assert!(
+        link_out.status.success(),
+        "fixture command failed: {link_out:?}"
+    );
     let link_id = String::from_utf8_lossy(&link_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
     let cat_out = repo
@@ -447,6 +506,10 @@ fn delete_rejected_by_not_null_references_cli_issue_10() {
         ])
         .output()
         .unwrap();
+    assert!(
+        cat_out.status.success(),
+        "fixture command failed: {cat_out:?}"
+    );
     let cat_id = String::from_utf8_lossy(&cat_out.stdout).trim().to_string();
     repo.ddb()
         .args([
@@ -464,5 +527,6 @@ fn delete_rejected_by_not_null_references_cli_issue_10() {
         .args(["delete", &link_id])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("NOT NULL REFERENCES"));
+        .stderr(predicate::str::contains("NOT NULL REFERENCES"))
+        .stderr(predicate::str::contains("category-membership.link_id"));
 }

@@ -31,18 +31,22 @@ fn bundle_import_recovers_real_conflict_and_reimport_is_noop() {
         .arg(&bundle_path)
         .assert()
         .success()
-        .stdout(predicate::str::contains("conflicts resolved: 1"));
+        .stdout(predicate::str::contains("imported: conflicts resolved: 1"));
 
     // Read the doogat on node 1: either LWW winner title is acceptable — the point
     // is a real merge landed, not which side won.
     let result = DdbTestRepo::ddb_at(&setup.nodes[1])
         .args(["read", &id])
-        .output()
-        .unwrap();
-    let output = String::from_utf8_lossy(&result.stdout);
+        .assert()
+        .success();
+    let output = String::from_utf8_lossy(&result.get_output().stdout);
+    let title = output
+        .lines()
+        .find_map(|line| line.strip_prefix("title: "))
+        .expect("merged doogat must contain a title line");
     assert!(
-        output.contains("Bundle Laptop Title") || output.contains("Bundle Desktop Title"),
-        "merged doogat should contain one of the two titles, got: {output}"
+        matches!(title, "Bundle Laptop Title" | "Bundle Desktop Title"),
+        "merged title must match one of the conflicting values, got: {title:?}"
     );
 
     // Re-import the SAME bundle: its commits are already ancestors of local HEAD,
@@ -52,5 +56,5 @@ fn bundle_import_recovers_real_conflict_and_reimport_is_noop() {
         .arg(&bundle_path)
         .assert()
         .success()
-        .stdout(predicate::str::contains("conflicts resolved: 0"));
+        .stdout(predicate::str::contains("imported: conflicts resolved: 0"));
 }

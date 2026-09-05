@@ -371,6 +371,21 @@ fn frontmatter_conflict_creates_fm_crdt_file() {
     let data = std::fs::read(fm_files[0].path()).unwrap();
     assert!(!data.is_empty(), "_fm.crdt file should not be empty");
 
+    // Reopening the repo through the CLI cleans up the temporary CRDT files.
+    let read = DdbTestRepo::ddb_at(&node2_path)
+        .args(["read", &id])
+        .assert()
+        .success();
+    let content = String::from_utf8_lossy(&read.get_output().stdout);
+    let title = content
+        .lines()
+        .find_map(|line| line.strip_prefix("title: "))
+        .expect("merged doogat must contain a title line");
+    assert!(
+        matches!(title, "Laptop Title" | "Desktop Title"),
+        "merged title must equal one of the conflicting titles, got: {title:?}"
+    );
+
     // Run compaction — should handle _fm.crdt files
     DdbTestRepo::ddb_at(&node2_path)
         .args(["compact", "--force"])
@@ -413,7 +428,13 @@ fn sync_auto_registers_node_when_none_exists() {
     );
 
     // Subsequent sync should reuse registration
+    let uuid_before = std::fs::read(&node_file).unwrap();
     node.ddb().arg("sync").assert().success();
+    assert_eq!(
+        std::fs::read(&node_file).unwrap(),
+        uuid_before,
+        "subsequent sync must preserve the registered node UUID"
+    );
 }
 
 #[test]
@@ -438,6 +459,12 @@ fn sync_output_reports_resurrected_count() {
         .success()
         .stdout(predicate::str::contains("resurrected:").not());
 
+    DdbTestRepo::ddb_at(&node2_path)
+        .args(["read", &id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("title: Doomed"));
+
     // Node1 deletes the doogat and pushes the deletion
     setup.node1.ddb().args(["delete", &id]).assert().success();
     setup.node1.ddb().arg("sync").assert().success();
@@ -455,4 +482,15 @@ fn sync_output_reports_resurrected_count() {
         .assert()
         .success()
         .stdout(predicate::str::contains("resurrected: 1"));
+
+    DdbTestRepo::ddb_at(&node2_path)
+        .args(["read", &id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("edited on desktop"));
+    DdbTestRepo::ddb_at(&node2_path)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("resurrected"));
 }

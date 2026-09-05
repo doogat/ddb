@@ -16,7 +16,10 @@ fn integration_45_a1_cross_mutation_parity_after_unique_failure() {
     let valid = server.graphql(
         r#"mutation { executeSql(sql: "INSERT INTO a1item (title, name) VALUES (\"a\", \"unique1\")") { message } }"#,
     );
-    assert!(valid.get("errors").is_none(), "valid insert failed: {valid}");
+    assert!(
+        valid.get("errors").is_none(),
+        "valid insert failed: {valid}"
+    );
     let valid_id = valid["data"]["executeSql"]["message"]
         .as_str()
         .unwrap()
@@ -65,7 +68,9 @@ fn integration_45_a1_cross_mutation_parity_after_unique_failure() {
         .to_string();
 
     // (c) deleteDoogat still works on the same table
-    let deleted = server.graphql(&format!(r#"mutation {{ deleteDoogat(id: "{created_id}") }}"#));
+    let deleted = server.graphql(&format!(
+        r#"mutation {{ deleteDoogat(id: "{created_id}") }}"#
+    ));
     assert!(
         deleted.get("errors").is_none(),
         "deleteDoogat after UNIQUE failure should succeed: {deleted}"
@@ -157,7 +162,10 @@ fn integration_45_r10_restrict_blocks_sql_and_graphql_delete() {
     let link = server.graphql(
         r#"mutation { executeSql(sql: "INSERT INTO r10link (url) VALUES (\"https://r10.example\")") { message } }"#,
     );
-    assert!(link.get("errors").is_none(), "insert r10link failed: {link}");
+    assert!(
+        link.get("errors").is_none(),
+        "insert r10link failed: {link}"
+    );
     let link_id = link["data"]["executeSql"]["message"]
         .as_str()
         .unwrap()
@@ -255,7 +263,10 @@ fn integration_45_a2_ghost_row_survives_server_restart() {
     let valid = server.graphql(
         r#"mutation { executeSql(sql: "INSERT INTO a2persist (title, name) VALUES (\"a\", \"uniq_a2\")") { message } }"#,
     );
-    assert!(valid.get("errors").is_none(), "valid insert failed: {valid}");
+    assert!(
+        valid.get("errors").is_none(),
+        "valid insert failed: {valid}"
+    );
     let valid_id = valid["data"]["executeSql"]["message"]
         .as_str()
         .unwrap()
@@ -291,5 +302,12 @@ fn integration_45_a2_ghost_row_survives_server_restart() {
     assert!(
         fresh.get("errors").is_none(),
         "fresh insert on the restarted server should succeed: {fresh}"
+    );
+    assert!(
+        !fresh["data"]["executeSql"]["message"]
+            .as_str()
+            .unwrap()
+            .is_empty(),
+        "fresh INSERT must return an id: {fresh}"
     );
 }

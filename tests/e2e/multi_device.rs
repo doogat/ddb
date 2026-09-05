@@ -1,4 +1,5 @@
 use crate::common::{DdbTestRepo, MultiNodeSetup};
+use predicates::prelude::*;
 use rand::prelude::*;
 
 /// Round-robin sync: push from one node, pull on all others
@@ -185,6 +186,51 @@ fn stale_node_resync_after_compaction() {
     assert!(
         out.contains("Edit from") || out.contains("Shared"),
         "stale node should have a resolved doogat after resync"
+    );
+    assert!(
+        out.lines().any(|line| line.starts_with("title: ")),
+        "resolved doogat must retain its title line: {out}"
+    );
+}
+
+#[test]
+fn compacted_node_resolves_second_conflict() {
+    let setup = MultiNodeSetup::new(2);
+    let id = MultiNodeSetup::create(&setup.nodes[0], "Stale shared", "original content");
+    MultiNodeSetup::sync(&setup.nodes[0]);
+    MultiNodeSetup::sync(&setup.nodes[1]);
+
+    MultiNodeSetup::update(&setup.nodes[0], &id, "Stale shared", "body from node0");
+    MultiNodeSetup::sync(&setup.nodes[0]);
+    MultiNodeSetup::update(&setup.nodes[1], &id, "Stale shared", "body from node1");
+    DdbTestRepo::ddb_at(&setup.nodes[1])
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("conflicts resolved: 1"));
+
+    DdbTestRepo::ddb_at(&setup.nodes[1])
+        .args(["compact", "--force"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("crdt temp:"))
+        .stdout(predicate::str::contains("repo (.git):"));
+
+    // Both nodes branch from the first merge; the compacted node resolves again.
+    MultiNodeSetup::sync(&setup.nodes[0]);
+    MultiNodeSetup::update(&setup.nodes[0], &id, "Stale shared", "second edit node0");
+    MultiNodeSetup::sync(&setup.nodes[0]);
+    MultiNodeSetup::update(&setup.nodes[1], &id, "Stale shared", "second edit node1");
+    DdbTestRepo::ddb_at(&setup.nodes[1])
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("conflicts resolved: 1"));
+
+    let out = MultiNodeSetup::read(&setup.nodes[1], &id);
+    assert!(
+        out.lines().any(|line| line.starts_with("title: ")),
+        "compacted node must retain a readable title after the second merge: {out}"
     );
 }
 
@@ -399,7 +445,45 @@ fn bundle_full_bootstrap() {
 
     // Create content on node0
     let id = MultiNodeSetup::create(&setup.nodes[0], "Bundle test", "bundle body");
-    MultiNodeSetup::push(&setup.nodes[0]);
+    MultiNodeSetup::sync(&setup.nodes[0]);
+    MultiNodeSetup::sync(&setup.nodes[1]);
+
+    // Export a resolved reference union, matching the shell bootstrap fixture.
+    let relative_path = format!("ddb/{id}.md");
+    for (node, label) in [(&setup.nodes[0], "laptop"), (&setup.nodes[1], "desktop")] {
+        let path = node.join(&relative_path);
+        let content = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n---\n- {label} note:: Added from {label}\n",
+                content.trim_end_matches('\n')
+            ),
+        )
+        .unwrap();
+        let added = std::process::Command::new("git")
+            .current_dir(node)
+            .args(["add", &relative_path])
+            .output()
+            .unwrap();
+        assert!(added.status.success(), "git add failed: {added:?}");
+        let committed = std::process::Command::new("git")
+            .current_dir(node)
+            .args(["commit", "-m", &format!("add {label} reference")])
+            .output()
+            .unwrap();
+        assert!(
+            committed.status.success(),
+            "git commit failed: {committed:?}"
+        );
+    }
+    MultiNodeSetup::sync(&setup.nodes[0]);
+    DdbTestRepo::ddb_at(&setup.nodes[1])
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("conflicts resolved: 1"));
+    MultiNodeSetup::sync(&setup.nodes[0]);
 
     // Export full bundle from node0
     let bundle_path = setup.remote_dir.path().join("full.bundle.tar");
@@ -429,13 +513,22 @@ fn bundle_full_bootstrap() {
         .args(["bundle", "import"])
         .arg(&bundle_path)
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("imported"));
 
     // Verify the doogat exists on node3
     let out = MultiNodeSetup::read(&path3, &id);
     assert!(
         out.contains("Bundle test"),
         "bootstrapped node should have the doogat"
+    );
+    assert!(
+        out.contains("laptop note:: Added from laptop"),
+        "bootstrapped node must retain the merged laptop reference: {out}"
+    );
+    assert!(
+        out.contains("desktop note:: Added from desktop"),
+        "bootstrapped node must retain the merged desktop reference: {out}"
     );
 }
 
@@ -680,7 +773,7 @@ fn concurrent_edits_same_doogat() {
 
     // Node0 creates a doogat, sync to all
     let id = MultiNodeSetup::create(&setup.nodes[0], "Shared doogat", "original body");
-    MultiNodeSetup::push(&setup.nodes[0]);
+    MultiNodeSetup::sync(&setup.nodes[0]);
     MultiNodeSetup::sync(&setup.nodes[1]);
     MultiNodeSetup::sync(&setup.nodes[2]);
 
@@ -688,6 +781,13 @@ fn concurrent_edits_same_doogat() {
     MultiNodeSetup::update(&setup.nodes[0], &id, "Edit from node0", "body from node0");
     MultiNodeSetup::update(&setup.nodes[1], &id, "Edit from node1", "body from node1");
     MultiNodeSetup::update(&setup.nodes[2], &id, "Edit from node2", "body from node2");
+
+    MultiNodeSetup::sync(&setup.nodes[0]);
+    DdbTestRepo::ddb_at(&setup.nodes[1])
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"(?m)^sync:.*conflicts resolved: [1-9]").unwrap());
 
     // Sync cascade: 3 rounds to ensure full convergence
     for _ in 0..3 {
@@ -701,6 +801,17 @@ fn concurrent_edits_same_doogat() {
 
     assert_eq!(content0, content1, "node0 and node1 diverged");
     assert_eq!(content1, content2, "node1 and node2 diverged");
+    let title = content0
+        .lines()
+        .find_map(|line| line.strip_prefix("title: "))
+        .expect("converged doogat must contain a title line");
+    assert!(
+        matches!(
+            title,
+            "Edit from node0" | "Edit from node1" | "Edit from node2"
+        ),
+        "converged title must be one of the conflicting values, got: {title:?}"
+    );
 }
 
 // ── Test: delete-vs-edit across 3 nodes ──────────────────────────

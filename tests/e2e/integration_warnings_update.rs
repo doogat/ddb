@@ -9,27 +9,21 @@ const SET_IG_WARN_DEMO_TITLE_TEMPLATE: &str =
 const CREATE_IG_UPD_DEMO: &str = "CREATE TABLE ig_upd_demo (note TEXT)";
 
 /// Fresh repo + server with the `ig_warn_demo` typedef (title_template
-/// `'auto-warn'`) already created via `executeSql`. Each test gets its own
+/// `'auto-warn'`) already created via the CLI. Each test gets its own
 /// instance.
 fn setup_ig_warn_demo() -> (DdbTestRepo, ServerGuard) {
     let repo = DdbTestRepo::init();
+    repo.ddb()
+        .args(["query", CREATE_IG_WARN_DEMO])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("table ig_warn_demo created"));
+    repo.ddb()
+        .args(["query", SET_IG_WARN_DEMO_TITLE_TEMPLATE])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("title template"));
     let server = ServerGuard::start(&repo);
-    let create = server.graphql_with_vars(
-        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
-        serde_json::json!({ "sql": CREATE_IG_WARN_DEMO }),
-    );
-    assert!(
-        create.get("errors").is_none(),
-        "CREATE TABLE ig_warn_demo failed: {create}"
-    );
-    let title_template = server.graphql_with_vars(
-        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
-        serde_json::json!({ "sql": SET_IG_WARN_DEMO_TITLE_TEMPLATE }),
-    );
-    assert!(
-        title_template.get("errors").is_none(),
-        "ALTER TABLE ig_warn_demo SET TITLE TEMPLATE failed: {title_template}"
-    );
     (repo, server)
 }
 
@@ -107,15 +101,15 @@ fn integration_57_a_graphql_create_titled_extensions_warnings_empty() {
         serde_json::json!([]),
         "expected empty extensions.warnings: {result}"
     );
+    assert!(result.get("data").is_some(), "expected data key: {result}");
 }
 
 #[test]
 fn integration_57_b_graphql_create_omitted_title_title_from_template_warning() {
     let (_repo, server) = setup_ig_warn_demo();
 
-    let result = server.graphql(
-        r#"mutation { createDoogat(input: { type: "ig_warn_demo" }) { id title } }"#,
-    );
+    let result = server
+        .graphql(r#"mutation { createDoogat(input: { type: "ig_warn_demo" }) { id title } }"#);
     assert!(
         result.get("errors").is_none(),
         "createDoogat should succeed: {result}"
@@ -123,6 +117,7 @@ fn integration_57_b_graphql_create_omitted_title_title_from_template_warning() {
     let warnings = result["extensions"]["warnings"]
         .as_array()
         .unwrap_or_else(|| panic!("extensions.warnings should be an array: {result}"));
+    assert!(result.get("data").is_some(), "expected data key: {result}");
     assert_eq!(warnings.len(), 1, "expected exactly 1 warning: {result}");
     assert_eq!(
         warnings[0]["code"].as_str(),

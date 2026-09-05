@@ -61,7 +61,11 @@ types:
 ";
     let schema = write_schema(&repo, "diffgadget", yaml);
 
-    let a = repo.ddb().args(["schema", "diff", &schema]).output().unwrap();
+    let a = repo
+        .ddb()
+        .args(["schema", "diff", &schema])
+        .output()
+        .unwrap();
     let b = repo
         .ddb()
         .args(["schema", "apply", &schema, "--dry-run"])
@@ -206,7 +210,8 @@ types:
     repo.ddb()
         .args(["schema", "apply", &schema])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("create_type").not());
 
     // A diff after convergence shows no create/add/drop op for this table.
     repo.ddb()

@@ -11,6 +11,10 @@ fn all_link_kinds_indexed() {
         .args(["create", "--title", "Wiki Target", "--body", "target"])
         .output()
         .unwrap();
+    assert!(
+        wiki_out.status.success(),
+        "fixture command failed: {wiki_out:?}"
+    );
     let wiki_id = String::from_utf8_lossy(&wiki_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -19,6 +23,10 @@ fn all_link_kinds_indexed() {
         .args(["create", "--title", "Embed Target", "--body", "embedded"])
         .output()
         .unwrap();
+    assert!(
+        embed_out.status.success(),
+        "fixture command failed: {embed_out:?}"
+    );
     let embed_id = String::from_utf8_lossy(&embed_out.stdout)
         .trim()
         .to_string();
@@ -36,6 +44,10 @@ fn all_link_kinds_indexed() {
         .args(["create", "--title", "Link Kinds Test", "--body", &body])
         .output()
         .unwrap();
+    assert!(
+        linker_out.status.success(),
+        "fixture command failed: {linker_out:?}"
+    );
     let linker_id = String::from_utf8_lossy(&linker_out.stdout)
         .trim()
         .to_string();
@@ -54,7 +66,7 @@ fn all_link_kinds_indexed() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("url"))
+        .stdout(predicate::str::is_match(r"\burl\b").unwrap())
         .stdout(predicate::str::contains("embed"))
         .stdout(predicate::str::contains("markdown"))
         .stdout(predicate::str::contains("wikilink"));

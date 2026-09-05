@@ -82,6 +82,7 @@ fn discover_mentions() {
         ])
         .output()
         .unwrap();
+    assert!(a_out.status.success(), "fixture command failed: {a_out:?}");
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -97,6 +98,7 @@ fn discover_mentions() {
         ])
         .output()
         .unwrap();
+    assert!(b_out.status.success(), "fixture command failed: {b_out:?}");
     let b_id = String::from_utf8_lossy(&b_out.stdout).trim().to_string();
 
     // Reindex so FTS picks up the body text
@@ -163,10 +165,12 @@ fn discover_similar() {
         ])
         .output()
         .unwrap();
+    assert!(a_out.status.success(), "fixture command failed: {a_out:?}");
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    repo.ddb()
+    let similar = repo
+        .ddb()
         .args([
             "create",
             "--title",
@@ -178,6 +182,13 @@ fn discover_similar() {
         ])
         .assert()
         .success();
+    let similar_id = String::from_utf8_lossy(&similar.get_output().stdout)
+        .trim()
+        .to_owned();
+    assert!(
+        similar_id.len() == 14 && similar_id.bytes().all(|byte| byte.is_ascii_digit()),
+        "similar fixture must return a 14-digit id: {similar_id:?}"
+    );
 
     repo.ddb().arg("reindex").assert().success();
 
@@ -186,6 +197,7 @@ fn discover_similar() {
         .args(["discover", "similar", &a_id])
         .assert()
         .success()
+        .stdout(predicate::str::contains(&similar_id))
         .stdout(predicate::str::contains("no suggestions").not())
         .stdout(predicate::str::contains("Rust Advanced"));
 }
@@ -206,7 +218,15 @@ fn discover_orphans() {
         ])
         .output()
         .unwrap();
+    assert!(
+        out.status.success(),
+        "orphan fixture create failed: {out:?}"
+    );
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert!(
+        id.len() == 14 && id.bytes().all(|byte| byte.is_ascii_digit()),
+        "orphan fixture must return a 14-digit id: {id:?}"
+    );
 
     repo.ddb().arg("reindex").assert().success();
 
@@ -263,6 +283,7 @@ fn discover_recent_shows_new_doogat() {
         .args(["create", "--title", "Fresh Note", "--body", "Just created."])
         .output()
         .unwrap();
+    assert!(out.status.success(), "fixture command failed: {out:?}");
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     repo.ddb().arg("reindex").assert().success();
@@ -327,6 +348,10 @@ fn discover_link_density_shows_hub() {
         .args(["create", "--title", "Hub", "--body", "Central node."])
         .output()
         .unwrap();
+    assert!(
+        hub_out.status.success(),
+        "fixture command failed: {hub_out:?}"
+    );
     let hub_id = String::from_utf8_lossy(&hub_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 

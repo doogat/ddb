@@ -34,6 +34,7 @@ fn insert_and_select() {
         ])
         .output()
         .unwrap();
+    assert!(id1.status.success(), "first INSERT failed: {id1:?}");
     let id1 = String::from_utf8_lossy(&id1.stdout).trim().to_string();
 
     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -46,7 +47,14 @@ fn insert_and_select() {
         ])
         .output()
         .unwrap();
+    assert!(id2.status.success(), "second INSERT failed: {id2:?}");
     let id2 = String::from_utf8_lossy(&id2.stdout).trim().to_string();
+    for id in [&id1, &id2] {
+        assert!(
+            id.len() == 14 && id.bytes().all(|byte| byte.is_ascii_digit()),
+            "INSERT must return a 14-digit id: {id:?}"
+        );
+    }
 
     // All rows present
     repo.ddb()
@@ -113,6 +121,7 @@ fn update_row() {
         ])
         .output()
         .unwrap();
+    assert!(out.status.success(), "fixture command failed: {out:?}");
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     repo.ddb()
@@ -147,6 +156,7 @@ fn delete_row() {
         .args(["query", "INSERT INTO tasks (status) VALUES ('keep')"])
         .output()
         .unwrap();
+    assert!(out1.status.success(), "fixture command failed: {out1:?}");
     let id1 = String::from_utf8_lossy(&out1.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -155,6 +165,7 @@ fn delete_row() {
         .args(["query", "INSERT INTO tasks (status) VALUES ('delete-me')"])
         .output()
         .unwrap();
+    assert!(out2.status.success(), "fixture command failed: {out2:?}");
     let id2 = String::from_utf8_lossy(&out2.stdout).trim().to_string();
 
     repo.ddb()
@@ -266,6 +277,15 @@ fn install_meeting_minutes_type() {
         .success()
         .stdout(predicate::str::contains("attendees: alice,bob"));
 
+    repo.ddb()
+        .args([
+            "query",
+            &format!(r#"SELECT date FROM "meeting-minutes" WHERE id = '{id}'"#),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2026-03-10"));
+
     // DELETE on hyphenated table must work (requires quoted identifiers in SQL)
     repo.ddb()
         .args([
@@ -273,7 +293,8 @@ fn install_meeting_minutes_type() {
             &format!(r#"DELETE FROM "meeting-minutes" WHERE id = '{id}'"#),
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("1 row(s) affected"));
 }
 
 #[test]
@@ -537,6 +558,43 @@ fn transaction_rollback_via_cli() {
         .assert()
         .success()
         .stdout(predicate::str::contains("0"));
+
+    repo.ddb()
+        .args([
+            "query",
+            "BEGIN; INSERT INTO items (name) VALUES ('committed'); COMMIT",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("COMMIT"));
+    repo.ddb()
+        .args([
+            "query",
+            "BEGIN; INSERT INTO items (name) VALUES ('rolled-back'); ROLLBACK",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ROLLBACK"));
+
+    let count = repo
+        .ddb()
+        .args(["query", "SELECT COUNT(*) FROM items"])
+        .assert()
+        .success();
+    assert_eq!(
+        String::from_utf8_lossy(&count.get_output().stdout).trim(),
+        "1"
+    );
+    let remaining = repo
+        .ddb()
+        .args(["query", "SELECT name FROM items"])
+        .assert()
+        .success();
+    assert_eq!(
+        String::from_utf8_lossy(&remaining.get_output().stdout).trim(),
+        "committed",
+        "rollback must preserve the previously committed row"
+    );
 }
 
 #[test]
@@ -776,6 +834,22 @@ fn multi_row_insert() {
     let ids_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let ids: Vec<&str> = ids_str.split(',').collect();
     assert_eq!(ids.len(), 3, "expected 3 IDs, got: {ids_str}");
+    for id in &ids {
+        assert!(
+            id.len() == 14 && id.bytes().all(|byte| byte.is_ascii_digit()),
+            "multi-row INSERT must return 14-digit IDs, got: {id:?}"
+        );
+    }
+
+    let count = repo
+        .ddb()
+        .args(["query", "SELECT COUNT(*) FROM items"])
+        .assert()
+        .success();
+    assert_eq!(
+        String::from_utf8_lossy(&count.get_output().stdout).trim(),
+        "3"
+    );
 
     // All rows present
     repo.ddb()
@@ -810,7 +884,8 @@ fn default_next_auto_increments() {
             "CREATE TABLE nexttest (name TEXT, pos INTEGER DEFAULT NEXT)",
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("table nexttest created"));
 
     // Multi-row insert should assign sequential values
     repo.ddb()

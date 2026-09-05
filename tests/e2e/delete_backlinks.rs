@@ -11,6 +11,7 @@ fn delete_reports_broken_backlinks() {
         .args(["create", "--title", "Target"])
         .output()
         .unwrap();
+    assert!(a_out.status.success(), "fixture command failed: {a_out:?}");
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -47,6 +48,7 @@ fn status_reports_broken_backlinks_after_delete() {
         .args(["create", "--title", "Target"])
         .output()
         .unwrap();
+    assert!(a_out.status.success(), "fixture command failed: {a_out:?}");
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 

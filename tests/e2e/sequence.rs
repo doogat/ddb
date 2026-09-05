@@ -22,16 +22,21 @@ fn create_with_sequence(repo: &DdbTestRepo, title: &str, parent_id: &str) -> Str
     );
     std::fs::write(&doogat_path, &content).unwrap();
 
-    std::process::Command::new("git")
+    let added = std::process::Command::new("git")
         .args(["add", "."])
         .current_dir(repo.path())
         .output()
         .unwrap();
-    std::process::Command::new("git")
+    assert!(added.status.success(), "fixture git add failed: {added:?}");
+    let committed = std::process::Command::new("git")
         .args(["commit", "-m", "add sequence field"])
         .current_dir(repo.path())
         .output()
         .unwrap();
+    assert!(
+        committed.status.success(),
+        "fixture git commit failed: {committed:?}"
+    );
 
     id
 }

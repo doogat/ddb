@@ -63,7 +63,8 @@ fn junction_table_round_trip() {
             ),
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("1 row"));
 
     // Verify junction row exists
     repo.ddb()
@@ -84,7 +85,8 @@ fn junction_table_round_trip() {
             ),
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("1 row"));
 
     // Verify junction table is empty
     repo.ddb()

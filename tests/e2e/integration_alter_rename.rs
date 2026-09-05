@@ -41,6 +41,10 @@ fn integration_50a_alter_rename_graphql() {
 
     let new_name = select(&server, "SELECT count(*) FROM rngql_dst");
     assert!(
+        new_name.get("data").is_some(),
+        "new table must return data: {new_name}"
+    );
+    assert!(
         new_name.get("errors").is_none(),
         "SELECT on new table name should succeed: {new_name}"
     );
@@ -57,19 +61,13 @@ fn integration_50b_mysql_rename_alias_rejected_graphql() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    let create = ddl(
-        &server,
-        "CREATE TABLE rngql_alias_src (title VARCHAR(64))",
-    );
+    let create = ddl(&server, "CREATE TABLE rngql_alias_src (title VARCHAR(64))");
     assert!(
         create.get("errors").is_none(),
         "CREATE TABLE failed: {create}"
     );
 
-    let rename = ddl(
-        &server,
-        "RENAME TABLE rngql_alias_src TO rngql_alias_dst",
-    );
+    let rename = ddl(&server, "RENAME TABLE rngql_alias_src TO rngql_alias_dst");
     assert!(
         rename.get("errors").is_some(),
         "MySQL RENAME TABLE alias should be rejected: {rename}"

@@ -293,12 +293,23 @@ fn pgwire_pg_catalog_hides_internal_tables() {
             !table_names.contains("_ddb_fts"),
             "internal table '_ddb_fts' should be hidden"
         );
+        assert!(
+            table_names.iter().all(|name| !name.starts_with("_ddb_")),
+            "internal table leaked: {table_names:?}"
+        );
 
         // Direct access to internal tables should still work
-        let direct = client.simple_query("SELECT COUNT(*) FROM _ddb_tags").await;
+        let direct = client
+            .simple_query("SELECT COUNT(*) FROM _ddb_tags")
+            .await
+            .expect("direct query on internal table should still work");
+        let count = direct.iter().find_map(|message| match message {
+            SimpleQueryMessage::Row(row) => row.get(0),
+            _ => None,
+        });
         assert!(
-            direct.is_ok(),
-            "direct query on internal table should still work"
+            count.unwrap().parse::<u64>().is_ok(),
+            "invalid count: {direct:?}"
         );
     });
 }

@@ -21,10 +21,11 @@ fn hyphenated_type_typed_query() {
     assert!(r.get("errors").is_none(), "INSERT test-widget failed: {r}");
 
     // Query via the typed query field (test-widget -> testWidgets)
-    let r = server.graphql(r#"{ testWidgets { items { id title status priority } } }"#);
+    let r = server.graphql(r#"{ testWidgets { items { id title status priority } totalCount } }"#);
     assert!(r.get("errors").is_none(), "testWidgets query failed: {r}");
     let items = r["data"]["testWidgets"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "expected 1 test-widget: {r}");
+    assert_eq!(r["data"]["testWidgets"]["totalCount"], 1);
     assert_eq!(items[0]["status"].as_str().unwrap(), "active");
     assert_eq!(items[0]["priority"].as_i64().unwrap(), 1);
 }

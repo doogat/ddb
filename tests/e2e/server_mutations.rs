@@ -7,7 +7,7 @@ fn compact_mutation_returns_result() {
     let server = ServerGuard::start(&repo);
 
     let result = server
-        .graphql(r#"mutation { compact { filesRemoved crdtDocsCompacted gcSuccess backupPath } }"#);
+        .graphql(r#"mutation { compact { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter crdtTempFilesBefore crdtTempFilesAfter repoBytesBefore repoBytesAfter backupPath } }"#);
     assert!(result.get("errors").is_none(), "compact failed: {result}");
     let compact = &result["data"]["compact"];
     assert!(compact["filesRemoved"].is_i64());
@@ -21,11 +21,20 @@ fn compact_force_mutation() {
     let server = ServerGuard::start(&repo);
 
     let result = server.graphql(
-        r#"mutation { compact(force: true) { filesRemoved crdtDocsCompacted gcSuccess backupPath } }"#,
+        r#"mutation { compact(force: true) { filesRemoved crdtDocsCompacted gcSuccess crdtTempBytesBefore crdtTempBytesAfter repoBytesBefore repoBytesAfter backupPath } }"#,
     );
     assert!(
         result.get("errors").is_none(),
         "compact(force: true) failed: {result}"
+    );
+    let compact = &result["data"]["compact"];
+    assert!(
+        compact["gcSuccess"].is_boolean(),
+        "missing gcSuccess: {result}"
+    );
+    assert!(
+        compact.get("backupPath").is_some(),
+        "missing backupPath: {result}"
     );
 }
 
@@ -67,8 +76,16 @@ fn compact_no_backup_mutation() {
     );
     let compact = &result["data"]["compact"];
     assert!(
+        compact["gcSuccess"].is_boolean(),
+        "missing gcSuccess: {result}"
+    );
+    assert!(
         compact["backupPath"].is_null(),
         "compact(noBackup: true) should have null backupPath: {result}"
+    );
+    assert!(
+        compact.get("backupPath").is_some(),
+        "missing backupPath: {result}"
     );
 }
 

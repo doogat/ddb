@@ -26,16 +26,21 @@ fn insert_folder_typedef_creates_subdirectory_path() {
     std::fs::write(typedef_file.path(), &updated).unwrap();
 
     // Commit the change
-    std::process::Command::new("git")
+    let added = std::process::Command::new("git")
         .current_dir(repo.path())
         .args(["add", "-A"])
         .output()
         .unwrap();
-    std::process::Command::new("git")
+    assert!(added.status.success(), "fixture git add failed: {added:?}");
+    let committed = std::process::Command::new("git")
         .current_dir(repo.path())
         .args(["commit", "-m", "add folder to widget"])
         .output()
         .unwrap();
+    assert!(
+        committed.status.success(),
+        "fixture git commit failed: {committed:?}"
+    );
 
     // Reindex to pick up folder setting
     repo.ddb().arg("reindex").assert().success();
@@ -56,7 +61,7 @@ fn insert_folder_typedef_creates_subdirectory_path() {
     // Verify the file is at ddb/widget/{id}.md
     let expected_path = repo.path().join(format!("ddb/widget/{id}.md"));
     assert!(
-        expected_path.exists(),
+        expected_path.is_file(),
         "expected file at {}",
         expected_path.display()
     );

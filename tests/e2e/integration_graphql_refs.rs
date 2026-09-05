@@ -72,6 +72,20 @@ fn integration_38c2_boolean_coercion() {
         serde_json::json!({ "sql": "INSERT INTO smokepin (title, pinned) VALUES ('PinTest', true)" }),
     );
     assert!(r.get("errors").is_none(), "INSERT PinTest failed: {r}");
+    assert!(!r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .is_empty());
+
+    let result = server.graphql(r#"{ sql(query: "SELECT title FROM smokepin") { rows } }"#);
+    assert!(
+        result.get("errors").is_none(),
+        "base title query failed: {result}"
+    );
+    let rows = result["data"]["sql"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "expected the inserted row: {rows:?}");
+    let row: serde_json::Value = serde_json::from_str(rows[0].as_str().unwrap()).unwrap();
+    assert_eq!(row, serde_json::json!(["PinTest"]));
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -89,7 +103,8 @@ fn integration_38c2_boolean_coercion() {
     );
     let rows = result["data"]["sql"]["rows"].as_array().unwrap();
     assert!(
-        rows.iter().any(|row| row.as_str().unwrap().contains("true")),
+        rows.iter()
+            .any(|row| row.as_str().unwrap().contains("true")),
         "expected a row containing \"true\": {rows:?}"
     );
 

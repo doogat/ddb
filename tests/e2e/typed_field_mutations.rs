@@ -31,7 +31,11 @@ fn update_doogat_with_fields_updates_materialized_row() {
     let server = ServerGuard::start(&repo);
 
     // Create typedef with VARCHAR column (frontmatter zone)
-    exec_sql(&server, "CREATE TABLE bookmark (url VARCHAR(200))");
+    let created = exec_sql(&server, "CREATE TABLE bookmark (url VARCHAR(200))");
+    assert_eq!(
+        created["data"]["executeSql"]["message"],
+        "table bookmark created"
+    );
 
     // Create a typed doogat via SQL INSERT
     let r = exec_sql(
@@ -39,6 +43,7 @@ fn update_doogat_with_fields_updates_materialized_row() {
         "INSERT INTO bookmark (title, url) VALUES ('My Bookmark', 'https://old.com')",
     );
     let id = r["data"]["executeSql"]["message"].as_str().unwrap().trim();
+    assert!(id.len() == 14 && id.bytes().all(|c| c.is_ascii_digit()));
 
     // Verify initial materialized row
     let rows = select_objects(
@@ -111,6 +116,7 @@ fn update_doogat_with_unset_fields_removes_field() {
         r.get("errors").is_none(),
         "updateDoogat with unsetFields failed: {r}"
     );
+    assert_eq!(r["data"]["updateDoogat"]["id"], id);
 
     // Verify materialized row has NULL url
     let rows = select_objects(

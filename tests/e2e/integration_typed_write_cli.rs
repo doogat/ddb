@@ -94,6 +94,10 @@ fn integration_48_typed_write_blockers_and_cascade() {
         ])
         .output()
         .unwrap();
+    assert!(
+        after_link.status.success(),
+        "post-CASCADE parent SELECT failed: {after_link:?}"
+    );
     let after_link_combined = format!(
         "{}{}",
         String::from_utf8_lossy(&after_link.stdout),
@@ -109,6 +113,10 @@ fn integration_48_typed_write_blockers_and_cascade() {
         ])
         .output()
         .unwrap();
+    assert!(
+        after_mem.status.success(),
+        "post-CASCADE child SELECT failed: {after_mem:?}"
+    );
     let after_mem_combined = format!(
         "{}{}",
         String::from_utf8_lossy(&after_mem.stdout),
@@ -209,6 +217,11 @@ fn integration_49_unify_typed_write_paths() {
         .output()
         .unwrap();
     let cat2_id = String::from_utf8_lossy(&cat2_out.stdout).trim().to_string();
+    assert!(!cat1_id.is_empty(), "first category seed must return an id");
+    assert!(
+        !cat2_id.is_empty(),
+        "second category seed must return an id"
+    );
 
     // CLI create on a typedef with two REFERENCES columns must populate the
     // reference zone.
@@ -286,6 +299,10 @@ fn integration_49_unify_typed_write_paths() {
         "{}{}",
         String::from_utf8_lossy(&bad_out.stdout),
         String::from_utf8_lossy(&bad_out.stderr)
+    );
+    assert!(
+        !bad_out.status.success(),
+        "wrong-type FK create must fail: {bad_combined}"
     );
     assert!(bad_combined.contains("references non-existent tw_category"));
 }

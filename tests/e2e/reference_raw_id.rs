@@ -548,4 +548,16 @@ fn plural_resolver_with_order_by_and_limit() {
         vec!["apple", "banana"],
         "expected first 2 alphabetically: {r}"
     );
+
+    let r = server.graphql(
+        r#"{ olbms { items { olcats(orderBy: "label", orderDir: "DESC", limit: 2) { label } } } }"#,
+    );
+    assert!(r.get("errors").is_none(), "DESC + limit failed: {r}");
+    let cats = r["data"]["olbms"]["items"][0]["olcats"].as_array().unwrap();
+    let labels: Vec<&str> = cats.iter().map(|c| c["label"].as_str().unwrap()).collect();
+    assert_eq!(
+        labels,
+        ["cherry", "banana"],
+        "DESC must order before truncating: {r}"
+    );
 }

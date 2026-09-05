@@ -20,6 +20,7 @@
 //! them in `HEAD` at the end.
 
 use crate::common::{ddb_bin, DdbTestRepo, ServerGuard};
+use ddb_core::parser::parse;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -188,6 +189,13 @@ fn integration_61_b_concurrent_cli_and_graphql_write_lock() {
             "serve write {k} not durable in HEAD for {id}: HEAD lacks {needle:?}\n\
              HEAD content:\n{head}"
         );
+        let committed = parse(&head, &format!("ddb/{id}.md"))
+            .expect("failed to parse committed GraphQL doogat");
+        assert_eq!(
+            committed.meta.title.as_deref(),
+            Some(needle.as_str()),
+            "serve write {k} must update the committed title for {id}"
+        );
     }
     for (k, id) in cli_ids.iter().enumerate() {
         let head = head_content(repo.path(), id);
@@ -196,6 +204,18 @@ fn integration_61_b_concurrent_cli_and_graphql_write_lock() {
             head.contains(&needle),
             "CLI write {k} not durable in HEAD for {id}: HEAD lacks {needle:?}\n\
              HEAD content:\n{head}"
+        );
+        let committed =
+            parse(&head, &format!("ddb/{id}.md")).expect("failed to parse committed CLI doogat");
+        assert_eq!(
+            committed.body.trim(),
+            needle,
+            "CLI write {k} must update the committed body for {id}"
+        );
+        assert_eq!(
+            committed.meta.title,
+            Some(format!("WL cli seed {k}")),
+            "CLI body write {k} must preserve the committed title for {id}"
         );
     }
 }

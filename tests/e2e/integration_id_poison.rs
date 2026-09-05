@@ -69,7 +69,13 @@ fn integration_62_id_minting_no_same_second_collision() {
     let single_assert = repo
         .ddb()
         .args([
-            "create", "--type", "int164", "--title", "single 164", "--set", "label=d",
+            "create",
+            "--type",
+            "int164",
+            "--title",
+            "single 164",
+            "--set",
+            "label=d",
         ])
         .assert()
         .success();
@@ -136,12 +142,16 @@ fn integration_63_poison_file_graphql_warning() {
 
     // First mutation since server start / since the poison commit — this is
     // where the warning fires.
-    let result =
-        server.graphql(r#"mutation { createDoogat(input: { title: "after poison" }) { id title } }"#);
+    let result = server
+        .graphql(r#"mutation { createDoogat(input: { title: "after poison" }) { id title } }"#);
 
     assert!(
         result.get("errors").is_none(),
         "mutation should succeed despite the poison file elsewhere in the repo: {result}"
+    );
+    assert!(
+        result.get("data").is_some(),
+        "mutation response must contain data: {result}"
     );
 
     let warnings = result["extensions"]["warnings"]

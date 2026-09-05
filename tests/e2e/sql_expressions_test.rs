@@ -10,7 +10,8 @@ fn insert_with_coalesce() {
             "CREATE TABLE tasks (name TEXT, sort_order INTEGER)",
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("table tasks created"));
 
     let out = repo
         .ddb()
@@ -25,12 +26,37 @@ fn insert_with_coalesce() {
         "insert with COALESCE failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    let first_id = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    assert!(
+        first_id.len() == 14 && first_id.bytes().all(|byte| byte.is_ascii_digit()),
+        "COALESCE INSERT must return a 14-digit id: {first_id:?}"
+    );
 
     repo.ddb()
         .args(["query", "SELECT name, sort_order FROM tasks"])
         .assert()
         .success()
         .stdout(predicate::str::contains("first | 0"));
+
+    let second = repo.ddb()
+        .args(["query", "INSERT INTO tasks (name, sort_order) VALUES ('second', COALESCE((SELECT MAX(sort_order) FROM tasks), 0) + 1)"])
+        .assert()
+        .success();
+    let second_id = String::from_utf8_lossy(&second.get_output().stdout)
+        .trim()
+        .to_owned();
+    assert!(
+        second_id.len() == 14 && second_id.bytes().all(|byte| byte.is_ascii_digit()),
+        "COALESCE plus arithmetic INSERT must return a 14-digit id: {second_id:?}"
+    );
+    repo.ddb()
+        .args([
+            "query",
+            &format!("SELECT sort_order FROM tasks WHERE id = '{second_id}'"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"));
 }
 
 #[test]

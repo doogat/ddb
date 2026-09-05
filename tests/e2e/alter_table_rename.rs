@@ -12,7 +12,8 @@ fn cli_alter_table_rename_to_renames_typedef_and_data() {
     repo.ddb()
         .args(["query", "CREATE TABLE rfoo (title VARCHAR(64))"])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("table rfoo created"));
 
     repo.ddb()
         .args([
@@ -32,7 +33,8 @@ fn cli_alter_table_rename_to_renames_typedef_and_data() {
     repo.ddb()
         .args(["query", "ALTER TABLE rfoo RENAME TO rbar"])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("renamed to rbar"));
 
     // Old name no longer resolves.
     repo.ddb()
@@ -46,6 +48,11 @@ fn cli_alter_table_rename_to_renames_typedef_and_data() {
         .assert()
         .success()
         .stdout(predicate::str::contains("2"));
+    repo.ddb()
+        .args(["query", "DROP TABLE rbar CASCADE"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dropped"));
 }
 
 #[test]

@@ -54,6 +54,16 @@ fn update_set_adds_field() {
         .assert()
         .success()
         .stdout(predicate::str::contains("status: done"));
+    repo.ddb()
+        .args(["update", &id, "--set", "status=review"])
+        .assert()
+        .success();
+    repo.ddb()
+        .args(["read", &id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status: review"))
+        .stdout(predicate::str::contains("status: done").not());
 }
 
 #[test]
@@ -96,6 +106,10 @@ fn create_with_multiple_set_flags() {
         .unwrap();
     assert!(out.status.success());
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert!(
+        id.len() == 14 && id.bytes().all(|byte| byte.is_ascii_digit()),
+        "--set create must return a 14-digit id: {id:?}"
+    );
 
     repo.ddb()
         .args(["read", &id])

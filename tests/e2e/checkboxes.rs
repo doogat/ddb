@@ -52,6 +52,34 @@ fn checkbox_filter_by_state() {
         .stdout(predicate::str::contains("task one"))
         .stdout(predicate::str::contains("task three"))
         .stdout(predicate::str::contains("task two").not());
+
+    let created = repo
+        .ddb()
+        .args(["create", "--title", "Updated checkboxes"])
+        .assert()
+        .success();
+    let id = String::from_utf8_lossy(&created.get_output().stdout)
+        .trim()
+        .to_owned();
+    repo.ddb()
+        .args([
+            "update",
+            &id,
+            "--body",
+            "- [ ] updated open task\n- [x] updated done task\n- [i] info note",
+        ])
+        .assert()
+        .success();
+    repo.ddb().arg("reindex").assert().success();
+    repo.ddb()
+        .args([
+            "query",
+            "SELECT state, content FROM _ddb_checkboxes WHERE state = 'open'",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("updated open task"))
+        .stdout(predicate::str::contains("updated done task").not());
 }
 
 #[test]

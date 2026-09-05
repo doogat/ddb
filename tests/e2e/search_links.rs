@@ -4,7 +4,8 @@ use predicates::prelude::*;
 #[test]
 fn full_text_search() {
     let repo = DdbTestRepo::init();
-    repo.ddb()
+    let created = repo
+        .ddb()
         .args([
             "create",
             "--title",
@@ -14,6 +15,10 @@ fn full_text_search() {
         ])
         .assert()
         .success();
+    let id = String::from_utf8_lossy(&created.get_output().stdout)
+        .trim()
+        .to_owned();
+    assert!(!id.is_empty(), "search fixture must return an id");
     std::thread::sleep(std::time::Duration::from_secs(1));
     repo.ddb()
         .args([
@@ -32,6 +37,11 @@ fn full_text_search() {
         .success()
         .stdout(predicate::str::contains("Alpha"))
         .stdout(predicate::str::contains("Beta").not());
+    repo.ddb()
+        .args(["search", "Alpha"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&id));
 }
 
 #[test]
@@ -48,6 +58,10 @@ fn wikilink_indexed_in_links_table() {
         ])
         .output()
         .unwrap();
+    assert!(
+        parent_out.status.success(),
+        "fixture command failed: {parent_out:?}"
+    );
     let parent_id = String::from_utf8_lossy(&parent_out.stdout)
         .trim()
         .to_string();

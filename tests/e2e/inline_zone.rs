@@ -17,7 +17,8 @@ fn inline_zone_frontmatter_materializes_and_survives_reindex() {
             "CREATE TABLE note (summary TEXT ZONE frontmatter, body_notes TEXT)",
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("table note created"));
 
     let out = repo
         .ddb()
@@ -68,6 +69,11 @@ fn inline_zone_frontmatter_materializes_and_survives_reindex() {
         .assert()
         .success()
         .stdout(predicate::str::contains("summary: after reindex"));
+    repo.ddb()
+        .args(["query", "DROP TABLE note CASCADE"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dropped"));
 }
 
 /// PRD 00160 (blind review, Critical): two `CREATE TABLE` statements in a single

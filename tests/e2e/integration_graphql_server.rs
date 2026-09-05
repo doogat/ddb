@@ -192,6 +192,10 @@ fn integration_18g_normalize_query_implicit_and_lowercase() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
+    let result = server.graphql(r#"{ normalizeSearchQuery(query: "B AND A") }"#);
+    assert_graphql_ok(&result);
+    assert_eq!(result["data"]["normalizeSearchQuery"], "a and b");
+
     let result = server.graphql(r#"{ normalizeSearchQuery(query: "  MEETING   Minutes  ") }"#);
     assert_graphql_ok(&result);
     assert_eq!(
@@ -435,6 +439,7 @@ fn integration_18z3_update_doogat_tag_semantics() {
         &server,
         json!({ "title": "F5 tag clear", "tags": ["a", "b", "c"] }),
     );
+    assert_eq!(clear["tags"], json!(["a", "b", "c"]));
     let result = server.graphql_with_vars(
         r#"mutation($input: UpdateDoogatInput!) { updateDoogat(input: $input) { id } }"#,
         json!({ "input": { "id": clear["id"], "tags": [] } }),

@@ -11,6 +11,7 @@ fn fix_dry_run_no_changes() {
         .args(["create", "--title", "Test", "--tags", "zebra,apple"])
         .output()
         .unwrap();
+    assert!(out.status.success(), "fixture command failed: {out:?}");
     let _id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     // Count commits before fix
@@ -19,9 +20,19 @@ fn fix_dry_run_no_changes() {
         .args(["rev-list", "--count", "HEAD"])
         .output()
         .unwrap();
+    assert!(
+        log_before.status.success(),
+        "fixture command failed: {log_before:?}"
+    );
     let count_before = String::from_utf8_lossy(&log_before.stdout)
         .trim()
         .to_string();
+    let head_before = std::process::Command::new("git")
+        .current_dir(repo.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(head_before.status.success());
 
     // Dry run
     repo.ddb()
@@ -36,12 +47,26 @@ fn fix_dry_run_no_changes() {
         .args(["rev-list", "--count", "HEAD"])
         .output()
         .unwrap();
+    assert!(
+        log_after.status.success(),
+        "fixture command failed: {log_after:?}"
+    );
     let count_after = String::from_utf8_lossy(&log_after.stdout)
         .trim()
         .to_string();
     assert_eq!(
         count_before, count_after,
         "dry run should not create commits"
+    );
+    let head_after = std::process::Command::new("git")
+        .current_dir(repo.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(head_after.status.success());
+    assert_eq!(
+        head_before.stdout, head_after.stdout,
+        "dry run must preserve HEAD"
     );
 }
 
@@ -52,9 +77,16 @@ fn fix_commits_changes() {
     // Create doogat with hash-prefixed tag
     let out = repo
         .ddb()
-        .args(["create", "--title", "Test", "--tags", "#gtd,work"])
+        .args([
+            "create",
+            "--title",
+            "Test",
+            "--tags",
+            "#gtd,zebra,apple,work",
+        ])
         .output()
         .unwrap();
+    assert!(out.status.success(), "fixture command failed: {out:?}");
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     // Apply fixes
@@ -66,7 +98,15 @@ fn fix_commits_changes() {
 
     // Read back and verify tag is normalized
     let read_out = repo.ddb().args(["read", &id]).output().unwrap();
+    assert!(
+        read_out.status.success(),
+        "read after fix failed: {read_out:?}"
+    );
     let content = String::from_utf8_lossy(&read_out.stdout);
+    assert!(
+        content.contains("  - apple"),
+        "fixed tags must contain apple: {content}"
+    );
     assert!(
         content.contains("  - gtd"),
         "tag should be stripped of #: {content}"
@@ -205,7 +245,7 @@ fn fix_migrate_rewrites_zones() {
 
     // Run zone migration
     repo.ddb()
-        .args(["fix", "--migrate"])
+        .args(["fix", "--migrate", "--verbose"])
         .assert()
         .success()
         .stdout(predicate::str::contains("zone-migrated"));

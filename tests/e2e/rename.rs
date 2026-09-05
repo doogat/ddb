@@ -11,6 +11,7 @@ fn rename_moves_file_and_rewrites_backlinks() {
         .args(["create", "--title", "Target", "--body", "I am B."])
         .output()
         .unwrap();
+    assert!(b_out.status.success(), "fixture command failed: {b_out:?}");
     let b_id = String::from_utf8_lossy(&b_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -26,6 +27,7 @@ fn rename_moves_file_and_rewrites_backlinks() {
         ])
         .output()
         .unwrap();
+    assert!(a_out.status.success(), "fixture command failed: {a_out:?}");
     let a_id = String::from_utf8_lossy(&a_out.stdout).trim().to_string();
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -54,11 +56,15 @@ fn rename_moves_file_and_rewrites_backlinks() {
         .stdout(predicate::str::contains("2 backlinks updated"));
 
     // Verify B is at new path
-    assert!(repo.path().join(&new_path).exists());
+    assert!(repo.path().join(&new_path).is_file());
     assert!(!repo.path().join(format!("ddb/{b_id}.md")).exists());
 
     // Verify A's backlink was rewritten
     let a_content = repo.ddb().args(["read", &a_id]).output().unwrap();
+    assert!(
+        a_content.status.success(),
+        "fixture command failed: {a_content:?}"
+    );
     let a_text = String::from_utf8_lossy(&a_content.stdout);
     let new_target = format!("ddb/contact/{b_id}");
     assert!(

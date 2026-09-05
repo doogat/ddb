@@ -1,7 +1,8 @@
 //! Port of tests/integration.sh:2188-2281 (PRD 00139 T20/T22 SINGLETON
 //! GraphQL flow, ALTER SET/DROP SINGLETON, DEFAULT VALUES auto-seed).
 
-use crate::common::{select_scalar, DdbTestRepo, ServerGuard};
+use crate::common::{DdbTestRepo, ServerGuard};
+use predicates::prelude::*;
 
 /// Run a DDL/DML statement via `executeSql`, selecting `message`.
 fn execute_sql(server: &ServerGuard, sql: &str) -> serde_json::Value {
@@ -30,6 +31,10 @@ fn integration_51_a_singleton_graphql_flow() {
     );
 
     let empty_query = server.graphql(r#"{ ig_app_config { id theme } }"#);
+    assert!(
+        empty_query.get("data").is_some(),
+        "expected data key: {empty_query}"
+    );
     assert!(
         empty_query.get("errors").is_none(),
         "query before any row exists failed: {empty_query}"
@@ -68,6 +73,7 @@ fn integration_51_a_singleton_graphql_flow() {
         .as_str()
         .expect("first upsert should return an id")
         .to_string();
+    assert!(!id.is_empty(), "first upsert must return a nonempty id");
 
     let after_first_upsert = server.graphql(r#"{ ig_app_config { theme } }"#);
     assert!(
@@ -130,19 +136,30 @@ fn integration_51_a_singleton_graphql_flow() {
 #[test]
 fn integration_52_b_graphql_alter_set_drop_singleton_reload() {
     let repo = DdbTestRepo::init();
+    repo.ddb()
+        .args(["query", "CREATE TABLE ig_alter_cfg (theme TEXT)"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("table ig_alter_cfg created"));
+    repo.ddb()
+        .args([
+            "query",
+            "INSERT INTO ig_alter_cfg (title, theme) VALUES ('cfg-a', 'dark'), ('cfg-b', 'light')",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"^\d{14},\d{14}\s*$").unwrap());
+    repo.ddb()
+        .args(["query", "ALTER TABLE ig_alter_cfg SET SINGLETON"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("typedef holds 2 rows"));
+    repo.ddb()
+        .args(["query", "DELETE FROM ig_alter_cfg WHERE title = 'cfg-b'"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 row"));
     let server = ServerGuard::start(&repo);
-
-    let create = execute_sql(&server, "CREATE TABLE ig_alter_cfg (theme TEXT)");
-    assert!(
-        create.get("errors").is_none(),
-        "CREATE TABLE failed: {create}"
-    );
-
-    let insert = execute_sql(
-        &server,
-        "INSERT INTO ig_alter_cfg (title, theme) VALUES ('cfg-a', 'dark')",
-    );
-    assert!(insert.get("errors").is_none(), "INSERT failed: {insert}");
 
     let set_singleton = execute_sql(&server, "ALTER TABLE ig_alter_cfg SET SINGLETON");
     assert!(
@@ -192,29 +209,25 @@ fn integration_52_b_graphql_alter_set_drop_singleton_reload() {
 #[test]
 fn integration_53_c_singleton_default_values_auto_seed() {
     let repo = DdbTestRepo::init();
-    let server = ServerGuard::start(&repo);
-
-    let create = execute_sql(
-        &server,
-        "CREATE TABLE ig_seed_cfg (theme TEXT DEFAULT 'system', schema_version INTEGER DEFAULT 1) SINGLETON DEFAULT VALUES",
-    );
-    assert!(
-        create.get("errors").is_none(),
-        "CREATE TABLE ... SINGLETON DEFAULT VALUES failed: {create}"
-    );
-
-    let count = select_scalar(&server, "SELECT COUNT(*) FROM ig_seed_cfg");
-    assert_eq!(
-        count, "1",
-        "expected exactly one auto-seeded row from DEFAULT VALUES"
-    );
-
-    let theme = select_scalar(&server, "SELECT theme FROM ig_seed_cfg");
-    assert_eq!(theme, "system", "expected DEFAULT-clause theme value");
-
-    let schema_version = select_scalar(&server, "SELECT schema_version FROM ig_seed_cfg");
-    assert_eq!(
-        schema_version, "1",
-        "expected DEFAULT-clause schema_version value"
-    );
+    repo.ddb()
+        .args(["query", "CREATE TABLE ig_seed_cfg (theme TEXT DEFAULT 'system', schema_version INTEGER DEFAULT 1) SINGLETON DEFAULT VALUES"])
+        .assert().success()
+        .stdout(predicate::str::contains("table ig_seed_cfg created"));
+    for (sql, expected) in [
+        ("SELECT COUNT(*) FROM ig_seed_cfg", "1"),
+        ("SELECT theme FROM ig_seed_cfg", "system"),
+        ("SELECT schema_version FROM ig_seed_cfg", "1"),
+    ] {
+        let output = repo.ddb().args(["query", sql]).assert().success();
+        assert_eq!(
+            String::from_utf8_lossy(&output.get_output().stdout).trim(),
+            expected,
+            "{sql}"
+        );
+    }
+    repo.ddb()
+        .args(["query", "DROP TABLE ig_seed_cfg CASCADE"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dropped"));
 }

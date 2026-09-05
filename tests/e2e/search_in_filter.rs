@@ -51,6 +51,18 @@ fn search_where_in_tag() {
         titles.contains(&"Svelte Note"),
         "missing Svelte Note in {titles:?}"
     );
+
+    let result = server.graphql(
+        r#"{ search(query: "infilter", where: [{field: "tag", in: ["python"]}]) { hits { id title } totalCount } }"#,
+    );
+    assert!(
+        result.get("errors").is_none(),
+        "search with a single tag in value failed: {result}"
+    );
+    let hits = result["data"]["search"]["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "expected one Python hit: {hits:?}");
+    assert_eq!(result["data"]["search"]["totalCount"], 1);
+    assert_eq!(hits[0]["title"], "Python Note");
 }
 
 #[test]

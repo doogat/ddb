@@ -248,10 +248,12 @@ fn rest_filter_by_tag() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
 
-    server.rest_post(
+    let created = server.rest_post(
         "/doogats",
         serde_json::json!({ "title": "Tagged", "tags": ["alpha"] }),
     );
+    assert_eq!(created.status(), 201);
+    let created: serde_json::Value = created.json().unwrap();
     server.rest_post("/doogats", serde_json::json!({ "title": "Untagged" }));
 
     let resp = server.rest_get("/doogats?tag=alpha");
@@ -260,6 +262,7 @@ fn rest_filter_by_tag() {
     let data = body["data"].as_array().unwrap();
     assert_eq!(data.len(), 1);
     assert_eq!(data[0]["title"].as_str().unwrap(), "Tagged");
+    assert_eq!(data[0]["id"], created["data"]["id"]);
 }
 
 #[test]
@@ -316,6 +319,7 @@ fn rest_filter_by_field() {
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
     assert_eq!(data.len(), 1, "expected 1 match, got: {data:?}");
+    assert_eq!(data[0]["title"], "Beta");
 
     // Nonexistent value → empty
     let resp = server.rest_get("/doogats?field.priority=99");
@@ -398,6 +402,15 @@ fn rest_filter_field_and_tag() {
 fn rest_auth_required() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
+
+    let resp = server
+        .rest_client()
+        .post(server.rest_url("/doogats"))
+        .json(&serde_json::json!({ "title": "No Auth" }))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .unwrap();
+    assert_eq!(resp.status(), 401);
 
     // No auth header
     let resp = server
@@ -975,6 +988,7 @@ fn sql_format_objects_returns_keyed_rows() {
         "sql with format:objects failed: {result}"
     );
     let sql = &result["data"]["sql"];
+    assert_eq!(sql["columns"], serde_json::json!(["id", "title"]));
     let rows = sql["rows"].as_array().expect("rows should be an array");
     assert!(!rows.is_empty(), "expected at least one row");
 

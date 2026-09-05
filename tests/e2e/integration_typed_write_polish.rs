@@ -67,24 +67,17 @@ fn integration_44_ddl_response_consistency() {
     let alter = server.graphql(
         r#"mutation { executeSql(sql: "ALTER TABLE ddltest ADD COLUMN age INTEGER") { columns rows message } }"#,
     );
-    assert!(
-        alter.get("errors").is_none(),
-        "ALTER TABLE failed: {alter}"
-    );
+    assert!(alter.get("errors").is_none(), "ALTER TABLE failed: {alter}");
     assert_eq!(
         alter["data"]["executeSql"]["columns"],
         serde_json::json!([])
     );
     assert_eq!(alter["data"]["executeSql"]["rows"], serde_json::json!([]));
 
-    let drop = server.graphql(
-        r#"mutation { executeSql(sql: "DROP TABLE ddltest") { columns rows message } }"#,
-    );
+    let drop = server
+        .graphql(r#"mutation { executeSql(sql: "DROP TABLE ddltest") { columns rows message } }"#);
     assert!(drop.get("errors").is_none(), "DROP TABLE failed: {drop}");
-    assert_eq!(
-        drop["data"]["executeSql"]["columns"],
-        serde_json::json!([])
-    );
+    assert_eq!(drop["data"]["executeSql"]["columns"], serde_json::json!([]));
     assert_eq!(drop["data"]["executeSql"]["rows"], serde_json::json!([]));
 
     let batch = server.graphql(
@@ -201,6 +194,10 @@ fn integration_45_g12_intra_batch_ignore_surviving_id() {
 
     let results = result["data"]["createMany"].as_array().unwrap();
     assert_eq!(results.len(), 2, "should return 2 results: {result}");
+    assert!(
+        !results[0]["id"].as_str().unwrap().is_empty(),
+        "survivor id must be nonempty: {result}"
+    );
     assert_eq!(
         results[0]["id"].as_str().unwrap(),
         results[1]["id"].as_str().unwrap(),
