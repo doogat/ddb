@@ -122,7 +122,7 @@ impl GitRepo {
             };
             let retained: Vec<git2::Oid> = c
                 .parents()
-                .filter(|parent| parent.tree().ok().as_ref().and_then(&entry_of) == own)
+                .filter(|parent| parent.tree().ok().as_ref().and_then(entry_of) == own)
                 .map(|parent| parent.id())
                 .collect();
             let authored = if c.parent_count() == 0 {
