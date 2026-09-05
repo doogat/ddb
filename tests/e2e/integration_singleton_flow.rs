@@ -1,7 +1,7 @@
 //! Port of tests/integration.sh:2188-2281 (PRD 00139 T20/T22 SINGLETON
 //! GraphQL flow, ALTER SET/DROP SINGLETON, DEFAULT VALUES auto-seed).
 
-use crate::common::{DdbTestRepo, ServerGuard};
+use crate::common::{select_scalar, DdbTestRepo, ServerGuard};
 use predicates::prelude::*;
 
 /// Run a DDL/DML statement via `executeSql`, selecting `message`.
@@ -230,4 +230,30 @@ fn integration_53_c_singleton_default_values_auto_seed() {
         .assert()
         .success()
         .stdout(predicate::str::contains("dropped"));
+
+    let server = ServerGuard::start(&repo);
+
+    let create = execute_sql(
+        &server,
+        "CREATE TABLE ig_seed_cfg (theme TEXT DEFAULT 'system', schema_version INTEGER DEFAULT 1) SINGLETON DEFAULT VALUES",
+    );
+    assert!(
+        create.get("errors").is_none(),
+        "CREATE TABLE ... SINGLETON DEFAULT VALUES failed: {create}"
+    );
+
+    let count = select_scalar(&server, "SELECT COUNT(*) FROM ig_seed_cfg");
+    assert_eq!(
+        count, "1",
+        "expected exactly one auto-seeded row from DEFAULT VALUES"
+    );
+
+    let theme = select_scalar(&server, "SELECT theme FROM ig_seed_cfg");
+    assert_eq!(theme, "system", "expected DEFAULT-clause theme value");
+
+    let schema_version = select_scalar(&server, "SELECT schema_version FROM ig_seed_cfg");
+    assert_eq!(
+        schema_version, "1",
+        "expected DEFAULT-clause schema_version value"
+    );
 }
