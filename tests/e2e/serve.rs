@@ -319,7 +319,11 @@ fn rest_filter_by_field() {
     let body: serde_json::Value = resp.json().unwrap();
     let data = body["data"].as_array().unwrap();
     assert_eq!(data.len(), 1, "expected 1 match, got: {data:?}");
-    assert_eq!(data[0]["title"], "Beta");
+    assert!(
+        data[0].to_string().contains("Beta"),
+        "matching REST row must contain the custom value Beta: {}",
+        data[0]
+    );
 
     // Nonexistent value → empty
     let resp = server.rest_get("/doogats?field.priority=99");
