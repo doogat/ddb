@@ -723,6 +723,212 @@ fn find_hlc_for_path_reaches_beyond_old_revwalk_cap() {
     assert_eq!(found.node, "deep");
 }
 
+/// Raw commit with exactly the given message (no auto-stamped trailer): overlay
+/// `files` on `base_tree`, parent on `parents`, optionally move HEAD. Lets the
+/// merge-attribution tests below build two-parent histories the public write
+/// API cannot express.
+fn raw_commit_over(
+    repo: &GitRepo,
+    dir: &Path,
+    base_tree: &git2::Tree<'_>,
+    files: &[(&str, &str)],
+    parents: &[&git2::Commit<'_>],
+    message: &str,
+    update_head: bool,
+) -> git2::Oid {
+    let raw = &repo.repo;
+    let sig = Signature::now("ddb", "ddb@local").unwrap();
+    let mut index = raw.index().unwrap();
+    index.read_tree(base_tree).unwrap();
+    for (path, content) in files {
+        std::fs::write(dir.join(path), content).unwrap();
+        index.add_path(Path::new(path)).unwrap();
+    }
+    index.write().unwrap();
+    let tree = raw.find_tree(index.write_tree().unwrap()).unwrap();
+    raw.commit(
+        update_head.then_some("HEAD"),
+        &sig,
+        &sig,
+        message,
+        &tree,
+        parents,
+    )
+    .unwrap()
+}
+
+fn hlc_msg(message: &str, wall_ms: u64, node: &str) -> String {
+    crate::hlc::append_hlc_trailer(
+        message,
+        &crate::hlc::Hlc {
+            wall_ms,
+            counter: 0,
+            node: node.into(),
+        },
+    )
+}
+
+/// PRD 00202: a merge commit that merely TRANSPORTS a file authored on its
+/// second parent must not own that file's HLC. The old predicate diffed a
+/// merge against parent(0) only, so the merged-in file looked "touched" by the
+/// merge and the walk stopped at the merge's later trailer — the mechanism
+/// behind the Nightly-red `two_node_singleton_post_sync_resolution` (first bad
+/// commit c33b0a7, which started stamping merge commits). FAILS on the old
+/// predicate (answers 5000); passes once the walk reaches the side commit
+/// (1000). The first-parent file keeps resolving to its own commit either way.
+#[test]
+fn find_hlc_for_path_ignores_merge_that_only_transports_a_file() {
+    let (dir, repo) = temp_repo();
+    let raw = &repo.repo;
+    let base = raw.head().unwrap().peel_to_commit().unwrap();
+    let base_tree = base.tree().unwrap();
+
+    let side_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/x.md", "x from B\n")],
+        &[&base],
+        &hlc_msg("side authors x", 1000, "bbbbbbbb"),
+        false,
+    );
+    let side = raw.find_commit(side_oid).unwrap();
+    let main_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/a.md", "a from A\n")],
+        &[&base],
+        &hlc_msg("main authors a", 2000, "aaaaaaaa"),
+        true,
+    );
+    let main = raw.find_commit(main_oid).unwrap();
+    let main_tree = main.tree().unwrap();
+    // The merge carries x.md byte-identical to B's blob: transport, not authorship.
+    let merge_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &main_tree,
+        &[("ddb/x.md", "x from B\n")],
+        &[&main, &side],
+        &hlc_msg("merge B into A", 5000, "aaaaaaaa"),
+        true,
+    );
+    let merge = raw.find_commit(merge_oid).unwrap();
+
+    let x = repo
+        .find_hlc_for_path(&merge, "ddb/x.md")
+        .expect("x.md has an authoring commit with a trailer");
+    assert_eq!(
+        x.wall_ms, 1000,
+        "a merged-in file must resolve to the side commit's HLC, not the merge's"
+    );
+    assert_eq!(x.node, "bbbbbbbb");
+    let a = repo.find_hlc_for_path(&merge, "ddb/a.md").unwrap();
+    assert_eq!(
+        a.wall_ms, 2000,
+        "the first-parent file keeps resolving to its own commit"
+    );
+}
+
+/// PRD 00202: a merge that genuinely REWRITES a path (its blob differs from
+/// every parent — a conflict resolution) still owns that path's HLC.
+#[test]
+fn find_hlc_for_path_keeps_merge_hlc_when_merge_rewrites_the_file() {
+    let (dir, repo) = temp_repo();
+    let raw = &repo.repo;
+    let base = raw.head().unwrap().peel_to_commit().unwrap();
+    let base_tree = base.tree().unwrap();
+
+    let side_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/y.md", "y from B\n")],
+        &[&base],
+        &hlc_msg("side writes y", 1000, "bbbbbbbb"),
+        false,
+    );
+    let side = raw.find_commit(side_oid).unwrap();
+    let main_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/y.md", "y from A\n")],
+        &[&base],
+        &hlc_msg("main writes y", 2000, "aaaaaaaa"),
+        true,
+    );
+    let main = raw.find_commit(main_oid).unwrap();
+    let main_tree = main.tree().unwrap();
+    let merge_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &main_tree,
+        &[("ddb/y.md", "y resolved by the merge\n")],
+        &[&main, &side],
+        &hlc_msg("merge resolves y", 5000, "aaaaaaaa"),
+        true,
+    );
+    let merge = raw.find_commit(merge_oid).unwrap();
+
+    let y = repo.find_hlc_for_path(&merge, "ddb/y.md").unwrap();
+    assert_eq!(
+        y.wall_ms, 5000,
+        "a merge whose blob differs from both parents authored the path"
+    );
+}
+
+/// PRD 00202: a trailer-less merge (legacy history) that only transports a file
+/// is transparent too — the walk continues to the authoring commit instead of
+/// stopping at the merge and answering `None`.
+#[test]
+fn find_hlc_for_path_walks_past_a_trailerless_transport_merge() {
+    let (dir, repo) = temp_repo();
+    let raw = &repo.repo;
+    let base = raw.head().unwrap().peel_to_commit().unwrap();
+    let base_tree = base.tree().unwrap();
+
+    let side_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/x.md", "x from B\n")],
+        &[&base],
+        &hlc_msg("side authors x", 1000, "bbbbbbbb"),
+        false,
+    );
+    let side = raw.find_commit(side_oid).unwrap();
+    let main_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &base_tree,
+        &[("ddb/a.md", "a from A\n")],
+        &[&base],
+        &hlc_msg("main authors a", 2000, "aaaaaaaa"),
+        true,
+    );
+    let main = raw.find_commit(main_oid).unwrap();
+    let main_tree = main.tree().unwrap();
+    let merge_oid = raw_commit_over(
+        &repo,
+        dir.path(),
+        &main_tree,
+        &[("ddb/x.md", "x from B\n")],
+        &[&main, &side],
+        "merge B into A (no trailer)",
+        true,
+    );
+    let merge = raw.find_commit(merge_oid).unwrap();
+
+    let x = repo.find_hlc_for_path(&merge, "ddb/x.md");
+    assert_eq!(
+        x.map(|h| h.wall_ms),
+        Some(1000),
+        "a trailer-less transport merge must not stop the walk"
+    );
+}
+
 /// Every non-merge write path (create, update, rename, delete, batch) must stamp
 /// a parseable `HLC:` trailer on its commit AND advance-and-persist the
 /// machine-local node HLC. After each write the commit that touched the path
