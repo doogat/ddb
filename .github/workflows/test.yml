@@ -42,10 +42,10 @@ jobs:
       - name: Fast cargo test tier
         run: cargo test-ci
 
-      - name: Smoke test
+      - name: Smoke test (e2e)
         env:
           DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: ./tests/smoke.sh
+        run: cargo test -p ddb-e2e --test e2e smoke_
 
       - name: Sync integration tests
         run: cargo test -p ddb-core --test sync_test

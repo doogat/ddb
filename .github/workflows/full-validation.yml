@@ -42,25 +42,6 @@ jobs:
           PROPTEST_CASES: 50
         run: cargo test -p ddb-core --test property_tests
 
-  linux-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
-      - name: Configure git identity
-        run: |
-          git config --global user.email "ci@ddb.dev"
-          git config --global user.name "Doogat DB CI"
-      - name: Build CLI binary
-        run: cargo build -p ddb-cli --bin ddb
-      - name: Integration test
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: ./tests/integration.sh
-
   linux-e2e:
     runs-on: ubuntu-latest
     steps:
@@ -96,10 +77,6 @@ jobs:
         env:
           PROPTEST_CASES: 50
         run: cargo test-full
-      - name: Integration test
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: ./tests/integration.sh
 
   windows-full:
     runs-on: windows-latest
@@ -117,17 +94,11 @@ jobs:
         env:
           PROPTEST_CASES: 50
         run: cargo test-full
-      - name: Integration test
-        timeout-minutes: 15
-        env:
-          DDB_BIN: ${{ github.workspace }}\target\debug\ddb.exe
-        run: pwsh -File tests/integration.ps1
 
   mark-validated:
     needs:
       - linux-clippy
       - linux-core
-      - linux-smoke
       - linux-e2e
       - macos-full
       - windows-full
