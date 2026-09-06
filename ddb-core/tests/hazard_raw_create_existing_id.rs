@@ -18,7 +18,6 @@
 use ddb_core::service::DoogatService;
 
 #[test]
-#[ignore = "fast-track FT-4: hazard H4 confirmed 2026-09-06 (create_doogat_raw overwrites an existing id); un-ignore with the fix, see dev/local/plans/fast-track-2026-09-06.md"]
 fn raw_create_with_existing_id_rejects_or_remints_and_never_overwrites() {
     let tmp = tempfile::TempDir::new().unwrap();
     let svc = DoogatService::init(tmp.path()).unwrap();

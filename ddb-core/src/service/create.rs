@@ -428,8 +428,9 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     pub fn create_doogat_raw(&self, content: &str, message: &str) -> Result<String> {
         self.ensure_fresh()?;
         let parsed = parser::parse(content, "new.md")?;
-        let id = match parsed.meta.id.as_ref() {
-            Some(z) => z.0.clone(),
+        let explicit_id = parsed.meta.id.as_ref().map(|z| z.0.clone());
+        let id = match explicit_id.as_ref() {
+            Some(candidate) => candidate.clone(),
             None => self.unique_id()?.0,
         };
 
@@ -455,6 +456,27 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             .unwrap_or(false);
 
         let write = || -> Result<()> {
+            // H4 fix: re-check the caller-supplied id for a collision here,
+            // inside the same `BEGIN IMMEDIATE` window that also guards the
+            // commit below — the same pattern PRD 00140 already uses for
+            // SINGLETON races. Checking once before this closure (as a prior
+            // version of this function did) leaves a TOCTOU gap: two
+            // concurrent raw creates naming the same not-yet-existing id can
+            // both pass that earlier check before either commits, and the
+            // second silently overwrites the first. Re-checking in-lock
+            // means the loser of the race observes the winner's
+            // just-committed id and is rejected with Conflict instead of
+            // overwriting it.
+            if let Some(candidate) = explicit_id.as_ref() {
+                let exists =
+                    crate::id_minting::existence_oracle(&self.repo, self.index.sql_conn())?;
+                if exists(candidate) {
+                    return Err(DoogatError::Conflict(format!(
+                        "doogat {candidate} already exists"
+                    )));
+                }
+            }
+
             // Run SINGLETON + UNIQUE + FK / allowed_values checks only when
             // the declared type is registered. Unregistered types skip
             // validation (raw FFI contract).
@@ -501,7 +523,10 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             Ok(())
         };
 
-        if is_singleton {
+        // H4 fix: an explicit caller-supplied id also needs the in-lock
+        // recheck above to be atomic with the commit, so it shares the same
+        // `BEGIN IMMEDIATE` gate as the SINGLETON case.
+        if is_singleton || explicit_id.is_some() {
             crate::indexer::with_immediate_transaction(self.index.sql_conn(), write)?;
         } else {
             write()?;
