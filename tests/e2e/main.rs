@@ -18,6 +18,8 @@ mod delete_backlinks;
 mod discover;
 mod fix;
 mod folder_namespace;
+mod hazard_concurrent_single_row_update;
+mod hazard_server_txn_scope;
 mod help;
 mod hyphenated_types;
 mod inline_zone;
