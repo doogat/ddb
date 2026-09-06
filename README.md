@@ -94,13 +94,15 @@ cargo build --release      # release build (default dev crates)
 ### Test
 
 ```bash
-cargo test                 # fast local tier
-cargo test-ci              # bounded CI matrix tier (unit/bin targets only)
-cargo test-full            # full cargo suite (includes ddb-e2e)
-cargo clippy --workspace   # lint
-./tests/smoke.sh             # CLI smoke test
-./tests/integration.sh       # full integration (runs smoke first)
+cargo test                            # default workspace test selection
+cargo test-ci                         # fast local tier (unit/bin targets only)
+cargo test-full                       # full cargo suite (Tier 2, CI)
+cargo clippy --workspace --all-targets # lint
+cargo test -p ddb-e2e                  # Rust smoke and integration scenarios (Tier 2)
+cargo test -p ddb-e2e smoke_           # CLI smoke scenarios (Tier 2)
 ```
+
+Run `cargo build`, all-target Clippy, and `cargo test-ci` locally after each task; CI runs the heavy Tier 2 battery. See [AGENTS.md](AGENTS.md) for the deletion safety exception.
 
 ### Benchmarks
 

@@ -2,7 +2,7 @@ use crate::common::{DdbTestRepo, ServerGuard};
 
 /// §42b base-field orderBy (created_at/updated_at/id) + deterministic
 /// pagination (PRD 00158), exercised through a live `ddb serve` process via
-/// `ServerGuard`. Mirrors tests/integration.sh:1529-1601. Rows are inserted
+/// `ServerGuard`. Rows are inserted
 /// with distinct dates scrambled relative to insertion order so that
 /// created_at ASC, created_at DESC, and id ASC each produce a different
 /// ordering, binding the sort direction.

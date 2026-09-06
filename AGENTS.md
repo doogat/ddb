@@ -24,7 +24,7 @@ ddb-uniffi-bindgen/  UniFFI bindgen binary (isolated from ddb-core)
 ddb-cli/src/         Binary crate: main.rs dispatch + commands/ subcommand handlers
 ddb-server/src/      GraphQL server: lib.rs entrypoint, actor/ core bridge, schema/ dynamic
                      GraphQL (queries, mutations/, subscriptions), auth.rs, config.rs, error.rs
-tests/               e2e/ (assert_cmd), smoke.sh + integration.sh (+ .ps1 ports), fixtures/
+tests/               e2e/ (Rust smoke_, integration_, and other assert_cmd scenarios), fixtures/
 dev/bin/             Developer scripts (release, build-xcframework, build-android,
                      safe-showboat-verify + its regression test)
 docs/src/            mdbook documentation (architecture, technical, guide)
@@ -105,7 +105,7 @@ A task is NOT complete unless ALL of these pass locally:
 3. **Fast tests** — `cargo test-ci` passes.
 4. **TDD unit tests** — unit tests for the change live alongside the module being touched and pass under `cargo test-ci`.
 
-Do NOT run `cargo test --workspace`, the e2e suite, `tests/integration.sh`, the `.ps1` ports, property tests, cross-platform jobs, coverage, or `showboat verify` per task. Those belong to Tier 2.
+Do NOT run `cargo test --workspace`, the e2e suite, property tests, cross-platform jobs, coverage, or `showboat verify` per task. Those belong to Tier 2.
 
 One narrow exception: `CLAUDE.md` instructs Claude-routed sessions to run `cargo test -p ddb-e2e` after any task that deletes or replaces existing code paths (skipped for purely additive tasks). That conditional, scope-limited e2e run is intentional — it is a deletion safety net, not a relaxation of Tier 1. See `CLAUDE.md` for the exact wording.
 
@@ -113,8 +113,8 @@ One narrow exception: `CLAUDE.md` instructs Claude-routed sessions to run `cargo
 
 The heavy battery is owned by the GitHub Actions workflows:
 
-- `test.yml` runs on every push: full workspace tests, cross-platform jobs, and the matrix that catches regressions the fast tier can miss.
-- `full-validation.yml` runs nightly: full `cargo test --workspace`, the e2e suite, `tests/integration.sh`, property tests, cross-platform validation, and coverage.
+- `test.yml` runs on every push: Linux Clippy, CLI build, `cargo test-ci`, Rust `smoke_` e2e scenarios, core sync integration tests, five targeted e2e cases, and a separate coverage job.
+- `full-validation.yml` runs nightly: full `cargo test --workspace`, the Rust e2e smoke and integration scenarios, property tests, cross-platform validation, and coverage.
 
 Do not duplicate these locally. If a CI failure is reproducible only locally, run the specific failing command in isolation rather than the full battery.
 
@@ -122,7 +122,7 @@ Do not duplicate these locally. If a CI failure is reproducible only locally, ru
 
 These are authoring obligations, not local execution gates:
 
-- **Smoke/integration scenario authoring** — if the PRD adds a CLI command or user-facing behavior, add a scenario to `tests/smoke.sh` and `tests/smoke.ps1`. If it adds a server endpoint, sync behavior, or CRDT logic, add it to `tests/integration.sh` and `tests/integration.ps1`. All four files follow the numbered-section + `pass` helper pattern. Execution of these scripts is delegated to CI (Tier 2). Upstream jink-feedback repros for the SQL regression suite live at `dev/local/specs/jink-feedback/ddb-repros/` (gitignored and machine-local — absent on fresh checkouts; skip this channel when the directory is missing); if present, run `bash dev/local/specs/jink-feedback/ddb-repros/run-all.sh` for an independent verification channel when investigating.
+- **Smoke/integration scenario authoring** — if the PRD adds a CLI command or user-facing behavior, add a `smoke_` scenario under `tests/e2e/`. If it adds a server endpoint, sync behavior, CRDT logic, or a multi-step workflow, add an `integration_` scenario there. Register new modules in `tests/e2e/main.rs`. Execution of these Rust e2e scenarios is delegated to CI (Tier 2). Upstream jink-feedback repros for the SQL regression suite live at `dev/local/specs/jink-feedback/ddb-repros/` (gitignored and machine-local — absent on fresh checkouts; skip this channel when the directory is missing); if present, run `bash dev/local/specs/jink-feedback/ddb-repros/run-all.sh` for an independent verification channel when investigating.
 - **E2E test authoring** — new user-facing behavior still requires its e2e test written under `tests/e2e/`. The test is authored as part of the PRD; execution happens in CI.
 - **Docs** — update relevant files in `docs/src/` to reflect any behavioral or API changes.
 - **Walkthrough** — if the PRD adds a CLI command, server endpoint, or user-facing behavior, create an executable showboat walkthrough in `dev/local/walkthroughs/` (see Showboat Walkthroughs below).
@@ -156,8 +156,8 @@ cargo test -p ddb-e2e                 Run e2e tests only
 cargo bench                           Run criterion benchmarks (CRUD + search)
 cargo bench --no-run                  Compile benchmarks without running
 cargo build -p ddb-core --features profiling   Build with tracing instrumentation
-./tests/smoke.sh                      CLI smoke test
-./tests/integration.sh                Full integration tests (runs smoke first)
+cargo test -p ddb-e2e smoke_          CLI smoke scenarios (Tier 2)
+cargo test -p ddb-e2e integration_    Integration scenarios (Tier 2)
 cargo test -p ddb-core --test property_tests   Property-based integration tests
 cargo test -p ddb-core --test sync_test        Core sync integration tests
 cargo clippy --workspace --all-targets   Lint (incl. test targets; matches CI)

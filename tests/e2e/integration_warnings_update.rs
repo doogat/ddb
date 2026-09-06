@@ -1,5 +1,5 @@
-//! Port of tests/integration.sh:2538-2657 (PRD 00147 REST warnings envelope,
-//! PRD 00154 GraphQL warnings envelope, PRD 00149 update warning/error shape).
+//! REST warnings envelope (PRD 00147), GraphQL warnings envelope (PRD 00154),
+//! and update warning/error shape (PRD 00149).
 
 use crate::common::{DdbTestRepo, ServerGuard};
 

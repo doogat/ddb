@@ -611,7 +611,7 @@ A `title_template` placeholder of the form `{col.field}` dereferences a `REFEREN
 
 65+ unit tests covering CREATE TABLE, INSERT (single and multi-row), SELECT, UPDATE, DELETE, FK validation, zone mapping (type-aware inference, VARCHAR boundary, ENUM/SET extraction, blob types), duplicate rejection, reserved name rejection, ALTER TABLE (ADD/DROP/RENAME COLUMN), DROP TABLE (CASCADE, IF EXISTS), bulk UPDATE, bulk DELETE, 8 transaction tests, 8 rejection tests for unsupported SQL features, and 7 type-aware inference tests.
 
-PRD 00122 added (all in `ddb-core/src/sql_engine/tests.rs`):
+PRD 00122 added (core tests in `ddb-core/src/sql_engine/tests.rs`):
 
 - 14 unit tests for `validate_row_against_schema` covering all 5 error message formats with explicit null/absent distinction.
 - 4 INSERT-rejection unit tests + 4 UPDATE-rejection unit tests via `executeSql`, each asserting the row is absent from BOTH the materialized table AND the `doogats` index after rejection.
@@ -619,38 +619,38 @@ PRD 00122 added (all in `ddb-core/src/sql_engine/tests.rs`):
 - 5 expression-synthesized NULL tests (`COALESCE(NULL, NULL)`, `IFNULL(NULL, NULL)`, etc.) for both INSERT and UPDATE paths (blind review C1 fix).
 - 3 multi-row INSERT atomicity tests proving that a validation failure on row N writes none of rows 1..N (blind review C2 fix).
 - 2 explicit empty-string tests pinning that `''` is rejected on INTEGER columns and accepted on TEXT.
-- 6 integration-script checks (D1-D6 in section 43 of `tests/integration.sh` and `tests/integration.ps1`).
+- 6 constraint-enforcement checks (D1-D6), now covered by the Rust e2e test `integration_sql_writes::integration_43_d_sql_constraint_enforcement`.
 
 9 E2E tests in `tests/e2e/sql_lifecycle.rs`. 3 E2E tests for junction tables in `tests/e2e/junction_tables.rs` (round-trip CRUD, reindex survival, multiple REFERENCES columns). 4 E2E tests for upsert/conflict handling in `tests/e2e/upsert.rs` (onConflict argument, IGNORE returns existing, ERROR on duplicate, mixed new/existing batch).
 
 ### PRD 00124 regression test suite (groups A-G)
 
-PRD 00124 closed the regression-coverage gap exposed by the jink-feedback integration sweep (issues #4-#8). Groups A-G map to specific files and line ranges; any new SQL correctness bug should extend the same cluster so future regressions trace back to both the originating issue and the jink repro.
+PRD 00124 closed the regression-coverage gap exposed by the jink-feedback integration sweep (issues #4-#8). Groups A-G map to core regression clusters and Rust e2e targets; any new SQL correctness bug should extend the same cluster so future regressions trace back to both the originating issue and the jink repro.
 
 **Upstream source.** The ported tests originate from shell scripts at `dev/local/specs/jink-feedback/ddb-repros/` (gitignored). The scripts use an inverted-assertion convention where exit 0 = bug reproduces. Running `bash dev/local/specs/jink-feedback/ddb-repros/run-all.sh` against a healthy build reports all four as FIXED and is a valid independent verification channel — the in-repo tests assert the opposite polarity.
 
 **Coverage map.**
 
-| Group | Bug | Rust cluster (`ddb-core/src/sql_engine/tests.rs`) | Integration (`tests/integration.sh`) | Smoke (`tests/smoke.sh`) |
-|-------|-----|---------------------------------------------------|--------------------------------------|--------------------------|
-| A1 | #4 cross-mutation parity | `update_after_unique_failure_succeeds_issue_4_a1`, `insert_after_unique_failure_succeeds_issue_4_a1`, `delete_after_unique_failure_succeeds_issue_4_a1` | Section 45 sub-block `45.A1` | Section 11 ghost-row pin |
-| A2 | #4 restart persistence | — (integration only) | Section 45 sub-block `45.A2` (kill + restart) | — |
-| A3 | #4 cross-table isolation | `failed_insert_on_table_a_does_not_corrupt_table_b_issue_4_a3` | Section 45 sub-block `45.A3` | — |
-| B1-B5 | #5 UPDATE/DELETE no-match | `update_with_missing_id_returns_affected_zero` and neighbours | Section 18 sub-block `18z` (GraphQL) + Section 30 (CLI) | — |
-| C1 | #6 search/normalize parity | `normalize_and_search_accept_same_inputs_issue_6_c1` in `search_query.rs` | Section 18h (PRD 00121) | — |
-| D1-D6 | #7 constraint enforcement | `executesql_*_rejects_*` cluster + `validate_*` | Section 43.D (PRD 00122) | — |
-| E1 | #8 JOIN pinning | `select_join_returns_joined_rows_issue_8_e1` plus CTE/subquery/UNION/window audit | Section 44 sub-block `44.E1` | — |
-| F1 | #9 composite UNIQUE error | `composite_unique_duplicate_rejected_with_clear_error_issue_9_f1` | Section 30 `30.F1` | — |
-| F2 | #9 single-col UNIQUE error | `single_column_unique_duplicate_rejected_with_clear_error_issue_9_f2` | — (pre-existing `create_table_with_unique_constraint_enforced` covers rejection) | — |
-| F3 | #9 CREATE INDEX rejected | Pre-existing `create_index_rejected_with_reason` | Section 44 (pre-existing DDL consistency check) | — |
-| F4 | #9 executeBatch atomicity | — | Section 18 sub-block `18z2` | — |
-| F5-F7 | #9 updateDoogat tag semantics | — | Section 18 sub-block `18z3` | — |
-| F9 | #9 SQL feature smoke | — | Section 18 sub-block `18z4` | — |
-| F10 | #9 search limit boundaries | — | Section 18 sub-block `18z5` | — |
-| F11 | #9 ALTER + typeDefs | — | Section 18 sub-block `18z6` | — |
-| G1, G2 | #9 GraphQL schema contract | — | Section 18 sub-block `18z7` | — |
+| Group | Bug | Rust cluster (`ddb-core/src/sql_engine/tests.rs`) | Rust E2E target (`tests/e2e/`) |
+|-------|-----|---------------------------------------------------|------------------------------|
+| A1 | #4 cross-mutation parity | `update_after_unique_failure_succeeds_issue_4_a1`, `insert_after_unique_failure_succeeds_issue_4_a1`, `delete_after_unique_failure_succeeds_issue_4_a1` | `integration_write_recovery::integration_45_a1_cross_mutation_parity_after_unique_failure`, `smoke_sql::smoke_11c_ghost_row_recovery` |
+| A2 | #4 restart persistence | — (integration only) | `integration_write_recovery::integration_45_a2_ghost_row_survives_server_restart` |
+| A3 | #4 cross-table isolation | `failed_insert_on_table_a_does_not_corrupt_table_b_issue_4_a3` | `integration_write_recovery::integration_45_a3_cross_table_isolation_after_unique_failure` |
+| B1-B5 | #5 UPDATE/DELETE no-match | `update_with_missing_id_returns_affected_zero` and neighbours | `integration_graphql_server::integration_18z_update_delete_no_match_parity`, `integration_sql_no_match::integration_30_where_id_no_match_semantics` |
+| C1 | #6 search/normalize parity | `normalize_and_search_accept_same_inputs_issue_6_c1` in `search_query.rs` | `integration_graphql_server::integration_18h_in_query_field_filter_and_error_class` |
+| D1-D6 | #7 constraint enforcement | `executesql_*_rejects_*` cluster + `validate_*` | `integration_sql_writes::integration_43_d_sql_constraint_enforcement` |
+| E1 | #8 JOIN pinning | `select_join_returns_joined_rows_issue_8_e1` plus CTE/subquery/UNION/window audit | `integration_junction_sync::integration_44_e1_join_pin_graphql` |
+| F1 | #9 composite UNIQUE error | `composite_unique_duplicate_rejected_with_clear_error_issue_9_f1` | `integration_sql_no_match::integration_30_f1_composite_unique_cli_rejection` |
+| F2 | #9 single-col UNIQUE error | `single_column_unique_duplicate_rejected_with_clear_error_issue_9_f2`, `create_table_with_unique_constraint_enforced` | — |
+| F3 | #9 CREATE INDEX rejected | Pre-existing `create_index_rejected_with_reason` | `integration_typed_write_polish::integration_44_ddl_response_consistency` |
+| F4 | #9 executeBatch atomicity | — | `integration_graphql_server::integration_18z2_execute_batch_atomicity` |
+| F5-F7 | #9 updateDoogat tag semantics | — | `integration_graphql_server::integration_18z3_update_doogat_tag_semantics` |
+| F9 | #9 SQL feature smoke | — | `integration_graphql_server::integration_18z4_sql_feature_coverage_pins` |
+| F10 | #9 search limit boundaries | — | `integration_graphql_server::integration_18z5_search_limit_boundary_pins` |
+| F11 | #9 ALTER + typeDefs | — | `integration_graphql_server::integration_18z6_alter_table_add_column_in_typedefs_introspection` |
+| G1, G2 | #9 GraphQL schema contract | — | `integration_graphql_server::integration_18z7_graphql_schema_introspection_contract` |
 
-**Jink full-sweep port.** The 40+ checks from `validate-full-sweep.sh` are distributed across the existing section 17 and section 18 numbered neighbourhoods via sub-blocks `17.J1`, `17.J2`, `18z8`, `18z9`, `18z10`. The jink tables (`link`, `category`, `category-membership`, `quote`, `saved-search`, `pinned-result`, `jink-config`) are created once in `17.J1` and dropped at the end of `18z10`; they persist across the F-group and G-group sub-blocks between them.
+**Jink full-sweep port.** The 40+ checks from `validate-full-sweep.sh` are covered by five Rust e2e tests in `integration_graphql_jink`: `integration_17j1_jink_schema_create_tables`, `integration_17j2_jink_config_singleton_and_link_crud`, `integration_18z8_jink_category_membership_port`, `integration_18z9_jink_quotes_saved_searches_pinned_results_config_port`, and `integration_18z10_jink_composite_unique_and_batch_delete_port`. Each test starts its own repository and server and calls `setup_jink_schema` to create the jink tables (`link`, `category`, `category-membership`, `quote`, `saved-search`, `pinned-result`, `jink-config`); tests do not share fixture state.
 
 **Property tests.** `ddb-core/tests/property_tests.rs` carries four SQL engine invariant properties under the `// SQL engine invariants` section header:
 

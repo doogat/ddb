@@ -19,7 +19,7 @@ git config core.hooksPath dev/hooks
 
 ```bash
 cargo build
-cargo test
+cargo test-ci
 ```
 
 See [AGENTS.md](AGENTS.md) for the full command reference.
@@ -38,22 +38,24 @@ Follow the conventions in [AGENTS.md](AGENTS.md). Key points:
 Every change needs tests:
 
 - **Unit tests** in the module
-- **Integration/e2e tests** in `tests/` for behavior changes
-- **Smoke test** scenarios in `tests/smoke.sh` and `tests/smoke.ps1` for CLI changes
-- **Integration test** scenarios in `tests/integration.sh` and `tests/integration.ps1` for server or sync changes
+- **Integration/e2e tests** in `tests/e2e/` for behavior changes
+- **Smoke/integration scenario authoring** — if the PRD adds a CLI command or user-facing behavior, add a `smoke_` scenario under `tests/e2e/`. If it adds a server endpoint, sync behavior, CRDT logic, or a multi-step workflow, add an `integration_` scenario there. Register new modules in `tests/e2e/main.rs`. Execution of these Rust e2e scenarios is delegated to CI (Tier 2).
 
-Run the full suite before submitting:
+Run the Tier 1 local gate after every task:
 
 ```bash
-cargo clippy --workspace
-cargo test --workspace
+cargo build
+cargo clippy --workspace --all-targets
+cargo test-ci
 ```
+
+Tier 2 runs in CI: full workspace tests, Rust e2e scenarios, property tests, cross-platform validation, and coverage. Do not duplicate the heavy battery locally. The narrow deletion safety exception in `CLAUDE.md` requires Claude-routed sessions to run `cargo test -p ddb-e2e` after tasks that delete or replace existing code paths; purely additive tasks skip that run. See [AGENTS.md](AGENTS.md) for the full two-tier policy.
 
 ## Pull Request Process
 
 1. Fork the repo and create a branch from `master`
 2. Make your changes with tests
-3. Ensure `cargo clippy --workspace` and `cargo test --workspace` pass
+3. Ensure the Tier 1 local gate and required CI checks pass
 4. Submit a PR against `master`
 
 Keep PRs focused — one concern per PR.

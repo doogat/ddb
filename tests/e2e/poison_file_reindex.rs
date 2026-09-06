@@ -100,8 +100,7 @@ fn lenient_reindex_skips_poison_file_and_indexes_the_rest() {
     // which rebuilds a stale index before answering — so that check passes even
     // if this `reindex` indexed nothing at all, and proves only that the CLI
     // still works. The `indexed N doogats` assertion above is what actually
-    // binds this reindex to having indexed the valid files. Same self-heal
-    // hazard the NOTE at `tests/smoke.sh:733-739` records.
+    // binds this reindex to having indexed the valid files.
 }
 
 /// `--strict` is the opt-in hard failure: over the same corpus the command must
@@ -111,7 +110,6 @@ fn lenient_reindex_skips_poison_file_and_indexes_the_rest() {
 /// in stderr: the lenient skip logs that same path as a warning, so a
 /// `--strict` that regressed to lenient would still print it and a bare
 /// `contains` would pass. Only the error line separates an abort from a skip.
-/// (Same false-pass shape that was fixed in `tests/smoke.sh` section 32.)
 #[test]
 fn strict_reindex_fails_and_names_the_poison_file() {
     let (repo, _ids) = repo_with_poison_file();

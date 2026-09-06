@@ -1,5 +1,4 @@
-//! Ported from tests/integration.sh §28 (lines 3181-3191): a targeted
-//! `bundle export --target <uuid>` delta export (PRD 00168 bundle import),
+//! A targeted `bundle export --target <uuid>` delta export (PRD 00168 bundle import),
 //! distinct from `--full`, delivers content scoped to the named node.
 
 use crate::common::{DdbTestRepo, TwoNodeSetup};

@@ -1,4 +1,4 @@
-//! Cross-protocol SINGLETON duplicate-insert parity (integration.sh §54.D / integration.ps1 §54.D).
+//! Cross-protocol SINGLETON duplicate-insert parity.
 //!
 //! One seeded row in a SINGLETON table, then a duplicate insert attempted on
 //! every remaining public transport. The CLI leg lives in

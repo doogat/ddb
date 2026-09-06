@@ -1,4 +1,4 @@
-//! Port of tests/integration.sh:3720-3796.
+//! Repo-aware ID minting and poison-file reindex warnings.
 //!
 //! §62 (PRD 00164, unified repo-aware ID minting): the batch (multi-row
 //! INSERT) and single (`ddb create`) mint paths agree on "id taken", so

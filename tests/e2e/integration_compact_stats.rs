@@ -1,5 +1,4 @@
-//! Ported from tests/integration.sh §33 (lines 3298-3345), byte-stats
-//! portion only: `ddb compact --force`'s report includes byte-stats lines.
+//! The `ddb compact --force` report includes byte-stats lines.
 //! The stale-node-resync flow itself is already covered by
 //! `multi_device::stale_node_resync_after_compaction`.
 

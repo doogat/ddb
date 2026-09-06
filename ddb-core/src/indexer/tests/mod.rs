@@ -4259,12 +4259,12 @@ fn rebuild_if_stale_inside_transaction_skips_full_rebuild_on_diff_failure() {
 
 #[test]
 fn rematerialize_never_exposes_missing_table_to_concurrent_reader() {
-    // §55.A residual race: `materialize_all_types` dropped and recreated each
+    // Rematerialization race: `materialize_all_types` dropped and recreated each
     // user table in SEPARATE autocommit statements, so a second connection (WAL)
     // could read between the committed DROP and the committed CREATE and see
     // "no such table". Two concurrent `ddb create` into a SINGLETON typedef hit
     // exactly this: the loser surfaced "no such table" instead of the structured
-    // SINGLETON message, failing integration.sh §55.A intermittently on linux CI.
+    // SINGLETON message, failing singleton_cross_process_create intermittently on Linux CI.
     // The fix wraps the rematerialize in one transaction, so a concurrent reader
     // sees the OLD table or the NEW table, never an absent one.
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -4272,7 +4272,7 @@ fn rematerialize_never_exposes_missing_table_to_concurrent_reader() {
 
     let dir = tempfile::TempDir::new().unwrap();
     let repo = GitRepo::init(dir.path()).unwrap();
-    // A _typedef-backed table (like §55.A's `CREATE TABLE ... SINGLETON`): it is
+    // A _typedef-backed table (as in `CREATE TABLE ... SINGLETON`): it is
     // in the orphan-cleanup keep-set, so it persists across rematerialize passes.
     // (An inferred-only table would be dropped by drop_orphan_materialized_tables
     // every pass, which is a legitimate absence, not the race under test.)

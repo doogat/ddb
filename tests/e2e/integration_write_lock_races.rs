@@ -1,5 +1,4 @@
-//! Cross-process write-lock races between `ddb serve` and the `ddb` CLI
-//! (integration.sh §61.B / integration.ps1 §61.B).
+//! Cross-process write-lock races between `ddb serve` and the `ddb` CLI.
 //!
 //! The headline deployment shape: a long-running server process and an operator
 //! at the CLI write to the same repo at the same time. Both sides' writes must

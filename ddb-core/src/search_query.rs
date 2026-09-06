@@ -1410,8 +1410,8 @@ mod tests {
     // accepts produces a normalized form compile_search_plan also accepts. PRD
     // 00121 fixed the original inconsistency where normalizeSearchQuery
     // accepted `tag=rust` while search() rejected it. This test pins the
-    // contract at the unit level in addition to the GraphQL-surface check
-    // already in integration.sh section 18h.
+    // contract at the unit level alongside the Rust e2e GraphQL-surface check
+    // integration_graphql_server::integration_18h_in_query_field_filter_and_error_class.
     #[test]
     fn normalize_and_search_accept_same_inputs_issue_6_c1() {
         // Curated inputs covering the patterns jink uses + the bugs from #6.

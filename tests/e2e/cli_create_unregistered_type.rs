@@ -1,5 +1,4 @@
-//! CLI `ddb create --type <unregistered>` regression (PRD 00155; nightly
-//! `full-validation` red since 2026-05-29 at `tests/smoke.sh:33`).
+//! CLI `ddb create --type <unregistered>` regression (PRD 00155).
 //!
 //! PRD 00147 rerouted CLI create through the app facade, whose
 //! `batch_create_with_message` contract rejects an unregistered `doogat_type`
@@ -10,7 +9,7 @@
 //! create command; the lenient path now surfaces an `UNREGISTERED_TYPE_BASE_ONLY`
 //! warning on stderr (the released path was silent).
 //!
-//! This is the exact `tests/smoke.sh:33` shape: `ddb create --type project`
+//! Regression shape: `ddb create --type project`
 //! on a fresh repo with no `ddb type install project`.
 
 use crate::common::DdbTestRepo;
@@ -19,7 +18,7 @@ use crate::common::DdbTestRepo;
 fn cli_create_unregistered_type_creates_base_doogat_with_warning() {
     let repo = DdbTestRepo::init();
 
-    // smoke.sh:33 shape: unregistered `project` type on a fresh repo.
+    // Unregistered `project` type on a fresh repo.
     let out = repo
         .ddb()
         .args([

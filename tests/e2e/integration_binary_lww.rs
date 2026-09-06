@@ -1,5 +1,4 @@
-//! Ported from tests/integration.sh §40 (lines 3407-3460): a binary asset
-//! conflict resolves via last-writer-wins on the commit's `HLC:` trailer
+//! A binary asset conflict resolves via last-writer-wins on the commit's `HLC:` trailer
 //! (PRD 00166), preserving the loser's content in history via a merge
 //! commit rather than silently dropping it.
 

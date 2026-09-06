@@ -1,4 +1,4 @@
-//! Ports tests/integration.sh §29 (lines 3215-3223): `update-bin --help`
+//! `update-bin --help`
 //! output and `update-bin --rollback` with no backup present.
 
 use crate::common::DdbTestRepo;

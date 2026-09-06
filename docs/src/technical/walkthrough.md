@@ -25,17 +25,17 @@ An isolated binary crate whose sole purpose is to host the UniFFI bindgen tool. 
 
 ### tests (ddb-e2e)
 
-An end-to-end test harness using `assert_cmd` for CLI tests and `reqwest` for server tests. E2E tests require the `ddb` binary on the PATH, so `cargo build -p ddb-cli` must run first. The crate lives in `tests/` and is declared as the fifth workspace member.
+An end-to-end test harness using `assert_cmd` for CLI tests and `reqwest` for server tests. E2E tests require the built `ddb` binary, so `cargo build -p ddb-cli` must run first. The crate lives in `tests/`, with scenario modules under `tests/e2e/` registered in `tests/e2e/main.rs`, and is declared as the fifth workspace member.
 
 ### Build aliases and test tiers
 
 The workspace defines custom Cargo aliases:
 
-- `cargo test` runs the fast local tier (unit tests in default members).
-- `cargo test-ci` runs the bounded CI matrix (unit and binary targets only).
-- `cargo test-full` runs the complete suite including workspace-wide and e2e tests.
+- `cargo test` runs the default workspace test selection.
+- `cargo test-ci` runs the fast local tier (unit and binary targets only).
+- `cargo test-full` runs the complete suite including workspace-wide and e2e tests (Tier 2, CI).
 
-Additional test surfaces include `tests/smoke.sh` and `tests/smoke.ps1` for CLI smoke tests, `tests/integration.sh` and `tests/integration.ps1` for full integration tests (server, sync, CRDT), and Criterion benchmarks in `ddb-core/benches/` for CRUD and search performance.
+The Rust e2e crate includes `smoke_` scenarios for CLI behavior and `integration_` scenarios for server, sync, CRDT, and multi-step workflows. Run all scenarios with `cargo test -p ddb-e2e`, or filter with `smoke_` or `integration_`. Execution belongs to Tier 2; the deletion safety exception in `AGENTS.md` still applies. Criterion benchmarks in `ddb-core/benches/` cover CRUD and search performance.
 
 
 ## 2. Core Data Model
@@ -407,11 +407,11 @@ The compaction module (see `compaction/mod.rs`) cleans up CRDT temporary files i
 
 ## 7. Testing Strategy
 
-Doogat DB uses a layered testing approach with six distinct tiers, each covering different aspects of the system.
+Doogat DB uses the following test surfaces across two execution tiers: a fast local gate and the heavy CI battery. See `AGENTS.md` for the full policy and deletion safety exception.
 
 ### Unit tests
 
-In-module `#[cfg(test)] mod tests` blocks test individual functions in isolation. These run with `cargo test` (the fast local tier) and cover parsing edge cases, CRDT merge logic, SQL translation, type inference, HLC arithmetic, and error mapping. The `MockSource` in `traits::mock` provides an in-memory doogat store for tests that need a `DoogatSource` without touching Git.
+In-module `#[cfg(test)] mod tests` blocks test individual functions in isolation. These run with `cargo test-ci` (the fast local tier) and cover parsing edge cases, CRDT merge logic, SQL translation, type inference, HLC arithmetic, and error mapping. The `MockSource` in `traits::mock` provides an in-memory doogat store for tests that need a `DoogatSource` without touching Git.
 
 ### Integration tests
 
@@ -427,7 +427,7 @@ The `tests/e2e/` directory contains assert_cmd-based tests that exercise the `dd
 
 ### Smoke tests
 
-`tests/smoke.sh` (bash) and `tests/smoke.ps1` (PowerShell) provide quick CLI validation (init, CRUD, search, SQL, types, compact). `tests/integration.sh` and `tests/integration.ps1` run the smoke tests first, then continue with server, sync, CRDT conflict resolution, bundles, and advanced SQL tests. All files follow a numbered-section pattern with a `pass` helper for status reporting.
+The Rust `smoke_` scenarios in `tests/e2e/` validate CLI behavior (init, CRUD, search, SQL, types, compact); `cargo test -p ddb-e2e smoke_` selects them. The `integration_` scenarios cover server, sync, CRDT conflict resolution, bundles, advanced SQL, and other multi-step workflows. New scenarios follow these prefixes, and new modules must be registered in `tests/e2e/main.rs`. Both groups run in CI on Linux, macOS, and Windows as part of Tier 2.
 
 ### Benchmarks
 
@@ -435,7 +435,7 @@ Criterion benchmarks in `ddb-core/benches/` measure CRUD operations and search p
 
 ### Full suite
 
-`cargo test --workspace` (aliased as `cargo test-full`) runs all of the above: unit tests, integration tests, and e2e tests across all crates. This is the definitive validation before merging any change.
+`cargo test --workspace` (aliased as `cargo test-full`) runs unit tests, integration tests, and e2e tests across all crates. CI owns this Tier 2 execution; the per-task local gate is `cargo build`, `cargo clippy --workspace --all-targets`, and `cargo test-ci`.
 
 ## 8. Consistency Auto-Fix
 
@@ -774,7 +774,7 @@ The three layers keep the database correct under contention, but Layer 1's check
 
 `upsert<TypeName>` runs its existence check and the create-or-update branch under one `BEGIN IMMEDIATE` window via `DoogatService::upsert_singleton`, so two concurrent upserts on an empty SINGLETON typedef converge on one row: one call returns `created: true`, the loser takes the UPDATE branch and returns `created: false` against the same id.
 
-Trade-off: every SINGLETON write serializes through the SQLite write lock. This is acceptable by definition -- a SINGLETON typedef holds one row, so write throughput is irrelevant. Cross-process behavior is exercised by the e2e tests `singleton_cross_process_create` / `singleton_cross_process_upsert` and `tests/integration.{sh,ps1}` section 55.
+Trade-off: every SINGLETON write serializes through the SQLite write lock. This is acceptable by definition -- a SINGLETON typedef holds one row, so write throughput is irrelevant. Cross-process behavior is exercised by the e2e tests `singleton_cross_process_create` / `singleton_cross_process_upsert` and the `integration_singleton_races` and `integration_write_lock_races` modules in `tests/e2e/`.
 
 ### Auto-seed on origin-only
 

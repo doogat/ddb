@@ -1,4 +1,4 @@
-//! Ported from tests/integration.sh §21 (lines 2886-2898): a raw `git clone`
+//! A raw `git clone`
 //! followed by `ddb reindex`, with no `ddb sync` involved at all, already
 //! sees content another node pushed.
 

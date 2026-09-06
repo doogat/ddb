@@ -1,5 +1,4 @@
-//! Ports tests/integration.sh §30 no-match half (lines 3240-3256) and §30.F1
-//! (lines 3258-3270): WHERE-id no-match semantics for UPDATE/DELETE, and CLI
+//! WHERE-id no-match semantics for UPDATE/DELETE, and CLI
 //! propagation of the composite-UNIQUE duplicate rejection error.
 
 use crate::common::DdbTestRepo;

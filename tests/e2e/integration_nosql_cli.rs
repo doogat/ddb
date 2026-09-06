@@ -1,7 +1,5 @@
-//! Ports tests/integration.sh §32 (lines 3284-3296): NoSQL CLI commands
-//! (get, scan --tag, scan --type, backlinks). The shell script reuses
-//! fixture state created much earlier in the script, so this test builds an
-//! equivalent self-contained fixture instead.
+//! NoSQL CLI commands (get, scan --tag, scan --type, backlinks)
+//! exercised against a self-contained fixture.
 
 use crate::common::DdbTestRepo;
 use predicates::prelude::*;

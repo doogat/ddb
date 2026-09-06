@@ -1,5 +1,5 @@
-//! Port of tests/integration.sh:2109-2157 (PRD 00131 structured-error code
-//! propagation): GraphQL errors for constraint violations carry a
+//! Structured-error code propagation (PRD 00131):
+//! GraphQL errors for constraint violations carry a
 //! machine-readable `extensions.code` (and related fields), not just a
 //! human-readable message.
 

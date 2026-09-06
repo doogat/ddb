@@ -1,5 +1,5 @@
-//! Port of tests/integration.sh:2159-2186 (PRD 00132 ALTER TABLE RENAME
-//! across protocols). CLI-transport coverage already exists in
+//! ALTER TABLE RENAME across protocols (PRD 00132).
+//! CLI-transport coverage already exists in
 //! `tests/e2e/alter_table_rename.rs`; these tests cover the GraphQL and
 //! PgWire transports.
 

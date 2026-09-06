@@ -1,5 +1,4 @@
-//! Ports tests/integration.sh §36 (lines 3366-3372): hyphenated type name
-//! via double-quoted SQL identifiers.
+//! Hyphenated type names via double-quoted SQL identifiers.
 
 use crate::common::DdbTestRepo;
 use predicates::prelude::*;

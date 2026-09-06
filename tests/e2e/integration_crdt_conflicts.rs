@@ -1,5 +1,4 @@
-//! Ported from tests/integration.sh §26 (lines 2976-3000) and §27c (lines
-//! 3056-3093): CRDT union of two reference-section additions, and PRD
+//! CRDT union of two reference-section additions, and PRD
 //! 00200's three-way conflicted merge (a deletion and a non-conflicting
 //! edit both survive a real conflicted sync).
 

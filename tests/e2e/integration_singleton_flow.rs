@@ -1,5 +1,5 @@
-//! Port of tests/integration.sh:2188-2281 (PRD 00139 T20/T22 SINGLETON
-//! GraphQL flow, ALTER SET/DROP SINGLETON, DEFAULT VALUES auto-seed).
+//! SINGLETON GraphQL flow, ALTER SET/DROP SINGLETON, and DEFAULT VALUES
+//! auto-seed (PRD 00139 T20/T22).
 
 use crate::common::{select_scalar, DdbTestRepo, ServerGuard};
 use predicates::prelude::*;

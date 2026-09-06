@@ -1,5 +1,5 @@
-//! SINGLETON insert races from integration.sh / integration.ps1 §55.B–E.
-//! Each race includes §55.E's exact row count. The CLI-only §55.A/E leg is
+//! SINGLETON insert races, each asserting the exact final row count.
+//! The CLI-only leg is
 //! `singleton_cross_process_create::two_concurrent_ddb_create_on_singleton_converge_on_one_row`.
 
 use crate::common::{DdbTestRepo, ServerGuard};
