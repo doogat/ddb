@@ -42,38 +42,11 @@ jobs:
       - name: Fast cargo test tier
         run: cargo test-ci
 
-      - name: Smoke test (e2e)
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: cargo test -p ddb-e2e --test e2e smoke_
+      - name: E2E tests
+        run: cargo test -p ddb-e2e
 
       - name: Sync integration tests
         run: cargo test -p ddb-core --test sync_test
-
-      - name: E2E - GraphQL CRUD
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: cargo test -p ddb-e2e --test e2e serve::crud_lifecycle -- --exact
-
-      - name: E2E - PgWire
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: cargo test -p ddb-e2e --test e2e pgwire::pgwire_insert_update_delete -- --exact
-
-      - name: E2E - WebSocket subscriptions
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: cargo test -p ddb-e2e --test e2e subscriptions::subscribe_mutate_receive -- --exact
-
-      - name: E2E - Sync/CRDT
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: cargo test -p ddb-e2e --test e2e sync_crdt::overlapping_body_edits_resolved_by_crdt -- --exact
-
-      - name: E2E - Multi-device
-        env:
-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb
-        run: cargo test -p ddb-e2e --test e2e multi_device::stale_node_returns -- --exact
 
   coverage:
     runs-on: ubuntu-latest

@@ -113,7 +113,7 @@ One narrow exception: `CLAUDE.md` instructs Claude-routed sessions to run `cargo
 
 The heavy battery is owned by the GitHub Actions workflows:
 
-- `test.yml` runs on every push: Linux Clippy, CLI build, `cargo test-ci`, Rust `smoke_` e2e scenarios, core sync integration tests, five targeted e2e cases, and a separate coverage job.
+- `test.yml` runs on every push: Linux Clippy, CLI build, `cargo test-ci`, the full Rust e2e suite (including reused smoke scenarios), core sync integration tests, and a separate coverage job.
 - `full-validation.yml` runs nightly: full `cargo test --workspace`, the Rust e2e smoke and integration scenarios, property tests, cross-platform validation, and coverage.
 
 Do not duplicate these locally. If a CI failure is reproducible only locally, run the specific failing command in isolation rather than the full battery.
