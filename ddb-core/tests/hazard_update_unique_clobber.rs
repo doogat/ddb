@@ -115,7 +115,6 @@ fn assert_unique_collision_is_safe(
 }
 
 #[test]
-#[ignore = "fast-track FT-1: hazard H1 confirmed 2026-09-06 (INSERT OR REPLACE evicts the sibling row); un-ignore with the fix, see dev/local/plans/fast-track-2026-09-06.md"]
 fn update_rejects_unique_collision_or_keeps_both_typed_rows() {
     let tmp = tempfile::tempdir().unwrap();
     let mut svc = init_service_with_unique_typedef(tmp.path());
@@ -140,7 +139,6 @@ fn update_rejects_unique_collision_or_keeps_both_typed_rows() {
 }
 
 #[test]
-#[ignore = "fast-track FT-1: hazard H1 confirmed 2026-09-06 (INSERT OR REPLACE evicts the sibling row); un-ignore with the fix, see dev/local/plans/fast-track-2026-09-06.md"]
 fn batch_update_rejects_unique_collision_or_keeps_both_typed_rows() {
     let tmp = tempfile::tempdir().unwrap();
     let mut svc = init_service_with_unique_typedef(tmp.path());
@@ -162,4 +160,41 @@ fn batch_update_rejects_unique_collision_or_keeps_both_typed_rows() {
         .map(|_| ());
 
     assert_unique_collision_is_safe(&mut svc, outcome, &id_a, "DoogatService::batch_update");
+}
+
+/// Two updates in ONE batch that land on the same UNIQUE value pass the
+/// per-item check individually (neither row is materialized yet), so the
+/// batch lane must also track collisions inside the batch.
+#[test]
+fn batch_update_rejects_intra_batch_unique_collision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut svc = init_service_with_unique_typedef(tmp.path());
+
+    let id_a = create_link(&svc, "Row A", "x");
+    let id_b = create_link(&svc, "Row B", "y");
+    assert_eq!(typed_row_count(&mut svc), 2, "both rows must materialize");
+
+    let to_z = |id: String| BatchUpdateInput {
+        id,
+        title: None,
+        body: None,
+        tags: None,
+        doogat_type: None,
+        fields: Some(slug_fields("z")),
+        unset_fields: None,
+    };
+    let outcome = svc.batch_update(&[to_z(id_a), to_z(id_b)]);
+
+    match outcome {
+        Err(DoogatError::Structured { code, .. }) if code == codes::UNIQUE_VIOLATION => {}
+        other => panic!(
+            "H1 (intra-batch): two updates in one batch racing the same UNIQUE value must be \
+             rejected with UNIQUE_VIOLATION, got: {other:?}"
+        ),
+    }
+    assert_eq!(
+        typed_row_count(&mut svc),
+        2,
+        "a rejected batch must leave both typed rows in place"
+    );
 }

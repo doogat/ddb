@@ -6,6 +6,7 @@ use crate::types::{BatchUpdateInput, ParsedDoogat, TableSchema};
 
 use crate::traits::{GitBackend, IndexPort};
 
+use super::validation::UniqueGroupKey;
 use super::{DoogatService, ExtraFieldUpdates};
 
 impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
@@ -70,6 +71,17 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         // SINGLETON_VIOLATION instead of a raw materializer error. Non-SINGLETON
         // updates run with no transaction and pay no new cost.
         let is_singleton = schema.map(|s| s.singleton).unwrap_or(false);
+        // FT-1 rework: an update targeting a typedef with unique_together
+        // groups must serialize its check-to-materialize window the same
+        // way SINGLETON already does — otherwise two concurrent writers can
+        // both pass `check_unique_constraints_for_update` (checked against
+        // the pre-write materialized table) before either row is indexed,
+        // and the loser's later `INSERT OR REPLACE` evicts the winner.
+        let has_unique_groups = schema
+            .and_then(|s| s.unique_together.as_ref())
+            .map(|g| !g.is_empty())
+            .unwrap_or(false);
+        let needs_transaction = is_singleton || has_unique_groups;
 
         let mut write = || -> Result<ParsedDoogat> {
             // Singleton check on the *result* type (no-op for unregistered or
@@ -79,6 +91,21 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             if let (Some(type_name), Some(all)) = (result_type.as_deref(), schemas.as_ref()) {
                 if all.iter().any(|s| s.table_name == type_name) {
                     self.check_singleton_update_constraint(id, type_name, all)?;
+
+                    // FT-1: pre-commit UNIQUE check against the merged field
+                    // set (existing fields overlaid with this update's
+                    // SET/UNSET), excluding this row, so a UNIQUE collision
+                    // is rejected before materialize_single's
+                    // `INSERT OR REPLACE` would otherwise evict the other
+                    // row from the typed table.
+                    let mut merged = parsed_fields(&parsed);
+                    for key in extra.unset {
+                        merged.remove(key);
+                    }
+                    for (key, value) in extra.set {
+                        merged.insert(key.clone(), value.clone());
+                    }
+                    self.check_unique_constraints_for_update(id, type_name, &merged, all)?;
                 }
             }
 
@@ -110,7 +137,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             Ok(updated)
         };
 
-        if is_singleton {
+        if needs_transaction {
             crate::indexer::with_immediate_transaction(self.index.sql_conn(), write)
         } else {
             write()
@@ -167,15 +194,16 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
         let schemas = self.list_type_schemas()?;
 
-        // PRD 00157: resolve each update's result SINGLETON typedef once. Any
-        // Some(..) means a SINGLETON-reachable write, so run prepare-all →
-        // commit_batch → reindex-each → store_head inside one BEGIN IMMEDIATE
-        // window so the per-update singleton check (`prepare_update`) and the
-        // commit are atomic across processes (mirrors `batch_create_with_message`).
-        // Batches with no SINGLETON-targeting update run unwrapped — no new
-        // contention.
-        let singleton_targets = self.resolve_batch_singleton_targets(updates, &schemas)?;
-        let any_singleton = singleton_targets.iter().any(|t| t.is_some());
+        // PRD 00157 (+ FT-1 rework): resolve each update's result-type lock
+        // requirements once. A SINGLETON target, or a target with
+        // unique_together groups, means the check-to-materialize window
+        // must run inside one BEGIN IMMEDIATE transaction (mirrors
+        // `batch_create_with_message`) so a cross-process race surfaces a
+        // structured violation on the loser instead of letting
+        // `INSERT OR REPLACE` materialization silently evict a row. Batches
+        // with no such target run unwrapped — no new contention.
+        let lock_targets = self.resolve_batch_lock_targets(updates, &schemas)?;
+        let any_transaction_needed = lock_targets.iter().any(|(s, u)| s.is_some() || *u);
 
         let body = || -> Result<Vec<ParsedDoogat>> {
             // Phase 1: prepare all writes (fail-fast, no side effects). Track
@@ -185,11 +213,19 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             // (PRD 00157 doubt-review #2). `reject_duplicate_update_ids` already
             // guarantees distinct ids, so two updates sharing a singleton target
             // are two rows contending for the one slot.
+            //
+            // FT-1 rework: also track intra-batch UNIQUE candidate keys
+            // (type, group_columns, values) the same way, since two updates
+            // in one batch can each pass `prepare_update`'s per-item DB check
+            // (which only sees the pre-batch materialized table) and still
+            // collide with each other once both are materialized in Phase 3.
             let mut writes: Vec<(String, String)> = Vec::with_capacity(updates.len());
             let mut seen_singleton: std::collections::HashSet<&str> =
                 std::collections::HashSet::new();
+            let mut seen_unique: std::collections::HashSet<UniqueGroupKey> =
+                std::collections::HashSet::new();
             for (i, update) in updates.iter().enumerate() {
-                if let Some(type_name) = singleton_targets[i].as_deref() {
+                if let Some(type_name) = lock_targets[i].0.as_deref() {
                     if !seen_singleton.insert(type_name) {
                         return Err(DoogatError::singleton_violation(
                             type_name.to_string(),
@@ -197,7 +233,15 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                         ));
                     }
                 }
-                writes.push(self.prepare_update(update, &schemas)?);
+                let (path, content, unique_candidates) = self.prepare_update(update, &schemas)?;
+                for key in &unique_candidates {
+                    if seen_unique.contains(key) {
+                        let (table, columns, values) = key.clone();
+                        return Err(DoogatError::unique_violation(table, columns, values));
+                    }
+                }
+                seen_unique.extend(unique_candidates);
+                writes.push((path, content));
             }
 
             // Phase 2: atomic commit
@@ -220,26 +264,29 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             Ok(results)
         };
 
-        if any_singleton {
+        if any_transaction_needed {
             crate::indexer::with_immediate_transaction(self.index.sql_conn(), body)
         } else {
             body()
         }
     }
 
-    /// PRD 00157: resolve each update's *result* SINGLETON typedef — the arg
-    /// type, else the stored type of `u.id` — returning `Some(type_name)` only
-    /// when that type is a registered SINGLETON typedef, `None` otherwise.
-    /// Resolves the result type by re-parsing the stored file exactly as
-    /// `prepare_update` derives `final_type`, so the pre-wrap scan and the
-    /// in-window per-update check never disagree. One pass drives both the
-    /// conditional BEGIN IMMEDIATE wrap (any `Some` → wrap) and the intra-batch
-    /// collision check (PRD 00157 doubt-review #2).
-    fn resolve_batch_singleton_targets(
+    /// PRD 00157 (+ FT-1 rework): resolve each update's *result* type's lock
+    /// requirements — the arg type, else the stored type of `u.id` — in one
+    /// pass. Element `.0` is `Some(type_name)` only when the result type is a
+    /// registered SINGLETON typedef (drives the intra-batch SINGLETON
+    /// collision check); `.1` is `true` when the result type has at least
+    /// one unique_together group (drives the intra-batch UNIQUE collision
+    /// check). Resolves the result type by re-parsing the stored file
+    /// exactly as `prepare_update` derives `final_type`, so the pre-wrap scan
+    /// and the in-window per-update check never disagree. One pass drives
+    /// both the conditional BEGIN IMMEDIATE wrap (any lock target → wrap) and
+    /// the intra-batch collision checks (PRD 00157 doubt-review #2).
+    fn resolve_batch_lock_targets(
         &self,
         updates: &[BatchUpdateInput],
         schemas: &[TableSchema],
-    ) -> Result<Vec<Option<String>>> {
+    ) -> Result<Vec<(Option<String>, bool)>> {
         let mut targets = Vec::with_capacity(updates.len());
         for u in updates {
             let result_type = match u.doogat_type.as_deref() {
@@ -250,14 +297,17 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                     parser::parse(&content, &path)?.meta.doogat_type
                 }
             };
-            let singleton = result_type.filter(|t| {
-                schemas
-                    .iter()
-                    .find(|s| s.table_name == *t)
-                    .map(|s| s.singleton)
-                    .unwrap_or(false)
-            });
-            targets.push(singleton);
+            let schema = result_type
+                .as_deref()
+                .and_then(|t| schemas.iter().find(|s| s.table_name == t));
+            let singleton = schema
+                .filter(|s| s.singleton)
+                .map(|s| s.table_name.clone());
+            let has_unique = schema
+                .and_then(|s| s.unique_together.as_ref())
+                .map(|g| !g.is_empty())
+                .unwrap_or(false);
+            targets.push((singleton, has_unique));
         }
         Ok(targets)
     }
@@ -277,7 +327,13 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     }
 
     /// Prepare a single update: read, merge fields, validate, serialize.
-    /// Returns `(path, new_content)` without side effects.
+    /// Returns `(path, new_content, unique_candidates)` without side
+    /// effects. `unique_candidates` is this row's `(type, group_columns,
+    /// values)` keys for every fully-resolvable unique_together group under
+    /// the merged field set — the caller (`batch_update_with_message`) uses
+    /// it to catch two updates in the same batch racing for the same UNIQUE
+    /// tuple, since each alone passes the per-item DB check below (neither
+    /// row is materialized until Phase 3).
     ///
     /// Routes typed REFERENCES-column SETs to the reference zone via the
     /// shared `apply_field_updates` helper so the auto-junction stays in
@@ -287,7 +343,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         &self,
         update: &BatchUpdateInput,
         schemas: &[TableSchema],
-    ) -> Result<(String, String)> {
+    ) -> Result<(String, String, Vec<UniqueGroupKey>)> {
         let path = self.index.resolve_path(&update.id)?;
         let content = self.repo.read_file(&path)?;
         let mut parsed = parser::parse(&content, &path)?;
@@ -296,11 +352,42 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             .doogat_type
             .as_deref()
             .or(parsed.meta.doogat_type.as_deref());
+        let mut unique_candidates = Vec::new();
         if let Some(final_type) = final_type {
-            if !schemas.iter().any(|s| s.table_name == final_type) {
-                return Err(DoogatError::type_not_registered(final_type.to_string()));
-            }
+            let final_schema = match schemas.iter().find(|s| s.table_name == final_type) {
+                Some(s) => s,
+                None => return Err(DoogatError::type_not_registered(final_type.to_string())),
+            };
             self.check_singleton_update_constraint(&update.id, final_type, schemas)?;
+
+            // FT-1: same pre-commit UNIQUE check as `update_doogat_parsed`,
+            // against the merged field set (existing fields overlaid with
+            // this update's SET/UNSET), excluding this row.
+            let mut merged = parsed_fields(&parsed);
+            if let Some(unset) = update.unset_fields.as_ref() {
+                for key in unset {
+                    merged.remove(key);
+                }
+            }
+            if let Some(set) = update.fields.as_ref() {
+                for (key, value) in set {
+                    merged.insert(key.clone(), value.clone());
+                }
+            }
+            let effective_fields = self.merge_row_snapshot_for_unique_check(
+                &update.id,
+                final_type,
+                &merged,
+                schemas,
+            )?;
+            self.check_effective_unique_fields(
+                &update.id,
+                final_type,
+                final_schema,
+                &effective_fields,
+            )?;
+            unique_candidates =
+                Self::unique_group_candidates(final_type, final_schema, &effective_fields);
         }
 
         let schema = parsed
@@ -339,7 +426,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         );
 
         let new_content = parser::serialize(&parsed);
-        Ok((path, new_content))
+        Ok((path, new_content, unique_candidates))
     }
 
     /// Update a doogat from raw content (for FFI consumers).
@@ -353,24 +440,34 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     ///
     /// When the desired markdown targets a registered SINGLETON typedef,
     /// `check_singleton_update_constraint` still fires before the commit
-    /// lands so cross-row singleton invariants stay enforced.
+    /// lands so cross-row singleton invariants stay enforced. FT-1 rework:
+    /// the same is now true for a registered typedef's unique_together
+    /// groups — this raw lane previously had no UNIQUE pre-check at all,
+    /// unlike `create_doogat_raw`.
     pub fn update_doogat_raw(&self, id: &str, content: &str, message: &str) -> Result<()> {
         self.ensure_fresh()?;
         let rel_path = self.index.resolve_path(id)?;
         let desired = parser::parse(content, &rel_path)?;
         let schemas = self.list_type_schemas()?;
 
-        // PRD 00140: an update into a registered SINGLETON typedef runs
-        // its constraint-check → commit → index window inside a
-        // `BEGIN IMMEDIATE` transaction so a cross-process race surfaces a
-        // structured SINGLETON_VIOLATION on the losing writer.
-        let is_singleton = desired
+        let desired_schema = desired
             .meta
             .doogat_type
             .as_deref()
-            .and_then(|t| schemas.iter().find(|s| s.table_name == t))
-            .map(|s| s.singleton)
+            .and_then(|t| schemas.iter().find(|s| s.table_name == t));
+
+        // PRD 00140 (+ FT-1 rework): an update into a registered SINGLETON
+        // typedef, or one with unique_together groups, runs its
+        // constraint-check → commit → index window inside a
+        // `BEGIN IMMEDIATE` transaction so a cross-process race surfaces a
+        // structured violation on the losing writer instead of a silent
+        // `INSERT OR REPLACE` eviction.
+        let is_singleton = desired_schema.map(|s| s.singleton).unwrap_or(false);
+        let has_unique_groups = desired_schema
+            .and_then(|s| s.unique_together.as_ref())
+            .map(|g| !g.is_empty())
             .unwrap_or(false);
+        let needs_transaction = is_singleton || has_unique_groups;
 
         let write = || -> Result<()> {
             if let Some(type_name) = desired.meta.doogat_type.as_deref() {
@@ -380,6 +477,12 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                     // FK + allowed_values pre-check so update cannot bypass
                     // validation that create enforces.
                     let fields = parsed_fields(&desired);
+                    // FT-1: raw update replaces the stored content wholesale,
+                    // so `fields` (desired's own frontmatter + inline fields)
+                    // is already the full post-update field set for this
+                    // check — no SET/UNSET overlay needed, unlike the
+                    // `update`/`batch_update` lanes.
+                    self.check_unique_constraints_for_update(id, type_name, &fields, &schemas)?;
                     self.validate_fields_with_schemas(&schemas, type_name, &fields)?;
                 }
             }
@@ -390,7 +493,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             Ok(())
         };
 
-        if is_singleton {
+        if needs_transaction {
             crate::indexer::with_immediate_transaction(self.index.sql_conn(), write)
         } else {
             write()

@@ -8,6 +8,10 @@ use super::DoogatService;
 pub(super) type BareNextCounters = std::collections::BTreeMap<(String, String), i64>;
 /// (table, column, partition_value) -> current max value for DEFAULT NEXT(col) columns.
 pub(super) type PartitionedNextCounters = std::collections::BTreeMap<(String, String, String), i64>;
+/// A candidate unique_together key — `(table, group_columns, group_values)`.
+/// FT-1: shared between the per-item DB check here and `batch_update`'s
+/// intra-batch collision tracking (`update.rs`).
+pub(super) type UniqueGroupKey = (String, Vec<String>, Vec<String>);
 
 impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     /// Convert a `Value` to its canonical string representation for comparison
@@ -65,7 +69,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
         for group in unique_groups {
             let (sql, param_vals) =
-                match Self::build_unique_check_sql(type_name, group, &input.fields) {
+                match Self::build_unique_check_sql(type_name, group, &input.fields, None) {
                     Some(pair) => pair,
                     None => continue,
                 };
@@ -217,10 +221,13 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
     /// Build the SQL query + params for checking one unique_together group.
     /// Returns `None` when not all group columns are present in the input fields.
+    /// `exclude_id` (UPDATE lanes only) excludes the row being updated from
+    /// the collision lookup, so a row may keep its own current value.
     fn build_unique_check_sql(
         type_name: &str,
         group: &[String],
         fields: &std::collections::BTreeMap<String, crate::types::Value>,
+        exclude_id: Option<&str>,
     ) -> Option<(String, Vec<rusqlite::types::Value>)> {
         // PRD 00133: query the materialized typedef table directly. Before
         // unification, the service path joined `_ddb_fields` which only
@@ -235,10 +242,12 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         for col_name in group.iter() {
             // Defensive identifier check; column names that aren't safe to
             // inline shouldn't reach this far, but reject rather than build
-            // an injectable query.
+            // an injectable query. Hyphenated column names (like hyphenated
+            // typedef names, allowed below) are valid identifiers once
+            // quoted, so '-' is accepted alongside alphanumerics and '_'.
             if !col_name
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
             {
                 return None;
             }
@@ -257,11 +266,201 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         {
             return None;
         }
-        let sql = format!(
-            "SELECT id FROM \"{type_name}\" WHERE {} LIMIT 1",
+        let mut sql = format!(
+            "SELECT id FROM \"{type_name}\" WHERE {}",
             where_parts.join(" AND ")
         );
+        if let Some(id) = exclude_id {
+            let id_idx = param_vals.len() + 1;
+            sql.push_str(&format!(" AND id != ?{id_idx}"));
+            param_vals.push(rusqlite::types::Value::Text(id.to_string()));
+        }
+        sql.push_str(" LIMIT 1");
         Some((sql, param_vals))
+    }
+
+    /// Pre-UPDATE unique_together check (FT-1). Mirrors
+    /// `check_unique_constraints`'s SELECT-against-materialized-table
+    /// approach, but against the caller-supplied MERGED field set (existing
+    /// values overlaid with the update's SET/UNSET) and excluding the row
+    /// being updated, since a row may keep its own current value.
+    ///
+    /// Unlike the create-side check, an update always rejects a collision —
+    /// `BatchUpdateInput` has no `on_conflict` — so this returns `Err` rather
+    /// than `Ok(Some(existing))`.
+    ///
+    /// `merged_fields` alone may be missing a group column the update didn't
+    /// touch (a Body-zone column lives only in `parsed.body`, never in
+    /// `meta.extra`/`inline_fields`); `merge_row_snapshot_for_unique_check`
+    /// folds in that row's own materialized value for any such column before
+    /// the group is checked, instead of silently skipping the whole group.
+    pub(super) fn check_unique_constraints_for_update(
+        &self,
+        current_id: &str,
+        type_name: &str,
+        merged_fields: &std::collections::BTreeMap<String, crate::types::Value>,
+        schemas: &[TableSchema],
+    ) -> Result<()> {
+        let schema = match schemas.iter().find(|s| s.table_name == type_name) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        if schema.unique_together.is_none() {
+            return Ok(());
+        }
+        let effective_fields =
+            self.merge_row_snapshot_for_unique_check(current_id, type_name, merged_fields, schemas)?;
+        self.check_effective_unique_fields(current_id, type_name, schema, &effective_fields)
+    }
+
+    /// FT-1 rework: fold the row's own materialized value into
+    /// `merged_fields` for any unique_together column the update's SET/UNSET
+    /// didn't mention. Without this, a group spanning a column outside
+    /// `meta.extra`/`inline_fields` (e.g. a Body-zone typed column) is
+    /// missing from `merged_fields`, `build_unique_check_sql` returns `None`
+    /// for it (`fields.get(col)?`), and the whole group is skipped even
+    /// though materialization writes every column regardless of zone.
+    /// Returns `merged_fields` unchanged when `type_name` isn't registered,
+    /// has no unique_together groups, or every group column is already
+    /// present.
+    pub(super) fn merge_row_snapshot_for_unique_check(
+        &self,
+        current_id: &str,
+        type_name: &str,
+        merged_fields: &std::collections::BTreeMap<String, crate::types::Value>,
+        schemas: &[TableSchema],
+    ) -> Result<std::collections::BTreeMap<String, crate::types::Value>> {
+        let mut effective = merged_fields.clone();
+        let schema = match schemas.iter().find(|s| s.table_name == type_name) {
+            Some(s) => s,
+            None => return Ok(effective),
+        };
+        let groups = match schema.unique_together.as_ref() {
+            Some(g) => g,
+            None => return Ok(effective),
+        };
+
+        let mut missing: Vec<&str> = groups
+            .iter()
+            .flatten()
+            .map(|c| c.as_str())
+            .filter(|c| !merged_fields.contains_key(*c))
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        if missing.is_empty() {
+            return Ok(effective);
+        }
+
+        // Defensive identifier check mirrors `build_unique_check_sql`; leave
+        // the affected group(s) to be skipped there rather than build an
+        // injectable query. Hyphens are accepted alongside alphanumerics and
+        // '_' so a hyphenated unique_together column isn't silently dropped
+        // from enforcement.
+        let identifiers_safe = missing
+            .iter()
+            .all(|c| c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+            && type_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !identifiers_safe {
+            return Ok(effective);
+        }
+
+        let select_cols = missing
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT {select_cols} FROM \"{type_name}\" WHERE id = ?1");
+        let rows = self.index.query_raw_with_params(
+            &sql,
+            &[rusqlite::types::Value::Text(current_id.to_string())],
+        )?;
+        if let Some(row) = rows.first() {
+            for (col, val) in missing.iter().zip(row.iter()) {
+                effective.insert((*col).to_string(), crate::types::Value::String(val.clone()));
+            }
+        }
+        Ok(effective)
+    }
+
+    /// Run the unique_together group checks against an already-resolved
+    /// effective field set (see `merge_row_snapshot_for_unique_check`).
+    /// Split out from `check_unique_constraints_for_update` so the batch
+    /// lane (`prepare_update`) can reuse the same effective-field snapshot
+    /// both for this per-item DB check and for the intra-batch collision
+    /// keys (`unique_group_candidates`), without computing it twice.
+    pub(super) fn check_effective_unique_fields(
+        &self,
+        current_id: &str,
+        type_name: &str,
+        schema: &TableSchema,
+        effective_fields: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Result<()> {
+        let unique_groups = match schema.unique_together.as_ref() {
+            Some(groups) => groups,
+            None => return Ok(()),
+        };
+
+        for group in unique_groups {
+            let (sql, param_vals) = match Self::build_unique_check_sql(
+                type_name,
+                group,
+                effective_fields,
+                Some(current_id),
+            ) {
+                Some(pair) => pair,
+                None => continue,
+            };
+            let rows = self.index.query_raw_with_params(&sql, &param_vals)?;
+            if rows.first().and_then(|r| r.first()).is_some() {
+                let values: Vec<String> = group
+                    .iter()
+                    .map(|col| {
+                        effective_fields
+                            .get(col)
+                            .map(Self::value_to_string)
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                return Err(DoogatError::unique_violation(
+                    type_name.to_string(),
+                    group.clone(),
+                    values,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// FT-1: candidate `(type, group_columns, values)` keys for every
+    /// fully-resolvable unique_together group under `effective_fields`.
+    /// `batch_update`'s Phase 1 uses this to catch two updates in the same
+    /// batch that would land on the same UNIQUE tuple only after commit —
+    /// each passes `check_effective_unique_fields` alone (neither row is
+    /// materialized yet), so the per-item DB check can't see the collision.
+    /// Mirrors `batch.rs`'s `input_unique_keys` for creates.
+    pub(super) fn unique_group_candidates(
+        type_name: &str,
+        schema: &TableSchema,
+        effective_fields: &std::collections::BTreeMap<String, crate::types::Value>,
+    ) -> Vec<UniqueGroupKey> {
+        let groups = match schema.unique_together.as_ref() {
+            Some(g) => g,
+            None => return vec![],
+        };
+        groups
+            .iter()
+            .filter_map(|group| {
+                let values: Option<Vec<String>> = group
+                    .iter()
+                    .map(|col| effective_fields.get(col).map(Self::value_to_string))
+                    .collect();
+                values.map(|vals| (type_name.to_string(), group.clone(), vals))
+            })
+            .collect()
     }
 
     /// Validate extra fields against a pre-loaded typedef schema list.
