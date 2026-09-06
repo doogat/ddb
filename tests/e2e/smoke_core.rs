@@ -1,15 +1,7 @@
-use crate::common::{ddb_bin, DdbTestRepo};
+use crate::common::{ddb_bin, stdout, DdbTestRepo};
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
-
-fn stdout(repo: &DdbTestRepo, args: &[&str]) -> String {
-    let mut command = repo.ddb();
-    let assert = command.args(args).assert().success();
-    String::from_utf8_lossy(&assert.get_output().stdout)
-        .trim()
-        .to_owned()
-}
 
 #[test]
 fn smoke_01_init() {

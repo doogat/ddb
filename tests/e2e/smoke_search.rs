@@ -1,13 +1,5 @@
-use crate::common::DdbTestRepo;
+use crate::common::{stdout, DdbTestRepo};
 use predicates::prelude::*;
-
-fn stdout(repo: &DdbTestRepo, args: &[&str]) -> String {
-    let mut command = repo.ddb();
-    let assert = command.args(args).assert().success();
-    String::from_utf8_lossy(&assert.get_output().stdout)
-        .trim()
-        .to_owned()
-}
 
 #[test]
 fn smoke_22_fts5_search_boost() {

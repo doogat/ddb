@@ -143,6 +143,81 @@ fn raw_id_coexists_with_object_resolver() {
 }
 
 #[test]
+fn raw_id_field_pins_first_linked_with_multiple_junction_rows() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE category (label TEXT)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE category failed: {r}");
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "CREATE TABLE bookmark (url TEXT, category TEXT REFERENCES category)" }),
+    );
+    assert!(r.get("errors").is_none(), "CREATE bookmark failed: {r}");
+
+    // Three categories, minted in ascending id order.
+    let mut category_ids = Vec::new();
+    for label in ["alpha", "beta", "gamma"] {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({ "sql": format!("INSERT INTO category (label) VALUES ('{label}')") }),
+        );
+        assert!(
+            r.get("errors").is_none(),
+            "INSERT category {label} failed: {r}"
+        );
+        category_ids.push(
+            r["data"]["executeSql"]["message"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    let r = server.graphql_with_vars(
+        r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+        serde_json::json!({ "sql": "INSERT INTO bookmark (url) VALUES ('https://example.com')" }),
+    );
+    assert!(r.get("errors").is_none(), "INSERT bookmark failed: {r}");
+    let bm_id = r["data"]["executeSql"]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Link the categories out of id order (gamma, alpha, beta) so a resolver
+    // that picked the numerically smallest category id would give a
+    // different answer than one that pins the first-*linked* junction row.
+    for cat_id in [&category_ids[2], &category_ids[0], &category_ids[1]] {
+        let r = server.graphql_with_vars(
+            r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+            serde_json::json!({
+                "sql": format!(
+                    "INSERT INTO bookmark_category (bookmark_id, category_id) VALUES ('{bm_id}', '{cat_id}')"
+                )
+            }),
+        );
+        assert!(r.get("errors").is_none(), "INSERT junction failed: {r}");
+    }
+
+    let r = server.graphql(r#"{ bookmarks { items { category_id } } }"#);
+    assert!(r.get("errors").is_none(), "category_id query failed: {r}");
+    let items = r["data"]["bookmarks"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "expected 1 bookmark: {r}");
+    let raw_id = items[0]["category_id"]
+        .as_str()
+        .expect("category_id should be a non-null String");
+    assert_eq!(
+        raw_id, category_ids[2],
+        "category_id must pin the first-linked category (gamma), not the numerically smallest one"
+    );
+}
+
+#[test]
 fn id_suffix_column_exposes_scalar_and_object() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);

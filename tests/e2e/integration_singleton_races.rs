@@ -2,7 +2,7 @@
 //! The CLI-only leg is
 //! `singleton_cross_process_create::two_concurrent_ddb_create_on_singleton_converge_on_one_row`.
 
-use crate::common::{DdbTestRepo, ServerGuard};
+use crate::common::{assert_doogat_id, DdbTestRepo, ServerGuard};
 use serde_json::Value;
 use std::process::Command;
 use std::sync::Barrier;
@@ -83,10 +83,7 @@ fn assert_survivor(repo: &DdbTestRepo, table: &str, theme: &str) -> String {
     let id = String::from_utf8_lossy(&row_id.get_output().stdout)
         .trim()
         .to_owned();
-    assert!(
-        id.len() == 14 && id.chars().all(|c| c.is_ascii_digit()),
-        "survivor must have a 14-digit id, got: {id:?}"
-    );
+    assert_doogat_id(&id);
     let row_theme = repo
         .ddb()
         .args(["query", &format!("SELECT theme FROM {table}")])
@@ -108,7 +105,6 @@ fn assert_survivor(repo: &DdbTestRepo, table: &str, theme: &str) -> String {
     let committed_ids: Vec<&str> = tree_stdout
         .lines()
         .filter_map(|path| path.strip_suffix(".md"))
-        .filter(|stem| stem.len() == 14 && stem.chars().all(|c| c.is_ascii_digit()))
         .collect();
     assert_eq!(
         committed_ids,

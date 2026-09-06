@@ -1,4 +1,4 @@
-use crate::common::{DdbTestRepo, ServerGuard};
+use crate::common::{assert_doogat_id, DdbTestRepo, ServerGuard};
 use serde_json::{json, Value};
 
 fn assert_graphql_ok(result: &Value) {
@@ -155,7 +155,7 @@ fn integration_17j2_jink_config_singleton_and_link_crud() {
         "jink-config should initially be empty"
     );
     let config_id = seed_jink_config(&server);
-    assert!(!config_id.is_empty());
+    assert_doogat_id(&config_id);
     assert_eq!(
         sql_rows(
             &server,

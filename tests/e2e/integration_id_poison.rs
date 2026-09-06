@@ -13,7 +13,7 @@
 //! mutation that calls `ensure_fresh()` after the poison commit; a second
 //! mutation would see nothing stale and return no warnings.
 
-use crate::common::{DdbTestRepo, ServerGuard};
+use crate::common::{assert_doogat_id, DdbTestRepo, ServerGuard};
 use predicates::prelude::*;
 use std::collections::HashSet;
 use std::path::Path;
@@ -34,11 +34,6 @@ fn git(repo: &Path, args: &[&str]) {
         "git {args:?} failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-}
-
-/// True if `s` is exactly 14 ASCII digits (the `ddb` id shape).
-fn is_14_digit_id(s: &str) -> bool {
-    s.len() == 14 && s.chars().all(|c| c.is_ascii_digit())
 }
 
 /// PRD 00164 removed the stale same-second mint workaround: the batch
@@ -90,15 +85,9 @@ fn integration_62_id_minting_no_same_second_collision() {
         "expected 3 comma-separated ids from the batch insert: {batch_stdout:?}"
     );
     for id in &batch_ids {
-        assert!(
-            is_14_digit_id(id),
-            "expected a 14-digit numeric id, got {id:?} in {batch_stdout:?}"
-        );
+        assert_doogat_id(id);
     }
-    assert!(
-        is_14_digit_id(&single_stdout),
-        "expected a single 14-digit numeric id, got {single_stdout:?}"
-    );
+    assert_doogat_id(&single_stdout);
 
     let mut all_ids: Vec<String> = batch_ids.into_iter().map(str::to_owned).collect();
     all_ids.push(single_stdout);

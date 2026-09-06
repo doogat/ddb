@@ -1,21 +1,5 @@
-use crate::common::DdbTestRepo;
+use crate::common::{assert_doogat_id, stdout, DdbTestRepo};
 use predicates::prelude::*;
-
-fn stdout(repo: &DdbTestRepo, args: &[&str]) -> String {
-    let mut command = repo.ddb();
-    let assert = command.args(args).assert().success();
-    String::from_utf8_lossy(&assert.get_output().stdout)
-        .trim()
-        .to_owned()
-}
-
-fn assert_doogat_id(id: &str) {
-    assert_eq!(id.len(), 14, "expected a 14-digit doogat id, got {id:?}");
-    assert!(
-        id.bytes().all(|byte| byte.is_ascii_digit()),
-        "expected a numeric doogat id, got {id:?}"
-    );
-}
 
 #[test]
 fn smoke_09_sql_queries() {

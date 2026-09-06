@@ -10,6 +10,7 @@
 //! SCREAMING_SNAKE_CASE vocabulary GraphQL puts in `extensions.code`).
 
 use crate::common::{DdbTestRepo, ServerGuard};
+use predicates::prelude::*;
 use serde_json::{json, Value};
 
 /// GW-7 happy path: create → read → update → delete → confirm gone (404).
@@ -152,6 +153,18 @@ fn rest_typed_create_populates_typed_columns() {
 
     // Verify typed columns are populated by reading the materialized row back.
     assert_item_typed_columns_roundtrip(&server, &id);
+
+    // Cross-process read-back: confirm the typed column is durable and
+    // readable through a separate `ddb query` CLI process, not just the
+    // same server's executeSql.
+    repo.ddb()
+        .args([
+            "query",
+            &format!("SELECT category FROM item WHERE id = '{id}'"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("books"));
 }
 
 /// Read the materialized `item` row back via `executeSql` (format:"objects") and

@@ -1,4 +1,5 @@
 use crate::common::{select_scalar, DdbTestRepo, ServerGuard};
+use serde_json::json;
 
 #[test]
 fn integration_44_e1_join_pin_graphql() {
@@ -33,13 +34,11 @@ fn integration_44_e1_join_pin_graphql() {
     let rows = joined["data"]["sql"]["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 1, "expected exactly one joined row: {joined}");
     let row_str = rows[0].as_str().unwrap();
-    assert!(
-        row_str.contains('a'),
-        "joined row should contain title 'a': {row_str}"
-    );
-    assert!(
-        row_str.contains('1'),
-        "joined row should contain count 1: {row_str}"
+    let row: serde_json::Value = serde_json::from_str(row_str).unwrap();
+    assert_eq!(
+        row,
+        json!(["a", "1"]),
+        "joined row should be exactly [title, count]: {row_str}"
     );
 }
 

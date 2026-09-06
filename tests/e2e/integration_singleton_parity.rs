@@ -8,7 +8,7 @@
 //! this test covers the GraphQL (`executeSql` *and* typed `createDoogat`), REST,
 //! and NoSQL-HTTP legs plus the shared end state.
 
-use crate::common::{DdbTestRepo, ServerGuard};
+use crate::common::{assert_doogat_id, DdbTestRepo, ServerGuard};
 use predicates::prelude::*;
 use serde_json::{json, Value};
 
@@ -57,10 +57,7 @@ fn integration_54_d_cross_protocol_singleton_duplicate_parity() {
     let existing_id = String::from_utf8_lossy(&seed.get_output().stdout)
         .trim()
         .to_string();
-    assert!(
-        existing_id.len() == 14 && existing_id.chars().all(|c| c.is_ascii_digit()),
-        "seed INSERT must print a 14-digit doogat id, got: {existing_id:?}"
-    );
+    assert_doogat_id(&existing_id);
 
     // Control: an ordinary table declared WITHOUT SINGLETON takes as many rows as
     // it is given. Without this, every rejection below would still pass on a

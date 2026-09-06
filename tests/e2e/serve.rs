@@ -1408,6 +1408,7 @@ fn filter_base_field_title_eq() {
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["title"].as_str().unwrap(), "Alpha Task");
+    assert_eq!(result["data"]["tasks"]["totalCount"].as_i64().unwrap(), 1);
 }
 
 #[test]
@@ -1443,6 +1444,7 @@ fn filter_base_field_title_contains() {
     let items = result["data"]["tasks"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert!(items[0]["title"].as_str().unwrap().contains("needle"));
+    assert_eq!(result["data"]["tasks"]["totalCount"].as_i64().unwrap(), 1);
 }
 
 #[test]
@@ -1819,7 +1821,8 @@ fn search_where_filter_materialized_column_eq() {
     );
     assert!(r.get("errors").is_none(), "CREATE TABLE failed: {r}");
 
-    // Insert 3 links: two with example.com, one with other.org
+    // Insert 3 links: one exact example.com match, one example.com prefix
+    // (must NOT match a true eq filter), one other.org.
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
         serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Link A', 'https://example.com', 'filterable alpha content')" }),
@@ -1829,7 +1832,7 @@ fn search_where_filter_materialized_column_eq() {
 
     let r = server.graphql_with_vars(
         r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
-        serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Link B', 'https://example.com', 'filterable beta content')" }),
+        serde_json::json!({ "sql": "INSERT INTO link (title, url, description) VALUES ('Link B', 'https://example.com/page', 'filterable beta content')" }),
     );
     assert!(r.get("errors").is_none(), "INSERT B failed: {r}");
     std::thread::sleep(Duration::from_secs(1));
@@ -1851,10 +1854,10 @@ fn search_where_filter_materialized_column_eq() {
     let hits = result["data"]["search"]["hits"].as_array().unwrap();
     assert_eq!(
         hits.len(),
-        2,
-        "expected 2 hits for url=example.com, got: {hits:?}"
+        1,
+        "expected 1 hit for url=example.com, got: {hits:?}"
     );
-    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 2);
+    assert_eq!(result["data"]["search"]["totalCount"].as_i64().unwrap(), 1);
 }
 
 #[test]

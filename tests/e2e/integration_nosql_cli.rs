@@ -1,7 +1,7 @@
 //! NoSQL CLI commands (get, scan --tag, scan --type, backlinks)
 //! exercised against a self-contained fixture.
 
-use crate::common::DdbTestRepo;
+use crate::common::{assert_doogat_id, DdbTestRepo};
 use predicates::prelude::*;
 
 #[test]
@@ -36,10 +36,7 @@ fn integration_32_nosql_cli_commands() {
         .output()
         .unwrap();
     let id3 = String::from_utf8_lossy(&id3_out.stdout).trim().to_string();
-    assert!(
-        id3.len() == 14 && id3.chars().all(|c| c.is_ascii_digit()),
-        "typed fixture must return a 14-digit id, got: {id3:?}"
-    );
+    assert_doogat_id(&id3);
 
     let id1_out = repo
         .ddb()
@@ -81,12 +78,13 @@ fn integration_32_nosql_cli_commands() {
         .args(["scan", "--type", "foo"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(id3));
+        .stdout(predicate::str::contains(id3.clone()));
     assert!(
         String::from_utf8_lossy(&scan.get_output().stdout)
             .lines()
-            .any(|line| line.len() == 14 && line.chars().all(|c| c.is_ascii_digit())),
-        "scan --type must print a 14-digit id on its own line"
+            .any(|line| line == id3),
+        "scan --type must print id3 on its own line, got: {:?}",
+        String::from_utf8_lossy(&scan.get_output().stdout)
     );
 
     repo.ddb()
