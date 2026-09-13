@@ -273,7 +273,7 @@ pub(super) fn build_execute_sql_field() -> Field {
             ))))
         })
     })
-    .description("Execute a single SQL statement (DDL or DML). DDL triggers schema reload. BEGIN/COMMIT/ROLLBACK are rejected with TRANSACTION_NOT_SUPPORTED because every client shares this surface; use executeBatch for atomic multi-statement execution.")
+    .description("Execute a single SQL statement (DDL or DML). DDL triggers schema reload. BEGIN/COMMIT/ROLLBACK are rejected with TRANSACTION_NOT_SUPPORTED because every client shares this surface; use executeBatch for atomic DML within one request.")
     .argument(
         InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING))
             .description("SQL statement to execute."),
@@ -315,11 +315,11 @@ pub(super) fn build_execute_batch_field() -> Field {
             })
         },
     )
-    .description("Execute multiple SQL statements atomically. DML statements run in an implicit transaction: if any fails, all are rolled back. DDL commits immediately and triggers schema reload. A batch that opens its own BEGIN must close it with COMMIT or ROLLBACK in the same call; one left open is rolled back and rejected with TRANSACTION_NOT_SUPPORTED.")
+    .description("Execute SQL statements in one request. Without explicit transaction control, multiple statements use an implicit transaction and buffered writes roll back together on failure. CREATE TABLE and column/typedef alterations join the transaction; DROP TABLE and table renames commit immediately and cannot be rolled back. DDL triggers schema reload. A batch that opens its own BEGIN must close it with COMMIT or ROLLBACK in the same call; one left open has its buffered writes rolled back and is rejected with TRANSACTION_NOT_SUPPORTED.")
     .argument(InputValue::new(
         "statements",
         TypeRef::named_nn_list_nn(TypeRef::STRING),
-    ).description("SQL statements to execute atomically."))
+    ).description("SQL statements to execute in one request."))
     .argument(InputValue::new("format", TypeRef::named(TypeRef::STRING)).description("Response format: 'array' (default) or 'objects'."))
 }
 

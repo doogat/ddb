@@ -310,6 +310,12 @@ uses `DoogatService::open_shared`: raw transaction verbs cannot span SQL calls,
 and a batch must close any transaction it opens. See
 [server transaction ownership](./server.md#shared-application-contract).
 
+`CREATE TABLE` and supported column/typedef alterations also buffer their Git
+writes while a transaction is active. `DROP TABLE` and
+`ALTER TABLE ... RENAME TO` commit immediately and cannot be undone by
+`ROLLBACK`; keep them out of batches that require rollback. The buffer and
+rollback behavior below applies only to transaction-aware operations.
+
 ### Execution Model
 
 - `execute_batch(sql)` parses multiple semicolon-separated statements and executes them sequentially
