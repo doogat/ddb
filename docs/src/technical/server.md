@@ -48,7 +48,15 @@ See [Choosing an interface](../guide/building-apps.md#choosing-an-interface) for
 
 Both the server and embedded (`DoogatDriver`) paths delegate typed SQL execution to the same `SqlEngine` in `ddb-core`. The server actor constructs `SqlEngine::new(index, repo)` per command; `DoogatDriver` does the same per `execute_sql` call. This ensures identical semantics for single statements: DDL creates typedef doogats via Git, DML reads/writes Git-backed doogats.
 
-**Transaction difference**: The embedded path (`DoogatDriver`) supports multi-statement transactions via `begin_transaction`/`commit_transaction`/`rollback_transaction`, which suspend and resume a `TransactionBuffer` across calls. The server path creates a fresh `SqlEngine` per `executeSql` command, so BEGIN/COMMIT/ROLLBACK cannot span multiple GraphQL calls. For atomic multi-statement execution over GraphQL, use `executeBatch(statements: [...])` which joins statements and executes them through the service's batch path.
+**Transaction ownership**: Embedded services use the default `Exclusive` scope. Raw SQL `BEGIN`/`COMMIT`/`ROLLBACK` through `DoogatDriver.executeSql`, the FFI transaction methods, and CLI SQL batches retain their existing behavior. The embedded caller owns any buffer retained across calls.
+
+The server actor constructs its service with `DoogatService::open_shared`, selecting `Shared` scope. Every connection uses that service; retaining a transaction between requests would capture unrelated clients' writes and could lose them when the initiating client disconnects.
+
+In `Shared` scope, `execute_sql` rejects `BEGIN`, `COMMIT`, or `ROLLBACK` anywhere in the statement string with `TRANSACTION_NOT_SUPPORTED`. A client SQL call or batch that opens a transaction without closing it rolls its buffered DML back and returns the same error. The core service enforces this policy once for GraphQL and PgWire; the actor constructor is covered by a unit test that fails if it uses the default scope. Internal operations such as schema application retain their explicitly owned transaction across helper calls and close it before returning to the client.
+
+**`executeBatch(statements: [...])` is the server's atomic unit for DML within one request.** Without explicit transaction control, multiple statements use an implicit transaction. An explicit `BEGIN` must finish with `COMMIT` or `ROLLBACK` in the same batch. DDL still commits immediately and is not rolled back with DML.
+
+Server clients previously issuing transaction verbs across requests must move their DML into one GraphQL `executeBatch` call. PgWire clients needing that atomic workflow must use this GraphQL surface until connection-scoped transactions are supported. GraphQL exposes the error in `extensions.code`; PgWire retains its existing SQL error mapping and includes the actionable message. This requires no repository migration or auth/setup change. REST and NoSQL do not expose these SQL transaction verbs and are unaffected.
 
 See [FFI Bindings](./ffi.md) for the embedded side of this contract.
 

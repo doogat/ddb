@@ -273,7 +273,7 @@ pub(super) fn build_execute_sql_field() -> Field {
             ))))
         })
     })
-    .description("Execute a single SQL statement (DDL or DML). DDL triggers schema reload.")
+    .description("Execute a single SQL statement (DDL or DML). DDL triggers schema reload. BEGIN/COMMIT/ROLLBACK are rejected with TRANSACTION_NOT_SUPPORTED because every client shares this surface; use executeBatch for atomic multi-statement execution.")
     .argument(
         InputValue::new("sql", TypeRef::named_nn(TypeRef::STRING))
             .description("SQL statement to execute."),
@@ -315,7 +315,7 @@ pub(super) fn build_execute_batch_field() -> Field {
             })
         },
     )
-    .description("Execute multiple SQL statements atomically. DML statements run in an implicit transaction: if any fails, all are rolled back. DDL commits immediately and triggers schema reload.")
+    .description("Execute multiple SQL statements atomically. DML statements run in an implicit transaction: if any fails, all are rolled back. DDL commits immediately and triggers schema reload. A batch that opens its own BEGIN must close it with COMMIT or ROLLBACK in the same call; one left open is rolled back and rejected with TRANSACTION_NOT_SUPPORTED.")
     .argument(InputValue::new(
         "statements",
         TypeRef::named_nn_list_nn(TypeRef::STRING),

@@ -102,7 +102,8 @@ impl From<DoogatError> for AppError {
                     | codes::SCHEMA_DESTRUCTIVE_BLOCKED => AppErrorCategory::Conflict,
                     codes::NOT_NULL_VIOLATION
                     | codes::UNKNOWN_FIELD
-                    | codes::TYPE_NOT_REGISTERED => AppErrorCategory::InvalidInput,
+                    | codes::TYPE_NOT_REGISTERED
+                    | codes::TRANSACTION_NOT_SUPPORTED => AppErrorCategory::InvalidInput,
                     codes::SCHEMA_APPLY_PARTIAL => AppErrorCategory::Internal,
                     _ => AppErrorCategory::Internal,
                 };
@@ -195,8 +196,14 @@ mod tests {
         };
         let app: crate::app_contract::AppError = err.into();
         assert_eq!(app.code, "SCHEMA_DESTRUCTIVE_BLOCKED");
-        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Conflict);
-        assert_eq!(app.message, "plan blocked: risky operations require override");
+        assert_eq!(
+            app.category,
+            crate::app_contract::AppErrorCategory::Conflict
+        );
+        assert_eq!(
+            app.message,
+            "plan blocked: risky operations require override"
+        );
     }
 
     #[test]
@@ -211,7 +218,10 @@ mod tests {
             context: vec![],
         };
         let app: crate::app_contract::AppError = err.into();
-        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Conflict);
+        assert_eq!(
+            app.category,
+            crate::app_contract::AppErrorCategory::Conflict
+        );
         assert_eq!(app.message, "request requires the override flag");
     }
 
@@ -224,7 +234,10 @@ mod tests {
         };
         let app: crate::app_contract::AppError = err.into();
         assert_eq!(app.code, "SCHEMA_APPLY_PARTIAL");
-        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Internal);
+        assert_eq!(
+            app.category,
+            crate::app_contract::AppErrorCategory::Internal
+        );
         assert_eq!(app.message, "halted after 5 of 9 operations");
     }
 

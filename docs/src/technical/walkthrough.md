@@ -19,6 +19,11 @@ A clap-derived binary (`ddb`). `main.rs` defines CLI structs and dispatches to `
 
 An axum-based multi-protocol server library. Protocols: GraphQL (dynamic schema from typedef doogats), REST (JSON CRUD), PgWire (Postgres wire protocol for SQL clients), and WebSocket (GraphQL subscriptions). The crate wires up bearer-token auth, a single-writer actor, a read-only connection pool, an event bus for real-time subscriptions, and hot schema reload when typedef doogats change.
 
+The actor opens its service with `DoogatService::open_shared`. Its `Shared`
+transaction scope prevents SQL requests from leaving a transaction buffer for
+another client. `open`, `init`, and `from_parts` default to `Exclusive`, retaining
+embedded transactions across calls. Both scopes use the same SQL engine.
+
 ### ddb-uniffi-bindgen
 
 An isolated binary crate whose sole purpose is to host the UniFFI bindgen tool. Keeping it separate avoids polluting ddb-core with binary targets and simplifies cross-compilation for Swift and Kotlin binding generation.

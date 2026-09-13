@@ -305,6 +305,11 @@ Five custom DDL statements are intercepted via regex before sqlparser parsing: `
 
 `BEGIN`, `COMMIT`, and `ROLLBACK` wrap multiple DML statements into a single git commit.
 
+This applies to the engine and exclusive embedded services. The server actor
+uses `DoogatService::open_shared`: raw transaction verbs cannot span SQL calls,
+and a batch must close any transaction it opens. See
+[server transaction ownership](./server.md#shared-application-contract).
+
 ### Execution Model
 
 - `execute_batch(sql)` parses multiple semicolon-separated statements and executes them sequentially

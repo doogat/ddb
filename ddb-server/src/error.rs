@@ -462,6 +462,11 @@ mod tests {
     #[test]
     fn app_err_safe_variants_match_legacy_message_and_code() {
         assert_app_err_matches_legacy(
+            DoogatError::transaction_not_supported("BEGIN"),
+            DoogatError::transaction_not_supported("BEGIN"),
+            "TRANSACTION_NOT_SUPPORTED",
+        );
+        assert_app_err_matches_legacy(
             DoogatError::NotFound("doogat 42 not found".into()),
             DoogatError::NotFound("doogat 42 not found".into()),
             "NOT_FOUND",

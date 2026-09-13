@@ -25,6 +25,13 @@ mod write_helpers;
 pub use create::UpsertOutcome;
 pub use search::SORTABLE_COLUMNS;
 
+/// Whether SQL transaction state has an owner across service calls.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransactionScope {
+    Exclusive,
+    Shared,
+}
+
 /// Extra frontmatter fields to set or remove during an update.
 pub struct ExtraFieldUpdates<'a> {
     pub set: &'a std::collections::BTreeMap<String, crate::types::Value>,
@@ -52,6 +59,7 @@ pub struct DoogatService<G: GitBackend = GitRepo, I: IndexPort = Index> {
     pub(super) index: I,
     pub(super) nosql: Box<dyn NoSqlMirrorPort + Send + Sync>,
     pub(super) txn: Option<TransactionBuffer>,
+    transaction_scope: TransactionScope,
     pub(super) repo_path: PathBuf,
     pub(super) skip_stale_check: bool,
 }
@@ -71,6 +79,16 @@ impl DoogatService<GitRepo, Index> {
     pub fn init(path: &Path) -> Result<Self> {
         GitRepo::init(path)?;
         Self::open(path)
+    }
+
+    /// Open a service shared by independent server clients.
+    ///
+    /// SQL calls may not leave transaction state for a later client. Embedded
+    /// callers should use `open` or `init`, which retain exclusive ownership.
+    pub fn open_shared(path: &Path) -> Result<Self> {
+        let mut service = Self::open(path)?;
+        service.transaction_scope = TransactionScope::Shared;
+        Ok(service)
     }
 
     /// Build the default NoSQL mirror for production wiring.
@@ -98,6 +116,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             index,
             nosql,
             txn: None,
+            transaction_scope: TransactionScope::Exclusive,
             repo_path,
             skip_stale_check: false,
         }
@@ -130,8 +149,8 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 #[cfg(test)]
 mod create_unregistered_policy_tests;
 #[cfg(test)]
-mod update_facade_tests;
-#[cfg(test)]
 mod mock_index_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod update_facade_tests;

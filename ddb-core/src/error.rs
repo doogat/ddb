@@ -117,6 +117,9 @@ pub mod codes {
     /// PRD 00161 §3.5: a schema plan contains destructive ops (drop/rename)
     /// and `allow_destructive` was not set.
     pub const SCHEMA_DESTRUCTIVE_BLOCKED: &str = "SCHEMA_DESTRUCTIVE_BLOCKED";
+    /// A transaction verb reached `execute_sql`, or a batch left a transaction
+    /// open, on a service shared by independent server clients.
+    pub const TRANSACTION_NOT_SUPPORTED: &str = "TRANSACTION_NOT_SUPPORTED";
 }
 
 impl DoogatError {
@@ -282,6 +285,25 @@ impl DoogatError {
             context: vec![
                 ("table".into(), ErrorValue::String(table)),
                 ("existing_id".into(), ErrorValue::String(existing_id)),
+            ],
+        }
+    }
+
+    /// Reject cross-call transaction state on a shared server service.
+    /// Embedded services retain their caller-owned transactions.
+    pub fn transaction_not_supported(verb: impl Into<String>) -> Self {
+        let verb = verb.into();
+        DoogatError::Structured {
+            code: codes::TRANSACTION_NOT_SUPPORTED,
+            message: format!(
+                "{verb} cannot span calls on a shared server service: transaction state would capture other clients' writes. Use executeBatch for atomic DML within one request; an explicit BEGIN must finish with COMMIT or ROLLBACK in that batch."
+            ),
+            context: vec![
+                ("verb".into(), ErrorValue::String(verb)),
+                (
+                    "atomic_unit".into(),
+                    ErrorValue::String("executeBatch".into()),
+                ),
             ],
         }
     }

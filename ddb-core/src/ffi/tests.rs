@@ -179,6 +179,37 @@ fn execute_sql_dml_on_nonexistent_type_returns_error() {
 // --- Transaction tests ---
 
 #[test]
+fn raw_sql_transactions_preserve_embedded_commit_and_rollback() {
+    let (_tmp, driver) = fresh_driver();
+    driver.reindex().unwrap();
+    driver
+        .execute_sql("CREATE TABLE item (name TEXT)".into())
+        .unwrap();
+    let before = driver.svc.lock().unwrap().repo.head_oid().unwrap();
+
+    driver.execute_sql("BEGIN".into()).unwrap();
+    driver
+        .execute_sql("INSERT INTO item (name) VALUES ('kept')".into())
+        .unwrap();
+    assert_eq!(driver.svc.lock().unwrap().repo.head_oid().unwrap(), before);
+    driver.execute_sql("COMMIT".into()).unwrap();
+    let committed = driver.svc.lock().unwrap().repo.head_oid().unwrap();
+    assert_ne!(committed, before);
+
+    driver.execute_sql("BEGIN".into()).unwrap();
+    driver
+        .execute_sql("INSERT INTO item (name) VALUES ('discarded')".into())
+        .unwrap();
+    driver.execute_sql("ROLLBACK".into()).unwrap();
+    assert_eq!(
+        driver.svc.lock().unwrap().repo.head_oid().unwrap(),
+        committed
+    );
+    let result = driver.execute_sql("SELECT name FROM item".into()).unwrap();
+    assert_eq!(result.rows, vec![vec!["kept".to_string()]]);
+}
+
+#[test]
 fn transaction_commit_persists_writes() {
     let (_tmp, driver) = fresh_driver();
     driver.reindex().unwrap();
@@ -663,7 +694,10 @@ fn apply_schema_creates_declared_type_when_not_dry_run() {
         .expect("apply should succeed");
 
     assert!(!report.dry_run);
-    assert!(report.applied, "non-dry-run create must report applied=true");
+    assert!(
+        report.applied,
+        "non-dry-run create must report applied=true"
+    );
     let create = report
         .ops
         .iter()

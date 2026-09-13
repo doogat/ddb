@@ -1,5 +1,8 @@
 mod handlers;
 
+#[cfg(test)]
+mod tests;
+
 use std::path::PathBuf;
 
 use chrono::Utc;
@@ -662,7 +665,7 @@ impl ActorHandle {
 
 /// The blocking actor loop, runs on its own OS thread.
 fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorMsg>, event_bus: EventBus) {
-    let mut svc = match DoogatService::open(&repo_path) {
+    let mut svc = match DoogatService::open_shared(&repo_path) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(%e, "actor: failed to open DoogatService");

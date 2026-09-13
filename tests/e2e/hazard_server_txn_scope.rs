@@ -88,7 +88,6 @@ fn insert_probe(server: &ServerGuard, title: &str, leg: &str) -> String {
 }
 
 #[test]
-#[ignore = "fast-track FT-6: hazard H6 confirmed 2026-09-06 (server transaction buffer is process-global; a foreign PgWire BEGIN swallows a GraphQL INSERT); un-ignore with the fix, see dev/local/plans/fast-track-2026-09-06.md"]
 fn open_transaction_on_one_connection_does_not_capture_another_clients_insert() {
     let repo = DdbTestRepo::init();
     let server = ServerGuard::start(&repo);
@@ -119,8 +118,10 @@ fn open_transaction_on_one_connection_does_not_capture_another_clients_insert() 
         });
         client
     });
-    rt.block_on(client.simple_query("BEGIN"))
-        .expect("pgwire BEGIN should succeed");
+    // Either outcome is safe: the server may reject the verb outright, or it
+    // may accept it. What must never follow is another client's write landing
+    // in this connection's transaction, and both legs below hold regardless.
+    let _ = rt.block_on(client.simple_query("BEGIN"));
 
     // Leg 1: a different client's INSERT must reach git, not the PgWire
     // client's transaction buffer.

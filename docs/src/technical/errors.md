@@ -67,6 +67,12 @@ typed `context` entries that propagate to every transport (GraphQL `extensions.c
 REST error envelope, FFI `DdbError::{Validation, SqlEngine}::code`). See
 `ddb-core/src/error.rs::codes` for the full list.
 
+`TRANSACTION_NOT_SUPPORTED` identifies transaction control that would retain
+state across requests on a shared server service. It is an `InvalidInput`
+application error with user-safe guidance, `verb`, and `atomic_unit` context.
+Use GraphQL `executeBatch` for atomic DML within one request. Exclusive embedded
+services retain their transaction API and raw SQL transaction support.
+
 ### SINGLETON_VIOLATION `existing_id` sentinel
 
 `SINGLETON_VIOLATION` errors carry `context.existing_id` so clients can render a
