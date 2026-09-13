@@ -45,7 +45,9 @@ fn seed_cascade_pair(svc: &mut DoogatService) -> (String, String) {
 
 fn child_rows(svc: &mut DoogatService, child_id: &str) -> Vec<Vec<String>> {
     match svc
-        .execute_sql(&format!("SELECT id FROM membership WHERE id = '{child_id}'"))
+        .execute_sql(&format!(
+            "SELECT id FROM membership WHERE id = '{child_id}'"
+        ))
         .unwrap()
     {
         SqlResult::Rows { rows, .. } => rows,
@@ -55,7 +57,9 @@ fn child_rows(svc: &mut DoogatService, child_id: &str) -> Vec<Vec<String>> {
 
 fn assert_child_gone(svc: &mut DoogatService, child_id: &str, via: &str) {
     let Err(err) = svc.read_doogat(child_id) else {
-        panic!("H3: CASCADE child {child_id} still readable from git after {via} deleted its parent");
+        panic!(
+            "H3: CASCADE child {child_id} still readable from git after {via} deleted its parent"
+        );
     };
     assert!(
         matches!(err, DoogatError::NotFound(_)),
@@ -69,7 +73,6 @@ fn assert_child_gone(svc: &mut DoogatService, child_id: &str, via: &str) {
 }
 
 #[test]
-#[ignore = "fast-track FT-3: hazard H3 confirmed 2026-09-06 (SQL DELETE runs no ON DELETE CASCADE walk); un-ignore with the fix, see dev/local/plans/fast-track-2026-09-06.md"]
 fn sql_delete_of_cascade_parent_removes_child_or_refuses() {
     let tmp = tempfile::TempDir::new().unwrap();
     let mut svc = DoogatService::init(tmp.path()).unwrap();

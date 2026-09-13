@@ -203,6 +203,10 @@ from Git. Read failures are surfaced, never silently dropped (PRD 00140):
   `tracing::warn!` when a SQLite row fails to decode, skipping only that row
   rather than dropping it without a signal.
 
+### Cascade delete preflight
+
+Cascade-delete preflight lives in `indexer/cascade.rs`: schema loading, required-reference checks, and child scans are shared by service and SQL deletion. SQL supplies transaction-buffered file reads; the service supplies Git reads. Every malformed typedef or child-id row is logged and skipped, while query-level failures propagate. Cleanup uses the shared junction sweep before removing a doogat and nests under the delete operation's savepoint.
+
 ### populate_junction_tables / sync_junction_tables_for_columns
 
 `Index::populate_junction_tables(schema, id, doogat)` and `Index::sync_junction_tables_for_columns(schema, id, doogat, changed_cols)` are the two entry points that keep auto-junction `{type}_{ref_col}` tables aligned with a single doogat's REFERENCES values. Both used to be private helpers reachable only from `materialize_single` / `materialize_row`. PRD 00134 promoted them to `pub(crate)` (and exposed them on the `SqlBackend` trait) so the SQL `INSERT` and `UPDATE` paths in `ddb-core/src/sql_engine/dml.rs` share the same implementation as the full-rebuild path. See [`sql-engine.md`](sql-engine.md#auto-junction-sync-on-typed-insert-and-update-prd-00134) for the SQL-side wiring.

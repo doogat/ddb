@@ -422,15 +422,17 @@ Removes the matching `- category:: [[id]]` line from the bookmark doogat's refer
 
 ### Cascade on Data Delete
 
-When a doogat is deleted via `DELETE FROM`, two cascade operations happen automatically:
+SQL `DELETE FROM` and `DoogatService::delete_doogat` (including `ddb delete`) use the same cascade planner. Each deleted node receives both cleanup operations:
 
 1. **Junction cleanup (both directions)**: every auto-junction row whose other end was the deleted id is removed. The cleanup sweeps:
    - **Reverse**: rows where the deleted id appears as the *referenced target* (e.g. deleting a `category` removes `bookmark_category` rows whose `category_id` matches).
    - **Parent/owner** (PRD 00137): rows where the deleted id is the *owning parent* (e.g. deleting a `bookmark` removes `bookmark_category` rows whose `bookmark_id` matches). Pre-PRD-00137 the parent-direction rows stayed dangling, so a subsequent `JOIN` against `bookmark_category` returned phantom rows until the next `ddb reindex`. The fix extends `cascade_junction_cleanup` to walk every REFERENCES column on the deleted row's own typedef and `DELETE FROM "<table>_<col>" WHERE "<table>_id" = '<deleted_id>'` in the same transaction. Bulk DELETE invokes the helper per matched id, so it covers the same contract.
 
-2. **Dangling reference removal**: all doogats that link to the deleted doogat via wikilinks in their reference section have those lines removed and are re-committed.
+2. **Dangling reference removal**: surviving doogats that link to deleted targets in their reference section have those lines removed and are re-committed. All targets are stripped in one edit per surviving file, so one cleanup cannot restore another removed reference.
 
 All operations, plus the original delete, land in a single atomic git commit. Inside a transaction, they are buffered and committed together with other transaction operations.
+
+The full plan passes RESTRICT and cycle checks before any mutation. Junction cleanup precedes each node's index removal. A nested SQLite savepoint rolls back index changes if a later cleanup or deletion fails before the Git commit; inside a SQL transaction, this preserves previously buffered statements. Git remains authoritative if a post-commit index operation fails, and the index can be rebuilt.
 
 Pre-existing orphan junction rows from before PRD 00137 (e.g. owner-direction junction rows whose parent was deleted in older versions) are recovered automatically on the next `ddb reindex`, since junction tables are rebuilt from doogat content.
 
@@ -446,6 +448,8 @@ Nullable `REFERENCES` columns are unaffected — the existing wikilink-strip cas
 
 A `REFERENCES` column can opt into `ON DELETE CASCADE` at typedef declaration time. When the referenced parent is deleted, every row that holds the parent's id through a CASCADE-marked column is also deleted. Cascade walks recursively through chains of CASCADE references, all in a single git commit.
 
+Both SQL deletion (`sql_engine/delete.rs`) and service deletion (`service/delete.rs`) call the crate-private `cascade_delete::plan`. Bulk SQL deletion plans all matched roots together and counts only directly matched rows in `Affected(n)`, excluding descendants. Schema and child-row scans warn and skip malformed items consistently with the indexer's existing resilience policy; SQL query failures and missing paths for discovered nodes return errors.
+
 ```sql
 CREATE TABLE "category-membership" (
   link     VARCHAR(255) NOT NULL REFERENCES link(id)     ON DELETE CASCADE,
@@ -458,6 +462,8 @@ Supported actions for v1: `RESTRICT` (default, behavior above) and `CASCADE`. `S
 Mixed actions on one table behave per-column independently — the example above lets a `link` delete cascade through the membership rows while a `category` delete with live memberships still rejects.
 
 **Cycle detection**: a cascade walk that would re-enter a node already in the in-progress set rejects with `cascade delete would form a cycle through <tables>` (`extensions.code = "CASCADE_CYCLE"`). No arbitrary depth limit; only true cycles reject.
+
+The planner uses iterative depth-first traversal. A shared descendant reached through multiple columns, a diamond, or overlapping bulk roots is deleted once. Cross-sibling edges that form a real cycle still reject the whole plan.
 
 The action persists on the typedef as a per-column `on_delete: cascade` field; absent or any other value parses as `RESTRICT`.
 

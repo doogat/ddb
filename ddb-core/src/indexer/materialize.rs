@@ -684,94 +684,18 @@ impl Index {
         repo: &dyn DoogatSource,
         deleted_id: &str,
     ) -> Result<()> {
-        use crate::error::DoogatError;
-        use crate::types::OnDeleteAction;
-        use rusqlite::OptionalExtension;
-
-        let schemas = self.load_all_typedefs(repo);
-        for (table_name, schema) in &schemas {
-            for col in &schema.columns {
-                if col.references.is_none() {
-                    continue;
-                }
-                // PRD 00129 §2: only RESTRICT-marked columns block the
-                // delete. CASCADE columns are collected separately by
-                // [`collect_cascade_children`] for the recursive cascade
-                // walk.
-                //
-                // The historical condition was `required && references` —
-                // restricting only on NOT NULL FKs because nullable FKs
-                // are handled by the wikilink-strip cascade. Preserve
-                // that behavior by skipping nullable RESTRICT columns
-                // (they fall through to wikilink stripping).
-                if col.on_delete != OnDeleteAction::Restrict || !col.required {
-                    continue;
-                }
-                let sql = format!(
-                    "SELECT id FROM \"{}\" WHERE \"{}\" = ?1 LIMIT 1",
-                    table_name, col.name
-                );
-                let blocker: Option<String> = self
-                    .conn
-                    .query_row(&sql, params![deleted_id], |row| row.get(0))
-                    .optional()?;
-                if let Some(blocker_id) = blocker {
-                    // PRD 00129 §6: structured REFERENCES_VIOLATION code
-                    // with the same English wording as before.
-                    return Err(DoogatError::references_violation(
-                        deleted_id,
-                        col.name.clone(),
-                        table_name.clone(),
-                        blocker_id,
-                    ));
-                }
-            }
-        }
-        Ok(())
+        let schemas = super::cascade::load_schemas(&self.conn, |path| repo.read_file(path))?;
+        super::cascade::check_restrict(&self.conn, &schemas, deleted_id)
     }
 
-    /// PRD 00129 §2: collect (table, child_id) pairs for every typed-table
-    /// row that references `deleted_id` through a column declared with
-    /// `ON DELETE CASCADE`. The caller (service::delete_doogat) walks the
-    /// returned children recursively to build the full cascade plan.
+    /// Collect CASCADE children for the shared service/SQL delete planner.
     pub(crate) fn collect_cascade_children(
         &self,
         repo: &dyn DoogatSource,
         deleted_id: &str,
     ) -> Result<Vec<(String, String)>> {
-        use crate::types::OnDeleteAction;
-        let mut out = Vec::new();
-        let schemas = self.load_all_typedefs(repo);
-        for (table_name, schema) in &schemas {
-            for col in &schema.columns {
-                if col.references.is_none() {
-                    continue;
-                }
-                if col.on_delete != OnDeleteAction::Cascade {
-                    continue;
-                }
-                let sql = format!(
-                    "SELECT id FROM \"{}\" WHERE \"{}\" = ?1",
-                    table_name, col.name
-                );
-                let mut stmt = self.conn.prepare(&sql)?;
-                // Warn on row-decode failure instead of dropping the child id
-                // silently (PRD 00140); the warn arm requires a corrupt index.
-                let rows = stmt
-                    .query_map(params![deleted_id], |row| row.get::<_, String>(0))?
-                    .filter_map(|r| match r {
-                        Ok(v) => Some(v),
-                        Err(e) => {
-                            tracing::warn!(error = %e, table_name, "cascade child scan: child-id row decode failed; row skipped");
-                            None
-                        }
-                    });
-                for child_id in rows {
-                    out.push((table_name.clone(), child_id));
-                }
-            }
-        }
-        Ok(out)
+        let schemas = super::cascade::load_schemas(&self.conn, |path| repo.read_file(path))?;
+        super::cascade::collect_children(&self.conn, &schemas, deleted_id)
     }
 
     /// Load typedef schemas from pre-parsed doogats (no git reads).

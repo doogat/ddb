@@ -1,6 +1,7 @@
 mod builders;
 mod classify;
 mod ddl;
+mod delete;
 mod dml;
 mod helpers;
 mod junction;

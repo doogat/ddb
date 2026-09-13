@@ -1,3 +1,4 @@
+pub(crate) mod cascade;
 mod filter;
 mod graph;
 pub(crate) mod materialize;
@@ -16,7 +17,7 @@ use crate::error::{DoogatError, Result};
 use crate::git_ops::write_lock;
 use crate::traits::DoogatSource;
 use crate::types::{ParsedDoogat, QueryValue, TableSchema};
-use filter::escape_sql_ident;
+pub(crate) use filter::escape_sql_ident;
 
 impl From<rusqlite::Error> for DoogatError {
     fn from(e: rusqlite::Error) -> Self {
@@ -244,22 +245,7 @@ impl Index {
 
     /// Run `f` inside a named SAVEPOINT, rolling back on error.
     fn with_savepoint(&self, name: &str, f: impl FnOnce() -> Result<()>) -> Result<()> {
-        self.conn.execute(&format!("SAVEPOINT {name}"), [])?;
-        match f() {
-            Ok(()) => {
-                self.conn.execute(&format!("RELEASE {name}"), [])?;
-                Ok(())
-            }
-            Err(e) => {
-                if let Err(rb_err) = self.conn.execute(&format!("ROLLBACK TO {name}"), []) {
-                    tracing::warn!(savepoint = name, error = %rb_err, "savepoint rollback failed");
-                }
-                if let Err(rl_err) = self.conn.execute(&format!("RELEASE {name}"), []) {
-                    tracing::warn!(savepoint = name, error = %rl_err, "savepoint release failed");
-                }
-                Err(e)
-            }
-        }
+        with_savepoint(&self.conn, name, f)
     }
 
     /// Upsert a single parsed doogat into the index (savepoint-wrapped).
@@ -496,11 +482,10 @@ impl Index {
     /// typedef row at all has no possible REFERENCES columns and no
     /// owner-side rows to clean, so that case is a silent no-op.
     ///
-    /// The actual sweep is shared with `sql_engine/dml.rs`'s SQL `DELETE`
+    /// The actual sweep is shared with `sql_engine/delete.rs`'s SQL `DELETE`
     /// path via [`delete_junction_rows_for_cascade`]; only schema loading
     /// differs between the two callers (this path loads from Git only, the
-    /// SQL path loads through `SqlEngine::load_schema`, which is
-    /// transaction-aware).
+    /// SQL path supplies transaction-aware reads to `cascade::load_schemas`).
     pub fn cascade_junction_cleanup(
         &self,
         repo: &dyn DoogatSource,
@@ -835,9 +820,32 @@ fn flatten_value_into_fields(
     Ok(())
 }
 
+/// Run an index operation atomically, nesting inside any caller transaction.
+pub(crate) fn with_savepoint<T>(
+    conn: &Connection,
+    name: &str,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let quoted = format!("\"{}\"", escape_sql_ident(name));
+    conn.execute(&format!("SAVEPOINT {quoted}"), [])?;
+    let result = f().and_then(|value| {
+        conn.execute(&format!("RELEASE {quoted}"), [])?;
+        Ok(value)
+    });
+    if result.is_err() {
+        if let Err(error) = conn.execute(&format!("ROLLBACK TO {quoted}"), []) {
+            tracing::warn!(savepoint = name, %error, "savepoint rollback failed");
+        }
+        if let Err(error) = conn.execute(&format!("RELEASE {quoted}"), []) {
+            tracing::warn!(savepoint = name, %error, "savepoint release failed");
+        }
+    }
+    result
+}
+
 /// Delete auto-junction rows for a doogat about to be deleted, given
 /// already-loaded typedef schemas. Shared by `Index::cascade_junction_cleanup`
-/// (service delete path) and `sql_engine::dml::SqlEngine::cascade_junction_cleanup`
+/// (service delete path) and `sql_engine::delete`
 /// (SQL `DELETE` path) so the two-direction sweep exists in exactly one
 /// place; each caller keeps its own schema-loading strategy (Git-only vs.
 /// transaction-aware) and error handling, since those differ deliberately.
@@ -846,9 +854,9 @@ fn flatten_value_into_fields(
 ///   referencing `target_type` has its junction row deleted.
 /// - **Owner**: if `owner_schema` is `Some` (the caller resolved
 ///   `target_type`'s own schema), the junction rows it owns are deleted too.
-pub(crate) fn delete_junction_rows_for_cascade(
+pub(crate) fn delete_junction_rows_for_cascade<'a>(
     conn: &Connection,
-    schemas: &std::collections::HashMap<String, TableSchema>,
+    schemas: impl IntoIterator<Item = (&'a String, &'a TableSchema)>,
     owner_schema: Option<&TableSchema>,
     target_type: &str,
     deleted_id: &str,

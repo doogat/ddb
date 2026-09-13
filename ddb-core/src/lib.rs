@@ -37,6 +37,7 @@ pub mod app_contract;
 pub mod attachments;
 pub mod bundle;
 pub mod bundled_types;
+mod cascade_delete;
 pub mod compaction;
 pub mod consistency;
 pub mod crdt_resolver;

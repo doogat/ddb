@@ -4,7 +4,7 @@ use crate::types::{SearchFieldOp, SearchFilters};
 use super::Index;
 
 /// Escape a SQL identifier by doubling embedded double-quotes.
-pub(super) fn escape_sql_ident(name: &str) -> String {
+pub(crate) fn escape_sql_ident(name: &str) -> String {
     name.replace('"', "\"\"")
 }
 

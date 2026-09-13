@@ -76,6 +76,7 @@ mod singleton_cross_process_create;
 mod singleton_cross_process_update;
 mod singleton_cross_process_upsert;
 mod smoke_core;
+mod smoke_delete_cascade;
 mod smoke_resilience;
 mod smoke_search;
 mod smoke_sql;
