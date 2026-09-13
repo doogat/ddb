@@ -162,6 +162,28 @@ Approaches evaluated and explicitly rejected. If a future requirement conflicts 
 
 **Tradeoff**: PG-protocol clients that assume transactional semantics (ORMs, migration tools) can misbehave; carried deliberately, mitigated by documented semantics and unified, redacted errors.
 
+**Planned evolution** (2026-09-13, fast-track decision D1a; PRD 00206): the
+non-transactional server policy is an interim safety boundary. Plan isolated
+transaction sessions with a SQLite connection and private transaction state
+per session, commit-time conflict detection, bounded lifetime, and the same
+CRUD transaction workflow across all six public interfaces. This revisits the
+long-term policy, not the current guarantee: shared-server SQL transaction
+verbs remain rejected until session ownership and cross-interface conformance
+ship together. Embedded transaction behavior remains supported. See
+[current transaction ownership and batch limits](../technical/server.md#shared-application-contract).
+
+**V1 conflict policy** (maintainer-confirmed, 2026-09-13): reject COMMIT when
+repository HEAD differs from its BEGIN baseline, even for an unrelated change.
+Validate and publish under the same repo write lock; discard stale staged work
+and require a fresh transaction for retry. Read-only/empty transactions also
+validate the baseline and create no Git commit when accepted. This conservative
+policy favors complete conflict protection over accepting disjoint writes.
+
+**V1 CLI ownership** (maintainer-confirmed, 2026-09-13): one running `ddb`
+process owns the transaction while accepting incremental interactive or
+scripted commands. EOF/process exit discards uncommitted work; transaction
+state does not persist across separate CLI invocations.
+
 ## Read Freshness: Committed = Visible, Watch Mode Opt-In
 
 **Decision** (2026-07-13): Served reads enforce "committed = visible" via a cheap HEAD-oid staleness probe (no more blanket `skip_stale_check`); a `_typedef` arriving via sync triggers a GraphQL schema reload; an opt-in watch mode (`ddb serve --watch` / `ddb watch`) absorbs external edits into commits after a debounce. A per-transport consistency contract page documents every guarantee. (PRD 00190.)
