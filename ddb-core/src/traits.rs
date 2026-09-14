@@ -504,6 +504,32 @@ pub trait GitBackend:
 
     /// Load repository config from `.ddb.toml`.
     fn load_config(&self) -> Result<RepoConfig>;
+
+    /// Run `f` while holding the repo-scoped write lock — the same lock every
+    /// commit path holds — so a caller can put a whole read → modify → commit
+    /// of one file inside ONE critical section. Without it two writers can
+    /// both read the same HEAD and the second commit silently drops the
+    /// first's change (fast-track FT-5, hazard H5).
+    ///
+    /// Contract for implementors:
+    /// - Re-entrant on the same instance: commit paths called from inside `f`
+    ///   must run inline, not re-acquire and self-deadlock.
+    /// - Cross-process: a second handle on the same repository blocks until
+    ///   the first releases, with a bounded timeout that fails loud.
+    /// - Innermost resource: callers open any SQLite `BEGIN IMMEDIATE` first,
+    ///   and never rebuild the index, open a transaction, spawn a subprocess,
+    ///   or touch the network inside `f`. The backend's own subprocess work
+    ///   (commit-graph rewrite, write-threshold maintenance) requested by
+    ///   commits inside `f` runs after the outermost lock is released, with
+    ///   one maintenance check per commit.
+    ///
+    /// Required, no default: an unlocked or no-op default would silently
+    /// reintroduce the lost-update hazard for an out-of-crate implementor,
+    /// so implementors outside this crate must add it to compile. Generic
+    /// with `Self: Sized` so the trait stays dyn-compatible.
+    fn with_write_lock<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T>
+    where
+        Self: Sized;
 }
 
 #[cfg(test)]

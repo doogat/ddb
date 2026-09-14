@@ -65,7 +65,6 @@ fn assert_loud_if_refused(round: usize, label: &str, out: &Output) {
 }
 
 #[test]
-#[ignore = "fast-track FT-5: hazard H5 confirmed 2026-09-06 (concurrent single-row updates are whole-file last-writer-wins, 6 of 6 rounds); un-ignore with the fix, see dev/local/plans/fast-track-2026-09-06.md"]
 fn concurrent_field_updates_on_one_doogat_keep_both_fields_or_refuse_loudly() {
     let repo = DdbTestRepo::init();
     let seed = repo

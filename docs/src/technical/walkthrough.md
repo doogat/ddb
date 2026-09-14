@@ -171,12 +171,14 @@ Historical note: issue #16 (PRD 00136) surfaced when `create_doogat_with_extra` 
 
 ### Update
 
-1. Read the existing doogat (same as the Read path).
-2. Modify the `ParsedDoogat` fields as requested.
-3. `parser::serialize()` reassembles the three-zone Markdown.
-4. `git_ops::GitRepo::commit_file()` writes and commits the updated content.
-5. `indexer::Index::index_doogat()` re-upserts the doogat, replacing all prior index entries for that ID.
-6. The server actor emits an `Updated` event.
+1. `ensure_fresh()` and `resolve_path()` run first, then a preview read decides whether the update needs a SQLite `BEGIN IMMEDIATE` transaction (SINGLETON or `unique_together` target). The transaction, when needed, is opened *before* the git lock — SQLite-outer, git-inner.
+2. `GitBackend::with_write_lock()` takes the repo write lock; steps 3-6 run inside it (FT-5: two concurrent field updates on one doogat used to read the same HEAD outside the lock and the second commit silently dropped the first's field).
+3. Read the existing doogat from HEAD (same as the Read path). If the result type's lock requirement rose since the preview (a concurrent retype or `CREATE TABLE`), refuse with a retryable `Conflict`.
+4. SINGLETON / UNIQUE / FK checks (SQLite reads only), then modify the `ParsedDoogat` fields as requested.
+5. `parser::serialize()` reassembles the three-zone Markdown.
+6. `git_ops::GitRepo::commit_file()` writes and commits the updated content; the lock is released. The commit-graph rewrite and the write-threshold maintenance check the commit requested run now, after release, never under the lock.
+7. `indexer::Index::index_doogat()` re-upserts the doogat, replacing all prior index entries for that ID, and the index stores this update's own commit as its HEAD.
+8. The server actor emits an `Updated` event.
 
 ### Search
 

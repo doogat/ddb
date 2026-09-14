@@ -2,7 +2,7 @@ use crate::app_contract::{summarize_reindex_warnings, AppOutput, UpdateCommand};
 use crate::error::{DoogatError, Result};
 use crate::parser;
 use crate::sql_engine::apply_updates_to_doogat;
-use crate::types::{BatchUpdateInput, ParsedDoogat, TableSchema};
+use crate::types::{BatchUpdateInput, CommitHash, ParsedDoogat, TableSchema};
 
 use crate::traits::{GitBackend, IndexPort};
 
@@ -36,103 +36,55 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     ) -> Result<ParsedDoogat> {
         self.ensure_fresh()?;
         let path = self.index.resolve_path(id)?;
-        let content = self.repo.read_file(&path)?;
-        let mut parsed = parser::parse(&content, &path)?;
 
-        // PRD 00157: resolve the *result* type (the type after this update) —
-        // the arg type wins, otherwise the doogat keeps its current type. A
-        // retype into a registered (possibly SINGLETON) typedef is the gap
-        // this closes, so schema loading is broadened from the pre-00157 gate
-        // on the *current* type to the result type. Without this an untyped
-        // doogat retyped into a SINGLETON typedef would skip the singleton
-        // check and never materialize into the typed table.
-        let result_type: Option<String> = doogat_type
-            .map(|t| t.to_string())
-            .or_else(|| parsed.meta.doogat_type.clone());
-
-        // Resolve schemas BEFORE applying field updates so typed-column SETs
-        // route to the correct zone (REFERENCES → reference section, etc.).
-        // PRD 00134 cycle-1 review C1 task #2.
-        let schemas = if result_type.is_some() {
+        // FT-5 (hazard H5): whether this update needs a BEGIN IMMEDIATE
+        // transaction is decided BEFORE any lock is taken (SQLite-outer,
+        // git-inner: the transaction can never be opened under the git
+        // lock). This read is only a preview of the stored type; the
+        // authoritative read happens inside the write lock below.
+        let preview = parser::parse(&self.repo.read_file(&path)?, &path)?;
+        let preview_type = doogat_type.or(preview.meta.doogat_type.as_deref());
+        let preview_schemas = if preview_type.is_some() {
             Some(self.list_type_schemas()?)
         } else {
             None
         };
-        let schema = schemas.as_ref().and_then(|all| {
-            result_type
-                .as_deref()
-                .and_then(|t| all.iter().find(|s| s.table_name == t))
-        });
+        let needs_transaction =
+            needs_transaction_lock(find_schema(preview_schemas.as_deref(), preview_type));
 
-        // PRD 00157: when the result type is a registered SINGLETON typedef,
-        // run the constraint-check → commit → reindex → store_head window
-        // inside one BEGIN IMMEDIATE transaction (mirrors `update_doogat_raw`
-        // and the create paths) so a cross-process loser surfaces a structured
-        // SINGLETON_VIOLATION instead of a raw materializer error. Non-SINGLETON
-        // updates run with no transaction and pay no new cost.
-        let is_singleton = schema.map(|s| s.singleton).unwrap_or(false);
-        // FT-1 rework: an update targeting a typedef with unique_together
-        // groups must serialize its check-to-materialize window the same
-        // way SINGLETON already does — otherwise two concurrent writers can
-        // both pass `check_unique_constraints_for_update` (checked against
-        // the pre-write materialized table) before either row is indexed,
-        // and the loser's later `INSERT OR REPLACE` evicts the winner.
-        let has_unique_groups = schema
-            .and_then(|s| s.unique_together.as_ref())
-            .map(|g| !g.is_empty())
-            .unwrap_or(false);
-        let needs_transaction = is_singleton || has_unique_groups;
-
-        let mut write = || -> Result<ParsedDoogat> {
-            // Singleton check on the *result* type (no-op for unregistered or
-            // non-SINGLETON types). First DB read inside the window, so the
-            // loser's check runs only after the winner's COMMIT releases the
-            // write lock and its row is visible.
-            if let (Some(type_name), Some(all)) = (result_type.as_deref(), schemas.as_ref()) {
-                if all.iter().any(|s| s.table_name == type_name) {
-                    self.check_singleton_update_constraint(id, type_name, all)?;
-
-                    // FT-1: pre-commit UNIQUE check against the merged field
-                    // set (existing fields overlaid with this update's
-                    // SET/UNSET), excluding this row, so a UNIQUE collision
-                    // is rejected before materialize_single's
-                    // `INSERT OR REPLACE` would otherwise evict the other
-                    // row from the typed table.
-                    let mut merged = parsed_fields(&parsed);
-                    for key in extra.unset {
-                        merged.remove(key);
-                    }
-                    for (key, value) in extra.set {
-                        merged.insert(key.clone(), value.clone());
-                    }
-                    self.check_unique_constraints_for_update(id, type_name, &merged, all)?;
-                }
+        let write = || -> Result<ParsedDoogat> {
+            #[cfg(test)]
+            if let Some(pause) = tests::AT_PREVIEW_TO_LOCK.take() {
+                pause();
+            }
+            // Locked read → modify → commit. Two writers on the same doogat
+            // used to read the same HEAD outside the lock and the second
+            // commit silently dropped the first's field. Everything under the
+            // lock is a git read, a SQLite read, or the one git commit;
+            // transaction acquisition happens before it, and reindexing
+            // runs after release.
+            let (commit, new_content, schemas) = self.repo.with_write_lock(|| {
+                self.commit_locked_update(
+                    id,
+                    &path,
+                    doogat_type,
+                    extra,
+                    needs_transaction,
+                    |parsed, schema| {
+                        apply_field_updates(parsed, title, tags, doogat_type, body, extra, schema)
+                    },
+                )
+            })?;
+            #[cfg(test)]
+            if let Some(pause) = tests::AT_COMMIT_TO_STORE_HEAD.take() {
+                pause();
             }
 
-            // Validate the user-supplied SET fields BEFORE routing them. After
-            // routing, REFERENCES values land in the reference zone, hidden
-            // from the `parsed.meta.extra`-based validator. We validate against
-            // the input map directly so FK/allowed_values rejections still
-            // fire on the typed UPDATE path. Kept keyed on the *current* type
-            // (PRD 00157 design: retype field-validation behavior unchanged).
-            let has_field_changes = !extra.set.is_empty() || !extra.unset.is_empty();
-            if has_field_changes {
-                if let (Some(type_name), Some(all)) =
-                    (parsed.meta.doogat_type.as_deref(), schemas.as_ref())
-                {
-                    self.validate_fields_with_schemas(all, type_name, extra.set)?;
-                }
-            }
-
-            apply_field_updates(&mut parsed, title, tags, doogat_type, body, extra, schema);
-
-            let new_content = parser::serialize(&parsed);
-            self.repo
-                .commit_file(&path, &new_content, &format!("update doogat {id}"))?;
             let mut updated =
                 self.reindex_and_rematerialize(&new_content, &path, schemas.as_deref())?;
-            // Sync stored HEAD to avoid spurious incremental_reindex on next call
-            self.index.store_head(&self.repo.head_oid()?.0)?;
+            // Store THIS update's commit as the indexed HEAD, never an
+            // unrelated later HEAD a concurrent writer may have moved it to.
+            self.index.store_head(&commit.0)?;
             updated.updated_at = self.index.lookup_updated_at(id).unwrap_or(None);
             Ok(updated)
         };
@@ -142,6 +94,106 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         } else {
             write()
         }
+    }
+
+    /// FT-5 (hazard H5): the locked read → check → modify → commit of one
+    /// doogat. Runs inside `GitBackend::with_write_lock`; everything here is
+    /// a git read, a SQLite read, or the one git commit. `apply` merges the
+    /// caller's field updates into the freshly read file under the resolved
+    /// result-type schema. Returns the commit, the committed content and the
+    /// schemas the caller reindexes against after the lock is released.
+    fn commit_locked_update(
+        &self,
+        id: &str,
+        path: &str,
+        doogat_type: Option<&str>,
+        extra: &ExtraFieldUpdates<'_>,
+        needs_transaction: bool,
+        apply: impl FnOnce(&mut ParsedDoogat, Option<&TableSchema>),
+    ) -> Result<(CommitHash, String, Option<Vec<TableSchema>>)> {
+        let content = self.repo.read_file(path)?;
+        let mut parsed = parser::parse(&content, path)?;
+
+        // PRD 00157: resolve the *result* type (the type after this
+        // update) — the arg type wins, otherwise the doogat keeps its
+        // current type. A retype into a registered (possibly
+        // SINGLETON) typedef is the gap this closes, so schema loading
+        // is broadened from the pre-00157 gate on the *current* type
+        // to the result type. Without this an untyped doogat retyped
+        // into a SINGLETON typedef would skip the singleton check and
+        // never materialize into the typed table.
+        let result_type: Option<String> = doogat_type
+            .map(|t| t.to_string())
+            .or_else(|| parsed.meta.doogat_type.clone());
+
+        // Resolve schemas BEFORE applying field updates so typed-column
+        // SETs route to the correct zone (REFERENCES → reference
+        // section, etc.). PRD 00134 cycle-1 review C1 task #2.
+        let schemas = if result_type.is_some() {
+            Some(self.list_type_schemas()?)
+        } else {
+            None
+        };
+        let schema = find_schema(schemas.as_deref(), result_type.as_deref());
+
+        // A concurrent retype or CREATE TABLE may have raised the lock
+        // requirement since the preview. Refuse loudly rather than run
+        // a SINGLETON/UNIQUE check outside the transaction it needs;
+        // the caller retries and the preview re-derives it.
+        if !needs_transaction && needs_transaction_lock(schema) {
+            return Err(DoogatError::Conflict(format!(
+                "type or schema of doogat {id} changed during the update; retry"
+            )));
+        }
+
+        // Singleton check on the *result* type (no-op for unregistered
+        // or non-SINGLETON types). First DB read inside the window, so
+        // the loser's check runs only after the winner's COMMIT
+        // releases the write lock and its row is visible.
+        if let (Some(type_name), Some(all)) = (result_type.as_deref(), schemas.as_ref()) {
+            if schema.is_some() {
+                self.check_singleton_update_constraint(id, type_name, all)?;
+
+                // FT-1: pre-commit UNIQUE check against the merged
+                // field set (existing fields overlaid with this
+                // update's SET/UNSET), excluding this row, so a UNIQUE
+                // collision is rejected before materialize_single's
+                // `INSERT OR REPLACE` would otherwise evict the other
+                // row from the typed table.
+                let mut merged = parsed_fields(&parsed);
+                for key in extra.unset {
+                    merged.remove(key);
+                }
+                for (key, value) in extra.set {
+                    merged.insert(key.clone(), value.clone());
+                }
+                self.check_unique_constraints_for_update(id, type_name, &merged, all)?;
+            }
+        }
+
+        // Validate the user-supplied SET fields BEFORE routing them.
+        // After routing, REFERENCES values land in the reference zone,
+        // hidden from the `parsed.meta.extra`-based validator. We
+        // validate against the input map directly so FK/allowed_values
+        // rejections still fire on the typed UPDATE path. Kept keyed on
+        // the *current* type (PRD 00157 design: retype field-validation
+        // behavior unchanged).
+        let has_field_changes = !extra.set.is_empty() || !extra.unset.is_empty();
+        if has_field_changes {
+            if let (Some(type_name), Some(all)) =
+                (parsed.meta.doogat_type.as_deref(), schemas.as_ref())
+            {
+                self.validate_fields_with_schemas(all, type_name, extra.set)?;
+            }
+        }
+
+        apply(&mut parsed, schema);
+
+        let new_content = parser::serialize(&parsed);
+        let commit = self
+            .repo
+            .commit_file(path, &new_content, &format!("update doogat {id}"))?;
+        Ok((commit, new_content, schemas))
     }
 
     /// App facade entrypoint: update a doogat from an `UpdateCommand`.
@@ -300,9 +352,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             let schema = result_type
                 .as_deref()
                 .and_then(|t| schemas.iter().find(|s| s.table_name == t));
-            let singleton = schema
-                .filter(|s| s.singleton)
-                .map(|s| s.table_name.clone());
+            let singleton = schema.filter(|s| s.singleton).map(|s| s.table_name.clone());
             let has_unique = schema
                 .and_then(|s| s.unique_together.as_ref())
                 .map(|g| !g.is_empty())
@@ -374,12 +424,8 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
                     merged.insert(key.clone(), value.clone());
                 }
             }
-            let effective_fields = self.merge_row_snapshot_for_unique_check(
-                &update.id,
-                final_type,
-                &merged,
-                schemas,
-            )?;
+            let effective_fields =
+                self.merge_row_snapshot_for_unique_check(&update.id, final_type, &merged, schemas)?;
             self.check_effective_unique_fields(
                 &update.id,
                 final_type,
@@ -612,6 +658,28 @@ fn stringify_extra_set_for_schema(
     out
 }
 
+fn find_schema<'a>(
+    schemas: Option<&'a [TableSchema]>,
+    type_name: Option<&str>,
+) -> Option<&'a TableSchema> {
+    let all = schemas?;
+    let t = type_name?;
+    all.iter().find(|s| s.table_name == t)
+}
+
+/// PRD 00157 + FT-1 rework: an update whose result type is a registered
+/// SINGLETON typedef, or one with unique_together groups, must run its
+/// check → commit → reindex → store_head window inside one BEGIN IMMEDIATE
+/// transaction so a cross-process loser surfaces a structured violation
+/// instead of a raw materializer error or an `INSERT OR REPLACE` eviction.
+/// Other updates run with no transaction and pay no new cost.
+fn needs_transaction_lock(schema: Option<&TableSchema>) -> bool {
+    match schema {
+        Some(s) => s.singleton || s.unique_together.as_ref().is_some_and(|g| !g.is_empty()),
+        None => false,
+    }
+}
+
 pub(super) fn parsed_fields(
     parsed: &ParsedDoogat,
 ) -> std::collections::BTreeMap<String, crate::types::Value> {
@@ -623,4 +691,354 @@ pub(super) fn parsed_fields(
         );
     }
     fields
+}
+
+/// FT-5 (hazard H5): two concurrent single-row field updates on ONE doogat
+/// must both land in committed HEAD, or the loser must refuse loudly (an
+/// `Err` to its caller). Whole-file last-writer-wins - the stored file read
+/// outside the write lock, then committed with no expected-parent check - is
+/// the silent loss these tests pin. Each writer is its own thread with its
+/// own service handle, released per round by a shared barrier so both start
+/// together (the barrier makes the race likely each round, not certain);
+/// durability is judged against the committed HEAD tree, never the returned
+/// values.
+#[cfg(test)]
+mod tests {
+    use super::parsed_fields;
+    use crate::parser;
+    use crate::service::{DoogatService, ExtraFieldUpdates};
+    use crate::types::Value;
+    use std::collections::BTreeMap;
+    use std::path::Path;
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::time::Duration;
+
+    thread_local! {
+        /// Interleaving seam for `update_doogat_parsed`: taken and run ONCE on
+        /// the updating thread after the preview has fixed `needs_transaction`
+        /// and immediately before the git write lock is taken. Test-only
+        /// (`cfg(test)`), thread-local so a test can pin one updater without
+        /// touching others; never set in production builds.
+        pub(super) static AT_PREVIEW_TO_LOCK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+        /// Interleaving seam for `update_doogat_parsed`: taken and run ONCE on
+        /// the updating thread after `with_write_lock` has returned (lock
+        /// released, commit durable) and before the reindex and `store_head`.
+        /// Same test-only, thread-local contract as `AT_PREVIEW_TO_LOCK`.
+        pub(super) static AT_COMMIT_TO_STORE_HEAD: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Rounds of the two-writer race; every round fires both before waiting.
+    const ROUNDS: usize = 8;
+    /// Bound on waiting for a writer's report; the repo write lock itself
+    /// times out after 10 s, so a hung writer surfaces as a failure, not a hang.
+    const ROUND_TIMEOUT: Duration = Duration::from_secs(30);
+
+    type Report = (&'static str, Result<(), String>);
+
+    /// Spawn one writer thread with its own service handle. Each round it
+    /// waits on `start`, sets `key=<key>-<round>` on `id`, and reports the
+    /// outcome on `report`. Never panics: a failed open is reported as a
+    /// refusal every round so the barrier can't hang the test.
+    fn spawn_writer(
+        repo: &Path,
+        id: &str,
+        key: &'static str,
+        start: Arc<Barrier>,
+        report: mpsc::Sender<Report>,
+    ) {
+        let repo = repo.to_path_buf();
+        let id = id.to_string();
+        std::thread::spawn(move || {
+            let svc = DoogatService::open(&repo).map_err(|e| e.to_string());
+            for round in 1..=ROUNDS {
+                let mut set = BTreeMap::new();
+                set.insert(key.to_string(), Value::String(format!("{key}-{round}")));
+                let extra = ExtraFieldUpdates {
+                    set: &set,
+                    unset: &[],
+                };
+                start.wait();
+                let outcome = svc.as_ref().map_err(Clone::clone).and_then(|svc| {
+                    svc.update_doogat(&id, None, None, None, None, &extra)
+                        .map_err(|e| e.to_string())
+                });
+                if report.send((key, outcome)).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    /// Race writers `a` and `b` on `id` for `ROUNDS` rounds. Returns one line
+    /// per successful writer whose field is missing from HEAD; empty means
+    /// the contract held.
+    fn race_two_writers(svc: &DoogatService, id: &str) -> Vec<String> {
+        let start = Arc::new(Barrier::new(3));
+        let (tx, rx) = mpsc::channel();
+        spawn_writer(svc.repo_path(), id, "a", start.clone(), tx.clone());
+        spawn_writer(svc.repo_path(), id, "b", start.clone(), tx);
+
+        let path = format!("ddb/{id}.md");
+        let mut lost = Vec::new();
+        for round in 1..=ROUNDS {
+            start.wait();
+            let outcomes = [
+                rx.recv_timeout(ROUND_TIMEOUT)
+                    .expect("first writer did not report within the round timeout"),
+                rx.recv_timeout(ROUND_TIMEOUT)
+                    .expect("second writer did not report within the round timeout"),
+            ];
+            assert!(
+                outcomes.iter().any(|(_, o)| o.is_ok()),
+                "round {round}: both writers refused, the round exercised nothing: {outcomes:?}"
+            );
+
+            let head = svc
+                .repo
+                .read_file(&path)
+                .expect("read the committed doogat from HEAD");
+            let committed =
+                parsed_fields(&parser::parse(&head, &path).expect("parse committed doogat"));
+            for (key, outcome) in &outcomes {
+                if outcome.is_err() {
+                    // Loud refusal: this writer's field is not expected this round.
+                    continue;
+                }
+                let expected = Value::String(format!("{key}-{round}"));
+                if committed.get(*key) != Some(&expected) {
+                    lost.push(format!(
+                        "round {round}: writer {key} returned Ok but HEAD holds {key}={:?} \
+                         (expected {expected:?}); committed fields={committed:?}",
+                        committed.get(*key)
+                    ));
+                }
+            }
+        }
+        lost
+    }
+
+    #[test]
+    fn concurrent_untyped_field_updates_on_one_doogat_keep_both_fields_or_refuse() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = DoogatService::init(tmp.path()).expect("init repo");
+        let id = svc
+            .create_doogat("H5 shared row", &[], None, "")
+            .expect("seed create");
+
+        let lost = race_two_writers(&svc, &id);
+        assert!(
+            lost.is_empty(),
+            "H5 fired (untyped): a successful single-row update vanished from HEAD, so a \
+             concurrent field update is whole-file last-writer-wins. Losing rounds:\n{}",
+            lost.join("\n")
+        );
+    }
+
+    #[test]
+    fn concurrent_typed_column_updates_on_one_doogat_keep_both_columns_or_refuse() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut svc = DoogatService::init(tmp.path()).expect("init repo");
+        svc.reindex().expect("initial reindex");
+        svc.execute_sql("CREATE TABLE pair (a VARCHAR(64), b VARCHAR(64))")
+            .expect("register pair typedef");
+        let id = svc
+            .create_doogat_with_extra("H5 typed row", &[], Some("pair"), "", BTreeMap::new())
+            .expect("seed typed create")
+            .meta
+            .id
+            .expect("created doogat must carry an id")
+            .0;
+
+        let lost = race_two_writers(&svc, &id);
+        assert!(
+            lost.is_empty(),
+            "H5 fired (typed): a successful single-row column update vanished from HEAD, so a \
+             concurrent typed update is whole-file last-writer-wins. Losing rounds:\n{}",
+            lost.join("\n")
+        );
+    }
+
+    /// Same race, but the typedef is SINGLETON so `needs_transaction` is true
+    /// and the BEGIN IMMEDIATE (outer) → git lock (inner) path is what races.
+    #[test]
+    fn concurrent_singleton_typed_updates_on_one_doogat_keep_both_columns_or_refuse() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut svc = DoogatService::init(tmp.path()).expect("init repo");
+        svc.reindex().expect("initial reindex");
+        svc.execute_sql("CREATE TABLE cfg (a VARCHAR(64), b VARCHAR(64)) SINGLETON")
+            .expect("register cfg singleton typedef");
+        let id = svc
+            .create_doogat_with_extra("H5 singleton row", &[], Some("cfg"), "", BTreeMap::new())
+            .expect("seed singleton create")
+            .meta
+            .id
+            .expect("created doogat must carry an id")
+            .0;
+
+        let lost = race_two_writers(&svc, &id);
+        assert!(
+            lost.is_empty(),
+            "H5 fired (SINGLETON, transaction path): a successful single-row column update \
+             vanished from HEAD, so a concurrent typed update under BEGIN IMMEDIATE is \
+             whole-file last-writer-wins. Losing rounds:\n{}",
+            lost.join("\n")
+        );
+    }
+
+    /// The transaction decision is made before the git lock (SQLite-outer,
+    /// git-inner). If a SINGLETON typedef for the update's result type lands
+    /// between that preview and the locked read, the in-lock re-derive must
+    /// refuse loudly instead of running the SINGLETON check outside the BEGIN
+    /// IMMEDIATE window it needs. The updater is parked on the
+    /// `AT_PREVIEW_TO_LOCK` seam (preview done, lock not yet taken); the test
+    /// thread registers the typedef through the normal unlocked path, then
+    /// releases it. Every wait is bounded, and a seam that never fires is a
+    /// failure (the "paused" handshake times out), never a vacuous pass.
+    #[test]
+    fn refuses_when_a_singleton_typedef_for_the_result_type_lands_between_preview_and_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = DoogatService::init(tmp.path()).expect("init repo");
+        let id = svc
+            .create_doogat("H5 retype target", &[], None, "")
+            .expect("seed create");
+        let path = format!("ddb/{id}.md");
+        let before = svc.repo.read_file(&path).expect("read seed from HEAD");
+
+        let (paused_tx, paused_rx) = mpsc::channel::<()>();
+        let (resume_tx, resume_rx) = mpsc::channel::<()>();
+        let updater_path = tmp.path().to_path_buf();
+        let updater_id = id.clone();
+        let updater = std::thread::spawn(move || {
+            let svc = DoogatService::open(&updater_path).expect("open updater handle");
+            AT_PREVIEW_TO_LOCK.set(Some(Box::new(move || {
+                paused_tx.send(()).expect("test thread went away");
+                resume_rx
+                    .recv_timeout(ROUND_TIMEOUT)
+                    .expect("never resumed from the preview-to-lock seam");
+            })));
+            // Preview runs with `app_config` unregistered: no transaction.
+            svc.update_doogat(
+                &updater_id,
+                None,
+                None,
+                Some("app_config"),
+                None,
+                &ExtraFieldUpdates::default(),
+            )
+            .map_err(|e| e.to_string())
+        });
+        paused_rx
+            .recv_timeout(ROUND_TIMEOUT)
+            .expect("updater never reached the preview-to-lock seam");
+
+        // Nobody holds the git lock now: register the SINGLETON typedef the
+        // ordinary way (commit, index, materialize), then let the updater
+        // take the lock and re-derive its requirement.
+        let typedef = "---\nid: 20260510130000\ntitle: app_config\ntype: _typedef\n\
+                       singleton: true\ncolumns:\n  - name: theme\n    data_type: TEXT\n\
+                       \x20   zone: frontmatter\n---\n";
+        let typedef_path = "ddb/_typedef/20260510130000.md";
+        svc.repo
+            .commit_file(typedef_path, typedef, "register singleton")
+            .expect("commit typedef");
+        svc.index
+            .index_doogat(&parser::parse(typedef, typedef_path).expect("parse typedef"))
+            .expect("index typedef");
+        svc.index
+            .materialize_all_types(&svc.repo)
+            .expect("materialize typedef");
+        resume_tx
+            .send(())
+            .expect("updater went away before resuming");
+
+        let err = updater
+            .join()
+            .expect("updater thread panicked")
+            .expect_err("retype into a typedef that became SINGLETON mid-update must refuse");
+        assert!(
+            err.contains("changed during the update"),
+            "expected the concurrent-schema refusal, got: {err}"
+        );
+        assert_eq!(
+            svc.repo.read_file(&path).expect("read HEAD after refusal"),
+            before,
+            "a refused update must leave the committed doogat untouched"
+        );
+    }
+
+    /// The index must record THIS update's own commit as its indexed HEAD,
+    /// not whatever HEAD is by the time `store_head` runs. The updater is
+    /// parked on the `AT_COMMIT_TO_STORE_HEAD` seam (lock released, commit
+    /// durable, index not yet touched); the test thread lands a later commit
+    /// through its own handle, then releases the updater. Every wait is
+    /// bounded; a seam that never fires times out instead of passing.
+    #[test]
+    fn stores_this_updates_own_commit_as_indexed_head_not_a_later_writers_head() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc = DoogatService::init(tmp.path()).expect("init repo");
+        let id = svc
+            .create_doogat("H5 attribution target", &[], None, "")
+            .expect("seed create");
+
+        let (paused_tx, paused_rx) = mpsc::channel::<()>();
+        let (resume_tx, resume_rx) = mpsc::channel::<()>();
+        let updater_path = tmp.path().to_path_buf();
+        let updater_id = id.clone();
+        let updater = std::thread::spawn(move || {
+            let svc = DoogatService::open(&updater_path).expect("open updater handle");
+            AT_COMMIT_TO_STORE_HEAD.set(Some(Box::new(move || {
+                paused_tx.send(()).expect("test thread went away");
+                resume_rx
+                    .recv_timeout(ROUND_TIMEOUT)
+                    .expect("never resumed from the commit-to-store-head seam");
+            })));
+            svc.update_doogat(
+                &updater_id,
+                Some("retitled"),
+                None,
+                None,
+                None,
+                &ExtraFieldUpdates::default(),
+            )
+            .map_err(|e| e.to_string())
+        });
+        paused_rx
+            .recv_timeout(ROUND_TIMEOUT)
+            .expect("updater never reached the commit-to-store-head seam");
+
+        // The updater's commit is durable and the lock is released: HEAD is
+        // its commit until the later writer moves it.
+        let updaters_commit = svc
+            .repo
+            .head_oid()
+            .expect("read HEAD after the update commit")
+            .0;
+        let later_commit = svc
+            .repo
+            .commit_file("ddb/other.md", "---\ntitle: other\n---\n", "later writer")
+            .expect("later writer commit")
+            .0;
+        assert_ne!(updaters_commit, later_commit, "later writer must move HEAD");
+        resume_tx
+            .send(())
+            .expect("updater went away before resuming");
+        updater
+            .join()
+            .expect("updater thread panicked")
+            .expect("update must succeed");
+
+        let stored = svc.index.stored_head_oid();
+        assert_eq!(
+            stored.as_deref(),
+            Some(updaters_commit.as_str()),
+            "the index must store this update's own commit as its indexed HEAD"
+        );
+        assert_ne!(
+            stored.as_deref(),
+            Some(later_commit.as_str()),
+            "the index must not attribute the update to the later writer's HEAD"
+        );
+    }
 }
