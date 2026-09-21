@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **deps**: update rustls to 0.23.45 to fix RUSTSEC-2026-0285 (TLS 1.3 handshake messages accepted across encryption level boundaries), with its required AWS-LC and WebPKI dependency updates.
 - **core**: two concurrent field updates on the same doogat (`ddb update <id> --set`, GraphQL `updateDoogat`, REST field update — every path through `DoogatService::update_doogat_parsed`) no longer lose one writer's field. The stored file was read from HEAD outside the repo write lock and committed with no expected-parent check, so the second commit silently overwrote the first's field with a stale whole file. The read → modify → commit now runs inside the write lock; if a concurrent retype or `CREATE TABLE` changes the update's transaction requirement mid-flight, the update refuses with a retryable `conflict` error instead of committing. The index records that update's own commit as its indexed HEAD, never an unrelated later HEAD. Batch update, SQL `UPDATE`, and the raw FFI replacement path are unchanged. (fast-track FT-5, hazard H5)
 - **core**: SQL `DELETE FROM` now deletes `ON DELETE CASCADE` descendants through the same planner as service deletion. Shared descendants are deleted once, real cycles reject, surviving reference edits compose, and a failed child deletion rolls back earlier index changes.
 
