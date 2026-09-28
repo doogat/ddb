@@ -403,7 +403,7 @@ The attachment system (see `attachments.rs`) manages binary files associated wit
 
 ### Bundles
 
-The bundle system (see `bundle.rs`) supports air-gapped sync between devices that cannot reach each other over a network. Bundles are tar archives containing a Git bundle (delta or full), node registration files, a manifest, and a SHA-256 checksum. Export creates a bundle targeting a specific node (delta based on that node's known heads) or a full bundle for backup. Import applies the bundle to the local repository and updates sync state.
+The bundle system (see `bundle/mod.rs`) supports air-gapped sync between devices that cannot reach each other over a network. Bundles are tar archives containing a Git bundle (delta or full), node registration files, a manifest, and a SHA-256 checksum. Export creates a bundle targeting a specific node (delta based on that node's known heads) or a full bundle for backup. Import holds a bundle-import lease, fetches the Git bundle's advertised branches into `refs/remotes/bundle/<payload-id>/` (the payload id is the SHA-256 of `objects.bundle`), merges only an advertised `master`, registers nodes, rebuilds the index, and only then deletes that namespace; a failed import keeps its refs for a retry.
 
 ### Maintenance
 

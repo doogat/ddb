@@ -180,6 +180,15 @@ fn conflicting_full_bundle_import_resolves_with_real_merge_commit() {
     std::fs::create_dir_all(db2.parent().unwrap()).unwrap();
     let index2 = crate::indexer::Index::open(&db2).unwrap();
 
+    // A ref outside this payload's namespace distinguishes namespaced cleanup
+    // from a sweep of the whole `refs/remotes/bundle/` prefix.
+    let sibling = "refs/remotes/bundle/other/master".to_string();
+    let sibling_oid = repo2.repo.head().unwrap().target().unwrap();
+    repo2
+        .repo
+        .reference(&sibling, sibling_oid, false, "sibling")
+        .unwrap();
+
     let report = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path)
         .expect("a resolvable conflict must not fail the import");
 
@@ -196,12 +205,10 @@ fn conflicting_full_bundle_import_resolves_with_real_merge_commit() {
         "a resolved conflict must land in a real 2-parent merge commit"
     );
 
-    assert!(
-        repo2
-            .repo
-            .find_reference("refs/remotes/bundle/master")
-            .is_err(),
-        "the bundle ref must be deleted after a successful import"
+    assert_eq!(
+        bundle_refs(dir2.path()),
+        vec![(sibling, sibling_oid)],
+        "the bundle ref must be deleted after a successful import, and only its own"
     );
 
     let content = repo2.read_file(path).unwrap();
@@ -214,7 +221,7 @@ fn conflicting_full_bundle_import_resolves_with_real_merge_commit() {
 /// Drive a bundle import whose merge FAILS: node 2 imports a bundle holding a
 /// doogat that collides on id with a local one, whose losing side has no
 /// frontmatter, so the collision loser cannot be rewritten. By design this
-/// leaves `refs/remotes/bundle/master` in place for a retry. Returns node 1's
+/// leaves `refs/remotes/bundle/<payload-id>/master` in place for a retry. Returns node 1's
 /// and node 2's temp dirs; node 2's repo is reopened by the caller so no
 /// borrow of it escapes this helper.
 fn import_with_unresolvable_collision(
@@ -292,12 +299,16 @@ fn import_with_unresolvable_collision(
 
 /// Reachability: a bundle-import merge failure (add/add collision loser
 /// with no frontmatter, so `rewrite_id_field` cannot rewrite its id) must
-/// leave `refs/remotes/bundle/master` in place. `import_bundle` only
-/// deletes that ref after a successful merge, so bundle data must stay
-/// reachable for a retry when the merge itself fails.
+/// leave `refs/remotes/bundle/<payload-id>/master` in place. `import_bundle`
+/// only deletes that namespace after a successful import, so bundle data must
+/// stay reachable for a retry when the merge itself fails.
 #[test]
 fn conflicting_bundle_import_leaves_bundle_ref_reachable_on_merge_failure() {
-    let (_dir1, dir2, result) = import_with_unresolvable_collision();
+    let (dir1, dir2, result) = import_with_unresolvable_collision();
+    let kept_ref = format!(
+        "refs/remotes/bundle/{}/master",
+        payload_id_of(&dir1.path().join("collision.bundle.tar"))
+    );
     let err = result.expect_err("an unresolvable add/add collision must fail the import");
     assert!(
         matches!(err, DoogatError::Sync(_)),
@@ -311,17 +322,11 @@ fn conflicting_bundle_import_leaves_bundle_ref_reachable_on_merge_failure() {
 
     let repo2 = GitRepo::open(dir2.path()).unwrap();
     assert!(
-        repo2
-            .repo
-            .find_reference("refs/remotes/bundle/master")
-            .is_ok(),
+        repo2.repo.find_reference(&kept_ref).is_ok(),
         "the bundle ref must survive a failed import so its data stays reachable"
     );
     assert!(
-        repo2
-            .repo
-            .revparse_single("refs/remotes/bundle/master")
-            .is_ok(),
+        repo2.repo.revparse_single(&kept_ref).is_ok(),
         "the bundle ref must still resolve to the unbundled commits after a failed import"
     );
 }
@@ -433,8 +438,10 @@ fn delta_export_fails_for_unknown_node() {
 }
 
 /// Export a full bundle whose branch set deliberately EXCLUDES `master`,
-/// so a pruning fetch into `refs/remotes/bundle/*` has something to prune.
-fn export_bundle_without_master(output: &Path, branch: &str) {
+/// so a pruning fetch would have other bundle refs to prune and the import
+/// has no delivered `master` to merge.
+/// Returns the OID the exported `branch` names.
+fn export_bundle_without_master(output: &Path, branch: &str) -> git2::Oid {
     let (_dir, repo) = temp_repo();
     repo.commit_file(
         "ddb/20260401000000.md",
@@ -456,16 +463,212 @@ fn export_bundle_without_master(output: &Path, branch: &str) {
     master.delete().unwrap();
 
     export_full_bundle(&repo, &mgr, output).unwrap();
+    head.id()
+}
+
+/// Every `(name, oid)` under `refs/remotes/bundle/`, sorted, from [`all_refs`]
+/// (a fresh handle) so no namespace spelling below that prefix is assumed.
+/// Enumeration, name and target errors fail the test instead of being skipped.
+fn bundle_refs(repo_dir: &Path) -> Vec<(String, git2::Oid)> {
+    all_refs(repo_dir)
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("refs/remotes/bundle/"))
+        .map(|(name, oid)| {
+            let oid = oid.unwrap_or_else(|| panic!("bundle ref {name} must be direct"));
+            (name, oid)
+        })
+        .collect()
+}
+
+/// A failed import A keeps its master ref for a retry. Once A's conflict is
+/// repaired locally (without importing A), a LATER masterless bundle B must
+/// not pick up A's stale master and merge it: B delivered no master, so the
+/// import fails as a merge failure, HEAD and data stay put, A's kept ref
+/// survives exactly, and B's fetched heads stay reachable. Checked under both
+/// `fetch.prune` settings.
+#[test]
+fn failed_bundle_then_masterless_bundle_never_merges_stale_master() {
+    let collision_path = "ddb/20260302000000.md";
+    for prune in [true, false] {
+        let (dir1, dir2, result) = import_with_unresolvable_collision();
+        assert!(
+            matches!(result, Err(DoogatError::Sync(_))),
+            "setup invalid: the collision import A must fail, got {result:?}"
+        );
+        let stale_master = git2::Repository::open(dir1.path())
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap();
+
+        let repo2 = GitRepo::open(dir2.path()).unwrap();
+        repo2
+            .repo
+            .config()
+            .unwrap()
+            .set_bool("fetch.prune", prune)
+            .unwrap();
+        let failed_refs = bundle_refs(dir2.path());
+        assert!(
+            failed_refs.iter().any(|(_, oid)| *oid == stale_master),
+            "setup invalid: failed import A must keep a ref to its master, got {failed_refs:?}"
+        );
+
+        // Repair the collision locally with A's exact content, so A's master
+        // would now merge cleanly, without importing A.
+        repo2
+            .commit_file(
+                collision_path,
+                "Just a plain body with no frontmatter block at all.\n",
+                "repair collision locally",
+            )
+            .unwrap();
+        {
+            let ours = repo2.repo.head().unwrap().peel_to_commit().unwrap();
+            let theirs = repo2.repo.find_commit(stale_master).unwrap();
+            assert!(
+                !repo2
+                    .repo
+                    .merge_commits(&ours, &theirs, None)
+                    .unwrap()
+                    .has_conflicts(),
+                "setup invalid: A's master must now be mergeable"
+            );
+        }
+
+        let head_before = repo2.head_oid().unwrap().0;
+        let collision_before = repo2.read_file(collision_path).unwrap();
+
+        let masterless = dir2.path().join("masterless.bundle.tar");
+        let b_head = export_bundle_without_master(&masterless, "sidecar");
+
+        let mut mgr2 = SyncManager::open(&repo2).unwrap();
+        let index2 = open_index(dir2.path());
+        let err = import_bundle(&repo2, &mut mgr2, &index2, &masterless).expect_err(
+            "a masterless bundle must fail, never merge the stale master a failed import kept",
+        );
+        assert!(
+            matches!(err, DoogatError::Sync(_)),
+            "prune={prune}: a masterless import must fail as Sync, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("bundle merge failed:"),
+            "prune={prune}: a masterless import must report a merge failure, got: {err}"
+        );
+        assert!(
+            err.to_string().contains(&payload_id_of(&masterless))
+                && err.to_string().contains("sidecar"),
+            "prune={prune}: the error must name B's payload id and delivered branch, got: {err}"
+        );
+
+        let reopened = GitRepo::open(dir2.path()).unwrap();
+        assert_eq!(
+            reopened.head_oid().unwrap().0,
+            head_before,
+            "prune={prune}: a failed masterless import must not move HEAD"
+        );
+        assert_eq!(
+            reopened.read_file(collision_path).unwrap(),
+            collision_before,
+            "prune={prune}: local data must be unchanged"
+        );
+        assert!(
+            reopened.read_file("ddb/20260401000000.md").is_err(),
+            "prune={prune}: B's data must not land without a delivered master"
+        );
+
+        let after = bundle_refs(dir2.path());
+        for kept in &failed_refs {
+            assert!(
+                after.contains(kept),
+                "prune={prune}: A's kept ref {kept:?} must survive exactly, got {after:?}"
+            );
+        }
+        assert!(
+            after.iter().any(|(_, oid)| *oid == b_head),
+            "prune={prune}: B's fetched head must stay reachable, got {after:?}"
+        );
+    }
+}
+
+/// Cleanup ordering: fetched refs are deleted only after ALL post-merge work
+/// succeeds. A genuine fast-forward lands, then the final index rebuild fails
+/// (read-only index), so the import must error and keep its fetched ref.
+/// HEAD rollback after a clean fast-forward is not promised, so not asserted.
+#[test]
+fn bundle_import_keeps_refs_when_post_merge_work_fails() {
+    let (dir2, repo2) = temp_repo();
+    repo2
+        .commit_file(
+            "ddb/20260301000000.md",
+            "---\nid: 20260301000000\ntitle: Base\n---\nBase body\n",
+            "add base",
+        )
+        .unwrap();
+    crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+
+    // Node 1 descends from node 2's HEAD, so importing it is a fast-forward.
+    let (dir1, repo1) = cloned_repo(&dir2);
+    crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+    repo1
+        .commit_file(
+            "ddb/20260303000000.md",
+            "---\nid: 20260303000000\ntitle: Ahead\n---\nAhead body\n",
+            "add ahead",
+        )
+        .unwrap();
+    let mgr1 = SyncManager::open(&repo1).unwrap();
+    let bundle_path = dir1.path().join("ff.bundle.tar");
+    export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
+    let bundle_head = repo1.repo.head().unwrap().target().unwrap();
+    let local_head = repo2.repo.head().unwrap().target().unwrap();
+    assert!(
+        repo1
+            .repo
+            .graph_descendant_of(bundle_head, local_head)
+            .unwrap(),
+        "setup invalid: the bundle must fast-forward node 2"
+    );
+
+    let mut mgr2 = SyncManager::open(&repo2).unwrap();
+    let index2 = open_index(dir2.path());
+    index2
+        .conn
+        .execute_batch("PRAGMA query_only = ON;")
+        .unwrap();
+
+    let result = import_bundle(&repo2, &mut mgr2, &index2, &bundle_path);
+    assert!(
+        result.is_err(),
+        "a failed final index rebuild must fail the import, got {result:?}"
+    );
+    assert_eq!(
+        GitRepo::open(dir2.path()).unwrap().head_oid().unwrap().0,
+        bundle_head.to_string(),
+        "setup invalid: the fast-forward must have landed before the rebuild failed"
+    );
+
+    let after = bundle_refs(dir2.path());
+    assert!(
+        after.iter().any(|(_, oid)| *oid == bundle_head),
+        "post-merge failure must keep the fetched ref to the bundle head, got {after:?}"
+    );
 }
 
 /// Reachability under `fetch.prune`: a failed import keeps
-/// `refs/remotes/bundle/master` so its data stays reachable for a retry.
+/// `refs/remotes/bundle/<payload-id>/master` so its data stays reachable for a
+/// retry.
 /// A LATER import of a different bundle must not silently take that
 /// reachability away, even when the repo has `fetch.prune = true` (a
 /// common global git setting) and the new bundle carries no `master`.
 #[test]
 fn kept_bundle_ref_survives_a_later_import_under_fetch_prune() {
-    let (_dir1, dir2, result) = import_with_unresolvable_collision();
+    let (dir1, dir2, result) = import_with_unresolvable_collision();
+    let kept_ref = format!(
+        "refs/remotes/bundle/{}/master",
+        payload_id_of(&dir1.path().join("collision.bundle.tar"))
+    );
     assert!(
         matches!(result, Err(DoogatError::Sync(_))),
         "setup invalid: the collision import must fail, got {result:?}"
@@ -480,7 +683,7 @@ fn kept_bundle_ref_survives_a_later_import_under_fetch_prune() {
 
     let kept = repo2
         .repo
-        .revparse_single("refs/remotes/bundle/master")
+        .revparse_single(&kept_ref)
         .expect("setup invalid: the failed import must have kept the bundle ref")
         .id();
 
@@ -495,7 +698,7 @@ fn kept_bundle_ref_survives_a_later_import_under_fetch_prune() {
 
     let survivor = repo2
         .repo
-        .revparse_single("refs/remotes/bundle/master")
+        .revparse_single(&kept_ref)
         .expect("a later import must not prune the bundle ref a failed import kept");
     assert_eq!(
         survivor.id(),
@@ -509,9 +712,9 @@ fn kept_bundle_ref_survives_a_later_import_under_fetch_prune() {
 }
 
 /// Cleanup completeness: the import fetch maps `refs/heads/*` onto
-/// `refs/remotes/bundle/*`, so a multi-branch bundle creates several
-/// bundle refs. A successful import must clear the whole namespace, not
-/// just `master`, or stale bundle refs pile up in the repo.
+/// `refs/remotes/bundle/<payload-id>/*`, so a multi-branch bundle creates
+/// several bundle refs. A successful import must clear its whole namespace,
+/// not just `master`, or stale bundle refs pile up in the repo.
 #[test]
 fn successful_import_deletes_every_bundle_ref_not_just_master() {
     let (dir1, repo1) = temp_repo();
@@ -548,12 +751,7 @@ fn successful_import_deletes_every_bundle_ref_not_just_master() {
         "the imported doogat must be readable at HEAD, got: {content}"
     );
 
-    let mut refs = repo2.repo.references_glob("refs/remotes/bundle/*").unwrap();
-    let leftover: Vec<String> = refs
-        .names()
-        .filter_map(|n| n.ok())
-        .map(str::to_string)
-        .collect();
+    let leftover = bundle_refs(dir2.path());
     assert!(
         leftover.is_empty(),
         "a successful import must delete every bundle ref, not just master; leftover: {leftover:?}"
@@ -795,17 +993,17 @@ fn bundle_merge_error_wraps_every_variant_as_sync_with_prefix() {
 }
 
 /// Reproduces the live failure: a bundle exported from a `main`-branch
-/// repo carries `refs/heads/main` but no `refs/heads/master`, so the
-/// merge engine's lookup of `refs/remotes/bundle/master` fails with
-/// `NotFound`. That raw variant must not escape `import_bundle` -- it
-/// must surface as the documented `Sync` contract.
+/// repo carries `refs/heads/main` but no `refs/heads/master`. The import
+/// refuses before merging because no `master` was delivered; no raw
+/// `NotFound` may escape `import_bundle` -- it must surface as the
+/// documented `Sync` contract.
 #[test]
 fn bundle_import_from_main_branch_repo_reports_sync_not_raw_not_found() {
     let dir1 = ::tempfile::TempDir::new().unwrap();
     let bundle_path = dir1.path().join("main-branch.bundle.tar");
     export_bundle_without_master(&bundle_path, "main");
 
-    // A freshly-initialised repo merges `bundle/master`, which this
+    // A freshly-initialised repo needs a delivered `master`, which this
     // bundle never provides.
     let (dir2, repo2) = temp_repo();
     crate::sync_manager::register_node(&repo2, "Node2").unwrap();
@@ -827,5 +1025,823 @@ fn bundle_import_from_main_branch_repo_reports_sync_not_raw_not_found() {
     assert!(
         err.to_string().contains("bundle merge failed"),
         "the Sync message must contain the mapping prefix, got: {err}"
+    );
+}
+
+/// Payload id of a bundle tar, computed from its `objects.bundle` the way
+/// the import does.
+fn payload_id_of(tar_path: &Path) -> String {
+    let dir = ::tempfile::TempDir::new().unwrap();
+    tar::Archive::new(std::fs::File::open(tar_path).unwrap())
+        .unpack(dir.path())
+        .unwrap();
+    compute_payload_id(&dir.path().join("objects.bundle")).unwrap()
+}
+
+/// Repack `src` into `out` after `edit` changes the extracted files, with a
+/// fresh valid v1 checksum.
+fn rewrite_bundle(src: &Path, out: &Path, edit: impl FnOnce(&Path)) {
+    let dir = ::tempfile::TempDir::new().unwrap();
+    tar::Archive::new(std::fs::File::open(src).unwrap())
+        .unpack(dir.path())
+        .unwrap();
+    edit(dir.path());
+    let checksum = compute_bundle_checksum(dir.path()).unwrap();
+    std::fs::write(dir.path().join("checksum.sha256"), checksum).unwrap();
+
+    let mut builder = tar::Builder::new(std::fs::File::create(out).unwrap());
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if entry.file_type().unwrap().is_dir() {
+            builder
+                .append_dir_all(name.to_string_lossy().as_ref(), entry.path())
+                .unwrap();
+        } else {
+            builder
+                .append_path_with_name(entry.path(), name.to_string_lossy().as_ref())
+                .unwrap();
+        }
+    }
+    builder.finish().unwrap();
+}
+
+/// Every ref name and direct target (symbolic refs map to `None`), sorted.
+fn all_refs(repo_dir: &Path) -> Vec<(String, Option<git2::Oid>)> {
+    let repo = git2::Repository::open(repo_dir).unwrap();
+    let mut refs: Vec<_> = repo
+        .references()
+        .unwrap()
+        .map(|reference| {
+            let reference = reference.expect("ref enumeration must not fail");
+            (
+                reference
+                    .name()
+                    .expect("ref name must be UTF-8")
+                    .to_string(),
+                reference.target(),
+            )
+        })
+        .collect();
+    refs.sort();
+    refs
+}
+
+fn open_index(repo_dir: &Path) -> crate::indexer::Index {
+    let db = repo_dir.join(".ddb/index.db");
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    crate::indexer::Index::open(&db).unwrap()
+}
+
+/// Import A fails; a legacy flat `bundle/master` ref, a sibling-prefix
+/// namespace and an unrelated remote ref exist. A successful multi-branch
+/// import C removes exactly its own refs; every other ref/OID survives.
+#[test]
+fn successful_bundle_import_preserves_other_failed_and_legacy_refs() {
+    let (_dir1, dir2, result) = import_with_unresolvable_collision();
+    assert!(
+        matches!(result, Err(DoogatError::Sync(_))),
+        "setup invalid: the collision import A must fail, got {result:?}"
+    );
+    let repo2 = GitRepo::open(dir2.path()).unwrap();
+    let local_head = repo2.repo.head().unwrap().target().unwrap();
+
+    // C descends from node 2 and carries two branches.
+    let (dir3, repo3) = cloned_repo(&dir2);
+    crate::sync_manager::register_node(&repo3, "Node3").unwrap();
+    repo3
+        .commit_file(
+            "ddb/20260305000000.md",
+            "---\nid: 20260305000000\ntitle: C\n---\nC body\n",
+            "add c",
+        )
+        .unwrap();
+    let c_head = repo3.repo.head().unwrap().peel_to_commit().unwrap();
+    repo3.repo.branch("feature", &c_head, false).unwrap();
+    let mgr3 = SyncManager::open(&repo3).unwrap();
+    let c_bundle = dir3.path().join("c.bundle.tar");
+    export_full_bundle(&repo3, &mgr3, &c_bundle).unwrap();
+    let c_ns = format!("refs/remotes/bundle/{}/", payload_id_of(&c_bundle));
+
+    repo2
+        .repo
+        .reference("refs/remotes/bundle/master", local_head, false, "legacy")
+        .unwrap();
+    let sibling = format!("{}-sibling/master", c_ns.trim_end_matches('/'));
+    repo2
+        .repo
+        .reference(&sibling, local_head, false, "sibling prefix")
+        .unwrap();
+    repo2
+        .repo
+        .reference(
+            "refs/remotes/elsewhere/feature",
+            local_head,
+            false,
+            "unrelated",
+        )
+        .unwrap();
+
+    let others = |refs: Vec<(String, Option<git2::Oid>)>| -> Vec<_> {
+        refs.into_iter()
+            .filter(|(name, _)| !name.starts_with("refs/heads/") && !name.starts_with(&c_ns))
+            .collect()
+    };
+    let before = others(all_refs(dir2.path()));
+    assert!(
+        before.iter().any(|(name, _)| name == &sibling),
+        "setup invalid: the sibling ref must be outside C's namespace"
+    );
+
+    let mut mgr2 = SyncManager::open(&repo2).unwrap();
+    let index2 = open_index(dir2.path());
+    import_bundle(&repo2, &mut mgr2, &index2, &c_bundle).expect("C must import cleanly");
+    assert!(repo2
+        .read_file("ddb/20260305000000.md")
+        .unwrap()
+        .contains("C body"));
+
+    let after = all_refs(dir2.path());
+    assert!(
+        after.iter().all(|(name, _)| !name.starts_with(&c_ns)),
+        "every ref C fetched must be removed, got {after:?}"
+    );
+    assert_eq!(
+        others(after),
+        before,
+        "every ref outside C's namespace must survive exactly"
+    );
+}
+
+/// The payload id is the full SHA-256 of the `objects.bundle` bytes: same
+/// bytes, same id; different Git payload, different id. A metadata-only
+/// tar change keeps the id yet still runs node registration on retry.
+#[test]
+fn bundle_payload_identity_is_stable_and_changes_with_git_payload() {
+    let dir = ::tempfile::TempDir::new().unwrap();
+    let one = dir.path().join("one.bundle");
+    let copy = dir.path().join("copy.bundle");
+    let two = dir.path().join("two.bundle");
+    std::fs::write(&one, b"payload one").unwrap();
+    std::fs::write(&copy, b"payload one").unwrap();
+    std::fs::write(&two, b"payload two").unwrap();
+
+    let id = compute_payload_id(&one).unwrap();
+    assert_eq!(id, format!("{:x}", Sha256::digest(b"payload one")));
+    assert_eq!(id.len(), 64, "the id must be the full digest, got {id}");
+    assert!(id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+    assert_eq!(compute_payload_id(&copy).unwrap(), id);
+    assert_ne!(compute_payload_id(&two).unwrap(), id);
+
+    let (dir1, repo1) = temp_repo();
+    repo1
+        .commit_file(
+            "ddb/20260301000000.md",
+            "---\nid: 20260301000000\ntitle: test\n---\nBody\n",
+            "add",
+        )
+        .unwrap();
+    crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+    let mgr1 = SyncManager::open(&repo1).unwrap();
+    let first = dir1.path().join("first.bundle.tar");
+    export_full_bundle(&repo1, &mgr1, &first).unwrap();
+    let second = dir1.path().join("second.bundle.tar");
+    rewrite_bundle(&first, &second, |d| {
+        std::fs::create_dir_all(d.join("nodes")).unwrap();
+        std::fs::write(
+            d.join("nodes/extra-node.toml"),
+            "uuid = \"extra-node\"\nname = \"Extra\"\nknown_heads = []\nstatus = \"Active\"\n",
+        )
+        .unwrap();
+        let manifest = d.join("manifest.toml");
+        let mut text = std::fs::read_to_string(&manifest).unwrap();
+        text.push_str("\n# metadata-only change\n");
+        std::fs::write(manifest, text).unwrap();
+    });
+    assert_eq!(payload_id_of(&first), payload_id_of(&second));
+
+    let (dir2, repo2) = temp_repo();
+    crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+    let mut mgr2 = SyncManager::open(&repo2).unwrap();
+    let index2 = open_index(dir2.path());
+    import_bundle(&repo2, &mut mgr2, &index2, &first).unwrap();
+    let extra = dir2.path().join(".nodes/extra-node.toml");
+    assert!(
+        !extra.exists(),
+        "setup invalid: the first tar has no extra node"
+    );
+
+    import_bundle(&repo2, &mut mgr2, &index2, &second).expect("a same-payload retry must succeed");
+    assert!(
+        extra.exists(),
+        "a metadata-only change must not skip node registration on retry"
+    );
+}
+
+/// A valid v1 archive (checksum and manifest verify) without
+/// `objects.bundle` fails before any HEAD or ref write.
+#[test]
+fn bundle_import_rejects_missing_git_payload_before_repo_mutation() {
+    let (dir1, repo1) = temp_repo();
+    repo1
+        .commit_file(
+            "ddb/20260301000000.md",
+            "---\nid: 20260301000000\ntitle: test\n---\nBody\n",
+            "add",
+        )
+        .unwrap();
+    crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+    let mgr1 = SyncManager::open(&repo1).unwrap();
+    let full = dir1.path().join("full.bundle.tar");
+    export_full_bundle(&repo1, &mgr1, &full).unwrap();
+    let stripped = dir1.path().join("stripped.bundle.tar");
+    rewrite_bundle(&full, &stripped, |d| {
+        std::fs::remove_file(d.join("objects.bundle")).unwrap();
+    });
+    verify_bundle(&stripped).expect("setup invalid: the stripped archive must verify as v1");
+
+    let (dir2, repo2) = temp_repo();
+    crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+    let head_before = repo2.head_oid().unwrap().0;
+    let refs_before = all_refs(dir2.path());
+    let mut mgr2 = SyncManager::open(&repo2).unwrap();
+    let index2 = open_index(dir2.path());
+
+    let err = import_bundle(&repo2, &mut mgr2, &index2, &stripped)
+        .expect_err("a bundle without objects.bundle must fail");
+    assert!(
+        matches!(err, DoogatError::Validation(_)) && err.to_string().contains("objects.bundle"),
+        "the missing Git payload must be named, got {err:?}"
+    );
+    assert_eq!(repo2.head_oid().unwrap().0, head_before);
+    assert_eq!(all_refs(dir2.path()), refs_before, "no ref may be written");
+}
+
+/// Refs already in the candidate namespace must match the advertised heads.
+/// A wrong OID on an advertised branch, or a `master` the bundle does not
+/// advertise, is refused loudly: no force, no merge, no cleanup.
+#[test]
+fn bundle_import_rejects_unexpected_existing_namespace_refs() {
+    let (dir1, repo1) = temp_repo();
+    repo1
+        .commit_file(
+            "ddb/20260301000000.md",
+            "---\nid: 20260301000000\ntitle: Remote\n---\nRemote body\n",
+            "add",
+        )
+        .unwrap();
+    crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+    let mgr1 = SyncManager::open(&repo1).unwrap();
+    let with_master = dir1.path().join("master.bundle.tar");
+    export_full_bundle(&repo1, &mgr1, &with_master).unwrap();
+
+    let (dir2, repo2) = temp_repo();
+    repo2
+        .commit_file(
+            "ddb/20260310000000.md",
+            "---\nid: 20260310000000\ntitle: Local\n---\nLocal body\n",
+            "add local",
+        )
+        .unwrap();
+    crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+    let local_head = repo2.repo.head().unwrap().target().unwrap();
+    let mut mgr2 = SyncManager::open(&repo2).unwrap();
+    let index2 = open_index(dir2.path());
+
+    // Wrong OID on the advertised `master`.
+    let ns = format!("refs/remotes/bundle/{}/", payload_id_of(&with_master));
+    repo2
+        .repo
+        .reference(&format!("{ns}master"), local_head, false, "seed wrong oid")
+        .unwrap();
+    let err = import_bundle(&repo2, &mut mgr2, &index2, &with_master)
+        .expect_err("a wrong-OID namespace ref must be refused");
+    assert!(
+        matches!(err, DoogatError::Sync(_)) && err.to_string().contains(&ns),
+        "the refusal must name the namespace, got {err:?}"
+    );
+    assert_eq!(
+        bundle_refs(dir2.path()),
+        vec![(format!("{ns}master"), local_head)],
+        "nothing may be fetched, forced or deleted"
+    );
+    assert_eq!(repo2.head_oid().unwrap().0, local_head.to_string());
+    assert!(repo2.read_file("ddb/20260301000000.md").is_err());
+
+    // A masterless bundle whose namespace already holds a `master`: the
+    // advertised heads decide, so the seeded ref is refused, never merged.
+    let masterless = dir2.path().join("masterless.bundle.tar");
+    export_bundle_without_master(&masterless, "sidecar");
+    let ns_b = format!("refs/remotes/bundle/{}/", payload_id_of(&masterless));
+    repo2
+        .repo
+        .reference(&format!("{ns_b}master"), local_head, false, "seed extra")
+        .unwrap();
+    let err = import_bundle(&repo2, &mut mgr2, &index2, &masterless)
+        .expect_err("an unadvertised namespace ref must be refused");
+    assert!(
+        matches!(err, DoogatError::Sync(_)) && err.to_string().contains(&ns_b),
+        "the refusal must name the namespace, got {err:?}"
+    );
+    let in_b: Vec<_> = bundle_refs(dir2.path())
+        .into_iter()
+        .filter(|(name, _)| name.starts_with(&ns_b))
+        .collect();
+    assert_eq!(in_b, vec![(format!("{ns_b}master"), local_head)]);
+    assert_eq!(repo2.head_oid().unwrap().0, local_head.to_string());
+    assert!(repo2.read_file("ddb/20260401000000.md").is_err());
+}
+
+/// A failed import's retry, after the conflict is repaired, reuses the
+/// same payload namespace, clears only it, keeps sibling refs, and releases
+/// the import lease. A repeated success is a no-op.
+#[test]
+fn failed_bundle_retry_uses_same_namespace_and_releases_import_lease() {
+    let (dir1, dir2, result) = import_with_unresolvable_collision();
+    assert!(
+        matches!(result, Err(DoogatError::Sync(_))),
+        "setup invalid: the collision import A must fail, got {result:?}"
+    );
+    let a_bundle = dir1.path().join("collision.bundle.tar");
+    let ns = format!("refs/remotes/bundle/{}/", payload_id_of(&a_bundle));
+    let failed = bundle_refs(dir2.path());
+    assert!(
+        !failed.is_empty() && failed.iter().all(|(name, _)| name.starts_with(&ns)),
+        "A's refs must live in its payload namespace, got {failed:?}"
+    );
+    let git_dir = dir2.path().join(".git");
+    drop(
+        write_lock::acquire(
+            &git_dir,
+            "ddb-bundle-import.lock",
+            Duration::from_millis(200),
+        )
+        .expect("a failed import must release the import lease"),
+    );
+
+    let repo2 = GitRepo::open(dir2.path()).unwrap();
+    let kept_oid = failed[0].1;
+    let siblings = [
+        "refs/remotes/bundle/other/master".to_string(),
+        format!("{}x/master", ns.trim_end_matches('/')),
+    ];
+    for name in &siblings {
+        repo2
+            .repo
+            .reference(name, kept_oid, false, "sibling")
+            .unwrap();
+    }
+
+    // Repair the collision locally with A's exact content.
+    repo2
+        .commit_file(
+            "ddb/20260302000000.md",
+            "Just a plain body with no frontmatter block at all.\n",
+            "repair collision locally",
+        )
+        .unwrap();
+
+    let mut mgr2 = SyncManager::open(&repo2).unwrap();
+    let index2 = open_index(dir2.path());
+    import_bundle(&repo2, &mut mgr2, &index2, &a_bundle).expect("the repaired retry must succeed");
+
+    let after = bundle_refs(dir2.path());
+    assert!(
+        after.iter().all(|(name, _)| !name.starts_with(&ns)),
+        "the retry must clear its namespace, got {after:?}"
+    );
+    for name in &siblings {
+        assert!(
+            after.contains(&(name.clone(), kept_oid)),
+            "sibling {name} must survive, got {after:?}"
+        );
+    }
+    drop(
+        write_lock::acquire(
+            &git_dir,
+            "ddb-bundle-import.lock",
+            Duration::from_millis(200),
+        )
+        .expect("a successful import must release the import lease"),
+    );
+
+    let head = repo2.head_oid().unwrap().0;
+    import_bundle(&repo2, &mut mgr2, &index2, &a_bundle).expect("a repeated success must succeed");
+    assert_eq!(
+        repo2.head_oid().unwrap().0,
+        head,
+        "a repeated success is a no-op"
+    );
+    assert_eq!(bundle_refs(dir2.path()), after);
+}
+
+/// Child-only env (set on the spawned command, never globally) selecting the
+/// lease test's child mode and fixture.
+const LEASE_CHILD_MODE: &str = "DDB_TEST_BUNDLE_LEASE_CHILD";
+const LEASE_CHILD_REPO: &str = "DDB_TEST_BUNDLE_LEASE_REPO";
+const LEASE_CHILD_BUNDLE: &str = "DDB_TEST_BUNDLE_LEASE_BUNDLE";
+
+/// Child side of the lease test: one real import on independent handles in
+/// its own process. Prints a marker only after every assertion held.
+fn run_lease_child(mode: &str) {
+    let repo_dir = PathBuf::from(std::env::var(LEASE_CHILD_REPO).unwrap());
+    let bundle = PathBuf::from(std::env::var(LEASE_CHILD_BUNDLE).unwrap());
+    let repo = GitRepo::open(&repo_dir).unwrap();
+    let mut mgr = SyncManager::open(&repo).unwrap();
+    let index = open_index(&repo_dir);
+    match mode {
+        "refuse" => {
+            let start = std::time::Instant::now();
+            let err = import_bundle_with_lease_timeout(
+                &repo,
+                &mut mgr,
+                &index,
+                &bundle,
+                Duration::from_millis(200),
+            )
+            .expect_err("a held lease must refuse after the bounded wait");
+            assert!(
+                matches!(err, DoogatError::Conflict(_))
+                    && err.to_string().contains("bundle-import"),
+                "lease contention must be a Conflict naming bundle import, got {err:?}"
+            );
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "the wait must be bounded"
+            );
+        }
+        "import" => {
+            let report = import_bundle_with_lease_timeout(
+                &repo,
+                &mut mgr,
+                &index,
+                &bundle,
+                Duration::from_secs(20),
+            )
+            .expect("the import must succeed once the lease is free");
+            assert_eq!(report.direction, "bundle-import");
+        }
+        other => panic!("unknown lease child mode {other:?}"),
+    }
+    println!("lease-child-done:{mode}");
+}
+
+/// Re-run this exact test in a fresh process of this test binary as child
+/// `mode`, wait for it (bounded, kill and reap on deadline), and panic with
+/// its output unless it exited cleanly after printing its marker.
+fn spawn_lease_child(mode: &str, repo_dir: &Path, bundle: &Path) {
+    let test_name = concat!(
+        module_path!(),
+        "::bundle_import_lease_covers_fetch_through_cleanup"
+    )
+    .split_once("::")
+    .unwrap()
+    .1;
+    let logs = ::tempfile::TempDir::new().unwrap();
+    let out_path = logs.path().join("stdout");
+    let err_path = logs.path().join("stderr");
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([test_name, "--exact", "--nocapture", "--test-threads=1"])
+        .env(LEASE_CHILD_MODE, mode)
+        .env(LEASE_CHILD_REPO, repo_dir)
+        .env(LEASE_CHILD_BUNDLE, bundle)
+        .stdout(std::fs::File::create(&out_path).unwrap())
+        .stderr(std::fs::File::create(&err_path).unwrap())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            child.wait().unwrap();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let output = format!(
+        "stdout:\n{}\nstderr:\n{}",
+        std::fs::read_to_string(&out_path).unwrap_or_default(),
+        std::fs::read_to_string(&err_path).unwrap_or_default()
+    );
+    assert!(
+        status.is_some_and(|s| s.success())
+            && output.contains(&format!("lease-child-done:{mode}")),
+        "lease child {mode:?} did not complete (status {status:?}, None = killed at deadline):\n{output}"
+    );
+}
+
+/// The import lease covers fetch through cleanup across processes: while
+/// this process holds it, a child process's real import refuses loudly after
+/// its bounded wait and leaves every ref and HEAD untouched. The lease stays
+/// held until the child has finished, so the refusal proves the import tried
+/// to enter while held. Once released, a second child imports and clears only
+/// its namespace; an error path releases the lease too.
+#[test]
+fn bundle_import_lease_covers_fetch_through_cleanup() {
+    if let Ok(mode) = std::env::var(LEASE_CHILD_MODE) {
+        run_lease_child(&mode);
+        return;
+    }
+    let (dir1, repo1) = temp_repo();
+    repo1
+        .commit_file(
+            "ddb/20260301000000.md",
+            "---\nid: 20260301000000\ntitle: Base\n---\nBase body\n",
+            "add base",
+        )
+        .unwrap();
+    let base_oid = repo1.repo.head().unwrap().target().unwrap();
+    // Node 2 already holds the base commit, which the bundle's `feature` names.
+    let (dir2, repo2) = cloned_repo(&dir1);
+    crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+    crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+    repo1
+        .repo
+        .branch("feature", &repo1.repo.find_commit(base_oid).unwrap(), false)
+        .unwrap();
+    repo1
+        .commit_file(
+            "ddb/20260306000000.md",
+            "---\nid: 20260306000000\ntitle: New\n---\nNew body\n",
+            "add new",
+        )
+        .unwrap();
+    let mgr1 = SyncManager::open(&repo1).unwrap();
+    let bundle = dir1.path().join("lease.bundle.tar");
+    export_full_bundle(&repo1, &mgr1, &bundle).unwrap();
+    let ns = format!("refs/remotes/bundle/{}/", payload_id_of(&bundle));
+
+    // Another importer owns the lease and has fetched `feature` already.
+    let git_dir = dir2.path().join(".git");
+    let held =
+        write_lock::acquire(&git_dir, "ddb-bundle-import.lock", Duration::from_secs(5)).unwrap();
+    repo2
+        .repo
+        .reference(&format!("{ns}feature"), base_oid, false, "holder fetched")
+        .unwrap();
+    let seeded = bundle_refs(dir2.path());
+    let head_before = repo2.head_oid().unwrap().0;
+
+    // A child process's real import refuses while this process holds the
+    // lease; the lease is dropped only after the child has finished.
+    spawn_lease_child("refuse", dir2.path(), &bundle);
+    assert_eq!(
+        bundle_refs(dir2.path()),
+        seeded,
+        "a refused import must not fetch or clean"
+    );
+    assert_eq!(repo2.head_oid().unwrap().0, head_before);
+    drop(held);
+
+    let sibling = "refs/remotes/bundle/other/master".to_string();
+    repo2
+        .repo
+        .reference(&sibling, base_oid, false, "sibling")
+        .unwrap();
+    spawn_lease_child("import", dir2.path(), &bundle);
+    let reopened = GitRepo::open(dir2.path()).unwrap();
+    assert!(reopened.read_file("ddb/20260306000000.md").is_ok());
+    assert_eq!(
+        bundle_refs(dir2.path()),
+        vec![(sibling, base_oid)],
+        "the import must clear exactly its own namespace"
+    );
+
+    // Error path releases the lease too.
+    let masterless = dir2.path().join("masterless.bundle.tar");
+    export_bundle_without_master(&masterless, "sidecar");
+    let mut mgr = SyncManager::open(&reopened).unwrap();
+    let index = open_index(dir2.path());
+    assert!(import_bundle(&reopened, &mut mgr, &index, &masterless).is_err());
+    drop(
+        write_lock::acquire(
+            &git_dir,
+            "ddb-bundle-import.lock",
+            Duration::from_millis(200),
+        )
+        .expect("a failed import must release the import lease"),
+    );
+}
+
+/// A real import keeps the import lease between its fetch and its cleanup.
+/// This test holds the Git write lock the merge needs, so the importer
+/// thread blocks at the merge once its fetch has landed. While it is blocked
+/// the lease cannot be taken; once the write lock is released the import
+/// completes and clears its namespace, and only then is the lease free.
+#[test]
+fn real_import_holds_import_lease_while_blocked_at_merge() {
+    let (dir2, repo2) = temp_repo();
+    repo2
+        .commit_file(
+            "ddb/20260301000000.md",
+            "---\nid: 20260301000000\ntitle: Base\n---\nBase body\n",
+            "add base",
+        )
+        .unwrap();
+    crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+    let (dir1, repo1) = cloned_repo(&dir2);
+    crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+    repo1
+        .commit_file(
+            "ddb/20260307000000.md",
+            "---\nid: 20260307000000\ntitle: Held\n---\nHeld body\n",
+            "add held",
+        )
+        .unwrap();
+    let mgr1 = SyncManager::open(&repo1).unwrap();
+    let bundle = dir1.path().join("held.bundle.tar");
+    export_full_bundle(&repo1, &mgr1, &bundle).unwrap();
+    let bundle_head = repo1.repo.head().unwrap().target().unwrap();
+    let fetched_master = (
+        format!("refs/remotes/bundle/{}/master", payload_id_of(&bundle)),
+        bundle_head,
+    );
+    let head_before = repo2.head_oid().unwrap().0;
+    let git_dir = dir2.path().join(".git");
+
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let repo_dir = dir2.path().to_path_buf();
+    let importer = std::thread::spawn(move || {
+        let repo = GitRepo::open(&repo_dir).unwrap();
+        let mut mgr = SyncManager::open(&repo).unwrap();
+        let index = open_index(&repo_dir);
+        ready_tx.send(()).unwrap();
+        go_rx.recv().unwrap();
+        import_bundle(&repo, &mut mgr, &index, &bundle)
+            .map(|report| report.direction)
+            .map_err(|e| e.to_string())
+    });
+    ready_rx.recv().expect("the importer must open its handles");
+    let write_guard =
+        write_lock::acquire(&git_dir, "ddb-write.lock", Duration::from_secs(5)).unwrap();
+    go_tx.send(()).unwrap();
+
+    // Rendezvous on observable state: the fetched ref appears only after the
+    // importer took the lease and fetched, and its merge cannot run while
+    // this test holds the write lock (the merge waits up to 10 s for it).
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    while !bundle_refs(dir2.path()).contains(&fetched_master) {
+        assert!(
+            !importer.is_finished(),
+            "the importer finished before its fetch was observed"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the importer never fetched {fetched_master:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let contended = write_lock::acquire(
+        &git_dir,
+        "ddb-bundle-import.lock",
+        Duration::from_millis(200),
+    );
+    assert!(
+        matches!(contended, Err(DoogatError::Conflict(_))),
+        "a real import blocked between fetch and merge must still hold the import lease"
+    );
+    assert_eq!(
+        GitRepo::open(dir2.path()).unwrap().head_oid().unwrap().0,
+        head_before,
+        "setup invalid: the merge must still be blocked on the write lock"
+    );
+
+    drop(write_guard);
+    let outcome = importer.join().expect("the importer thread must not panic");
+    assert_eq!(outcome, Ok("bundle-import".to_string()));
+    assert_eq!(
+        GitRepo::open(dir2.path()).unwrap().head_oid().unwrap().0,
+        bundle_head.to_string(),
+        "the released import must land"
+    );
+    assert!(
+        bundle_refs(dir2.path()).is_empty(),
+        "the released import must clean its namespace"
+    );
+    drop(
+        write_lock::acquire(
+            &git_dir,
+            "ddb-bundle-import.lock",
+            Duration::from_millis(200),
+        )
+        .expect("a finished import must release the import lease"),
+    );
+}
+
+/// `parse_ref_lines` never skips a malformed record: a short or uppercase
+/// OID, a missing separator, an empty name, a name with whitespace and a
+/// blank line in the middle each fail as `Sync` naming the record. Full
+/// 40- and 64-hex OIDs parse into `(refname, oid)` pairs.
+#[test]
+fn parse_ref_lines_rejects_malformed_records_and_accepts_full_oids() {
+    let sha1 = "a".repeat(40);
+    let sha256 = "0123456789abcdef".repeat(4);
+    let parsed = parse_ref_lines(
+        &format!("{sha1} refs/heads/master\n{sha256} refs/heads/feature\n"),
+        "test",
+    )
+    .unwrap();
+    assert_eq!(
+        parsed,
+        vec![
+            ("refs/heads/master".to_string(), sha1.clone()),
+            ("refs/heads/feature".to_string(), sha256.clone()),
+        ]
+    );
+
+    let malformed = [
+        format!("{} refs/heads/master", &sha1[..39]),
+        format!("{} refs/heads/master", sha1.to_uppercase()),
+        format!("{sha1}refs/heads/master"),
+        format!("{sha1} "),
+        format!("{sha1} refs/heads/a b"),
+        format!("{sha1} refs/heads/a\tb"),
+        String::new(),
+    ];
+    for line in &malformed {
+        let text = format!("{sha1} refs/heads/before\n{line}\n{sha256} refs/heads/after\n");
+        match parse_ref_lines(&text, "test") {
+            Err(DoogatError::Sync(msg)) => assert!(
+                msg.contains(&format!("malformed test record: {line:?}")),
+                "the error must name the record {line:?}, got: {msg}"
+            ),
+            other => panic!("record {line:?} must be refused as Sync, got {other:?}"),
+        }
+    }
+}
+
+/// Tags in a bundle are never fetched: a lightweight and an annotated tag
+/// pointing into the bundle's history must not land in `refs/tags/*`
+/// outside the payload namespace, and never select a branch.
+#[test]
+fn bundle_import_never_fetches_advertised_tags() {
+    let (dir1, repo1) = temp_repo();
+    repo1
+        .commit_file(
+            "ddb/20260308000000.md",
+            "---\nid: 20260308000000\ntitle: Tagged\n---\nTagged body\n",
+            "add tagged",
+        )
+        .unwrap();
+    crate::sync_manager::register_node(&repo1, "Node1").unwrap();
+    let head = repo1.repo.head().unwrap().peel_to_commit().unwrap();
+    repo1
+        .repo
+        .tag_lightweight("light", head.as_object(), false)
+        .unwrap();
+    let sig = git2::Signature::now("ddb", "ddb@example.invalid").unwrap();
+    repo1
+        .repo
+        .tag("annotated", head.as_object(), &sig, "annotated tag", false)
+        .unwrap();
+    let mgr1 = SyncManager::open(&repo1).unwrap();
+    let bundle = dir1.path().join("tagged.bundle.tar");
+    export_full_bundle(&repo1, &mgr1, &bundle).unwrap();
+
+    let extracted = ::tempfile::TempDir::new().unwrap();
+    tar::Archive::new(std::fs::File::open(&bundle).unwrap())
+        .unpack(extracted.path())
+        .unwrap();
+    let git_bundle = extracted.path().join("objects.bundle");
+    let listed = run_git(
+        &repo1,
+        &["bundle", "list-heads", git_bundle.to_str().unwrap()],
+    )
+    .unwrap();
+    assert!(
+        listed.contains("refs/tags/light") && listed.contains("refs/tags/annotated"),
+        "setup invalid: the bundle must advertise both tags, got {listed}"
+    );
+    assert_eq!(
+        advertised_heads(&repo1, &git_bundle).unwrap(),
+        vec![("master".to_string(), head.id().to_string())],
+        "advertised tags and HEAD must never select a branch"
+    );
+
+    let (dir2, repo2) = temp_repo();
+    crate::sync_manager::register_node(&repo2, "Node2").unwrap();
+    let tags = |dir: &Path| -> Vec<(String, Option<git2::Oid>)> {
+        all_refs(dir)
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("refs/tags/"))
+            .collect()
+    };
+    let tags_before = tags(dir2.path());
+    let mut mgr2 = SyncManager::open(&repo2).unwrap();
+    let index2 = open_index(dir2.path());
+    import_bundle(&repo2, &mut mgr2, &index2, &bundle).expect("a tagged bundle must import");
+    assert!(repo2
+        .read_file("ddb/20260308000000.md")
+        .unwrap()
+        .contains("Tagged body"));
+    assert_eq!(
+        tags(dir2.path()),
+        tags_before,
+        "advertised tags must never be fetched into refs/tags/*"
     );
 }
