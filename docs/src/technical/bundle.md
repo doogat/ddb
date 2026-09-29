@@ -86,6 +86,21 @@ The payload's `refs/remotes/bundle/<payload-id>/` refs are deleted only after th
 
 Re-importing the same bundle after a successful import is a no-op: its commits are already ancestors of local HEAD, so the merge classifies as already-up-to-date and reports zero (new) conflicts.
 
+### Recovery workflow and interface conformance
+
+Kept refs make a failed import safe to retry. Fix the cause (for example, repair the colliding file locally), then import the same bundle again: the same Git payload maps to the same namespace, the retry merges it, and only that namespace is deleted. Other imports' kept refs are never merged or deleted by it. A later bundle that delivers no `master` fails rather than merging a kept `master` from an earlier failed import. An independent successful import leaves every other namespace, legacy flat ref and unrelated remote ref untouched.
+
+The same golden workflow (failed A, local repair, masterless B refused, independent C succeeds, repaired retry of A, no-op reimport; under `fetch.prune` true and false) runs through both public interfaces that expose bundle import:
+
+| Interface | Success | Failure | Conformance tests |
+|-----------|---------|---------|-------------------|
+| CLI `ddb bundle import <path>` | exit 0, `imported: conflicts resolved: <n>` | nonzero exit, no success line; a merge failure prints `bundle merge failed:` naming the payload namespace; a bundle without `master` also lists its delivered branches | `tests/e2e/integration_bundle_import_ref_namespace.rs` |
+| FFI `DoogatDriver::import_bundle` | `Ok(())` (no `SyncReport` crosses FFI) | `DdbError::Git { msg }` carrying the CLI's `bundle merge failed:` text: the payload namespace, plus the delivered branches for a bundle without `master` | `ddb-core/src/ffi/tests.rs` (`bundle_import_ffi_*`) |
+
+The FFI tests exercise the public Rust driver, not generated Swift/Kotlin bindings. GraphQL, REST, PgWire and NoSQL HTTP have no bundle-import endpoint and make no bundle-import promise.
+
+Limits: there is no abort or discard command. A kept namespace stays until a retry of the same bundle succeeds or an operator deletes that one namespace by hand; a recovery API is deferred to its own design. Kept refs are not garbage-collected automatically. The bundle-import lease serializes cooperating importers only and does not close the separate Git write-lease gaps listed in `invariants.md`.
+
 ## Pre-compaction Backup
 
 Compaction automatically exports a full bundle before mutating data, providing a recovery path if compaction corrupts the repository. Backups are stored at `.ddb/backups/pre-compact-{ISO8601}.bundle.tar` by default.

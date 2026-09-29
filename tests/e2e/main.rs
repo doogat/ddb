@@ -26,6 +26,7 @@ mod inline_zone;
 mod integration_alter_rename;
 mod integration_binary_lww;
 mod integration_bundle;
+mod integration_bundle_import_ref_namespace;
 mod integration_compact_stats;
 mod integration_crdt_conflicts;
 mod integration_error_codes;
