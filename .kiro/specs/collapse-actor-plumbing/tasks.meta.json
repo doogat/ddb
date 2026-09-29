@@ -1,0 +1,202 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Write the Phase 0 acceptance unit test first (TDD) in `ddb-server/src/actor/tests.rs`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712115
+      },
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413720915
+      },
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790420919719
+      }
+    ],
+    "1.2 Add `EventIntent` enum, closure-carrying `ActorMsg`, and generic `ActorHandle::call<R, F>`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712188
+      },
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790420923607
+      }
+    ],
+    "1.3 Write the actor-gone / dropped-reply structured-error unit test": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712226
+      }
+    ],
+    "2. Checkpoint — closure path works end-to-end for one read + one mutation with enums still present": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712263
+      }
+    ],
+    "3.1 Write reload derivation unit tests first (TDD) in `ddb-server/src/reload.rs`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712303
+      }
+    ],
+    "3.2 Add `SchemaChange` enum, `derive_schema_change`, and `SchemaReloader::apply`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712336
+      }
+    ],
+    "3.3 Wire the actor bridge to call `apply` once per actor-routed mutation and retire the 5 hand-wired triggers": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712374
+      }
+    ],
+    "4.1 Migrate NoSQL HTTP routes in `nosql_api.rs` to `call`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712407
+      }
+    ],
+    "4.2 Migrate GraphQL read resolvers and subscription reads to `call`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712442
+      }
+    ],
+    "4.3 Migrate internal/read callers in `reload.rs` and `lib.rs` to `call`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712473
+      }
+    ],
+    "4.4 Write colocated unit test asserting reads emit no events through `call`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712498
+      }
+    ],
+    "5.1 Write per-kind event-parity unit tests first (TDD) in `ddb-server/src/actor/tests.rs`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712524
+      }
+    ],
+    "5.2 Migrate GraphQL mutation resolvers (`schema/mutations/**`) to `call` with correct EventIntent": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712554
+      }
+    ],
+    "5.3 Migrate REST mutating handlers (`rest.rs`) to `call`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712588
+      }
+    ],
+    "5.4 Migrate PgWire `execute_sql` (`pgwire.rs:110-114`) to `call`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712614
+      }
+    ],
+    "5.5 Replace the `match &msg.cmd` event introspection with EventIntent-driven emission": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712646
+      }
+    ],
+    "6.1 Write colocated unit test first (TDD) for a maintenance verb through `call`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712672
+      }
+    ],
+    "6.2 Route `sync`, `compact`, `run_maintenance` through `call` (inline, no worker extraction)": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712697
+      }
+    ],
+    "7. Checkpoint — every verb, event, and reload routes through `call`; enums still present": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712724
+      }
+    ],
+    "8.1 Delete `ActorCommand`, `ActorReply`, `handle_command`, the 36 verb methods, and the 36 \"unexpected reply\" fallbacks": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712756
+      }
+    ],
+    "8.2 Verify the \"add a verb = one touch point\" invariant with a compile-fenced note or doc test": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712782
+      }
+    ],
+    "9.1 Add `ddb-server/tests/property_tests.rs` with proptest generators for P1, P2, P3": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712812
+      }
+    ],
+    "10.1 Add `tests/e2e/integration_closure_actor.rs` and register it in `tests/e2e/main.rs`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712841
+      }
+    ],
+    "10.2 Run the CLAUDE.md conditional e2e deletion safety net": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712866
+      }
+    ],
+    "11.1 Update `docs/src/technical/server.md` and `docs/src/technical/walkthrough.md`": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712897
+      }
+    ],
+    "12. Final checkpoint — Tier 1 gate green, then push master": [
+      {
+        "executionId": "f1ed7fab-1401-46e1-b5b1-fc09f26c6f04",
+        "chatSessionId": "sess_a9da9904-bd85-4c09-8fb7-852b578b100a",
+        "timestamp": 1790413712922
+      }
+    ]
+  }
+}
