@@ -412,7 +412,7 @@ pub trait GitMerge {
         losers: &[crate::types::CollisionLoser],
         message: &str,
         theirs: &CommitHash,
-    ) -> Result<CommitHash>;
+    ) -> Result<crate::types::MergeCommitOutcome>;
 }
 
 /// Commit introspection, tree walking, and history queries.

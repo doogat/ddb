@@ -768,7 +768,7 @@ impl crate::traits::GitMerge for GitRepo {
         losers: &[crate::types::CollisionLoser],
         message: &str,
         theirs: &CommitHash,
-    ) -> Result<CommitHash> {
+    ) -> Result<crate::types::MergeCommitOutcome> {
         self.commit_merge(files, binary, losers, message, theirs)
     }
 }

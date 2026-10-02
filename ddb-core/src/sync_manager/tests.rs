@@ -261,7 +261,8 @@ fn lww_fallback_when_crdt_produces_invalid_output() {
             "synthetic merge with invalid content",
             &theirs_hash,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     // validate_clean_merge_or_fallback detects the invalid content,
     // builds ConflictFile from the two parent commits, and calls
@@ -835,6 +836,64 @@ fn add_add_collision_resolves_in_single_commit() {
         "one parent of the merge commit must be exactly B's pre-sync HEAD, proving \
          no intermediate commit was created between 'before sync' and the final merge commit"
     );
+}
+
+/// A real sync over an add/add collision whose sides have no frontmatter
+/// block must converge in one round: the loser is folded verbatim, reported
+/// once, counted as reassigned, and the next sync has nothing left to do.
+/// Fails on the old wedge, where `commit_merge` erred with "no frontmatter
+/// opening ---" and every retry hit the same collision.
+#[test]
+fn sync_report_lists_every_verbatim_folded_collision_loser() {
+    let (_dir_a, repo_a, dir_b, repo_b, _bare_dir) = setup_binary_sync_pair();
+
+    // Both sides create the same id with NO frontmatter block, so whichever
+    // side loses has no id field to rewrite.
+    let id = "20260101120000";
+    let path = format!("ddb/{id}.md");
+    let body_a = "A body, no frontmatter\n";
+    let body_b = "B body, no frontmatter\n";
+    repo_a.commit_file(&path, body_a, "A creates").unwrap();
+    repo_b.commit_file(&path, body_b, "B creates").unwrap();
+
+    repo_a.push("origin", "master").unwrap();
+    let db_b = dir_b.path().join(".ddb/index.db");
+    std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
+    let index_b = crate::indexer::Index::open(&db_b).unwrap();
+    let mut mgr_b = SyncManager::open(&repo_b).unwrap();
+    let report = mgr_b.sync("origin", "master", &index_b).unwrap();
+
+    assert_eq!(report.collisions_reassigned, 1);
+    assert_eq!(
+        report.collision_losers_kept_verbatim.len(),
+        1,
+        "{:?}",
+        report.collision_losers_kept_verbatim
+    );
+    let kept = &report.collision_losers_kept_verbatim[0];
+    assert_eq!(kept.old_id, id);
+    assert_eq!(kept.old_path, path);
+    assert_ne!(kept.new_path, path);
+    assert!(
+        repo_b.read_file(&kept.new_path).is_ok(),
+        "the verbatim-folded loser must exist at its reported new path"
+    );
+    // One input landed unchanged at each path: the loser at `new_path`, the
+    // winner at the contested `path`.
+    let at_new = std::fs::read(dir_b.path().join(&kept.new_path)).unwrap();
+    let at_old = std::fs::read(dir_b.path().join(&path)).unwrap();
+    let inputs = [body_a.as_bytes(), body_b.as_bytes()];
+    assert!(inputs.contains(&at_new.as_slice()), "{at_new:?}");
+    assert!(inputs.contains(&at_old.as_slice()), "{at_old:?}");
+    assert_ne!(
+        at_new, at_old,
+        "loser and winner must be the two different inputs"
+    );
+
+    let next = mgr_b.sync("origin", "master", &index_b).unwrap();
+    assert_eq!(next.direction, "up-to-date");
+    assert_eq!(next.collisions_reassigned, 0);
+    assert!(next.collision_losers_kept_verbatim.is_empty());
 }
 
 /// Helper: set up two repos (A, B) with a shared bare remote, both registered

@@ -229,6 +229,29 @@ pub struct SyncReport {
     /// each (table, winner, losers) triple instead of only seeing the
     /// aggregate count. Length equals `singleton_conflicts_resolved`.
     pub singleton_conflicts: Vec<SingletonConflictResolution>,
+    /// Collision losers that had no frontmatter block, so instead of being
+    /// id-rewritten their bytes landed unchanged at the derived `new_path`;
+    /// `old_path` now holds the winner. Each is also counted in
+    /// `collisions_reassigned`.
+    pub collision_losers_kept_verbatim: Vec<CollisionLoserKeptVerbatim>,
+}
+
+/// One collision loser folded verbatim: it had no frontmatter block, so its
+/// bytes landed unchanged at the derived `new_path`, and `old_path` now holds
+/// the winner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollisionLoserKeptVerbatim {
+    pub old_id: String,
+    pub old_path: String,
+    pub new_path: String,
+}
+
+/// Result of a conflicted merge commit: the commit plus every collision loser
+/// that was folded verbatim into it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeCommitOutcome {
+    pub commit: CommitHash,
+    pub losers_kept_verbatim: Vec<CollisionLoserKeptVerbatim>,
 }
 
 /// One row's worth of detail from a SINGLETON post-sync sweep.

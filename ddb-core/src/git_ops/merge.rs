@@ -2,7 +2,9 @@ use git2::Oid;
 
 use super::{validate_path, GitRepo};
 use crate::error::{DoogatError, Result};
-use crate::types::{CommitHash, ConflictFile, MergeResult};
+use crate::types::{
+    CollisionLoserKeptVerbatim, CommitHash, ConflictFile, MergeCommitOutcome, MergeResult,
+};
 
 impl GitRepo {
     /// Create a merge commit with two parents from a true three-way merge tree,
@@ -17,8 +19,8 @@ impl GitRepo {
         losers: &[crate::types::CollisionLoser],
         message: &str,
         theirs: &CommitHash,
-    ) -> Result<CommitHash> {
-        let hash = self.with_write_lock(|| {
+    ) -> Result<MergeCommitOutcome> {
+        let outcome = self.with_write_lock(|| {
             for (rel_path, _) in files {
                 validate_path(&self.path, rel_path)?;
             }
@@ -70,7 +72,8 @@ impl GitRepo {
             }
 
             self.overlay_resolved_blobs(&mut merge_index, files, binary)?;
-            self.fold_losers_into_index(&mut merge_index, losers, &our_commit, &their_commit)?;
+            let losers_kept_verbatim =
+                self.fold_losers_into_index(&mut merge_index, losers, &our_commit, &their_commit)?;
 
             // `write_tree_to` additionally refuses any not-fully-merged index — a
             // second backstop, though the equality guard above already guarantees the
@@ -87,10 +90,13 @@ impl GitRepo {
             // replacing the old manual `write_resolved_files`.
             self.repo
                 .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
-            Ok(CommitHash(oid.to_string()))
+            Ok(MergeCommitOutcome {
+                commit: CommitHash(oid.to_string()),
+                losers_kept_verbatim,
+            })
         })?;
         self.write_commit_graph();
-        Ok(hash)
+        Ok(outcome)
     }
 
     /// Overlay CRDT-resolved blobs onto a `merge_commits` index's conflict entries.
@@ -124,31 +130,47 @@ impl GitRepo {
     /// this is what makes two losers in the same call land at distinct paths
     /// even if their computed candidates are close together.
     ///
-    /// Atomic-abort contract: a loser that fails to fold (e.g. `rewrite_id_field`
-    /// finds no frontmatter block to rewrite) aborts this call via `?`, which
-    /// aborts `commit_merge` before its single `create_commit` — nothing lands,
-    /// not the winner, not an earlier loser in the same batch. Per-loser
-    /// degradation is deliberately not offered here: landing the winner while
-    /// silently dropping a loser is exactly the half-resolved data-loss shape
-    /// PRD 00167 removed. The repo's "one bad file never fails the batch" P0
-    /// invariant scopes to read/list/index paths, not to this git write path.
+    /// Two-branch rule, decided per loser in `fold_one_loser`:
+    /// - A loser with NO frontmatter block has no id field to rewrite, so its
+    ///   original blob lands verbatim at the derived path and it is returned in
+    ///   the kept-verbatim list the caller reports. Verbatim bytes are never
+    ///   link-rewritten: a later loser's inbound-link scan skips every path an
+    ///   earlier loser in this call kept verbatim.
+    /// - A loser WITH a frontmatter block is id-rewritten. If that rewrite
+    ///   fails (e.g. the YAML inside the block is invalid), the loser aborts
+    ///   this call via `?`, which aborts `commit_merge` before its single
+    ///   `create_commit` — nothing lands, not the winner, not an earlier loser
+    ///   in the same batch. Per-loser degradation is deliberately not offered:
+    ///   landing the winner while silently dropping a loser is exactly the
+    ///   half-resolved data-loss shape PRD 00167 removed. The repo's "one bad
+    ///   file never fails the batch" P0 invariant scopes to read/list/index
+    ///   paths, not to this git write path.
     fn fold_losers_into_index(
         &self,
         merge_index: &mut git2::Index,
         losers: &[crate::types::CollisionLoser],
         our_commit: &git2::Commit,
         their_commit: &git2::Commit,
-    ) -> Result<()> {
+    ) -> Result<Vec<CollisionLoserKeptVerbatim>> {
         let mut taken_ids = Self::collect_taken_ids(merge_index);
+        let mut kept_verbatim = Vec::new();
         for loser in losers {
             let winner_commit = if loser.theirs_won {
                 their_commit
             } else {
                 our_commit
             };
-            self.fold_one_loser(merge_index, loser, winner_commit, &mut taken_ids)?;
+            if let Some(kept) = self.fold_one_loser(
+                merge_index,
+                loser,
+                winner_commit,
+                &mut taken_ids,
+                &kept_verbatim,
+            )? {
+                kept_verbatim.push(kept);
+            }
         }
-        Ok(())
+        Ok(kept_verbatim)
     }
 
     /// Snapshot every doogat id already present anywhere under `ddb/` -- other
@@ -172,47 +194,46 @@ impl GitRepo {
             .collect()
     }
 
-    /// Fold one collision loser's reassigned content (new deterministic ID,
-    /// rewritten frontmatter, rewritten inbound links) into `merge_index`.
+    /// Fold one collision loser's moved or rewritten content (new deterministic
+    /// ID, rewritten frontmatter, rewritten inbound links) into `merge_index`.
     /// `taken_ids` is threaded through by mutable reference and updated with
     /// the newly derived id before returning, so the next loser processed in
-    /// the same `fold_losers_into_index` call sees it as taken.
+    /// the same `fold_losers_into_index` call sees it as taken. Inbound-link
+    /// rewrites skip every path in `earlier_verbatim` (losers this call already
+    /// kept verbatim). Returns the kept-verbatim record when the loser had no
+    /// frontmatter block and its bytes landed unchanged; `None` when it was
+    /// id-rewritten.
     fn fold_one_loser(
         &self,
         merge_index: &mut git2::Index,
         loser: &crate::types::CollisionLoser,
         winner_commit: &git2::Commit,
         taken_ids: &mut std::collections::HashSet<String>,
-    ) -> Result<()> {
+        earlier_verbatim: &[CollisionLoserKeptVerbatim],
+    ) -> Result<Option<CollisionLoserKeptVerbatim>> {
         let exists = |candidate: &str| -> bool { taken_ids.contains(candidate) };
         let new_id =
             crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, exists);
         taken_ids.insert(new_id.0.clone());
-        let new_content =
-            crate::parser::rewrite_id_field(&loser.content, &new_id.0).map_err(|e| {
-                DoogatError::Conflict(format!(
-                    "collision loser at {} (old id {}) could not be rewritten: {e}",
-                    loser.old_path, loser.old_id
-                ))
-            })?;
         let new_path =
             crate::git_ops::doogat_path(&new_id.0, loser.type_name.as_deref(), loser.folder);
+        let keep_verbatim = !crate::parser::has_frontmatter(&loser.content);
+        let loser_oid = self.loser_blob_oid(loser, &new_id.0, keep_verbatim)?;
 
         tracing::warn!(
             old_id = %loser.old_id,
             new_id = %new_id.0,
             old_path = %loser.old_path,
             new_path = %new_path,
+            kept_verbatim = keep_verbatim,
             "collision resolved: doogat ID reassigned"
         );
-
         let old_path_no_ext = loser
             .old_path
             .strip_suffix(".md")
             .unwrap_or(&loser.old_path);
         let new_path_no_ext = new_path.strip_suffix(".md").unwrap_or(&new_path);
-
-        let rewritten_links = self.scan_and_rewrite_links_in_index(
+        let mut rewritten_links = self.scan_and_rewrite_links_in_index(
             merge_index,
             winner_commit,
             &loser.old_id,
@@ -220,15 +241,44 @@ impl GitRepo {
             &new_id.0,
             new_path_no_ext,
         )?;
-
-        let oid = self.repo.blob(new_content.as_bytes())?;
-        Self::resolve_index_entry(merge_index, &new_path, oid)?;
-
+        rewritten_links.retain(|(path, _)| !earlier_verbatim.iter().any(|k| k.new_path == *path));
+        Self::resolve_index_entry(merge_index, &new_path, loser_oid)?;
         for (path, content) in rewritten_links {
             let oid = self.repo.blob(content.as_bytes())?;
             Self::resolve_index_entry(merge_index, &path, oid)?;
         }
-        Ok(())
+        Ok(keep_verbatim.then(|| CollisionLoserKeptVerbatim {
+            old_id: loser.old_id.clone(),
+            old_path: loser.old_path.clone(),
+            new_path,
+        }))
+    }
+
+    /// The blob a collision loser lands as. Kept verbatim: its ORIGINAL blob,
+    /// because `loser.content` is a lossy UTF-8 decode and re-blobbing it would
+    /// drop invalid bytes. Otherwise: a new blob of its id-rewritten content;
+    /// a rewrite failure maps to `Conflict` and aborts the whole merge.
+    fn loser_blob_oid(
+        &self,
+        loser: &crate::types::CollisionLoser,
+        new_id: &str,
+        keep_verbatim: bool,
+    ) -> Result<Oid> {
+        if keep_verbatim {
+            return Oid::from_str(&loser.losing_blob_oid).map_err(|e| {
+                DoogatError::Conflict(format!(
+                    "collision loser at {} (old id {}) has an invalid blob id {}: {e}",
+                    loser.old_path, loser.old_id, loser.losing_blob_oid
+                ))
+            });
+        }
+        let rewritten = crate::parser::rewrite_id_field(&loser.content, new_id).map_err(|e| {
+            DoogatError::Conflict(format!(
+                "collision loser at {} (old id {}) could not be rewritten: {e}",
+                loser.old_path, loser.old_id
+            ))
+        })?;
+        Ok(self.repo.blob(rewritten.as_bytes())?)
     }
 
     /// Scan every `ddb/*.md` entry in `index` for inline references to `old_id`

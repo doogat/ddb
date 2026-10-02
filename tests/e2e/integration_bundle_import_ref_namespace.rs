@@ -21,9 +21,10 @@ use crate::common::{DdbTestRepo, MultiNodeSetup};
 
 const BUNDLE_NS: &str = "refs/remotes/bundle/";
 const COLLISION: &str = "ddb/20260302000000.md";
-/// A's losing side of the add/add collision: no frontmatter, so its id cannot
-/// be rewritten and the merge must fail.
-const LOSER: &str = "Just a plain body with no frontmatter block at all.\n";
+/// A's losing side of the add/add collision: a frontmatter block with invalid
+/// YAML, so its id cannot be rewritten and the merge must fail. (A loser with
+/// no frontmatter block at all is folded verbatim instead.)
+const LOSER: &str = "---\nid: [unclosed\ntitle: Bad\n---\nLoser body.\n";
 const A_EXTRA_ID: &str = "20260303000000";
 const SIDECAR: &str = "ddb/20260401000000.md";
 const C_ID: &str = "20260305000000";
@@ -235,7 +236,7 @@ fn two_nodes(prune: bool) -> (DdbTestRepo, TempDir, PathBuf) {
     (node1, scratch, node2)
 }
 
-/// Both nodes add `COLLISION`; node 1 (theirs) writes the frontmatter-less
+/// Both nodes add `COLLISION`; node 1 (theirs) writes the YAML-invalid
 /// loser under the strictly lower HLC and also adds A's extra doogat.
 fn diverge_on_collision(node1: &Path, node2: &Path) {
     seed_hlc(node1, u64::MAX / 2, "theirsss");

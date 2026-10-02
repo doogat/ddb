@@ -218,13 +218,35 @@ fn conflicting_full_bundle_import_resolves_with_real_merge_commit() {
     );
 }
 
+/// Losing-side content whose frontmatter block holds invalid YAML: it HAS a
+/// block (so it is not folded verbatim), but `rewrite_id_field` cannot parse
+/// it, so `commit_merge` must abort the whole merge commit.
+const UNREWRITABLE_LOSER: &str = "---\nid: [unclosed\ntitle: Bad\n---\nLoser body.\n";
+
+/// The winning side of the add/add collision `import_with_collision` builds.
+const COLLISION_WINNER: &str = "---\nid: 20260302000000\ntitle: Winner\n---\nWinner body\n";
+
 /// Drive a bundle import whose merge FAILS: node 2 imports a bundle holding a
-/// doogat that collides on id with a local one, whose losing side has no
-/// frontmatter, so the collision loser cannot be rewritten. By design this
-/// leaves `refs/remotes/bundle/<payload-id>/master` in place for a retry. Returns node 1's
-/// and node 2's temp dirs; node 2's repo is reopened by the caller so no
-/// borrow of it escapes this helper.
+/// doogat that collides on id with a local one, whose losing side has
+/// YAML-invalid frontmatter, so the collision loser cannot be rewritten. By
+/// design this leaves `refs/remotes/bundle/<payload-id>/master` in place for
+/// a retry. Returns node 1's and node 2's temp dirs; node 2's repo is
+/// reopened by the caller so no borrow of it escapes this helper.
 fn import_with_unresolvable_collision(
+) -> (::tempfile::TempDir, ::tempfile::TempDir, Result<SyncReport>) {
+    assert!(
+        crate::parser::rewrite_id_field(UNREWRITABLE_LOSER, "20260302999999").is_err(),
+        "test setup invalid: rewrite_id_field must fail on YAML-invalid frontmatter"
+    );
+    import_with_collision(UNREWRITABLE_LOSER)
+}
+
+/// Drive a bundle import over a real add/add collision at
+/// `ddb/20260302000000.md` in which node 1's `loser_content` loses to node
+/// 2's `COLLISION_WINNER`. Returns node 1's and node 2's temp dirs and the
+/// import result.
+fn import_with_collision(
+    loser_content: &str,
 ) -> (::tempfile::TempDir, ::tempfile::TempDir, Result<SyncReport>) {
     // Node 1: create the shared ancestor commit.
     let (dir1, repo1) = temp_repo();
@@ -247,15 +269,8 @@ fn import_with_unresolvable_collision(
 
     // Both nodes independently add a NEW doogat at the SAME path, absent
     // from the shared ancestor -- a real add/add collision. The losing
-    // side (Node1, "theirs" from repo2's merge-remote perspective) has no
-    // frontmatter block at all, so `rewrite_id_field` cannot rewrite its
-    // id and `commit_merge` must abort the whole merge commit atomically.
+    // side is Node1, "theirs" from repo2's merge-remote perspective.
     let collision_path = "ddb/20260302000000.md";
-    let loser_content = "Just a plain body with no frontmatter block at all.\n";
-    assert!(
-        crate::parser::rewrite_id_field(loser_content, "20260302999999").is_err(),
-        "test setup invalid: rewrite_id_field must fail on frontmatter-less content"
-    );
 
     // Node1 (theirs) is seeded with a strictly LOWER HLC so it loses the
     // add/add collision to Node2 (ours) under lww_pick's tie-break rule.
@@ -276,15 +291,10 @@ fn import_with_unresolvable_collision(
     };
     std::fs::write(dir2.path().join(".git/ddb-hlc"), ours_seed.to_string()).unwrap();
     repo2
-        .commit_file(
-            collision_path,
-            "---\nid: 20260302000000\ntitle: Winner\n---\nWinner body\n",
-            "Node2 adds winner",
-        )
+        .commit_file(collision_path, COLLISION_WINNER, "Node2 adds winner")
         .unwrap();
 
-    // Node1 exports a full bundle; Node2's import must fail because the
-    // add/add collision loser cannot be rewritten.
+    // Node1 exports a full bundle; Node2 imports it.
     let bundle_path = dir1.path().join("collision.bundle.tar");
     export_full_bundle(&repo1, &mgr1, &bundle_path).unwrap();
 
@@ -297,9 +307,9 @@ fn import_with_unresolvable_collision(
     (dir1, dir2, result)
 }
 
-/// Reachability: a bundle-import merge failure (add/add collision loser
-/// with no frontmatter, so `rewrite_id_field` cannot rewrite its id) must
-/// leave `refs/remotes/bundle/<payload-id>/master` in place. `import_bundle`
+/// Reachability: a bundle-import merge failure (add/add collision loser with
+/// YAML-invalid frontmatter, so `rewrite_id_field` cannot rewrite its id)
+/// must leave `refs/remotes/bundle/<payload-id>/master` in place. `import_bundle`
 /// only deletes that namespace after a successful import, so bundle data must
 /// stay reachable for a retry when the merge itself fails.
 #[test]
@@ -362,6 +372,33 @@ fn conflicting_bundle_import_leaves_repo_clean_on_merge_failure() {
         !reopened.index().unwrap().has_conflicts(),
         "an in-memory merge failure must never leave unmerged entries in the repo index"
     );
+}
+
+/// A bundle import whose add/add collision loser has NO frontmatter block
+/// must succeed: the loser's bytes land verbatim at a derived path and the
+/// report lists exactly that one fold. Fails on the old wedge, where the
+/// import erred with "no frontmatter opening ---" on every retry.
+#[test]
+fn frontmatterless_bundle_loser_imports_and_reports_one_verbatim_fold() {
+    let collision_path = "ddb/20260302000000.md";
+    let loser_content = "Just a plain body with no frontmatter block at all.\n";
+    let (_dir1, dir2, result) = import_with_collision(loser_content);
+    let report = result.expect("a frontmatter-less collision loser must not fail the import");
+    let repo2 = GitRepo::open(dir2.path()).unwrap();
+
+    assert_eq!(report.collisions_reassigned, 1);
+    assert_eq!(
+        report.collision_losers_kept_verbatim.len(),
+        1,
+        "{:?}",
+        report.collision_losers_kept_verbatim
+    );
+    let kept = &report.collision_losers_kept_verbatim[0];
+    assert_eq!(kept.old_id, "20260302000000");
+    assert_eq!(kept.old_path, collision_path);
+    assert_ne!(kept.new_path, collision_path);
+    assert_eq!(repo2.read_file(collision_path).unwrap(), COLLISION_WINNER);
+    assert_eq!(repo2.read_file(&kept.new_path).unwrap(), loser_content);
 }
 
 #[test]
@@ -520,7 +557,7 @@ fn failed_bundle_then_masterless_bundle_never_merges_stale_master() {
         repo2
             .commit_file(
                 collision_path,
-                "Just a plain body with no frontmatter block at all.\n",
+                UNREWRITABLE_LOSER,
                 "repair collision locally",
             )
             .unwrap();
@@ -1396,7 +1433,7 @@ fn failed_bundle_retry_uses_same_namespace_and_releases_import_lease() {
     repo2
         .commit_file(
             "ddb/20260302000000.md",
-            "Just a plain body with no frontmatter block at all.\n",
+            UNREWRITABLE_LOSER,
             "repair collision locally",
         )
         .unwrap();

@@ -2326,7 +2326,8 @@ fn resolved_merge_commit_carries_hlc_trailer_and_absorbs_theirs() {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(
@@ -2452,7 +2453,8 @@ fn resolved_merge_ordinary_peer_stamps_wall_clock_band() {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(
@@ -2532,7 +2534,8 @@ fn commit_merge_folds_single_loser_into_same_commit_as_winner() {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(merge_commit.id().to_string(), merge_oid.0);
@@ -2638,7 +2641,8 @@ fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(merge_commit.id().to_string(), merge_oid.0);
@@ -2661,8 +2665,8 @@ fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
 }
 
 /// A merge commit is atomic by construction: if ANY loser in a multi-loser batch
-/// cannot be rewritten (here, the second loser's content has no frontmatter block
-/// at all, so `rewrite_id_field` has no id field to rewrite), `commit_merge` must
+/// cannot be rewritten (here, the second loser has a frontmatter block whose YAML
+/// is invalid, so `rewrite_id_field` cannot parse it), `commit_merge` must
 /// commit NOTHING — not HEAD, not the winner, not the first (otherwise-valid)
 /// loser. Landing the winner while silently dropping a loser is the half-resolved
 /// data-loss shape this PRD removed; the correct behavior is to abort the whole
@@ -2712,13 +2716,14 @@ fn commit_merge_commits_nothing_when_one_loser_in_the_batch_cannot_be_rewritten(
     let expected_path1 =
         super::doogat_path(&expected_id1.0, loser1.type_name.as_deref(), loser1.folder);
 
-    // Second loser: no frontmatter block at all, so there is no id field for
-    // `rewrite_id_field` to rewrite. Confirmed to fail below before relying on
-    // it to trigger the abort.
-    let loser2_content = "Just a plain body with no frontmatter block at all.\n";
+    // Second loser: a delimited frontmatter block whose YAML is invalid, so
+    // `rewrite_id_field` cannot parse it. (A frontmatter-less loser would be
+    // folded verbatim instead.) Confirmed to fail below before relying on it to
+    // trigger the abort.
+    let loser2_content = UNREWRITABLE_LOSER;
     assert!(
         crate::parser::rewrite_id_field(loser2_content, "20260301999999").is_err(),
-        "test setup invalid: rewrite_id_field must fail on frontmatter-less content"
+        "test setup invalid: rewrite_id_field must fail on YAML-invalid frontmatter"
     );
     let loser2_blob_oid = repo_b
         .repo
@@ -2765,6 +2770,471 @@ fn commit_merge_commits_nothing_when_one_loser_in_the_batch_cannot_be_rewritten(
         repo_b.read_file(&expected_path1).is_err(),
         "the first loser must not land either — the commit is atomic"
     );
+}
+
+const CONTESTED_ID: &str = "20260301120000";
+const CONTESTED_PATH: &str = "ddb/20260301120000.md";
+/// A second, uncontested loser id for multi-loser batches.
+const SECOND_ID: &str = "20260301130000";
+const SECOND_PATH: &str = "ddb/20260301130000.md";
+const WINNER: &str = "---\nid: 20260301120000\ntitle: Winner\n---\nWinner body.\n";
+/// No frontmatter block and no trailing newline: any parse/serialize round
+/// trip would change these bytes.
+const FRONTMATTERLESS_LOSER: &str = "Loser body with no frontmatter.\nSecond line, no newline";
+/// Well-formed `---` delimiters around invalid YAML: `rewrite_id_field` fails,
+/// so a loser with these bytes aborts the whole merge.
+const UNREWRITABLE_LOSER: &str = "---\nid: [unclosed\ntitle: Bad\n---\nLoser body.\n";
+
+/// Real add/add collision at `CONTESTED_PATH`: A commits `theirs` and pushes,
+/// B commits `ours`, fetches and merges. Returns B (with the temp dirs that
+/// must outlive it) and theirs' commit for `commit_merge`.
+fn conflicted_add_add(
+    ours: &str,
+    theirs: &str,
+) -> (TempDir, TempDir, TempDir, GitRepo, crate::types::CommitHash) {
+    let (dir_a, repo_a, dir_b, repo_b, bare) = setup_two_repos();
+    repo_a
+        .commit_file(CONTESTED_PATH, theirs, "A creates")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b
+        .commit_file(CONTESTED_PATH, ours, "B creates")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let theirs_oid = match repo_b.merge_remote("origin", "master").unwrap() {
+        MergeResult::Conflicts(conflicts, theirs_oid) => {
+            assert_eq!(conflicts.len(), 1);
+            theirs_oid
+        }
+        other => panic!("expected Conflicts, got {other:?}"),
+    };
+    (dir_a, dir_b, bare, repo_b, theirs_oid)
+}
+
+/// A collision loser at `old_path` whose seed is the blob OID of `content`.
+fn loser_at(
+    repo: &GitRepo,
+    old_id: &str,
+    old_path: &str,
+    content: &str,
+    theirs_won: bool,
+) -> crate::types::CollisionLoser {
+    crate::types::CollisionLoser {
+        old_id: old_id.to_string(),
+        old_path: old_path.to_string(),
+        content: content.to_string(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: repo.repo.blob(content.as_bytes()).unwrap().to_string(),
+        theirs_won,
+    }
+}
+
+/// The id and path `commit_merge` derives for `loser` when `taken` ids are
+/// already occupied in the merge tree.
+fn derived_id_and_path(loser: &crate::types::CollisionLoser, taken: &[&str]) -> (String, String) {
+    let id = crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |c| {
+        taken.contains(&c)
+    });
+    let path = super::doogat_path(&id.0, loser.type_name.as_deref(), loser.folder);
+    (id.0, path)
+}
+
+/// Exact bytes committed at `path` in HEAD's tree, or `None` when absent.
+fn head_blob_bytes(repo: &GitRepo, path: &str) -> Option<Vec<u8>> {
+    let tree = repo.head_commit().unwrap().tree().unwrap();
+    let entry = tree.get_path(std::path::Path::new(path)).ok()?;
+    Some(repo.repo.find_blob(entry.id()).unwrap().content().to_vec())
+}
+
+/// A loser with no frontmatter block has no id field to rewrite, so it must
+/// land byte-for-byte at its derived path, in the merge commit, and be
+/// reported. Fails on the old wedge (`commit_merge` erred with "no
+/// frontmatter opening ---"), on any byte change, or on a missing report.
+#[test]
+fn frontmatterless_loser_lands_byte_identical_at_its_derived_path() {
+    let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(FRONTMATTERLESS_LOSER, WINNER);
+    let loser = loser_at(
+        &repo_b,
+        CONTESTED_ID,
+        CONTESTED_PATH,
+        FRONTMATTERLESS_LOSER,
+        true,
+    );
+    let (_, expected_path) = derived_id_and_path(&loser, &[CONTESTED_ID]);
+    let head_before = repo_b.head_oid().unwrap();
+
+    let outcome = repo_b
+        .commit_merge(
+            &[(CONTESTED_PATH, WINNER)],
+            &[],
+            &[loser],
+            "merge",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let head_after = repo_b.head_oid().unwrap();
+    assert_ne!(head_after.0, head_before.0, "HEAD must move");
+    assert_eq!(outcome.commit, head_after);
+    assert_eq!(
+        head_blob_bytes(&repo_b, CONTESTED_PATH).unwrap(),
+        WINNER.as_bytes(),
+        "the winner must land at the contested path"
+    );
+    assert_eq!(
+        head_blob_bytes(&repo_b, &expected_path).unwrap(),
+        FRONTMATTERLESS_LOSER.as_bytes(),
+        "the loser's bytes must land unchanged at its derived path"
+    );
+    assert_eq!(
+        outcome.losers_kept_verbatim,
+        vec![crate::types::CollisionLoserKeptVerbatim {
+            old_id: CONTESTED_ID.to_string(),
+            old_path: CONTESTED_PATH.to_string(),
+            new_path: expected_path,
+        }]
+    );
+}
+
+/// Control: a loser WITH a frontmatter block keeps the id-rewrite branch and
+/// is not reported as kept verbatim.
+#[test]
+fn loser_with_frontmatter_is_still_id_rewritten() {
+    let loser_content = "---\nid: 20260301120000\ntitle: Loser\n---\nLoser body.\n";
+    let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(loser_content, WINNER);
+    let loser = loser_at(&repo_b, CONTESTED_ID, CONTESTED_PATH, loser_content, true);
+    let (expected_id, expected_path) = derived_id_and_path(&loser, &[CONTESTED_ID]);
+    let expected_content = crate::parser::rewrite_id_field(loser_content, &expected_id).unwrap();
+    assert_ne!(expected_content, loser_content);
+
+    let outcome = repo_b
+        .commit_merge(
+            &[(CONTESTED_PATH, WINNER)],
+            &[],
+            &[loser],
+            "merge",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    assert_eq!(
+        head_blob_bytes(&repo_b, &expected_path).unwrap(),
+        expected_content.as_bytes()
+    );
+    assert!(outcome.losers_kept_verbatim.is_empty());
+}
+
+/// Control: a loser whose frontmatter block holds invalid YAML is not
+/// frontmatter-less, so it still fails the rewrite and aborts the whole
+/// batch: an error, HEAD unchanged, neither winner nor loser landed.
+#[test]
+fn loser_with_unparseable_yaml_still_aborts_the_whole_batch() {
+    let loser_content = UNREWRITABLE_LOSER;
+    let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(loser_content, WINNER);
+    let loser = loser_at(&repo_b, CONTESTED_ID, CONTESTED_PATH, loser_content, true);
+    let (_, derived_path) = derived_id_and_path(&loser, &[CONTESTED_ID]);
+    let head_before = repo_b.head_oid().unwrap();
+
+    let result = repo_b.commit_merge(
+        &[(CONTESTED_PATH, WINNER)],
+        &[],
+        &[loser],
+        "merge",
+        &theirs_oid,
+    );
+
+    assert!(
+        matches!(result, Err(DoogatError::Conflict(_))),
+        "expected Conflict error, got {result:?}"
+    );
+    assert_eq!(
+        repo_b.head_oid().unwrap().0,
+        head_before.0,
+        "HEAD must not move"
+    );
+    assert_eq!(
+        head_blob_bytes(&repo_b, CONTESTED_PATH).unwrap(),
+        loser_content.as_bytes(),
+        "the winner must not land"
+    );
+    assert!(
+        head_blob_bytes(&repo_b, &derived_path).is_none(),
+        "the loser must not land at its derived path"
+    );
+}
+
+/// One frontmatter-less and one normal loser in the same call land in the
+/// SAME single merge commit; only the frontmatter-less one is reported.
+#[test]
+fn mixed_loser_batch_lands_in_one_commit_and_lists_only_the_verbatim_fold() {
+    let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(FRONTMATTERLESS_LOSER, WINNER);
+    let verbatim = loser_at(
+        &repo_b,
+        CONTESTED_ID,
+        CONTESTED_PATH,
+        FRONTMATTERLESS_LOSER,
+        true,
+    );
+    let normal_content = "---\nid: 20260301130000\ntitle: Normal Loser\n---\nNormal body.\n";
+    let normal = loser_at(&repo_b, SECOND_ID, SECOND_PATH, normal_content, true);
+    let (verbatim_id, verbatim_path) = derived_id_and_path(&verbatim, &[CONTESTED_ID]);
+    let (normal_id, normal_path) =
+        derived_id_and_path(&normal, &[CONTESTED_ID, verbatim_id.as_str()]);
+    let normal_expected = crate::parser::rewrite_id_field(normal_content, &normal_id).unwrap();
+    let head_before = repo_b.head_oid().unwrap();
+    let outcome = repo_b
+        .commit_merge(
+            &[(CONTESTED_PATH, WINNER)],
+            &[],
+            &[verbatim, normal],
+            "merge",
+            &theirs_oid,
+        )
+        .unwrap();
+    let merge_commit = repo_b.head_commit().unwrap();
+    assert_eq!(merge_commit.id().to_string(), outcome.commit.0);
+    assert!(
+        merge_commit
+            .parents()
+            .any(|p| p.id().to_string() == head_before.0),
+        "both losers must land in one commit built directly on the pre-merge HEAD"
+    );
+    assert_eq!(
+        head_blob_bytes(&repo_b, &verbatim_path).unwrap(),
+        FRONTMATTERLESS_LOSER.as_bytes()
+    );
+    assert_eq!(
+        head_blob_bytes(&repo_b, &normal_path).unwrap(),
+        normal_expected.as_bytes()
+    );
+    assert_eq!(
+        outcome.losers_kept_verbatim,
+        vec![crate::types::CollisionLoserKeptVerbatim {
+            old_id: CONTESTED_ID.to_string(),
+            old_path: CONTESTED_PATH.to_string(),
+            new_path: verbatim_path,
+        }]
+    );
+}
+
+/// The same frontmatter-less collision resolved from either side (loser is
+/// ours and theirs wins, or loser is theirs and ours wins) must derive the
+/// same destination and land the same bytes there.
+#[test]
+fn frontmatterless_loser_derives_the_same_path_in_either_merge_direction() {
+    let resolve = |ours: &str, theirs: &str, theirs_won: bool| {
+        let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(ours, theirs);
+        let loser = loser_at(
+            &repo_b,
+            CONTESTED_ID,
+            CONTESTED_PATH,
+            FRONTMATTERLESS_LOSER,
+            theirs_won,
+        );
+        let outcome = repo_b
+            .commit_merge(
+                &[(CONTESTED_PATH, WINNER)],
+                &[],
+                &[loser],
+                "merge",
+                &theirs_oid,
+            )
+            .unwrap();
+        assert_eq!(outcome.losers_kept_verbatim.len(), 1);
+        let new_path = outcome.losers_kept_verbatim[0].new_path.clone();
+        let bytes = head_blob_bytes(&repo_b, &new_path).unwrap();
+        (new_path, bytes)
+    };
+
+    let loser_ours = resolve(FRONTMATTERLESS_LOSER, WINNER, true);
+    let loser_theirs = resolve(WINNER, FRONTMATTERLESS_LOSER, false);
+
+    assert_eq!(
+        loser_ours.0, loser_theirs.0,
+        "destination must not depend on direction"
+    );
+    assert_eq!(loser_ours.1, FRONTMATTERLESS_LOSER.as_bytes());
+    assert_eq!(loser_theirs.1, FRONTMATTERLESS_LOSER.as_bytes());
+}
+
+/// `CollisionLoser.content` is a lossy UTF-8 decode, so a verbatim loser must
+/// land as its ORIGINAL blob. Fails if the fold re-blobs the decoded string
+/// (the invalid byte would become U+FFFD).
+#[test]
+fn frontmatterless_loser_with_invalid_utf8_lands_its_original_blob() {
+    let raw: &[u8] = b"caf\xE9 no frontmatter\n";
+    let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(FRONTMATTERLESS_LOSER, WINNER);
+    let losing_blob = repo_b.repo.blob(raw).unwrap();
+    let loser = crate::types::CollisionLoser {
+        old_id: CONTESTED_ID.to_string(),
+        old_path: CONTESTED_PATH.to_string(),
+        content: String::from_utf8_lossy(raw).into_owned(),
+        folder: false,
+        type_name: None,
+        losing_blob_oid: losing_blob.to_string(),
+        theirs_won: true,
+    };
+    let (_, derived_path) = derived_id_and_path(&loser, &[CONTESTED_ID]);
+
+    let outcome = repo_b
+        .commit_merge(
+            &[(CONTESTED_PATH, WINNER)],
+            &[],
+            &[loser],
+            "merge",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    assert_eq!(head_blob_bytes(&repo_b, &derived_path).unwrap(), raw);
+    let tree = repo_b.head_commit().unwrap().tree().unwrap();
+    let landed = tree.get_path(std::path::Path::new(&derived_path)).unwrap();
+    assert_eq!(landed.id(), losing_blob, "the original blob must land");
+    assert_eq!(outcome.losers_kept_verbatim.len(), 1);
+}
+
+/// A later loser's inbound-link rewrite must not edit bytes an earlier loser
+/// in the same batch kept verbatim. Fails if the first loser's `[[second's
+/// old id]]` is rewritten while it is still reported as kept verbatim.
+#[test]
+fn later_loser_link_rewrite_never_touches_an_earlier_verbatim_loser() {
+    let first_content = format!("Links [[{SECOND_ID}]] with no frontmatter.\n");
+    let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(&first_content, WINNER);
+    let first = loser_at(&repo_b, CONTESTED_ID, CONTESTED_PATH, &first_content, true);
+    let second = loser_at(&repo_b, SECOND_ID, SECOND_PATH, FRONTMATTERLESS_LOSER, true);
+    let (first_id, first_new) = derived_id_and_path(&first, &[CONTESTED_ID]);
+    let (_, second_new) = derived_id_and_path(&second, &[CONTESTED_ID, first_id.as_str()]);
+
+    let outcome = repo_b
+        .commit_merge(
+            &[(CONTESTED_PATH, WINNER)],
+            &[],
+            &[first, second],
+            "merge",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    assert_eq!(
+        head_blob_bytes(&repo_b, &first_new).unwrap(),
+        first_content.as_bytes(),
+        "an earlier verbatim loser's bytes must never be link-rewritten"
+    );
+    let kept =
+        |old_id: &str, old_path: &str, new_path: String| crate::types::CollisionLoserKeptVerbatim {
+            old_id: old_id.to_string(),
+            old_path: old_path.to_string(),
+            new_path,
+        };
+    assert_eq!(
+        outcome.losers_kept_verbatim,
+        vec![
+            kept(CONTESTED_ID, CONTESTED_PATH, first_new),
+            kept(SECOND_ID, SECOND_PATH, second_new),
+        ]
+    );
+}
+
+/// Atomicity holds across the two branches: a verbatim loser staged earlier
+/// in the batch must not land when a later loser fails its rewrite.
+#[test]
+fn verbatim_loser_does_not_land_when_a_later_loser_aborts() {
+    let (_a, _b, _bare, repo_b, theirs_oid) = conflicted_add_add(FRONTMATTERLESS_LOSER, WINNER);
+    let verbatim = loser_at(
+        &repo_b,
+        CONTESTED_ID,
+        CONTESTED_PATH,
+        FRONTMATTERLESS_LOSER,
+        true,
+    );
+    let bad = loser_at(&repo_b, SECOND_ID, SECOND_PATH, UNREWRITABLE_LOSER, true);
+    let (_, verbatim_path) = derived_id_and_path(&verbatim, &[CONTESTED_ID]);
+    let head_before = repo_b.head_oid().unwrap();
+
+    let result = repo_b.commit_merge(
+        &[(CONTESTED_PATH, WINNER)],
+        &[],
+        &[verbatim, bad],
+        "merge",
+        &theirs_oid,
+    );
+
+    assert!(
+        matches!(result, Err(DoogatError::Conflict(_))),
+        "expected Conflict error, got {result:?}"
+    );
+    assert_eq!(
+        repo_b.head_oid().unwrap().0,
+        head_before.0,
+        "HEAD must not move"
+    );
+    assert_eq!(
+        head_blob_bytes(&repo_b, CONTESTED_PATH).unwrap(),
+        FRONTMATTERLESS_LOSER.as_bytes(),
+        "the winner must not land"
+    );
+    assert!(
+        head_blob_bytes(&repo_b, &verbatim_path).is_none(),
+        "the verbatim loser must not land"
+    );
+}
+
+/// Inbound-link rewriting still runs for a verbatim loser: a linker's
+/// `[[old_id]]` points at the derived id, while the loser's own bytes stay
+/// unchanged.
+#[test]
+fn verbatim_loser_still_gets_its_inbound_links_rewritten() {
+    let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+    repo_a
+        .commit_file("ddb/note.md", "version A", "A edits")
+        .unwrap();
+    repo_a.push("origin", "master").unwrap();
+    repo_b
+        .commit_file("ddb/note.md", "version B", "B edits")
+        .unwrap();
+    let linker = format!("---\nid: 20260301999999\ntitle: L\n---\nsee [[{CONTESTED_ID}]]\n");
+    repo_b
+        .commit_file("ddb/linker.md", &linker, "add linker")
+        .unwrap();
+    repo_b.fetch("origin", "master").unwrap();
+    let MergeResult::Conflicts(_, theirs_oid) = repo_b.merge_remote("origin", "master").unwrap()
+    else {
+        panic!("expected Conflicts");
+    };
+    let loser = loser_at(
+        &repo_b,
+        CONTESTED_ID,
+        CONTESTED_PATH,
+        FRONTMATTERLESS_LOSER,
+        true,
+    );
+    let (new_id, new_path) = derived_id_and_path(&loser, &[]);
+
+    let outcome = repo_b
+        .commit_merge(
+            &[("ddb/note.md", "resolved")],
+            &[],
+            &[loser],
+            "merge",
+            &theirs_oid,
+        )
+        .unwrap();
+
+    let rewritten = repo_b.read_file("ddb/linker.md").unwrap();
+    assert!(
+        rewritten.contains(&format!("[[{new_id}]]")),
+        "{rewritten:?}"
+    );
+    assert!(
+        !rewritten.contains(&format!("[[{CONTESTED_ID}]]")),
+        "{rewritten:?}"
+    );
+    assert_eq!(
+        head_blob_bytes(&repo_b, &new_path).unwrap(),
+        FRONTMATTERLESS_LOSER.as_bytes()
+    );
+    assert_eq!(outcome.losers_kept_verbatim.len(), 1);
 }
 
 /// Widens the loser-id occupancy check beyond the loser's own type/folder: an id
@@ -2864,7 +3334,8 @@ fn commit_merge_advances_loser_past_id_occupied_in_different_type_folder() {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(merge_commit.id().to_string(), merge_oid.0);
@@ -2989,7 +3460,8 @@ fn commit_merge_advances_loser_past_id_occupied_in_typedef() {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(merge_commit.id().to_string(), merge_oid.0);
@@ -3108,7 +3580,8 @@ fn commit_merge_advances_second_loser_past_first_losers_in_batch_assigned_id() {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(merge_commit.id().to_string(), merge_oid.0);
@@ -3178,7 +3651,8 @@ fn fold_flat_loser_and_read_result() -> (String, String) {
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(merge_commit.id().to_string(), merge_oid.0);
@@ -3339,7 +3813,8 @@ fn commit_merge_leaves_non_utf8_linker_untouched_but_still_rewrites_valid_linker
             "merge origin/master",
             &theirs_oid,
         )
-        .unwrap();
+        .unwrap()
+        .commit;
 
     let merge_commit = repo_b.head_commit().unwrap();
     assert_eq!(merge_commit.id().to_string(), merge_oid.0);
@@ -3482,7 +3957,8 @@ fn commit_merge_logs_reassignment_warn_with_old_and_new_identity() {
             &theirs_oid,
         )
     })
-    .unwrap();
+    .unwrap()
+    .commit;
     let captured = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
 
     let merge_commit = repo_b.head_commit().unwrap();
@@ -3623,7 +4099,8 @@ fn commit_merge_logs_distinct_reassignment_warn_per_loser() {
             &theirs_oid,
         )
     })
-    .unwrap();
+    .unwrap()
+    .commit;
     let captured = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
 
     let merge_commit = repo_b.head_commit().unwrap();

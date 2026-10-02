@@ -192,6 +192,17 @@ fn find_frontmatter(lines: &[&str]) -> Result<(usize, usize)> {
     Ok((first, second))
 }
 
+/// Whether `content` has a delimited frontmatter block (an opening and a
+/// closing `---`), judged by the same rule `split_zones` uses. Says nothing
+/// about whether the YAML inside the block is valid. A body with two `---`
+/// lines anywhere counts as a block, so such a collision loser takes the
+/// rewrite branch (and may abort); tightening this is deferred to a follow-up
+/// PRD.
+pub(crate) fn has_frontmatter(content: &str) -> bool {
+    let lines: Vec<&str> = content.lines().collect();
+    find_frontmatter(&lines).is_ok()
+}
+
 /// Find all `---` separator positions after frontmatter, skipping fenced code blocks.
 fn find_separators_after(lines: &[&str], fm_end: usize) -> Vec<usize> {
     let mut positions = Vec::new();

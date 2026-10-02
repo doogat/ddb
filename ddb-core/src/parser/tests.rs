@@ -981,6 +981,40 @@ fn rewrite_id_field_propagates_parse_error() {
     assert!(result.is_err());
 }
 
+// -- has_frontmatter tests --
+
+#[test]
+fn has_frontmatter_rejects_content_with_no_opening_delimiter() {
+    assert!(!has_frontmatter(
+        "Just a plain body with no frontmatter block at all.\n"
+    ));
+    assert!(!has_frontmatter(""));
+}
+
+#[test]
+fn has_frontmatter_rejects_unterminated_block() {
+    assert!(!has_frontmatter(
+        "---\nid: 20260301120000\ntitle: Open\nBody with no closing delimiter.\n"
+    ));
+}
+
+#[test]
+fn has_frontmatter_accepts_well_formed_block() {
+    assert!(has_frontmatter(
+        "---\nid: 20260301120000\ntitle: Fine\n---\nBody.\n"
+    ));
+    // Delimiters decide it, not the YAML: an invalid block is still a block.
+    let invalid_yaml = "---\nid: [unclosed\ntitle: Bad\n---\nBody.\n";
+    assert!(rewrite_id_field(invalid_yaml, "20260301120001").is_err());
+    assert!(has_frontmatter(invalid_yaml));
+}
+
+#[test]
+fn has_frontmatter_counts_paired_horizontal_rules_as_a_block() {
+    // Pinned, not endorsed: tightening is deferred to a follow-up PRD.
+    assert!(has_frontmatter("Intro\n\n---\n\nMiddle\n\n---\n\nOutro\n"));
+}
+
 // -- top-level parse tests --
 
 #[test]

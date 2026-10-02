@@ -288,6 +288,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             collisions_reassigned: 0,
             singleton_conflicts_resolved: 0,
             singleton_conflicts: Vec::new(),
+            collision_losers_kept_verbatim: Vec::new(),
         };
 
         match merge_result {
@@ -343,7 +344,8 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         }
 
         let binary = self.resolve_binary_ref_conflicts(&binary_ref)?;
-        self.create_conflict_commit(&resolved, &binary, &collision_losers, theirs_oid)?;
+        report.collision_losers_kept_verbatim =
+            self.create_conflict_commit(&resolved, &binary, &collision_losers, theirs_oid)?;
 
         report.collisions_reassigned = collision_losers.len();
         report.conflicts_resolved = count;
@@ -352,14 +354,15 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         Ok(())
     }
 
-    /// Tick HLC, commit resolved files, and write FM CRDT state.
+    /// Tick HLC, commit resolved files, and write FM CRDT state. Returns the
+    /// collision losers the merge commit folded verbatim.
     fn create_conflict_commit(
         &mut self,
         resolved: &[crate::types::ResolvedFile],
         binary: &[(String, String)],
         losers: &[crate::types::CollisionLoser],
         theirs_oid: &CommitHash,
-    ) -> Result<()> {
+    ) -> Result<Vec<crate::types::CollisionLoserKeptVerbatim>> {
         let files: Vec<(&str, &str)> = resolved
             .iter()
             .map(|r| (r.path.as_str(), r.content.as_str()))
@@ -368,12 +371,17 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             .iter()
             .map(|(p, o)| (p.as_str(), o.as_str()))
             .collect();
-        self.repo
-            .commit_merge(&files, &binary, losers, "resolve merge conflicts via CRDT", theirs_oid)?;
+        let outcome = self.repo.commit_merge(
+            &files,
+            &binary,
+            losers,
+            "resolve merge conflicts via CRDT",
+            theirs_oid,
+        )?;
 
         let commit_oid = self.repo.head_oid()?;
         write_fm_crdt_files(self.repo.repo_path(), &commit_oid, resolved)?;
-        Ok(())
+        Ok(outcome.losers_kept_verbatim)
     }
 
     /// Post-merge: update sync state, push, commit-graph, reindex.
