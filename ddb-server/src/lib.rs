@@ -61,6 +61,7 @@ pub async fn run(
 
     let rest_actor = actor.clone();
     let (reloader, shared_schema) = reload::SchemaReloader::new(actor.clone(), read_pool.clone());
+    actor.set_reloader(reloader.clone());
     let gql_schema =
         build_initial_schema(actor, read_pool.clone(), type_schemas, reloader.clone())?;
     reloader.store_initial(gql_schema);
