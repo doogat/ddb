@@ -127,7 +127,12 @@ Numeric order = autopilot execution order (memory `project_ddb_growth_roadmap`);
 
 Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration shell scenarios to the Rust e2e crate`): only self-hits, 00171's own PRD file (repo and portfolio scope return the identical five rows, all within the PRD itself or adjacent Phase-2-titled sections of other backlog PRDs); no external prior art. Staleness stamp (`engram status --scope portfolio`, 2026-08-16, nonzero exit): memory stale=14, prd stale=1, transcripts stale=2 dead=5640, code stale=4 (skipped=3598), discovery/findings clean; many sibling repos report absent prd/decision/discovery layers. Review harvest: `dev/local/reviews/*-review-NN.md` files upserted (30 total, incl. 00170's two cycles); the `*-audit.md` renders still fail to parse (`missing frontmatter`) and are NOT harvested — the audit trail survives only as files, so it dies with a `dev/local` GC.
 
-## GitHub State (refreshed 2026-09-07)
+## GitHub State (refreshed 2026-10-17)
+
+- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 215 unreleased commits on master now.
+- **Nightly RED 5 straight days (2026-10-12 through 2026-10-16), all pinned to commit `d7867d23`** (= `d7867d2 fix(sync): fold frontmatter-less collision losers byte-unchanged`, the most recent master commit before this session). `full-validation / windows-full` fails: `sync_manager::tests::sync_report_lists_every_verbatim_folded_collision_loser` panics with a byte-array payload `[65, 32, 98, 111, 100, 121, ...]` = `"A body, no frontmatter\r\n"` — a Windows CRLF vs. Unix LF mismatch in that commit's new byte-unchanged-fold assertion. Linux results not shown in the excerpt; likely Windows-only (CRLF). Not yet triaged into a PRD. This commit predates PRD 00172 and is unrelated to actor-plumbing collapse work — flag as a separate follow-up, do not fix inside 00172's scope.
+
+### Prior snapshot (2026-09-07)
 
 - Local master and `origin/master` are both `876a153`; GitHub has a push run on that SHA. Earlier statements about 119 unpushed commits and a blocked push are obsolete. Only the main worktree exists; an older `worktree-agent-a188c62e61e58f6e5` branch was not removed because ownership was not established.
 - Test 34086467208 at `876a153` succeeded. Manual Full Validation 34092612666 at the same SHA succeeded on all six jobs (2026-09-07 06:50–07:45 UTC). Actual e2e summaries: 566 passed, 0 failed, 2 unrelated hazard tests ignored on Linux, macOS and Windows. Earlier SHA-specific results retain their original scope.

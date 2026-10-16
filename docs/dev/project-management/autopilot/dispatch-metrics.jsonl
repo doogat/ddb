@@ -129,3 +129,7 @@
 {"kind":"handoff","site":"done","edge":"leave","at":1788799145,"phase":"build","prd":"00171-migrate-shell-scenarios-to-e2e-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792188579,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792189872,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792190015,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
+{"id":"d73fe5f2","kind":"tess","task":"1","queued_at":1792190523,"prompt_bytes":51533}
+{"id":"702473c9","kind":"tess","task":"1","queued_at":1792190567,"prompt_bytes":18592}
+{"id":"50f129a5","kind":"tess","task":"1","queued_at":1792190571,"prompt_bytes":18592}
