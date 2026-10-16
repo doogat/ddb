@@ -327,6 +327,7 @@ async fn explicit_true_reloads_once_on_ok() {
             .await
             .unwrap();
 
+        assert_eq!(reloader.version(), before + 1, "call must await its reload");
         assert!(has_item(&schemas), "call must return the closure's value");
         assert_reloads(&reloader, before, 1).await;
     })
@@ -401,6 +402,7 @@ async fn schema_apply_reloads_once_when_applied() {
             .await
             .unwrap();
 
+        assert_eq!(reloader.version(), before + 1, "call must await its reload");
         assert!(output.value.applied, "a new type must be applied");
         assert!(!output.value.ops.is_empty());
         assert_reloads(&reloader, before, 1).await;
@@ -435,6 +437,79 @@ async fn schema_apply_skips_reload_when_not_applied_or_err() {
     })
     .await
     .expect("schema-apply not-applied test timed out");
+}
+
+#[tokio::test]
+async fn schema_apply_preview_with_pending_ops_does_not_reload() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let tmp = tempfile::tempdir().unwrap();
+        let actor = spawn_actor(tmp.path(), EventBus::new());
+        let reloader = register_reloader(tmp.path(), &actor);
+        let before = reloader.version();
+
+        // Intent claims a real apply, but the closure only previews: ops pending, nothing applied.
+        let preview = actor
+            .call(
+                EventIntent::None,
+                ReloadIntent::SchemaApply { dry_run: false },
+                apply(ITEM_SCHEMA, true),
+            )
+            .await
+            .unwrap();
+        assert!(!preview.value.applied);
+        assert!(!preview.value.ops.is_empty(), "a new type must plan ops");
+
+        assert_reloads(&reloader, before, 0).await;
+    })
+    .await
+    .expect("schema-apply preview test timed out");
+}
+
+#[tokio::test]
+async fn explicit_true_reloads_once_for_schema_apply_result() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let tmp = tempfile::tempdir().unwrap();
+        let actor = spawn_actor(tmp.path(), EventBus::new());
+        let reloader = register_reloader(tmp.path(), &actor);
+        let before = reloader.version();
+
+        let output = actor
+            .call(EventIntent::None, ReloadIntent::Explicit(true), apply(ITEM_SCHEMA, false))
+            .await
+            .unwrap();
+
+        assert!(output.value.applied);
+        assert_eq!(reloader.version(), before + 1, "call must await its reload");
+        assert_reloads(&reloader, before, 1).await;
+    })
+    .await
+    .expect("explicit(true) schema-apply test timed out");
+}
+
+#[tokio::test]
+async fn schema_apply_intent_on_non_schema_apply_result_does_not_reload() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let tmp = tempfile::tempdir().unwrap();
+        let actor = spawn_actor(tmp.path(), EventBus::new());
+        let setup = actor.call(EventIntent::None, ReloadIntent::None, apply(ITEM_SCHEMA, false));
+        assert!(setup.await.unwrap().value.applied);
+        let reloader = register_reloader(tmp.path(), &actor);
+        let before = reloader.version();
+
+        let schemas = actor
+            .call(
+                EventIntent::None,
+                ReloadIntent::SchemaApply { dry_run: false },
+                |svc| svc.list_type_schemas(),
+            )
+            .await
+            .unwrap();
+
+        assert!(has_item(&schemas));
+        assert_reloads(&reloader, before, 0).await;
+    })
+    .await
+    .expect("schema-apply intent on read test timed out");
 }
 
 #[tokio::test]
