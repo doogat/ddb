@@ -1,0 +1,192 @@
+I am reading the review card, diff patch, prepended context, and PRD to understand the changes and constraints.
+
+● Read FT-7b-card.md
+  │ dev/local/tmp/FT-7b-card.md
+  └ 154 lines read
+
+● Read FT-7b-no-pack.md
+  │ dev/local/tmp/FT-7b-no-pack.md
+  └ 1 line read
+
+● Count lines in the candidate patch (shell)
+  │ wc -l /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/FT-7b-build-candidate.patch
+  └ 1 line…
+
+● List files in patch (shell)
+  │ grep -E "^(\+\+\+ |---\s)"
+  │ /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/FT-7b-build-candidate.patch
+  └ 10 lines…
+
+● Check git status of worktree (shell)
+  │ git -C /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00203-ft-7b status
+  └ 11 lines…
+
+● Read 00203-bundle-import-ref-namespace-v1.md
+  │ dev/local/prds/backlog/00203-bundle-import-ref-namespace-v1.md
+  └ 182 lines read
+
+● Read FT-7b-build-candidate.patch
+  │ dev/local/tmp/FT-7b-build-candidate.patch
+  └ 1030 lines read
+
+● Check untracked files in worktree (shell)
+  │ git -C /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00203-ft-7b status -u
+  └ 11 lines…
+
+● Check walkthrough and review files in main repo (shell)
+  │ ls -la dev/local/walkthroughs/00203* dev/local/prds/hold/00168* dev/local/reviews/FT-7*
+  └ 64 lines…
+
+● Read FT-7b-build.md
+  │ dev/local/reviews/FT-7b-build.md
+  └ 162 lines read
+
+● Read 00203-bundle-import-ref-namespace.md
+  │ dev/local/walkthroughs/00203-bundle-import-ref-namespace.md
+  └ 171 lines read
+
+/ Search (grep)
+  │ "fn import_bundle" (ddb-core/src/bundle/mod.rs)
+  └ 1 file found
+
+/ Search (grep)
+  │ "pub fn import_bundle" (ddb-core/src/bundle/mod.rs)
+  └ 1 file found
+
+/ Search (grep)
+  │ "import_bundle" (ddb-core/src/bundle/mod.rs)
+  └ 1 file found
+
+● Read mod.rs
+  │ ddb-core/src/bundle/mod.rs
+  └ L500:560 (60 lines read)
+
+● Read mod.rs
+  │ ddb-core/src/bundle/mod.rs
+  └ L561:680 (37 lines read)
+
+/ Search (grep)
+  │ "fn import_bundle" (ddb-core/src)
+  └ 3 files found
+
+/ Search (grep)
+  │ "fn import_bundle" (ddb-core/src/bundle/mod.rs)
+  └ 1 file found
+
+/ Search (grep)
+  │ "fn import_bundle" (ddb-core/src/bundle/mod.rs, ddb-core/src/ffi/driver.rs)
+  └ 3 lines found
+
+● Read mod.rs
+  │ ddb-core/src/bundle/mod.rs
+  └ L350:450 (101 lines read)
+
+● Read mod.rs
+  │ ddb-core/src/bundle/mod.rs
+  └ L150:260 (111 lines read)
+
+● Read mod.rs
+  │ ddb-core/src/bundle/mod.rs
+  └ L261:350 (90 lines read)
+
+● Read driver.rs
+  │ ddb-core/src/ffi/driver.rs
+  └ L265:300 (14 lines read)
+
+/ Search (grep)
+  │ "DoogatError::Sync" (ddb-core/src/ffi/)
+  └ 1 file found
+
+● Read records.rs
+  │ ddb-core/src/ffi/records.rs
+  └ L120:160 (41 lines read)
+
+● Read records.rs
+  │ ddb-core/src/ffi/records.rs
+  └ L70:125 (56 lines read)
+
+● Check line count of modified test files (shell)
+  │ wc -l /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00203-ft-7b/ddb-core/src/
+  │ ffi/tests.rs /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00203-ft-7b/tests/
+  │ e2e/integration_bundle_import_ref_namespace.rs
+  └ 3 lines…
+
+● Check function sizes in changed code (shell)
+  │ python3 -c '
+  │ import sys
+  │
+  │ def check_file(path, start_line=1):
+  │ with open(path) as f:…
+  └ 50 lines…
+
+● Read integration_bundle_import_ref_namespace.rs
+  │ dev/local/tmp/worktrees/00203-ft-7b/tests/e2e/integration_bundle_import_ref_namespace.rs
+  └ L270:325 (56 lines read)
+
+● Read Cargo.toml
+  │ tests/Cargo.toml
+  └ 24 lines read
+
+/ Search (grep)
+  │ "conflicts resolved" (ddb-cli/src)
+  └ 35 lines found
+
+/ Search (grep)
+  │ "eprintln" (ddb-cli/src/main.rs)
+  └ 35 lines found
+
+✗ Search (grep)
+  │ "Sync(" (ddb-core/src/error.rs)
+  └ rg: regex parse error:
+    (?:Sync()
+    ^
+    error: unclosed group
+
+/ Search (grep)
+  │ "Sync\(" (ddb-core/src/error.rs)
+  └ 11 lines found
+
+/ Search (grep)
+  │ "(ignore|skip|xfail)"
+  │ (dev/local/tmp/worktrees/00203-ft-7b/tests/e2e/integration_bundle_import_ref_namespace.rs,
+  │ dev/local/tmp/worktrees/00203-ft-7b/ddb-core/src/ffi/tests.rs)
+  └ No matches found
+
+/ Search (grep)
+  │ "(TODO|FIXME|XXX|\bdbg!\b|\bprintln!\b)"
+  │ (dev/local/tmp/worktrees/00203-ft-7b/tests/e2e/integration_bundle_import_ref_namespace.rs,
+  │ dev/local/tmp/worktrees/00203-ft-7b/ddb-core/src/ffi/tests.rs)
+  └ No matches found
+
+[CARL] 🟡 File size (1571 lines) exceeds 800-line limit; FFI bundle tests should be extracted to a separate module | File: ddb-core/src/ffi/tests.rs:1084 | Task: general
+[CARL] 🟡 Function failed_a_then_repaired exceeds 50-line limit (57 lines); extract setup steps | File: tests/e2e/integration_bundle_import_ref_namespace.rs:194 | Task: general
+[CARL] 🟡 Function masterless_b_fails exceeds 50-line limit (51 lines) | File: tests/e2e/integration_bundle_import_ref_namespace.rs:271 | Task: general
+[CARL] 🟡 Function bundle_import_retry_cleans_only_its_payload_namespace exceeds 50-line limit (73 lines); extract ref assertion helper | File: tests/e2e/integration_bundle_import_ref_namespace.rs:407 | Task: general
+[CARL] 🟡 Function failed_a_then_repaired exceeds 50-line limit (60 lines); extract setup steps | File: ddb-core/src/ffi/tests.rs:1271 | Task: general
+[CARL] 🟡 Function bundle_import_ffi_retry_cleans_only_its_payload_namespace exceeds 50-line limit (75 lines); extract ref assertion helper | File: ddb-core/src/ffi/tests.rs:1497 | Task: general
+[CARL] 🟡 Ref inspection helpers and fixture constants duplicated across e2e and FFI test modules | File: tests/e2e/integration_bundle_import_ref_namespace.rs:21 | Task: general
+[CARL] 🟡 CLI test derives payload ID from observed ref namespace rather than independently hashing bundle payload | File: tests/e2e/integration_bundle_import_ref_namespace.rs:308 | Task: general
+[CARL] ⚪ Loop over prune flags aborts on first failure, leaving prune=false without independent baseline-red proof | File: tests/e2e/integration_bundle_import_ref_namespace.rs:388 | Task: general
+
+R1: pass
+R2: pass
+R3: pass
+R4: pass
+R6: pass
+R7: pass
+R8: pass
+R9: pass
+R10: pass
+R11: pass
+R12: fail
+R13: fail
+
+### Open Points Evaluation
+
+1. **`prune=false` baseline-red proof**: The `for prune in [true, false]` loop terminates upon the first failure on `prune=true` during baseline replay. While the pre-change codebase fails regardless of prune setting, separate test cases or non-short-circuiting parametrization are needed for independent baseline-red proof.
+2. **CLI payload ID derivation**: CLI tests derive `b_id` from the observed git namespace instead of computing the SHA-256 of `objects.bundle` (unlike FFI's `payload_id`). While failing pre-change code, it validates namespace consistency rather than payload hash fidelity.
+3. **E2E 479-line file and fixture duplication**: Constants, ref-parsing helpers (`all_refs`, `bundle_refs`, `new_namespace`, `plant_foreign_refs`), and multi-step fixtures are duplicated across `ddb-core` and `tests/e2e`.
+4. **Extra doogat in Fixture A**: Verified sound. Because Node 2 locally repairs `COLLISION` with A's exact content (`LOSER`), `ddb/20260303000000.md` serves as a vital content-level sentinel proving A's stale commits were not merged during masterless B.
+5. **Ancestry assertion on retry**: Verified correct. Node 2 fast-forwards to C prior to retrying A; the resulting three-way merge commit cannot match A's OID without discarding C. Asserting `merge-base --is-ancestor <a_master> HEAD` alongside readability of both A and C items is mathematically and topographically accurate.
+6. **Documentation accuracy**: Verified against `ddb-core/src/bundle/mod.rs`, `ddb-core/src/ffi/driver.rs`, and `ddb-cli/src/commands/sync.rs`. Exit codes, error prefixes (`bundle merge failed:`), FFI `Result<(), DdbError>` error mapping, no-op reimport behavior, and recovery limits are documented accurately.
+

@@ -1,0 +1,700 @@
+{
+  "summary": "FT-7a review-only: review-fanout (rita/cora/grace/toby/mallory/trent/victor) + Eve + blind Blake + Bob(codex) + Carl(gemini), Victor on every CRITICAL/HIGH",
+  "agentCount": 10,
+  "logs": [
+    "▸ running dynamic workflow review-fanout",
+    "[review-fanout] review-fanout: 4 finding dimensions + rubric",
+    "[review-fanout] verifying 0 blocking findings (0 over the cap)",
+    "[review-fanout] review-fanout done: 11 raw -> 11 unique, 0 blocking, 0 confirmed, 0 refuted, 0 demoted, 0 unverified",
+    "▸ review-fanout done",
+    "lanes: {\"fanout\":\"APPROVE\",\"eve\":\"ok\",\"blake\":\"ok\",\"bob\":\"ok: codex-run.sh exited 0 (gpt-6-sol, read-only sandbox); final answer printed twice in the output (lines 5025-5042 and again at 5049-5066), deduplicated to one set.\",\"carl\":\"ok: gemini-run.sh exit 0 (backend=copilot model=gemini-3.8-flash, 6m18s); output at /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-carl-output.txt\"}",
+    "verifying 0 CRITICAL/HIGH from eve/blake/bob/carl"
+  ],
+  "result": {
+    "laneStatus": {
+      "fanout": "APPROVE",
+      "eve": "ok",
+      "blake": "ok",
+      "bob": "ok: codex-run.sh exited 0 (gpt-6-sol, read-only sandbox); final answer printed twice in the output (lines 5025-5042 and again at 5049-5066), deduplicated to one set.",
+      "carl": "ok: gemini-run.sh exit 0 (backend=copilot model=gemini-3.8-flash, 6m18s); output at /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-carl-output.txt"
+    },
+    "fanout": {
+      "verdict": "APPROVE",
+      "blocking": [],
+      "advisory": [
+        {
+          "title": "Lease test never shows an import holding the lease from fetch through cleanup; releasing it early would pass every test",
+          "severity": "MEDIUM",
+          "file": "ddb-core/src/bundle/tests.rs",
+          "line": 1233,
+          "evidence": "let held =\n        write_lock::acquire(&git_dir, \"ddb-bundle-import.lock\", Duration::from_secs(5)).unwrap();\n...\n    spawn_lease_child(\"refuse\", dir2.path(), &bundle);",
+          "fix": "Hold the lease from a real import that pauses between fetch and cleanup, for example through a test-only hook or by blocking the final rebuild. While it is paused, run the second import from another process and assert Conflict and no ref change. That would fail if `let _lease = acquire_import_lease(...)` became `let _ = ...` or the guard were dropped before cleanup.",
+          "task": "FT-7a",
+          "dimensions": [
+            "requirements"
+          ]
+        },
+        {
+          "title": "import_bundle_with_lease_timeout grew to 64 lines, over the 50-line function limit",
+          "severity": "MEDIUM",
+          "file": "ddb-core/src/bundle/mod.rs",
+          "line": 322,
+          "evidence": "fn import_bundle_with_lease_timeout(... ) spans lines 322-385 and now inlines: `let git_bundle_path = ...; if !git_bundle_path.is_file() {...}`, `let existing = namespace_refs(repo, &namespace)?; if let Some((branch, oid)) = existing.iter().find(|r| !heads.contains(r)) {...}`, `unbundle_git_objects(...)?; ensure_namespace_matches(...)?;`, `if !heads.iter().any(|(branch, _)| branch == \"master\") {...}`, and the cleanup loop.",
+          "fix": "Keep behavior identical but extract the pre-merge leg (advertised_heads + pre-fetch namespace check + unbundle_git_objects + post-fetch ensure_namespace_matches + master check) into one helper, e.g. `fetch_payload_heads(repo, &git_bundle_path, &namespace, &payload_id) -> Result<Vec<(String,String)>>`, and the cleanup into `delete_payload_namespace(repo, &namespace, &payload_id, &heads)`. Lease acquisition stays in the caller so the guard's scope is unchanged.",
+          "task": "FT-7a",
+          "dimensions": [
+            "quality"
+          ]
+        },
+        {
+          "title": "payload_id is a noun-named I/O function, shadowed by a same-named local",
+          "severity": "LOW",
+          "file": "ddb-core/src/bundle/mod.rs",
+          "line": 98,
+          "evidence": "fn payload_id(git_bundle_path: &Path) -> Result<String> { let mut file = std::fs::File::open(git_bundle_path)?; ... }  and later  `let payload_id = payload_id(&git_bundle_path)?;`",
+          "fix": "Rename to `compute_payload_id` (verb-first, matching the existing `compute_bundle_checksum`) and update the call site and the test helper `payload_id_of`.",
+          "task": "FT-7a",
+          "dimensions": [
+            "quality"
+          ]
+        },
+        {
+          "title": "parse_ref_lines doc says `<oid> <refname>` but returns (name, oid), swapped and undocumented",
+          "severity": "LOW",
+          "file": "ddb-core/src/bundle/mod.rs",
+          "line": 133,
+          "evidence": "/// Parse `<oid> <refname>` lines strictly; malformed records fail loud.\nfn parse_ref_lines(text: &str, what: &str) -> Result<Vec<(String, String)>> { ... Ok((name.to_string(), oid.to_string())) }",
+          "fix": "State the return order in the doc comment, e.g. \"returns `(refname, oid)` pairs\", so readers of the `(String, String)` tuples in advertised_heads/namespace_refs do not have to read the body.",
+          "task": "FT-7a",
+          "dimensions": [
+            "quality"
+          ]
+        },
+        {
+          "title": "Two ref-enumeration test helpers duplicate the same walk",
+          "severity": "LOW",
+          "file": "ddb-core/src/bundle/tests.rs",
+          "line": 461,
+          "evidence": "fn bundle_refs(repo_dir: &Path) -> Vec<(String, git2::Oid)> { let repo = git2::Repository::open(repo_dir).unwrap(); for reference in repo.references().unwrap() { ... } }  and  fn all_refs(repo_dir: &Path) -> Vec<(String, Option<git2::Oid>)> { let repo = git2::Repository::open(repo_dir).unwrap(); repo.references().unwrap().map(...) }",
+          "fix": "Build bundle_refs from all_refs: filter names on `refs/remotes/bundle/` and unwrap the target with the same `must be direct` panic message. Keeps the same assertions with one enumeration path.",
+          "task": "FT-7a",
+          "dimensions": [
+            "quality"
+          ]
+        },
+        {
+          "title": "New open_index helper is not used by two new tests in the same diff",
+          "severity": "LOW",
+          "file": "ddb-core/src/bundle/tests.rs",
+          "line": 545,
+          "evidence": "`let index2 = crate::indexer::Index::open(&dir2.path().join(\".ddb/index.db\")).unwrap();` (failed_bundle_then_masterless_bundle_never_merges_stale_master) and `let db2 = dir2.path().join(\".ddb/index.db\"); std::fs::create_dir_all(db2.parent().unwrap()).unwrap(); let index2 = crate::indexer::Index::open(&db2).unwrap();` (bundle_import_keeps_refs_when_post_merge_work_fails), while the diff adds `fn open_index(repo_dir: &Path) -> crate::indexer::Index` doing exactly this.",
+          "fix": "Use `open_index(dir2.path())` in both new tests. Leave the older pre-existing tests alone.",
+          "task": "FT-7a",
+          "dimensions": [
+            "quality"
+          ]
+        },
+        {
+          "title": "merge_bundle_and_resolve doc comment line was not rewrapped",
+          "severity": "LOW",
+          "file": "ddb-core/src/bundle/mod.rs",
+          "line": 241,
+          "evidence": "/// master, resolving conflicts via the same libgit2 + CRDT pipeline the network-sync path uses (`SyncManager::apply_merge_result`).",
+          "fix": "Rewrap to the surrounding ~90-column doc width; rustfmt does not wrap comments.",
+          "task": "FT-7a",
+          "dimensions": [
+            "quality"
+          ]
+        },
+        {
+          "title": "Lease test cannot tell whether the lease is held past fetch; a `let _ =` or early-drop regression passes every test",
+          "severity": "MEDIUM",
+          "file": "ddb-core/src/bundle/tests.rs",
+          "line": 1537,
+          "evidence": "Test side: `let held = write_lock::acquire(&git_dir, \"ddb-bundle-import.lock\", Duration::from_secs(5)).unwrap(); ... spawn_lease_child(\"refuse\", dir2.path(), &bundle);`. Code side: `let _lease = acquire_import_lease(repo, lease_timeout)?;`. The only other lease checks are after the import returns: `write_lock::acquire(... Duration::from_millis(200)).expect(\"a failed import must release the import lease\")`.",
+          "fix": "Add a test that fails if the lease is dropped too early. Let an import hold the lease through merge, rebuild and cleanup, for example by blocking at a test-only hook after the merge or on a held rebuild or index resource. While it is blocked, have a second process or handle try `write_lock::acquire` on ddb-bundle-import.lock with a short timeout and assert that it times out. Alternatively assert the lease is still held at the post-merge failure point in bundle_import_keeps_refs_when_post_merge_work_fails. Probe to show the gap: change mod.rs:350 to `let _ = acquire_import_lease(repo, lease_timeout)?;`, then run `mise exec -- cargo +1.89.0 test -p ddb-core --lib bundle`. All tests are expected to still pass.",
+          "task": "FT-7a",
+          "dimensions": [
+            "tests"
+          ]
+        },
+        {
+          "title": "Strict ref-record parsing (never skip malformed branch records) has no test",
+          "severity": "MEDIUM",
+          "file": "ddb-core/src/bundle/mod.rs",
+          "line": 134,
+          "evidence": "`fn parse_ref_lines(text: &str, what: &str) -> Result<Vec<(String, String)>> { ... .ok_or_else(|| DoogatError::Sync(format!(\"malformed {what} record: {line:?}\")))?;` and `if branch.is_empty() { return Err(DoogatError::Sync(format!(\"malformed bundle head: {name}\"))); }`. tests.rs has no reference to parse_ref_lines, advertised_heads or the word malformed (rg returned only the unrelated namespace_refs test name).",
+          "fix": "Add a colocated unit test for parse_ref_lines. It should reject a short or uppercase OID, a line with no space, an empty name, a name with whitespace, and a blank line in the middle, each with a Sync error naming the record. It should accept both 40-hex and 64-hex OIDs. Also assert that advertised_heads-style filtering rejects `refs/heads/` with an empty branch and ignores HEAD and tags. Without this, changing `.map(...).collect()` to `.filter_map(...)` would silently skip malformed records and still pass every test, even though the card says to never skip them silently.",
+          "task": "FT-7a",
+          "dimensions": [
+            "tests"
+          ]
+        },
+        {
+          "title": "Wrong-OID namespace case does not isolate the pre-fetch refusal: the non-forced fetch would reject it anyway",
+          "severity": "LOW",
+          "file": "ddb-core/src/bundle/tests.rs",
+          "line": 1305,
+          "evidence": "`repo2.repo.reference(&format!(\"{ns}master\"), local_head, false, \"seed wrong oid\")` followed by `assert!(matches!(err, DoogatError::Sync(_)) && err.to_string().contains(&ns), ...)`. local_head and the bundle's master are unrelated histories, so the non-forced `refs/heads/*:{namespace}*` fetch fails as non-fast-forward. run_git's `git {args} failed` message then also contains the namespace, so removing the `existing.iter().find(|r| !heads.contains(r))` pre-check still passes this case.",
+          "fix": "Seed the wrong-OID ref with an ancestor of the bundle's master (a fetch would fast-forward it), or assert the refusal text `nothing was fetched, merged or deleted`, so the pre-fetch check is the only thing that can pass the case. Also assert that no objects were unbundled, for example that the bundle master OID is absent from repo2's odb.",
+          "task": "FT-7a",
+          "dimensions": [
+            "tests"
+          ]
+        },
+        {
+          "title": "Masterless-import error is not checked for the payload id and delivered branch names",
+          "severity": "LOW",
+          "file": "ddb-core/src/bundle/tests.rs",
+          "line": 488,
+          "evidence": "The test asserts only `err.to_string().contains(\"bundle merge failed:\")`, while the code emits `\"bundle merge failed: bundle payload {payload_id} delivered no master branch (delivered: {delivered:?}); fetched refs kept under {namespace}\"`. The card requires the error to carry the payload id and the delivered branch names.",
+          "fix": "In failed_bundle_then_masterless_bundle_never_merges_stale_master, also assert that the error contains payload_id_of(&masterless) and \"sidecar\".",
+          "task": "FT-7a",
+          "dimensions": [
+            "tests"
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "rule_id": "R1",
+          "verdict": "fail",
+          "note": "Several new behaviors have no test. parse_ref_lines' strict rejection of malformed list-heads/for-each-ref records (the PRD says never skip them silently) has no test: rg finds no parse_ref_lines or malformed case in tests.rs. The post-fetch ensure_namespace_matches (verify fetched OIDs) and the pre-cleanup re-check mismatch paths are never triggered. The absolute --git-common-dir branch (linked worktree) is also untested. Probe: add unit tests feeding malformed lines to parse_ref_lines."
+        },
+        {
+          "rule_id": "R2",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R3",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R4",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R6",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R7",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R8",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R9",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R10",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R11",
+          "verdict": "pass"
+        },
+        {
+          "rule_id": "R12",
+          "verdict": "fail",
+          "note": "import_bundle_with_lease_timeout in ddb-core/src/bundle/mod.rs runs lines 322-385, about 64 lines, over the 50-line limit. Several new tests are also over 50 lines: failed_bundle_then_masterless_bundle_never_merges_stale_master (~99), bundle_import_lease_covers_fetch_through_cleanup (~85), failed_bundle_retry_uses_same_namespace_and_releases_import_lease (~78), successful_bundle_import_preserves_other_failed_and_legacy_refs (~75) and bundle_import_rejects_unexpected_existing_namespace_refs (~70)."
+        },
+        {
+          "rule_id": "R13",
+          "verdict": "fail",
+          "note": "ddb-core/src/bundle/tests.rs grows from about 831 to 1621 lines (+838/-48 in the patch), about twice the 800-line limit. mod.rs is 565 lines, which is fine."
+        }
+      ],
+      "incomplete": false,
+      "failedDimensions": [],
+      "stats": {
+        "dimensions": 4,
+        "raw": 11,
+        "unique": 11,
+        "confirmed": 0,
+        "refuted": 0,
+        "demoted": 0,
+        "unverified": 0,
+        "diff_bytes": 83162,
+        "diff_truncated": true
+      },
+      "agent_output": "[FANOUT] ✅ No issues found\n\n### Advisory (does not block)\n\n- Lease test never shows an import holding the lease from fetch through cleanup; releasing it early would pass every test\n- import_bundle_with_lease_timeout grew to 64 lines, over the 50-line function limit\n- payload_id is a noun-named I/O function, shadowed by a same-named local\n- parse_ref_lines doc says `<oid> <refname>` but returns (name, oid), swapped and undocumented\n- Two ref-enumeration test helpers duplicate the same walk\n- New open_index helper is not used by two new tests in the same diff\n- merge_bundle_and_resolve doc comment line was not rewrapped\n- Lease test cannot tell whether the lease is held past fetch; a `let _ =` or early-drop regression passes every test\n- Strict ref-record parsing (never skip malformed branch records) has no test\n- Wrong-OID namespace case does not isolate the pre-fetch refusal: the non-forced fetch would reject it anyway\n- Masterless-import error is not checked for the payload id and delivered branch names\n\n### Rubric\n\nR1: fail\nR2: pass\nR3: pass\nR4: pass\nR6: pass\nR7: pass\nR8: pass\nR9: pass\nR10: pass\nR11: pass\nR12: fail\nR13: fail\n\n### Rubric notes\n\n- R1: Several new behaviors have no test. parse_ref_lines' strict rejection of malformed list-heads/for-each-ref records (the PRD says never skip them silently) has no test: rg finds no parse_ref_lines or m\n- R12: import_bundle_with_lease_timeout in ddb-core/src/bundle/mod.rs runs lines 322-385, about 64 lines, over the 50-line limit. Several new tests are also over 50 lines: failed_bundle_then_masterless_bundl\n- R13: ddb-core/src/bundle/tests.rs grows from about 831 to 1621 lines (+838/-48 in the patch), about twice the 800-line limit. mod.rs is 565 lines, which is fine.\n\n_engine: workflow — dimensions 4, raw 11, unique 11, confirmed 0, refuted 0, demoted 0, unverified 0, diff_bytes 83162_",
+      "review_markdown": "---\nprd: \nreview: 1\ndate: 2026-09-28\nhead_sha: a739c292748bcf5e35b5c6340eec7a360ceceb0c\nreviewers: fanout\n---\n\n## Fanout\n\n[FANOUT] ✅ No issues found\n\n### Advisory (does not block)\n\n- Lease test never shows an import holding the lease from fetch through cleanup; releasing it early would pass every test\n- import_bundle_with_lease_timeout grew to 64 lines, over the 50-line function limit\n- payload_id is a noun-named I/O function, shadowed by a same-named local\n- parse_ref_lines doc says `<oid> <refname>` but returns (name, oid), swapped and undocumented\n- Two ref-enumeration test helpers duplicate the same walk\n- New open_index helper is not used by two new tests in the same diff\n- merge_bundle_and_resolve doc comment line was not rewrapped\n- Lease test cannot tell whether the lease is held past fetch; a `let _ =` or early-drop regression passes every test\n- Strict ref-record parsing (never skip malformed branch records) has no test\n- Wrong-OID namespace case does not isolate the pre-fetch refusal: the non-forced fetch would reject it anyway\n- Masterless-import error is not checked for the payload id and delivered branch names\n\n### Rubric\n\nR1: fail\nR2: pass\nR3: pass\nR4: pass\nR6: pass\nR7: pass\nR8: pass\nR9: pass\nR10: pass\nR11: pass\nR12: fail\nR13: fail\n\n### Rubric notes\n\n- R1: Several new behaviors have no test. parse_ref_lines' strict rejection of malformed list-heads/for-each-ref records (the PRD says never skip them silently) has no test: rg finds no parse_ref_lines or m\n- R12: import_bundle_with_lease_timeout in ddb-core/src/bundle/mod.rs runs lines 322-385, about 64 lines, over the 50-line limit. Several new tests are also over 50 lines: failed_bundle_then_masterless_bundl\n- R13: ddb-core/src/bundle/tests.rs grows from about 831 to 1621 lines (+838/-48 in the patch), about twice the 800-line limit. mod.rs is 565 lines, which is fine.\n\n_engine: workflow — dimensions 4, raw 11, unique 11, confirmed 0, refuted 0, demoted 0, unverified 0, diff_bytes 83162_\n\nVerdict: converged\nTests: {{TESTS_LINE}}\n",
+      "stats_line": "_engine: workflow — dimensions 4, raw 11, unique 11, confirmed 0, refuted 0, demoted 0, unverified 0, diff_bytes 83162_"
+    },
+    "lanes": {
+      "eve": {
+        "lane_status": "ok",
+        "status_detail": "Static doubt + de-slop review of the FT-7a candidate. Verified before judging: worktree /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00203-ft-7a is at a739c292748bcf5e35b5c6340eec7a360ceceb0c with exactly the seven allowlisted files modified; its live `git diff --binary` hashes to 09d7869d1fb374f7d83b5c2cb655a0f9049d7e4ae483ab62ffbf1d0434916fa5, byte-identical to dev/local/tmp/FT-7a-build-candidate.patch and to the handoff's recorded SHA. Read the full patch, bundle/mod.rs, bundle/tests.rs, write_lock.rs, remote.rs, merge.rs (merge_remote_with_policy), sync_manager apply_merge_result, error.rs variants, the four touched docs, CHANGELOG, e2e bundle tests, CI workflows, the card, design preflight and build evidence. No cargo/ddb executed; no files modified. Core logic (payload id, lease, advertised-head validation, scoped fetch/merge/cleanup, cleanup-after-rebuild ordering) matches the card; no CRITICAL/HIGH residual found. 10 residual findings: 4 FIX (all LOW), 1 VERIFY (MEDIUM), 5 KNOWN (LOW).",
+        "findings": [
+          {
+            "title": "Docs and comment call the namespace fetch \"non-forced\"; git forces updates under refs/remotes/ regardless, the pre-fetch check is the real guard",
+            "severity": "LOW",
+            "file": "docs/src/technical/bundle.md",
+            "line": 58,
+            "evidence": "bundle.md:58 says the fetch of refs/heads/* into refs/remotes/bundle/<payload-id>/* is \"(non-forced)\" and bundle/mod.rs:212-213 documents unbundle_git_objects as \"(non-forced, never pruning)\". git-fetch(1), refspec section: \"any updates outside of refs/{tags,heads}/* will be accepted without + in the refspec (or --force)\". So omitting `+` in `refs/heads/*:{namespace}*` (mod.rs:221) does not stop a non-fast-forward overwrite of an existing namespace ref; what stops it is the pre-fetch `namespace_refs` vs `advertised_heads` refusal at mod.rs:353-359. Correctness holds, but the doc names the wrong mechanism and a future reader could drop the pre-check believing fetch would refuse.",
+            "fix": "Reword bundle.md step 7 and the unbundle_git_objects doc comment: state that no `+`/`--force` is passed but git accepts non-fast-forward updates under refs/remotes/ anyway, which is why every preexisting namespace ref is checked against the advertised heads before the fetch runs."
+          },
+          {
+            "title": "Post-merge failures (node registration, final index rebuild) escape raw without naming the kept namespace",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/mod.rs",
+            "line": 373,
+            "evidence": "Merge failures append \"(fetched refs kept under refs/remotes/bundle/<id>/)\" (mod.rs:244-249), the masterless and refusal errors name the namespace (mod.rs:355-358, 366-369), but `import_node_registrations(repo, &work_dir)?` (373) and `index.rebuild(repo)?` (374) return the raw Io/Sqlite error with no pointer to the retained refs. The card's Docs section requires \"Errors name the namespace; failed refs remain until a safe retry or operator recovery\". The new test bundle_import_keeps_refs_when_post_merge_work_fails asserts only `result.is_err()`, so the message content is unpinned.",
+            "fix": "Before propagating an error from import_node_registrations or index.rebuild, emit `tracing::warn!(namespace = %namespace, \"bundle import failed after merge; fetched refs kept\")` or map the error to add \"(fetched refs kept under {namespace})\" while preserving its variant where the variant carries a String; extend the late-rebuild test to assert the namespace appears in the error or log."
+          },
+          {
+            "title": "Unreachable match arm in merge_failed closure",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/mod.rs",
+            "line": 248,
+            "evidence": "`merge_failed` does `match bundle_merge_error(e) { DoogatError::Sync(msg) => ..., other => other }` but `bundle_merge_error` (mod.rs:279-281) unconditionally returns `DoogatError::Sync(...)`, so the `other => other` arm is dead code introduced by this change.",
+            "fix": "Collapse to `let merge_failed = |e| DoogatError::Sync(format!(\"bundle merge failed: {e} (fetched refs kept under refs/remotes/bundle/{payload_id}/)\"))`, or have bundle_merge_error return the formatted String and wrap once."
+          },
+          {
+            "title": "Stale test doc comments still describe the flat refs/remotes/bundle/master layout and a merge-engine NotFound path the pre-check now short-circuits",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 989,
+            "evidence": "tests.rs:292 (\"leave `refs/remotes/bundle/master` in place\"), 431 (\"pruning fetch into `refs/remotes/bundle/*`\"), 655 (\"keeps `refs/remotes/bundle/master`\"), 709 (\"maps `refs/heads/*` onto `refs/remotes/bundle/*`\") describe the pre-FT-7a layout. tests.rs:989-1001 say the main-branch bundle test reproduces \"the merge engine's lookup of `refs/remotes/bundle/master` fails with `NotFound`\", but with the candidate the import now fails at the masterless pre-check (mod.rs:364-370) before merge_remote runs, so this test no longer exercises the NotFound-to-Sync mapping through import_bundle (only bundle_merge_error_wraps_every_variant_as_sync_with_prefix still does, directly). Assertions still pass and still pin real behavior; only the narrative is wrong.",
+            "fix": "Update the five comments to the namespaced layout and reword the main-branch test's comment to say it now pins the pre-merge delivered-master refusal (Sync + `bundle merge failed:`), with the raw-NotFound mapping covered by the bundle_merge_error unit test."
+          },
+          {
+            "title": "Cross-process lease test unverified on the Windows/macOS nightly matrix",
+            "severity": "MEDIUM",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 1537,
+            "evidence": "bundle_import_lease_covers_fetch_through_cleanup re-spawns the ddb-core lib test binary via std::env::current_exe() with libtest args, relies on fs2 cross-process exclusion, `git rev-parse --git-common-dir` output shape, and a 5 s/60 s wall-clock budget. The local gate ran only on this macOS host (build evidence: 36 bundle tests, fast tier 1866). full-validation.yml runs `cargo test-full` on windows-latest and macos-latest with the stable toolchain, so this test will run there for the first time after push. Memory note: a green Nightly can be a guard-skip that tested nothing.",
+            "fix": "After pushing, confirm full-validation.yml jobs `windows-full` and `macos-full` ran on the exact pushed HEAD (check headSha, duration and per-job status, not only conclusion) and that `bundle::tests::bundle_import_lease_covers_fetch_through_cleanup` passed in both `cargo test-full` logs."
+          },
+          {
+            "title": "Three untouched docs still cite ddb-core/src/bundle.rs",
+            "severity": "LOW",
+            "file": "docs/src/technical/errors.md",
+            "line": 20,
+            "evidence": "docs/src/technical/errors.md:20, docs/src/architecture/overview.md:154 and docs/src/technical/phase-2-exit.md:45 still reference `bundle.rs`. KNOWN: the card's allowlist limits docs to bundle.md, invariants.md, sync.md and walkthrough.md and asks to correct `bundle.rs` references only \"in the touched paragraphs\"; these files are outside that scope.",
+            "fix": "Out of scope for FT-7a; sweep in a docs-only follow-up."
+          },
+          {
+            "title": "Fetch tag auto-following can leave refs/tags/* outside the namespace, never cleaned",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/mod.rs",
+            "line": 222,
+            "evidence": "`git fetch --no-prune <bundle> refs/heads/*:<ns>*` auto-follows tags that point into fetched history unless `--no-tags`; a source repo with tags exported via `git bundle create --all` (which includes refs/tags) would write refs/tags/* into the importing repo, outside refs/remotes/bundle/<id>/, and cleanup never touches them. KNOWN: pre-existing fetch shape (the old fetch was identical apart from the destination), ddb never creates tags, and the card fixes the fetch flags (`--no-prune` plus the heads refspec). Probe if wanted: tag a temp repo, `git bundle create b --all`, fetch it with the import refspec into a fresh repo, `git for-each-ref refs/tags`.",
+            "fix": "Out of scope; if ever needed, add `--no-tags` in a separate item."
+          },
+          {
+            "title": "Merge commit subject now embeds the 64-hex payload id",
+            "severity": "LOW",
+            "file": "ddb-core/src/git_ops/merge.rs",
+            "line": 413,
+            "evidence": "perform_normal_merge formats the subject as `merge {remote}/{branch}`, so a clean bundle merge commit now reads `merge bundle/<64-hex>/master` instead of `merge bundle/master`; visible in `git log` of every importing repo. KNOWN: cosmetic, nothing parses that subject (rg over ddb-core and tests found no consumer), merge.rs is outside the allowlist, and the CHANGELOG does not mention it.",
+            "fix": "Out of scope; optionally mention in the CHANGELOG entry or shorten in a later merge.rs change."
+          },
+          {
+            "title": "Windows MAX_PATH exposure from the 64-hex namespace directory",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/mod.rs",
+            "line": 347,
+            "evidence": "Loose refs land at `.git/refs/remotes/bundle/<64-hex>/<branch>` (~100 chars beyond the repo path). On Windows without core.longpaths a repo rooted deeper than ~155 chars would make `git fetch` or libgit2 ref writes fail. KNOWN: the card mandates the full 64-hex SHA-256 (no truncation), the failure is loud (run_git non-zero exit or git2 error), not silent data loss, and CI temp paths stay well under the limit.",
+            "fix": "Out of scope; document core.longpaths if a Windows user reports it."
+          },
+          {
+            "title": "Six of the eight new tests have no recorded baseline-red run",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 1174,
+            "evidence": "dev/local/reviews/FT-7a-build.md:85-86 records that only the stale-master and late-rebuild tests were proven red on a739c29; the other six were authored in the implementation session. Static check: bundle_payload_identity..., bundle_import_lease_covers..., and failed_bundle_retry... cannot compile on the baseline (payload_id, import_bundle_with_lease_timeout and the write_lock import do not exist there); successful_bundle_import_preserves_other_failed_and_legacy_refs would fail because the old delete_all_bundle_refs swept the whole refs/remotes/bundle/ prefix; rejects_missing_git_payload would get Sync not Validation (old unbundle returned Ok on a missing payload); rejects_unexpected_existing_namespace_refs would see the old code merge the flat master successfully. KNOWN: rules/testing.md mandates fail-first only for the bug-fix regression, which has proof; re-running is execution, outside this static lane.",
+            "fix": "None required; optional probe: apply only tests.rs from the candidate onto a739c29 and run `mise exec -- cargo +1.89.0 test -p ddb-core --lib bundle` expecting compile failure."
+          }
+        ],
+        "verdict_lines": [
+          "D1: pass",
+          "D2: pass",
+          "D3: pass",
+          "D4: pass",
+          "D5: pass"
+        ],
+        "raw_excerpt": "FT-7a doubt + de-slop review (static; worktree at a739c29, 7 files, live `git diff --binary` SHA-256 09d7869d... equals the saved candidate patch).\n\nChecked and found sound: payload id is a streamed full SHA-256 of objects.bundle after v1 checksum verification; missing objects.bundle rejected (Validation) before the lease; lease taken via write_lock::acquire on ddb-bundle-import.lock under `git rev-parse --git-common-dir` (relative path joined to repo_path), held from head inspection to cleanup/error, Conflict on timeout naming bundle-import; advertised heads from `git bundle list-heads` parsed strictly (40/64 hex, no whitespace, refs/heads/ only); preexisting namespace refs must be a subset of advertised (branch, oid) pairs or import refuses with no fetch/merge/delete; fetch keeps --no-prune with refs/heads/*:refs/remotes/bundle/<id>/*; post-fetch namespace must equal heads; merge only `<id>/master` via merge_remote_allowing_unrelated (merge.rs builds refs/remotes/{remote}/{branch}, nested branch names fine); masterless import errors Sync + `bundle merge failed:` naming payload id, delivered branches and namespace; cleanup runs after node registration and index.rebuild, re-checks the namespace, deletes via write-locked delete_remote_ref per head, never sweeps the parent prefix (for-each-ref trailing-slash pattern uses git's match_name_as_path prefix rule). Sync manager touches no remote refs during apply_merge_result (control rg proved). Stale-A/masterless-B test would return Ok on the old code (confirmed by build evidence), so the fail-first is semantic. Late-rebuild test hits the final rebuild (FastForward path does not touch the index). Lease test is deterministic (parent holds lock across child lifetime). CHANGELOG entry under [Unreleased]/Fixed; 00168 entries corrected.\n\nFIX:\n- Docs/comment say the namespace fetch is \"non-forced\"; git accepts non-fast-forward updates under refs/remotes/ without `+`, so the pre-fetch namespace check is the actual guard — docs/src/technical/bundle.md:58, ddb-core/src/bundle/mod.rs:212-213 — reword to name the pre-check as the protection and qualify \"no + / --force passed\".\n- Node-registration and final-rebuild failures return raw errors that do not name the kept namespace, unlike merge/masterless/refusal errors (card: \"Errors name the namespace\") — ddb-core/src/bundle/mod.rs:373-374 — add a tracing::warn naming {namespace} or attach context preserving the variant; pin it in bundle_import_keeps_refs_when_post_merge_work_fails.\n- Dead `other => other` arm: bundle_merge_error always returns Sync — ddb-core/src/bundle/mod.rs:248 — build the suffixed Sync message directly.\n- Stale test comments describe the flat refs/remotes/bundle/master layout, and the main-branch test's comment claims a merge-engine NotFound path the masterless pre-check now short-circuits — ddb-core/src/bundle/tests.rs:292, 431, 655, 709, 989-1001 — update comments; note NotFound mapping is covered by bundle_merge_error_wraps_every_variant_as_sync_with_prefix.\nVERIFY:\n- Cross-process lease test (current_exe re-spawn, fs2 locks, git output shape) unrun on Windows/macOS CI — after push, confirm full-validation.yml windows-full and macos-full ran on the exact pushed HEAD (headSha, duration, job status) and `bundle::tests::bundle_import_lease_covers_fetch_through_cleanup` passed in both cargo test-full logs.\nKNOWN:\n- errors.md:20, overview.md:154, phase-2-exit.md:45 still cite bundle.rs — outside the card's docs allowlist (\"touched paragraphs\" only).\n- git fetch tag auto-following could write refs/tags/* outside the namespace, never cleaned — pre-existing fetch shape, ddb creates no tags, fetch flags fixed by the card.\n- Merge commit subject now `merge bundle/<64-hex>/master` (merge.rs:413) — cosmetic, no consumer, merge.rs outside allowlist.\n- Windows MAX_PATH exposure from the 64-hex ref directory — card mandates full digest; failure is loud, not silent.\n- Six of eight new tests lack a recorded baseline-red run (FT-7a-build.md:85-86) — fail-first is mandated only for the bug-fix regression, which has proof; static reasoning shows each would fail to compile or assert on a739c29.\n\nD1: pass\nD2: pass\nD3: pass\nD4: pass\nD5: pass"
+      },
+      "blake": {
+        "lane_status": "ok",
+        "status_detail": "Reviewed the FT-7a candidate in the worktree at dev/local/tmp/worktrees/00203-ft-7a: ddb-core/src/bundle/mod.rs (565 lines) and tests.rs (1621 lines), plus the doc/CHANGELOG updates. Implementation matches the card closely: payload id is a streamed full-64-hex SHA-256 of objects.bundle computed after v1 checksum verification; import lease uses write_lock::acquire on a persistent ddb-bundle-import.lock under git-common-dir, held from namespace inspection through final cleanup/error, preserving the Conflict class and a bounded (not total-import) timeout; preexisting namespace refs are validated against advertised heads before any fetch, with loud refusal and no mutation on mismatch; fetch is --no-prune and non-forced into refs/remotes/bundle/<payload-id>/*; only advertised master is merged via the existing merge_remote_allowing_unrelated path, no fallback; masterless imports fail as Sync + 'bundle merge failed:' naming payload id and delivered branches while keeping fetched refs; cleanup runs only after merge+node-registration+rebuild succeed, re-validates the namespace, and deletes via delete_remote_ref per advertised branch, never sweeping the parent prefix. All 8 named regression tests exist and are substantive (not tautological): the masterless/stale-master test runs under both fetch.prune settings and proves against real repo state (HEAD, file content, ref survival), not just error text; the lease test spawns a genuine child process and exercises refuse/import/error-releases-lease paths, not a duplicate of write_lock.rs's own unit tests. Docs (bundle.md, invariants.md, sync.md, walkthrough.md) and CHANGELOG accurately describe payload identity, namespacing, lease scope/timeout wording, retry/legacy-ref retention, and explicitly preserve the known unlocked-unbundle/fetch gap and the \"not a total import deadline\" distinction, with no overclaiming and no abort API advertised. Allowlist match is exact (git status shows only the 7 allowed paths touched). Transport impact section is honest (CLI/FFI inherit unchanged signatures; no new transport surface). Static-only review per task instructions; no cargo/build/test commands were run.",
+        "findings": [
+          {
+            "title": "import_bundle_with_lease_timeout exceeds the 50-line function-size limit",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/mod.rs",
+            "line": 322,
+            "evidence": "The function body from `fn import_bundle_with_lease_timeout` (line 322) to its closing brace (line 385) is ~57 lines of body, over the repo's coding-style 50-line-per-function guideline. It is a single linear orchestration (unpack -> verify -> lease -> validate -> fetch -> merge -> cleanup) with no obvious sub-unit to extract without adding indirection.",
+            "fix": "Optional: split pre-lease validation (unpack/checksum/payload-id) into a small helper returning (payload_id, namespace, git_bundle_path), leaving the locked section as its own function.",
+            "proof": "Style-only; not a correctness defect and no failing input is implicated."
+          },
+          {
+            "title": "bundle/tests.rs exceeds the 800-line file-size cap",
+            "severity": "LOW",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 1,
+            "evidence": "File is 1621 lines, roughly double the repo's stated 800-line max file size. This is a colocated test module for a complex, highly scenario-driven feature (8 new regression tests plus a cross-process lease harness), so the size is driven by genuine scenario count rather than duplication.",
+            "fix": "Optional: split into submodules (e.g. bundle/tests/lease.rs, bundle/tests/namespace.rs) if this file is revisited later; not blocking for this card.",
+            "proof": "Style-only; not a correctness defect and no failing input is implicated."
+          }
+        ],
+        "verdict_lines": [
+          "B1: pass",
+          "B2: pass",
+          "B3: pass",
+          "B4: pass",
+          "B6: pass",
+          "B7: pass",
+          "B8: pass",
+          "B9: pass",
+          "B10: pass",
+          "B11: pass",
+          "B12: fail",
+          "B13: fail"
+        ],
+        "raw_excerpt": "[BLAKE] ⚪ import_bundle_with_lease_timeout runs ~57 lines, over the 50-line function guideline | File: ddb-core/src/bundle/mod.rs | Task: general\n[BLAKE] ⚪ bundle/tests.rs is 1621 lines, over the 800-line file-size cap | File: ddb-core/src/bundle/tests.rs | Task: general\n\nEverything else checked out: payload identity is a streamed full-hex SHA-256 computed after v1 checksum verification; the import lease (ddb-bundle-import.lock via write_lock::acquire, never unlinked) is held from namespace inspection through final cleanup/error, preserves the Conflict class, and is documented as a bounded wait rather than a total-import deadline; preexisting namespace refs are validated against advertised heads before fetch with a loud, no-mutation refusal on mismatch; fetch is --no-prune/non-forced into the exact namespace; only an advertised master is merged via the existing merge_remote_allowing_unrelated path with no fallback; a masterless import fails as Sync + \"bundle merge failed:\" naming the payload id and delivered branches while keeping fetched refs; cleanup happens only after merge + node registration + index rebuild succeed, re-checks the namespace, and deletes via delete_remote_ref per advertised branch without sweeping the parent prefix. All 8 named regression tests exist, are non-tautological, and the cross-process lease test spawns a real child process rather than duplicating write_lock.rs's own primitive tests. Docs/CHANGELOG accurately reflect the new contract and preserve the known unlocked-unbundle/fetch gap language from invariants.md. Allowlist match is exact."
+      },
+      "bob": {
+        "lane_status": "ok",
+        "status_detail": "codex-run.sh exited 0 (gpt-6-sol, read-only sandbox); final answer printed twice in the output (lines 5025-5042 and again at 5049-5066), deduplicated to one set.",
+        "findings": [
+          {
+            "title": "The lease test holds the lock directly, then runs an importer; it does not prove that an active import retains the lease through fetch, rebuild, and cleanup. Coordinate two real imports at a post-fetch point.",
+            "severity": "MEDIUM",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 1537,
+            "evidence": "[BOB] 🟡 The lease test holds the lock directly, then runs an importer; it does not prove that an active import retains the lease through fetch, rebuild, and cleanup. Coordinate two real imports at a post-fetch point. | File: ddb-core/src/bundle/tests.rs:1537 | Task: FT-7a",
+            "proof": ""
+          },
+          {
+            "title": "`import_bundle_with_lease_timeout` exceeds 50 lines and repeats archive extraction, checksum verification, and manifest parsing from `verify_bundle`; extract that shared preparation into one helper.",
+            "severity": "MEDIUM",
+            "file": "ddb-core/src/bundle/mod.rs",
+            "line": 322,
+            "evidence": "[BOB] 🟡 `import_bundle_with_lease_timeout` exceeds 50 lines and repeats archive extraction, checksum verification, and manifest parsing from `verify_bundle`; extract that shared preparation into one helper. | File: ddb-core/src/bundle/mod.rs:322 | Task: FT-7a",
+            "proof": ""
+          },
+          {
+            "title": "The changed test file is 1,621 lines, exceeding the 800-line limit; move the new import regressions into a focused test module.",
+            "severity": "MEDIUM",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 1027,
+            "evidence": "[BOB] 🟡 The changed test file is 1,621 lines, exceeding the 800-line limit; move the new import regressions into a focused test module. | File: ddb-core/src/bundle/tests.rs:1027 | Task: FT-7a",
+            "proof": ""
+          },
+          {
+            "title": "The changed successful-import assertion passes on the pre-change single-branch implementation, so it does not satisfy the requested fail-first criterion; give it a fixture that distinguishes the new behavior.",
+            "severity": "MEDIUM",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 197,
+            "evidence": "[BOB] 🟡 The changed successful-import assertion passes on the pre-change single-branch implementation, so it does not satisfy the requested fail-first criterion; give it a fixture that distinguishes the new behavior. | File: ddb-core/src/bundle/tests.rs:197 | Task: FT-7a",
+            "proof": ""
+          },
+          {
+            "title": "Cannot statically verify: build, lint, and test gates ran and passed.",
+            "severity": "LOW",
+            "file": "N/A",
+            "evidence": "[BOB] ⚪ Cannot statically verify: build, lint, and test gates ran and passed. | File: N/A | Task: FT-7a",
+            "proof": ""
+          }
+        ],
+        "verdict_lines": [
+          "R1: fail",
+          "R2: fail",
+          "R3: pass",
+          "R4: pass",
+          "R6: pass",
+          "R7: pass",
+          "R8: pass",
+          "R9: pass",
+          "R10: pass",
+          "R11: pass",
+          "R12: fail",
+          "R13: fail"
+        ],
+        "raw_excerpt": "[BOB] 🟡 The lease test holds the lock directly, then runs an importer; it does not prove that an active import retains the lease through fetch, rebuild, and cleanup. Coordinate two real imports at a post-fetch point. | File: ddb-core/src/bundle/tests.rs:1537 | Task: FT-7a\n[BOB] 🟡 `import_bundle_with_lease_timeout` exceeds 50 lines and repeats archive extraction, checksum verification, and manifest parsing from `verify_bundle`; extract that shared preparation into one helper. | File: ddb-core/src/bundle/mod.rs:322 | Task: FT-7a\n[BOB] 🟡 The changed test file is 1,621 lines, exceeding the 800-line limit; move the new import regressions into a focused test module. | File: ddb-core/src/bundle/tests.rs:1027 | Task: FT-7a\n[BOB] 🟡 The changed successful-import assertion passes on the pre-change single-branch implementation, so it does not satisfy the requested fail-first criterion; give it a fixture that distinguishes the new behavior. | File: ddb-core/src/bundle/tests.rs:197 | Task: FT-7a\n[BOB] ⚪ Cannot statically verify: build, lint, and test gates ran and passed. | File: N/A | Task: FT-7a\n\nR1: fail\nR2: fail\nR3: pass\nR4: pass\nR6: pass\nR7: pass\nR8: pass\nR9: pass\nR10: pass\nR11: pass\nR12: fail\nR13: fail\n(Excerpt is the final answer block from lines 5025-5042 of /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-bob-output.txt; the first 4000 chars of the file are the echoed prompt and codex header.)"
+      },
+      "carl": {
+        "lane_status": "ok",
+        "status_detail": "gemini-run.sh exit 0 (backend=copilot model=gemini-3.8-flash, 6m18s); output at /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-carl-output.txt",
+        "findings": [
+          {
+            "title": "Function import_bundle_with_lease_timeout exceeds 50-line limit (70 lines); extract archive unpack and namespace cleanup helpers",
+            "severity": "MEDIUM",
+            "file": "ddb-core/src/bundle/mod.rs",
+            "line": 317,
+            "evidence": "[CARL] 🟡 Function import_bundle_with_lease_timeout exceeds 50-line limit (70 lines); extract archive unpack and namespace cleanup helpers | File: ddb-core/src/bundle/mod.rs:317 | Task: general"
+          },
+          {
+            "title": "Colocated test file exceeds 800-line limit (1625 lines) following card allowlist constraints",
+            "severity": "MEDIUM",
+            "file": "ddb-core/src/bundle/tests.rs",
+            "line": 1,
+            "evidence": "[CARL] 🟡 Colocated test file exceeds 800-line limit (1625 lines) following card allowlist constraints | File: ddb-core/src/bundle/tests.rs:1 | Task: general"
+          }
+        ],
+        "verdict_lines": [
+          "R1: pass",
+          "R2: pass",
+          "R3: pass",
+          "R4: pass",
+          "R6: pass",
+          "R7: pass",
+          "R8: pass",
+          "R9: pass",
+          "R10: pass",
+          "R11: pass",
+          "R12: fail",
+          "R13: fail"
+        ],
+        "raw_excerpt": "I will read the review context card, prepended context, and build candidate patch to begin the review.\n[... tool-read trace of FT-7a-card.md, FT-7a-build-candidate.patch, worktree ddb-core/src/bundle/mod.rs, tests.rs, merge.rs, remote.rs, CHANGELOG.md, docs bundle.md/invariants.md/sync.md/walkthrough.md, write_lock.rs, prior carl outputs, FT-7a-opus-correct.txt; TODO/FIXME/dbg! grep: no matches ...]\n\n[CARL] 🟡 Function import_bundle_with_lease_timeout exceeds 50-line limit (70 lines); extract archive unpack and namespace cleanup helpers | File: ddb-core/src/bundle/mod.rs:317 | Task: general\n[CARL] 🟡 Colocated test file exceeds 800-line limit (1625 lines) following card allowlist constraints | File: ddb-core/src/bundle/tests.rs:1 | Task: general\n\nR1: pass\nR2: pass\nR3: pass\nR4: pass\nR6: pass\nR7: pass\nR8: pass\nR9: pass\nR10: pass\nR11: pass\nR12: fail\nR13: fail"
+      }
+    },
+    "verified": []
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Prep"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "prep",
+      "phaseIndex": 1,
+      "phaseTitle": "Prep",
+      "agentId": "a828527d439d41689",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588103494,
+      "queuedAt": 1790588103482,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "# FT-7a isolate bundle fetch, merge and cleanup ## Goal Clo…",
+      "promptPreview": "READ-ONLY prep. Do not edit anything, do not run cargo. \nTool rules (mandatory): use the Read tool for files and rg for search; cat/head/tail/grep/find are blocked by a hook; the Grep and Glob tools do not exist. One command per Bash call, no pipes, no && chains. DO NOT run cargo, ddb, or any build/test command at all: this review is static; the candidate already passed its gates (build, strict cl…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588193290,
+      "tokens": 77972,
+      "toolCalls": 16,
+      "durationMs": 89796,
+      "resultPreview": "{\"card_text\":\"# FT-7a isolate bundle fetch, merge and cleanup\\n\\n## Goal\\n\\nClose the live 00168 stale-ref data-loss bug in one coherent core change:\\nan import merges only a branch advertised by its own Git payload, preserves\\nother failed imports' refs, and cleans its namespace only after success.\\nFetch, target selection, cleanup and the fail-first regression land together.\\n\\nPrepared 2026-09-…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "eve",
+      "phaseIndex": 2,
+      "phaseTitle": "Review",
+      "agentId": "a69d32383453d798b",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1790588194869,
+      "queuedAt": 1790588194847,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "ok",
+      "promptPreview": "You are the final skeptical reviewer for a completed PRD implementation. A\nconfident implementer just finished and earlier review phases passed. Your job\nis to find what they and the prior reviewers missed, and to flag slop the\nimplementation accumulated. Assume the work is subtly wrong until proven\notherwise. Do not be agreeable.\n\nNever call bash `head`, `tail`, `cat`, `grep`, or `find` - a hook …",
+      "promptFramed": true,
+      "lastProgressAt": 1790588912165,
+      "tokens": 213051,
+      "toolCalls": 39,
+      "durationMs": 717294,
+      "resultPreview": "{\"lane_status\":\"ok\",\"status_detail\":\"Static doubt + de-slop review of the FT-7a candidate. Verified before judging: worktree /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00203-ft-7a is at a739c292748bcf5e35b5c6340eec7a360ceceb0c with exactly the seven allowlisted files modified; its live `git diff --binary` hashes to 09d7869d1fb374f7d83b5c2cb655a0f9049d7e4ae483ab62ffbf1d0434916…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "blake",
+      "phaseIndex": 2,
+      "phaseTitle": "Review",
+      "agentId": "a24822963366435c0",
+      "model": "claude-sonnet-5",
+      "state": "done",
+      "startedAt": 1790588194870,
+      "queuedAt": 1790588194847,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "ok",
+      "promptPreview": "You are Blake, a hostile auditor reviewing code you've never seen before.\nYou know ONLY what was supposed to be built. You must find the code,\nread it, and determine if it does what the spec says.\n\nNever call bash `head`, `tail`, `cat`, `grep`, or `find` - a hook blocks them. Use the Read tool (offset/limit), `rg`, or `rg --files` instead. Never pipe between heterogeneous commands and never combin…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588335310,
+      "tokens": 110689,
+      "toolCalls": 20,
+      "durationMs": 140438,
+      "resultPreview": "{\"lane_status\":\"ok\",\"status_detail\":\"Reviewed the FT-7a candidate in the worktree at dev/local/tmp/worktrees/00203-ft-7a: ddb-core/src/bundle/mod.rs (565 lines) and tests.rs (1621 lines), plus the doc/CHANGELOG updates. Implementation matches the card closely: payload id is a streamed full-64-hex SHA-256 of objects.bundle computed after v1 checksum verification; import lease uses write_lock::acqui…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "bob-codex",
+      "phaseIndex": 2,
+      "phaseTitle": "Review",
+      "agentId": "a43d6cc7141522d57",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588194871,
+      "queuedAt": 1790588194847,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "ok",
+      "promptPreview": "You dispatch the external-model review lane \"bob\" for fast-track item FT-7a. Steps, each a separate Bash call in the FOREGROUND with timeout 600000:\n1. Write the file /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-no-pack.md with the single line \"(no pack available this cycle)\" and write the file /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-bob-prompt.md with EXACTLY th…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588397191,
+      "tokens": 68141,
+      "toolCalls": 6,
+      "durationMs": 202319,
+      "resultPreview": "{\"lane_status\":\"ok\",\"status_detail\":\"codex-run.sh exited 0 (gpt-6-sol, read-only sandbox); final answer printed twice in the output (lines 5025-5042 and again at 5049-5066), deduplicated to one set.\",\"findings\":[{\"title\":\"The lease test holds the lock directly, then runs an importer; it does not prove that an active import retains the lease through fetch, rebuild, and cleanup. Coordinate two real …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "carl-gemini",
+      "phaseIndex": 2,
+      "phaseTitle": "Review",
+      "agentId": "a58affe49edfe249c",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588194871,
+      "queuedAt": 1790588194848,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "ok",
+      "promptPreview": "You dispatch the external-model review lane \"carl\" for fast-track item FT-7a. Steps, each a separate Bash call in the FOREGROUND with timeout 600000:\n1. Write the file /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-no-pack.md with the single line \"(no pack available this cycle)\" and write the file /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-carl-prompt.md with EXACTLY …",
+      "promptFramed": true,
+      "lastProgressAt": 1790588610521,
+      "tokens": 71589,
+      "toolCalls": 5,
+      "durationMs": 414424,
+      "resultPreview": "{\"lane_status\":\"ok\",\"status_detail\":\"gemini-run.sh exit 0 (backend=copilot model=gemini-3.8-flash, 6m18s); output at /Users/bob/git/src/github.com/doogat/ddb/docs/dev/tmp/FT-7a-carl-output.txt\",\"findings\":[{\"title\":\"Function import_bundle_with_lease_timeout exceeds 50-line limit (70 lines); extract archive unpack and namespace cleanup helpers\",\"severity\":\"MEDIUM\",\"file\":\"ddb-core/src/bundle/mod.rs…"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 4,
+      "title": "▸ review-fanout",
+      "kind": "child"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "requirements",
+      "phaseIndex": 4,
+      "phaseTitle": "▸ review-fanout",
+      "agentId": "acb8a7ca0eb3ff531",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588194927,
+      "queuedAt": 1790588194914,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "You are the REQUIREMENTS reviewer of a completed change. Review ONLY through the requirements lens.\n\nChecklist:\n- Implementation matches the task description; all acceptance criteria met.\n- No scope creep: features nobody asked for.\n- No missing pieces from the original task.\n- Every PRD \"must have\" requirement is addressed; no PRD section is left unimplemented.\n- Dependencies are handled; the suc…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588251170,
+      "tokens": 112950,
+      "toolCalls": 6,
+      "durationMs": 56242,
+      "resultPreview": "{\"findings\":[{\"title\":\"Lease test never shows an import holding the lease from fetch through cleanup; releasing it early would pass every test\",\"severity\":\"MEDIUM\",\"file\":\"ddb-core/src/bundle/tests.rs\",\"line\":1233,\"evidence\":\"let held =\\n        write_lock::acquire(&git_dir, \\\"ddb-bundle-import.lock\\\", Duration::from_secs(5)).unwrap();\\n...\\n    spawn_lease_child(\\\"refuse\\\", dir2.path(), &bundle);…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "correctness",
+      "phaseIndex": 4,
+      "phaseTitle": "▸ review-fanout",
+      "agentId": "ab47fefcc26042f37",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588194927,
+      "queuedAt": 1790588194914,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "You are the CORRECTNESS reviewer of a completed change. Review ONLY through the correctness lens.\n\nChecklist:\n- Hunt logic bugs in the diff: off-by-one, wrong boundary, inverted condition, missing await, lost error.\n- Trace each changed function on its edge inputs (empty, one element, last element, null).\n- Error handling is explicit and never silently swallowed (R10).\n- The implementation matches…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588293393,
+      "tokens": 118065,
+      "toolCalls": 13,
+      "durationMs": 96911,
+      "resultPreview": "{\"findings\":[]}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "quality",
+      "phaseIndex": 4,
+      "phaseTitle": "▸ review-fanout",
+      "agentId": "a2e0e48901168656a",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588194928,
+      "queuedAt": 1790588194914,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "You are the QUALITY reviewer of a completed change. Review ONLY through the quality lens.\n\nChecklist:\n- Reduce complexity: no needless indirection, dead branches, or abstractions built for a single caller; nesting <= 4; functions under 50 lines.\n- Eliminate redundancy: no logic duplicated within the diff or against existing code.\n- Improve naming: names state intent; action-named functions start w…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588246225,
+      "tokens": 111332,
+      "toolCalls": 6,
+      "durationMs": 49743,
+      "resultPreview": "{\"findings\":[{\"title\":\"import_bundle_with_lease_timeout grew to 64 lines, over the 50-line function limit\",\"severity\":\"MEDIUM\",\"file\":\"ddb-core/src/bundle/mod.rs\",\"line\":322,\"evidence\":\"fn import_bundle_with_lease_timeout(... ) spans lines 322-385 and now inlines: `let git_bundle_path = ...; if !git_bundle_path.is_file() {...}`, `let existing = namespace_refs(repo, &namespace)?; if let Some((branc…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "tests",
+      "phaseIndex": 4,
+      "phaseTitle": "▸ review-fanout",
+      "agentId": "af4311e4ee3eccfb5",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588194928,
+      "queuedAt": 1790588194914,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "You are the TESTS reviewer of a completed change. Review ONLY through the tests lens.\n\nChecklist:\n- Unit tests for every new behavior; edge cases and error paths covered.\n- Integration tests where the change crosses a boundary.\n- Tests bind to intent, not just to observable behavior.\n- No skipped or xfail test masks a failure.\n- Tests actually run and pass.\n\nReport only defects you can ground in t…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588277164,
+      "tokens": 120005,
+      "toolCalls": 8,
+      "durationMs": 80682,
+      "resultPreview": "{\"findings\":[{\"title\":\"Lease test cannot tell whether the lease is held past fetch; a `let _ =` or early-drop regression passes every test\",\"severity\":\"MEDIUM\",\"file\":\"ddb-core/src/bundle/tests.rs\",\"line\":1537,\"evidence\":\"Test side: `let held = write_lock::acquire(&git_dir, \\\"ddb-bundle-import.lock\\\", Duration::from_secs(5)).unwrap(); ... spawn_lease_child(\\\"refuse\\\", dir2.path(), &bundle);`. Code…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "rubric",
+      "phaseIndex": 4,
+      "phaseTitle": "▸ review-fanout",
+      "agentId": "ac0ea9a2848da7f9c",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1790588194928,
+      "queuedAt": 1790588194914,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "You are the RUBRIC reviewer of a completed change. Answer every rule below with pass or fail.\nA rule you cannot confirm from the diff is a fail. Add a short note for every fail.\n\n## Rubric\n\n# Review-Work-Completion Rubric\n\nThis rubric defines binary pass/fail criteria for consensus review of completed work. Each rule is numbered and stable for tracking coverage. Reviewers must answer \"R{n}: pass|f…",
+      "promptFramed": true,
+      "lastProgressAt": 1790588246577,
+      "tokens": 103679,
+      "toolCalls": 7,
+      "durationMs": 51648,
+      "resultPreview": "{\"verdicts\":[{\"rule_id\":\"R1\",\"verdict\":\"fail\",\"note\":\"Several new behaviors have no test. parse_ref_lines' strict rejection of malformed list-heads/for-each-ref records (the PRD says never skip them silently) has no test: rg finds no parse_ref_lines or malformed case in tests.rs. The post-fetch ensure_namespace_matches (verify fetched OIDs) and the pre-cleanup re-check mismatch paths are never tri…"
+    }
+  ],
+  "totalTokens": 1107473,
+  "totalToolCalls": 126
+}

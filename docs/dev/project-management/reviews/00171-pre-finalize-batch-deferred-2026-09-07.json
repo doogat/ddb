@@ -1,0 +1,284 @@
+{
+  "batch_id": "202607161128",
+  "items": [
+    {
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md",
+      "cycle": 1,
+      "type": "observation",
+      "topic": "nightly-red-singleton-hlc-winner",
+      "detail": "Cross-platform pre-existing red at d77ad58: two_node_singleton_post_sync_resolution picks the HLC-earlier writer; regression from the 00164-00166 range; reproduced locally on macOS 2026-08-15; out of 00167 scope. Proposed new backlog PRD (bisect + fix winner selection)."
+    },
+    {
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md",
+      "cycle": 1,
+      "type": "scope-overflow",
+      "topic": "00167-cycle1-review-tail",
+      "detail": "7 of 18 cycle-1 findings fell below the top-10 severity cut and were deferred, each with a verified reason in dev/local/reviews/00167-sync-collision-reassignment-atomicity-v1-ledger.json: (1) HIGH crash-injection test absent - the single-commit fold removed the winner-committed/loser-uncommitted seam it would inject into, verified by Eve; the structural assertions fail against the old two-commit code and pin the same intent. (2) MEDIUM no showboat walkthrough - sibling sync-internal PRDs 00162-00166 all shipped without one and 00167 changes no CLI surface; worth one batch-end decision across the series rather than per-PRD. (3) MEDIUM server.md:755 still tells API consumers ids are creation timestamps and sql_engine/builders.rs:425 slices an id into a date, both wrong for content-addressed ids - but reachable before 00167 via the 00164 advance path, so it is its own follow-up. (4) LOW derive_content_id has no attempt cap. (5) LOW their_commit.tree() recomputed per entry + per-loser blob re-reads under the write lock. (6) LOW loser new_path and rewritten-link paths skip validate_path. (7) LOW three changed test modules exceed 800 lines, already oversized at the base commit."
+    },
+    {
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md",
+      "cycle": 1,
+      "type": "process-observation",
+      "topic": "prd-transport-impact-overclaim",
+      "detail": "Blake (blind lens) found the PRD's own Transport Impact section claims REST 'sync passthrough' and FFI 'driver sync' are Guaranteed, but neither surface has a sync entry point: rest.rs registers only /doogats, /doogats/:id, /schema/apply, and DoogatDriver exposes register_node/import_bundle with no sync method. The conformance plan likewise says integration.sh/.ps1 'exercise CLI + FFI' while the scripts contain zero FFI invocations. Being corrected in cycle-1 rework, but the pattern is worth noting at batch end: the Transport Impact template is being filled in aspirationally rather than against the actual transport surface, which would defeat the 120% parity guardrail it exists to enforce."
+    },
+    {
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "malformed-loser-wedges-sync",
+      "severity": "high",
+      "consensus": "2/5",
+      "issue": "Unrecoverable sync deadlock: any add-add conflict whose losing content has no YAML frontmatter makes rewrite_id_field -> parser::find_frontmatter return Parse(\"no frontmatter opening ---\"), fold_one_loser aborts, and commit_merge commits nothing. The next sync recomputes the identical merge and fails identically - no --skip, no --force, no documented recovery. Pre-00167 the winner commit landed so sync converged (lossily); now it never converges.",
+      "detail": "Raised by Blake at HIGH and independently by Alice at MEDIUM; Eve classed the same behaviour KNOWN and defended it. Orchestrator-verified as real code shape: merge.rs:191-197 wraps the rewrite_id_field error and propagates with ?, aborting commit_merge before its single create_commit, so nothing lands and the next sync recomputes the same conflict. This is a NEW availability regression introduced by this cycle's own task-21 hardening - it is the deliberate cost of the atomic-abort ruling, which both Eve and Pat independently judged correct on data-safety grounds (skipping a bad loser silently DELETES its content, since a loser only survives by being reassigned). Reachability is narrow: it needs a hand-authored ddb/{id}.md with no frontmatter block created independently on two devices under the same id; ddb's own writes always emit frontmatter. Alice proposes a third option neither abort nor data loss: on rewrite_id_field failure, fold the loser at its derived path with content byte-unchanged plus a warn - coherent precisely because the failing case HAS no frontmatter id to be left stale. Deferred at the rework cap rather than deflated; wants its own follow-up PRD to pick between (a) Alice's byte-unchanged fold, (b) a documented operator recovery path, or (c) accepting the wedge."
+    },
+    {
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "partition-conflicts-missing-ddb-guard",
+      "severity": "high",
+      "consensus": "1/5",
+      "issue": "partition_conflicts routes EVERY non-reference/, ancestor-less, both-sides-present conflict into the add-add bucket with no ddb/ prefix guard, so a non-doogat file (.gitignore, README.md, .ddb.toml, any docs/*.md) is treated as a doogat ID collision: old_id becomes its file stem and fold_one_loser relocates the loser's bytes to ddb/{14-digit}.md, fabricating a bogus doogat while the real path silently keeps only the winner.",
+      "detail": "Raised by Blake (blind lens) alone. Orchestrator-verified against sync_manager/mod.rs:107-117: the partition is exactly `if ours.is_empty() || theirs.is_empty() -> delete_edit; else if path.starts_with(\"reference/\") -> binary_ref; else if ancestor.is_none() -> add_add; else normal` - there is no ddb/ prefix test anywhere in it. Verified PRE-EXISTING and out of 00167 scope: partition_conflicts is untouched by both the cycle-1 and cycle-2 diffs, and the pre-00167 two-commit path relocated a misrouted loser to ddb/{id}.md exactly the same way via reassign_single_loser. 00167 changed only the atomicity of the relocation, not the routing that decides what gets relocated. Deferred as its own backlog PRD (add a ddb/ prefix guard to the add-add arm, route non-doogat add-add conflicts to the normal bucket, regression-test a README.md collision) rather than widening a convergence-phase PRD into the conflict-partitioning logic."
+    },
+    {
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "independent-resolution-test-can-false-green",
+      "severity": "high",
+      "consensus": "1/5",
+      "issue": "The independent-resolution test can false-green against the old wall-clock minter because both universes may resolve within the same second; the 5ms sleep only orders HLC commits. Assert each result's loser path equals the exact derive_content_id result from the known losing blob OID.",
+      "detail": "Raised by Bob (codex, doubt lens). Orchestrator-verified against sync_manager/tests.rs:1888-1914: add_add_collision_resolution_is_independent_of_push_direction asserts only (1) universe_1 == universe_2, (2) the winner keeps the colliding id, (3) some filename differs from the colliding id. It never pins the loser filename to a specific derive_content_id output, so the OLD wall-clock minter - which yields the same YYYYMMDDHHmmss in both universes whenever they complete inside the same second - passes all three assertions. The test therefore fails against the old code only when the two universes straddle a second boundary, i.e. non-deterministically. This is the very task (17) created to close the cycle-1 'no genuine two-node agreement test' finding, and it is weaker than its record claims. Mitigating: determinism IS pinned deterministically elsewhere - id_minting::derive_content_id's own unit tests (task 2) assert same-input-same-output and deterministic advance, and cycle 1 verified two live nodes deriving the identical loser id. So the PRD's acceptance criterion is met; this specific regression pin is just soft. Fix is cheap and surgical: assert the loser path equals derive_content_id(old_id, losing_blob_oid) explicitly in both universes."
+    },
+    {
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md",
+      "cycle": 2,
+      "type": "scope-overflow",
+      "topic": "00167-cycle2-review-tail",
+      "detail": "The cycle-2 medium/low tail was deferred without a sweep pass because the cycle hit the rework cap (cycle 2 of cap 2) with unresolved HIGHs, routing to the loop-mode cap-out branch, which finalizes without running the tail sweep. Sweeping would mean a third implementation round with no review cycle left to validate it. The tail, all verified against the code by the orchestrator where countable: (1) MEDIUM audit warn fires BEFORE the commit exists - fold_one_loser emits 'collision resolved: doogat ID reassigned' at merge.rs:201-207, ahead of the link scan, blob writes, index overlays and create_commit, so an aborted batch logs losers as reassigned though HEAD never moved; pre-00167 code logged only after commit_files succeeded. Raised by BOTH Eve and Bob (2/5), fix is to collect the tuples and emit after create_commit succeeds. This is a genuine placement regression in task 16's own fix. (2) MEDIUM CHANGELOG lines 23-25 present three never-released regressions as user-facing fixes, so a 0.2.8 reader concludes their synced links and .md bytes may already be corrupted (Alice, verified against v0.2.7 sources). (3) MEDIUM the 'names which document failed' half of task 21 is untested - the abort test asserts only is_err() plus tree state, never that the error carries loser.old_path/old_id (Alice). (4) MEDIUM fold_losers_into_index builds the full taken_ids snapshot at merge.rs:142 before checking whether losers is empty, so every zero-collision conflicted merge pays a whole-index pass (Alice; verified - collect_taken_ids runs unconditionally ahead of the loop). (5) MEDIUM invariants.md I3 'Why' still says 'three minting paths disagree today' in present tense under the new HOLDS header - the same status-vs-body contradiction class task 19 was routed to fix, one sentence missed (Eve). (6) MEDIUM resolve_add_add_collision is 62 lines, over the 50-line limit (Bob). (7) MEDIUM loser ID occupancy consults only the in-memory merge tree, not the SQLite doogats index, so an id present in the index but absent from the tree is invisible (Blake). (8) MEDIUM check-then-act race: the divergence guard compares only the SET of conflicting paths, never blob OIDs, so a concurrent writer editing the collided path between merge_remote releasing the lock and commit_merge re-taking it is silently overwritten (Blake). (9) MEDIUM business policy (ID derivation, backlink scoping, loser path computation) landed in the git adapter rather than sync_manager as the PRD's Structural Decomposition specifies, and git_ops now depends on id_minting (Blake). (10) MEDIUM behaviour shipped beyond the PRD text: non-UTF-8 skipping, theirs_won winner scoping, the hard missing-OID error, repo-wide occupancy - all correct fixes, none named in the PRD (Blake). (11) MEDIUM git-ops.md:67,126 and data-flow.md:103 still show the pre-00167 commit_merge signature without the losers parameter (Blake). (12) MEDIUM cycle-2 tests retain large duplicated fixtures - resolve_collision_with_backlinks 111 lines, resolve_collision_with_push_order 80 lines (Bob). (13) MEDIUM avoid String::from_utf8(entry.path.clone()) per index entry; use std::str::from_utf8 (Carl). (14) LOW fold_one_loser is 53 lines by the fn-to-closing-brace measure (merge.rs:180-232), not the 47 recorded, which counted brace-to-brace - Alice is right on the arithmetic and the 61-line cycle-1 figure used her convention, so it is still 3 over (orchestrator re-counted and confirms 53). (15) LOW resolve_index_entry hardcodes mode 0o100644, converting a symlink or executable ddb/**.md entry to a regular file when a rewrite touches it (Blake). (16) LOW the integration.sh/.ps1 convergence leg is fast-forward-only and cannot fail on a determinism regression (Blake; same substance as cycle-1 finding 7, now pinned at unit level). (17) LOW GitMerge::commit_merge gained a losers parameter - a breaking library API change with no Changed/breaking CHANGELOG entry (Blake). (18) LOW the missing-seed doc comment says an empty OID derives 'the same id as the old one' but derive_content_id would hash to a different id; it should say content-addressing is lost (Bob)."
+    },
+    {
+      "cycle": 2,
+      "type": "git_push_failed",
+      "topic": "master-push-00167",
+      "detail": "git push origin master failed post-00167: sign_and_send_pubkey signing failed for RSA buvis and ED25519 1Password agent - locked/unreachable SSH signing agent on this unattended host. Local branch is 37 commits ahead of origin/master (through 00167s work). Commits are intact locally; user should push manually once the signing agent is unlocked.",
+      "prd": "00167-sync-collision-reassignment-atomicity-v1.md"
+    },
+    {
+      "prd": "00168-bundle-import-conflict-recovery-v1.md",
+      "cycle": 1,
+      "type": "critical-finding",
+      "topic": "bundle-ref-pruned-by-fetch-prune",
+      "severity": "critical",
+      "consensus": "1/4",
+      "detail": "Blake (blind lens) reproduced live: unbundle_git_objects fetches refs/heads/*:refs/remotes/bundle/* with no --no-prune, so on a machine with fetch.prune=true (set globally here) the NEXT bundle import deletes the refs/remotes/bundle/master that a FAILED import deliberately kept. Observed `- [deleted] (none) -> bundle/master`; with -c fetch.prune=false the ref survived. This defeats the PRD's headline reachability guarantee. Logged here because classification routes every CRITICAL to batch end, but it is ALSO queued for cycle-1 rework as task [D1-1] and blocks convergence until fixed - a CRITICAL is never a settled deferral. Not escalated to a batch halt: the bundle tarball on disk remains the recoverable source, and the post-00168 behavior is strictly better than the pre-00168 unconditional delete, so this is a weaker-than-claimed guarantee rather than unrecoverable loss."
+    },
+    {
+      "prd": "00168-bundle-import-conflict-recovery-v1.md",
+      "cycle": 1,
+      "type": "settled-deferral",
+      "topic": "single-write-lease-not-held",
+      "severity": "high",
+      "consensus": "2/4",
+      "detail": "Blake and Bob both flag that import_bundle takes the repo write lock three separate times (merge_remote, commit_merge, delete_remote_ref) with unlocked windows between, plus unbundle_git_objects writing objects and refs/remotes/bundle/* fully outside the lock - against the PRD's 'merge -> resolve -> ref-delete runs inside the 00162 write lease'. Deferred: the 00168 design doc records this as the exact already-accepted gap the shipped network sync() path has lived with since 00163, and Bob himself filed the unbundle/fetch leg as KNOWN. Collapsing the three re-entrant acquisitions into one outer lease is a sync-wide change, so it needs its own PRD."
+    },
+    {
+      "prd": "00168-bundle-import-conflict-recovery-v1.md",
+      "cycle": 1,
+      "type": "settled-deferral",
+      "topic": "ffi-import-bundle-discards-syncreport",
+      "severity": "medium",
+      "consensus": "3/4",
+      "detail": "Alice, Blake and Bob independently flag that DoogatDriver::import_bundle returns Result<(), DdbError> and drops the SyncReport, so the true conflict count - the PRD's primary output - is invisible to FFI consumers while Transport Impact calls FFI Guaranteed. Deferred: pre-existing signature, explicitly out of scope in the design doc, and widening a public FFI return type needs the compatibility/deprecation review AGENTS.md mandates. This is the second consecutive PRD (see 00167's prd-transport-impact-overclaim entry) where Transport Impact was filled in aspirationally rather than against the actual transport surface - worth one batch-end decision on the template, not another per-PRD patch."
+    },
+    {
+      "prd": "00168-bundle-import-conflict-recovery-v1.md",
+      "cycle": 1,
+      "type": "settled-deferral",
+      "topic": "validate-clean-merge-untouched",
+      "severity": "medium",
+      "consensus": "1/4",
+      "detail": "Blake notes validate_clean_merge_or_fallback - named by the PRD at :538-544 as a site that must stop reporting false success - is untouched and still returns Ok(0) when commit_parent_count < 2. Deferred as a requirements-vs-design reconciliation: the PRD named that site because the OLD CLI-merge design produced no commit on conflict, which is what manufactured the false Ok(0). Under the chosen libgit2 design conflicts arrive as MergeResult::Conflicts and never reach that branch. Hard-failing it would change shared network-sync behavior outside this PRD."
+    },
+    {
+      "prd": "00168-bundle-import-conflict-recovery-v1.md",
+      "cycle": 1,
+      "type": "settled-deferral",
+      "topic": "pre-existing-out-of-scope-tail",
+      "severity": "low",
+      "consensus": "1/4",
+      "detail": "Three low findings deferred as pre-existing and out of scope, each with the reviewer's own scoping: (1) GitRepo::open deletes every .crdt/temp/* file so conflict-resolution CRDT state is wiped by the next process (Alice flagged it as pre-existing and explicitly did not ask for a fix here); (2) git_ops/mod.rs is 849 lines against the 800 max, but was already 845 before this diff's 4-line trait delegation arm - splitting an unrelated oversized file as a side effect violates surgical-changes (bundle.rs, which THIS diff pushed over, IS being fixed in rework); (3) the walkthrough shows character-interleaved CRDT body merge (`laptdesktopp body`), which Blake scoped as pre-existing resolver behavior. Full reasons in dev/local/reviews/00168-bundle-import-conflict-recovery-v1-ledger.json."
+    },
+    {
+      "type": "stall",
+      "site": "cap_critical",
+      "detail": "Cycle 2 hit rework_cap 2 with an unresolved CRITICAL: import_bundle merges the hardcoded refs/remotes/bundle/master rather than the refs this bundle fetched, so with a stale bundle ref present (the state the cycle-1 CRITICAL fix now creates) importing a different bundle reports success while importing the OLD bundle's data and leaving the requested commits unreachable. Reproduced by Blake and independently confirmed by the orchestrator (/tmp/ddb-ffprobe-a, git 2.55.0). Same root cause as 2 of the 3 HIGHs; adding + to the fetch refspec is NOT the fix (it reintroduces the cycle-1 CRITICAL). See dev/local/reviews/00168-bundle-import-conflict-recovery-v1-review-02.md.",
+      "op_id": "c389f89aed18",
+      "prd": "00168-bundle-import-conflict-recovery-v1.md"
+    },
+    {
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 1,
+      "type": "settled-deferral",
+      "topic": "skip-warning-never-reaches-read-verbs",
+      "severity": "high",
+      "consensus": "3/5",
+      "issue": "The PRD's Phase 1 acceptance criterion names search explicitly ('after a poison file lands, a create AND a search both succeed and each carries a skip AppWarning'), but only create, update and apply_schema capture ensure_fresh's return value. Every read verb (search, read, sql, discovery, batch, delete, utility) calls self.ensure_fresh()?; as a bare statement and discards the warnings, so a search that is the first verb after a poison commit silently returns a short result set with no structured signal.",
+      "detail": "Raised by Blake at CRITICAL, Bob at HIGH, Alice as R9 fail, and placed in KNOWN by Eve. Severity adjudicated HIGH rather than CRITICAL: the three reviewers who actually read the implementation all rated it below Blake's blind CRITICAL, the skip is not silent at the log level (per-file tracing::warn! still fires), and the index is a derived, rebuildable cache with git as source of truth. Deferred because search has no AppOutput envelope to carry a warning - SearchCommand/AppSearchResult exist in app_contract but are never constructed - and building one is precisely the subject of backlog PRD 00176 route-search-through-contract. Eve additionally proved the criterion is unimplementable as literally written: the warning is consume-once, because the first verb's ensure_fresh reindexes and leaves the index fresh, so a create AND a subsequent search cannot both carry it for a single poison event. What IS being fixed this cycle is the documentation that overstated the guarantee (invariants.md I5 claimed 'the verb envelope' generally). THIRD CONSECUTIVE PRD in this batch where the PRD text asserts a transport/verb surface that does not exist - see the 00167 prd-transport-impact-overclaim and 00168 ffi-import-bundle-discards-syncreport entries above. That pattern now deserves one batch-end decision about how Transport Impact and acceptance criteria are authored, not a fourth per-PRD patch."
+    },
+    {
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 1,
+      "type": "settled-deferral",
+      "topic": "frontmatter-cap-bounds-parse-not-read",
+      "severity": "high",
+      "consensus": "3/5",
+      "issue": "MAX_FRONTMATTER_BYTES bounds serde_yaml parse cost but not read cost: git2 has already materialized the whole blob and split_zones has already built a line vector before parse_frontmatter's cap can reject it. The PRD success metric 'reindex cost stays bounded' is therefore met on the CPU/parse dimension only.",
+      "detail": "Raised by Bob at HIGH, Alice at MEDIUM, and placed in KNOWN by Eve, who identified the reason it cannot be fixed cheaply: the blob is fully in memory from git2 before any ddb code sees it, so a parse-boundary cap structurally cannot bound read cost. The implementor flagged this as an open question during task 10 and it was never resolved either way - deferring it now is the first time it has been decided rather than left hanging. A real fix needs a streaming blob reader and is its own PRD."
+    },
+    {
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 1,
+      "type": "settled-deferral",
+      "topic": "readpool-bypasses-rebuild-lock",
+      "severity": "high",
+      "consensus": "1/5",
+      "issue": "ReadPool readers set skip_stale_check, so they never enter the rebuild-lock protocol and can still observe tables while another connection is mid-drop_all_tables - the PRD's own named symptom, reached via the read-pool path rather than the N-concurrent-ddb-create path.",
+      "detail": "Raised by Bob. Already an explicitly accepted residual gap: named in the design doc's Risks section before implementation, listed in docs/src/technical/invariants.md I10, and independently placed in KNOWN by Eve. Not a regression - ReadPool has always trusted WAL visibility. Recorded here so the gap stays visible at batch end rather than living only in an invariants footnote."
+    },
+    {
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 1,
+      "type": "observation",
+      "topic": "e2e-suite-cannot-distinguish-regression-from-contention",
+      "severity": "medium",
+      "consensus": "2/5",
+      "detail": "Full cargo test -p ddb-e2e failed 1 of 451 on each of two build-session runs, a DIFFERENT test each time (typed_where_filter_completeness, then serve::execute_batch_format_objects with reqwest ConnectionRefused); both pass in isolation. Alice and Eve independently judged the pre-existing attribution plausible - both flaking tests live in files this diff never touches, and the new rebuild lock is scoped per temp-dir index directory so it cannot couple unrelated tests. Alice named the mechanism: tests/e2e/common.rs allocates ports with a bind-then-release TcpListener probe, a TOCTOU window under 451-way parallelism. Proving it needs two full e2e runs at base commit 6bb1617, which is Tier 2 work. Wants its own backlog PRD: until the port allocation is fixed, the e2e suite cannot distinguish a real regression from contention, which degrades every future PRD's safety net."
+    },
+    {
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "eviction-keys-off-file-stem-not-indexed-identity",
+      "severity": "high",
+      "consensus": "1/5",
+      "issue": "Poison eviction derives the ID from the filename, but supported frontmatter IDs can differ; the stale row then survives, while a newly added poison filename can evict an unrelated row with that ID.",
+      "detail": "Raised by Bob (codex) at HIGH; Eve independently classed the identical mechanism KNOWN and defended it; Alice and Carl did not raise it. Orchestrator-verified by reading the code: the new poison-eviction filter (ddb-core/src/indexer/rebuild.rs:112) calls crate::parser::extract_id_from_path, which is a bare Path::file_stem (ddb-core/src/parser/mod.rs:972-977). The PRE-EXISTING delete leg (rebuild.rs:190) derives its IDs through the exact same call. So the new code inherits the repo's long-standing filename-is-identity model rather than introducing a new one - the finding is real in shape but pre-existing in class, which is why it was deferred rather than reworked at the cap. Reachability: it needs a hand-authored ddb/{stem}.md whose frontmatter id differs from its stem; every ddb write path names the file after the id. Consequences are bounded - the index is a derived cache with git as source of truth, and a full rebuild self-heals both the stale-survivor and the mis-evicted-row cases. Wants its own follow-up PRD that fixes BOTH legs together by capturing each changed path's existing indexed (id, type) before parsing and evicting only that captured row; patching the poison leg alone would leave the two legs disagreeing about identity, which is worse than the current consistent-but-wrong model."
+    },
+    {
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "00169-cycle2-medium-low-tail",
+      "severity": "medium",
+      "consensus": "1/5 each",
+      "issue": "Ten Medium/Low findings survived cycle 2 unfixed because the rework cap (2) was reached; none blocks convergence under the severity bar, and there was no tail sweep on the cap-out path.",
+      "detail": "Each carries a verified reason in dev/local/reviews/00169-poison-file-reindex-resilience-v1-ledger.json (cycle 2 entries). (1) MEDIUM incremental_reindex is 90 lines, over the 50-line guideline, after task 15 inlined a 13-line poison-id filter - cosmetic, extractable with no behavior change (Alice). (2) MEDIUM evict_doogats swallows type-lookup and unmaterialize errors via .ok().flatten(), so HEAD can advance past incomplete materialized cleanup - pre-existing shape shared with the delete leg; belongs with the identity follow-up above (Bob). (3) MEDIUM the schema_version drop loop duplicates Index::drop_all_tables and interpolates identifiers read from sqlite_master - the duplication was inspected and deliberately kept this cycle because the two copies differ in FK-pragma placement and transactional context, so unifying risks the destructive path (Bob + Carl, same defect from both sides). (4) MEDIUM skip-path dedup uses quadratic Vec::contains in summarize_reindex_warnings (Bob). (5) MEDIUM the new task-15 regression tests run 150-180 lines each - same class as the cycle-1 settled deferral on the 6,034-line test monolith (Bob). (6) MEDIUM strict incremental reindex applies genuine deletions before erroring on a poison file - Bob filed it as KNOWN himself, and Eve refuted the proposed one-line fix as UNSAFE (indexing before delete-eviction deletes a just-indexed row when a deleted ddb/_typedef/X.md and an added ddb/X.md share a stem); incremental strict is never true on any user-facing path (Bob, Carl). (7) LOW ddb reindex prints one line per raw undeduplicated warning, so one malformed file shows twice - root cause pre-existing and already documented at docs/src/technical/indexer.md:108-114 (Alice). (8) LOW the newly-public describe_consistency_warning has no rustdoc - one-line fix, raised by both Bob and Eve. Findings (2), (3) and (8) are the only ones worth a follow-up; the rest are documented-and-accepted."
+    },
+    {
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 2,
+      "type": "verification-gap",
+      "topic": "ps1-smoke-section-33-never-executed",
+      "severity": "medium",
+      "consensus": "1/5",
+      "issue": "tests/smoke.ps1 section 33 (the reindex-report + ddb create AppWarning scenario, including the $reindexQuietExit = $LASTEXITCODE guard through the Out-String pipeline) was reviewed line-for-line but never executed - no pwsh resolves on this host.",
+      "detail": "Raised by Eve under VERIFY. Same standing arrangement as the cycle-1 .ps1 deferrals: Windows CI is the first real execution of the PowerShell ports by construction. Confirm the first test.yml / full-validation.yml Windows job on pushed master shows both new section-33 pass lines."
+    },
+    {
+      "source": "deferred",
+      "type": "cycle-1-deferrals",
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 1,
+      "summary": "Four deferrals recorded in dev/local/autopilot/deferred/202607161128-deferred.json and dev/local/reviews/00169-poison-file-reindex-resilience-v1-ledger.json: (a) HIGH skip warnings never reach read verbs incl. search, owned by backlog 00176; (b) HIGH frontmatter cap bounds parse cost but not read cost, structurally blocked by git2 blob model, needs a streaming-reader PRD; (c) HIGH ReadPool bypasses the rebuild lock, already an accepted residual documented in invariants.md I10; (d) MEDIUM e2e suite cannot distinguish a real regression from port contention (1-of-451 flake, different test each run), wants its own PRD. Plus 8 further settled deferrals and 2 discards in the ledger. PROCESS SIGNAL FOR BATCH END: 00167, 00168 and now 00169 each shipped a PRD asserting a transport or verb surface that does not exist - the Transport Impact section and acceptance criteria are being authored aspirationally rather than against the actual surface, which defeats the 120% parity guardrail they exist to enforce. Wants one batch-end decision, not a fourth per-PRD patch."
+    },
+    {
+      "source": "deferred",
+      "type": "cap-overflow",
+      "prd": "00169-poison-file-reindex-resilience-v1.md",
+      "cycle": 2,
+      "summary": "Cycle 2 hit the rework cap (rework_cap = 2) with 11 unresolved findings, zero CRITICAL, so the PRD finalizes as converged-with-deferrals. All 11 are recorded with verified reasons in dev/local/reviews/00169-poison-file-reindex-resilience-v1-ledger.json (cycle-2 entries) and surfaced as 3 records in dev/local/autopilot/deferred/202607161128-deferred.json. The one HIGH: poison eviction keys off extract_id_from_path (a bare file stem, parser/mod.rs:972) rather than the indexed identity, so a file whose frontmatter id differs from its stem keeps stale rows, and a newly-added poison file can evict an unrelated row holding that id (rebuild.rs:112). Orchestrator-verified as REAL in shape but PRE-EXISTING in class - the delete leg at rebuild.rs:190 has always used the same call - and bounded (derived cache, git is source of truth, full rebuild self-heals). Raised by Bob alone at HIGH; Eve independently classed the same mechanism KNOWN. Wants one follow-up PRD fixing BOTH legs to key off the captured indexed (id, type), not a patch to the poison leg alone. The remaining 10 are 8 Medium + 2 Low: two are worth the same follow-up (evict_doogats swallows errors; describe_consistency_warning lacks rustdoc), one is refuted-as-unsafe (folding both evictions after batch_index_changes deletes a just-indexed row on rename-shaped change-sets, proven by Eve), and the rest are cosmetic or pre-existing-and-documented. Blake HIGH (search verb carries no skip AppWarning) was auto-dismissed against the cycle-1 ledger entry that already deferred it to backlog PRD 00176."
+    },
+    {
+      "prd": "00170-id-throughput-ceiling-decision-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "node-validation-fallback-creates-second-node-rendering",
+      "severity": "high",
+      "consensus": "1/4",
+      "issue": "The malformed-node fallback creates a second node-identity rendering: IDs hash invalid values while the explicitly read-only HlcClock still uses raw truncate_node, contradicting the recorded rationale for keeping one shared representation",
+      "detail": "Raised by Bob (codex, doubt lens) at HIGH; Alice, Blake and Carl did not raise it. Orchestrator-verified against source: HlcClock::load (ddb-core/src/git_ops/hlc_clock.rs:42-46) stores the RAW trimmed non-empty .git/ddb-node value as node_id, and the HLC's node field is truncate_node(raw). PRD 00201 lists hlc_clock.rs as 'Read-only: the node-id source reused by the discriminator' (:108), so HlcClock keeps emitting truncate_node(raw) - while 00201's new 'Validated node field' feature (:52-57) HASHES a non-conforming raw value into a different 8-hex string. For a malformed node file (short, non-hex, dash-only) the ID's node field and the HLC trailer's node field would therefore disagree. docs/src/architecture/design-decisions.md:52 rejects a wider discriminator precisely to avoid 'two different renderings of node identity - the ID's and HlcClock's'. The fallback reintroduces on the malformed path the exact drift the decision's own rationale rejects. NOTE: this is a regression finding against the CYCLE-1 REWORK - cycle 1 asked for node-file validation, task 4 added it, and this is a gap in the thing that was added. Materiality: it is a gap in a PLAN DOCUMENT held in dev/local/prds/hold/, which autopilot never drains and which a maintainer must clear via /review-prd-backlog before any batch picks it up. Nothing ships from it today. Fix direction (Bob's): extract one shared node-field resolver used by BOTH HlcClock and ID minting, or explicitly document and justify the divergence in 00201."
+    },
+    {
+      "prd": "00170-id-throughput-ceiling-decision-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "node-warning-has-no-propagation-plan",
+      "severity": "high",
+      "consensus": "1/4",
+      "issue": "The promised structured malformed-node warning has no propagation plan: DoogatService::unique_id and SqlEngine::unique_ids return IDs without warnings, and several create paths do not return AppOutput",
+      "detail": "Raised by Bob (codex, doubt lens) at HIGH. Orchestrator-verified against source: DoogatService::unique_id (ddb-core/src/service/write_helpers.rs:244-247) returns Result<DoogatId> and SqlEngine::unique_ids (ddb-core/src/sql_engine/mod.rs:126-150) returns Result<Vec<DoogatId>>; neither carries a warning channel of any kind. PRD 00201:56 promises to 'surface a structured warning naming .git/ddb-node on the create path's existing warning channel' but names no channel, defines no AppWarning code or result shape, and adds no task threading it out to the service, SQL, raw-create or the six transports. As written the warning has nowhere to go, so the Success Metric at 00201:25 that depends on it cannot be met. Same regression-against-the-rework class as the entry above, and the same materiality: a plan-document gap in a held PRD, nothing shipped. FOURTH-CONSECUTIVE-PRD PATTERN: this is the same shape as the 00167 prd-transport-impact-overclaim, 00168 ffi-import-bundle-discards-syncreport and 00169 skip-warning-never-reaches-read-verbs entries above - a PRD asserting a warning/transport surface that does not exist. It now recurs INSIDE a rework that was itself correcting overclaims. This strongly reinforces the standing batch-end request for ONE decision about how Transport Impact and warning-carrying acceptance criteria are authored. Note the fix here is partly blocked on the same backlog work: routing warnings out of read/write verbs is 00175/00176's subject.",
+      "fix": "Define a stable AppWarning code and result shape, then add explicit propagation tasks for service, SQL, raw-create, and all six transports - or downgrade 00201's warning promise to a tracing::warn! and drop the structured-warning success metric."
+    },
+    {
+      "prd": "00170-id-throughput-ceiling-decision-v1.md",
+      "cycle": 2,
+      "type": "cap-overflow",
+      "topic": "node-hash-fallback-algorithm-unpinned",
+      "severity": "medium",
+      "consensus": "1/4",
+      "issue": "The deterministic hash fallback does not pin a hash algorithm, domain separator, or byte-to-hex rule, so the requirement that every process and device derive the same field is not implementation-stable",
+      "detail": "Raised by Bob (codex, doubt lens) at MEDIUM. Orchestrator-verified: PRD 00201:56 requires 'same raw value -> same field always, on every process and device' - a cross-device determinism claim - but names no algorithm, no domain separator and no byte-to-hex rule. An implementer reaching for std::collections::hash_map::DefaultHasher, the obvious in-stdlib choice, would violate the stated property outright: its output is explicitly documented as not stable across Rust releases, so two devices on different toolchains would derive different node fields from the same malformed node file. Fix direction (Bob's): pin a stable algorithm such as domain-separated SHA-256 truncated to four bytes rendered lowercase hex, with a fixed-vector test. Cheap to apply when 00201 is promoted."
+    },
+    {
+      "source": "deferred",
+      "type": "cap-overflow",
+      "prd": "00170-id-throughput-ceiling-decision-v1.md",
+      "cycle": 2,
+      "topic": "00170-cycle2-cap-out",
+      "summary": "PROCESS/TOOLING GAP, corrected and widened: 00170 cycle 2 is the FIRST PRD in this entire batch to emit a `review_converged` row into loop-metrics.jsonl. `rg '\"event\":\"review_converged\"'` over BOTH dev/local/autopilot/loop-metrics.jsonl and the GC-exempt dev/local/autopilot/ledger/loop-metrics.jsonl returns exactly one line each - 00170's, at line 100 of 100 in both files. The earlier note in the contract card said only PRD 00168 was missing its row; the truth is that NONE of 00163, 00200, 00164, 00165, 00166, 00167, 00168 or 00169 ever wrote one. The convergence metric (cycles_to_converge, converged vs cap_deferred) is therefore unusable for this batch: it has a single sample, and any median computed from it describes one PRD. Whatever emits that row was skipped or unreachable in every prior review gate of this batch. Worth a maintainer decision at batch end about whether the Phase 5 metric emission needs to be enforced mechanically (the way check_review_file gates the review artifact) rather than left as a prose step a gate can silently skip. NOTE the two files are byte-identical in length (100 lines each), consistent with the ledger being a faithful mirror rather than a lossy one - the gap is in emission, not mirroring.",
+      "cap_out_summary": "Cycle 2 hit the rework cap (rework_cap = 2) with 3 unresolved findings, ZERO CRITICAL, so the PRD finalizes as converged-with-deferrals. All EIGHT cycle-1 findings (1 CRITICAL, 4 HIGH, 3 MEDIUM) were verified CLOSED by the gate against source: the collision-free overclaim is now 'collision-resistant, not collision-free' with the 2^-32 / ~77k-node figures and the resolve_add_add_collision backstop named; throughput is split into ID-mints (10^4-10^5/sec, labelled unbenchmarked) versus end-to-end doogat creates (unchanged ~1/sec, bound by the git commit, citing performance.md:87 and :95) and answers the bulk-create question with a plain no; the (guess) marker is gone and both documents state the identical 28-char ^[0-9]{20}[0-9a-f]{8}$ shape; node-file validation was added; the generate_unique_id(exists, node) signature change is explicit; b1e7853's message discloses the CHANGELOG skip; the jink axis cites verified file:line evidence (generated.ts:740, :1036, :642 <- queries.rs:68, :70), all re-checked byte-for-byte by the gate; and e2e moved to authored-locally/executed-by-CI. Alice and Carl found nothing; Blake passed all 19 B-rules and his 3 process findings were auto-dismissed against the ledger. The 3 survivors are ALL Bob's and are ALL regression findings against the cycle-1 rework itself - specifically against the 'Validated node field' feature that the rework ADDED to PRD 00201. Every one is a gap in a PLAN DOCUMENT sitting in dev/local/prds/hold/, which autopilot never drains and a maintainer must clear via /review-prd-backlog before any batch picks it up, so nothing ships from them today and they surface in front of the maintainer at exactly the moment that document is next read. No tail sweep ran: the cap-out branch finalizes without one, and sweeping would mean a third implementation round with no review cycle left to validate it."
+    },
+    {
+      "type": "deferred_decision",
+      "cycle": 2,
+      "severity": "high",
+      "consensus": "1/4",
+      "issue": "The malformed-node fallback creates a second node-identity rendering: IDs hash invalid values while the explicitly read-only HlcClock still uses raw truncate_node, contradicting the recorded rationale for keeping one shared representation",
+      "verified": "CONFIRMED against git_ops/hlc_clock.rs:42-46 (HlcClock keeps the RAW value, renders truncate_node(raw)) vs 00201:52-57 (hashes non-conforming values); design-decisions.md:52 rejects a wider discriminator precisely to avoid two node-identity renderings",
+      "disposition": "deferred at rework cap (cycle 2 of cap 2); gap in a plan document held in dev/local/prds/hold/ that a maintainer must clear via /review-prd-backlog before any batch drains it",
+      "prd": "00170-id-throughput-ceiling-decision-v1.md"
+    },
+    {
+      "type": "deferred_decision",
+      "cycle": 2,
+      "severity": "high",
+      "consensus": "1/4",
+      "issue": "The promised structured malformed-node warning has no propagation plan: DoogatService::unique_id and SqlEngine::unique_ids return IDs without warnings, and several create paths do not return AppOutput",
+      "verified": "CONFIRMED against service/write_helpers.rs:244-247 and sql_engine/mod.rs:126-150 (both return bare Result types with no warning channel); 00201:56 names no channel, no AppWarning code, and adds no propagation task",
+      "disposition": "deferred at rework cap; remedy overlaps backlog PRDs 00175/00176 which own routing warnings out of the verbs",
+      "prd": "00170-id-throughput-ceiling-decision-v1.md"
+    },
+    {
+      "type": "deferred_decision",
+      "cycle": 2,
+      "severity": "medium",
+      "consensus": "1/4",
+      "issue": "The deterministic hash fallback does not pin a hash algorithm, domain separator, or byte-to-hex rule, so the requirement that every process and device derive the same field is not implementation-stable",
+      "verified": "CONFIRMED: 00201:56 claims cross-device determinism while naming no algorithm; std DefaultHasher is documented as unstable across Rust releases, so the obvious implementation choice violates the stated property",
+      "disposition": "deferred with the two HIGHs; Medium never blocks convergence and the cap-out branch finalizes without a tail sweep",
+      "prd": "00170-id-throughput-ceiling-decision-v1.md"
+    },
+    {
+      "type": "git_push_failed",
+      "cycle": 2,
+      "severity": "info",
+      "issue": "git push origin master failed after PRD 00170: sign_and_send_pubkey signing failed for RSA buvis and ED25519 1Password agents, Permission denied (publickey)",
+      "verified": "CONFIRMED via git push exit 128 on this unattended host",
+      "disposition": "commits left local (115 ahead of origin/master through this PRD); locked SSH signing agent on unattended host is a known recurring condition (same as 00167); user must push manually",
+      "prd": "00170-id-throughput-ceiling-decision-v1.md"
+    }
+  ]
+}

@@ -1,0 +1,246 @@
+I will read the review context card, prepended context, and build candidate patch to begin the review.
+
+● Read FT-7a-card.md
+  │ dev/local/tmp/FT-7a-card.md
+  └ 195 lines read
+
+● Read FT-7a-no-pack.md
+  │ docs/dev/tmp/FT-7a-no-pack.md
+  └ 1 line read
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L1:100 (100 lines read)
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L101:300 (200 lines read)
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L301:500 (200 lines read)
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L501:750 (250 lines read)
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L751:1050 (300 lines read)
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L1051:1400 (300 lines read)
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L1350:1550 (38 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L1:120 (120 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L120:260 (141 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L260:390 (130 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L390:450 (61 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L451:550 (100 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L551:600 (15 lines read)
+
+● Read tests.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/tests.rs
+  └ L1500:1650 (122 lines read)
+
+/ Search (grep)
+  │ "fn conflicting_full_bundle_import" (ddb-core/src/bundle/tests.rs)
+  └ 1 file found
+
+● Read tests.rs
+  │ ddb-core/src/bundle/tests.rs
+  └ L820:845 (12 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L315:380 (66 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00203-ft-7a/ddb-core/src/bundle/mod.rs
+  └ L381:386 (5 lines read)
+
+● Read FT-7a-build-candidate.patch
+  │ dev/local/tmp/FT-7a-build-candidate.patch
+  └ L1:60 (60 lines read)
+
+● Read remote.rs
+  │ ddb-core/src/git_ops/remote.rs
+  └ L1:50 (40 lines read)
+
+● Read merge.rs
+  │ ddb-core/src/git_ops/merge.rs
+  └ L145:175 (31 lines read)
+
+/ Search (grep)
+  │ "merge_remote_allowing_unrelated" (ddb-core/src/git_ops/merge.rs)
+  └ 1 file found
+
+✗ Read merge.rs
+  │ ddb-core/src/git_ops/merge.rs
+  └ view_range out of bounds
+
+/ Search (grep)
+  │ "merge_remote_allowing_unrelated" (ddb-core/src/git_ops/merge.rs)
+  └ 3 lines found
+
+● Read merge.rs
+  │ ddb-core/src/git_ops/merge.rs
+  └ L425:455 (31 lines read)
+
+● Read CHANGELOG.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/CHANGELOG.md
+  └ L1:20 (19 lines read)
+
+✗ Read CHANGELOG.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/CHANGELOG.md
+  └ view_range out of bounds
+
+● Read bundle.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/bundle.md
+  └ L1:50 (49 lines read)
+
+● Read bundle.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/bundle.md
+  └ L80:120 (39 lines read)
+
+● Read invariants.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/invariants.md
+  └ L1:20 (19 lines read)
+
+✗ Read invariants.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/invariants.md
+  └ view_range out of bounds
+
+● Read sync.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/sync.md
+  └ L1:20 (20 lines read)
+
+● Read sync.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/sync.md
+  └ L150:220 (70 lines read)
+
+● Read sync.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/sync.md
+  └ L240:300 (60 lines read)
+
+● Read sync.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/sync.md
+  └ L301:350 (49 lines read)
+
+● Read sync.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/sync.md
+  └ L351:400 (14 lines read)
+
+✗ Read sync.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/sync.md
+  └ view_range out of bounds
+
+● Read walkthrough.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/walkthrough.md
+  └ L400:450 (50 lines read)
+
+● Read walkthrough.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/walkthrough.md
+  └ L451:520 (70 lines read)
+
+● Read walkthrough.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/walkthrough.md
+  └ L521:600 (80 lines read)
+
+● Read walkthrough.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/walkthrough.md
+  └ L700:750 (51 lines read)
+
+● Read walkthrough.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/walkthrough.md
+  └ L751:820 (70 lines read)
+
+● Read walkthrough.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/walkthrough.md
+  └ L821:880 (17 lines read)
+
+✗ Read walkthrough.md
+  │ dev/local/tmp/worktrees/00203-ft-7a/docs/src/technical/walkthrough.md
+  └ view_range out of bounds
+
+/ Search (grep)
+  │ "fn " (ddb-core/src)
+  └ 122 files found
+
+● Read tests.rs
+  │ ddb-core/src/sync_manager/tests.rs
+  └ L1000:1050 (51 lines read)
+
+/ Search (grep)
+  │ "R12:" (dev/local)
+  └ 211 files found
+
+● Read FT-6-carl-output.txt
+  │ dev/local/tmp/FT-6-carl-output.txt
+  └ 271 lines read
+
+● Read carl-output-00168-01.txt
+  │ dev/local/tmp/carl-output-00168-01.txt
+  └ 79 lines read
+
+● Read carl-output-00168-02.txt
+  │ dev/local/tmp/carl-output-00168-02.txt
+  └ 176 lines read
+
+● Read FT-5-carl-output.txt
+  │ dev/local/tmp/FT-5-carl-output.txt
+  └ 312 lines read
+
+● Read write_lock.rs
+  │ ddb-core/src/git_ops/write_lock.rs
+  └ L1:65 (65 lines read)
+
+/ Search (glob)
+  │ "*7a*" in dev/local/tmp
+  └ 11 files found
+
+● Read FT-7a-opus-correct.txt
+  │ dev/local/tmp/FT-7a-opus-correct.txt
+  └ L1:60 (19 lines read)
+
+/ Search (grep)
+  │ "(TODO|FIXME|dbg!)" (ddb-core/src/bundle/mod.rs, ddb-core/src/bundle/tests.rs)
+  └ No matches found
+
+[CARL] 🟡 Function import_bundle_with_lease_timeout exceeds 50-line limit (70 lines); extract archive unpack and namespace cleanup helpers | File: ddb-core/src/bundle/mod.rs:317 | Task: general
+[CARL] 🟡 Colocated test file exceeds 800-line limit (1625 lines) following card allowlist constraints | File: ddb-core/src/bundle/tests.rs:1 | Task: general
+
+R1: pass
+R2: pass
+R3: pass
+R4: pass
+R6: pass
+R7: pass
+R8: pass
+R9: pass
+R10: pass
+R11: pass
+R12: fail
+R13: fail
+

@@ -1,0 +1,14 @@
+{
+  "sha": "c8b72bd9126c83d054264ce6ac3738e8f6d0abda",
+  "cycle": 1,
+  "commands": [
+    {"command": "cargo build", "exit": 0},
+    {"command": "cargo build -p ddb-cli", "exit": 0},
+    {"command": "cargo clippy --workspace --all-targets", "exit": 0},
+    {"command": "cargo test-ci", "exit": 0},
+    {"command": "CARGO_BIN_EXE_ddb=/Users/bob/git/src/github.com/doogat/ddb/target/debug/ddb /usr/bin/time -p cargo test -p ddb-e2e", "exit": 0}
+  ],
+  "passed": 2384,
+  "failed": 0,
+  "skipped": 0
+}

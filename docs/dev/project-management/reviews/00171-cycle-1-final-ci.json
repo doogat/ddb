@@ -1,0 +1,22 @@
+{
+  "run_id": 34057702782,
+  "url": "https://github.com/doogat/ddb/actions/runs/34057702782",
+  "head_sha": "4a248cb0c1792d922b5e56600330c34e532e7ab8",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": {"test": "success", "coverage": "success"},
+  "observed_on": "2026-09-07",
+  "local_00171_verification_sha": "74644b8825e52794f1274b3dcec9875d1a17d808",
+  "local_fast_tests": {"passed": 1819, "failed": 0, "ignored": 0},
+  "targeted_old_nightly_reproduction": {
+    "sha": "4a248cb0c1792d922b5e56600330c34e532e7ab8",
+    "command": "cargo test -p ddb-e2e --test e2e integration_warnings_update::integration_58_a_graphql_update_warnings_empty -- --exact",
+    "exit": 0,
+    "passed": 1,
+    "failed": 0,
+    "filtered_out": 567,
+    "limitation": "An isolated pass does not explain the earlier macOS full-suite connection reset."
+  },
+  "later_concurrent_master_head": "876a153b4039128f8052526629773fa189058c71",
+  "note": "CI success applies to 4a248cb. Later concurrent maintainer work is outside 00171."
+}

@@ -1,0 +1,3277 @@
+{
+  "sha": "36c0687e387177fb6929311237057308b71138f8",
+  "runner_tests": 565,
+  "rows": {
+    "tests/smoke.sh:26": {
+      "tests": [
+        "smoke_core::smoke_01_init"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:66": {
+      "tests": [
+        "smoke_core::smoke_01_init"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:30": {
+      "tests": [
+        "cli_create_unregistered_type::cli_create_unregistered_type_creates_base_doogat_with_warning",
+        "smoke_core::smoke_02_create_unique_ids"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:70": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:30"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:42": {
+      "tests": [
+        "smoke_core::smoke_03_read"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:87": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:42"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:47": {
+      "tests": [
+        "cli_update_app_error::cli_update_existing_prints_updated_and_changes_title",
+        "sync_crdt::non_overlapping_edits_merge_cleanly"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:92": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:47"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:52": {
+      "tests": [
+        "smoke_core::smoke_05_delete"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:98": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:52"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:58": {
+      "tests": [
+        "smoke_core::smoke_06_status"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:104": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:58"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:62": {
+      "tests": [
+        "delete_backlinks::delete_reports_broken_backlinks",
+        "delete_backlinks::status_reports_broken_backlinks_after_delete"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:109": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:62"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:73": {
+      "tests": [
+        "smoke_core::smoke_07_reindex",
+        "sql_lifecycle::reindex_preserves_table"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:122": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:73"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:77": {
+      "tests": [
+        "tags::body_hashtag_indexed_with_source"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:127": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:77"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:83": {
+      "tests": [
+        "checkboxes::checkbox_filter_by_state"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:134": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:83"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:89": {
+      "tests": [
+        "folder_namespace::insert_folder_typedef_creates_subdirectory_path"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:141": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:89"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:100": {
+      "tests": [
+        "search_links::full_text_search"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:151": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:100"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:104": {
+      "tests": [
+        "search_links::paginated_search_shows_header"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:156": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:104"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:108": {
+      "tests": [
+        "smoke_sql::smoke_09_sql_queries",
+        "tags::tag_join_filters_doogats"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:161": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:108"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:113": {
+      "tests": [
+        "search_links::wikilink_indexed_in_links_table"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:168": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:113"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:117": {
+      "tests": [
+        "link_kinds::all_link_kinds_indexed"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:173": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:117"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:128": {
+      "tests": [
+        "rename::rename_moves_file_and_rewrites_backlinks"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:184": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:128"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:136": {
+      "tests": [
+        "sql_lifecycle::create_table",
+        "sql_lifecycle::delete_row",
+        "sql_lifecycle::insert_and_select",
+        "sql_lifecycle::update_row"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:193": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:136"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:146": {
+      "tests": [
+        "smoke_sql::smoke_11c_ghost_row_recovery"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:209": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:146"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:160": {
+      "tests": [
+        "smoke_sql::smoke_11d_join_smoke_pin",
+        "sql_lifecycle::multi_table_schema_prd_scenario",
+        "tags::tag_join_filters_doogats"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:226": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:160"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:170": {
+      "tests": [
+        "smoke_sql::smoke_11a_alter_zone_title_template"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:241": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:170"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:176": {
+      "tests": [
+        "smoke_sql::smoke_11b_create_table_if_not_exists"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:250": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:176"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:182": {
+      "tests": [
+        "alter_table_rename::cli_alter_table_rename_rejects_reserved_target",
+        "alter_table_rename::cli_alter_table_rename_to_renames_typedef_and_data"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:259": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:182"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:193": {
+      "tests": [
+        "cli_create_fk_freshness::create_link_after_category_in_separate_process_succeeds_without_reindex"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:275": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:193"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:204": {
+      "tests": [
+        "inline_zone::inline_zone_frontmatter_materializes_and_survives_reindex"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:291": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:204"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:211": {
+      "tests": [
+        "smoke_core::smoke_12_install_bundled_type"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:301": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:211"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:215": {
+      "tests": [
+        "sql_lifecycle::install_meeting_minutes_type"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:306": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:215"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:222": {
+      "tests": [
+        "smoke_core::smoke_13_type_suggest"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:316": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:222"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:227": {
+      "tests": [
+        "smoke_core::smoke_14_register_node_and_compact"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:322": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:227"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:237": {
+      "tests": [
+        "smoke_core::smoke_15_node_list_and_retire"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:334": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:237"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:243": {
+      "tests": [
+        "smoke_core::smoke_16_compact_dry_run"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:342": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:243"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:249": {
+      "tests": [
+        "smoke_core::smoke_16a_compact_no_backup"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:348": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:249"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:259": {
+      "tests": [
+        "smoke_core::smoke_16b_compact_backup_path"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:355": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:259"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:267": {
+      "tests": [
+        "smoke_core::smoke_16c_maintenance"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:363": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:267"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:283": {
+      "tests": [
+        "discover::discover_link_density_shows_hub",
+        "discover::discover_mentions",
+        "discover::discover_orphans",
+        "discover::discover_recent_shows_new_doogat",
+        "discover::discover_similar",
+        "discover::discover_stale"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:382": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:283"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:305": {
+      "tests": [
+        "fix::fix_commits_changes",
+        "fix::fix_dry_run_no_changes",
+        "fix::fix_idempotent"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:409": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:305"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:321": {
+      "tests": [
+        "help::help_create_app_prints_guide",
+        "help::help_no_topic_lists_guides",
+        "help::help_unknown_topic_fails",
+        "sequence::sequence_breadcrumb_display",
+        "sequence::sequence_broken_list",
+        "sequence::sequence_tree_display",
+        "smoke_core::smoke_16f_log_level_flag",
+        "smoke_sql::smoke_16f_app_building_flow",
+        "sql_lifecycle::multi_table_schema_prd_scenario"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:430": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:321"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:418": {
+      "tests": [
+        "cascade_delete::cascade_delete_cleans_junction_table",
+        "cascade_delete::cascade_delete_removes_wikilink_from_referencing_file"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:531": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:418"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:441": {
+      "tests": [
+        "cascade_delete::cascade_delete_cleans_owned_junction_when_parent_deleted"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:554": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:441"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:465": {
+      "tests": [
+        "cascade_delete::cascade_delete_via_ddb_delete_cleans_junction_and_refs"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:581": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:465"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:485": {
+      "tests": [
+        "cascade_delete::delete_rejected_by_not_null_references_cli_issue_10",
+        "cascade_delete::delete_rejected_by_not_null_references_sql_issue_10"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:600": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:485"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:511": {
+      "tests": [
+        "smoke_sql::smoke_19_boolean_consistency"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:627": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:511"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:534": {
+      "tests": [
+        "smoke_sql::smoke_20_type_table_self_contained"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:650": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:534"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:542": {
+      "tests": [
+        "sql_lifecycle::default_next_auto_increments"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:658": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:542"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:564": {
+      "tests": [
+        "smoke_search::smoke_22_fts5_search_boost"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:680": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:564"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:571": {
+      "tests": [
+        "sql_expressions_test::insert_rejects_unlisted_function",
+        "sql_expressions_test::insert_with_arithmetic",
+        "sql_expressions_test::insert_with_coalesce",
+        "sql_expressions_test::insert_with_nested_expression",
+        "sql_expressions_test::nullif_in_insert",
+        "sql_expressions_test::update_with_ifnull"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:688": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:571"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:594": {
+      "tests": [
+        "set_flag::create_with_malformed_set_returns_error",
+        "set_flag::create_with_multiple_set_flags",
+        "set_flag::update_set_adds_field",
+        "set_flag::update_set_empty_value_clears_field",
+        "set_flag::update_unset_removes_field"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:715": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:594"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:610": {
+      "tests": [
+        "date_default::insert_with_explicit_date_preserves_value",
+        "date_default::insert_without_date_derives_from_id"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:733": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:610"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:619": {
+      "tests": [
+        "smoke_search::smoke_26_fts_negation"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:744": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:619"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:633": {
+      "tests": [
+        "smoke_sql::smoke_27_on_conflict_do_nothing"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:758": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:633"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:652": {
+      "tests": [
+        "smoke_search::smoke_28_in_query_field_filter"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:783": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:652"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:671": {
+      "tests": [
+        "alter_column_type::narrowing_rejects_with_row_count_message",
+        "alter_column_type::widens_varchar_to_text_and_accepts_longer_values"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:802": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:671"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:683": {
+      "tests": [
+        "alter_singleton::after_set_singleton_second_insert_rejects_with_constraint",
+        "smoke_sql::smoke_30_singleton_typedef_crud"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:815": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:683"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:700": {
+      "tests": [
+        "schema_apply::apply_creates_declared_type",
+        "schema_apply::dry_run_prints_plan_and_creates_nothing",
+        "schema_apply::reapply_is_idempotent_noop"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.ps1:835": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:700"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/smoke.sh:713": {
+      "tests": [
+        "poison_file_reindex::lenient_reindex_skips_poison_file_and_indexes_the_rest",
+        "poison_file_reindex::strict_reindex_fails_and_names_the_poison_file",
+        "smoke_resilience::smoke_32_cli_answers_after_strict_abort"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:859": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:713"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.sh:743": {
+      "tests": [
+        "smoke_resilience::smoke_33_reindex_report_and_create_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/smoke.ps1:891": {
+      "tests": [],
+      "aliases": [
+        "tests/smoke.sh:743"
+      ],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:52": {
+      "tests": [
+        "serve::auth_missing_token_returns_401",
+        "serve::crud_lifecycle",
+        "serve::health_no_auth_required",
+        "serve::health_returns_ok",
+        "serve::search_and_list"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:160": {
+      "tests": [
+        "integration_graphql_jink::integration_17j1_jink_schema_create_tables"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:164": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE"
+    },
+    "tests/integration.sh:205": {
+      "tests": [
+        "integration_graphql_jink::integration_17j2_jink_config_singleton_and_link_crud"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:243": {
+      "tests": [
+        "serve::crud_lifecycle",
+        "serve::search_and_list",
+        "serve::search_returns_enriched_fields"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:262": {
+      "tests": [
+        "checkboxes::checkbox_graphql_queries"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:267": {
+      "tests": [
+        "integration_graphql_server::integration_18c_graphql_tag_queries",
+        "serve::crud_lifecycle",
+        "serve::search_and_list"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:284": {
+      "tests": [
+        "integration_graphql_server::integration_18c2_updated_at_created_at_fields"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:305": {
+      "tests": [
+        "integration_graphql_server::integration_18d_search_filter_by_type_and_tag",
+        "serve::search_where_filter_combined_type_and_field"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:335": {
+      "tests": [
+        "serve::search_where_filter_combined_type_and_field",
+        "serve::search_where_filter_materialized_column_contains",
+        "serve::search_where_filter_materialized_column_eq",
+        "serve::search_where_filter_tag"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:377": {
+      "tests": [
+        "search_in_filter::search_where_in_empty_returns_no_results",
+        "search_in_filter::search_where_in_materialized_column",
+        "search_in_filter::search_where_in_tag"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:429": {
+      "tests": [
+        "serve::search_boolean_and_phrase_queries",
+        "serve::search_malformed_query_returns_bad_request"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:465": {
+      "tests": [
+        "integration_graphql_server::integration_18g_normalize_query_implicit_and_lowercase",
+        "serve::normalize_search_query_standalone",
+        "serve::search_returns_query_normalized"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:483": {
+      "tests": [
+        "integration_graphql_server::integration_18h_in_query_field_filter_and_error_class",
+        "serve::search_malformed_query_returns_bad_request"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:548": {
+      "tests": [
+        "integration_graphql_server::integration_18i_in_query_substring_and_references_title"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:584": {
+      "tests": [
+        "integration_graphql_server::integration_18z_update_delete_no_match_parity"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:619": {
+      "tests": [
+        "integration_graphql_server::integration_18z2_execute_batch_atomicity",
+        "serve::execute_batch_format_objects",
+        "server_mutations::batch_update_atomicity_via_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:648": {
+      "tests": [
+        "integration_graphql_server::integration_18z3_update_doogat_tag_semantics"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:689": {
+      "tests": [
+        "integration_graphql_server::integration_18z4_sql_feature_coverage_pins"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:729": {
+      "tests": [
+        "integration_graphql_server::integration_18z5_search_limit_boundary_pins"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:760": {
+      "tests": [
+        "integration_graphql_server::integration_18z6_alter_table_add_column_in_typedefs_introspection",
+        "serve::alter_table_column_visible_in_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:792": {
+      "tests": [
+        "integration_graphql_server::integration_18z7_graphql_schema_introspection_contract",
+        "serve::aggregate_query",
+        "serve::graphql_introspection_hides_internal_tables"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:830": {
+      "tests": [
+        "integration_graphql_jink::integration_18z8_jink_category_membership_port"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:870": {
+      "tests": [
+        "integration_graphql_jink::integration_18z9_jink_quotes_saved_searches_pinned_results_config_port"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:935": {
+      "tests": [
+        "integration_graphql_jink::integration_18z10_jink_composite_unique_and_batch_delete_port"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:974": {
+      "tests": [
+        "integration_rest_pgwire::integration_19_rest_sort_parameter",
+        "rest::rest_crud_lifecycle",
+        "serve::rest_auth_required",
+        "serve::rest_crud_lifecycle",
+        "serve::rest_filter_by_field",
+        "serve::rest_filter_by_tag"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1067": {
+      "tests": [
+        "integration_rest_pgwire::integration_20_compact_custom_backup_path",
+        "integration_rest_pgwire::integration_20_maintenance_mutation",
+        "integration_rest_pgwire::integration_20_nosql_endpoints",
+        "integration_rest_pgwire::integration_20_pgwire_boolean_type",
+        "integration_rest_pgwire::integration_20_sql_engine_error_descriptive",
+        "pgwire::pgwire_auth_rejected",
+        "pgwire::pgwire_connect_auth_ok",
+        "pgwire::pgwire_pg_catalog_hides_internal_tables",
+        "pgwire::pgwire_select_with_columns",
+        "rest::rest_get_unknown_id_returns_404",
+        "serve::graphql_introspection_hides_internal_tables",
+        "server_mutations::compact_force_mutation",
+        "server_mutations::compact_mutation_returns_result",
+        "server_mutations::compact_no_backup_mutation",
+        "server_mutations::sync_mutation_no_remote_returns_error"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1179": {
+      "tests": [
+        "subscriptions::ws_payload_auth_subscribe_receive"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1189": {
+      "tests": [
+        "read_pool::concurrent_reads_during_write"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1199": {
+      "tests": [
+        "integration_graphql_refs::integration_38b_rest_structured_references_object",
+        "relation_resolution::batch_plural_references_multiple_items"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (REST-references half only; test passes)"
+    },
+    "tests/integration.sh:1222": {
+      "tests": [
+        "relation_resolution::null_reference_returns_null",
+        "relation_resolution::plural_reference_resolves_as_typed_object_list",
+        "relation_resolution::singular_reference_resolves_as_typed_object"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1248": {
+      "tests": [
+        "reference_raw_id::plural_resolver_with_limit",
+        "reference_raw_id::plural_resolver_with_order_by",
+        "reference_raw_id::plural_resolver_with_order_by_and_limit",
+        "reference_raw_id::plural_resolver_with_order_by_desc",
+        "reference_raw_id::raw_id_coexists_with_object_resolver"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1283": {
+      "tests": [
+        "relation_resolution::typed_connection_includes_tags"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1293": {
+      "tests": [
+        "tag_entries::tag_entries_filter_by_doogat_id",
+        "tag_entries::tag_entries_filter_by_tag_contains",
+        "tag_entries::tag_entries_filter_by_tag_eq"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1316": {
+      "tests": [
+        "serve::sql_columns_aliased",
+        "serve::sql_columns_star_select",
+        "serve::sql_default_format_returns_arrays"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1323": {
+      "tests": [
+        "integration_graphql_refs::integration_38c2_boolean_coercion",
+        "serve::execute_sql_format_objects",
+        "serve::sql_format_objects_returns_keyed_rows"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (boolean-coercion half only; test passes)"
+    },
+    "tests/integration.sh:1347": {
+      "tests": [
+        "integration_graphql_refs::integration_38d_distinct_typed_query"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (test passes)"
+    },
+    "tests/integration.sh:1360": {
+      "tests": [
+        "integration_graphql_refs::integration_38e_groupby_aggregate",
+        "serve::aggregate_query",
+        "serve::aggregate_with_filter"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (test passes)"
+    },
+    "tests/integration.sh:1380": {
+      "tests": [
+        "integration_graphql_batch::integration_38f_execute_batch_multi_statement",
+        "serve::execute_batch_format_objects"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (test passes)"
+    },
+    "tests/integration.sh:1407": {
+      "tests": [
+        "server_mutations::batch_update_via_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1429": {
+      "tests": [
+        "server_mutations::create_many_basic",
+        "server_mutations::create_many_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1457": {
+      "tests": [
+        "hyphenated_types::hyphenated_type_typed_query",
+        "typed_field_mutations::delete_doogat_cleans_materialized_row",
+        "typed_field_mutations::update_doogat_with_fields_updates_materialized_row",
+        "typed_field_mutations::update_doogat_with_unset_fields_removes_field"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1498": {
+      "tests": [
+        "serve::filter_base_field_id_eq",
+        "serve::filter_base_field_id_nonexistent",
+        "serve::filter_base_field_title_contains",
+        "serve::filter_base_field_title_eq"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1529": {
+      "tests": [
+        "integration_orderby_base_fields::integration_42b_orderby_base_fields_deterministic_pagination"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1603": {
+      "tests": [
+        "date_default::insert_with_explicit_date_preserves_value",
+        "date_default::insert_without_date_derives_from_id",
+        "integration_sql_writes::integration_43_sql_insert_defaults_date_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1622": {
+      "tests": [
+        "integration_sql_writes::integration_43_d_sql_constraint_enforcement"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1685": {
+      "tests": [
+        "integration_junction_sync::integration_44_e1_join_pin_graphql",
+        "sql_lifecycle::multi_table_schema_prd_scenario",
+        "tags::tag_join_filters_doogats"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1705": {
+      "tests": [
+        "cascade_delete::cascade_delete_cleans_owned_junction_when_parent_deleted",
+        "integration_junction_sync::integration_44_j_auto_junction_atomic_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1746": {
+      "tests": [
+        "integration_junction_sync::integration_44_k_create_doogat_auto_junction"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1769": {
+      "tests": [
+        "cascade_delete::cascade_delete_cleans_owned_junction_when_parent_deleted",
+        "integration_junction_sync::integration_44_m_parent_junction_cleanup_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1804": {
+      "tests": [
+        "integration_typed_write_polish::integration_44_ddl_response_consistency"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1848": {
+      "tests": [
+        "upsert::create_many_on_conflict_ignore_returns_existing"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:1870": {
+      "tests": [
+        "integration_typed_write_polish::integration_45_g13_title_template_omit"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1891": {
+      "tests": [
+        "integration_typed_write_polish::integration_45_g12_intra_batch_ignore_surviving_id",
+        "upsert::create_many_on_conflict_ignore_mixed_new_and_existing"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1917": {
+      "tests": [
+        "integration_tags_filter::integration_45_g11_tags_filter_nullable_operators"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1969": {
+      "tests": [
+        "integration_write_recovery::integration_45_a1_cross_mutation_parity_after_unique_failure"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:1998": {
+      "tests": [
+        "integration_write_recovery::integration_45_a3_cross_table_isolation_after_unique_failure"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2021": {
+      "tests": [
+        "cascade_delete::delete_rejected_by_not_null_references_sql_issue_10",
+        "integration_write_recovery::integration_45_r10_restrict_blocks_sql_and_graphql_delete"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2073": {
+      "tests": [
+        "integration_write_recovery::integration_45_a2_ghost_row_survives_server_restart"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2109": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed) <!-- banner-only line, nothing to port; see 49.1-49.4 -->"
+    },
+    "tests/integration.sh:2120": {
+      "tests": [
+        "integration_error_codes::integration_49_1_unique_violation_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2133": {
+      "tests": [
+        "integration_error_codes::integration_49_2_not_null_violation_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2142": {
+      "tests": [
+        "integration_error_codes::integration_49_3_createmany_error_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2148": {
+      "tests": [
+        "integration_error_codes::integration_49_4_createmany_intra_batch_error_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2159": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed) <!-- banner-only line, nothing to port; see 50a/50b/50c -->"
+    },
+    "tests/integration.sh:2160": {
+      "tests": [
+        "integration_alter_rename::integration_50a_alter_rename_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2169": {
+      "tests": [
+        "alter_table_rename::cli_mysql_rename_table_alias_rejected_with_clear_message",
+        "integration_alter_rename::integration_50b_mysql_rename_alias_rejected_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2174": {
+      "tests": [
+        "integration_alter_rename::integration_50c_alter_rename_pgwire",
+        "pgwire::pgwire_ddl_create_table"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2188": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (banner; assertions under 51.A)"
+    },
+    "tests/integration.sh:2192": {
+      "tests": [
+        "integration_singleton_flow::integration_51_a_singleton_graphql_flow"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2242": {
+      "tests": [
+        "alter_singleton::set_singleton_rejects_multi_row_typedef_with_count",
+        "integration_singleton_flow::integration_52_b_graphql_alter_set_drop_singleton_reload"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2273": {
+      "tests": [
+        "integration_singleton_flow::integration_53_c_singleton_default_values_auto_seed"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2282": {
+      "tests": [
+        "alter_singleton::after_set_singleton_second_insert_rejects_with_constraint",
+        "integration_singleton_parity::integration_54_d_cross_protocol_singleton_duplicate_parity",
+        "pgwire_singleton::pgwire_singleton_duplicate_insert_keeps_connection_healthy"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2366": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2376": {
+      "tests": [
+        "singleton_cross_process_create::two_concurrent_ddb_create_on_singleton_converge_on_one_row"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2400": {
+      "tests": [
+        "integration_singleton_races::integration_55_b_graphql_execute_sql_singleton_insert_race",
+        "singleton_cross_process_upsert::two_concurrent_graphql_upserts_on_singleton_converge_on_one_row"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2428": {
+      "tests": [
+        "integration_singleton_races::integration_55_c_graphql_create_doogat_singleton_insert_race",
+        "server_mutations::sync_during_writes_serialized_through_actor"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2454": {
+      "tests": [
+        "integration_singleton_races::integration_55_d_cli_vs_pgwire_singleton_insert_race",
+        "singleton_cross_process_upsert::two_concurrent_pgwire_inserts_on_singleton_one_wins_one_gets_singleton_error"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2516": {
+      "tests": [
+        "integration_singleton_races::integration_55_b_graphql_execute_sql_singleton_insert_race",
+        "integration_singleton_races::integration_55_c_graphql_create_doogat_singleton_insert_race",
+        "integration_singleton_races::integration_55_d_cli_vs_pgwire_singleton_insert_race",
+        "singleton_cross_process_create::two_concurrent_ddb_create_on_singleton_converge_on_one_row"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2538": {
+      "tests": [
+        "integration_warnings_update::integration_56_a_rest_create_titled_warnings_empty",
+        "integration_warnings_update::integration_56_b_rest_create_omitted_title_title_from_template_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2548": {
+      "tests": [
+        "integration_warnings_update::integration_56_a_rest_create_titled_warnings_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2558": {
+      "tests": [
+        "integration_warnings_update::integration_56_b_rest_create_omitted_title_title_from_template_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2572": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2579": {
+      "tests": [
+        "integration_warnings_update::integration_57_a_graphql_create_titled_extensions_warnings_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2586": {
+      "tests": [
+        "integration_warnings_update::integration_57_b_graphql_create_omitted_title_title_from_template_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2606": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2617": {
+      "tests": [
+        "integration_warnings_update::integration_58_a_graphql_update_warnings_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2628": {
+      "tests": [
+        "cli_update_app_error::cli_update_missing_id_reports_app_error",
+        "cross_transport_error::delete_unknown_id_reports_not_found_on_both_transports",
+        "cross_transport_error::read_unknown_id_reports_not_found_on_both_transports",
+        "integration_warnings_update::integration_58_b_graphql_update_missing_id_not_found"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2635": {
+      "tests": [
+        "integration_warnings_update::integration_58_c_rest_update_warnings_empty",
+        "rest::rest_crud_lifecycle"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2648": {
+      "tests": [
+        "cross_transport_error::delete_unknown_id_reports_not_found_on_both_transports",
+        "integration_warnings_update::integration_58_d_rest_update_missing_id_not_found",
+        "rest::rest_get_unknown_id_returns_404"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2659": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2667": {
+      "tests": [
+        "rest::rest_typed_create_populates_typed_columns"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2680": {
+      "tests": [
+        "rest::rest_create_malformed_fields_returns_400"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2698": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2739": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2750": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2761": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2772": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2778": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2789": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2800": {
+      "tests": [
+        "typed_where_filter::typed_where_filter_completeness"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2817": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2826": {
+      "tests": [
+        "concurrent_writes::concurrent_cli_update_processes_lose_no_commit"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2847": {
+      "tests": [
+        "integration_write_lock_races::integration_61_b_concurrent_cli_and_graphql_write_lock",
+        "server_mutations::sync_during_writes_serialized_through_actor"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2886": {
+      "tests": [
+        "integration_sync::integration_21_clone_reindex_reads_pushed_note",
+        "sync_crdt::two_node_fast_forward_sync"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:2900": {
+      "tests": [
+        "sync_crdt::non_overlapping_edits_merge_cleanly"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2918": {
+      "tests": [
+        "sync_crdt::frontmatter_conflict_creates_fm_crdt_file"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2937": {
+      "tests": [
+        "sync_crdt::concurrent_tag_additions_both_survive"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2956": {
+      "tests": [
+        "sync_crdt::overlapping_body_edits_resolved_by_crdt"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:2976": {
+      "tests": [
+        "integration_crdt_conflicts::integration_26_reference_section_conflict"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3002": {
+      "tests": [
+        "multi_device::concurrent_edits_same_doogat"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3028": {
+      "tests": [
+        "sync_crdt::sync_output_reports_resurrected_count"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3056": {
+      "tests": [
+        "integration_crdt_conflicts::integration_27c_three_way_conflicted_merge"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3097": {
+      "tests": [
+        "collision::add_add_collision_both_doogats_survive",
+        "collision::add_add_collision_resolves_in_single_commit"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3155": {
+      "tests": [
+        "collision::add_add_collision_both_doogats_survive"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3168": {
+      "tests": [
+        "multi_device::bundle_full_bootstrap"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3181": {
+      "tests": [
+        "integration_bundle::integration_28_delta_bundle_target_export",
+        "multi_device::airgapped_delta_transfer"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3193": {
+      "tests": [
+        "bundle_import_conflict_recovery::bundle_import_recovers_real_conflict_and_reimport_is_noop"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3215": {
+      "tests": [
+        "integration_update_bin::integration_29_update_bin_help_and_rollback",
+        "sql_lifecycle::transaction_rollback_via_cli"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3225": {
+      "tests": [
+        "integration_sql_no_match::integration_30_where_id_no_match_semantics",
+        "sql_lifecycle::alter_table_add_column",
+        "sql_lifecycle::alter_table_rename_column",
+        "sql_lifecycle::bulk_delete",
+        "sql_lifecycle::bulk_update",
+        "sql_lifecycle::drop_table_cascade"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (no-match-semantics half only)"
+    },
+    "tests/integration.sh:3258": {
+      "tests": [
+        "integration_sql_no_match::integration_30_f1_composite_unique_cli_rejection"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3272": {
+      "tests": [
+        "attachments::attach_and_list",
+        "attachments::detach_removes_file"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3284": {
+      "tests": [
+        "integration_nosql_cli::integration_32_nosql_cli_commands"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3298": {
+      "tests": [
+        "integration_compact_stats::integration_33_compact_byte_stats_report",
+        "multi_device::compact_creates_recoverable_backup",
+        "multi_device::compacted_node_resolves_second_conflict",
+        "multi_device::stale_node_resync_after_compaction"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (byte-stats-report half only)"
+    },
+    "tests/integration.sh:3347": {
+      "tests": [
+        "sql_lifecycle::multi_row_insert"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3355": {
+      "tests": [
+        "sql_lifecycle::transaction_commit_via_cli",
+        "sql_lifecycle::transaction_rollback_via_cli"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3366": {
+      "tests": [
+        "integration_hyphenated_type::integration_36_hyphenated_type_create_table",
+        "sql_lifecycle::install_meeting_minutes_type"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3374": {
+      "tests": [
+        "junction_tables::junction_table_round_trip"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3390": {
+      "tests": [
+        "fix::fix_verbose_reports_title_noncompliant"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3398": {
+      "tests": [
+        "fix::fix_migrate_rewrites_zones"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3407": {
+      "tests": [
+        "integration_binary_lww::integration_40_binary_asset_lww",
+        "multi_device::hlc_lww_picks_later_writer"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3464": {
+      "tests": [
+        "sync_crdt::sync_auto_registers_node_when_none_exists"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3488": {
+      "tests": [
+        "title_template_references::membership_title_resolves_from_referenced_doogats",
+        "title_template_references::typedef_with_bad_dotted_path_is_rejected"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3516": {
+      "tests": [
+        "alter_column_type::narrowing_rejects_with_row_count_message",
+        "alter_column_type::widens_varchar_to_text_and_accepts_longer_values"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3563": {
+      "tests": [
+        "cascade_delete::delete_rejected_by_not_null_references_cli_issue_10",
+        "integration_typed_write_cli::integration_48_typed_write_blockers_and_cascade"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (CREATE INDEX + CASCADE + cycle-detection halves only)"
+    },
+    "tests/integration.sh:3626": {
+      "tests": [
+        "cli_create_fk_freshness::create_link_after_category_in_separate_process_succeeds_without_reindex",
+        "integration_typed_write_cli::integration_49_unify_typed_write_paths"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3674": {
+      "tests": [
+        "cascade_delete::cascade_delete_cleans_owned_junction_when_parent_deleted",
+        "integration_typed_write_cli::integration_44_l_cli_create_auto_junction"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3697": {
+      "tests": [
+        "cli_create_fk_freshness::create_link_after_category_in_separate_process_succeeds_without_reindex"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.sh:3720": {
+      "tests": [
+        "integration_id_poison::integration_62_id_minting_no_same_second_collision"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.sh:3746": {
+      "tests": [
+        "integration_id_poison::integration_63_poison_file_graphql_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:85": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:52"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:212": {
+      "tests": [
+        "integration_graphql_jink::integration_17j1_jink_schema_create_tables"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:252": {
+      "tests": [
+        "integration_graphql_jink::integration_17j2_jink_config_singleton_and_link_crud"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:283": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:243"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:302": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:262"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:307": {
+      "tests": [
+        "integration_graphql_server::integration_18c_graphql_tag_queries"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:324": {
+      "tests": [
+        "integration_graphql_server::integration_18c2_updated_at_created_at_fields"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:343": {
+      "tests": [
+        "integration_graphql_server::integration_18d_search_filter_by_type_and_tag"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:370": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:335"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:408": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:377"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:456": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:429"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:488": {
+      "tests": [
+        "integration_graphql_server::integration_18g_normalize_query_implicit_and_lowercase"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:506": {
+      "tests": [
+        "integration_graphql_server::integration_18h_in_query_field_filter_and_error_class"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:573": {
+      "tests": [
+        "integration_graphql_server::integration_18i_in_query_substring_and_references_title"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:603": {
+      "tests": [
+        "integration_graphql_server::integration_18z_update_delete_no_match_parity"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:636": {
+      "tests": [
+        "integration_graphql_server::integration_18z2_execute_batch_atomicity"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:660": {
+      "tests": [
+        "integration_graphql_server::integration_18z3_update_doogat_tag_semantics"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:690": {
+      "tests": [
+        "integration_graphql_server::integration_18z4_sql_feature_coverage_pins"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:720": {
+      "tests": [
+        "integration_graphql_server::integration_18z5_search_limit_boundary_pins"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:743": {
+      "tests": [
+        "integration_graphql_server::integration_18z6_alter_table_add_column_in_typedefs_introspection"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:756": {
+      "tests": [
+        "integration_graphql_server::integration_18z7_graphql_schema_introspection_contract"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:784": {
+      "tests": [
+        "integration_graphql_jink::integration_18z8_jink_category_membership_port"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:821": {
+      "tests": [
+        "integration_graphql_jink::integration_18z9_jink_quotes_saved_searches_pinned_results_config_port"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:880": {
+      "tests": [
+        "integration_graphql_jink::integration_18z10_jink_composite_unique_and_batch_delete_port"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:912": {
+      "tests": [
+        "integration_rest_pgwire::integration_19_rest_sort_parameter"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1006": {
+      "tests": [
+        "integration_rest_pgwire::integration_20_compact_custom_backup_path",
+        "integration_rest_pgwire::integration_20_maintenance_mutation",
+        "integration_rest_pgwire::integration_20_nosql_endpoints",
+        "integration_rest_pgwire::integration_20_pgwire_boolean_type",
+        "integration_rest_pgwire::integration_20_sql_engine_error_descriptive",
+        "rest::rest_get_unknown_id_returns_404",
+        "serve::graphql_introspection_hides_internal_tables",
+        "server_mutations::compact_force_mutation",
+        "server_mutations::compact_mutation_returns_result",
+        "server_mutations::compact_no_backup_mutation",
+        "server_mutations::sync_mutation_no_remote_returns_error"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1100": {
+      "tests": [
+        "subscriptions::ws_payload_auth_subscribe_receive"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1105": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1189"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1118": {
+      "tests": [
+        "integration_graphql_refs::integration_38b_rest_structured_references_object"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (REST-references half only; test passes)"
+    },
+    "tests/integration.ps1:1136": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1222"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1161": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1248"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1192": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1283"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1202": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1293"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1224": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1316"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1231": {
+      "tests": [
+        "integration_graphql_refs::integration_38c2_boolean_coercion"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (boolean-coercion half only; test passes)"
+    },
+    "tests/integration.ps1:1255": {
+      "tests": [
+        "integration_graphql_refs::integration_38d_distinct_typed_query"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (test passes)"
+    },
+    "tests/integration.ps1:1267": {
+      "tests": [
+        "integration_graphql_refs::integration_38e_groupby_aggregate"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (test passes)"
+    },
+    "tests/integration.ps1:1286": {
+      "tests": [
+        "integration_graphql_batch::integration_38f_execute_batch_multi_statement"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (test passes)"
+    },
+    "tests/integration.ps1:1309": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1407"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1334": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1429"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1361": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1457"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1403": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1498"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1432": {
+      "tests": [
+        "integration_orderby_base_fields::integration_42b_orderby_base_fields_deterministic_pagination"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1507": {
+      "tests": [
+        "integration_sql_writes::integration_43_sql_insert_defaults_date_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1526": {
+      "tests": [
+        "integration_sql_writes::integration_43_d_sql_constraint_enforcement"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1600": {
+      "tests": [
+        "integration_junction_sync::integration_44_e1_join_pin_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1615": {
+      "tests": [
+        "integration_junction_sync::integration_44_j_auto_junction_atomic_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1648": {
+      "tests": [
+        "integration_junction_sync::integration_44_k_create_doogat_auto_junction"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1669": {
+      "tests": [
+        "integration_junction_sync::integration_44_m_parent_junction_cleanup_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1703": {
+      "tests": [
+        "integration_typed_write_polish::integration_44_ddl_response_consistency"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1743": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:1848"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:1768": {
+      "tests": [
+        "integration_typed_write_polish::integration_45_g13_title_template_omit"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1788": {
+      "tests": [
+        "integration_typed_write_polish::integration_45_g12_intra_batch_ignore_surviving_id"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1814": {
+      "tests": [
+        "integration_tags_filter::integration_45_g11_tags_filter_nullable_operators"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1861": {
+      "tests": [
+        "integration_write_recovery::integration_45_a1_cross_mutation_parity_after_unique_failure"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1881": {
+      "tests": [
+        "integration_write_recovery::integration_45_a3_cross_table_isolation_after_unique_failure"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1900": {
+      "tests": [
+        "integration_write_recovery::integration_45_r10_restrict_blocks_sql_and_graphql_delete"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1934": {
+      "tests": [
+        "integration_write_recovery::integration_45_a2_ghost_row_survives_server_restart"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1964": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed) <!-- banner-only line, nothing to port; see 49.1-49.4 -->"
+    },
+    "tests/integration.ps1:1971": {
+      "tests": [
+        "integration_error_codes::integration_49_1_unique_violation_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:1993": {
+      "tests": [
+        "integration_error_codes::integration_49_2_not_null_violation_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2005": {
+      "tests": [
+        "integration_error_codes::integration_49_3_createmany_error_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2014": {
+      "tests": [
+        "integration_error_codes::integration_49_4_createmany_intra_batch_error_extensions_code"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2026": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed) <!-- banner-only line, nothing to port; see 50a/50b -->"
+    },
+    "tests/integration.ps1:2027": {
+      "tests": [
+        "integration_alter_rename::integration_50a_alter_rename_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2036": {
+      "tests": [
+        "integration_alter_rename::integration_50b_mysql_rename_alias_rejected_graphql"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2046": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2050": {
+      "tests": [
+        "integration_singleton_flow::integration_51_a_singleton_graphql_flow"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2117": {
+      "tests": [
+        "integration_singleton_flow::integration_52_b_graphql_alter_set_drop_singleton_reload"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2155": {
+      "tests": [
+        "integration_singleton_flow::integration_53_c_singleton_default_values_auto_seed"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2166": {
+      "tests": [
+        "integration_singleton_parity::integration_54_d_cross_protocol_singleton_duplicate_parity"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2268": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2366"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2270": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2376"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2303": {
+      "tests": [
+        "integration_singleton_races::integration_55_b_graphql_execute_sql_singleton_insert_race"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2335": {
+      "tests": [
+        "integration_singleton_races::integration_55_c_graphql_create_doogat_singleton_insert_race"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2364": {
+      "tests": [
+        "integration_singleton_races::integration_55_d_cli_vs_pgwire_singleton_insert_race"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2432": {
+      "tests": [
+        "integration_singleton_races::integration_55_b_graphql_execute_sql_singleton_insert_race",
+        "integration_singleton_races::integration_55_c_graphql_create_doogat_singleton_insert_race",
+        "integration_singleton_races::integration_55_d_cli_vs_pgwire_singleton_insert_race",
+        "singleton_cross_process_create::two_concurrent_ddb_create_on_singleton_converge_on_one_row"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2449": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2460": {
+      "tests": [
+        "integration_warnings_update::integration_56_a_rest_create_titled_warnings_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2469": {
+      "tests": [
+        "integration_warnings_update::integration_56_b_rest_create_omitted_title_title_from_template_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2485": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2491": {
+      "tests": [
+        "integration_warnings_update::integration_57_a_graphql_create_titled_extensions_warnings_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2503": {
+      "tests": [
+        "integration_warnings_update::integration_57_b_graphql_create_omitted_title_title_from_template_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2526": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2606"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2534": {
+      "tests": [
+        "integration_warnings_update::integration_58_a_graphql_update_warnings_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2549": {
+      "tests": [
+        "integration_warnings_update::integration_58_b_graphql_update_missing_id_not_found"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2558": {
+      "tests": [
+        "integration_warnings_update::integration_58_c_rest_update_warnings_empty"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2570": {
+      "tests": [
+        "integration_warnings_update::integration_58_d_rest_update_missing_id_not_found"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2578": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2584": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2667"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2592": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2680"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2606": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2698"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2649": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2739"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2660": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2750"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2671": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2761"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2683": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2772"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2689": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2778"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2700": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2789"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2713": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2800"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2732": {
+      "tests": [],
+      "aliases": [],
+      "scaffolding": true,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2741": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2826"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2767": {
+      "tests": [
+        "integration_write_lock_races::integration_61_b_concurrent_cli_and_graphql_write_lock"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2809": {
+      "tests": [
+        "integration_sync::integration_21_clone_reindex_reads_pushed_note"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2823": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2900"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2842": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2918"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2861": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2937"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2880": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:2956"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2900": {
+      "tests": [
+        "integration_crdt_conflicts::integration_26_reference_section_conflict"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:2926": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3002"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2953": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3028"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:2983": {
+      "tests": [
+        "integration_crdt_conflicts::integration_27c_three_way_conflicted_merge"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3026": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3097"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3081": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3155"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3096": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3168"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3110": {
+      "tests": [
+        "integration_bundle::integration_28_delta_bundle_target_export"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3125": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3193"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3144": {
+      "tests": [
+        "integration_update_bin::integration_29_update_bin_help_and_rollback"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3155": {
+      "tests": [
+        "integration_sql_no_match::integration_30_where_id_no_match_semantics",
+        "sql_lifecycle::bulk_delete",
+        "sql_lifecycle::bulk_update"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (no-match-semantics half only)"
+    },
+    "tests/integration.ps1:3205": {
+      "tests": [
+        "integration_sql_no_match::integration_30_f1_composite_unique_cli_rejection"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3218": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3272"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3235": {
+      "tests": [
+        "integration_nosql_cli::integration_32_nosql_cli_commands"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3252": {
+      "tests": [
+        "integration_compact_stats::integration_33_compact_byte_stats_report"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (byte-stats-report half only)"
+    },
+    "tests/integration.ps1:3301": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3347"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3310": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3355"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3323": {
+      "tests": [
+        "integration_hyphenated_type::integration_36_hyphenated_type_create_table"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3333": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3374"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3354": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3390"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3363": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3398"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3372": {
+      "tests": [
+        "help::help_create_app_prints_guide",
+        "help::help_no_topic_lists_guides",
+        "help::help_unknown_topic_fails"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3387": {
+      "tests": [
+        "integration_binary_lww::integration_40_binary_asset_lww"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3438": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3464"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3466": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3488"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3498": {
+      "tests": [],
+      "aliases": [
+        "tests/integration.sh:3516"
+      ],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3538": {
+      "tests": [
+        "integration_typed_write_cli::integration_48_typed_write_blockers_and_cascade"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (CREATE INDEX + CASCADE + cycle-detection halves only)"
+    },
+    "tests/integration.ps1:3595": {
+      "tests": [
+        "integration_typed_write_cli::integration_49_unify_typed_write_paths"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3633": {
+      "tests": [
+        "integration_typed_write_cli::integration_44_l_cli_create_auto_junction"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3654": {
+      "tests": [
+        "cli_create_fk_freshness::create_link_after_category_in_separate_process_succeeds_without_reindex"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE (pre-existing, no port needed)"
+    },
+    "tests/integration.ps1:3678": {
+      "tests": [
+        "integration_id_poison::integration_62_id_minting_no_same_second_collision"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    },
+    "tests/integration.ps1:3703": {
+      "tests": [
+        "integration_id_poison::integration_63_poison_file_graphql_warning"
+      ],
+      "aliases": [],
+      "scaffolding": false,
+      "status": "DONE"
+    }
+  },
+  "verified_test_revision": "32aa8845edf3167d8c8d40058689a0668013a103"
+}

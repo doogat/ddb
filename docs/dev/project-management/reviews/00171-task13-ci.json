@@ -1,0 +1,47 @@
+{
+  "replacement_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+  "base_sha": "32aa8845edf3167d8c8d40058689a0668013a103",
+  "full_validation_run": 33991344845,
+  "full_validation_url": "https://github.com/doogat/ddb/actions/runs/33991344845",
+  "status": "completed: success",
+  "shell_files_present": true,
+  "push_succeeded": true,
+  "historical_push_failure_reconciled": true,
+  "local_build": {
+    "exit": 0,
+    "duration_s": 42.71
+  },
+  "local_clippy": {
+    "exit": 0,
+    "duration_s": 0.58
+  },
+  "local_test_ci": {
+    "exit": 0,
+    "cli_passed": 42,
+    "core_passed": 1555,
+    "server_passed": 222,
+    "failed": 0,
+    "ignored": 0,
+    "core_duration_s": 952.78
+  },
+  "qwen": {
+    "dispatch": "419e2b0c",
+    "preflight_outcome": "healthy",
+    "memory_pressure_level": 1,
+    "exact_diff_verified": true,
+    "output": "dev/local/reviews/00171-task13-qwen.md"
+  },
+  "push_test_run": 33991275129,
+  "push_test_url": "https://github.com/doogat/ddb/actions/runs/33991275129",
+  "platform_observation": {
+    "linux-e2e": "success",
+    "linux-clippy": "success",
+    "linux-core": "success",
+    "macos-full": "success",
+    "windows-full": "success",
+    "mark-validated": "success"
+  },
+  "push_test_conclusion": "success",
+  "smoke_e2e_step": "success",
+  "green_evidence": "dev/local/reviews/00171-task13-ci-green.json"
+}

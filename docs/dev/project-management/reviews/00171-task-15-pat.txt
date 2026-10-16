@@ -1,0 +1,5 @@
+CLOSURE | resolved | "test.yml's new `Smoke test (e2e)` step runs only the 30 `smoke_*` tests (of 565)... replace the `smoke_` step and the five `--exact` steps with one `cargo test -p ddb-e2e` step" | diff replaces the `Smoke test (e2e)` step and all five `--exact` steps with a single unfiltered `cargo test -p ddb-e2e` "E2E tests" step
+CLOSURE | resolved | "drop the `DDB_BIN` env (nothing under tests/ reads it)" | all six `env: DDB_BIN: ...` blocks removed along with their steps
+CLOSURE | resolved | "fix the test.yml sentence at AGENTS.md:116" | AGENTS.md line updated to "the full Rust e2e suite (including reused smoke scenarios)" replacing the "five targeted e2e cases" wording
+
+LOW | AGENTS.md:116 | "the full Rust e2e suite (including reused smoke scenarios)" is a slightly odd phrase since smoke scenarios aren't "reused" from anywhere else in this file's context, just part of the suite | "the full Rust e2e suite" alone is simpler and equally accurate

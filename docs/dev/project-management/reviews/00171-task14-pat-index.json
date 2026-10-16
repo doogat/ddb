@@ -1,0 +1,411 @@
+{
+  "sha": "c8b72bd9126c83d054264ce6ac3738e8f6d0abda",
+  "base": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+  "valid_partitions": 21,
+  "tally": {
+    "LOW": 7
+  },
+  "user_override": "User requested Codex perform remaining per-task reviews on Sonnet behalf to avoid quota wait. Full PRD fresh-review boundary remains mandatory.",
+  "partitions": [
+    {
+      "index": 1,
+      "name": "docs",
+      "bytes": 35155,
+      "dispatch_id": "fa16da59",
+      "session_id": "426f2ae1-0978-4c27-842d-a8cf4e2273b6",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-01-docs.correction-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-01-docs.md",
+      "resume": true,
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": false,
+        "findings": [
+          {
+            "severity": "LOW",
+            "file": "docs/src/technical/walkthrough.md:430",
+            "issue": "Claims \"Both groups run in CI on Linux, macOS, and Windows as part of Tier 2,\" but this diff's own AGENTS.md text says test.yml (push, which runs the `smoke_` scenarios) is a single-job Linux run, and cross-platform validation only happens nightly via full-validation.yml \u2014 the platform-coverage claim contradicts the adjacent doc it's meant to summarize.",
+            "fix": "Narrow the claim: state smoke_ runs on every push (Linux) and full cross-platform coverage (Linux/macOS/Windows) happens nightly via full-validation.yml, matching AGENTS.md's Tier 2 description."
+          },
+          {
+            "severity": "LOW",
+            "file": "CONTRIBUTING.md:21",
+            "issue": "Changes the Setup section's quickstart command from `cargo test` to `cargo test-ci`, a behavior-guidance change unrelated to the assigned shell-script/testing-reference rewrite (task scope was CONTRIBUTING.md:42-43).",
+            "fix": "Revert this line or, if intentional, note it separately from the shell-deletion task since it isn't part of the 4-file mandate being replaced."
+          },
+          {
+            "severity": "LOW",
+            "file": "CONTRIBUTING.md:47",
+            "issue": "\"Run the Tier 1 local gate after every task\" and the PR-process checklist (\"Ensure the Tier 1 local gate and required CI checks pass\") rewrite testing guidance well beyond the stated 42-43 line target, duplicating/extending AGENTS.md's tier policy into a file the task didn't scope for that change.",
+            "fix": "Keep this partition's CONTRIBUTING.md edit limited to the 4-file-mandate paragraph; move the broader Tier1/Tier2 policy rewrite to a separate, explicitly scoped change if wanted."
+          },
+          {
+            "severity": "LOW",
+            "file": "README.md:101-102",
+            "issue": "Drops the `integration_`-filtered convenience command entirely (`cargo test -p ddb-e2e integration_`), unlike AGENTS.md's command table which lists both `smoke_` and `integration_` filters side by side.",
+            "fix": "Add `cargo test -p ddb-e2e integration_ # Integration scenarios (Tier 2)` to match AGENTS.md's parallel listing."
+          }
+        ],
+        "closures": []
+      }
+    },
+    {
+      "index": 2,
+      "name": "rust-comments",
+      "bytes": 27084,
+      "dispatch_id": "7dc83fe2",
+      "session_id": "260c754d-a066-443a-9c2c-e85ed582975b",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-02-rust-comments.prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-02-rust-comments.md",
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": false,
+        "findings": [
+          {
+            "severity": "LOW",
+            "file": "tests/e2e/integration_id_poison.rs:4",
+            "issue": "The module doc still opens with `\u00a762 (PRD 00164, ...)` \u2014 a leftover section-number label from the retired shell-script numbering scheme, now orphaned since the line above it (`Port of tests/integration.sh:3720-3796.`) that gave `\u00a762` its context was rewritten away",
+            "fix": "Drop the `\u00a762` prefix (keep `PRD 00164, unified repo-aware ID minting:`) so the comment reads standalone without implying a shell-script cross-reference that no longer exists."
+          },
+          {
+            "severity": "LOW",
+            "file": "tests/e2e/integration_singleton_races.rs:2",
+            "issue": "`Each race includes \u00a755.E's exact row count.` keeps a bare `\u00a755.E` section marker even though the same docstring's shell-script citation (`integration.sh / integration.ps1 \u00a755.B\u2013E`) was removed in this diff, leaving `\u00a755.E` referring to nothing a reader can look up",
+            "fix": "Replace `\u00a755.E` with a plain description (e.g. \"the SINGLETON-race case\") or name the specific test function it refers to, consistent with how the other rewritten docstrings in this same diff dropped their section numbers."
+          },
+          {
+            "severity": "LOW",
+            "file": "ddb-core/src/search_query.rs:1415",
+            "issue": "The rewritten comment embeds a fully-qualified test path, `integration_graphql_server::integration_18h_in_query_field_filter_and_error_class`, as a doc citation; this is exactly the kind of pointer that goes stale silently (renamed test, moved module) since nothing enforces it stays in sync",
+            "fix": "If precision here matters, prefer a shorter, less brittle pointer (e.g. \"see the GraphQL-surface e2e coverage for issue #6 filter/error-class\") over a fully qualified path that can't be verified by the compiler and will rot unnoticed."
+          }
+        ],
+        "closures": []
+      }
+    },
+    {
+      "index": 3,
+      "name": "tests-smoke-sh-01",
+      "bytes": 48581,
+      "dispatch_id": "205bc5cb",
+      "session_id": "ed2b7284-15ac-43e0-a84c-38b1afebe049",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-03-tests-smoke-sh-01.prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-03-tests-smoke-sh-01.md",
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 4,
+      "name": "tests-smoke-sh-02",
+      "bytes": 17046,
+      "dispatch_id": "52c304b8",
+      "session_id": "488bef3e-3f8b-4e9b-a7ce-63f8ae46b2a4",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-04-tests-smoke-sh-02.prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-04-tests-smoke-sh-02.md",
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 5,
+      "name": "tests-smoke-ps1-01",
+      "bytes": 45527,
+      "dispatch_id": "8c27fa40",
+      "session_id": "5587ac91-19a4-4fac-84d0-6300c2fd85ef",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-05-tests-smoke-ps1-01.prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-05-tests-smoke-ps1-01.md",
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 6,
+      "name": "tests-smoke-ps1-02",
+      "bytes": 28929,
+      "dispatch_id": "48ab3034",
+      "session_id": "914cd880-7790-4218-b020-9acd54f4d651",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-06-tests-smoke-ps1-02.prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-06-tests-smoke-ps1-02.md",
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 7,
+      "name": "tests-integration-sh-01",
+      "bytes": 44385,
+      "dispatch_id": "9656961e",
+      "session_id": "8d02d264-cdab-4401-a055-0b6aad7f7112",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-07-tests-integration-sh-01.prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-07-tests-integration-sh-01.md",
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 8,
+      "name": "tests-integration-sh-02",
+      "bytes": 44705,
+      "dispatch_id": "fb5ac0be",
+      "session_id": "79393a76-c195-44f3-b2d5-53af46240a05",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-08-tests-integration-sh-02.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-08-tests-integration-sh-02.md",
+      "resume": true,
+      "superseded_dispatch_id": "bac56346",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 9,
+      "name": "tests-integration-sh-03",
+      "bytes": 46382,
+      "dispatch_id": "2efaaafd",
+      "session_id": "0572b4e5-f985-44e9-b408-df366a3405b4",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-09-tests-integration-sh-03.prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-09-tests-integration-sh-03.md",
+      "actual_reviewer": "sonnet",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 10,
+      "name": "tests-integration-sh-04",
+      "bytes": 44409,
+      "dispatch_id": "21368055",
+      "session_id": "6bba257b-1d36-47be-8dc0-92bd6fde86eb",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-10-tests-integration-sh-04.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-10-tests-integration-sh-04.md",
+      "superseded_dispatch_id": "39278e40",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 11,
+      "name": "tests-integration-sh-05",
+      "bytes": 46561,
+      "dispatch_id": "403f43c9",
+      "session_id": "ecef4fae-e7c8-4627-b079-0b98251b3f39",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-11-tests-integration-sh-05.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-11-tests-integration-sh-05.md",
+      "superseded_dispatch_id": "da0d4adc",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 12,
+      "name": "tests-integration-sh-06",
+      "bytes": 47878,
+      "dispatch_id": "6e7e6fcd",
+      "session_id": "0a0e637d-5308-45c3-b42b-ef6369ba5d9e",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-12-tests-integration-sh-06.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-12-tests-integration-sh-06.md",
+      "superseded_dispatch_id": "bdfee68d",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-parent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 13,
+      "name": "tests-integration-sh-07",
+      "bytes": 35790,
+      "dispatch_id": "2108b107",
+      "session_id": "432ce558-1d74-4db5-840a-0e405d25707f",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-13-tests-integration-sh-07.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-13-tests-integration-sh-07.md",
+      "superseded_dispatch_id": "21b60ba9",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 14,
+      "name": "tests-integration-ps1-01",
+      "bytes": 43670,
+      "dispatch_id": "50d6f7b4",
+      "session_id": "173106b2-73db-46eb-89df-5cbb829f4341",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-14-tests-integration-ps1-01.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-14-tests-integration-ps1-01.md",
+      "superseded_dispatch_id": "2ea56b3c",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 15,
+      "name": "tests-integration-ps1-02",
+      "bytes": 44428,
+      "dispatch_id": "35c0ffd9",
+      "session_id": "24a12927-f4d9-442f-b534-cf6894d07644",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-15-tests-integration-ps1-02.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-15-tests-integration-ps1-02.md",
+      "superseded_dispatch_id": "74e4e68c",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 16,
+      "name": "tests-integration-ps1-03",
+      "bytes": 45203,
+      "dispatch_id": "94320706",
+      "session_id": "6874beb3-9ebb-43e1-bff6-3b17fe3d4f3e",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-16-tests-integration-ps1-03.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-16-tests-integration-ps1-03.md",
+      "superseded_dispatch_id": "5fbf330a",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-parent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 17,
+      "name": "tests-integration-ps1-04",
+      "bytes": 44086,
+      "dispatch_id": "d721d266",
+      "session_id": "7c86130c-6b93-4f7c-aee1-03f6ab80e03c",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-17-tests-integration-ps1-04.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-17-tests-integration-ps1-04.md",
+      "superseded_dispatch_id": "6181150c",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 18,
+      "name": "tests-integration-ps1-05",
+      "bytes": 44846,
+      "dispatch_id": "8ac7141a",
+      "session_id": "0769f11c-8cea-43ce-b18b-650a3824d3be",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-18-tests-integration-ps1-05.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-18-tests-integration-ps1-05.md",
+      "superseded_dispatch_id": "0b205186",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 19,
+      "name": "tests-integration-ps1-06",
+      "bytes": 46420,
+      "dispatch_id": "5a1529f4",
+      "session_id": "b675abbd-995d-417e-8601-14b3d48e50c2",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-19-tests-integration-ps1-06.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-19-tests-integration-ps1-06.md",
+      "superseded_dispatch_id": "67a87f30",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 20,
+      "name": "tests-integration-ps1-07",
+      "bytes": 45447,
+      "dispatch_id": "092dd08c",
+      "session_id": "e2df8bb2-233a-44a0-99bd-2361c7492639",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-20-tests-integration-ps1-07.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-20-tests-integration-ps1-07.md",
+      "superseded_dispatch_id": "c247bbd2",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-parent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    },
+    {
+      "index": 21,
+      "name": "tests-integration-ps1-08",
+      "bytes": 15088,
+      "dispatch_id": "834b3f30",
+      "session_id": "c2d9c4ec-f4c0-40e9-8bac-5af921cf3d43",
+      "prompt": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/pat14-21-tests-integration-ps1-08.codex-prompt.md",
+      "report": "/Users/bob/git/src/github.com/doogat/ddb/dev/local/reviews/00171-task14-pat-21-tests-integration-ps1-08.md",
+      "superseded_dispatch_id": "4e33fd32",
+      "reviewer": "codex",
+      "user_authorized_substitution": true,
+      "actual_reviewer": "codex-isolated-agent",
+      "parsed": {
+        "no_findings": true,
+        "findings": [],
+        "closures": []
+      }
+    }
+  ]
+}

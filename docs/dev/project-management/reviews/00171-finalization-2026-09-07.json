@@ -1,0 +1,17 @@
+{
+  "status": "00171 done with maintainer-accepted deferrals",
+  "fresh_finalize_session": "/root/finalize_00171",
+  "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+  "newly_accepted_deferrals": 11,
+  "prd_deferrals": 16,
+  "task_attempts_preserved": 16,
+  "batch_completions": 9,
+  "backlog_remaining": 31,
+  "state_phase": "build",
+  "state_next_phase": "build",
+  "retained_prd": "00171-migrate-shell-scenarios-to-e2e-v1.md",
+  "next_prd_selected": false,
+  "next_worker_started": false,
+  "cleanup_files_archived_and_removed": 22,
+  "publication": "Already published at accepted SHA, proven by successful GitHub Test34086467208 and FullValidation34092612666. Redundant final push hit sandbox DNS; escalation was interrupted. No fresh live remote recheck claimed."
+}

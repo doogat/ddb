@@ -1,0 +1,79 @@
+{
+  "sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+  "full_validation_run": 33991344845,
+  "push_test_run": 33991275129,
+  "full_validation_jobs": [
+    {
+      "active": [],
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024425,
+      "name": "linux-core",
+      "status": "completed"
+    },
+    {
+      "active": [],
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024496,
+      "name": "macos-full",
+      "status": "completed"
+    },
+    {
+      "active": [],
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024538,
+      "name": "linux-clippy",
+      "status": "completed"
+    },
+    {
+      "active": [],
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024542,
+      "name": "windows-full",
+      "status": "completed"
+    },
+    {
+      "active": [],
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024551,
+      "name": "linux-e2e",
+      "status": "completed"
+    },
+    {
+      "active": [],
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101381357522,
+      "name": "mark-validated",
+      "status": "completed"
+    }
+  ],
+  "push_test_jobs": [
+    {
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101373835864,
+      "name": "test",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Smoke test (e2e)",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101373836019,
+      "name": "coverage",
+      "status": "completed",
+      "steps": []
+    }
+  ]
+}

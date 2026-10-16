@@ -1,0 +1,290 @@
+{
+  "archive": "dev/local/reviews/00171-task12-13-dispatch-inputs.tar.gz",
+  "files": [
+    {
+      "path": "dev/local/tmp/00171-devon/body-to-title-invocations.log",
+      "sha256": "74b7f6fd91e749bf132fc79e712330ed129a7a81d7aa3f5683be76f5f54cf8a1",
+      "bytes": 560
+    },
+    {
+      "path": "dev/local/tmp/00171-devon/body-to-title-r2-invocations.log",
+      "sha256": "f231702865070543e91045cc3ef22f8f3ebc7a54b6ce1a92e5d7703f5c678c67",
+      "bytes": 560
+    },
+    {
+      "path": "dev/local/tmp/00171-devon/body-to-title-r2.sh",
+      "sha256": "752ab2109c35d10d77a6121d575956969205b3c7ae00d62eb8b554fe962c902c",
+      "bytes": 138
+    },
+    {
+      "path": "dev/local/tmp/00171-devon/body-to-title.sh",
+      "sha256": "752ab2109c35d10d77a6121d575956969205b3c7ae00d62eb8b554fe962c902c",
+      "bytes": 138
+    },
+    {
+      "path": "dev/local/tmp/00171-devon/drop-update.sh",
+      "sha256": "752ab2109c35d10d77a6121d575956969205b3c7ae00d62eb8b554fe962c902c",
+      "bytes": 138
+    },
+    {
+      "path": "dev/local/tmp/00171-devon/insert-value-r2-invocations.log",
+      "sha256": "b76777adc65238c237fe99f1866a88af5ac7b603880738638bb5908fba8ba428",
+      "bytes": 572
+    },
+    {
+      "path": "dev/local/tmp/00171-devon/insert-value-r2.sh",
+      "sha256": "752ab2109c35d10d77a6121d575956969205b3c7ae00d62eb8b554fe962c902c",
+      "bytes": 138
+    },
+    {
+      "path": "dev/local/tmp/00171-devon/insert-value-replay.sh",
+      "sha256": "9658dda09fa339582ecf667033a5d9323e369d51866f29af0840fdf45b267a78",
+      "bytes": 115
+    },
+    {
+      "path": "dev/local/tmp/00171-task12-focused-command.txt",
+      "sha256": "2557d325349b00d804bf57877fb82aa02d0e5d0eb434d9cf54d3b5b616042bcd",
+      "bytes": 525
+    },
+    {
+      "path": "dev/local/tmp/attempt-task-12.json",
+      "sha256": "cf5fdc2a59549e47e92fdc29d4c0b7468f0096035a550ecdc06a45145be33d73",
+      "bytes": 379
+    },
+    {
+      "path": "dev/local/tmp/attempt-task-13.json",
+      "sha256": "c321a0d68c59ba5cf61a9a85f1347b438518216db0aac65fb097af2c20619110",
+      "bytes": 351
+    },
+    {
+      "path": "dev/local/tmp/dispatch-devon-12-round2.txt",
+      "sha256": "5c70870878f6f057a602ac703253478ddf2907a2abc2cecdfed0d0d8c49db3da",
+      "bytes": 32281
+    },
+    {
+      "path": "dev/local/tmp/dispatch-devon-12.txt",
+      "sha256": "6c67e4ba30cbd550693ec9797c9c01abb5b905f07f095c34cf92ffb9b0644744",
+      "bytes": 31039
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-12-gql-restore.txt",
+      "sha256": "2a33fc526ae3a357010770682507e010e16856ff09a3febd76064f62d91a95c6",
+      "bytes": 5797
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-12-partb-fix.txt",
+      "sha256": "3a1b44682d6c20d7debd4c7d7e968569ad103705df81f2efb4366979d9210f1b",
+      "bytes": 23136
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-12-partb.txt",
+      "sha256": "772d9c65e726557ab3a9bccb34184b174fa100ee1e338525d8f26d4255e8db6a",
+      "bytes": 22859
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-12-rest-fix.txt",
+      "sha256": "cf1ca18f050cd928efe00f317f0542f8f8a4824725fcb4a8fcf13485439be0e7",
+      "bytes": 4161
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-12-smoke.txt",
+      "sha256": "aa1e344ddda7e8db74f0947f4b2e904c0bf095a81b7774c32544eab1fd07c5c3",
+      "bytes": 22767
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-12-sync-fix.txt",
+      "sha256": "35df42aa3dd5b8bb9f815d2771dce1d218a5b2c0946f15d20658c8151208574a",
+      "bytes": 23360
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-12.txt",
+      "sha256": "e4adccfad44328b63a6329dccad8ce2ef3d180529b4d51ab36907aa676a6895b",
+      "bytes": 23548
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-13.txt",
+      "sha256": "61b8211e6026fa93baf2e2fd7a728d1b9dc7eb1e7c6e96bd1348e9b091711250",
+      "bytes": 6299
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-checks.txt",
+      "sha256": "3657accd79fd57a675b32b8c72a209bb8f32f29a478372f5676862742a84ec19",
+      "bytes": 2691
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-files.txt",
+      "sha256": "d23f80040d711ab92496fcdd323b348a2981d3c779b6a22b1ce9188768a9e891",
+      "bytes": 307
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-gql-restore-checks.txt",
+      "sha256": "92d569fcbaf99ab65e9b778143eb3fb4261710134b68409e844401e7831eccfb",
+      "bytes": 2181
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-gql-restore-context.txt",
+      "sha256": "c0bce61b991396ca7a68982ec76844c572c6571cfc8afcd018c5c4b70e1bb390",
+      "bytes": 251
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-gql-restore-files.txt",
+      "sha256": "e8b13cc7f0044cc9de310abc4f62817595b0df4ce89e62d631799fce3e34037d",
+      "bytes": 154
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-partb-checks.txt",
+      "sha256": "5769983d60ca253994058ad50aab9ca3d5c5bf4f14606983a2e144d45c9f6a33",
+      "bytes": 2173
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-partb-files.txt",
+      "sha256": "d3f4bdfe835d018cc29d5c68d1ce51021b2ea204733cafba11710e82ecd417ec",
+      "bytes": 136
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-partb-fix-checks.txt",
+      "sha256": "87a146d8404f48c415fde983eb07e8e20308c6b968e657f6a71381b8d399b71d",
+      "bytes": 1792
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-partb-fix-files.txt",
+      "sha256": "b6f0cf65890b9c0d4d2d6e926d839f8404828ec8a678f6599530c2c2d4250484",
+      "bytes": 794
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-rest-checks.txt",
+      "sha256": "f6c7a76107140f85d6d7d698a5b91bf6eafd643ee0a77f5c70a6561d8a47d294",
+      "bytes": 714
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-rest-context.txt",
+      "sha256": "4a52c6a6d5ee997474d12839c6171b92737a9a1b7e2fd2120e4a3d390b4f8923",
+      "bytes": 189
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-rest-files.txt",
+      "sha256": "b7614e53d806fa3d372fc24ad31d7e5dd9233e742b0fe8777f5b374a3e6394ca",
+      "bytes": 60
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-smoke-checks.txt",
+      "sha256": "62d998db78bb4560a12b304dc8e0d67370fe297db062d7764d46371253301cdf",
+      "bytes": 2130
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-smoke-files.txt",
+      "sha256": "5f51ac14913204243079da0e6c5f58af8e104f99c8cd70ea1e30f27775cd693f",
+      "bytes": 87
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-sync-failures.txt",
+      "sha256": "38e1c37864f87e84a468f1f0abbf1d49e925daf5222385ed8eda2da3c7c6433b",
+      "bytes": 2473
+    },
+    {
+      "path": "dev/local/tmp/ivan-12-sync-fix-files.txt",
+      "sha256": "9cd4e7515ec0275c87ff229d2bc173e64d252671195a7c18da42d8c994cf312b",
+      "bytes": 218
+    },
+    {
+      "path": "dev/local/tmp/ivan-13-checks.txt",
+      "sha256": "c443529816377ea12f8642ca7a58930108205903eed0e794cf9a0652ae76d703",
+      "bytes": 2629
+    },
+    {
+      "path": "dev/local/tmp/ivan-13-context.txt",
+      "sha256": "50347dd30c05c0d495750a61d561b9b449a2c218dcfff8f9448968a085b499d0",
+      "bytes": 428
+    },
+    {
+      "path": "dev/local/tmp/ivan-13-files.txt",
+      "sha256": "3be035ab63da5bf5e964b8c1825e538356e530ed6d1b4850dddc86a20ef0649a",
+      "bytes": 147
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-acceptance.txt",
+      "sha256": "6c58f1d3f3ec96752a502efb6ff16fb8a5f4cc535668e25ea81d4437232de53f",
+      "bytes": 270
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-cli-diff.txt",
+      "sha256": "6bb7650966f0463f9bf21d2cc9c1e2cd32d39462142ea4f51bf23adcc61c57f1",
+      "bytes": 22614
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-cli-prompt.md",
+      "sha256": "f7c05108f83023745e163bb9ce5ec1f0a1fd9fca19e080d1d166bf56f6a56751",
+      "bytes": 32379
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-description.txt",
+      "sha256": "ce5debd9ee0d6581a693fae2b5323349dc0729419834ce6d209625ec472ecbac",
+      "bytes": 3733
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-groups.json",
+      "sha256": "db82388026253f19ce4b665af4180e815103cb00437ee6852a7838241ace5440",
+      "bytes": 1788
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-prior-2.txt",
+      "sha256": "3b495f9f2d5e984ab98b32f7cdbcde6e0e7017bf55e1d99f3b56d3c3ad0dba28",
+      "bytes": 710
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-races-diff.txt",
+      "sha256": "30fda110270a4ba44020f63e6d7faf8bd97481952d6cf026d82a06a12618ae96",
+      "bytes": 15703
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-races-prompt.md",
+      "sha256": "bf6319e9eb294b03449f855a6580176d6e9f933b48107782bd219075de002c7c",
+      "bytes": 25468
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-rerun-2.md",
+      "sha256": "c9c722cb987180cb92f83e43ffcbdd46ba698478463c8069abf2485d2a721cc5",
+      "bytes": 4135
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-schema-diff.txt",
+      "sha256": "beba2dccda368e921aff8a958f1180a95f89e18af65d1c82a83570648b289bab",
+      "bytes": 21136
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-schema-prompt.md",
+      "sha256": "d95320f99edaac0952c636cb24d2cd8cf09c7defb4cacbd7d52739b626161fca",
+      "bytes": 30901
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-server-diff.txt",
+      "sha256": "e99fc0ed85a1b8b6a4a0366ce9a807afefbb31de625598b31413265327486470",
+      "bytes": 33348
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-server-prompt.md",
+      "sha256": "6494853099a784b972ffd87acd00cc54e1f34b816ce79aa67bac75ed6e442a46",
+      "bytes": 43113
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-subject.txt",
+      "sha256": "39454deb726c17723ecf0503bfbfa40b9531d6d6ab151c84d7847bf759f0a369",
+      "bytes": 197
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-sync-diff.txt",
+      "sha256": "48f11a91f839ef2c59a8067a6ee08fd2b9939a2990245a6cfaaad44073b5cd8e",
+      "bytes": 11190
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-sync-prompt.md",
+      "sha256": "2db8b14e7b9e38e36894aa6ac07c3c70c2656bc8c31333beb487e72b8bde66e5",
+      "bytes": 20955
+    },
+    {
+      "path": "dev/local/tmp/review-task-12-verification.txt",
+      "sha256": "7bb53a89ceab3ac5d1cfb533081867f8081dd23cbe249f21e49b84e5720465e9",
+      "bytes": 2002
+    }
+  ]
+}

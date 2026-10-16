@@ -1,0 +1,186 @@
+[
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "Phase 1's explicit acceptance criterion \"after a poison file lands, a create AND a search both succeed and each carries a skip AppWarning ... the warning reaches CLI stderr (write_warnings) and the GraphQL warnings extension (forward_warnings)\" is unmet for search (and for read/sql/discovery/batch/delete/utility). ensure_fresh() computes and returns Vec<ConsistencyWarning>, but every verb except create, update, and apply_schema calls self.ensure_fresh()?; as a bare statement and discards the returned warnings. search was never routed through the app-contract facade this PRD requires it to use.",
+    "file": "ddb-core/src/service/search.rs",
+    "reason": "Confirmed real and deliberately narrowed at design time. Severity adjudicated HIGH, not CRITICAL: the three reviewers who read the implementation (Bob, Alice, Eve) all rated it below Blake's blind CRITICAL, skips are not silent (per-file tracing::warn! still fires), and the index is a derived cache with git as source of truth. Routing search through an AppOutput envelope is the whole subject of backlog PRD 00176 route-search-through-contract; bolting one on here would duplicate and pre-empt that reshape. Additionally, Eve proved the criterion is unimplementable as literally written: the warning is consume-once (the first verb's ensure_fresh reindexes and leaves the index fresh), so a create AND a subsequent search cannot both carry it for one poison event. Deferred to 00176; the overstated invariants.md I5 wording is corrected in this cycle's rework so the docs stop claiming the broader guarantee."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "The 256 KiB check runs only after the entire blob is decoded, split into a line vector, and frontmatter is copied; adversarial input can still consume unbounded read/scan memory, so the PRD's bounded-reindex-cost requirement is unmet.",
+    "file": "ddb-core/src/parser/mod.rs",
+    "reason": "Confirmed: MAX_FRONTMATTER_BYTES bounds serde_yaml parse cost only. Read cost is inherent to git2's blob model - the blob is fully materialized in memory by git2 before any ddb code sees it, so a parse-boundary cap cannot bound it and no cheap fix exists inside this PRD's scope. The PRD success metric 'reindex cost stays bounded' is therefore met on the CPU/parse dimension and not on the memory/read dimension. Recorded as a documented partial-miss rather than silently claimed; a real fix needs a streaming blob reader, which is a separate PRD."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "ReadPool bypasses freshness and rebuild-lock coordination, so reads can still observe tables while another connection has dropped them, contradicting the claimed all-transport cold-start robustness.",
+    "file": "ddb-server/src/read_pool.rs",
+    "reason": "Already an explicitly accepted residual gap: named in the design doc's Risks section, listed in docs/src/technical/invariants.md I10 as an accepted gap, and independently placed in KNOWN by Eve. ReadPool readers set skip_stale_check deliberately and trust WAL visibility. Not a regression and not in this PRD's test matrix (N concurrent ddb create, not N concurrent pool reads)."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "ConsistencyWarning::{UnreadableFile,MalformedYaml}.error and the FFI RebuildWarningRecord.message carry unbounded strings derived from untrusted, externally-synced content; summarize_reindex_warnings caps the warning count to one but not that one message's size, and the FFI reindex() path forwards the full, uncapped per-file list.",
+    "file": "ddb-core/src/ffi/driver.rs",
+    "reason": "Documented as an accepted residual in the design doc's Risks section before implementation began ('Warning message strings have no length cap ... Not fixed here (non-blocking)'). A truncation pass is a follow-up, not a regression in this diff."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "The Phase 1 task text literally specifies 'Add From<ConsistencyWarning> for AppWarning', but the implementation instead adds free functions summarize_reindex_warnings/describe_consistency_warning/describe_consistency_warning_code that summarize a Vec<ConsistencyWarning> into at most one AppWarning.",
+    "file": "ddb-core/src/app_contract/output.rs",
+    "reason": "Deliberate and design-reviewed. A From impl maps one warning to one AppWarning, which directly contradicts the PRD's own Risk-section mitigation ('attach a single summary AppWarning (count + see ddb doctor) on the verb envelope') for the large-corrupt-corpus case. The free-function shape implements the PRD's intent; only the task's shorthand phrasing differs."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "Pre-existing `! $DDB ...` smoke assertions retain the documented errexit false-pass hazard but are outside this diff's surgical scope.",
+    "file": "tests/smoke.sh",
+    "reason": "Pre-existing in sections this PRD never touched. The build session found and fixed the instance its own new section 32 introduced (commit 886ea27) and deliberately left the older ones alone under the surgical-changes rule; Eve independently placed them in KNOWN on the same grounds. The class is real and worth a dedicated sweep PRD, not an unrelated PRD's rework cycle."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "The new resilience tests add roughly 1,680 repetitive lines to an already monolithic 6,034-line module; split them into focused resilience, locking, and schema-version test modules with shared fixtures.",
+    "file": "ddb-core/src/indexer/tests/mod.rs",
+    "reason": "The module was already 4,354 lines before this PRD, so the monolith is pre-existing and this diff widened rather than created it. Splitting a 6,034-line test module is a mechanical but wide refactor touching every test in it, with real risk of silently dropping a test during the move - disproportionate inside an unrelated PRD's rework cycle. The 800-line rule's real target (source files) is addressed this cycle for indexer/mod.rs."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "E2E flake attribution (lead 2) is plausible but unproven - run cargo build -p ddb-cli && cargo test -p ddb-e2e twice at base commit 6bb1617 and confirm the same sporadic 1-of-451 server/port failures occur pre-PRD.",
+    "file": "tests/e2e/common.rs",
+    "reason": "Both Alice and Eve independently judged the attribution plausible: the two flaking tests live in files this diff never touches, a different test failed on each run, both pass in isolation, and the new rebuild lock is scoped per temp-dir index directory so it cannot couple unrelated tests. Alice additionally identified the mechanism - common.rs allocates ports via a bind-then-release TcpListener check, a TOCTOU window under 451-way parallelism. Proving it needs two full e2e runs at the base commit, which is Tier 2 work by this repo's own two-tier Definition of Done. Deserves its own PRD: today the suite cannot distinguish a real regression from contention."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "integration.sh section 63 (GraphQL warning extension) has never executed locally per the two-tier DoD - confirm the first nightly full-validation.yml run on the pushed master passes section 63.",
+    "file": "tests/integration.sh",
+    "reason": "Execution of tests/integration.sh is explicitly delegated to Tier 2 CI by the repo's Definition of Done; authoring it was the per-PRD deliverable and that is done. The build session did verify section 63 green by extracting it into a standalone harness and running it against a real ddb binary and a real server. Nightly CI owns the in-script run."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "tests/integration.ps1 section 63 and tests/smoke.ps1 section 32 have never run anywhere (no PowerShell on the build host) - confirm the first Windows CI execution passes, specifically $LASTEXITCODE after & $DDB reindex --strict and the guarded Stop-Process/Remove-Item teardown.",
+    "file": "tests/integration.ps1",
+    "reason": "No pwsh resolves on this host, so local execution is impossible, not skipped. Parity was maintained by line-for-line review against the bash originals, and that review did catch two real defects (a duplicated byte[] conversion and an unguarded Remove-Item under a file-wide ErrorActionPreference=Stop). Windows CI is the first real execution by construction; this is the standard arrangement for the .ps1 ports in this repo."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "critical",
+    "issue": "R1/R2: No regression test for the CRITICAL rebuild-lock guard scope bug. The \"indistinguishable\" gap assumption is false: the loser's drop deletes tables the winner is already using, causing observable data loss or `no such table` panics.",
+    "file": "N/A",
+    "reason": "The CRITICAL severity rests on a false premise about the current code and is discarded at that severity; the underlying missing-test half is NOT discarded and is being fixed this cycle. Verified directly at ddb-core/src/indexer/mod.rs:197-241: _guard is bound at function scope and held across drop, SCHEMA_DDL recreate, and the user_version stamp, so the failure mode Carl describes is the PRE-FIX behavior that commit 0537b18 already removed. Eve independently traced the durable-data consequence and refuted it too: drops are stamp-gated and row population is both lock- and stamp-gated, so even the buggy guard scope could not destroy populated rows - the residual was transient-only. Bob rated the same issue medium and Alice high, both framing it as a testing-policy gap rather than a live defect, which is the accurate reading."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "low",
+    "issue": "Cannot statically verify: Tier 1 gates, PowerShell scenarios, or the attribution of the two nondeterministic E2E failures to pre-existing parallelism/port contention",
+    "file": "N/A",
+    "reason": "Not a finding about the work. Bob runs in a static-only sandbox and his own prompt instructs him to emit this line for any criterion needing runtime verification. The Tier 1 gates it names were in fact run by the build session (build clean, clippy --workspace --all-targets clean, cargo test-ci 1804 passed 0 failed) and the counts are recorded in the review file."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "Poison eviction derives the ID from the filename, but supported frontmatter IDs can differ; the stale row then survives, while a newly added poison filename can evict an unrelated row with that ID",
+    "file": "ddb-core/src/indexer/rebuild.rs:107",
+    "reason": "Verified real in shape but pre-existing in class, and deferred at the cycle-2 rework cap. Read directly: the new poison eviction (rebuild.rs:112) calls crate::parser::extract_id_from_path, which is a bare Path::file_stem (parser/mod.rs:972-977) - the SAME keying the pre-existing delete leg has always used (rebuild.rs:190). So the new code inherits the existing delete-leg identity model rather than introducing a new one. Eve independently placed it in KNOWN on exactly these grounds and noted a full rebuild self-heals it. Reaching it needs a hand-authored file whose frontmatter id differs from its stem, which ddb's own writes never produce. Bob alone rated it high (1/5). Deferred to batch end as cap-overflow; the honest fix is one follow-up PRD that makes BOTH legs key off the indexed identity, not a rework-cycle patch to the poison leg alone."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "`incremental_reindex` is 90 lines (53-142), over the 50-line guideline; task 15's 13-line poison-id filter (lines 107-117) could be extracted into a named helper the same way task 18 extracted `evict_doogats`/`parse_changed_path` from this file.",
+    "file": "ddb-core/src/indexer/rebuild.rs",
+    "reason": "Real and cosmetic. Cap-overflow at cycle 2; no behavior change available from the fix."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "Poison eviction can report success and advance HEAD despite incomplete materialized cleanup because type lookup errors are converted to `None` and `unmaterialize_data_doogats` ignores query/delete errors",
+    "file": "ddb-core/src/indexer/rebuild.rs:148",
+    "reason": "Real error-swallowing in evict_doogats (the `.ok().flatten()` at rebuild.rs:151-159). Pre-existing shape shared with the delete leg; the index is a derived cache that a full rebuild heals. Cap-overflow at cycle 2; belongs with the same identity/eviction follow-up PRD as the HIGH above."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "The new schema-version drop loop duplicates `drop_all_tables`, silently discards row-decoding failures, and interpolates unescaped identifiers from `sqlite_master`",
+    "file": "ddb-core/src/indexer/schema_version.rs:44",
+    "reason": "The duplication half was inspected this cycle and deliberately left: Eve verified the two copies differ in FK-pragma placement and transactional context, so unifying them risks the destructive path for no behavioral gain. The identifier interpolation reads names from sqlite_master (not user input at that boundary), which is why it is medium not a SQL-injection critical. Cap-overflow; Carl raised the same duplication independently."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "Skip-path deduplication uses quadratic `Vec::contains` despite explicitly supporting large corrupt corpora; a `HashSet` preserves the first description while simplifying membership checks",
+    "file": "ddb-core/src/app_contract/output.rs:41",
+    "reason": "Real O(n^2) on the warning-summary path. Bounded in practice by the warning count, not the corpus size. Cap-overflow at cycle 2."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "The new task-15 regression tests are roughly 150-180 lines each, exceeding the 50-line limit and repeating fixture construction and survival assertions",
+    "file": "ddb-core/src/indexer/tests/mod.rs:6247",
+    "reason": "Same class as the cycle-1 settled deferral on this file (the 6,034-line test monolith): pre-existing and widened, not created, by this PRD. Splitting it is a wide mechanical refactor with real risk of dropping a test, disproportionate inside a rework cycle."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "Strict incremental reindex still applies genuine deletions before discovering a poison file and returning `Err`; acceptable only as a documented non-user-facing limitation because production never passes `true` and moving deletion after indexing would break rename-shaped delete/add changes",
+    "file": "ddb-core/src/indexer/rebuild.rs:97",
+    "reason": "Bob himself filed it as KNOWN with that reasoning, and Eve independently proved the proposed one-line fix UNSAFE: indexing before delete-eviction deletes a just-indexed row when a deleted ddb/_typedef/X.md and an added ddb/X.md share a file stem. incremental_reindex's strict flag is never true on any user-facing path (the one production call site passes false; ddb reindex --strict routes through the full-rebuild path). Documented in the CHANGELOG parenthetical. Carl's 'fold evict_doogats after batch_index_changes' is the same fix and is refuted by the same argument."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "Fold evict_doogats calls after batch_index_changes to prevent partial state on strict abort",
+    "file": "ddb-core/src/indexer/rebuild.rs",
+    "reason": "Duplicate of the strict-deletion-ordering entry above, proposed as the fix rather than the defect. Refuted on safety grounds by Eve: the fold deletes a just-indexed row for rename-shaped delete/add change-sets sharing a file stem."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "Extract table-drop loop to a free function shared by Index::drop_all_tables and schema_version",
+    "file": "ddb-core/src/indexer/mod.rs",
+    "reason": "Same finding as Bob's schema_version duplication entry above, from the other file's side. Deliberately not unified: the copies differ in FK-pragma placement and transactional context (PRD 00157 comment), so sharing one helper risks the destructive path."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "`ddb reindex`'s new per-line warning print (lines 65-70) iterates raw undeduplicated `report.warnings`, so the documented double-report wart shows one malformed file as two near-identical lines",
+    "file": "ddb-cli/src/commands/maintenance.rs",
+    "reason": "Cosmetic. Root cause (one malformed file produces a parallel_parse warning AND a collect_consistency_warnings warning) is pre-existing and already documented at docs/src/technical/indexer.md:108-114. Cap-overflow at cycle 2."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "The newly public `describe_consistency_warning` API has no rustdoc describing its stable transport-facing purpose",
+    "file": "ddb-core/src/app_contract/mod.rs:21",
+    "reason": "Real doc gap on a newly-public fn, raised independently by Bob and Eve. One-line fix, but it lands after the rework cap; carried to batch end rather than reopening a converged cycle."
+  }
+]

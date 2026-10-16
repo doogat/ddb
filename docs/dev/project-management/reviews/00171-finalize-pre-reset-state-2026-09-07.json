@@ -1,0 +1,499 @@
+{
+  "phase": "done",
+  "next_phase": "done",
+  "prd": "00171-migrate-shell-scenarios-to-e2e-v1.md",
+  "catchup_mode": "run",
+  "doubt_reviewer": "codex",
+  "consensus_engine": "legacy",
+  "phases_completed": [
+    "review"
+  ],
+  "cycle": 2,
+  "rework_cap": 2,
+  "replan_count": 0,
+  "tasks_total": 0,
+  "tasks_completed": 0,
+  "batch": {
+    "id": "202607161128",
+    "mode": "autopilot",
+    "completed_prds": [
+      "00163-git-tree-construction-correctness-v1.md",
+      "00200-make-merge-tree-three-way-v1.md",
+      "00164-unify-id-minting-v1.md",
+      "00165-deterministic-crdt-resolution-v1.md",
+      "00166-make-hlc-load-bearing-v1.md",
+      "00167-sync-collision-reassignment-atomicity-v1.md",
+      "00169-poison-file-reindex-resilience-v1.md",
+      "00170-id-throughput-ceiling-decision-v1.md",
+      {
+        "filename": "00171-migrate-shell-scenarios-to-e2e-v1.md",
+        "cycles": 2,
+        "autonomous_decisions": 17,
+        "escalated_decisions": 0,
+        "tasks_completed": 16,
+        "tasks_total": 16
+      }
+    ],
+    "catchup_completed_at": "2026-08-17T02:59:13Z",
+    "catchup_head_sha": "34138fe35ab1569bbe6e51ac0189a135ac812704",
+    "parks_consecutive": 0
+  },
+  "qwen_gate_failures_consecutive": 0,
+  "qwen_breaker": {
+    "tripped": false,
+    "after_task": null,
+    "failed_tasks": [],
+    "batch_id": "202607161128"
+  },
+  "schema_version": 1,
+  "codex_probe": {
+    "batch_id": "202607161128",
+    "verdict": "healthy",
+    "backend": "codex",
+    "detail": null,
+    "checked_at": "2026-08-15T08:44:06Z"
+  },
+  "design_mode": "run",
+  "deferred_decisions": [
+    {
+      "cycle": 1,
+      "issue": "Multi-process race tests not marked #[serial] as PRD explicitly requires (mitigated by per-test port/tempdir isolation)",
+      "file": "tests/e2e/integration_singleton_races.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Existing reviewed design deliberately uses independent TempDirs/ports and order-independent race results instead of serial markers. Retain parallel execution; record the stale PRD wording.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "Several newly-ported multi-process race test functions run well past the 50-line guideline (integration_61_b_concurrent_cli_and_graphql_write_lock \u2248145 lines, integration_55_d_cli_vs_pgwire_singleton_insert_race \u2248152 lines)",
+      "file": "tests/e2e/integration_write_lock_races.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Keep cohesive multi-process scenario orchestration and HEAD durability checks; shared operations are already helpers. The project Rust instructions have no hard function-size limit, and broad test fragmentation is outside this coverage repair.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "The mechanical fail-first/tautology finder for this cycle reports \"Checked 0 test function(s)\" and \"replay: skipped (the diff touches no test function)\" despite ~60 new/changed e2e test files \u2014 the automated tautology net did not fire for this diff",
+      "file": "N/A",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Installed mechanical checks are explicitly Python-only. Extending shared tooling is outside 00171; this cycle used Rust source audits and same-HEAD runtime evidence.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] PRD says the \u00a755/\u00a761 race sections are \"marked serial\"; no serial marker exists (no serial_test, no shared mutex) \u2014 design doc lines 92-100 and 289 supersede this with per-test tempdir + unique-port isolation, and every race outcome is order-independent (SINGLETON forces exactly one winner; 61.B requires every write to land), so a serial marker would only slow the suite.",
+      "file": "tests/e2e/integration_singleton_races.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Existing reviewed design deliberately uses independent TempDirs/ports and order-independent race results instead of serial markers. Retain parallel execution; record the stale PRD wording.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] PRD spawn helper \"polls /health\"; `ServerGuard::start` (tests/e2e/common.rs:81-102) waits on the stderr \"listening on\" lines plus a 50 ms sleep, no /health poll \u2014 design lines 84-89 reused the existing guard unchanged, the health round trip is pinned by `serve::health_returns_ok`, and the internals are 00188's to change.",
+      "file": "tests/e2e/common.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Design deliberately reuses existing ServerGuard readiness; health_returns_ok tests its lifecycle. Internals are reserved for 00188, outside this test migration.",
+      "status": "deferred"
+    },
+    {
+      "issue": "Nightly macOS ConnectionReset in a migrated e2e test, cause unconfirmed. integration_warnings_update::integration_58_a_graphql_update_warnings_empty failed once at c8b72bd in Nightly 34020494801 at tests/e2e/common.rs:186. At the reviewed SHA it passed on all three platforms with no code change, no retry, no skip. Eve traced the readiness path and found it sound for HTTP; cause remains unconfirmed. Alice established that task 15 moved the full e2e suite from nightly-only to every push, so this flake exposure increased as a direct result of this PRD rework, with no resilience added. Severity contested: Blake (blind) 1/4 rates it high; Alice, Bob and Eve rate it low with PRD 00188 named as the durable home.",
+      "severity": "high",
+      "consensus": "1/4",
+      "file": "tests/e2e/common.rs:186",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "status": "deferred",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-01",
+      "followup_prd": "00188-ephemeral-serve-test-mode-v1.md"
+    },
+    {
+      "issue": "Section 38b2b link order does not exclude a MAX(id) resolver. reference_raw_id.rs:164 mints alpha, beta, gamma ascending so category_ids[2] is the largest id; :195 links [2],[0],[1] and :215 asserts category_ids[2]. Confirmed by reading. Fix: link the middle id first and assert category_ids[1], which excludes min-id, max-id and last-linked at once.",
+      "severity": "medium",
+      "consensus": "1/4",
+      "file": "tests/e2e/reference_raw_id.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-02"
+    },
+    {
+      "issue": "Section 38b2b object resolver unpinned on multiple junction rows. The deleted bash asserted BOTH the scalar and the object resolver on three junction rows; the new test queries only category_id, so an object resolver drifting from the scalar row is unpinned. Bears on the PRD No lost semantics success metric.",
+      "severity": "medium",
+      "consensus": "1/4",
+      "file": "tests/e2e/reference_raw_id.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-03"
+    },
+    {
+      "issue": "The new 73-line test duplicates the seed loop at reference_raw_id.rs:320-338 verbatim apart from table and variable names, and exceeds the 50-line guideline. Confirmed by reading. One seed_labeled_rows helper closes both.",
+      "severity": "medium",
+      "consensus": "2/4",
+      "file": "tests/e2e/reference_raw_id.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-04"
+    },
+    {
+      "issue": "Section 18d2 pins the hit count but never which row survived. serve.rs:1854-1860 asserts hits.len()==1 and totalCount==1 and never reads hits[0][title], so an eq returning the wrong single row passes. Confirmed by reading.",
+      "severity": "low",
+      "consensus": "1/4",
+      "file": "tests/e2e/serve.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-05"
+    },
+    {
+      "issue": "common::stdout is a noun name for a newly crate-wide action helper that runs ddb and asserts success; it reads as std::io::stdout or the assert_cmd stdout assertion. Rename to run_stdout or capture_stdout and update the three importers.",
+      "severity": "low",
+      "consensus": "2/4",
+      "file": "tests/e2e/common.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-06"
+    },
+    {
+      "issue": "Redundant predicate in integration_nosql_cli.rs: the contains predicate is strictly implied by the new line-equality check on the same captured output, and the clone exists only to feed it.",
+      "severity": "low",
+      "consensus": "1/4",
+      "file": "tests/e2e/integration_nosql_cli.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-07"
+    },
+    {
+      "issue": "Unused DDB_BIN remains at .github/workflows/full-validation.yml:61; the initial zero-hit search skipped hidden directories. The cycle-2 discard is superseded; restore this low-severity cleanup.",
+      "severity": "low",
+      "consensus": "2/4",
+      "file": ".github/workflows/full-validation.yml",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-08"
+    },
+    {
+      "issue": "Corrected Eve: strengthen the two sibling section 18z8 nonempty-ID assertions with the existing assert_doogat_id helper.",
+      "severity": "medium",
+      "consensus": "1/4",
+      "file": "tests/e2e/integration_graphql_jink.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-09"
+    },
+    {
+      "issue": "Corrected Eve: assess redundant seeding sleeps; preserve the known repo-aware ID throughput ceiling. Claimed three-second improvement is unverified; no minting-code change is authorized.",
+      "severity": "low",
+      "consensus": "1/4",
+      "file": "tests/e2e/reference_raw_id.rs",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-10"
+    },
+    {
+      "issue": "Corrected Eve first-reference-order documentation check ran. data-model.md and indexer.md lack the explicit rule; server.md does not state multi-reference singular scalar/object selection order. Clarify existing behavior without changing policy.",
+      "severity": "low",
+      "consensus": "1/4",
+      "file": "docs/src/technical/server.md",
+      "status": "deferred",
+      "cycle": 2,
+      "type": "maintainer-accepted-deferral",
+      "reason": "Explicit maintainer acceptance on 2026-09-07 at 876a153; remaining tail sweep waived. Deferred and unfixed, not refuted or repaired. Authority: 00171-acceptance-2026-09-07.md.",
+      "accepted_at": "2026-09-07T16:26:50.502538+00:00",
+      "accepted_sha": "876a153b4039128f8052526629773fa189058c71",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md",
+      "authority": "yes, that is what I want to do, proceed",
+      "acceptance_id": "00171-C2-11"
+    }
+  ],
+  "design_doc": "dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-design.md",
+  "tasks": [],
+  "work_start_sha": "b1e785395fb1e5d7043fbc725cc5786f62a6417e",
+  "repo_root": "/Users/bob/git/src/github.com/doogat/ddb",
+  "contract_card": "step: PRD 00171 finalized at 876a153 with maintainer acceptance, 11 cycle-2 findings deferred, tail sweep waived.\n\ninvariants: Batch 202607161128 has 9 completed PRDs; 16 attempts and 16 PRD deferrals preserved. No implementation, new review/CI, selection, or worker launch. Preserve unrelated work and both FT stashes.\n\nnext: Installed more_prds reset hands off to build/build, then STOP by maintainer request with 31 backlog PRDs remaining. Only a future manual invocation may select. Parent verifies and performs scoped cleanup. Publication is established by successful exact-SHA CI and matching local origin/master; redundant push recheck was sandbox-blocked and escalation interrupted.",
+  "qwen_preflight": {
+    "batch_id": "202607161128",
+    "verdict": "healthy",
+    "detail": null,
+    "checked_at": "2026-08-16T23:52:33Z"
+  },
+  "review_lenses": {
+    "consensus": "done",
+    "blind": "done",
+    "doubt": "done",
+    "ui": "failed",
+    "fable": "done"
+  },
+  "doubts_rubric_verdicts": [
+    {
+      "rule_id": "D1",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D2",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D3",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D4",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D5",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D1",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D2",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D3",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D4",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D5",
+      "verdict": "pass",
+      "source": "fable"
+    }
+  ],
+  "autonomous_decisions": [
+    {
+      "cycle": 1,
+      "issue": "Review diff/commit range for PRD 00171 bundles unrelated PRD 00202 HLC-logic commits (git_ops/read.rs, tests.rs) \u2014 a process/traceability issue, not a defect in 00171's own work",
+      "file": "ddb-core/src/git_ops/read.rs",
+      "severity": "low",
+      "consensus": "3/4",
+      "action": "discard",
+      "reason": "Git history identifies interleaved, separately authored PRD 00202 commits; not scope creep by 00171. Full work_start_sha is intentionally preserved."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] Per-push CI coverage dropped: `test.yml`'s new `Smoke test (e2e)` step runs only the 30 `smoke_*` tests (of 565), yet ~26 of smoke.sh's 56 sections were mapped to pre-existing modules outside that filter (delete_backlinks, tags, checkboxes, folder_namespace, search_links, link_kinds, rename, sql_lifecycle, alter_table_rename, cli_create_fk_freshness, inline_zone, discover, fix, sequence, help, cascade_delete, sql_expressions_test, set_flag, date_default, alter_column_type, schema_apply, poison_file_reindex, cli_create_unregistered_type, cli_update_app_error, sync_crdt); smoke.sh ran those on every push, now they run nightly only, contradicting the PRD's \"CI keeps identical coverage\" \u2014 .github/workflows/test.yml:45-48 \u2014 replace the `smoke_` step and the five `--exact` steps with one `cargo test -p ddb-e2e` step (the full suite took 223 s in the 5cf4c36 linux-e2e job), drop the `DDB_BIN` env (nothing under tests/ reads it), and fix the test.yml sentence at AGENTS.md:116.",
+      "file": ".github/workflows/test.yml",
+      "severity": "high",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a742 totalCount assertions dropped: bash 1505/1517 asserted `totalCount == 1`; the cited \"ALREADY COVERED\" tests request the field but never read it \u2014 tests/e2e/serve.rs:1408-1410 (`filter_base_field_title_eq`) and :1443-1445 (`filter_base_field_title_contains`) \u2014 add `assert_eq!(result[\"data\"][\"tasks\"][\"totalCount\"].as_i64().unwrap(), 1)` to each.",
+      "file": "tests/e2e/serve.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a744.E1 JOIN pin degraded to single-character containment: `row_str.contains('a')`/`contains('1')` also pass on `[\"abc\",\"10\"]`; bash 1699-1700 grepped the quoted tokens \u2014 tests/e2e/integration_junction_sync.rs:35-43 \u2014 parse `rows[0]` as JSON and `assert_eq!(row, json!([\"a\",\"1\"]))`.",
+      "file": "tests/e2e/integration_junction_sync.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a759.A cross-process read-back dropped: bash 2667-2677 read the typed column back through a separate `ddb query` process (its comment names that as the point); the Rust target reads through the same server's executeSql \u2014 tests/e2e/rest.rs:153-154 \u2014 add `repo.ddb().args([\"query\", \"SELECT category FROM item WHERE id = '<id>'\"]).assert().success().stdout(contains(\"books\"))`.",
+      "file": "tests/e2e/rest.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a718d2 eq-exactness fixture lost: bash 341-346 seeded `https://example.com/page` so a prefix/LIKE `eq` would fail; the \"ALREADY COVERED\" test seeds two identical `https://example.com` plus `https://other.org`, so a prefix match still passes \u2014 tests/e2e/serve.rs:1830-1857 (`search_where_filter_materialized_column_eq`) \u2014 change Link B's url to `https://example.com/page` and expect 1 hit / totalCount 1.",
+      "file": "tests/e2e/serve.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a738b2b raw-scalar pin with multiple junction rows lost: bash 1260-1265 linked three categories and asserted `rlcat_id == <first-linked>`; the cited test links one \u2014 tests/e2e/reference_raw_id.rs:112-143 \u2014 add a three-category variant asserting `category_id` equals the first-linked id.",
+      "file": "tests/e2e/reference_raw_id.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a717.J2 numeric-id assertion weakened: bash 217 required `\"message\":\"[0-9]+\"`, Rust asserts `!config_id.is_empty()` \u2014 tests/e2e/integration_graphql_jink.rs:158 \u2014 assert a 14-digit numeric id.",
+      "file": "tests/e2e/integration_graphql_jink.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "PRD checklist unchecked and file still in wip/ despite verifiably complete, CI-green implementation",
+      "file": "dev/local/prds/wip/00171-migrate-shell-scenarios-to-e2e-v1.md",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "PRD is intentionally wip until review converges and a fresh finalize session accepts it."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] Slop: `stdout()` copy-pasted in smoke_core.rs:6, smoke_sql.rs:4, smoke_search.rs:4; the 14-digit-id check re-implemented as `assert_doogat_id` (smoke_sql.rs:12), `is_14_digit_id` (integration_id_poison.rs:40) and inline at integration_nosql_cli.rs:40,88, integration_singleton_parity.rs:61, integration_singleton_races.rs:87,111 \u2014 tests/e2e/common.rs \u2014 move one `stdout()` and one `assert_doogat_id()` there and call them (also closes the \u00a717.J2 item).",
+      "file": "tests/e2e/common.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[VERIFY] Tier 2 has not run on the deletion commit: the green manual dispatch (run 33991344845, 2026-09-05 20:51-21:48, `565 passed; 0 failed; 0 ignored` on linux-e2e and windows-full) is on 5cf4c36, one commit before c8b72bd; only test.yml (run 34016441899, 21 min, green) has run on c8b72bd \u2014 after the next nightly run `gh run list --repo doogat/ddb --workflow=full-validation.yml --limit 1 --json headSha,conclusion,createdAt,updatedAt`; it must show headSha c8b72bd or later, conclusion success, a real duration (\u226545 min), and `gh run view --job <linux-e2e id> --log` must contain `test result: ok. 565 passed; 0 failed; 0 ignored`.",
+      "file": "N/A",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "Live GitHub confirmed the contract-required full validation before deletion and Test after deletion. A fixed duration and old exact test count are not validity gates. Rework will be pushed for fresh CI. Not queued: command shape."
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] \u00a754.D/\u00a755.D psql-absent skip semantic not ported \u2014 moot: the PgWire legs use tokio-postgres (`pgwire_singleton`, `integration_55_d_cli_vs_pgwire_singleton_insert_race`), so no client-absent path exists to degrade; recorded so nobody re-adds a skip.",
+      "file": "tests/e2e/pgwire_singleton.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "Rust PgWire client is a declared dependency; every platform runs the assertions, so no missing-client branch remains."
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] The mapping table cites three reserved slugs that resolve to no test (`integration_49_structured_error_propagation`, `integration_50_alter_table_rename`, `integration_50_cross_process_fk_freshness`; mapping.md:230,235,340,465,538) \u2014 each row documents the slug as intentionally unused for a banner-only section whose assertions map to sub-rows; every other cited target (179 qualified, 112 bare) resolves against `cargo test -p ddb-e2e -- --list` (565 tests).",
+      "file": "dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-mapping.md",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "Mapping explicitly labels these as non-executable banner sections and maps their executable subrows to registered tests."
+    },
+    {
+      "cycle": 2,
+      "issue": "Blake re-raised four cycle-1 settled decisions (PRD still in wip/ with unchecked boxes; \u00a754.D psql-absent skip not ported; no #[serial] markers) plus Bob raised three of the same settled class (serve.rs 2011 lines; rest.rs either-or hedge outside the diff)",
+      "severity": "high/medium/low",
+      "consensus": "1/4",
+      "action": "discarded or settled-deferral per the ledger",
+      "reason": "Cycle 2 decision gate: --ledger-dismiss BLAKE matched none of them because his wording changed, so they were dismissed by gate judgment on issue text plus file and appended to 00171-migrate-shell-scenarios-to-e2e-v1-ledger.json with reasons. Blake is blind to the ledger by construction."
+    },
+    {
+      "cycle": 2,
+      "issue": "Bob: obsolete DDB_BIN env survives on the linux-e2e step of full-validation.yml; and Bob VERIFY: 14-digit-id consolidation completeness unverified outside the touched modules",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discarded - contradicts computed facts / answered by gate-run evidence",
+      "reason": "Cycle 2 decision gate ran both checks itself. rg -n DDB_BIN over the repo excluding dev/local returns zero hits, so the DDB_BIN claim is refuted. rg -n over tests/e2e for the 14-digit shapes shows survivors only in modules PRD 00171 never touched, matching Eve KNOWN 2 and the surgical-change rule; every 00171-authored site named in cycle 1 is consolidated. Bob had no grep in his sandbox and said so."
+    },
+    {
+      "cycle": 2,
+      "issue": "DDB_BIN cycle-2 dismissal superseded after hidden-directory search correction; Eve input isolation repaired in a fresh native Fable child",
+      "severity": "low",
+      "consensus": "2/4",
+      "action": "restored finding; review input corrected",
+      "reason": "Direct rg of .github/workflows/full-validation.yml finds DDB_BIN at line 61. The old search omitted hidden directories. False discard removed from active ledger, full old ledger archived. Corrected Eve raw response and re-consolidation retained; original findings preserved. No code edits, acceptance or state resume; maintainer decision pending."
+    },
+    {
+      "cycle": 2,
+      "timestamp": "2026-09-07T16:26:50.502538+00:00",
+      "issue": "Explicit maintainer acceptance of all 11 remaining 00171 findings and waiver of the remaining tail sweep",
+      "type": "maintainer-acceptance",
+      "action": "Accept 00171 at 876a153 with deferred exceptions; run fresh finalization and stop before 00172",
+      "reason": "I accept 00171 at `876a153` with the remaining assertion gaps, cleanup/documentation findings, and unreproduced macOS flake explicitly deferred. I waive the remaining tail sweep for this PRD. Record those acceptance exceptions, run the fresh finalize gate, mark 00171 done, and stop. No further implementation or review cycles. Explicit reply: yes, that is what I want to do, proceed",
+      "authority": "maintainer",
+      "acceptance_record": "dev/local/reviews/00171-acceptance-2026-09-07.md"
+    }
+  ],
+  "rework_task_ids": []
+}

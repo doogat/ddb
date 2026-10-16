@@ -1,0 +1,9 @@
+{
+  "command": "cargo build",
+  "exit": 0,
+  "sha": "74644b8825e52794f1274b3dcec9875d1a17d808",
+  "summaries": [],
+  "passed": 0,
+  "failed": 0,
+  "skipped": 0
+}

@@ -1,0 +1,82 @@
+[
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "The PRD requires \"merge → resolve → ref-delete runs inside the 00162 write lease\"; it does not. `import_bundle` takes the lock three separate times (`merge_remote`, `commit_merge`, `delete_remote_ref`) with unlocked windows between, and `unbundle_git_objects` writes git objects and `refs/remotes/bundle/*` fully outside the lock.",
+    "file": "ddb-core/src/bundle.rs",
+    "reason": "Design-accepted, recorded in the 00168 design doc Risks section: the two-lock-acquisition gap is the exact gap the already-shipped network sync() path has lived with since 00163, so bundle import inherits an identical, already-accepted risk profile rather than a new one. Bob raised the same point and himself filed the unbundle/fetch leg as KNOWN (explicitly deferred by the design as a side-ref-only preparation leg outside 00168's master merge→resolve→ref-delete scope). Collapsing three re-entrant lock acquisitions into one outer lease is a sync-wide change, not a bundle-import change — it belongs to its own PRD."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "FFI parity gap: `DoogatDriver::import_bundle` returns `Result<(), DdbError>` and discards the report, so the \"true conflict count\" the PRD promises is CLI-only while Transport Impact calls FFI `Guaranteed`.",
+    "file": "ddb-core/src/ffi/driver.rs:262-268",
+    "reason": "Pre-existing FFI signature, explicitly out of scope in the 00168 design doc (\"FFI's import_bundle binding returns SyncReport today and after this change — no signature change downstream, only field values become more honest\"). Widening the FFI return type is a public-interface change requiring the compatibility/deprecation review AGENTS.md mandates; it is a separate PRD, not a rework item. Real gap, tracked at batch end."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "`validate_clean_merge_or_fallback` — named by the PRD at `:538-544` as a site that must \"stop reporting false success\" — is untouched and still `return Ok(0)` when `commit_parent_count < 2` (mod.rs:561).",
+    "file": "ddb-core/src/sync_manager/mod.rs",
+    "reason": "Requirements-vs-design reconciliation. The PRD named this site because, under the OLD CLI-merge design, a conflicted merge produced no commit and this early return was what manufactured the false Ok(0). Under the chosen design there is no CLI merge: conflicts arrive as MergeResult::Conflicts and never reach this branch, so the false-success path the PRD describes no longer exists. Changing the shared network-sync clean-merge validator to hard-fail on a <2-parent commit would alter network sync behavior outside this PRD's scope."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "Pre-existing, surfaced by this PRD's walkthrough: `GitRepo::open` deletes every `.crdt/temp/*` file, so the frontmatter CRDT state conflict resolution writes (sync_manager/mod.rs:368) is wiped by the next process.",
+    "file": "ddb-core/src/git_ops/mod.rs:182",
+    "reason": "Alice flagged it herself as pre-existing and explicitly did not ask for a fix in this PRD. Unrelated to bundle import; belongs to CRDT-state lifecycle work."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "Pre-existing size violation touched by this diff: git_ops/mod.rs is 849 lines (845 before, +4 here) against the 800 max.",
+    "file": "ddb-core/src/git_ops/mod.rs",
+    "reason": "Pre-existing (845 lines before this PRD). This diff adds a 4-line trait delegation arm — the surgical-changes rule forbids splitting an unrelated 845-line file as a side effect. bundle.rs, which THIS diff pushed over the limit, is being fixed in rework."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "The shipped proof-of-work walkthrough demonstrates the headline scenario producing mangled content: the merged body renders as `laptdesktopp body` (character-interleaved CRDT output of \"laptop body\" and \"desktop body\").",
+    "file": "dev/local/walkthroughs/00168-bundle-import-conflict-recovery.md",
+    "reason": "Blake himself scoped it as pre-existing resolver behavior. Character-interleaved Automerge text merge is the CRDT layer's documented behavior, not a bundle-import defect; changing body-merge strategy is a resolver PRD."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "`map_err(|e| DoogatError::Sync(...))` collapses every resolver error, including the retryable `DoogatError::Conflict` that `with_write_lock` returns on lock-acquire timeout and that `commit_merge`'s divergence guard returns; a lock timeout inside `merge_remote` (line 120, unwrapped) still surfaces as `Conflict`, so the same failure reports two different classes depending on where it lands. Preserve `Conflict` and wrap only the rest.",
+    "file": "ddb-core/src/bundle.rs:121-123",
+    "reason": "PARTIALLY IMPLEMENTED BY DESIGN, settled in cycle-1 rework task [D1-3] (commits 01cfc85, 427f920). The substantive defect -- one failure reporting two different classes depending on which call raised it -- IS fixed: both `merge_remote` and `apply_merge_result` now route through the same `bundle_merge_error`. The literal remedy ('preserve Conflict and wrap only the rest') was deliberately NOT implemented, because its premise is false in this codebase. `DoogatError::Conflict` is overloaded: retryable producers are write_lock.rs:72 (lock-acquire timeout) and git_ops/merge.rs:65 (resolve->commit window guard); TERMINAL producers are git_ops/merge.rs:193 (collision loser whose id cannot be rewritten) and sync_manager/mod.rs:502 (binary conflict missing blob OID). Preserving Conflict was implemented first and empirically broke three tests -- conflicting_bundle_import_leaves_repo_clean_on_merge_failure, conflicting_bundle_import_leaves_bundle_ref_reachable_on_merge_failure, and kept_bundle_ref_survives_a_later_import_under_fetch_prune (the regression test for THIS cycle's CRITICAL finding) -- all of which require the terminal collision failure to be reported as `Sync`, which is also the PRD's documented contract. Both classes can arrive through either wrapped call, so they cannot be distinguished at the import boundary without string-sniffing the message (exactly what this PRD removed). Pat (per-task reviewer) independently checked the evidence chain and concurred. DO NOT re-raise 'Conflict is still collapsed' in a later cycle: that is the settled, deliberate outcome."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "`DoogatError::Conflict` is overloaded across a retryable class (write-lock acquire timeout at write_lock.rs:72; the resolve->commit window guard at git_ops/merge.rs:65) and a terminal class (collision loser whose id cannot be rewritten at git_ops/merge.rs:193; binary conflict missing its blob OID at sync_manager/mod.rs:502). A caller that retries on the public CONFLICT category will therefore spin forever on a malformed doogat, and bundle import must now report retryable lock timeouts as `Sync`/Internal to keep the terminal case honest.",
+    "file": "ddb-core/src/git_ops/merge.rs:193",
+    "reason": "NEW finding, discovered during cycle-1 rework task [D1-3] (not raised by any cycle-1 reviewer). Real latent bug, but out of scope for this PRD: `Conflict` maps to a public `CONFLICT` code and `AppErrorCategory::Conflict` (app_contract/error.rs:88), so reclassifying the terminal producers is a public error-shape change requiring the compatibility/deprecation review AGENTS.md mandates, and it touches the shared network-sync resolver rather than bundle import. Needs its own PRD. The tradeoff it forces on bundle import is recorded durably in the CHANGELOG `[Unreleased]` bundle entry and in the `bundle_merge_error` doc comment."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "Size limits crossed by this diff: bundle.rs went 569 -> 828 lines (800 max), and the three new test fns are 96 / 86 / 84 lines (50 max). The dedupe above (~75 lines) plus moving `mod tests` to `bundle/tests.rs` (the `git_ops/tests.rs` precedent) fixes both.",
+    "file": "ddb-core/src/bundle.rs",
+    "reason": "CLOSED EXCEPT FOR ONE DELIBERATE HOLDOUT, settled in cycle-1 rework task [D1-6] (commits a3bc99e, 4d097e2). The file-size half is fully closed: bundle.rs became bundle/mod.rs at 413 lines. Two of the three named test fns came down to 29 and 26 lines via the shared `import_with_unresolvable_collision` fixture. The third, `conflicting_full_bundle_import_resolves_with_real_merge_commit`, remains 84 lines ON PURPOSE: it exercises a SUCCESSFUL conflicted import, so the unresolvable-collision fixture does not fit it, and it is the only test with that setup, so extracting a single-use helper would move lines out of view without improving readability (and would create exactly the one-consumer abstraction the project's simplicity rule forbids). Pat verified the line count independently and endorsed the holdout. Note also that `bundle/tests.rs` is 831 lines, over the nominal 800: the repo's own test files are far larger (git_ops/tests.rs 3318, sync_manager/tests.rs 2084), so the limit does not bind test files in practice here; Pat concurred. DO NOT re-raise either point in a later cycle."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "A third copy of the `temp_repo` test helper exists at ddb-core/src/compaction/tests.rs:5, alongside the copies in bundle/tests.rs and git_ops/tests.rs.",
+    "file": "ddb-core/src/compaction/tests.rs:5",
+    "reason": "Surfaced incidentally by a duplicate-detection hook during cycle-1 rework task [D1-6]; raised by no reviewer and entirely pre-existing. Out of 00168 scope under the surgical-changes rule: consolidating a test helper shared across compaction, git_ops and bundle test modules is a crate-wide test-support change, not a bundle-import change. Recorded so it is not mistaken for something this PRD introduced."
+  }
+]

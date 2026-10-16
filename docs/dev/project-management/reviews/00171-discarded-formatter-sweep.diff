@@ -1,0 +1,2272 @@
+diff --git a/ddb-cli/src/commands/maintenance.rs b/ddb-cli/src/commands/maintenance.rs
+index 2f92be7..cc018e2 100644
+--- a/ddb-cli/src/commands/maintenance.rs
++++ b/ddb-cli/src/commands/maintenance.rs
+@@ -57,7 +57,11 @@ pub(crate) fn compact(
+ 
+ pub(crate) fn reindex(repo: &std::path::Path, strict: bool) -> ddb_core::error::Result<()> {
+     let svc = DoogatService::open(repo)?;
+-    let report = if strict { svc.reindex_strict()? } else { svc.reindex()? };
++    let report = if strict {
++        svc.reindex_strict()?
++    } else {
++        svc.reindex()?
++    };
+     outln!("indexed {} doogats", report.indexed)?;
+     if !report.warnings.is_empty() {
+         outln!("{} warning(s)", report.warnings.len())?;
+diff --git a/ddb-core/src/app_contract/error.rs b/ddb-core/src/app_contract/error.rs
+index 4a9db70..f02a8c6 100644
+--- a/ddb-core/src/app_contract/error.rs
++++ b/ddb-core/src/app_contract/error.rs
+@@ -195,8 +195,14 @@ mod tests {
+         };
+         let app: crate::app_contract::AppError = err.into();
+         assert_eq!(app.code, "SCHEMA_DESTRUCTIVE_BLOCKED");
+-        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Conflict);
+-        assert_eq!(app.message, "plan blocked: risky operations require override");
++        assert_eq!(
++            app.category,
++            crate::app_contract::AppErrorCategory::Conflict
++        );
++        assert_eq!(
++            app.message,
++            "plan blocked: risky operations require override"
++        );
+     }
+ 
+     #[test]
+@@ -211,7 +217,10 @@ mod tests {
+             context: vec![],
+         };
+         let app: crate::app_contract::AppError = err.into();
+-        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Conflict);
++        assert_eq!(
++            app.category,
++            crate::app_contract::AppErrorCategory::Conflict
++        );
+         assert_eq!(app.message, "request requires the override flag");
+     }
+ 
+@@ -224,7 +233,10 @@ mod tests {
+         };
+         let app: crate::app_contract::AppError = err.into();
+         assert_eq!(app.code, "SCHEMA_APPLY_PARTIAL");
+-        assert_eq!(app.category, crate::app_contract::AppErrorCategory::Internal);
++        assert_eq!(
++            app.category,
++            crate::app_contract::AppErrorCategory::Internal
++        );
+         assert_eq!(app.message, "halted after 5 of 9 operations");
+     }
+ 
+diff --git a/ddb-core/src/app_contract/mod.rs b/ddb-core/src/app_contract/mod.rs
+index 119b05a..5bfe8bb 100644
+--- a/ddb-core/src/app_contract/mod.rs
++++ b/ddb-core/src/app_contract/mod.rs
+@@ -11,12 +11,10 @@ mod error;
+ pub use error::{AppError, AppErrorCategory, AppErrorDetail, SCHEMA_UNSUPPORTED_CHANGE};
+ 
+ mod output;
+-pub use output::{AppOutput, AppWarning};
+-pub(crate) use output::{
+-    describe_consistency_warning_code, summarize_reindex_warnings,
+-};
+ #[cfg(test)]
+ pub(crate) use output::REINDEX_SKIPPED_FILES;
++pub(crate) use output::{describe_consistency_warning_code, summarize_reindex_warnings};
++pub use output::{AppOutput, AppWarning};
+ 
+ pub fn describe_consistency_warning(warning: &crate::types::ConsistencyWarning) -> String {
+     output::describe_consistency_warning(warning)
+diff --git a/ddb-core/src/app_contract/output.rs b/ddb-core/src/app_contract/output.rs
+index 85c115a..23e0b92 100644
+--- a/ddb-core/src/app_contract/output.rs
++++ b/ddb-core/src/app_contract/output.rs
+@@ -44,7 +44,8 @@ pub(crate) fn summarize_reindex_warnings(warnings: Vec<ConsistencyWarning>) -> O
+         let path = match warning {
+             ConsistencyWarning::UnreadableFile { path, .. } => path,
+             ConsistencyWarning::MalformedYaml { path, .. } => path,
+-            ConsistencyWarning::CrossZoneDuplicate { .. } | ConsistencyWarning::MissingRequired { .. } => continue,
++            ConsistencyWarning::CrossZoneDuplicate { .. }
++            | ConsistencyWarning::MissingRequired { .. } => continue,
+         };
+         if skip_paths.contains(&path.as_str()) {
+             continue;
+@@ -58,17 +59,29 @@ pub(crate) fn summarize_reindex_warnings(warnings: Vec<ConsistencyWarning>) -> O
+     let message = if skip_paths.len() == 1 {
+         first_description
+     } else {
+-        format!("{first_description} (+{} more; run `ddb reindex` for the full list)", skip_paths.len() - 1)
++        format!(
++            "{first_description} (+{} more; run `ddb reindex` for the full list)",
++            skip_paths.len() - 1
++        )
+     };
+-    Some(AppWarning { code: REINDEX_SKIPPED_FILES, message })
++    Some(AppWarning {
++        code: REINDEX_SKIPPED_FILES,
++        message,
++    })
+ }
+ 
+ pub(crate) fn describe_consistency_warning(w: &ConsistencyWarning) -> String {
+     match w {
+-        ConsistencyWarning::UnreadableFile { path, error } => format!("{path}: unreadable ({error})"),
++        ConsistencyWarning::UnreadableFile { path, error } => {
++            format!("{path}: unreadable ({error})")
++        }
+         ConsistencyWarning::MalformedYaml { path, error } => format!("{path}: malformed ({error})"),
+-        ConsistencyWarning::CrossZoneDuplicate { path, key } => format!("{path}: duplicate key '{key}'"),
+-        ConsistencyWarning::MissingRequired { path, field, .. } => format!("{path}: missing required field '{field}'"),
++        ConsistencyWarning::CrossZoneDuplicate { path, key } => {
++            format!("{path}: duplicate key '{key}'")
++        }
++        ConsistencyWarning::MissingRequired { path, field, .. } => {
++            format!("{path}: missing required field '{field}'")
++        }
+     }
+ }
+ 
+diff --git a/ddb-core/src/bundle/mod.rs b/ddb-core/src/bundle/mod.rs
+index 83d381f..0b0e80d 100644
+--- a/ddb-core/src/bundle/mod.rs
++++ b/ddb-core/src/bundle/mod.rs
+@@ -114,7 +114,11 @@ fn unbundle_git_objects(repo: &impl GitBackend, work_dir: &TempDir) -> Result<()
+ /// refs; a successful import must clear the whole namespace.
+ fn delete_all_bundle_refs(repo: &impl GitBackend) -> Result<()> {
+     let output = std::process::Command::new("git")
+-        .args(["for-each-ref", "--format=%(refname)", "refs/remotes/bundle/"])
++        .args([
++            "for-each-ref",
++            "--format=%(refname)",
++            "refs/remotes/bundle/",
++        ])
+         .current_dir(repo.repo_path())
+         .output()?;
+     if !output.status.success() {
+diff --git a/ddb-core/src/consistency/singleton_sweep.rs b/ddb-core/src/consistency/singleton_sweep.rs
+index e3a6137..8cd004e 100644
+--- a/ddb-core/src/consistency/singleton_sweep.rs
++++ b/ddb-core/src/consistency/singleton_sweep.rs
+@@ -185,8 +185,8 @@ mod tests {
+     use tempfile::TempDir;
+ 
+     use super::*;
+-    use crate::hlc::append_hlc_trailer;
+     use crate::git_ops::GitRepo;
++    use crate::hlc::append_hlc_trailer;
+ 
+     fn temp_repo() -> (TempDir, GitRepo) {
+         let dir = TempDir::new().unwrap();
+@@ -603,7 +603,15 @@ Body for 20260601000000
+         let report = singleton_sweep(&repo, &index, &resolved_at).unwrap();
+ 
+         assert!(report.conflicts_resolved >= 1);
+-        let msg = repo.repo.head().unwrap().peel_to_commit().unwrap().message().unwrap().to_string();
++        let msg = repo
++            .repo
++            .head()
++            .unwrap()
++            .peel_to_commit()
++            .unwrap()
++            .message()
++            .unwrap()
++            .to_string();
+         let trailer_count = msg.lines().filter(|l| l.starts_with("HLC: ")).count();
+         assert_eq!(
+             trailer_count, 1,
+diff --git a/ddb-core/src/crdt_resolver.rs b/ddb-core/src/crdt_resolver.rs
+index 6fc241c..a7dec52 100644
+--- a/ddb-core/src/crdt_resolver.rs
++++ b/ddb-core/src/crdt_resolver.rs
+@@ -1191,7 +1191,10 @@ mod tests {
+             counter: 0,
+             node: "bbbbbbbb".into(),
+         };
+-        assert_eq!(lww_pick(Some(&ours), Some(&theirs), "z", "a"), LwwSide::Theirs);
++        assert_eq!(
++            lww_pick(Some(&ours), Some(&theirs), "z", "a"),
++            LwwSide::Theirs
++        );
+     }
+ 
+     #[test]
+@@ -1282,7 +1285,7 @@ mod tests {
+         let conflicts = vec![ConflictFile {
+             path: "ddb/test.md".into(),
+             ancestor: None,
+-            ours: "zzz body".into(),   // higher content key, but LOWER HLC node
++            ours: "zzz body".into(), // higher content key, but LOWER HLC node
+             theirs: "aaa body".into(), // lower content key, but HIGHER HLC node
+             ours_hlc: Some(ours_hlc),
+             theirs_hlc: Some(theirs_hlc),
+diff --git a/ddb-core/src/ffi/tests.rs b/ddb-core/src/ffi/tests.rs
+index 281e5d7..90d4619 100644
+--- a/ddb-core/src/ffi/tests.rs
++++ b/ddb-core/src/ffi/tests.rs
+@@ -663,7 +663,10 @@ fn apply_schema_creates_declared_type_when_not_dry_run() {
+         .expect("apply should succeed");
+ 
+     assert!(!report.dry_run);
+-    assert!(report.applied, "non-dry-run create must report applied=true");
++    assert!(
++        report.applied,
++        "non-dry-run create must report applied=true"
++    );
+     let create = report
+         .ops
+         .iter()
+diff --git a/ddb-core/src/git_ops/hlc_clock.rs b/ddb-core/src/git_ops/hlc_clock.rs
+index 242ce22..fdded99 100644
+--- a/ddb-core/src/git_ops/hlc_clock.rs
++++ b/ddb-core/src/git_ops/hlc_clock.rs
+@@ -303,8 +303,15 @@ mod tests {
+             let sig = git2::Signature::now("ddb", "ddb@local").unwrap();
+             let parent = raw.head().unwrap().peel_to_commit().unwrap();
+             let tree = parent.tree().unwrap();
+-            raw.commit(Some("HEAD"), &sig, &sig, "legacy commit, no trailer", &tree, &[&parent])
+-                .unwrap();
++            raw.commit(
++                Some("HEAD"),
++                &sig,
++                &sig,
++                "legacy commit, no trailer",
++                &tree,
++                &[&parent],
++            )
++            .unwrap();
+         }
+ 
+         // Precondition: this HEAD carries no HLC trailer.
+diff --git a/ddb-core/src/git_ops/merge.rs b/ddb-core/src/git_ops/merge.rs
+index 5d183fd..3343254 100644
+--- a/ddb-core/src/git_ops/merge.rs
++++ b/ddb-core/src/git_ops/merge.rs
+@@ -60,7 +60,9 @@ impl GitRepo {
+                 .chain(binary.iter().map(|(p, _)| *p))
+                 .collect();
+             if rerun_conflicts.len() != resolved.len()
+-                || !rerun_conflicts.iter().all(|p| resolved.contains(p.as_str()))
++                || !rerun_conflicts
++                    .iter()
++                    .all(|p| resolved.contains(p.as_str()))
+             {
+                 return Err(DoogatError::Conflict(
+                     "merge conflict set changed since resolution (HEAD moved during the \
+@@ -77,7 +79,8 @@ impl GitRepo {
+             // overlay clears every conflict.
+             let tree_oid = merge_index.write_tree_to(&self.repo)?;
+             let tree = self.repo.find_tree(tree_oid)?;
+-            if let Some(theirs_hlc) = crate::hlc::extract_hlc(their_commit.message().unwrap_or("")) {
++            if let Some(theirs_hlc) = crate::hlc::extract_hlc(their_commit.message().unwrap_or(""))
++            {
+                 self.hlc_clock.recv(&theirs_hlc);
+             }
+             let oid = self.create_commit(message, &tree, &[&our_commit, &their_commit])?;
+@@ -409,8 +412,11 @@ impl GitRepo {
+         if let Some(theirs_hlc) = crate::hlc::extract_hlc(their_commit.message().unwrap_or("")) {
+             self.hlc_clock.recv(&theirs_hlc);
+         }
+-        let oid =
+-            self.create_commit(&format!("merge {remote}/{branch}"), &tree, &[&our_commit, &their_commit])?;
++        let oid = self.create_commit(
++            &format!("merge {remote}/{branch}"),
++            &tree,
++            &[&our_commit, &their_commit],
++        )?;
+         self.repo
+             .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+         Ok(MergeResult::Clean(CommitHash(oid.to_string())))
+diff --git a/ddb-core/src/git_ops/mod.rs b/ddb-core/src/git_ops/mod.rs
+index 6f8d7ac..2bb6300 100644
+--- a/ddb-core/src/git_ops/mod.rs
++++ b/ddb-core/src/git_ops/mod.rs
+@@ -259,7 +259,12 @@ impl GitRepo {
+ 
+     /// Single chokepoint for non-merge write commits: tick the machine-local
+     /// HLC clock, stamp its value as a trailer on `message`, and commit.
+-    fn create_commit(&self, message: &str, tree: &git2::Tree, parents: &[&git2::Commit]) -> Result<Oid> {
++    fn create_commit(
++        &self,
++        message: &str,
++        tree: &git2::Tree,
++        parents: &[&git2::Commit],
++    ) -> Result<Oid> {
+         let hlc = self.hlc_clock.tick();
+         let msg = crate::hlc::append_hlc_trailer(message, &hlc);
+         let sig = self.signature()?;
+@@ -312,7 +317,11 @@ impl GitRepo {
+             // Already holding the process lock on this repo — re-entrant call.
+             return f();
+         }
+-        let _os_guard = write_lock::acquire(&self.path.join(".git"), "ddb-write.lock", WRITE_LOCK_TIMEOUT)?;
++        let _os_guard = write_lock::acquire(
++            &self.path.join(".git"),
++            "ddb-write.lock",
++            WRITE_LOCK_TIMEOUT,
++        )?;
+         self.write_lock_depth.set(1);
+         // Reset the depth on scope exit (incl. panic unwind) before the OS
+         // guard drops, so the re-entrant flag never outlives the held lock.
+diff --git a/ddb-core/src/git_ops/tests.rs b/ddb-core/src/git_ops/tests.rs
+index 2477df5..d5239f0 100644
+--- a/ddb-core/src/git_ops/tests.rs
++++ b/ddb-core/src/git_ops/tests.rs
+@@ -1114,7 +1114,10 @@ fn every_non_merge_write_stamps_and_advances_hlc() {
+         "create commit must carry an HLC trailer"
+     );
+     let cur = node_hlc(&repo);
+-    assert!(cur > prev, "create must advance the persisted node HLC: {cur} !> {prev}");
++    assert!(
++        cur > prev,
++        "create must advance the persisted node HLC: {cur} !> {prev}"
++    );
+     assert_eq!(
+         repo.find_hlc_for_path(&head, "ddb/20260401120000.md")
+             .unwrap(),
+@@ -1140,7 +1143,10 @@ fn every_non_merge_write_stamps_and_advances_hlc() {
+         "update commit must carry an HLC trailer"
+     );
+     let cur = node_hlc(&repo);
+-    assert!(cur > prev, "update must advance the persisted node HLC: {cur} !> {prev}");
++    assert!(
++        cur > prev,
++        "update must advance the persisted node HLC: {cur} !> {prev}"
++    );
+     assert_eq!(
+         repo.find_hlc_for_path(&head, "ddb/20260401120000.md")
+             .unwrap(),
+@@ -1163,7 +1169,10 @@ fn every_non_merge_write_stamps_and_advances_hlc() {
+         "rename commit must carry an HLC trailer on the new path"
+     );
+     let cur = node_hlc(&repo);
+-    assert!(cur > prev, "rename must advance the persisted node HLC: {cur} !> {prev}");
++    assert!(
++        cur > prev,
++        "rename must advance the persisted node HLC: {cur} !> {prev}"
++    );
+     assert_eq!(
+         repo.find_hlc_for_path(&head, "ddb/contact/20260401120000.md")
+             .unwrap(),
+@@ -1182,7 +1191,10 @@ fn every_non_merge_write_stamps_and_advances_hlc() {
+         "delete commit must carry an HLC trailer on the deleted path"
+     );
+     let cur = node_hlc(&repo);
+-    assert!(cur > prev, "delete must advance the persisted node HLC: {cur} !> {prev}");
++    assert!(
++        cur > prev,
++        "delete must advance the persisted node HLC: {cur} !> {prev}"
++    );
+     assert_eq!(
+         repo.find_hlc_for_path(&head, "ddb/contact/20260401120000.md")
+             .unwrap(),
+@@ -1201,7 +1213,10 @@ fn every_non_merge_write_stamps_and_advances_hlc() {
+         "batch commit must carry an HLC trailer"
+     );
+     let cur = node_hlc(&repo);
+-    assert!(cur > prev, "batch must advance the persisted node HLC: {cur} !> {prev}");
++    assert!(
++        cur > prev,
++        "batch must advance the persisted node HLC: {cur} !> {prev}"
++    );
+     assert_eq!(
+         repo.find_hlc_for_path(&head, "ddb/20260401140000.md")
+             .unwrap(),
+@@ -1574,9 +1589,7 @@ fn conflicted_merge_arm_behavior_unchanged() {
+     let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+ 
+     // Shared base file, brought up to date on repo_b via fast-forward.
+-    repo_a
+-        .commit_file("ddb/x.md", "base", "base x")
+-        .unwrap();
++    repo_a.commit_file("ddb/x.md", "base", "base x").unwrap();
+     repo_a.push("origin", "master").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+     let ff = repo_b.merge_remote("origin", "master").unwrap();
+@@ -1737,9 +1750,7 @@ fn conflicted_merge_keeps_ours_only_edit() {
+ 
+     // Ours: edit z.md AND conflict on the shared file.
+     repo_b.commit_file("ddb/z.md", "ours-z", "ours z").unwrap();
+-    repo_b
+-        .commit_file("ddb/x.md", "ours x", "ours x")
+-        .unwrap();
++    repo_b.commit_file("ddb/x.md", "ours x", "ours x").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+ 
+     let result = repo_b.merge_remote("origin", "master").unwrap();
+@@ -1752,7 +1763,13 @@ fn conflicted_merge_keeps_ours_only_edit() {
+     };
+ 
+     repo_b
+-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
++        .commit_merge(
++            &[("ddb/x.md", "resolved x")],
++            &[],
++            &[],
++            "merge",
++            &theirs_oid,
++        )
+         .unwrap();
+ 
+     // ours' non-conflicting edit survives, AND the conflict carries the passed
+@@ -1783,9 +1800,7 @@ fn conflicted_merge_keeps_ours_clean_delete() {
+ 
+     // Ours: delete d.md AND conflict on the shared file.
+     repo_b.delete_file("ddb/d.md", "ours delete d").unwrap();
+-    repo_b
+-        .commit_file("ddb/x.md", "ours x", "ours x")
+-        .unwrap();
++    repo_b.commit_file("ddb/x.md", "ours x", "ours x").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+ 
+     let result = repo_b.merge_remote("origin", "master").unwrap();
+@@ -1798,7 +1813,13 @@ fn conflicted_merge_keeps_ours_clean_delete() {
+     };
+ 
+     repo_b
+-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
++        .commit_merge(
++            &[("ddb/x.md", "resolved x")],
++            &[],
++            &[],
++            "merge",
++            &theirs_oid,
++        )
+         .unwrap();
+ 
+     assert!(repo_b.read_file("ddb/d.md").is_err());
+@@ -1826,9 +1847,7 @@ fn conflicted_merge_drops_theirs_deletion() {
+     repo_a.push("origin", "master").unwrap();
+ 
+     // Ours: conflict on the shared file only (y untouched).
+-    repo_b
+-        .commit_file("ddb/x.md", "ours x", "ours x")
+-        .unwrap();
++    repo_b.commit_file("ddb/x.md", "ours x", "ours x").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+ 
+     let result = repo_b.merge_remote("origin", "master").unwrap();
+@@ -1841,7 +1860,13 @@ fn conflicted_merge_drops_theirs_deletion() {
+     };
+ 
+     repo_b
+-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
++        .commit_merge(
++            &[("ddb/x.md", "resolved x")],
++            &[],
++            &[],
++            "merge",
++            &theirs_oid,
++        )
+         .unwrap();
+ 
+     assert!(repo_b.read_file("ddb/y.md").is_err());
+@@ -1853,9 +1878,7 @@ fn conflicted_merge_drops_theirs_deletion() {
+ fn conflicted_merge_keeps_ours_created_doogat() {
+     let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+ 
+-    repo_a
+-        .commit_file("ddb/x.md", "base-x", "base")
+-        .unwrap();
++    repo_a.commit_file("ddb/x.md", "base-x", "base").unwrap();
+     repo_a.push("origin", "master").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+     let ff = repo_b.merge_remote("origin", "master").unwrap();
+@@ -1870,9 +1893,7 @@ fn conflicted_merge_keeps_ours_created_doogat() {
+     repo_b
+         .commit_file("ddb/n.md", "ours-n", "ours new n")
+         .unwrap();
+-    repo_b
+-        .commit_file("ddb/x.md", "ours x", "ours x")
+-        .unwrap();
++    repo_b.commit_file("ddb/x.md", "ours x", "ours x").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+ 
+     let result = repo_b.merge_remote("origin", "master").unwrap();
+@@ -1885,7 +1906,13 @@ fn conflicted_merge_keeps_ours_created_doogat() {
+     };
+ 
+     repo_b
+-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
++        .commit_merge(
++            &[("ddb/x.md", "resolved x")],
++            &[],
++            &[],
++            "merge",
++            &theirs_oid,
++        )
+         .unwrap();
+ 
+     assert_eq!(repo_b.read_file("ddb/n.md").unwrap(), "ours-n");
+@@ -1900,7 +1927,10 @@ fn conflicted_merge_line_merges_both_edits() {
+ 
+     repo_a
+         .commit_files(
+-            &[("ddb/x.md", "base-x"), ("ddb/b4.md", "line1\nline2\nline3\n")],
++            &[
++                ("ddb/x.md", "base-x"),
++                ("ddb/b4.md", "line1\nline2\nline3\n"),
++            ],
+             "base",
+         )
+         .unwrap();
+@@ -1944,11 +1974,20 @@ fn conflicted_merge_line_merges_both_edits() {
+ 
+     // b4.md is auto-merged by git; only x.md is passed as resolved.
+     repo_b
+-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
++        .commit_merge(
++            &[("ddb/x.md", "resolved x")],
++            &[],
++            &[],
++            "merge",
++            &theirs_oid,
++        )
+         .unwrap();
+ 
+     let b4 = repo_b.read_file("ddb/b4.md").unwrap();
+-    assert!(b4.contains("ours-line1"), "ours' line-1 edit was dropped: {b4:?}");
++    assert!(
++        b4.contains("ours-line1"),
++        "ours' line-1 edit was dropped: {b4:?}"
++    );
+     assert!(
+         b4.contains("theirs-line3"),
+         "theirs' line-3 edit was dropped: {b4:?}"
+@@ -1978,9 +2017,7 @@ fn conflicted_merge_theirs_rename_single_path() {
+         .unwrap();
+     repo_a.push("origin", "master").unwrap();
+ 
+-    repo_b
+-        .commit_file("ddb/x.md", "ours x", "ours x")
+-        .unwrap();
++    repo_b.commit_file("ddb/x.md", "ours x", "ours x").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+ 
+     let result = repo_b.merge_remote("origin", "master").unwrap();
+@@ -1993,7 +2030,13 @@ fn conflicted_merge_theirs_rename_single_path() {
+     };
+ 
+     repo_b
+-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
++        .commit_merge(
++            &[("ddb/x.md", "resolved x")],
++            &[],
++            &[],
++            "merge",
++            &theirs_oid,
++        )
+         .unwrap();
+ 
+     assert!(repo_b.read_file("ddb/z2.md").is_ok());
+@@ -2023,9 +2066,7 @@ fn conflicted_merge_ours_rename_single_path() {
+     repo_b
+         .rename_file("ddb/w.md", "ddb/w2.md", "ours rename w")
+         .unwrap();
+-    repo_b
+-        .commit_file("ddb/x.md", "ours x", "ours x")
+-        .unwrap();
++    repo_b.commit_file("ddb/x.md", "ours x", "ours x").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+ 
+     let result = repo_b.merge_remote("origin", "master").unwrap();
+@@ -2038,7 +2079,13 @@ fn conflicted_merge_ours_rename_single_path() {
+     };
+ 
+     repo_b
+-        .commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid)
++        .commit_merge(
++            &[("ddb/x.md", "resolved x")],
++            &[],
++            &[],
++            "merge",
++            &theirs_oid,
++        )
+         .unwrap();
+ 
+     assert!(repo_b.read_file("ddb/w2.md").is_ok());
+@@ -2052,9 +2099,7 @@ fn conflicted_merge_ours_rename_single_path() {
+ fn conflicted_merge_diverged_head_fails_loud() {
+     let (_dir_a, repo_a, _dir_b, repo_b, _bare) = setup_two_repos();
+ 
+-    repo_a
+-        .commit_file("ddb/x.md", "base-x", "base")
+-        .unwrap();
++    repo_a.commit_file("ddb/x.md", "base-x", "base").unwrap();
+     repo_a.push("origin", "master").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+     let ff = repo_b.merge_remote("origin", "master").unwrap();
+@@ -2065,9 +2110,7 @@ fn conflicted_merge_diverged_head_fails_loud() {
+         .unwrap();
+     repo_a.push("origin", "master").unwrap();
+ 
+-    repo_b
+-        .commit_file("ddb/x.md", "ours x", "ours x")
+-        .unwrap();
++    repo_b.commit_file("ddb/x.md", "ours x", "ours x").unwrap();
+     repo_b.fetch("origin", "master").unwrap();
+ 
+     let result = repo_b.merge_remote("origin", "master").unwrap();
+@@ -2087,8 +2130,13 @@ fn conflicted_merge_diverged_head_fails_loud() {
+         .unwrap();
+     let head_before = repo_b.head_oid().unwrap();
+ 
+-    let merge_result =
+-        repo_b.commit_merge(&[("ddb/x.md", "resolved x")], &[], &[], "merge", &theirs_oid);
++    let merge_result = repo_b.commit_merge(
++        &[("ddb/x.md", "resolved x")],
++        &[],
++        &[],
++        "merge",
++        &theirs_oid,
++    );
+     assert!(
+         matches!(merge_result, Err(DoogatError::Conflict(_))),
+         "expected Conflict error on diverged HEAD, got {merge_result:?}"
+@@ -2109,7 +2157,10 @@ fn conflicted_merge_abort_leaves_worktree_clean() {
+ 
+     repo_a
+         .commit_files(
+-            &[("ddb/x.md", "base-x"), ("reference/foo/data.bin", "base-bin")],
++            &[
++                ("ddb/x.md", "base-x"),
++                ("reference/foo/data.bin", "base-bin"),
++            ],
+             "base",
+         )
+         .unwrap();
+@@ -2519,8 +2570,7 @@ fn commit_merge_folds_single_loser_into_same_commit_as_winner() {
+         crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |_| false);
+     let expected_path =
+         super::doogat_path(&expected_id.0, loser.type_name.as_deref(), loser.folder);
+-    let expected_content =
+-        crate::parser::rewrite_id_field(&loser.content, &expected_id.0).unwrap();
++    let expected_content = crate::parser::rewrite_id_field(&loser.content, &expected_id.0).unwrap();
+ 
+     let head_before = repo_b.head_oid().unwrap();
+ 
+@@ -2835,11 +2885,10 @@ fn commit_merge_advances_loser_past_id_occupied_in_different_type_folder() {
+         other => panic!("expected Conflicts, got {other:?}"),
+     };
+ 
+-    let expected_advanced_id = crate::id_minting::derive_content_id(
+-        &loser.old_id,
+-        &loser.losing_blob_oid,
+-        |candidate| candidate == natural_id.0.as_str(),
+-    );
++    let expected_advanced_id =
++        crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |candidate| {
++            candidate == natural_id.0.as_str()
++        });
+     assert_ne!(
+         expected_advanced_id.0, natural_id.0,
+         "test setup invalid: the naturally-derived id must really be the one \
+@@ -2960,11 +3009,10 @@ fn commit_merge_advances_loser_past_id_occupied_in_typedef() {
+         other => panic!("expected Conflicts, got {other:?}"),
+     };
+ 
+-    let expected_advanced_id = crate::id_minting::derive_content_id(
+-        &loser.old_id,
+-        &loser.losing_blob_oid,
+-        |candidate| candidate == natural_id.0.as_str(),
+-    );
++    let expected_advanced_id =
++        crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |candidate| {
++            candidate == natural_id.0.as_str()
++        });
+     assert_ne!(
+         expected_advanced_id.0, natural_id.0,
+         "test setup invalid: the naturally-derived id must really be the one \
+@@ -3119,8 +3167,14 @@ fn commit_merge_advances_second_loser_past_first_losers_in_batch_assigned_id() {
+         "expected exactly one new commit on HEAD for a multi-loser call"
+     );
+ 
+-    assert_eq!(repo_b.read_file(&expected_path1).unwrap(), expected_content1);
+-    assert_eq!(repo_b.read_file(&expected_path2).unwrap(), expected_content2);
++    assert_eq!(
++        repo_b.read_file(&expected_path1).unwrap(),
++        expected_content1
++    );
++    assert_eq!(
++        repo_b.read_file(&expected_path2).unwrap(),
++        expected_content2
++    );
+ }
+ 
+ /// Folds an identical single flat/untyped loser into an identical (freshly
+@@ -3255,8 +3309,7 @@ fn commit_merge_leaves_non_utf8_linker_untouched_but_still_rewrites_valid_linker
+         crate::id_minting::derive_content_id(&loser.old_id, &loser.losing_blob_oid, |_| false);
+     let expected_path =
+         super::doogat_path(&expected_id.0, loser.type_name.as_deref(), loser.folder);
+-    let expected_content =
+-        crate::parser::rewrite_id_field(&loser.content, &expected_id.0).unwrap();
++    let expected_content = crate::parser::rewrite_id_field(&loser.content, &expected_id.0).unwrap();
+ 
+     // Valid-UTF-8 linker, committed only on repo_b (the losing side, since
+     // `theirs_won: true` means repo_a is the winner). It mentions the
+@@ -3271,9 +3324,11 @@ fn commit_merge_leaves_non_utf8_linker_untouched_but_still_rewrites_valid_linker
+ 
+     // Non-UTF-8 linker, committed only on repo_b. `commit_file` takes `&str`
+     // and cannot hold invalid UTF-8, so this one goes through git2 directly.
+-    let mut invalid_bytes =
+-        format!("---\nid: 20991231235959\ntitle: Bad Linker\n---\nsee [[{}]] ", loser.old_id)
+-            .into_bytes();
++    let mut invalid_bytes = format!(
++        "---\nid: 20991231235959\ntitle: Bad Linker\n---\nsee [[{}]] ",
++        loser.old_id
++    )
++    .into_bytes();
+     invalid_bytes.push(0xFF); // lone continuation byte: invalid at any position
+     invalid_bytes.extend_from_slice(b" and more\n");
+ 
+diff --git a/ddb-core/src/indexer/rebuild.rs b/ddb-core/src/indexer/rebuild.rs
+index ef8e8b5..1c16e92 100644
+--- a/ddb-core/src/indexer/rebuild.rs
++++ b/ddb-core/src/indexer/rebuild.rs
+@@ -205,7 +205,11 @@ impl Index {
+         repo: &impl DoogatSource,
+         paths: &[String],
+         strict: bool,
+-    ) -> Result<(usize, Vec<ParsedDoogat>, Vec<crate::types::ConsistencyWarning>)> {
++    ) -> Result<(
++        usize,
++        Vec<ParsedDoogat>,
++        Vec<crate::types::ConsistencyWarning>,
++    )> {
+         if paths.len() > 1 {
+             let contents = repo.read_files_batch(paths)?;
+             let mut parsed = Vec::with_capacity(contents.len());
+diff --git a/ddb-core/src/indexer/tests/mod.rs b/ddb-core/src/indexer/tests/mod.rs
+index 1bdd3f1..3ff0a39 100644
+--- a/ddb-core/src/indexer/tests/mod.rs
++++ b/ddb-core/src/indexer/tests/mod.rs
+@@ -2665,9 +2665,8 @@ fn unstamped_but_compliant_schema_is_not_dropped_and_gets_stamped() {
+     .unwrap();
+     // user_version is deliberately left unset — SQLite defaults it to 0.
+ 
+-    let idx = Index::configure_connection(conn, None).expect(
+-        "configure_connection should succeed for an unstamped, already-compliant schema",
+-    );
++    let idx = Index::configure_connection(conn, None)
++        .expect("configure_connection should succeed for an unstamped, already-compliant schema");
+ 
+     let sentinel_count: i64 = idx
+         .conn
+@@ -5668,7 +5667,8 @@ fn configure_connection_re_checks_after_the_lock_and_spares_a_peers_finished_upg
+     // The upgrade the peer would have performed, out of band on a second
+     // connection: recreate the current schema, stamp it, index a sentinel row.
+     let peer = Connection::open(&db_path).unwrap();
+-    peer.execute_batch("DROP TABLE IF EXISTS _ddb_fts;").unwrap();
++    peer.execute_batch("DROP TABLE IF EXISTS _ddb_fts;")
++        .unwrap();
+     peer.execute_batch(Index::SCHEMA_DDL).unwrap();
+     peer.pragma_update(None, "user_version", Index::SCHEMA_VERSION)
+         .unwrap();
+@@ -5963,7 +5963,9 @@ fn explicit_reindex_still_serializes_against_a_held_rebuild_lock() {
+     let report = rx
+         .recv_timeout(std::time::Duration::from_secs(10))
+         .expect("locked_explicit_rebuild never returned after the lock was released")
+-        .expect("locked_explicit_rebuild that waited for the lock must then succeed, not error out");
++        .expect(
++            "locked_explicit_rebuild that waited for the lock must then succeed, not error out",
++        );
+     assert_eq!(
+         report.indexed, 1,
+         "the explicit reindex that waited for the lock must still index the repo's doogat"
+diff --git a/ddb-core/src/parser/tests.rs b/ddb-core/src/parser/tests.rs
+index 9140974..240994a 100644
+--- a/ddb-core/src/parser/tests.rs
++++ b/ddb-core/src/parser/tests.rs
+@@ -223,8 +223,8 @@ fn frontmatter_over_cap_error_states_cap_and_actual_size() {
+     let actual_len = yaml.len();
+     assert_eq!(actual_len, MAX_FRONTMATTER_BYTES + 1);
+ 
+-    let err = parse_frontmatter(&yaml, "note.md")
+-        .expect_err("over-cap frontmatter must be rejected");
++    let err =
++        parse_frontmatter(&yaml, "note.md").expect_err("over-cap frontmatter must be rejected");
+     let msg = err.to_string();
+     assert!(
+         msg.contains(&MAX_FRONTMATTER_BYTES.to_string()),
+diff --git a/ddb-core/src/schema_diff/desired.rs b/ddb-core/src/schema_diff/desired.rs
+index 7411084..7ab0868 100644
+--- a/ddb-core/src/schema_diff/desired.rs
++++ b/ddb-core/src/schema_diff/desired.rs
+@@ -33,7 +33,9 @@ impl SchemaDoc {
+         let types_seq = root
+             .get("types")
+             .and_then(|v| v.as_sequence())
+-            .ok_or_else(|| DoogatError::SqlEngine("desired schema missing `types:` sequence".into()))?;
++            .ok_or_else(|| {
++                DoogatError::SqlEngine("desired schema missing `types:` sequence".into())
++            })?;
+ 
+         let mut types = Vec::with_capacity(types_seq.len());
+         let mut renames = Vec::new();
+@@ -153,8 +155,12 @@ fn validate_zone_tokens(columns: Option<&serde_yaml::Value>, table: &str) -> Res
+         return Ok(());
+     };
+     for col in seq {
+-        let Some(map) = col.as_mapping() else { continue };
+-        let Some(zone) = map.get("zone") else { continue };
++        let Some(map) = col.as_mapping() else {
++            continue;
++        };
++        let Some(zone) = map.get("zone") else {
++            continue;
++        };
+         if !matches!(
+             zone.as_str(),
+             Some("frontmatter") | Some("body") | Some("reference")
+@@ -934,8 +940,7 @@ types:
+         data_type: BOOLEAN
+         default_value: "TRUE"
+ "#;
+-        let doc =
+-            SchemaDoc::from_yaml(yaml).expect("legitimate default values must keep parsing");
++        let doc = SchemaDoc::from_yaml(yaml).expect("legitimate default values must keep parsing");
+         let cols = &doc.types[0].columns;
+         assert_eq!(cols[0].default_value, Some("'active'".to_string()));
+         assert_eq!(cols[1].default_value, Some("0".to_string()));
+@@ -1120,8 +1125,7 @@ types:
+         data_type: TEXT
+     unique_together: [[status, owner]]
+ "#;
+-        let doc =
+-            SchemaDoc::from_yaml(yaml).expect("legitimate unique_together must keep parsing");
++        let doc = SchemaDoc::from_yaml(yaml).expect("legitimate unique_together must keep parsing");
+         assert_eq!(
+             doc.types[0].unique_together,
+             Some(vec![vec!["status".to_string(), "owner".to_string()]])
+diff --git a/ddb-core/src/schema_diff/differ.rs b/ddb-core/src/schema_diff/differ.rs
+index f3bd2e2..daf2b20 100644
+--- a/ddb-core/src/schema_diff/differ.rs
++++ b/ddb-core/src/schema_diff/differ.rs
+@@ -11,7 +11,10 @@ use crate::types::{ColumnDef, TableSchema};
+ /// `live[i]` corresponds to `desired.types[i]`; `None` (or an index past the
+ /// end of `live`) means the type does not exist yet and must be created.
+ pub fn diff(desired: &SchemaDoc, live: &[Option<TableSchema>]) -> SchemaPlan {
+-    let mut plan = SchemaPlan { ops: Vec::new(), unsupported: Vec::new() };
++    let mut plan = SchemaPlan {
++        ops: Vec::new(),
++        unsupported: Vec::new(),
++    };
+     for (i, desired_type) in desired.types.iter().enumerate() {
+         match live.get(i).and_then(Option::as_ref) {
+             Some(current) => {
+@@ -271,28 +274,32 @@ fn diff_type_attributes(desired: &TableSchema, current: &TableSchema, plan: &mut
+ 
+     // origin is never diffed.
+     if desired.title_template != current.title_template {
+-        plan.unsupported
+-            .push(format!("type {table}: title_template change is unsupported"));
++        plan.unsupported.push(format!(
++            "type {table}: title_template change is unsupported"
++        ));
+     }
+     if desired.crdt_strategy != current.crdt_strategy {
+         plan.unsupported
+             .push(format!("type {table}: crdt_strategy change is unsupported"));
+     }
+     if desired.template_sections != current.template_sections {
+-        plan.unsupported
+-            .push(format!("type {table}: template_sections change is unsupported"));
++        plan.unsupported.push(format!(
++            "type {table}: template_sections change is unsupported"
++        ));
+     }
+     if desired.folder != current.folder {
+         plan.unsupported
+             .push(format!("type {table}: folder change is unsupported"));
+     }
+     if desired.stale_after_days != current.stale_after_days {
+-        plan.unsupported
+-            .push(format!("type {table}: stale_after_days change is unsupported"));
++        plan.unsupported.push(format!(
++            "type {table}: stale_after_days change is unsupported"
++        ));
+     }
+     if desired.unique_together != current.unique_together {
+-        plan.unsupported
+-            .push(format!("type {table}: unique_together change is unsupported"));
++        plan.unsupported.push(format!(
++            "type {table}: unique_together change is unsupported"
++        ));
+     }
+ }
+ 
+@@ -368,7 +375,10 @@ mod tests {
+             vec![PlanOp::CreateType(a), PlanOp::CreateType(b)],
+             "exactly one CreateType per declared type, in declared order"
+         );
+-        assert!(plan.unsupported.is_empty(), "create path adds nothing to unsupported");
++        assert!(
++            plan.unsupported.is_empty(),
++            "create path adds nothing to unsupported"
++        );
+     }
+ 
+     #[test]
+@@ -392,7 +402,10 @@ mod tests {
+             plan.ops,
+             vec![
+                 PlanOp::CreateType(t),
+-                PlanOp::SetSearchKey { table: "c".into(), column: Some("name".into()) },
++                PlanOp::SetSearchKey {
++                    table: "c".into(),
++                    column: Some("name".into())
++                },
+             ],
+             "SetSearchKey must immediately follow the CreateType"
+         );
+@@ -415,8 +428,14 @@ mod tests {
+         let live = tbl("a", vec![col("x", "TEXT"), col("y", "INTEGER")]);
+         let plan = diff(&doc(vec![live.clone()]), &[Some(live)]);
+ 
+-        assert!(plan.is_empty(), "identical desired/live contributes zero ops");
+-        assert!(plan.unsupported.is_empty(), "identical desired/live contributes zero unsupported");
++        assert!(
++            plan.is_empty(),
++            "identical desired/live contributes zero ops"
++        );
++        assert!(
++            plan.unsupported.is_empty(),
++            "identical desired/live contributes zero unsupported"
++        );
+     }
+ 
+     // ---- 4: column added ----
+@@ -542,7 +561,10 @@ mod tests {
+         let plan = diff(&doc(vec![desired]), &[Some(live)]);
+ 
+         assert!(
+-            !plan.ops.iter().any(|op| matches!(op, PlanOp::SetZone { .. })),
++            !plan
++                .ops
++                .iter()
++                .any(|op| matches!(op, PlanOp::SetZone { .. })),
+             "equal effective zones must not produce a SetZone, even if raw zone fields differ"
+         );
+     }
+@@ -614,7 +636,10 @@ mod tests {
+ 
+         assert_eq!(
+             plan.ops,
+-            vec![PlanOp::SetSingleton { table: "a".into(), on: true }],
++            vec![PlanOp::SetSingleton {
++                table: "a".into(),
++                on: true
++            }],
+             "differing singleton must yield exactly one SetSingleton with the desired flag"
+         );
+     }
+@@ -654,7 +679,10 @@ mod tests {
+         let live = tbl("a", vec![]); // title_template None
+         let plan = diff(&doc(vec![desired]), &[Some(live)]);
+ 
+-        assert!(plan.ops.is_empty(), "no op exists for a title_template change");
++        assert!(
++            plan.ops.is_empty(),
++            "no op exists for a title_template change"
++        );
+         assert_eq!(
+             plan.unsupported.len(),
+             1,
+@@ -677,7 +705,10 @@ mod tests {
+         let plan = diff(&doc(vec![desired]), &[Some(live)]);
+ 
+         assert!(plan.is_empty(), "origin differences must not generate ops");
+-        assert!(plan.unsupported.is_empty(), "origin differences must not be flagged unsupported");
++        assert!(
++            plan.unsupported.is_empty(),
++            "origin differences must not be flagged unsupported"
++        );
+     }
+ 
+     // ---- 13: renames are never inferred ----
+@@ -689,7 +720,10 @@ mod tests {
+         let plan = diff(&doc(vec![desired]), &[Some(live)]);
+ 
+         assert!(
+-            !plan.ops.iter().any(|op| matches!(op, PlanOp::RenameColumn { .. })),
++            !plan
++                .ops
++                .iter()
++                .any(|op| matches!(op, PlanOp::RenameColumn { .. })),
+             "a remove+add must never be collapsed into a RenameColumn"
+         );
+         assert!(
+@@ -822,7 +856,10 @@ mod tests {
+         );
+ 
+         assert!(
+-            !plan.ops.iter().any(|op| matches!(op, PlanOp::RenameColumn { .. })),
++            !plan
++                .ops
++                .iter()
++                .any(|op| matches!(op, PlanOp::RenameColumn { .. })),
+             "a rename whose `from` is absent must not emit a RenameColumn"
+         );
+         assert_eq!(
+@@ -853,7 +890,10 @@ mod tests {
+         );
+ 
+         assert!(
+-            !plan.ops.iter().any(|op| matches!(op, PlanOp::RenameColumn { .. })),
++            !plan
++                .ops
++                .iter()
++                .any(|op| matches!(op, PlanOp::RenameColumn { .. })),
+             "a rename whose target already exists must not emit a RenameColumn"
+         );
+         assert_eq!(
+diff --git a/ddb-core/src/schema_diff/plan.rs b/ddb-core/src/schema_diff/plan.rs
+index 343c277..7ab22dd 100644
+--- a/ddb-core/src/schema_diff/plan.rs
++++ b/ddb-core/src/schema_diff/plan.rs
+@@ -55,13 +55,37 @@ fn render_column(column: &ColumnDef, include_zone: bool) -> String {
+ #[derive(Debug, Clone, PartialEq)]
+ pub enum PlanOp {
+     CreateType(TableSchema),
+-    AddColumn { table: String, column: ColumnDef },
+-    AlterColumnType { table: String, column: String, new_type: String },
+-    SetZone { table: String, column: String, zone: Zone },
+-    SetSearchKey { table: String, column: Option<String> },
+-    SetSingleton { table: String, on: bool },
+-    RenameColumn { table: String, from: String, to: String },
+-    DropColumn { table: String, column: String },
++    AddColumn {
++        table: String,
++        column: ColumnDef,
++    },
++    AlterColumnType {
++        table: String,
++        column: String,
++        new_type: String,
++    },
++    SetZone {
++        table: String,
++        column: String,
++        zone: Zone,
++    },
++    SetSearchKey {
++        table: String,
++        column: Option<String>,
++    },
++    SetSingleton {
++        table: String,
++        on: bool,
++    },
++    RenameColumn {
++        table: String,
++        from: String,
++        to: String,
++    },
++    DropColumn {
++        table: String,
++        column: String,
++    },
+ }
+ 
+ impl PlanOp {
+@@ -77,8 +101,7 @@ impl PlanOp {
+                 if let Some(constraints) = &schema.unique_together {
+                     for cols in constraints {
+                         if !cols.is_empty() {
+-                            let quoted: Vec<String> =
+-                                cols.iter().map(|c| quote_ident(c)).collect();
++                            let quoted: Vec<String> = cols.iter().map(|c| quote_ident(c)).collect();
+                             parts.push(format!("UNIQUE({})", quoted.join(", ")));
+                         }
+                     }
+@@ -100,14 +123,22 @@ impl PlanOp {
+                     render_column(column, false)
+                 )
+             }
+-            PlanOp::AlterColumnType { table, column, new_type } => {
++            PlanOp::AlterColumnType {
++                table,
++                column,
++                new_type,
++            } => {
+                 format!(
+                     "ALTER TABLE {} ALTER COLUMN {} TYPE {new_type}",
+                     quote_ident(table),
+                     quote_ident(column)
+                 )
+             }
+-            PlanOp::SetZone { table, column, zone } => {
++            PlanOp::SetZone {
++                table,
++                column,
++                zone,
++            } => {
+                 format!(
+                     "ALTER TABLE {} SET ZONE {} FOR {}",
+                     quote_ident(table),
+@@ -117,7 +148,11 @@ impl PlanOp {
+             }
+             PlanOp::SetSearchKey { table, column } => match column {
+                 Some(col) => {
+-                    format!("ALTER TABLE {} SET SEARCH KEY {}", quote_ident(table), quote_ident(col))
++                    format!(
++                        "ALTER TABLE {} SET SEARCH KEY {}",
++                        quote_ident(table),
++                        quote_ident(col)
++                    )
+                 }
+                 None => format!("ALTER TABLE {} DROP SEARCH KEY", quote_ident(table)),
+             },
+@@ -137,7 +172,11 @@ impl PlanOp {
+                 )
+             }
+             PlanOp::DropColumn { table, column } => {
+-                format!("ALTER TABLE {} DROP COLUMN {}", quote_ident(table), quote_ident(column))
++                format!(
++                    "ALTER TABLE {} DROP COLUMN {}",
++                    quote_ident(table),
++                    quote_ident(column)
++                )
+             }
+         }
+     }
+@@ -157,7 +196,10 @@ impl PlanOp {
+     }
+ 
+     pub fn is_destructive(&self) -> bool {
+-        matches!(self, PlanOp::DropColumn { .. } | PlanOp::RenameColumn { .. })
++        matches!(
++            self,
++            PlanOp::DropColumn { .. } | PlanOp::RenameColumn { .. }
++        )
+     }
+ 
+     /// User-facing dry-run description.
+@@ -167,10 +209,18 @@ impl PlanOp {
+             PlanOp::AddColumn { table, column } => {
+                 format!("add column {} to {table}", column.name)
+             }
+-            PlanOp::AlterColumnType { table, column, new_type } => {
++            PlanOp::AlterColumnType {
++                table,
++                column,
++                new_type,
++            } => {
+                 format!("alter column {column} on {table} to type {new_type}")
+             }
+-            PlanOp::SetZone { table, column, zone } => {
++            PlanOp::SetZone {
++                table,
++                column,
++                zone,
++            } => {
+                 format!("set zone of {column} on {table} to {}", zone_token(zone))
+             }
+             PlanOp::SetSearchKey { table, column } => match column {
+@@ -398,7 +448,10 @@ mod tests {
+             false,
+             None,
+         ));
+-        assert_eq!(op.render_sql(), r#"CREATE TABLE "project" ("status" VARCHAR(50))"#);
++        assert_eq!(
++            op.render_sql(),
++            r#"CREATE TABLE "project" ("status" VARCHAR(50))"#
++        );
+         assert!(!op.render_sql().contains("ZONE"));
+     }
+ 
+@@ -419,7 +472,10 @@ mod tests {
+             false,
+             None,
+         ));
+-        assert_eq!(body.render_sql(), r#"CREATE TABLE "note" ("content" TEXT ZONE body)"#);
++        assert_eq!(
++            body.render_sql(),
++            r#"CREATE TABLE "note" ("content" TEXT ZONE body)"#
++        );
+ 
+         let reference = PlanOp::CreateType(schema(
+             "task",
+@@ -586,7 +642,10 @@ mod tests {
+             false,
+             Some(vec![]),
+         ));
+-        assert_eq!(op.render_sql(), r#"CREATE TABLE "project" ("status" VARCHAR(50))"#);
++        assert_eq!(
++            op.render_sql(),
++            r#"CREATE TABLE "project" ("status" VARCHAR(50))"#
++        );
+         assert!(!op.render_sql().contains("UNIQUE"));
+     }
+ 
+@@ -602,7 +661,10 @@ mod tests {
+         );
+         s.search_key = Some("email".into());
+         let op = PlanOp::CreateType(s);
+-        assert_eq!(op.render_sql(), r#"CREATE TABLE "contact" ("email" VARCHAR(255))"#);
++        assert_eq!(
++            op.render_sql(),
++            r#"CREATE TABLE "contact" ("email" VARCHAR(255))"#
++        );
+         assert!(!op.render_sql().contains("SEARCH KEY"));
+     }
+ 
+@@ -749,7 +811,10 @@ mod tests {
+             table: "contact".into(),
+             column: Some("fqn".into()),
+         };
+-        assert_eq!(op.render_sql(), r#"ALTER TABLE "contact" SET SEARCH KEY "fqn""#);
++        assert_eq!(
++            op.render_sql(),
++            r#"ALTER TABLE "contact" SET SEARCH KEY "fqn""#
++        );
+         assert_eq!(op.kind(), "set_search_key");
+     }
+ 
+@@ -806,7 +871,10 @@ mod tests {
+             table: "contact".into(),
+             column: "fax".into(),
+         };
+-        assert_eq!(op.render_sql(), r#"ALTER TABLE "contact" DROP COLUMN "fax""#);
++        assert_eq!(
++            op.render_sql(),
++            r#"ALTER TABLE "contact" DROP COLUMN "fax""#
++        );
+         assert_eq!(op.kind(), "drop_column");
+     }
+ 
+diff --git a/ddb-core/src/service/mock_index_tests.rs b/ddb-core/src/service/mock_index_tests.rs
+index 97b9b5c..d222334 100644
+--- a/ddb-core/src/service/mock_index_tests.rs
++++ b/ddb-core/src/service/mock_index_tests.rs
+@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
+ use rusqlite::Connection;
+ 
+ use crate::app_contract::{
+-    ApplySchemaCommand, AppWarning, CreateCommand, UnregisteredTypePolicy, UpdateCommand,
++    AppWarning, ApplySchemaCommand, CreateCommand, UnregisteredTypePolicy, UpdateCommand,
+     REINDEX_SKIPPED_FILES,
+ };
+ use crate::error::{DoogatError, Result};
+@@ -354,7 +354,11 @@ fn reindex_warning_count(warnings: &[AppWarning]) -> usize {
+         .count()
+ }
+ 
+-fn create_cmd(title: Option<&str>, doogat_type: Option<&str>, policy: UnregisteredTypePolicy) -> CreateCommand {
++fn create_cmd(
++    title: Option<&str>,
++    doogat_type: Option<&str>,
++    policy: UnregisteredTypePolicy,
++) -> CreateCommand {
+     CreateCommand {
+         title: title.map(str::to_string),
+         body: None,
+diff --git a/ddb-core/src/service/mod.rs b/ddb-core/src/service/mod.rs
+index 1a50550..fef7959 100644
+--- a/ddb-core/src/service/mod.rs
++++ b/ddb-core/src/service/mod.rs
+@@ -130,8 +130,8 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
+ #[cfg(test)]
+ mod create_unregistered_policy_tests;
+ #[cfg(test)]
+-mod update_facade_tests;
+-#[cfg(test)]
+ mod mock_index_tests;
+ #[cfg(test)]
+ mod tests;
++#[cfg(test)]
++mod update_facade_tests;
+diff --git a/ddb-core/src/service/schema_apply.rs b/ddb-core/src/service/schema_apply.rs
+index f5a7b1a..b1b973a 100644
+--- a/ddb-core/src/service/schema_apply.rs
++++ b/ddb-core/src/service/schema_apply.rs
+@@ -901,7 +901,10 @@ types:
+         let report = svc
+             .apply_schema(cmd(HYPHENATED_TYPE_ADD_COLUMN, false, false))
+             .expect("adding a hyphenated column must succeed, not fail mid-plan");
+-        assert!(report.value.applied, "adding a hyphenated column must apply");
++        assert!(
++            report.value.applied,
++            "adding a hyphenated column must apply"
++        );
+         assert!(
+             report
+                 .value
+diff --git a/ddb-core/src/service/tests.rs b/ddb-core/src/service/tests.rs
+index 9b58868..addd7b1 100644
+--- a/ddb-core/src/service/tests.rs
++++ b/ddb-core/src/service/tests.rs
+@@ -4939,7 +4939,9 @@ fn update_parsed_retype_untyped_into_occupied_singleton_rejects_prd_00157() {
+     let occupant_id = occupant[0].meta.id.as_ref().unwrap().0.clone();
+ 
+     // A base (untyped) doogat we will try to retype into the occupied singleton.
+-    let victim_id = svc.create_doogat("Victim", &[], None, "victim body").unwrap();
++    let victim_id = svc
++        .create_doogat("Victim", &[], None, "victim body")
++        .unwrap();
+ 
+     let mut set = std::collections::BTreeMap::new();
+     set.insert(
+@@ -4990,7 +4992,9 @@ fn update_parsed_retype_into_empty_singleton_succeeds_prd_00157() {
+     // (the wrap must not reject the first occupant).
+     let (_tmp, svc) = fresh_svc();
+     setup_app_config_singleton_typedef(&svc);
+-    let id = svc.create_doogat("Becomes config", &[], None, "body").unwrap();
++    let id = svc
++        .create_doogat("Becomes config", &[], None, "body")
++        .unwrap();
+     let mut set = std::collections::BTreeMap::new();
+     set.insert(
+         "theme".to_string(),
+@@ -5172,10 +5176,24 @@ fn non_singleton_updates_unaffected_by_wrap_prd_00157() {
+     let (_tmp, svc) = fresh_svc();
+     let a = svc.create_doogat("A", &[], None, "a body").unwrap();
+     let b = svc.create_doogat("B", &[], None, "b body").unwrap();
+-    svc.update_doogat(&a, Some("A2"), None, None, None, &ExtraFieldUpdates::default())
+-        .unwrap();
+-    svc.update_doogat(&b, Some("B2"), None, None, None, &ExtraFieldUpdates::default())
+-        .unwrap();
++    svc.update_doogat(
++        &a,
++        Some("A2"),
++        None,
++        None,
++        None,
++        &ExtraFieldUpdates::default(),
++    )
++    .unwrap();
++    svc.update_doogat(
++        &b,
++        Some("B2"),
++        None,
++        None,
++        None,
++        &ExtraFieldUpdates::default(),
++    )
++    .unwrap();
+     assert!(svc.read_doogat(&a).unwrap().contains("A2"));
+     assert!(svc.read_doogat(&b).unwrap().contains("B2"));
+ }
+diff --git a/ddb-core/src/service/update_facade_tests.rs b/ddb-core/src/service/update_facade_tests.rs
+index 503c654..0ef9d3f 100644
+--- a/ddb-core/src/service/update_facade_tests.rs
++++ b/ddb-core/src/service/update_facade_tests.rs
+@@ -56,7 +56,10 @@ fn update_facade_unset_fields_clears_frontmatter_field() {
+ 
+     // First update: set a custom frontmatter field.
+     let mut fields = BTreeMap::new();
+-    fields.insert("custom_key".to_string(), Value::String("custom_value".into()));
++    fields.insert(
++        "custom_key".to_string(),
++        Value::String("custom_value".into()),
++    );
+ 
+     let after_set = svc
+         .update(UpdateCommand {
+@@ -139,8 +142,7 @@ fn update_empty_unset_fields_preserves_existing_frontmatter() {
+ 
+     assert_eq!(after.value.meta.title.as_deref(), Some("Renamed"));
+     assert!(
+-        after.value.meta.extra.contains_key("alpha")
+-            && after.value.meta.extra.contains_key("beta"),
++        after.value.meta.extra.contains_key("alpha") && after.value.meta.extra.contains_key("beta"),
+         "empty unset_fields must preserve all existing frontmatter fields, got: {:?}",
+         after.value.meta.extra.keys().collect::<Vec<_>>()
+     );
+diff --git a/ddb-core/src/sql_engine/classify.rs b/ddb-core/src/sql_engine/classify.rs
+index 84c78be..fdf7ecc 100644
+--- a/ddb-core/src/sql_engine/classify.rs
++++ b/ddb-core/src/sql_engine/classify.rs
+@@ -86,7 +86,9 @@ mod tests {
+ 
+     #[test]
+     fn dml_does_not_require_reload() {
+-        assert!(!requires_schema_reload("INSERT INTO book (id) VALUES ('1')"));
++        assert!(!requires_schema_reload(
++            "INSERT INTO book (id) VALUES ('1')"
++        ));
+         assert!(!requires_schema_reload(
+             "UPDATE book SET title = 'x' WHERE id = '1'"
+         ));
+diff --git a/ddb-core/src/sql_engine/ddl.rs b/ddb-core/src/sql_engine/ddl.rs
+index 12c1d51..830a467 100644
+--- a/ddb-core/src/sql_engine/ddl.rs
++++ b/ddb-core/src/sql_engine/ddl.rs
+@@ -799,8 +799,11 @@ impl<'a> SqlEngine<'a> {
+                 content,
+             });
+         } else {
+-            self.repo
+-                .commit_file(&typedef_path, &content, &format!("alter table {table_name}"))?;
++            self.repo.commit_file(
++                &typedef_path,
++                &content,
++                &format!("alter table {table_name}"),
++            )?;
+         }
+         self.index.index_doogat(&parsed)?;
+         Ok(())
+diff --git a/ddb-core/src/sql_engine/helpers.rs b/ddb-core/src/sql_engine/helpers.rs
+index 8c04c16..23fdb51 100644
+--- a/ddb-core/src/sql_engine/helpers.rs
++++ b/ddb-core/src/sql_engine/helpers.rs
+@@ -467,7 +467,12 @@ pub(super) fn strip_inline_zones(sql: &str) -> Result<(String, TableColumnZones)
+             continue;
+         }
+ 
+-        let table = caps.get(1).unwrap().as_str().trim_matches('"').to_lowercase();
++        let table = caps
++            .get(1)
++            .unwrap()
++            .as_str()
++            .trim_matches('"')
++            .to_lowercase();
+ 
+         // The column list is the first balanced top-level `(...)` after the
+         // `CREATE TABLE <name>` preamble. Missing (e.g. CTAS) -> leave alone.
+@@ -605,7 +610,10 @@ fn parse_zone_value(value: &str) -> Result<Zone> {
+         "reference" => Ok(Zone::Reference),
+         other => Err(DoogatError::Structured {
+             code: "INVALID_ZONE",
+-            message: format!("invalid zone: {} (use frontmatter, body, or reference)", other),
++            message: format!(
++                "invalid zone: {} (use frontmatter, body, or reference)",
++                other
++            ),
+             context: vec![],
+         }),
+     }
+@@ -1406,7 +1414,11 @@ mod tests {
+         // over-skipping past ZONE so it survived to sqlparser as a parse error.)
+         let sql = "CREATE TABLE t (a TEXT ZONE body          , b TEXT)";
+         let (cleaned, map) = strip_inline_zones(sql).unwrap();
+-        assert_eq!(map["t"].len(), 1, "trailing whitespace must not lose the ZONE");
++        assert_eq!(
++            map["t"].len(),
++            1,
++            "trailing whitespace must not lose the ZONE"
++        );
+         assert_eq!(map["t"]["a"], Zone::Body);
+         assert!(!cleaned.to_lowercase().contains("zone body"));
+ 
+diff --git a/ddb-core/src/sql_engine/tests.rs b/ddb-core/src/sql_engine/tests.rs
+index 2fe9bbd..daf7ddf 100644
+--- a/ddb-core/src/sql_engine/tests.rs
++++ b/ddb-core/src/sql_engine/tests.rs
+@@ -9049,10 +9049,7 @@ fn inline_zone_on_enum_preserves_allowed_values() {
+     let schema = engine.load_schema("inline_enum").unwrap();
+     let status = schema.columns.iter().find(|c| c.name == "status").unwrap();
+     assert_eq!(status.zone, Some(Zone::Frontmatter));
+-    assert_eq!(
+-        status.allowed_values,
+-        Some(vec!["a".into(), "b".into()])
+-    );
++    assert_eq!(status.allowed_values, Some(vec!["a".into(), "b".into()]));
+ }
+ 
+ #[test]
+@@ -9140,7 +9137,8 @@ fn inline_zone_time_zone_typed_column_does_not_false_positive() {
+     // `invalid zone: not` error from the inline-ZONE pre-parser. (It may still
+     // fail for an unrelated reason if the type is unsupported, but never with a
+     // false-positive zone error.)
+-    let result = engine.execute("CREATE TABLE inline_tz (created TIMESTAMP WITH TIME ZONE NOT NULL)");
++    let result =
++        engine.execute("CREATE TABLE inline_tz (created TIMESTAMP WITH TIME ZONE NOT NULL)");
+     if let Err(e) = result {
+         let msg = format!("{e}");
+         assert!(
+@@ -9158,7 +9156,10 @@ fn inline_zone_malformed_create_errors_without_panic() {
+     // Malformed SQL (unterminated quoted identifier) must surface a normal
+     // error, never a panic, from the inline-ZONE pre-parser.
+     let result = engine.execute("CREATE TABLE inline_bad (\"unterminated TEXT)");
+-    assert!(result.is_err(), "malformed CREATE TABLE must error, not panic");
++    assert!(
++        result.is_err(),
++        "malformed CREATE TABLE must error, not panic"
++    );
+ }
+ 
+ #[test]
+diff --git a/ddb-core/src/sync_manager/mod.rs b/ddb-core/src/sync_manager/mod.rs
+index f1ec9bd..5917526 100644
+--- a/ddb-core/src/sync_manager/mod.rs
++++ b/ddb-core/src/sync_manager/mod.rs
+@@ -368,8 +368,13 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
+             .iter()
+             .map(|(p, o)| (p.as_str(), o.as_str()))
+             .collect();
+-        self.repo
+-            .commit_merge(&files, &binary, losers, "resolve merge conflicts via CRDT", theirs_oid)?;
++        self.repo.commit_merge(
++            &files,
++            &binary,
++            losers,
++            "resolve merge conflicts via CRDT",
++            theirs_oid,
++        )?;
+ 
+         let commit_oid = self.repo.head_oid()?;
+         write_fm_crdt_files(self.repo.repo_path(), &commit_oid, resolved)?;
+diff --git a/ddb-core/src/sync_manager/tests.rs b/ddb-core/src/sync_manager/tests.rs
+index e9caefc..712b9bc 100644
+--- a/ddb-core/src/sync_manager/tests.rs
++++ b/ddb-core/src/sync_manager/tests.rs
+@@ -1171,7 +1171,9 @@ fn theirs_deleted_ours_untouched_stays_deleted() {
+     repo_b.merge_remote("origin", "master").unwrap();
+ 
+     // A deletes it and pushes
+-    repo_a.delete_file(&format!("ddb/{id}.md"), "A deletes").unwrap();
++    repo_a
++        .delete_file(&format!("ddb/{id}.md"), "A deletes")
++        .unwrap();
+     repo_a.push("origin", "master").unwrap();
+ 
+     // B does NOTHING to the file.
+@@ -1215,7 +1217,9 @@ fn theirs_deleted_ours_edited_resurrects_with_marker() {
+     repo_b.merge_remote("origin", "master").unwrap();
+ 
+     // A deletes it and pushes
+-    repo_a.delete_file(&format!("ddb/{id}.md"), "A deletes").unwrap();
++    repo_a
++        .delete_file(&format!("ddb/{id}.md"), "A deletes")
++        .unwrap();
+     repo_a.push("origin", "master").unwrap();
+ 
+     // B edits it
+@@ -1459,7 +1463,13 @@ fn resolve_collision_with_backlinks(
+         theirs: theirs_doc.to_string(),
+         ours_hlc: Some(ours_hlc),
+         theirs_hlc: Some(theirs_hlc),
+-        ours_blob_oid: Some(repo_ours.repo.blob(ours_doc.as_bytes()).unwrap().to_string()),
++        ours_blob_oid: Some(
++            repo_ours
++                .repo
++                .blob(ours_doc.as_bytes())
++                .unwrap()
++                .to_string(),
++        ),
+         theirs_blob_oid: Some(
+             repo_ours
+                 .repo
+@@ -2081,4 +2091,3 @@ fn partition_preserves_delete_edit_binary_ref_and_ancestor_rules() {
+         conflict_paths(&add_add)
+     );
+ }
+-
+diff --git a/ddb-core/tests/crdt_determinism.rs b/ddb-core/tests/crdt_determinism.rs
+index f2ef75a..007fec8 100644
+--- a/ddb-core/tests/crdt_determinism.rs
++++ b/ddb-core/tests/crdt_determinism.rs
+@@ -65,10 +65,8 @@ fn swapped_roles_converge_on_same_scalar_winner() {
+     // Node B: ours=Y, theirs=X (roles swapped)
+     let (b, _) = merge_frontmatter(ancestor, y, x).expect("merge B should succeed");
+ 
+-    let title_a = title_line(&a)
+-        .expect("result A must contain a title line");
+-    let title_b = title_line(&b)
+-        .expect("result B must contain a title line");
++    let title_a = title_line(&a).expect("result A must contain a title line");
++    let title_b = title_line(&b).expect("result B must contain a title line");
+ 
+     assert_eq!(
+         title_a, title_b,
+@@ -178,10 +176,8 @@ fn empty_ancestor_swap_converges() {
+     // Node B: ours=Y, theirs=X (roles swapped)
+     let (b, _) = merge_frontmatter("", y, x).expect("merge B should succeed");
+ 
+-    let title_a = title_line(&a)
+-        .expect("result A must contain a title line");
+-    let title_b = title_line(&b)
+-        .expect("result B must contain a title line");
++    let title_a = title_line(&a).expect("result A must contain a title line");
++    let title_b = title_line(&b).expect("result B must contain a title line");
+ 
+     assert_eq!(
+         title_a, title_b,
+diff --git a/ddb-core/tests/hazard_delete_owner_junction_rows.rs b/ddb-core/tests/hazard_delete_owner_junction_rows.rs
+index c9a524b..db3c400 100644
+--- a/ddb-core/tests/hazard_delete_owner_junction_rows.rs
++++ b/ddb-core/tests/hazard_delete_owner_junction_rows.rs
+@@ -57,9 +57,8 @@ fn service_delete_of_reference_owner_removes_its_junction_rows() {
+     std::thread::sleep(std::time::Duration::from_secs(1));
+ 
+     // Owner O: setting the REFERENCES column materializes the junction row.
+-    let owner_insert = format!(
+-        "INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')"
+-    );
++    let owner_insert =
++        format!("INSERT INTO bookmark (url, category) VALUES ('https://example.com', '{cat_id}')");
+     let bm_id = insert_id(&mut svc, &owner_insert);
+ 
+     let jt = junction_table_name("bookmark", "category");
+diff --git a/ddb-core/tests/hazard_sql_delete_cascade.rs b/ddb-core/tests/hazard_sql_delete_cascade.rs
+index 8dc0498..082aa9e 100644
+--- a/ddb-core/tests/hazard_sql_delete_cascade.rs
++++ b/ddb-core/tests/hazard_sql_delete_cascade.rs
+@@ -45,7 +45,9 @@ fn seed_cascade_pair(svc: &mut DoogatService) -> (String, String) {
+ 
+ fn child_rows(svc: &mut DoogatService, child_id: &str) -> Vec<Vec<String>> {
+     match svc
+-        .execute_sql(&format!("SELECT id FROM membership WHERE id = '{child_id}'"))
++        .execute_sql(&format!(
++            "SELECT id FROM membership WHERE id = '{child_id}'"
++        ))
+         .unwrap()
+     {
+         SqlResult::Rows { rows, .. } => rows,
+@@ -55,7 +57,9 @@ fn child_rows(svc: &mut DoogatService, child_id: &str) -> Vec<Vec<String>> {
+ 
+ fn assert_child_gone(svc: &mut DoogatService, child_id: &str, via: &str) {
+     let Err(err) = svc.read_doogat(child_id) else {
+-        panic!("H3: CASCADE child {child_id} still readable from git after {via} deleted its parent");
++        panic!(
++            "H3: CASCADE child {child_id} still readable from git after {via} deleted its parent"
++        );
+     };
+     assert!(
+         matches!(err, DoogatError::NotFound(_)),
+diff --git a/ddb-core/tests/id_mint_collision.rs b/ddb-core/tests/id_mint_collision.rs
+index 23d5b77..638d79d 100644
+--- a/ddb-core/tests/id_mint_collision.rs
++++ b/ddb-core/tests/id_mint_collision.rs
+@@ -20,7 +20,10 @@ Seed body content.
+     let returned_seed_id = svc
+         .create_doogat_raw(&seeded_content, "seed current-second id")
+         .expect("create_doogat_raw must accept an author-supplied id");
+-    assert_eq!(returned_seed_id, seed_id, "author-supplied id must be stored verbatim");
++    assert_eq!(
++        returned_seed_id, seed_id,
++        "author-supplied id must be stored verbatim"
++    );
+ 
+     // Mint via raw-create path (no explicit id).
+     let raw_content = "\
+diff --git a/ddb-server/src/filter.rs b/ddb-server/src/filter.rs
+index 24f184f..e8f7e25 100644
+--- a/ddb-server/src/filter.rs
++++ b/ddb-server/src/filter.rs
+@@ -724,17 +724,13 @@ fn route_field_condition(
+     conditions: &mut Vec<String>,
+ ) -> Result<(), String> {
+     if let Some((parent_col, target_table)) = resolve_reference_target(field, ctx) {
+-        for cond in crate::relation_filter::build_forward_relation(
+-            &parent_col,
+-            &target_table,
+-            value,
+-            ctx,
+-        )? {
++        for cond in
++            crate::relation_filter::build_forward_relation(&parent_col, &target_table, value, ctx)?
++        {
+             conditions.push(cond);
+         }
+     } else if let Some((ref_type, ref_col)) = resolve_reverse_target(field, ctx) {
+-        for cond in
+-            crate::relation_filter::build_reverse_relation(&ref_type, &ref_col, value, ctx)?
++        for cond in crate::relation_filter::build_reverse_relation(&ref_type, &ref_col, value, ctx)?
+         {
+             conditions.push(cond);
+         }
+@@ -3011,7 +3007,10 @@ mod tests {
+     fn reverse_schemas() -> SchemaLookup {
+         let mut schemas = SchemaLookup::new();
+         schemas.insert("bookmark".into(), test_schema());
+-        schemas.insert("category".into(), schema_with_table("category", vec!["title"]));
++        schemas.insert(
++            "category".into(),
++            schema_with_table("category", vec!["title"]),
++        );
+         schemas
+     }
+ 
+@@ -3369,7 +3368,10 @@ mod tests {
+         });
+         let mut s = SchemaLookup::new();
+         s.insert("bookmark".into(), bookmark);
+-        s.insert("category".into(), schema_with_table("category", vec!["title"]));
++        s.insert(
++            "category".into(),
++            schema_with_table("category", vec!["title"]),
++        );
+         s
+     }
+ 
+diff --git a/ddb-server/src/relation_filter.rs b/ddb-server/src/relation_filter.rs
+index 6b6c7f1..6a423ea 100644
+--- a/ddb-server/src/relation_filter.rs
++++ b/ddb-server/src/relation_filter.rs
+@@ -151,14 +151,18 @@ fn emit_membership_exists(
+     // Compile sub-conditions FIRST so the depth check at the top of
+     // `build_conditions_into` always runs (even for an empty terminal), then
+     // branch on whether the COMPILED conditions are empty.
+-    let sub_conditions =
+-        compile_membership_sub_conditions(target_table, &r_alias, sub_value, ctx)?;
++    let sub_conditions = compile_membership_sub_conditions(target_table, &r_alias, sub_value, ctx)?;
+ 
+     // Empty compiled sub-`where`: no JOIN needed; the quantifier reduces to
+     // junction presence/absence (a junction row implies a related row, same
+     // basis as the empty-`none` "uncategorized" form). Avoids emitting `AND ()`.
+     if sub_conditions.is_empty() {
+-        return Ok(no_join_membership_sql(junction, &j_alias, &correlation, quantifier));
++        return Ok(no_join_membership_sql(
++            junction,
++            &j_alias,
++            &correlation,
++            quantifier,
++        ));
+     }
+ 
+     let sub_sql = sub_conditions.join(" AND ");
+diff --git a/ddb-server/src/rest.rs b/ddb-server/src/rest.rs
+index 8d20ea1..c005c10 100644
+--- a/ddb-server/src/rest.rs
++++ b/ddb-server/src/rest.rs
+@@ -435,7 +435,10 @@ async fn update_doogat(
+         .await
+         .map_err(rest_error)?;
+     let warnings = warnings_to_json(output.warnings);
+-    Ok(Json(SingleResponse::new(doogat_to_json(&output.value), warnings)))
++    Ok(Json(SingleResponse::new(
++        doogat_to_json(&output.value),
++        warnings,
++    )))
+ }
+ 
+ async fn delete_doogat(
+diff --git a/ddb-server/src/schema/input.rs b/ddb-server/src/schema/input.rs
+index ea686ef..ee16b9d 100644
+--- a/ddb-server/src/schema/input.rs
++++ b/ddb-server/src/schema/input.rs
+@@ -69,7 +69,9 @@ pub(crate) fn fields_map(obj: &GqlObject) -> Result<BTreeMap<String, DdbValue>,
+ 
+ /// Like [`fields_map`] but `None` when the field is absent (batch-update
+ /// semantics: distinguish "leave fields unchanged" from "set fields to empty").
+-pub(crate) fn opt_fields_map(obj: &GqlObject) -> Result<Option<BTreeMap<String, DdbValue>>, String> {
++pub(crate) fn opt_fields_map(
++    obj: &GqlObject,
++) -> Result<Option<BTreeMap<String, DdbValue>>, String> {
+     match obj.get("fields") {
+         Some(GqlValue::String(json)) => Ok(Some(parse_fields_json(json)?)),
+         _ => Ok(None),
+diff --git a/ddb-server/src/schema/mutations/singleton.rs b/ddb-server/src/schema/mutations/singleton.rs
+index 5106ff6..f636aed 100644
+--- a/ddb-server/src/schema/mutations/singleton.rs
++++ b/ddb-server/src/schema/mutations/singleton.rs
+@@ -72,7 +72,8 @@ pub(super) fn build_singleton_fields(schema: &TableSchema) -> (Field, Field) {
+                     .await
+                     .map_err(to_graphql_error)?;
+                 Ok(Some(FieldValue::owned_any(typed_doogat_to_value(
+-                    &output.value, &schema,
++                    &output.value,
++                    &schema,
+                 ))))
+             })
+         },
+diff --git a/ddb-server/tests/graphql_apply_schema_t161.rs b/ddb-server/tests/graphql_apply_schema_t161.rs
+index b3dbf57..b664fd6 100644
+--- a/ddb-server/tests/graphql_apply_schema_t161.rs
++++ b/ddb-server/tests/graphql_apply_schema_t161.rs
+@@ -127,9 +127,7 @@ async fn dry_run_apply_returns_plan_without_mutating() {
+ 
+     // PROVE no mutation by observation: a dry-run must NOT have created the
+     // table, so selecting from it must fail (`no such table`).
+-    let probed = probe
+-        .execute_sql("SELECT * FROM gizmo".to_string())
+-        .await;
++    let probed = probe.execute_sql("SELECT * FROM gizmo".to_string()).await;
+     assert!(
+         probed.is_err(),
+         "dry-run must NOT create the gizmo table; SELECT against it should fail but it succeeded"
+diff --git a/ddb-server/tests/graphql_update_warnings_t149.rs b/ddb-server/tests/graphql_update_warnings_t149.rs
+index 7491061..dec1607 100644
+--- a/ddb-server/tests/graphql_update_warnings_t149.rs
++++ b/ddb-server/tests/graphql_update_warnings_t149.rs
+@@ -70,7 +70,8 @@ async fn graphql_update_doogat_not_found_maps_to_not_found_code() {
+         ddb_server::schema::build_schema(actor, pool, vec![], None).expect("schema must build");
+ 
+     // Use a well-formed 14-digit id that was never created.
+-    let query = r#"mutation { updateDoogat(input: { id: "00000000000000", title: "Ghost" }) { id } }"#;
++    let query =
++        r#"mutation { updateDoogat(input: { id: "00000000000000", title: "Ghost" }) { id } }"#;
+     let response = schema.execute(query).await;
+ 
+     assert!(
+diff --git a/ddb-server/tests/rest_apply_schema_t161.rs b/ddb-server/tests/rest_apply_schema_t161.rs
+index 6fcba76..86eb173 100644
+--- a/ddb-server/tests/rest_apply_schema_t161.rs
++++ b/ddb-server/tests/rest_apply_schema_t161.rs
+@@ -127,10 +127,17 @@ async fn dry_run_apply_returns_plan_without_mutating() {
+     let probe = actor.clone();
+     let app = app(actor);
+ 
+-    let (status, json) =
+-        post_apply(&app, serde_json::json!({ "schema": GIZMO_YAML, "dryRun": true })).await;
++    let (status, json) = post_apply(
++        &app,
++        serde_json::json!({ "schema": GIZMO_YAML, "dryRun": true }),
++    )
++    .await;
+ 
+-    assert_eq!(status, StatusCode::OK, "dry-run must return 200; body: {json}");
++    assert_eq!(
++        status,
++        StatusCode::OK,
++        "dry-run must return 200; body: {json}"
++    );
+ 
+     // The envelope: `warnings` is always an array, and `data` is the report.
+     assert!(
+@@ -286,10 +293,17 @@ async fn apply_report_reflects_declared_type_name() {
+     let (actor, _pool) = setup(tmp.path()).await;
+     let app = app(actor);
+ 
+-    let (status, json) =
+-        post_apply(&app, serde_json::json!({ "schema": WIDGET_YAML, "dryRun": true })).await;
++    let (status, json) = post_apply(
++        &app,
++        serde_json::json!({ "schema": WIDGET_YAML, "dryRun": true }),
++    )
++    .await;
+ 
+-    assert_eq!(status, StatusCode::OK, "dry-run must return 200; body: {json}");
++    assert_eq!(
++        status,
++        StatusCode::OK,
++        "dry-run must return 200; body: {json}"
++    );
+     let report = &json["data"];
+ 
+     let ops = report
+@@ -344,8 +358,11 @@ async fn real_apply_triggers_schema_reload_dry_run_does_not() {
+ 
+     // Dry-run: plan only, no mutation, so NO reload may fire.
+     let version_before_dry = reloader.version();
+-    let (dry_status, dry_json) =
+-        post_rest_apply(&app, serde_json::json!({ "schema": GIZMO_YAML, "dryRun": true })).await;
++    let (dry_status, dry_json) = post_rest_apply(
++        &app,
++        serde_json::json!({ "schema": GIZMO_YAML, "dryRun": true }),
++    )
++    .await;
+     assert_eq!(
+         dry_status,
+         StatusCode::OK,
+diff --git a/tests/e2e/concurrent_writes.rs b/tests/e2e/concurrent_writes.rs
+index b08c6c8..4491b8e 100644
+--- a/tests/e2e/concurrent_writes.rs
++++ b/tests/e2e/concurrent_writes.rs
+@@ -70,7 +70,9 @@ fn head_content(repo: &Path, id: &str) -> String {
+ /// Wait for a spawned `ddb` process and return its trimmed stdout, asserting a
+ /// clean exit. `label` names the writer in failure messages.
+ fn wait_ok(child: Child, label: &str) -> String {
+-    let out = child.wait_with_output().expect("failed to wait on ddb process");
++    let out = child
++        .wait_with_output()
++        .expect("failed to wait on ddb process");
+     assert!(
+         out.status.success(),
+         "{label} failed (status {}): stdout={:?} stderr={:?}",
+diff --git a/tests/e2e/cross_transport_error.rs b/tests/e2e/cross_transport_error.rs
+index 51ea211..0be523f 100644
+--- a/tests/e2e/cross_transport_error.rs
++++ b/tests/e2e/cross_transport_error.rs
+@@ -71,9 +71,9 @@ fn delete_unknown_id_reports_not_found_on_both_transports() {
+         rest_status_and_code(server.rest_delete(&format!("/doogats/{MISSING_ID}")));
+     assert_eq!(rest_status, 404, "REST delete of unknown id should be 404");
+ 
+-    let gql_code = graphql_error_code(
+-        &server.graphql(&format!("mutation {{ deleteDoogat(id: \"{MISSING_ID}\") }}")),
+-    );
++    let gql_code = graphql_error_code(&server.graphql(&format!(
++        "mutation {{ deleteDoogat(id: \"{MISSING_ID}\") }}"
++    )));
+ 
+     assert_eq!(rest_code, "NOT_FOUND", "REST should report NOT_FOUND");
+     assert_eq!(gql_code, "NOT_FOUND", "GraphQL should report NOT_FOUND");
+diff --git a/tests/e2e/integration_compact_stats.rs b/tests/e2e/integration_compact_stats.rs
+index ef1fe2f..9d2f2b6 100644
+--- a/tests/e2e/integration_compact_stats.rs
++++ b/tests/e2e/integration_compact_stats.rs
+@@ -12,7 +12,13 @@ fn integration_33_compact_byte_stats_report() {
+     let out = setup
+         .node1
+         .ddb()
+-        .args(["create", "--title", "Stale shared", "--body", "original content"])
++        .args([
++            "create",
++            "--title",
++            "Stale shared",
++            "--body",
++            "original content",
++        ])
+         .output()
+         .unwrap();
+     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+diff --git a/tests/e2e/integration_crdt_conflicts.rs b/tests/e2e/integration_crdt_conflicts.rs
+index c72f7f9..9a15134 100644
+--- a/tests/e2e/integration_crdt_conflicts.rs
++++ b/tests/e2e/integration_crdt_conflicts.rs
+@@ -37,7 +37,13 @@ fn integration_26_reference_section_conflict() {
+     let out = setup
+         .node1
+         .ddb()
+-        .args(["create", "--title", "Shared note", "--body", "Original body"])
++        .args([
++            "create",
++            "--title",
++            "Shared note",
++            "--body",
++            "Original body",
++        ])
+         .output()
+         .unwrap();
+     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+diff --git a/tests/e2e/integration_graphql_batch.rs b/tests/e2e/integration_graphql_batch.rs
+index c1138b4..8033748 100644
+--- a/tests/e2e/integration_graphql_batch.rs
++++ b/tests/e2e/integration_graphql_batch.rs
+@@ -45,9 +45,7 @@ fn integration_38f_execute_batch_multi_statement() {
+     // Failure-rollback: a batch with a bad statement must fail entirely, leaving no partial writes
+     let pre = server.graphql(r#"{ batchfoosAggregate { count } }"#);
+     assert!(pre.get("errors").is_none(), "pre-count query failed: {pre}");
+-    let pre_count = pre["data"]["batchfoosAggregate"]["count"]
+-        .as_i64()
+-        .unwrap();
++    let pre_count = pre["data"]["batchfoosAggregate"]["count"].as_i64().unwrap();
+ 
+     let result = server.graphql_with_vars(
+         r#"mutation($stmts: [String!]!) { executeBatch(statements: $stmts) { message } }"#,
+diff --git a/tests/e2e/integration_orderby_base_fields.rs b/tests/e2e/integration_orderby_base_fields.rs
+index 18d4a3e..5dca633 100644
+--- a/tests/e2e/integration_orderby_base_fields.rs
++++ b/tests/e2e/integration_orderby_base_fields.rs
+@@ -75,9 +75,8 @@ fn integration_42b_orderby_base_fields_deterministic_pagination() {
+     );
+ 
+     // created_at ASC: date order Jan < Feb < Mar < Apr = [n1, n3, n0e, n2].
+-    let ob = server.graphql(
+-        "{ obnotes(orderBy: { created_at: ASC }) { items { subject } totalCount } }",
+-    );
++    let ob = server
++        .graphql("{ obnotes(orderBy: { created_at: ASC }) { items { subject } totalCount } }");
+     assert!(
+         ob.get("errors").is_none(),
+         "orderBy created_at ASC failed: {ob}"
+@@ -134,9 +133,8 @@ fn integration_42b_orderby_base_fields_deterministic_pagination() {
+     assert!(p2.get("errors").is_none(), "pagination page2 failed: {p2}");
+     assert_eq!(subjects(&p2), vec!["n0e", "n2"]);
+ 
+-    let drop = server.graphql(
+-        r#"mutation { executeSql(sql: "DROP TABLE obnote CASCADE") { message } }"#,
+-    );
++    let drop =
++        server.graphql(r#"mutation { executeSql(sql: "DROP TABLE obnote CASCADE") { message } }"#);
+     assert!(
+         drop.get("errors").is_none(),
+         "DROP TABLE obnote failed: {drop}"
+diff --git a/tests/e2e/integration_sql_no_match.rs b/tests/e2e/integration_sql_no_match.rs
+index 69adcac..87eb87c 100644
+--- a/tests/e2e/integration_sql_no_match.rs
++++ b/tests/e2e/integration_sql_no_match.rs
+@@ -127,7 +127,9 @@ fn integration_30_f1_composite_unique_cli_rejection() {
+     );
+     assert!(combined.contains("UNIQUE"));
+     assert!(
+-        combined.contains("f1mship") || combined.contains("link_id") || combined.contains("category"),
++        combined.contains("f1mship")
++            || combined.contains("link_id")
++            || combined.contains("category"),
+         "expected table/column context in error, got: {combined}"
+     );
+ }
+diff --git a/tests/e2e/integration_sql_writes.rs b/tests/e2e/integration_sql_writes.rs
+index 135ad2b..974e007 100644
+--- a/tests/e2e/integration_sql_writes.rs
++++ b/tests/e2e/integration_sql_writes.rs
+@@ -54,7 +54,9 @@ fn integration_43_sql_insert_defaults_date_graphql() {
+         &batch_id[6..8]
+     );
+ 
+-    let doogat = server.graphql(&format!(r#"{{ doogat(id: "{batch_id}") {{ created_at }} }}"#));
++    let doogat = server.graphql(&format!(
++        r#"{{ doogat(id: "{batch_id}") {{ created_at }} }}"#
++    ));
+     assert!(
+         doogat.get("errors").is_none(),
+         "doogat query failed: {doogat}"
+diff --git a/tests/e2e/integration_tags_filter.rs b/tests/e2e/integration_tags_filter.rs
+index ce578d5..949f16b 100644
+--- a/tests/e2e/integration_tags_filter.rs
++++ b/tests/e2e/integration_tags_filter.rs
+@@ -21,9 +21,8 @@ fn integration_45_g11_tags_filter_nullable_operators() {
+         "createDoogat with tags failed: {created}"
+     );
+ 
+-    let contains = server.graphql(
+-        r#"{ g11links(where: {tags: {contains: "rust"}}) { totalCount items { id } } }"#,
+-    );
++    let contains = server
++        .graphql(r#"{ g11links(where: {tags: {contains: "rust"}}) { totalCount items { id } } }"#);
+     assert!(
+         contains.get("errors").is_none(),
+         "contains filter failed: {contains}"
+@@ -33,9 +32,8 @@ fn integration_45_g11_tags_filter_nullable_operators() {
+         serde_json::json!(1)
+     );
+ 
+-    let contains_all = server.graphql(
+-        r#"{ g11links(where: {tags: {containsAll: ["rust", "sql"]}}) { totalCount } }"#,
+-    );
++    let contains_all = server
++        .graphql(r#"{ g11links(where: {tags: {containsAll: ["rust", "sql"]}}) { totalCount } }"#);
+     assert!(
+         contains_all.get("errors").is_none(),
+         "containsAll filter failed: {contains_all}"
+@@ -45,9 +43,8 @@ fn integration_45_g11_tags_filter_nullable_operators() {
+         serde_json::json!(1)
+     );
+ 
+-    let contains_any = server.graphql(
+-        r#"{ g11links(where: {tags: {containsAny: ["rust", "go"]}}) { totalCount } }"#,
+-    );
++    let contains_any = server
++        .graphql(r#"{ g11links(where: {tags: {containsAny: ["rust", "go"]}}) { totalCount } }"#);
+     assert!(
+         contains_any.get("errors").is_none(),
+         "containsAny filter failed: {contains_any}"
+diff --git a/tests/e2e/singleton_cross_process_update.rs b/tests/e2e/singleton_cross_process_update.rs
+index 6116953..1064b18 100644
+--- a/tests/e2e/singleton_cross_process_update.rs
++++ b/tests/e2e/singleton_cross_process_update.rs
+@@ -30,8 +30,12 @@ fn two_concurrent_ddb_update_retype_into_singleton_converge_on_one_row() {
+     let child1 = update_child(&repo, &id_a, "dark");
+     let child2 = update_child(&repo, &id_b, "light");
+ 
+-    let out1 = child1.wait_with_output().expect("failed to wait on process 1");
+-    let out2 = child2.wait_with_output().expect("failed to wait on process 2");
++    let out1 = child1
++        .wait_with_output()
++        .expect("failed to wait on process 1");
++    let out2 = child2
++        .wait_with_output()
++        .expect("failed to wait on process 2");
+     let outputs = [&out1, &out2];
+ 
+     // Exactly one winner, one loser.
+diff --git a/tests/e2e/typed_where_filter.rs b/tests/e2e/typed_where_filter.rs
+index cc0066d..f1892f5 100644
+--- a/tests/e2e/typed_where_filter.rs
++++ b/tests/e2e/typed_where_filter.rs
+@@ -42,7 +42,10 @@ fn setup_completeness_fixture(server: &ServerGuard) -> CompletenessFixture {
+         ),
+     );
+     exec_sql(server, "INSERT INTO rellink (title) VALUES ('orphan-link')");
+-    CompletenessFixture { cat_rust_id, link1_id }
++    CompletenessFixture {
++        cat_rust_id,
++        link1_id,
++    }
+ }
+ 
+ fn assert_negation_filters(server: &ServerGuard, link1_id: &str) {
+@@ -50,23 +53,39 @@ fn assert_negation_filters(server: &ServerGuard, link1_id: &str) {
+         r#"{{ rellinks(where: {{ id: {{ notIn: ["{link1_id}"] }} }}) {{ totalCount }} }}"#
+     ));
+     assert!(r.get("errors").is_none(), "notIn query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 2, "notIn totalCount: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        2,
++        "notIn totalCount: {r}"
++    );
+ 
+     let r = server.graphql(&format!(
+         r#"{{ rellinks(where: {{ id: {{ nin: ["{link1_id}"] }} }}) {{ totalCount }} }}"#
+     ));
+     assert!(r.get("errors").is_none(), "nin query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 2, "nin totalCount: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        2,
++        "nin totalCount: {r}"
++    );
+ }
+ 
+ fn assert_null_filters(server: &ServerGuard) {
+     let r = server.graphql(r#"{ rellinks(where: { url: { isNull: true } }) { totalCount } }"#);
+     assert!(r.get("errors").is_none(), "isNull true query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 1, "isNull true: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        1,
++        "isNull true: {r}"
++    );
+ 
+     let r = server.graphql(r#"{ rellinks(where: { url: { isNull: false } }) { totalCount } }"#);
+     assert!(r.get("errors").is_none(), "isNull false query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 2, "isNull false: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        2,
++        "isNull false: {r}"
++    );
+ }
+ 
+ fn assert_forward_filters(server: &ServerGuard, cat_rust_id: &str) {
+@@ -74,30 +93,55 @@ fn assert_forward_filters(server: &ServerGuard, cat_rust_id: &str) {
+         r#"{ rellinks(where: { category: { title: { eq: "Rust" } } }) { totalCount items { id url } } }"#,
+     );
+     assert!(r.get("errors").is_none(), "inlined title query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 1, "inlined title count: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        1,
++        "inlined title count: {r}"
++    );
+     let items = r["data"]["rellinks"]["items"].as_array().unwrap();
+     assert_eq!(items.len(), 1, "inlined title items: {r}");
+-    assert_eq!(items[0]["url"].as_str().unwrap(), "https://rust.example", "inlined title url: {r}");
++    assert_eq!(
++        items[0]["url"].as_str().unwrap(),
++        "https://rust.example",
++        "inlined title url: {r}"
++    );
+ 
+-    let r = server.graphql(r#"{ rellinks(where: { category: { slug: { eq: "py" } } }) { totalCount } }"#);
++    let r = server
++        .graphql(r#"{ rellinks(where: { category: { slug: { eq: "py" } } }) { totalCount } }"#);
+     assert!(r.get("errors").is_none(), "inlined slug query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 1, "inlined slug count: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        1,
++        "inlined slug count: {r}"
++    );
+ 
+     let r = server.graphql(&format!(
+         r#"{{ rellinks(where: {{ category: {{ eq: "{cat_rust_id}" }} }}) {{ totalCount }} }}"#
+     ));
+     assert!(r.get("errors").is_none(), "category eq query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 1, "category eq count: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        1,
++        "category eq count: {r}"
++    );
+ }
+ 
+ fn assert_quantifier_filters(server: &ServerGuard) {
+     let r = server.graphql(r#"{ rellinks(where: { category: { none: {} } }) { totalCount } }"#);
+     assert!(r.get("errors").is_none(), "none query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 1, "none count: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        1,
++        "none count: {r}"
++    );
+ 
+     let r = server.graphql(r#"{ rellinks(where: { category: { some: {} } }) { totalCount } }"#);
+     assert!(r.get("errors").is_none(), "some query failed: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 2, "some count: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        2,
++        "some count: {r}"
++    );
+ }
+ 
+ fn assert_reverse_filters(server: &ServerGuard) {
+@@ -105,17 +149,35 @@ fn assert_reverse_filters(server: &ServerGuard) {
+         r#"{ relcats(where: { rellinks: { some: { url: { contains: "rust" } } } }) { totalCount items { id title } } }"#,
+     );
+     assert!(r.get("errors").is_none(), "reverse some query failed: {r}");
+-    assert_eq!(r["data"]["relcats"]["totalCount"].as_i64().unwrap(), 1, "reverse some count: {r}");
++    assert_eq!(
++        r["data"]["relcats"]["totalCount"].as_i64().unwrap(),
++        1,
++        "reverse some count: {r}"
++    );
+     let items = r["data"]["relcats"]["items"].as_array().unwrap();
+     assert_eq!(items.len(), 1, "reverse some items: {r}");
+-    assert_eq!(items[0]["title"].as_str().unwrap(), "Rust", "reverse some title: {r}");
++    assert_eq!(
++        items[0]["title"].as_str().unwrap(),
++        "Rust",
++        "reverse some title: {r}"
++    );
+ 
+-    let r = server.graphql(r#"{ relcats(where: { rellinks: { none: {} } }) { totalCount items { id title } } }"#);
++    let r = server.graphql(
++        r#"{ relcats(where: { rellinks: { none: {} } }) { totalCount items { id title } } }"#,
++    );
+     assert!(r.get("errors").is_none(), "reverse none query failed: {r}");
+-    assert_eq!(r["data"]["relcats"]["totalCount"].as_i64().unwrap(), 1, "reverse none count: {r}");
++    assert_eq!(
++        r["data"]["relcats"]["totalCount"].as_i64().unwrap(),
++        1,
++        "reverse none count: {r}"
++    );
+     let items = r["data"]["relcats"]["items"].as_array().unwrap();
+     assert_eq!(items.len(), 1, "reverse none items: {r}");
+-    assert_eq!(items[0]["title"].as_str().unwrap(), "Empty", "reverse none title: {r}");
++    assert_eq!(
++        items[0]["title"].as_str().unwrap(),
++        "Empty",
++        "reverse none title: {r}"
++    );
+ }
+ 
+ fn assert_pagination(server: &ServerGuard) {
+@@ -125,7 +187,11 @@ fn assert_pagination(server: &ServerGuard) {
+     assert!(r.get("errors").is_none(), "pagination page 0 failed: {r}");
+     let items = r["data"]["rellinks"]["items"].as_array().unwrap();
+     assert_eq!(items.len(), 1, "page 0 item count: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 2, "page 0 totalCount: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        2,
++        "page 0 totalCount: {r}"
++    );
+     let p0_url = items[0]["url"].as_str().unwrap().to_string();
+ 
+     let r = server.graphql(
+@@ -134,10 +200,17 @@ fn assert_pagination(server: &ServerGuard) {
+     assert!(r.get("errors").is_none(), "pagination page 1 failed: {r}");
+     let items = r["data"]["rellinks"]["items"].as_array().unwrap();
+     assert_eq!(items.len(), 1, "page 1 item count: {r}");
+-    assert_eq!(r["data"]["rellinks"]["totalCount"].as_i64().unwrap(), 2, "page 1 totalCount: {r}");
++    assert_eq!(
++        r["data"]["rellinks"]["totalCount"].as_i64().unwrap(),
++        2,
++        "page 1 totalCount: {r}"
++    );
+     let p1_url = items[0]["url"].as_str().unwrap().to_string();
+ 
+-    assert_ne!(p0_url, p1_url, "page 0 and page 1 should have different URLs");
++    assert_ne!(
++        p0_url, p1_url,
++        "page 0 and page 1 should have different URLs"
++    );
+ }
+ 
+ /// Exhaustive test of the typed per-type `where:` filter on GraphQL
+@@ -203,10 +276,14 @@ fn setup_every_fixture(server: &ServerGuard) -> (String, String, String, String,
+     std::thread::sleep(std::time::Duration::from_secs(1));
+ 
+     let cat_null = exec_sql_then_sleep(server, "INSERT INTO evcat (title) VALUES ('NoColor')");
+-    let cat_red =
+-        exec_sql_then_sleep(server, "INSERT INTO evcat (title, color) VALUES ('Red', 'red')");
+-    let cat_blue =
+-        exec_sql_then_sleep(server, "INSERT INTO evcat (title, color) VALUES ('Blue', 'blue')");
++    let cat_red = exec_sql_then_sleep(
++        server,
++        "INSERT INTO evcat (title, color) VALUES ('Red', 'red')",
++    );
++    let cat_blue = exec_sql_then_sleep(
++        server,
++        "INSERT INTO evcat (title, color) VALUES ('Blue', 'blue')",
++    );
+ 
+     let link_null = exec_sql_then_sleep(
+         server,

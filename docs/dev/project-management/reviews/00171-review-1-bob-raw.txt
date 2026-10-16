@@ -1,0 +1,36 @@
+```
+[BOB] ⚪ Diff bundles already-landed PRD 00202 commits (git_ops/read.rs merge-attribution rewrite, its new tests, and the matching CHANGELOG entry) that are out of scope for 00171's shell-migration mandate — those commits (b1a047f, a7e5179, 75cde1c) are already on master per `git log`, so this is almost certainly a diff-base artifact (c1's base predates them), not new work done under 00171 | File: ddb-core/src/git_ops/read.rs | Task: general
+[BOB] ⚪ Several newly-ported multi-process race test functions run well past the 50-line guideline (integration_61_b_concurrent_cli_and_graphql_write_lock ≈145 lines, integration_55_d_cli_vs_pgwire_singleton_insert_race ≈152 lines) | File: tests/e2e/integration_write_lock_races.rs | Task: general
+[BOB] ⚪ The mechanical fail-first/tautology finder for this cycle reports "Checked 0 test function(s)" and "replay: skipped (the diff touches no test function)" despite ~60 new/changed e2e test files — the automated tautology net did not fire for this diff | File: N/A | Task: general
+
+R1: pass
+R2: pass
+R3: pass
+R4: pass
+R6: pass
+R7: pass
+R8: pass
+R9: pass
+R10: pass
+R11: pass
+R12: fail
+R13: pass
+
+FIX:
+- (none)
+
+VERIFY:
+- git_ops/read.rs + tests.rs + CHANGELOG 00202 content appearing in this diff — run `git log --oneline -1 <c1-base-sha> -- ddb-core/src/git_ops/read.rs` and confirm it already contains 75cde1c; if it does, this is pure diff-base noise from cutting the review diff against a stale base, not scope creep by this cycle's implementor.
+- Mech-check tool reporting zero touched test functions for a diff that adds/changes ~60 e2e test files — check the mech-check finder's file-glob/path filter to see why `tests/e2e/**` was excluded from this cycle's scan, since future review cycles on this crate need the automated tautology/fail-first net working rather than relying on manual sampling.
+
+KNOWN:
+- Race-scenario test functions exceeding 50 lines (R12) — out of scope to split: these are atomic multi-process race scenarios (spawn every writer, then assert convergence + HEAD durability as one indivisible check), the same shape as the pre-existing `singleton_cross_process_upsert.rs` tests this PRD explicitly cross-references, and the diff already extracts the reusable pieces into helpers (`race_graphql`, `graphql_winner`, `assert_survivor`, `spawn_ddb`, `wait_ok`, `head_content`) — further splitting would fragment one scenario into pieces that still have to run together.
+
+D1: pass
+D2: pass
+D3: pass
+D4: pass
+D5: pass
+```
+
+Scope note: this diff is large (84 files) with an extensive pre-existing per-file Pat review trail in `dev/local/reviews/00171-task14-pat-*`. I read the mapping table, both CI workflows in full, `common.rs`/`main.rs` wiring, all four deleted shell files' headers (confirmed clean full deletions), and did deep spot-checks on the highest-risk ported scenarios (SINGLETON races, CLI-vs-PgWire race, cross-process write-lock race) rather than reading all ~60 e2e files line-by-line — those sampled files show correct, non-tautological, HEAD-durability-based assertions.

@@ -1,0 +1,299 @@
+{
+  "full_validation_run": 33991344845,
+  "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+  "push_test": {
+    "conclusion": null,
+    "created_at": "2026-09-05T20:50:10Z",
+    "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+    "html_url": "https://github.com/doogat/ddb/actions/runs/33991275129",
+    "id": 33991275129,
+    "status": "in_progress"
+  },
+  "jobs": [
+    {
+      "conclusion": null,
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024425,
+      "name": "linux-core",
+      "status": "in_progress",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run actions/checkout@v5",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run dtolnay/rust-toolchain@stable",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Swatinem/rust-cache@v2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install system dependencies",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Configure git identity",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Sync integration tests",
+          "status": "completed"
+        },
+        {
+          "conclusion": null,
+          "name": "Property tests",
+          "status": "in_progress"
+        },
+        {
+          "conclusion": null,
+          "name": "Post Run Swatinem/rust-cache@v2",
+          "status": "pending"
+        },
+        {
+          "conclusion": null,
+          "name": "Post Run actions/checkout@v5",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "conclusion": null,
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024496,
+      "name": "macos-full",
+      "status": "in_progress",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run actions/checkout@v5",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run dtolnay/rust-toolchain@stable",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Swatinem/rust-cache@v2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Configure git identity",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build CLI binary",
+          "status": "completed"
+        },
+        {
+          "conclusion": null,
+          "name": "Full cargo test suite",
+          "status": "in_progress"
+        },
+        {
+          "conclusion": null,
+          "name": "Post Run Swatinem/rust-cache@v2",
+          "status": "pending"
+        },
+        {
+          "conclusion": null,
+          "name": "Post Run actions/checkout@v5",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024538,
+      "name": "linux-clippy",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run actions/checkout@v5",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run dtolnay/rust-toolchain@stable",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Swatinem/rust-cache@v2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install system dependencies",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Clippy",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Run Swatinem/rust-cache@v2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "conclusion": null,
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024542,
+      "name": "windows-full",
+      "status": "in_progress",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run actions/checkout@v5",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run dtolnay/rust-toolchain@stable",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Swatinem/rust-cache@v2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Configure git identity",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build CLI binary",
+          "status": "completed"
+        },
+        {
+          "conclusion": null,
+          "name": "Full cargo test suite",
+          "status": "in_progress"
+        },
+        {
+          "conclusion": null,
+          "name": "Post Run Swatinem/rust-cache@v2",
+          "status": "pending"
+        },
+        {
+          "conclusion": null,
+          "name": "Post Run actions/checkout@v5",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "head_sha": "5cf4c360556c1b8aa9a3e1bb7dfd83496ba269e4",
+      "id": 101374024551,
+      "name": "linux-e2e",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run actions/checkout@v5",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run dtolnay/rust-toolchain@stable",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Swatinem/rust-cache@v2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install system dependencies",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Configure git identity",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build CLI binary",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Full e2e tests",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Run Swatinem/rust-cache@v2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job",
+          "status": "completed"
+        }
+      ]
+    }
+  ]
+}

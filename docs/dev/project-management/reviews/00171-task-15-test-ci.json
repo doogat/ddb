@@ -1,0 +1,13 @@
+{
+  "command": "cargo test-ci --manifest-path /Users/bob/git/src/github.com/doogat/ddb/dev/local/worktrees/00171-review/Cargo.toml",
+  "exit": 0,
+  "sha": "ec28333069e7b94927abf20c2d61f546286a17fc",
+  "summaries": [
+    "test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.85s",
+    "test result: ok. 1555 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 952.15s",
+    "test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s"
+  ],
+  "passed": 1819,
+  "failed": 0,
+  "skipped": 0
+}

@@ -1,0 +1,5 @@
+CLOSURE section not applicable — no `### Findings (verbatim)` block in the task description, so skipping closure verdicts.
+
+SEVERITY | file:line | issue | fix
+LOW | README.md:102 | Quickstart "Test" block replaces the old `smoke.sh`/`integration.sh` pair with `cargo test -p ddb-e2e` and `cargo test -p ddb-e2e smoke_`, but drops the `integration_`-filter example entirely — AGENTS.md's parallel list (lines 156-158) keeps both `smoke_` and `integration_` filter examples, so README now under-documents how to run only integration scenarios. | Add a fourth line `cargo test -p ddb-e2e integration_  # Integration scenarios (Tier 2)` to match AGENTS.md.
+LOW | CONTRIBUTING.md:45-46 | The new "Integration/e2e tests in `tests/e2e/`" bullet and the following "Smoke/integration scenario authoring" bullet both point at `tests/e2e/` and overlap almost entirely in scope, where the old text kept three distinct bullets (integration/e2e, smoke, integration) each with a distinct home. | Fold the two into one bullet, e.g. keep "Integration/e2e tests" as the heading and inline the smoke_/integration_ authoring guidance under it instead of as a separate bullet.

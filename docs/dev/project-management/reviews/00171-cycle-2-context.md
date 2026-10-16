@@ -1,0 +1,19 @@
+# 00171 cycle 2 context
+
+Review only PRD 00171. Do not drain the backlog. Original work_start_sha remains `b1e785395fb1e5d7043fbc725cc5786f62a6417e`.
+
+Cycle 1 ran all required lenses and fixed eight actionable findings through tasks 15 and 16. Their final commits are `103c8ab` (complete per-push e2e selection) and `74644b8` (six assertion repairs plus shared helpers). Pat marked every quoted finding resolved. The original 14 build tasks and these two rework tasks are complete; this is not final PRD acceptance.
+
+Concurrent maintainer work in the full history is outside 00171: `dbc128f` adds six ignored hazard regressions, `bd3e7f0` protects raw-create identity, `4a248cb` protects UNIQUE values on update, and `876a153` removes owned junction rows on deletion. These were authored by another live session. They were preserved, not implemented or reviewed as 00171. Do not attribute their production-code changes to this migration. Master advanced to `876a153` while final approvals were pending.
+
+The 00171 rework was tested at `74644b8825e52794f1274b3dcec9875d1a17d808`: cargo build, cargo clippy --workspace --all-targets, and cargo test-ci all passed (1,819 passed, 0 failed, 0 ignored). The last-verification record deliberately retains that actual tested SHA. The other session committed `4a248cb` after the fast-forward and before push, so the pushed master head is `4a248cb0c1792d922b5e56600330c34e532e7ab8`; do not relabel old test counts as fresh results for it.
+
+## CI observations to include in the next review
+
+- Current push: [Test 34057702782](https://github.com/doogat/ddb/actions/runs/34057702782), head `4a248cb`, created 2026-09-06 20:20:51 UTC. **Succeeded**: both test (including the unfiltered e2e suite) and coverage jobs passed. Saved evidence: `00171-cycle-1-final-ci.json`. This success applies to that SHA, not the later concurrent `876a153` commit.
+- Original pre-deletion cross-platform proof: [Full Validation 33991344845](https://github.com/doogat/ddb/actions/runs/33991344845), head `5cf4c36`, all six jobs successful. Original post-deletion per-push proof: [Test 34016441899](https://github.com/doogat/ddb/actions/runs/34016441899), head `c8b72bd`, successful.
+- A later [Nightly 34020494801](https://github.com/doogat/ddb/actions/runs/34020494801) at `c8b72bd` failed. Windows failed `git_ops::tests::commit_merge_logs_distinct_reassignment_warn_per_loser` because captured logs were empty. That core test is outside this PRD. macOS failed the migrated `integration_warnings_update::integration_58_a_graphql_update_warnings_empty` with a connection reset at `tests/e2e/common.rs:186`; the e2e summary was 564 passed, 1 failed. This was discovered while checking the final push, after cycle-1 rework was complete.
+- The exact macOS failure was reproduced narrowly on the current local Mac at head `4a248cb`: `cargo build -p ddb-cli` passed; `cargo test -p ddb-e2e --test e2e integration_warnings_update::integration_58_a_graphql_update_warnings_empty -- --exact` passed (1 passed, 0 failed, 567 filtered out; 2.08 seconds). This is the repository's explicit narrow CI-failure reproduction exception, not a local full-suite run.
+- The single-case pass does not establish that the earlier full-suite connection-reset cause is fixed. Carry it as an unresolved CI/concurrency observation into cycle 2; do not silently discard it or invent a retry/readiness fix without evidence. No code was changed for it in this session.
+
+Full details: `00171-migrate-shell-scenarios-to-e2e-v1-review-1.md`, `00171-migrate-shell-scenarios-to-e2e-v1-rework-1.md`, `00171-cycle-1-rework-doubt.md`, and the raw reviewer/Pat outputs in this directory. The source mapping still has exactly 391 rows. The new first-linked-reference test is registered and active; the two ignored e2e cases belong to the concurrent hazard commit.

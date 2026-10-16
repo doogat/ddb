@@ -1,0 +1,232 @@
+I will read the card, patch, and context files to review the build candidate.
+
+● Read FT-8a-build-candidate.patch
+  │ dev/local/tmp/FT-8a-build-candidate.patch
+  └ 1 line read
+
+● Read FT-8a-card.md
+  │ dev/local/tmp/FT-8a-card.md
+  └ 226 lines read
+
+✗ Read context.md
+  │ /private/tmp/claude-501/-Users-bob-git-src-github-com-doogat-ddb/d60f147b-2c13-496a-b8a8-67c1e19
+  │ ebf64/scratchpad/context.md
+  └ Permission denied and could not request permission from user
+
+✗ Read context.md from scratchpad (shell)
+  │ cat /private/tmp/claude-501/-Users-bob-git-src-github-com-doogat-ddb/d60f147b-2c13-496a-b8a8-67c
+  │ 1e19ebf64/scratchpad/context.md
+  └ Permission denied and could not request permission from user
+
+/ Search (glob)
+  │ "**/*FT-8a*" in dev/local
+  └ 5 files found
+
+/ Search (glob)
+  │ "**/*context*" in dev/local
+  └ 20 files found
+
+● Read FT-8a-build.md
+  │ dev/local/reviews/FT-8a-build.md
+  └ 146 lines read
+
+● Read FT-8a-state.json
+  │ dev/local/tmp/FT-8a-state.json
+  └ 51 lines read
+
+● Read 00204-FT-8a-fresh-review-handoff-20260930.md
+  │ docs/dev/tmp/00204-FT-8a-fresh-review-handoff-20260930.md
+  └ 86 lines read
+
+● Read 00204-sync-collision-loser-without-frontmatter-v1.md
+  │ dev/local/prds/backlog/00204-sync-collision-loser-without-frontmatter-v1.md
+  └ 193 lines read
+
+● Read FT-8a-opus-impl.txt
+  │ dev/local/tmp/FT-8a-opus-impl.txt
+  └ 147 lines read
+
+● Read FT-8a-build-candidate.patch
+  │ dev/local/tmp/FT-8a-build-candidate.patch
+  └ L1:250 (250 lines read)
+
+● Read FT-8a-build-candidate.patch
+  │ dev/local/tmp/FT-8a-build-candidate.patch
+  └ L251:500 (250 lines read)
+
+● Read FT-8a-build-candidate.patch
+  │ dev/local/tmp/FT-8a-build-candidate.patch
+  └ L501:750 (250 lines read)
+
+● Read FT-8a-build-candidate.patch
+  │ dev/local/tmp/FT-8a-build-candidate.patch
+  └ L751:1000 (250 lines read)
+
+● Read FT-8a-build-candidate.patch
+  │ dev/local/tmp/FT-8a-build-candidate.patch
+  └ L1001:1300 (93 lines read)
+
+/ Search (glob)
+  │ "*" in dev/local/reviews
+  └ 292 files found
+
+● Read FT-7b-carl-output.txt
+  │ dev/local/reviews/FT-7b-logs/FT-7b-carl-output.txt
+  └ 191 lines read
+
+● Read FT-7b-carl-prompt.md
+  │ dev/local/reviews/FT-7b-logs/FT-7b-carl-prompt.md
+  └ 171 lines read
+
+/ Search (glob)
+  │ "**/*carl*" in dev/local
+  └ 49 files found
+
+/ Search (glob)
+  │ "Cargo.toml" in dev/local/tmp/worktrees/00204-ft-8a
+  └ 6 files found
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/parser/mod.rs
+  └ L185:210 (26 lines read)
+
+● Check line counts of modified files (shell)
+  │ wc -l
+  │ /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00204-ft-8a/CHANGELOG.md \
+  │ /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/bu
+  │ ndle/tests.rs \
+  │ /Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/ff…
+  └ 35 lines…
+
+● Find functions > 50 lines (shell)
+  │ python3 - << 'EOF'
+  │ import re
+  │
+  │ patch_file =
+  │ "/Users/bob/git/src/github.com/doogat/ddb/dev/local/tmp/FT-8a-build-candidate.patch"…
+  └ 121 lines…
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/parser/mod.rs
+  └ L170:195 (26 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/parser/mod.rs
+  └ L120:165 (46 lines read)
+
+● Read merge.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/git_ops/merge.rs
+  └ L190:265 (76 lines read)
+
+● Read merge.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/git_ops/merge.rs
+  └ L265:320 (56 lines read)
+
+/ Search (grep)
+  │ "CollisionLoser\s*\{" (dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src)
+  └ 3 files found
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/sync_manager/mod.rs
+  └ L145:190 (46 lines read)
+
+/ Search (grep)
+  │ "\bcommit_merge\b" (dev/local/tmp/worktrees/00204-ft-8a)
+  └ 14 files found
+
+/ Search (grep)
+  │ "SyncReport\s*\{" (dev/local/tmp/worktrees/00204-ft-8a)
+  └ 4 files found
+
+/ Search (grep)
+  │ "collision_losers_kept_verbatim" (dev/local/tmp/worktrees/00204-ft-8a)
+  └ 5 files found
+
+/ Search (grep)
+  │ "ConflictFile\s*\{" (dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src)
+  └ 5 files found
+
+● Read merge.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/git_ops/merge.rs
+  └ L390:430 (41 lines read)
+
+● Read merge.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/git_ops/merge.rs
+  └ L430:480 (51 lines read)
+
+/ Search (grep)
+  │ "fn extract_conflicts" (dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/git_ops/merge.rs)
+  └ 1 file found
+
+● Read merge.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/git_ops/merge.rs
+  └ L510:555 (46 lines read)
+
+/ Search (grep)
+  │ "no frontmatter opening" (dev/local/tmp/worktrees/00204-ft-8a)
+  └ 3 files found
+
+/ Search (grep)
+  │ "(TODO|FIXME|XXX|\bdbg!\b|\bprintln!\b)" (dev/local/tmp/FT-8a-build-candidate.patch)
+  └ No matches found
+
+/ Search (grep)
+  │ "(#\[ignore\]|skip|xfail)" (dev/local/tmp/FT-8a-build-candidate.patch)
+  └ 1 file found
+
+/ Search (grep)
+  │ "(#\[ignore\]|skip|xfail)" (dev/local/tmp/FT-8a-build-candidate.patch)
+  └ 1 line found
+
+/ Search (grep)
+  │ "pub fn import_bundle" (dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/bundle)
+  └ 1 file found
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/bundle/mod.rs
+  └ L500:530 (31 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/bundle/mod.rs
+  └ L550:600 (48 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/bundle/mod.rs
+  └ L200:250 (51 lines read)
+
+● Read mod.rs
+  │ dev/local/tmp/worktrees/00204-ft-8a/ddb-core/src/bundle/mod.rs
+  └ L250:320 (71 lines read)
+
+[CARL] 🟡 Function fold_one_loser exceeds 50-line limit (63 lines); extract loser content resolution helper | File: ddb-core/src/git_ops/merge.rs:198 | Task: general
+[CARL] 🟡 Function frontmatterless_bundle_loser_imports_and_reports_one_verbatim_fold exceeds 50-line limit (60 lines); extract repo setup | File: ddb-core/src/bundle/tests.rs:378 | Task: general
+[CARL] 🟡 Function mixed_loser_batch_lands_in_one_commit_and_lists_only_the_verbatim_fold exceeds 50-line limit (65 lines); extract batch setup | File: ddb-core/src/git_ops/tests.rs:2966 | Task: general
+[CARL] 🟡 Function sync_report_lists_every_verbatim_folded_collision_loser exceeds 50-line limit (60 lines); extract multi-node setup | File: ddb-core/src/sync_manager/tests.rs:847 | Task: general
+[CARL] 🟡 has_frontmatter allocates a Vec<&str> for all lines instead of evaluating line iterators lazily | File: ddb-core/src/parser/mod.rs:198 | Task: general
+[CARL] 🟡 File size (4000 lines) exceeds 800-line limit; merge collision test suites should be split | File: ddb-core/src/git_ops/tests.rs:1 | Task: general
+[CARL] 🟡 File size (2152 lines) exceeds 800-line limit; sync collision test scenarios should be partitioned | File: ddb-core/src/sync_manager/tests.rs:1 | Task: general
+[CARL] 🟡 File size (1919 lines) exceeds 800-line limit; bundle collision and import tests should be modularized | File: ddb-core/src/bundle/tests.rs:1 | Task: general
+[CARL] 🟡 File size (1668 lines) exceeds 800-line limit; bundle import FFI fixtures should be separated | File: ddb-core/src/ffi/tests.rs:1 | Task: general
+
+R1: pass
+R2: pass
+R3: pass
+R4: pass
+R6: pass
+R7: pass
+R8: pass
+R9: pass
+R10: pass
+R11: pass
+R12: fail
+R13: fail
+
+### Open Points Evaluation
+
+1. **Card-time drift (re-pointing failure fixtures to YAML-invalid loser)**: Sound and necessary. Re-pointing `import_with_unresolvable_collision` to success would have silently eliminated critical failure-path regression coverage across six bundle tests, three FFI tests, and three e2e scenarios from FT-7. Retaining the failure behavior via `UNREWRITABLE_LOSER` (`---\nid: [unclosed\ntitle: Bad\n---\nLoser body.\n`) preserves all negative test coverage on `DoogatError::Conflict` / `bundle merge failed:`, while the new `frontmatterless_bundle_loser_imports_and_reports_one_verbatim_fold` test independently verifies the converging verbatim fold.
+2. **Predicate behavior (`find_frontmatter(..).is_ok()`)**: Sound. The predicate delegates directly to `find_frontmatter`, ensuring 100% boundary consistency with `split_zones`. Documents containing multiple horizontal rules are treated as having frontmatter, which aligns with existing parser semantics and the maintainer-settled decision gating verbatim folding strictly on the absence of delimiters.
+3. **`create_conflict_commit` signature change**: Verified correct. Changing the return type from `Result<()>` to `Result<Vec<CollisionLoserKeptVerbatim>>` is private to `SyncManager` and is the minimal surgical plumbing required to populate `report.collision_losers_kept_verbatim` from `commit_merge`.
+4. **Baseline replay using a one-token shim**: Validated. The replay shim (`if true || has_frontmatter(..)`) accurately forced the pre-FT-8a always-rewrite path on the baseline commit `a3e2dbc`, demonstrating that all five new verbatim fold tests failed specifically on the wedge error while control and re-pointed fixtures passed.
+5. **Rustfmt drift hunks**: Correctly isolated. Formatting only touched lines and leaving 40 pre-existing drift hunks untouched complies with project hygiene rules against unnecessary repository churn.
+6. **Walkthrough 00203 divergence**: Appropriately tracked. Walkthrough 00203 recorded the pre-FT-8a wedge failure; re-recording it alongside authoring walkthrough 00204 is correctly assigned to FT-8b.
+

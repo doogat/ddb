@@ -1,0 +1,35 @@
+All edits check out. This completes the task.
+
+## Report
+
+Restored the six assertion-fidelity gaps and consolidated the duplicated helpers, all within `tests/e2e`:
+
+1. `serve.rs` — added `totalCount == 1` assertions to `filter_base_field_title_eq` and `filter_base_field_title_contains`.
+2. `integration_junction_sync.rs` — JOIN pin now parses `rows[0]` as JSON and asserts `row == json!(["a","1"])` instead of loose char containment.
+3. `rest.rs` — added a separate CLI process (`repo.ddb().args(["query", ...])`) read-back of the typed column after the existing GraphQL read-back.
+4. `serve.rs` — `search_where_filter_materialized_column_eq` now seeds Link B at `https://example.com/page` (prefix, not exact) and expects 1 hit/totalCount 1.
+5. `reference_raw_id.rs` — added `raw_id_field_pins_first_linked_with_multiple_junction_rows`, linking three categories out of id order and asserting `category_id` equals the first-linked (not smallest) id; the existing one-reference tests are untouched.
+6. `integration_graphql_jink.rs` — `config_id` now asserted via the shared 14-digit numeric id check.
+7. `common.rs` gained `pub fn stdout(...)` and `pub fn assert_doogat_id(...)`; removed the duplicated local copies from `smoke_core.rs`, `smoke_sql.rs`, `smoke_search.rs`, and switched the inline ID checks in `integration_id_poison.rs`, `integration_nosql_cli.rs` (id3), `integration_singleton_parity.rs`, `integration_singleton_races.rs` to call it. Left `integration_nosql_cli.rs`'s scan-line check and `integration_singleton_races.rs`'s git-tree-stem check as exact comparisons against the already-validated id (`id3` / `id`) rather than folding them into a generic parser, per the two-callers exception.
+
+No test was ignored, no production code touched, no new dependency.
+
+ASSUMPTIONS:
+- The new three-junction-row test links categories out of creation-id order (gamma, alpha, beta) so the assertion can distinguish "first-linked" from "numerically smallest id" — the PRD text implied this distinction but didn't specify exact linking order.
+- REST cross-process read-back uses `repo.ddb()` (the same `DdbTestRepo` already in scope in that test), matching the finding's suggested snippet exactly.
+- `assert_doogat_id`'s generic panic message replaces the more specific per-call messages that existed inline (e.g., "typed fixture must return a 14-digit id") — acceptable since the task explicitly asked to consolidate these into one shared helper.
+
+FILES_TOUCHED:
+tests/e2e/common.rs
+tests/e2e/smoke_core.rs
+tests/e2e/smoke_sql.rs
+tests/e2e/smoke_search.rs
+tests/e2e/integration_id_poison.rs
+tests/e2e/integration_nosql_cli.rs
+tests/e2e/integration_singleton_parity.rs
+tests/e2e/integration_singleton_races.rs
+tests/e2e/serve.rs
+tests/e2e/rest.rs
+tests/e2e/reference_raw_id.rs
+tests/e2e/integration_graphql_jink.rs
+tests/e2e/integration_junction_sync.rs

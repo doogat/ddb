@@ -1,0 +1,134 @@
+{
+  "status": "completed: archived, byte-verified, originals removed",
+  "files": [
+    {
+      "path": "dev/local/tmp/00171-eve-correction-instructions.md",
+      "bytes": 4823,
+      "sha256": "2c6505645d1cbde0de8c0dc5937ade129f5c3d64d1eca252d5c425ef2b773ae0"
+    },
+    {
+      "path": "dev/local/tmp/00171-finalize-contract.md",
+      "bytes": 1190,
+      "sha256": "70c57c2540e7ea90b42dbb25adf6d0786734ddc6eec5fcbf9bf50059397f65f5"
+    },
+    {
+      "path": "dev/local/tmp/00171-finalize-instructions.md",
+      "bytes": 3379,
+      "sha256": "4de6a04d688a67883ffce8d8d2b502107fcc495601ac4d3be10a55a9f90beeef"
+    },
+    {
+      "path": "dev/local/tmp/00171-handoff-20260905-1255.md",
+      "bytes": 7427,
+      "sha256": "4f3b1f2825f9effc8127607daf426a877e1aa0b8a6c716759cabf9c58147fd69"
+    },
+    {
+      "path": "dev/local/tmp/00171-handoff-20260907-0807.md",
+      "bytes": 5442,
+      "sha256": "8cc004ce1a899f6ecd1d9f339a4db34a83610c0bbfa923b9ef8bf07034868e84"
+    },
+    {
+      "path": "dev/local/tmp/alice-output-00171-c2.txt",
+      "bytes": 4141,
+      "sha256": "5fe8c675b9a5ffa4f95380fe54446a949a7d3a3cb714419e2679a97a3e35f3db"
+    },
+    {
+      "path": "dev/local/tmp/blake-output-00171-c2.txt",
+      "bytes": 4051,
+      "sha256": "a4c2cad75c9a38a324ad97070ec2d8ec27936852d7680a5d5cb178997cb2433b"
+    },
+    {
+      "path": "dev/local/tmp/bob-output-00171-c2.txt",
+      "bytes": 7113,
+      "sha256": "0a50b250353040e636dc5a7723902a66e09e16e350b935edea8746b702094570"
+    },
+    {
+      "path": "dev/local/tmp/bob-prompt-00171-c2.md",
+      "bytes": 20324,
+      "sha256": "b578cebffcc4aa002c6a35c7304327adc7457ca3e4141cdffc28b20039566a8f"
+    },
+    {
+      "path": "dev/local/tmp/carl-prompt-00171-c2.md",
+      "bytes": 10455,
+      "sha256": "8a2afb624945210f46d22c7cd2e960a589a9751d9bf857a5b2bed2f5e3ad4171"
+    },
+    {
+      "path": "dev/local/tmp/design-codex-output-00171.txt",
+      "bytes": 77244,
+      "sha256": "17849272f82e9782eb2670bc3e155dc44e7921c00bfc81b0f710ea55085b2365"
+    },
+    {
+      "path": "dev/local/tmp/design-codex-prompt-00171.txt",
+      "bytes": 4727,
+      "sha256": "a0af632f971f939871dbf8d4693aaf32626b0ec81d21f686fc398e03f29fe36b"
+    },
+    {
+      "path": "dev/local/tmp/engram-pack-00171-c2.md",
+      "bytes": 12054,
+      "sha256": "2219b0393b07345fb13ff202528ac8225671c9ec14ec17f1d4b7e478bd46cf91"
+    },
+    {
+      "path": "dev/local/tmp/eve-corrected-normalized-00171-c2.txt",
+      "bytes": 4479,
+      "sha256": "21bb5b497839dbbceb5dd6b8472c23fb5571ab2591635e4d241c5c2d637d78d2"
+    },
+    {
+      "path": "dev/local/tmp/eve-output-00171-c2.txt",
+      "bytes": 7016,
+      "sha256": "e10f4026fb15163b6a39999141fd4fd53baa45efc8499b6bcc2c42abe09556e4"
+    },
+    {
+      "path": "dev/local/tmp/review-context-00171-c2.md",
+      "bytes": 176022,
+      "sha256": "94a02367eeede1138105348d75b8658d46581b2a277d6dc51be8ba0e83a29edc"
+    },
+    {
+      "path": "dev/local/tmp/review-diff-00171-c2-surrounding.diff",
+      "bytes": 103546,
+      "sha256": "f8a88933f70e37d61cacd9f196aa47f826febd066b5e38ba42c938418c46f274"
+    },
+    {
+      "path": "dev/local/tmp/review-diff-00171-c2.diff",
+      "bytes": 20499,
+      "sha256": "cfa1e2e37f8402044395b207fd59d12754744b9ecfd3c1ef086c197c3290408b"
+    },
+    {
+      "path": "dev/local/tmp/review-prd-00171-c2.md",
+      "bytes": 166288,
+      "sha256": "cf22c8b9b9c68564aaabb5e7805cfc919a40a5cefd4b2e2b6caf7c0b6acf976d"
+    },
+    {
+      "path": "dev/local/tmp/review-tasks-00171-c2.md",
+      "bytes": 4292,
+      "sha256": "215df1708b1d4fa55721f3c6706a21e3158bf3b86f8ebf73765cd857aec63928"
+    },
+    {
+      "path": "dev/local/tmp/self-deslop-00171-t7-prompt.md",
+      "bytes": 9100,
+      "sha256": "885d507106f39498666ae9769083a01682743381faa36700e79b144ef0c518e9"
+    },
+    {
+      "path": "dev/local/plans/00171-closeout-2026-09-07.md",
+      "bytes": 6840,
+      "sha256": "94457b55de947eb293eeb65d72dc790985d2b9aa044b61682488591ea81c20f4"
+    }
+  ],
+  "preserve": [
+    "dev/local/plans/fast-track-2026-09-06.md",
+    "stash@{0}: FT-6",
+    "stash@{1}: FT-3",
+    "worktree-agent-a188c62e61e58f6e5",
+    "all durable review/design files"
+  ],
+  "archive": "dev/local/reviews/00171-final-dispatch-and-plan-artifacts.tar.gz",
+  "archive_sha256": "bf6ab4fd010297c30dae68bbe2b725699e27f5810592d8b2cc0a31e4bfe85ea8",
+  "completed_at": "2026-09-07T16:43:04.394960+00:00",
+  "verified_preserved": {
+    "stashes": [
+      "stash@{0}: On master: FT-6",
+      "stash@{1}: On master: FT-3"
+    ],
+    "fast_track_plan": true,
+    "unrelated_branch": true,
+    "tracked_tree_clean": true
+  }
+}

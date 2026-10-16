@@ -1,0 +1,5 @@
+LOW | tests/e2e/integration_singleton_races.rs:41-56 | `graphql_winner` asserts both "exactly one success" and "exactly one error" over a fixed 2-element `responses` array; the second assertion is implied by the first (2 elements, one success ⇒ one error) | drop the second `assert_eq!` and keep the first, or replace both with a single check that partitions `responses` into (winner, loser) directly
+
+LOW | tests/e2e/integration_singleton_races.rs:246-256 | Same redundant pair-of-asserts pattern: `successes` is a fixed 2-element `[bool; 2]`, so asserting `count(ok) == 1` already implies `count(!ok) == 1` | drop the second `assert_eq!`
+
+LOW | tests/e2e/integration_singleton_races.rs:190-330 | `integration_55_d_cli_vs_pgwire_singleton_insert_race` is a single ~140-line function mixing connection setup, the race, winner/loser classification, and durability checks, well past the file's own 50-line-function convention (which it follows elsewhere via `race_graphql`/`graphql_winner`/`assert_survivor`) | extract PgWire connection setup and loser-message classification into named helpers, consistent with the extraction pattern already used in this file

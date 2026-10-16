@@ -1,0 +1,857 @@
+{
+  "phase": "paused",
+  "next_phase": "paused",
+  "prd": "00171-migrate-shell-scenarios-to-e2e-v1.md",
+  "catchup_mode": "run",
+  "doubt_reviewer": "codex",
+  "consensus_engine": "legacy",
+  "phases_completed": [],
+  "cycle": 2,
+  "rework_cap": 2,
+  "replan_count": 0,
+  "tasks_total": 16,
+  "tasks_completed": 16,
+  "batch": {
+    "id": "202607161128",
+    "mode": "autopilot",
+    "completed_prds": [
+      "00163-git-tree-construction-correctness-v1.md",
+      "00200-make-merge-tree-three-way-v1.md",
+      "00164-unify-id-minting-v1.md",
+      "00165-deterministic-crdt-resolution-v1.md",
+      "00166-make-hlc-load-bearing-v1.md",
+      "00167-sync-collision-reassignment-atomicity-v1.md",
+      "00169-poison-file-reindex-resilience-v1.md",
+      "00170-id-throughput-ceiling-decision-v1.md"
+    ],
+    "catchup_completed_at": "2026-08-17T02:59:13Z",
+    "catchup_head_sha": "34138fe35ab1569bbe6e51ac0189a135ac812704",
+    "parks_consecutive": 0
+  },
+  "qwen_gate_failures_consecutive": 0,
+  "qwen_breaker": {
+    "tripped": false,
+    "after_task": null,
+    "failed_tasks": [],
+    "batch_id": "202607161128"
+  },
+  "schema_version": 1,
+  "codex_probe": {
+    "batch_id": "202607161128",
+    "verdict": "healthy",
+    "backend": "codex",
+    "detail": null,
+    "checked_at": "2026-08-15T08:44:06Z"
+  },
+  "design_mode": "run",
+  "deferred_decisions": [
+    {
+      "cycle": 1,
+      "issue": "Multi-process race tests not marked #[serial] as PRD explicitly requires (mitigated by per-test port/tempdir isolation)",
+      "file": "tests/e2e/integration_singleton_races.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Existing reviewed design deliberately uses independent TempDirs/ports and order-independent race results instead of serial markers. Retain parallel execution; record the stale PRD wording.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "Several newly-ported multi-process race test functions run well past the 50-line guideline (integration_61_b_concurrent_cli_and_graphql_write_lock \u2248145 lines, integration_55_d_cli_vs_pgwire_singleton_insert_race \u2248152 lines)",
+      "file": "tests/e2e/integration_write_lock_races.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Keep cohesive multi-process scenario orchestration and HEAD durability checks; shared operations are already helpers. The project Rust instructions have no hard function-size limit, and broad test fragmentation is outside this coverage repair.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "The mechanical fail-first/tautology finder for this cycle reports \"Checked 0 test function(s)\" and \"replay: skipped (the diff touches no test function)\" despite ~60 new/changed e2e test files \u2014 the automated tautology net did not fire for this diff",
+      "file": "N/A",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Installed mechanical checks are explicitly Python-only. Extending shared tooling is outside 00171; this cycle used Rust source audits and same-HEAD runtime evidence.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] PRD says the \u00a755/\u00a761 race sections are \"marked serial\"; no serial marker exists (no serial_test, no shared mutex) \u2014 design doc lines 92-100 and 289 supersede this with per-test tempdir + unique-port isolation, and every race outcome is order-independent (SINGLETON forces exactly one winner; 61.B requires every write to land), so a serial marker would only slow the suite.",
+      "file": "tests/e2e/integration_singleton_races.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Existing reviewed design deliberately uses independent TempDirs/ports and order-independent race results instead of serial markers. Retain parallel execution; record the stale PRD wording.",
+      "status": "deferred"
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] PRD spawn helper \"polls /health\"; `ServerGuard::start` (tests/e2e/common.rs:81-102) waits on the stderr \"listening on\" lines plus a 50 ms sleep, no /health poll \u2014 design lines 84-89 reused the existing guard unchanged, the health round trip is pinned by `serve::health_returns_ok`, and the internals are 00188's to change.",
+      "file": "tests/e2e/common.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "type": "review-observation",
+      "reason": "Design deliberately reuses existing ServerGuard readiness; health_returns_ok tests its lifecycle. Internals are reserved for 00188, outside this test migration.",
+      "status": "deferred"
+    }
+  ],
+  "design_doc": "dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-design.md",
+  "tasks": [
+    {
+      "name": "Build e2e mapping table: smoke.sh + smoke.ps1 sections",
+      "description": "Build the section-by-section coverage mapping table for tests/smoke.sh and tests/smoke.ps1 \u2014 the coverage-proof artifact every later port task and acceptance check references. This is the FIRST task in the PRD; it creates the shared mapping table file.\n\nLocation: create dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-mapping.md (new file; durable PRD satellite \u2014 not deleted by dev/local GC, dies only when the PRD itself moves to done/). Source files: tests/smoke.sh (769 lines, ~56 numbered section headers via `rg -n \"^# [0-9]\" tests/smoke.sh`), tests/smoke.ps1 (932 lines, ~56 numbered section headers, near-mirror dialect of smoke.sh).\n\nReuse: cross-check each candidate target against the existing tests/e2e/*.rs suite (100+ files, `rg -n \"fn \" tests/e2e/*.rs` for an index) before assigning a NEW target test name \u2014 if an existing e2e test already covers the same assertion, the row must say \"ALREADY COVERED by <test>\", never a duplicate.\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Mapping table row format: \"one row per shell section: file:line | section # | target e2e test (or \\\"ALREADY COVERED by <existing test>\\\" or \\\"justified survivor: <reason>\\\") | needs server? | must-fail? | status\"\n- Test naming: \"smoke_NN_slug / integration_NN_slug, NN zero-padded to match the source section number (04, not 4).\"\n- Must-fail idiom (for must-fail rows' target-test note): the shell `ddb-fails` helper / bash bare `!` negation maps to `assert_cmd`'s `.assert().failure().stderr(predicate::str::contains(\"error:\"))`, already used in tests/e2e/cli_update_app_error.rs \u2014 reuse verbatim, do not invent a new pattern.\n\nDetails:\n- Enumerate every numbered section in both files by file:line. Read each section body (not just the header) to determine what it asserts.\n- For each section: assign a target Rust test name (smoke_NN_slug), note whether it needs ServerGuard (a live `ddb serve`) or is CLI-only, whether it is a must-fail scenario, and set status to TODO.\n- tests/smoke.ps1 is invoked by NO workflow today (absent from both test.yml and full-validation.yml, confirmed by grep) \u2014 still map its sections per the PRD's 100%-coverage metric; note the zero-CI-risk fact in that row's notes rather than skipping the section.\n- Where smoke.sh and smoke.ps1 carry the same NN section as dialect mirrors of one scenario, they share ONE target Rust test \u2014 do not create two target rows pointing at two different tests for the same scenario; note \"dialect pair, same target\" in the row.\n- Every section must map to a target row \u2014 zero unmapped sections is the acceptance bar.\n\nAcceptance criteria:\n- the table is complete with zero unmapped sections (duplicate-numbered sections disambiguated by file:line); it lives in the PRD workdir notes and is referenced by later acceptance checks.\n\nVerify: row count in the new mapping table (smoke section) matches the combined section count from `rg -c \"^# [0-9]\" tests/smoke.sh tests/smoke.ps1` (accounting for shared dialect-pair rows counting once each per file, not merged into a single row); spot-check 3 random rows against their source line to confirm accuracy.",
+      "estimated_tokens": 77736,
+      "est_context_peak": 97736,
+      "model": "sonnet",
+      "qwen_eligible": true,
+      "id": "1",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "review": "failed:no_diff_gitignored_output"
+        }
+      ]
+    },
+    {
+      "name": "Build e2e mapping table: integration.sh sections",
+      "description": "Extend the shared mapping table (created by an earlier task) with a row per numbered section in tests/integration.sh \u2014 APPEND to the existing file, do not overwrite the smoke.sh/smoke.ps1 rows already there.\n\nLocation: append to dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-mapping.md. Source: tests/integration.sh (3803 lines, ~140 numbered section headers via `rg -n \"^# [0-9]\" tests/integration.sh`).\n\nPremise: dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-mapping.md already exists with the smoke.sh/smoke.ps1 rows filled in (written by an earlier task in this PRD). Re-verify the file exists and has content before appending; if it is missing, stop and report \u2014 do not silently create a fresh file that drops the smoke rows.\n\nReuse: cross-check each candidate target against the existing tests/e2e/*.rs suite before assigning a NEW target \u2014 the design doc's Reuse inventory flags that integration.sh \u00a754.D/\u00a755.D name `pgwire_singleton` as their own replacement in their own pass messages (`integration.sh:2358`, `:2513`); check tests/e2e/pgwire*.rs, serve.rs, server_mutations.rs, subscriptions.rs, singleton_cross_process_*.rs for existing equivalents before writing a new target for any server-lifecycle section.\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Mapping table row format: \"one row per shell section: file:line | section # | target e2e test (or \\\"ALREADY COVERED by <existing test>\\\" or \\\"justified survivor: <reason>\\\") | needs server? | must-fail? | status\"\n- Test naming: \"smoke_NN_slug / integration_NN_slug, NN zero-padded to match the source section number (04, not 4).\" integration.sh carries a duplicate `# 50.` section header at two locations (`integration.sh:2159` PRD 00132 rename-across-protocols, and `integration.sh:3697` PRD 00136 FK-freshness) \u2014 key these two rows by file:line, and disambiguate with distinct target slugs (`integration_50_alter_table_rename`, `integration_50_cross_process_fk_freshness`), never two rows named `integration_50`.\n- Must-fail idiom: bash negates with bare `!` (no `ddb-fails` helper in bash) \u2014 maps to the same `assert_cmd` `.assert().failure()` idiom used by the smoke mapping task.\n\nDetails:\n- integration.sh has two structurally distinct halves sharing overlapping numbering: lines ~52-2885 (server-dependent: GraphQL/REST/PgWire/SINGLETON, numbered \u00a717-\u00a761) and lines ~2886-3803 (CLI/git/sync/CRDT-focused, independently numbered \u00a721-\u00a763, reusing numbers already used in the first half \u2014 this is the source of the duplicate-`#50` quirk, not a typo). Map both halves; note the half in each row so later port tasks reading this table know which capability group a section belongs to.\n- For each section: assign a target Rust test name (integration_NN_slug), note whether it needs ServerGuard, whether it is a must-fail scenario, and set status to TODO.\n- Every section must map to a target row \u2014 zero unmapped sections.\n\nAcceptance criteria:\n- the table is complete with zero unmapped sections (duplicate-numbered sections disambiguated by file:line); it lives in the PRD workdir notes and is referenced by later acceptance checks.\n\nVerify: row count added for integration.sh matches `rg -c \"^# [0-9]\" tests/integration.sh` (~140); the two duplicate `# 50.` rows carry distinct file:line keys and distinct target slugs; the pre-existing smoke rows from the earlier task are still present and unmodified in the file.",
+      "blocked_by": [
+        1
+      ],
+      "estimated_tokens": 108904,
+      "est_context_peak": 128904,
+      "model": "sonnet",
+      "qwen_eligible": true,
+      "id": "2",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": "endpoint_unreachable",
+          "pipeline": "lean",
+          "review": "failed:no_diff_gitignored_output"
+        }
+      ]
+    },
+    {
+      "name": "Build e2e mapping table: integration.ps1 sections",
+      "description": "Extend the shared mapping table with a row per numbered section in tests/integration.ps1 \u2014 APPEND to the existing file (already carrying the smoke and integration.sh rows), reusing the same target Rust test names integration.sh's rows already established for matching section numbers.\n\nLocation: append to dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-mapping.md. Source: tests/integration.ps1 (3781 lines, ~139 numbered section headers via `rg -n \"^# [0-9]\" tests/integration.ps1`).\n\nPremise: the mapping table already has smoke and integration.sh rows filled in by earlier tasks in this PRD. Re-verify the file exists and has both sets of rows before appending; if either is missing, stop and report.\n\nReuse: for each integration.ps1 section, first look up the matching NN in the integration.sh rows already in the table (same PRD, same behavior, different dialect) and reuse that target test name \u2014 these dialect pairs are almost always the SAME Rust test, not a second one. Only assign a distinct target when the .ps1 section's assertions genuinely diverge from its .sh counterpart (see Details).\n\nContract (verbatim from the design doc's Interfaces & contracts and Risks & edge cases):\n- Mapping table row format: \"one row per shell section: file:line | section # | target e2e test (or \\\"ALREADY COVERED by <existing test>\\\" or \\\"justified survivor: <reason>\\\") | needs server? | must-fail? | status\"\n- integration.ps1 carries the SAME duplicate `# 50.` pattern as integration.sh, mirrored at `integration.ps1:2026` and `:3654` \u2014 key by file:line, reuse the two target slugs integration.sh's task already assigned (`integration_50_alter_table_rename`, `integration_50_cross_process_fk_freshness`).\n- Must-fail idiom: PowerShell's `ddb-fails` helper (`integration.ps1:67`) is the ONLY dialect that names this helper explicitly \u2014 maps to the same `assert_cmd` `.assert().failure()` idiom as the other mapping tasks; do not port the PowerShell helper itself, only its call sites' assertions.\n\nDetails:\n- For each integration.ps1 section, cross-reference the corresponding integration.sh row (same or equivalent NN). If assertions match, reuse the same target and note \"dialect pair, same target\" \u2014 do not create a second target for the identical scenario.\n- Windows-specific path/escaping behavior: any section whose PowerShell assertion tests *string* path formatting (not just behavior \u2014 e.g. backslash vs forward-slash literal comparisons) needs a `cfg!(windows)` branch called out explicitly in that row's notes, per the PRD's own Risk note. Most sections need no special handling since Rust's `std::path::Path` already normalizes platform separators.\n- integration.ps1 has one section (`# 40. help guides`, line 3372) with no corresponding numbered section in integration.sh at that position \u2014 integration.sh's own `# 40.` is \"binary asset LWW conflict resolution\" at a different line, and .ps1 ALSO has that same section at line 3387 as a separate, later entry. Treat .ps1's `# 40. help guides` as a genuine .ps1-only addition: map it to its own target or mark it a justified survivor if it merely re-runs `--help` output already covered by an existing e2e test \u2014 do not silently drop it or conflate it with the `# 40. binary asset LWW` row.\n- integration.sh \u00a754.D / \u00a755.D's psql-absent skip does NOT need porting (per the design doc, PgWire sections drop the psql dependency entirely via tokio_postgres) \u2014 mark those rows accordingly rather than inventing a `cfg!` / `command -v psql` equivalent in Rust.\n- Every section must map to a target row \u2014 zero unmapped sections.\n\nAcceptance criteria:\n- the table is complete with zero unmapped sections (duplicate-numbered sections disambiguated by file:line); it lives in the PRD workdir notes and is referenced by later acceptance checks.\n\nVerify: row count added for integration.ps1 matches `rg -c \"^# [0-9]\" tests/integration.ps1` (~139) plus the one .ps1-only `# 40. help guides` row; the mapping table now has zero rows with an empty target-test column across all four source files; the pre-existing smoke and integration.sh rows are unmodified.",
+      "blocked_by": [
+        1,
+        2
+      ],
+      "estimated_tokens": 114357,
+      "est_context_peak": 134357,
+      "model": "sonnet",
+      "qwen_eligible": true,
+      "id": "3",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "review": "failed:no_diff_gitignored_output"
+        }
+      ]
+    },
+    {
+      "name": "Verify ServerGuard spawn/health/teardown round-trip",
+      "description": "Add one round-trip test confirming the existing ServerGuard harness (spawn, /health poll, teardown) is stable before any server-backed section is ported. Per the design doc, ServerGuard already covers 100% of the PRD's \"Server-spawn helper\" ask \u2014 this task verifies that, it does not build a new helper.\n\nLocation: tests/e2e/common.rs (add the test near the existing ServerGuard impl, tests/e2e/common.rs:55) or a small new tests/e2e/server_guard_roundtrip.rs if the crate's convention keeps tests out of common.rs \u2014 match whichever pattern the existing 21 files that call `ServerGuard::start` use for their own smoke coverage, if any already exists.\n\nReuse: `ServerGuard::start(&DdbTestRepo)` (tests/e2e/common.rs:55) \u2014 full server lifecycle: spawn, free-port allocation (`next_available_port`, an AtomicU16 counter), stderr-based readiness detection for HTTP+PgWire listeners, auth-token capture, `.url()`, `.rest_*`, `.graphql*`, `.ws_*`, `.kill()`, `Drop`. `DdbTestRepo` (common.rs:361-401) for the tempdir-backed repo.\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- \"ServerGuard::start(&DdbTestRepo) (already implemented, tests/e2e/common.rs:55) is the contract every server-backed port uses. Its public API (start, .url(), .rest_*, .graphql*, .ws_*, .kill, Drop) is unchanged by this PRD \u2014 no new methods are required for any currently-known shell scenario.\"\n- \"If a specific integration-section port surfaces a genuine gap during Phase 1, add the method to ServerGuard directly (same file, same struct) rather than a parallel helper.\" This task itself does NOT add new methods \u2014 it only proves the existing ones round-trip cleanly.\n\nDetails:\n- Write a single test: init a DdbTestRepo, call ServerGuard::start, poll `/health` via the guard's existing client method, assert success, let Drop tear the process down.\n- Do not modify ServerGuard's public API in this task.\n\nAcceptance criteria:\n- one round-trip test spawns, queries `/health`, and tears down cleanly.\n\nVerify: `cargo test -p ddb-e2e --test e2e <new_test_name>` passes locally.",
+      "blocked_by": [
+        1,
+        2,
+        3
+      ],
+      "estimated_tokens": 56600,
+      "est_context_peak": 76600,
+      "model": "haiku",
+      "qwen_eligible": true,
+      "id": "4",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "haiku",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "minimal"
+        }
+      ]
+    },
+    {
+      "name": "Port smoke.sh + smoke.ps1 sections to tests/e2e/smoke_*.rs",
+      "description": "Port every numbered section of tests/smoke.sh and tests/smoke.ps1 (~56 sections each, dialect mirrors of the same scenarios) to Rust e2e tests, per the mapping table's smoke rows.\n\nLocation: new files tests/e2e/smoke_*.rs (one file per section or a small cluster of adjacent, related sections \u2014 e.g. smoke_core.rs for CRUD/consistency/maintenance sections, smoke_sql.rs for SQL DDL/typed/schema sections). Add one `mod smoke_*;` line per new file to tests/e2e/main.rs, inserted alphabetically into the existing module list.\n\nReuse: `DdbTestRepo` (tests/e2e/common.rs:361-401) for tempdir-backed repo init and `ddb()`/`ddb_at()` command builders \u2014 direct replacement for the shell scripts' `mktemp -d` + `ddb init`. `assert_cmd::Command` + `predicates` for CLI invocation and must-fail assertions (`.assert().success()`/`.failure()`, `predicate::str::contains(...)`) \u2014 the established idiom used throughout the crate (see tests/e2e/cli_update_app_error.rs), not a new pattern.\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Test naming: \"smoke_NN_slug, NN zero-padded to match the source section number (04, not 4).\"\n- Must-fail: \"the shell ddb-fails helper (PowerShell-only) / bash bare ! negation maps directly to the existing assert_cmd idiom\": `repo.ddb().args([...]).assert().failure().stderr(predicate::str::contains(\"error:\"))`.\n- No `serial_test` crate, no `--test-threads=1` \u2014 every test gets its own port and its own TempDir-backed repo (existing pattern), so cargo's default parallel runner is already safe.\n\nDetails:\n- Follow the mapping table (built by an earlier task) section-by-section: for each row targeting a new smoke_NN_slug test, write it; for rows marked \"ALREADY COVERED\", do not write a duplicate \u2014 verify the existing test covers the assertion and mark the row DONE with a note pointing at the existing test.\n- Preserve assertions verbatim in intent \u2014 same commands, same expected outcomes, same must-fail cases.\n- tests/smoke.ps1 has zero CI coverage today; port its sections anyway per the mapping table (they may be identical to smoke.sh's \u2014 reuse the same target test where they are dialect mirrors).\n- Update the mapping table's status column to DONE for every section ported in this task.\n\nAcceptance criteria:\n- each ported test green locally; must-fail assertions preserved via assert_cmd failure checks.\n\nVerify: `cargo build -p ddb-cli` then `cargo test -p ddb-e2e --test e2e smoke_` \u2014 every new smoke_* test passes locally; the mapping table shows every smoke.sh/smoke.ps1 row as DONE.",
+      "blocked_by": [
+        1
+      ],
+      "estimated_tokens": 79486,
+      "est_context_peak": 99486,
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "files",
+      "id": "5",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "codex",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "codex_no_edit": false,
+          "self_deslop": "noop"
+        }
+      ]
+    },
+    {
+      "name": "Port integration \u00a717-20: GraphQL server setup, jink schema, expanded GraphQL ops, REST CRUD, PgWire basic",
+      "description": "Port tests/integration.sh:52-1178 and the corresponding tests/integration.ps1 section (\u00a717, \u00a717.J1, \u00a717.J2, \u00a718, \u00a718b, \u00a718c, \u00a718c2, \u00a718d, \u00a718d2, \u00a718d3, \u00a718e, \u00a718g, \u00a718h, \u00a718i, \u00a718z, \u00a718z2-\u00a718z10, \u00a719, \u00a720) to Rust e2e tests, per the mapping table's integration rows for this range.\n\nLocation: new files tests/e2e/integration_*.rs (one file per section or a small cluster of adjacent related sections, e.g. integration_graphql_server.rs, integration_graphql_jink.rs, integration_rest_pgwire.rs). Add one `mod integration_*;` line per new file to tests/e2e/main.rs, inserted alphabetically.\n\nReuse: `ServerGuard::start(&DdbTestRepo)` (verified round-trip-clean by an earlier task) for every section in this range \u2014 all are server-backed (GraphQL/REST/PgWire). `tokio_postgres` (tests/Cargo.toml, see tests/e2e/pgwire.rs) for \u00a720's PgWire basic query, not `psql`. `assert_cmd`/`predicates` for any CLI-side setup calls.\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Test naming: \"integration_NN_slug, NN zero-padded to match the source section number.\"\n- ServerGuard's public API (start, .url(), .rest_*, .graphql*, .ws_*, .kill, Drop) is the contract \u2014 do not add new methods; if this range genuinely needs one, add it to ServerGuard directly and note it in the mapping table.\n- Concurrency: no serial_test crate, no --test-threads=1 \u2014 every test gets its own port + TempDir via the existing pattern.\n\nDetails:\n- Follow the mapping table row-by-row for this line range: for rows marked \"ALREADY COVERED\", verify against the named existing test and mark DONE without duplicating; for new-target rows, write the test.\n- \u00a717.J1/\u00a717.J2 (jink schema CREATE TABLE + jink-config singleton + Link CRUD) and the \u00a718z8-\u00a718z10 jink full-sweep sections must preserve their exact schema/field assertions \u2014 these are jink-consumer-facing contract pins, not incidental test data.\n- Preserve assertions verbatim in intent.\n- Update the mapping table's status column to DONE for every section ported here (both the .sh and .ps1 rows for each NN, noting \"dialect pair, same target\" where applicable).\n\nAcceptance criteria:\n- each ported test green locally; the mapping table marks every section in this range DONE.\n\nVerify: `cargo test -p ddb-e2e --test e2e integration_` (filtered to the new files' test names) passes locally; the mapping table shows 100% of \u00a717-20 rows (both dialects) as DONE.",
+      "blocked_by": [
+        2,
+        3,
+        4
+      ],
+      "estimated_tokens": 87550,
+      "est_context_peak": 107550,
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "files",
+      "id": "6",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "codex",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "codex_no_edit": false,
+          "self_deslop": "noop"
+        }
+      ]
+    },
+    {
+      "name": "Port integration \u00a737-38i: WebSocket auth, read-under-write, extended GraphQL ops",
+      "description": "Port tests/integration.sh:1179-1497 and the corresponding tests/integration.ps1 section (\u00a737, \u00a738, \u00a738b, \u00a738b2, \u00a738b2b, \u00a738b3, \u00a738b4, \u00a738c, \u00a738c2, \u00a738d, \u00a738e, \u00a738f, \u00a738g, \u00a738h, \u00a738i) to Rust e2e tests, per the mapping table's integration rows for this range.\n\nLocation: new files tests/e2e/integration_*.rs (e.g. integration_ws_auth.rs, integration_graphql_refs.rs, integration_graphql_batch.rs). Add one `mod integration_*;` line per new file to tests/e2e/main.rs, inserted alphabetically.\n\nReuse: `ServerGuard` for WebSocket (`.ws_*` methods) and GraphQL/REST calls \u2014 all sections in this range are server-backed. `MultiNodeSetup`/`TwoNodeSetup` (tests/e2e/common.rs:404-594) if \u00a738 (read-under-write: concurrent read + write) needs more than one client against the same server.\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Test naming: \"integration_NN_slug, NN zero-padded.\"\n- ServerGuard's public API is unchanged \u2014 do not add new methods without a genuine gap.\n- Timing-sensitive within-test ordering (e.g. \u00a738's concurrent read+write interleaving) is expressed with `std::thread::scope` + explicit joins, not a serial marker \u2014 same pattern as tests/e2e/singleton_cross_process_upsert.rs.\n\nDetails:\n- Follow the mapping table row-by-row for this line range; skip rows marked ALREADY COVERED (verify, mark DONE, no duplicate).\n- \u00a738b-\u00a738i (multi-value references, DISTINCT/GROUP BY, executeBatch/batchUpdate/createMany, typed field updates via GraphQL) must preserve exact response-shape assertions (field presence/absence, ordering, aggregate values).\n- Update the mapping table's status column to DONE for every section ported here (both dialect rows).\n\nAcceptance criteria:\n- each ported test green locally; the mapping table marks every section in this range DONE.\n\nVerify: `cargo test -p ddb-e2e --test e2e integration_` (filtered to the new files) passes locally; mapping table shows 100% of \u00a737-38i rows (both dialects) as DONE.",
+      "blocked_by": [
+        2,
+        3,
+        4
+      ],
+      "estimated_tokens": 65793,
+      "est_context_peak": 85793,
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "files",
+      "id": "7",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "self_deslop": "committed:34138fe35ab1569bbe6e51ac0189a135ac812704"
+        }
+      ]
+    },
+    {
+      "name": "Port integration \u00a742-45: base field filters, SQL INSERT+constraints, JOIN/auto-junction, DDL, createMany + ghost-row pins",
+      "description": "Port tests/integration.sh:1498-2108 and the corresponding tests/integration.ps1 section (\u00a742, \u00a742b, \u00a743, \u00a743.D, \u00a744.E1, \u00a744.J, \u00a744.K, \u00a744.M, \u00a744, \u00a745, \u00a745.G13, \u00a745.G12, \u00a745.G11, \u00a745.A1, \u00a745.A3, \u00a745.R10, \u00a745.A2) to Rust e2e tests, per the mapping table's integration rows for this range.\n\nLocation: new files tests/e2e/integration_*.rs (e.g. integration_typed_filters.rs, integration_sql_constraints.rs, integration_junction.rs, integration_createmany.rs). Add one `mod integration_*;` line per new file to tests/e2e/main.rs, inserted alphabetically.\n\nReuse: `ServerGuard` for GraphQL executeSql/createDoogat/createMany calls. `assert_cmd` for any CLI-side setup. Existing ghost-row/cross-mutation test patterns if present in tests/e2e/ (grep for `ghost` or `A1`/`A2`/`A3` before writing new coverage \u2014 these pin regressions from prior PRDs, PRD 00124 and issue #4).\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Test naming: \"integration_NN_slug, NN zero-padded.\"\n- Must-fail idiom for \u00a743.D (SQL constraint enforcement) and \u00a745.R10 (RESTRICT on NOT NULL REFERENCES): `assert_cmd`'s `.assert().failure()` / GraphQL error-extensions assertion, matching the crate's established pattern.\n\nDetails:\n- Follow the mapping table row-by-row for this line range; skip ALREADY COVERED rows after verifying.\n- \u00a744.J/\u00a744.K/\u00a744.M (auto-junction table population on SQL INSERT/UPDATE, GraphQL createDoogat, and parent-direction DELETE cleanup) must assert the junction table's actual row state, not just a success/failure code.\n- \u00a745.A1/\u00a745.A2/\u00a745.A3 (ghost-row and cross-mutation recovery pins) are regression pins for a previously-fixed bug (issue #4) \u2014 preserve the exact failure-then-recovery sequence, not just the end state.\n- Update the mapping table's status column to DONE for every section ported here (both dialect rows).\n\nAcceptance criteria:\n- each ported test green locally; the mapping table marks every section in this range DONE.\n\nVerify: `cargo test -p ddb-e2e --test e2e integration_` (filtered to the new files) passes locally; mapping table shows 100% of \u00a742-45 rows (both dialects) as DONE.",
+      "blocked_by": [
+        2,
+        3,
+        4
+      ],
+      "estimated_tokens": 73652,
+      "est_context_peak": 93652,
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "files",
+      "id": "8",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "self_deslop": "noop"
+        }
+      ]
+    },
+    {
+      "name": "Port integration \u00a746-53: structured-error codes, ALTER TABLE RENAME across protocols, SINGLETON GraphQL flow",
+      "description": "Port tests/integration.sh:2109-2281 and the corresponding tests/integration.ps1 section (\u00a749, \u00a749.1-\u00a749.4, \u00a750, \u00a750a, \u00a750b, \u00a750c, \u00a751, \u00a751.A, \u00a752.B, \u00a753.C) to Rust e2e tests, per the mapping table's integration rows for this range.\n\nLocation: new files tests/e2e/integration_*.rs (e.g. integration_error_codes.rs, integration_alter_rename.rs, integration_singleton_flow.rs). Add one `mod integration_*;` line per new file to tests/e2e/main.rs, inserted alphabetically.\n\nReuse: `ServerGuard` for GraphQL/PgWire calls. `tokio_postgres` for \u00a750c (ALTER TABLE RENAME via PgWire when available).\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Test naming: \"integration_NN_slug, NN zero-padded.\" The \u00a750 section is one of the two duplicate-numbered sections in this PRD (the other is later in the file, ported by a different task) \u2014 this one's target slug is `integration_50_alter_table_rename` (established by the mapping table task), NOT plain `integration_50`.\n- \u00a749.1-\u00a749.4 structured-error assertions must check `extensions.code` on the GraphQL error response, matching the exact error-code vocabulary from PRD 00131/00129 (UNIQUE_VIOLATION, NOT_NULL_VIOLATION, etc.) \u2014 do not paraphrase to a generic error-message substring check.\n\nDetails:\n- Follow the mapping table row-by-row for this line range; skip ALREADY COVERED rows after verifying.\n- \u00a750b (MySQL alias rejected) must assert the specific rejection message, not just failure \u2014 the PRD's own acceptance bar is \"no internal error leak\".\n- \u00a751-\u00a753 (SINGLETON GraphQL flow, ALTER SET/DROP SINGLETON, DEFAULT VALUES auto-seed) are PRD 00139 T20 conformance pins \u2014 preserve the exact flow order (create \u2192 alter \u2192 verify parity).\n- Update the mapping table's status column to DONE for every section ported here (both dialect rows).\n\nAcceptance criteria:\n- each ported test green locally; the mapping table marks every section in this range DONE.\n\nVerify: `cargo test -p ddb-e2e --test e2e integration_` (filtered to the new files) passes locally; mapping table shows 100% of \u00a746-53 rows (both dialects) as DONE.",
+      "blocked_by": [
+        2,
+        3,
+        4
+      ],
+      "estimated_tokens": 62262,
+      "est_context_peak": 82262,
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "files",
+      "id": "9",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "self_deslop": "noop"
+        }
+      ]
+    },
+    {
+      "name": "Port integration \u00a756-60: REST/GraphQL warnings envelopes, update warning shape, REST typed create, typed where-filter completeness",
+      "description": "Port tests/integration.sh:2538-2816 and the corresponding tests/integration.ps1 section (\u00a756, \u00a756.A-B, \u00a757, \u00a757.A-B, \u00a758, \u00a758.A-D, \u00a759, \u00a759.A-B, \u00a760, \u00a760.A-G) to Rust e2e tests, per the mapping table's integration rows for this range.\n\nLocation: new files tests/e2e/integration_*.rs (e.g. integration_warnings_rest.rs, integration_warnings_graphql.rs, integration_update_shape.rs, integration_where_filter.rs). Add one `mod integration_*;` line per new file to tests/e2e/main.rs, inserted alphabetically.\n\nReuse: `ServerGuard` for REST/GraphQL calls.\n\nContract (verbatim from the design doc's Interfaces & contracts):\n- Test naming: \"integration_NN_slug, NN zero-padded.\"\n- \u00a756/\u00a757's WarningExtension/warnings-envelope contract: caller-supplied title yields `warnings: []` (REST) / `extensions.warnings: []` (GraphQL) \u2014 always present, never omitted, even when empty. \u00a756.B/\u00a757.B: omitted title with a title_template typedef fires a `TITLE_FROM_TEMPLATE` warning.\n- \u00a758: GraphQL updateDoogat and REST PUT both always carry a warnings array; a missing id surfaces the structured NOT_FOUND envelope (`extensions.code = NOT_FOUND` for GraphQL, 404 for REST).\n- \u00a759.B: malformed fields JSON is rejected with 400 + `VALIDATION_ERROR` before any side effect.\n\nDetails:\n- Follow the mapping table row-by-row for this line range; skip ALREADY COVERED rows after verifying.\n- \u00a760.A-G (typed where-filter completeness: negation, null operators, forward/reverse relation sub-filters, none/some, relation filter + orderBy + pagination + totalCount correlation) must assert the exact result set, not just non-empty \u2014 this section pins PRD 00159's completeness contract.\n- The warnings-array assertion must fail if the array key is missing entirely (not present-but-empty) \u2014 that is the whole point of the envelope contract these sections pin.\n- Update the mapping table's status column to DONE for every section ported here (both dialect rows).\n\nAcceptance criteria:\n- each ported test green locally; the mapping table marks every section in this range DONE.\n\nVerify: `cargo test -p ddb-e2e --test e2e integration_` (filtered to the new files) passes locally; mapping table shows 100% of \u00a756-60 rows (both dialects) as DONE.",
+      "blocked_by": [
+        2,
+        3,
+        4
+      ],
+      "estimated_tokens": 64919,
+      "est_context_peak": 84919,
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "files",
+      "id": "10",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "self_deslop": "noop"
+        }
+      ]
+    },
+    {
+      "name": "Port integration Part B: sync/CRDT conflicts, bundle export/import, SQL schema evolution, ID minting, poison-file warnings",
+      "description": "Port tests/integration.sh:2886-3803 and the corresponding tests/integration.ps1 section \u2014 the file's second, independently-numbered half (\u00a721-\u00a741, plus a reused-numbering tail \u00a746-\u00a750/\u00a762-\u00a763) \u2014 to Rust e2e tests, per the mapping table's integration rows for this range. This half is mostly CLI/git-driven (sync, CRDT conflict resolution, bundle export/import, compaction), not server-backed like the earlier integration port tasks.\n\nLocation: new files tests/e2e/integration_*.rs (e.g. integration_sync.rs, integration_crdt_conflicts.rs, integration_bundle.rs, integration_schema_evolution.rs, integration_id_minting.rs). Add one `mod integration_*;` line per new file to tests/e2e/main.rs, inserted alphabetically.\n\nReuse: `MultiNodeSetup`/`TwoNodeSetup` (tests/e2e/common.rs:404-594) \u2014 bare-remote + N-node clone/register/push/sync helpers, already used for multi-device sync scenarios; this is the direct replacement for every \u00a721-\u00a728 sync/CRDT/bundle section's multi-clone setup. `DdbTestRepo` for single-repo sections (\u00a729-\u00a741 zone/attachments/NoSQL/compaction).\n\nContract (verbatim from the PRD's Functional Decomposition and design doc):\n- Test naming: \"integration_NN_slug, NN zero-padded.\" This half reuses section numbers already used in the server-backed half (e.g. a second `# 50.`) \u2014 its target slug is `integration_50_cross_process_fk_freshness` (established by the mapping table task), distinct from the earlier half's `integration_50_alter_table_rename`.\n- \u00a726b/\u00a727a/\u00a727a2/\u00a727b/\u00a727c (deterministic CRDT convergence, add-add collision, delete-vs-edit, three-way conflicted merge) pin PRD 00165/00200's conflict-resolution guarantees \u2014 both nodes must converge on the SAME resolved state, asserted explicitly, not just \"no error\".\n- \u00a728a (bundle-import conflict recovery) \u2014 nodes diverge WITHOUT git-remote sync; preserve this exact setup, it is the scenario that originally caught the bug the design doc references.\n\nDetails:\n- Follow the mapping table row-by-row for this line range; skip ALREADY COVERED rows after verifying.\n- \u00a732 (poison-file reindex resilience) and \u00a733 (reindex report + AppWarning surface) are PRD 00169 regression pins \u2014 preserve the exact skip-and-report semantics (one bad file must not fail the batch).\n- \u00a762 (PRD 00164 unified ID minting, end-to-end CLI conformance) and \u00a763 (PRD 00169 poison-file skip warning through GraphQL extensions) close out the file \u2014 preserve their exact assertions.\n- Update the mapping table's status column to DONE for every section ported here (both dialect rows).\n\nAcceptance criteria:\n- each ported test green locally; the mapping table marks every section in this range DONE.\n\nVerify: `cargo test -p ddb-e2e --test e2e integration_` (filtered to the new files) passes locally; mapping table shows 100% of the Part B rows (both dialects) as DONE.",
+      "blocked_by": [
+        2,
+        3,
+        4
+      ],
+      "estimated_tokens": 83750,
+      "est_context_peak": 103750,
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "files",
+      "id": "11",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "self_deslop": "noop"
+        }
+      ]
+    },
+    {
+      "name": "Port integration \u00a754-55/61: PgWire/SINGLETON cross-protocol parity, SINGLETON write races, cross-process write-lock races (port LAST)",
+      "description": "Port tests/integration.sh:2282-2537 + 2817-2885 and the corresponding tests/integration.ps1 section (\u00a754.D, \u00a755, \u00a755.A-E, \u00a761, \u00a761.A-B) to Rust e2e tests. This is the riskiest, timing-sensitive slice of the PRD (concurrent multi-process races) and is deliberately sequenced LAST among the port tasks, after every other integration/smoke section has already landed, per the PRD's own Phase 1 instruction (\"server sections \u00a754-57 and multi-process races port last\").\n\nLocation: new files tests/e2e/integration_*.rs (e.g. integration_pgwire_singleton_parity.rs, integration_singleton_races.rs, integration_write_lock_races.rs). Add one `mod integration_*;` line per new file to tests/e2e/main.rs, inserted alphabetically.\n\nReuse: `tests/e2e/singleton_cross_process_upsert.rs` \u2014 a live two-server race test that already runs under ordinary `cargo test` parallelism today; this is the existing pattern for every race in this range, not a new one. `ServerGuard` (each test gets its own port via `next_available_port`'s AtomicU16 counter, and its own TempDir-backed repo).\n\nContract (verbatim from the design doc's Interfaces & contracts \u2014 this design DELIBERATELY SUPERSEDES the PRD's own suggested mitigation of \"serial markers\" for these sections, per the design doc's review log; do not add a serial_test dependency):\n- \"No serial_test crate, no --test-threads=1. Every test gets its own port and its own TempDir-backed repo, so cargo's default parallel test runner is already safe.\"\n- \"Timing-sensitive within-test ordering (two CLI/GraphQL calls that must interleave a specific way) is expressed with std::thread::scope + explicit joins, not a serial marker \u2014 same file, same pattern as the existing race test.\"\n- \"PgWire sections \u2014 psql dependency dropped, not preserved. The Rust e2e crate already ports PgWire scenarios through tokio_postgres (pure-Rust client), never shelling out to psql. The port therefore drops the skip entirely: \u00a754.D's PgWire assertions run unconditionally on every platform via tokio_postgres. Do not add a command -v psql equivalent check in Rust \u2014 there is nothing to check for.\"\n\nDetails:\n- Follow the mapping table row-by-row for this line range; skip ALREADY COVERED rows after verifying (the design doc's Reuse inventory flags \u00a754.D/\u00a755.D as likely already covered by tests/e2e/pgwire_singleton.rs \u2014 check before writing new coverage).\n- \u00a755.A-D (CLI/GraphQL executeSql/typed-createDoogat/PgWire concurrent INSERT races) must each assert exactly one row survives the race (structured-error parity on the loser). \u00a755.E asserts convergence across every protocol's race.\n- \u00a761.A-B (cross-process write lock: N concurrent CLI writers on distinct doogats, and a `ddb serve` write concurrent with a CLI write) must assert no lost commit under concurrency \u2014 this is PRD 00162's write-lock guarantee, a P0 data-safety invariant per AGENTS.md.\n- Update the mapping table's status column to DONE for every section ported here (both dialect rows).\n\nAcceptance criteria:\n- each ported test green locally; the mapping table marks every section in this range DONE.\n\nVerify: `cargo test -p ddb-e2e --test e2e integration_` (filtered to the new files) passes locally, run at least twice to catch flake from the concurrency changes; mapping table shows 100% of \u00a754-55/61 rows (both dialects) as DONE.",
+      "blocked_by": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "estimated_tokens": 66452,
+      "est_context_peak": 86452,
+      "model": "opus",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "tier",
+      "id": "12",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "opus",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "codex",
+          "preflight_outcome": null,
+          "pipeline": "full",
+          "verification": null,
+          "red_check": "n/a:test-only-task",
+          "self_deslop": "skipped:test-only",
+          "style_gate": "clean",
+          "split_hygiene": "skipped:no-tests",
+          "review": "medium-retry:fixed"
+        }
+      ]
+    },
+    {
+      "name": "Rewire test.yml + full-validation.yml to run e2e replacements; dispatch manual full-validation",
+      "description": "Rewire CI to run the e2e replacements where it ran the shell scripts, then dispatch one manual full-validation run and confirm it is green on all three platforms before any deletion happens.\n\nLocation: .github/workflows/test.yml, .github/workflows/full-validation.yml (edited in place, exact diffs below).\n\nContract (verbatim from the design doc's Interfaces & contracts \u2014 apply these diffs exactly):\n\ntest.yml \u2014 replace the shell smoke step:\n```diff\n-      - name: Smoke test\n-        env:\n-          DDB_BIN: ${{ github.workspace }}/target/debug/ddb\n-        run: ./tests/smoke.sh\n+      - name: Smoke test (e2e)\n+        env:\n+          DDB_BIN: ${{ github.workspace }}/target/debug/ddb\n+        run: cargo test -p ddb-e2e --test e2e smoke_\n```\nJob ordering is unchanged (this step already runs after \"Build CLI binary\"). The five hand-picked `E2E - *` steps and the `Sync integration tests` step in test.yml are untouched \u2014 independent fast-gate sampling, not this task's concern.\n\nfull-validation.yml:\n- DELETE the `linux-smoke` job entirely (not just its shell step) and remove it from `mark-validated`'s `needs:` list. Its only content (`./tests/integration.sh`) is now a strict subset of what `linux-e2e`'s unfiltered `cargo test -p ddb-e2e` already runs on the same platform.\n- DELETE the `Integration test` step from `macos-full` and `windows-full` (keep every other step, including `Full cargo test suite`, which now carries the ported coverage via `cargo test-full` = `cargo test --workspace`, which includes the `tests` workspace member unfiltered).\n\nDetails:\n- Apply both diffs exactly as specified \u2014 this is a net simplification (3 fewer CI steps, no coverage lost, since cargo test-full/linux-e2e already run unfiltered).\n- After both files are edited, dispatch a manual `full-validation` workflow run (`gh workflow run full-validation.yml` or the repo's documented dispatch method) and wait for it to complete.\n- Do NOT proceed to shell-file deletion in this task \u2014 that is a separate, later task gated on this run being green.\n\nAcceptance criteria:\n- all platforms green on the e2e replacements with the shell steps removed.\n\nVerify: the dispatched full-validation run shows linux-e2e, macos-full, windows-full (and any other jobs) green with the shell smoke/integration steps absent from the run; `test.yml`'s Smoke test step runs `cargo test -p ddb-e2e --test e2e smoke_` and passes on the next push-triggered run.",
+      "blocked_by": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "estimated_tokens": 57584,
+      "est_context_peak": 77584,
+      "model": "sonnet",
+      "qwen_eligible": true,
+      "id": "13",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "qwen",
+          "preflight_outcome": "healthy",
+          "pipeline": "lean",
+          "verification": null,
+          "red_check": "n/a:config-only-task",
+          "self_deslop": "skipped:trivial",
+          "style_gate": "clean",
+          "split_hygiene": "skipped:no-tests"
+        }
+      ]
+    },
+    {
+      "name": "Delete the four shell scenario files; rewrite AGENTS.md + CONTRIBUTING.md + README.md + docs testing references",
+      "description": "Delete tests/smoke.sh, tests/smoke.ps1, tests/integration.sh, tests/integration.ps1 now that CI proves the e2e replacements are green on all three platforms (the prior task's full-validation dispatch), and rewrite every doc that names the 4-file authoring mandate or the shell scripts themselves. This is the FINAL task of the PRD \u2014 a deletion PRD per CLAUDE.md, so run `cargo test -p ddb-e2e` after.\n\nPremise: the prior task's manual full-validation dispatch is green on all three platforms with the shell steps already removed from CI. Re-verify this before deleting \u2014 do not delete on an unconfirmed or stale CI run.\n\nLocation:\n- Delete: tests/smoke.sh, tests/smoke.ps1, tests/integration.sh, tests/integration.ps1 (or, per the mapping table, justify and keep any survivor instead of deleting it).\n- AGENTS.md \u2014 rewrite the \"Per-PRD deliverables\" bullet: scenario authoring now targets tests/e2e/, not the 4-file shell mandate. The bullet's trailing sentence about dev/local/specs/jink-feedback/ddb-repros/ is UNRELATED to the 4-file mandate and must carry into the rewritten text unchanged.\n- CONTRIBUTING.md:42-43 \u2014 duplicates the exact 4-file mandate AGENTS.md is dropping; rewrite identically to AGENTS.md's new text.\n- README.md:101-102 \u2014 quickstart commands that would 404 post-deletion; replace with the `cargo test -p ddb-e2e` equivalent.\n- docs/src/technical/walkthrough.md:38,430 \u2014 describes the four files as \"additional test surfaces\"; rewrite to describe the e2e crate instead.\n- docs/src/technical/sql-engine.md:622,634 \u2014 cites specific shell sections for the SQL-engine bug-cluster table; repoint at the mapping table's target e2e test names for those rows.\n\nContract (verbatim from the PRD's Phase 2 task and Success Metrics):\n- \"delete the four shell files (per the mapping table; each survivor justified); rewrite AGENTS.md 'Per-PRD deliverables' (scenario authoring targets tests/e2e/) and the docs/src/technical/ testing references; run cargo test -p ddb-e2e (deletion PRD per CLAUDE.md)\"\n- \"The four shell files are deleted (or each survivor is justified in the mapping table).\"\n- \"AGENTS.md 'Per-PRD deliverables' is rewritten: scenario authoring targets tests/e2e/; the 4-file mandate is removed.\"\n\nDetails:\n- Use `git rm` for the four shell files (or `git mv` if a survivor is kept elsewhere per the mapping table's justification).\n- After all doc edits and deletions, run `rg -l \"smoke.sh\"` across the repo \u2014 every remaining hit must be a historical doc (e.g. a dated changelog entry or an old PRD in dev/local/prds/done/), never a live instruction.\n- Run `cargo test -p ddb-e2e` per CLAUDE.md's deletion-PRD mandate (this PRD deletes existing code paths).\n\nAcceptance criteria:\n- `rg -l \"smoke.sh\"` finds only historical docs; CI green after deletion; AGENTS.md carries the new mandate.\n\nVerify: `rg -l \"smoke.sh\"` output reviewed \u2014 every hit is historical (dev/local/prds/done/, changelog, etc.), none in AGENTS.md/CONTRIBUTING.md/README.md/docs/src/technical/ live text; `cargo test -p ddb-e2e` green; a follow-up CI push run is green with the shell files absent from the working tree.",
+      "blocked_by": [
+        13
+      ],
+      "estimated_tokens": 91861,
+      "est_context_peak": 111861,
+      "model": "opus",
+      "qwen_eligible": false,
+      "qwen_excluded_reason": "tier",
+      "id": "14",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "opus",
+          "outcome": "completed",
+          "review_cycle": null,
+          "cause": null,
+          "implementor": "codex",
+          "preflight_outcome": null,
+          "pipeline": "full",
+          "red_check": "n/a:test-only-task",
+          "self_deslop": "skipped:trivial",
+          "style_gate": "clean",
+          "split_hygiene": "skipped:no-tests"
+        }
+      ]
+    },
+    {
+      "name": "[D1] Restore complete per-push e2e coverage",
+      "description": "Replace the smoke-only filter and five redundant exact e2e steps in .github/workflows/test.yml with one unfiltered cargo test -p ddb-e2e step. Keep CLI build before e2e and retain the core sync integration step and independent coverage job. Remove obsolete DDB_BIN env on the replaced steps (the harness uses CARGO_BIN_EXE_ddb/current_exe). Update AGENTS.md description of per-push CI. Full e2e is already CI Tier 2 and was measured at 223.56 seconds on Linux; no local full-suite execution is requested.\n\n### Findings (verbatim)\n[EVE] \ud83d\udfe0 [FIX] Per-push CI coverage dropped: `test.yml`'s new `Smoke test (e2e)` step runs only the 30 `smoke_*` tests (of 565), yet ~26 of smoke.sh's 56 sections were mapped to pre-existing modules outside that filter (delete_backlinks, tags, checkboxes, folder_namespace, search_links, link_kinds, rename, sql_lifecycle, alter_table_rename, cli_create_fk_freshness, inline_zone, discover, fix, sequence, help, cascade_delete, sql_expressions_test, set_flag, date_default, alter_column_type, schema_apply, poison_file_reindex, cli_create_unregistered_type, cli_update_app_error, sync_crdt); smoke.sh ran those on every push, now they run nightly only, contradicting the PRD's \"CI keeps identical coverage\" \u2014 .github/workflows/test.yml:45-48 \u2014 replace the `smoke_` step and the five `--exact` steps with one `cargo test -p ddb-e2e` step (the full suite took 223 s in the 5cf4c36 linux-e2e job), drop the `DDB_BIN` env (nothing under tests/ reads it), and fix the test.yml sentence at AGENTS.md:116. | File: .github/workflows/test.yml | Task: general\n\nContract: .github/workflows/test.yml; AGENTS.md.\n\nAcceptance: every quoted finding no longer reproduces; the push job selects all registered e2e tests, including all 63 previously omitted smoke targets, with no duplicate exact steps.\n\nVerify: python3 dev/local/tmp/00171-review-check-ci.py\n",
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "id": "15",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": 1,
+          "cause": null,
+          "implementor": "orchestrator",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "red_check": "n/a:micro-lane",
+          "self_deslop": "skipped:trivial",
+          "style_gate": "clean",
+          "split_hygiene": "skipped:no-tests"
+        }
+      ]
+    },
+    {
+      "name": "[D1] Restore exact scenario assertions and share existing test helpers",
+      "description": "Test-only task. Restore the six concrete assertion-fidelity gaps below and consolidate the duplicated stdout/id helpers specified by the seventh finding. Keep every existing scenario and add the multi-junction-row raw-scalar variant; do not weaken or remove the existing one-reference test. No production changes, new dependency, runtime feature, or unrelated refactor. All mutations stay under tests/e2e. The PRD requires assertion equivalence with the retired shell scenarios.\n\n### Findings (verbatim)\n[EVE] \ud83d\udfe1 [FIX] \u00a742 totalCount assertions dropped: bash 1505/1517 asserted `totalCount == 1`; the cited \"ALREADY COVERED\" tests request the field but never read it \u2014 tests/e2e/serve.rs:1408-1410 (`filter_base_field_title_eq`) and :1443-1445 (`filter_base_field_title_contains`) \u2014 add `assert_eq!(result[\"data\"][\"tasks\"][\"totalCount\"].as_i64().unwrap(), 1)` to each. | File: tests/e2e/serve.rs | Task: general\n[EVE] \ud83d\udfe1 [FIX] \u00a744.E1 JOIN pin degraded to single-character containment: `row_str.contains('a')`/`contains('1')` also pass on `[\"abc\",\"10\"]`; bash 1699-1700 grepped the quoted tokens \u2014 tests/e2e/integration_junction_sync.rs:35-43 \u2014 parse `rows[0]` as JSON and `assert_eq!(row, json!([\"a\",\"1\"]))`. | File: tests/e2e/integration_junction_sync.rs | Task: general\n[EVE] \ud83d\udfe1 [FIX] \u00a759.A cross-process read-back dropped: bash 2667-2677 read the typed column back through a separate `ddb query` process (its comment names that as the point); the Rust target reads through the same server's executeSql \u2014 tests/e2e/rest.rs:153-154 \u2014 add `repo.ddb().args([\"query\", \"SELECT category FROM item WHERE id = '<id>'\"]).assert().success().stdout(contains(\"books\"))`. | File: tests/e2e/rest.rs | Task: general\n[EVE] \ud83d\udfe1 [FIX] \u00a718d2 eq-exactness fixture lost: bash 341-346 seeded `https://example.com/page` so a prefix/LIKE `eq` would fail; the \"ALREADY COVERED\" test seeds two identical `https://example.com` plus `https://other.org`, so a prefix match still passes \u2014 tests/e2e/serve.rs:1830-1857 (`search_where_filter_materialized_column_eq`) \u2014 change Link B's url to `https://example.com/page` and expect 1 hit / totalCount 1. | File: tests/e2e/serve.rs | Task: general\n[EVE] \ud83d\udfe1 [FIX] \u00a738b2b raw-scalar pin with multiple junction rows lost: bash 1260-1265 linked three categories and asserted `rlcat_id == <first-linked>`; the cited test links one \u2014 tests/e2e/reference_raw_id.rs:112-143 \u2014 add a three-category variant asserting `category_id` equals the first-linked id. | File: tests/e2e/reference_raw_id.rs | Task: general\n[EVE] \ud83d\udfe1 [FIX] \u00a717.J2 numeric-id assertion weakened: bash 217 required `\"message\":\"[0-9]+\"`, Rust asserts `!config_id.is_empty()` \u2014 tests/e2e/integration_graphql_jink.rs:158 \u2014 assert a 14-digit numeric id. | File: tests/e2e/integration_graphql_jink.rs | Task: general\n[EVE] \u26aa [FIX] Slop: `stdout()` copy-pasted in smoke_core.rs:6, smoke_sql.rs:4, smoke_search.rs:4; the 14-digit-id check re-implemented as `assert_doogat_id` (smoke_sql.rs:12), `is_14_digit_id` (integration_id_poison.rs:40) and inline at integration_nosql_cli.rs:40,88, integration_singleton_parity.rs:61, integration_singleton_races.rs:87,111 \u2014 tests/e2e/common.rs \u2014 move one `stdout()` and one `assert_doogat_id()` there and call them (also closes the \u00a717.J2 item). | File: tests/e2e/common.rs | Task: general\n\nContract: tests/e2e/common.rs; tests/e2e/smoke_core.rs; tests/e2e/smoke_sql.rs; tests/e2e/smoke_search.rs; tests/e2e/integration_id_poison.rs; tests/e2e/integration_nosql_cli.rs; tests/e2e/integration_singleton_parity.rs; tests/e2e/integration_singleton_races.rs; tests/e2e/serve.rs; tests/e2e/rest.rs; tests/e2e/reference_raw_id.rs; tests/e2e/integration_graphql_jink.rs; tests/e2e/integration_junction_sync.rs.\n\nAcceptance: every quoted finding no longer reproduces. Existing checks remain, exact negative fixtures distinguish eq from prefix matching, multiple junction rows pin first-linked ordering, REST read-back uses a separate CLI process, and shared helpers keep the same successful exit and ASCII 14-digit ID semantics. No test is ignored.\n",
+      "model": "sonnet",
+      "qwen_eligible": false,
+      "id": "16",
+      "status": "completed",
+      "attempts": [
+        {
+          "attempt": 1,
+          "model": "sonnet",
+          "outcome": "completed",
+          "review_cycle": 1,
+          "cause": null,
+          "implementor": "claude",
+          "preflight_outcome": null,
+          "pipeline": "lean",
+          "red_check": "n/a:test-only-task",
+          "self_deslop": "skipped:test-only",
+          "style_gate": "clean",
+          "split_hygiene": "skipped:no-tests"
+        }
+      ]
+    }
+  ],
+  "work_start_sha": "b1e785395fb1e5d7043fbc725cc5786f62a6417e",
+  "repo_root": "/Users/bob/git/src/github.com/doogat/ddb",
+  "contract_card": "step: 00171 cycle-2 review completed, including a fresh native Eve correction for PRD-only input isolation. Review shape/roster check passed again after reconciliation. State remains phase=next_phase=paused at cycle 2, cap 2; no third cycle or cap increase is authorized. The attended parent has asked for the one material acceptance decision: record the historical Mac reset under 00188 and resume the bounded tail sweep, or keep paused. No answer has arrived; elapsed time is not consent.\n\ninvariants: Only 00171. All 16 tasks complete; cycle stays 2, rework_cap stays 2. Preserve work_start_sha=b1e785395fb1e5d7043fbc725cc5786f62a6417e, batch 202607161128 history, both FT stashes and dev/local/plans/fast-track-2026-09-06.md. No PRD move, no acceptance, no backlog loop, no 00172. Never run ddb in the source checkout; never run full local Tier 2.\n\nstate: reviewed HEAD 876a153b4039128f8052526629773fa189058c71, clean and pushed. Fresh local gate this cycle: cargo test-ci exit 0, 1819 passed / 0 failed / 0 ignored (42+1555+222). CI at that SHA: Test 34086467208 success (e2e 566/0/2, coverage 79.88%) and Full Validation 34092612666 all six jobs success (566/0/2 on each platform). last-verification.json still records the STALE sha 74644b8 and was deliberately not rewritten.\n\nfindings: Read the authoritative Coordinator reconciliation at the end of the cycle-2 review. One acceptance decision plus ten bounded tail observations remain. Original six source repairs, restored DDB_BIN cleanup, corrected Eve's sibling ID assertions, seeding-sleep assessment, and singular-reference developer guidance. The DDB_BIN discard was false: rg skipped hidden .github; direct file search finds it at line 61. The false settled entry was removed from the active ledger and preserved in 00171-cycle-2-ledger-before-input-correction.json. Other settled decisions remain. The corrected consolidator merges factual agreement with the highest severity; do not mistake its 2/4 High row for severity agreement: only Blake rates the reset High, the other three reviewers rate it Low/out-of-scope. Its cause remains unconfirmed.\n\nnext: Await the maintainer's pending acceptance disposition. On authorized resume, use the installed cap-pause state commands, preserve cycle/cap 2, and complete the existing mandatory bounded tail-sweep work procedure with independent per-task review and required gates. No whole review rerun and no backlog loop. Then reconcile acceptance documents and use a distinct fresh finalize child. CI evidence is SHA-specific: any new commit needs appropriate fresh CI. Until resumed, keep the PRD in wip, checklist unchecked, active plan intact, and all durable evidence. Both review hosts have exited; no next-PRD worker is running. Detailed input correction and direct checks: dev/local/reviews/00171-cycle-2-coordinator-checks.md and 00171-cycle-2-eve-corrected-raw.md.",
+  "qwen_preflight": {
+    "batch_id": "202607161128",
+    "verdict": "healthy",
+    "detail": null,
+    "checked_at": "2026-08-16T23:52:33Z"
+  },
+  "review_lenses": {
+    "consensus": "done",
+    "blind": "done",
+    "doubt": "done",
+    "ui": "failed",
+    "fable": "done"
+  },
+  "doubts_rubric_verdicts": [
+    {
+      "rule_id": "D1",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D2",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D3",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D4",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D5",
+      "verdict": "pass",
+      "source": "codex"
+    },
+    {
+      "rule_id": "D1",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D2",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D3",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D4",
+      "verdict": "pass",
+      "source": "fable"
+    },
+    {
+      "rule_id": "D5",
+      "verdict": "pass",
+      "source": "fable"
+    }
+  ],
+  "autonomous_decisions": [
+    {
+      "cycle": 1,
+      "issue": "Review diff/commit range for PRD 00171 bundles unrelated PRD 00202 HLC-logic commits (git_ops/read.rs, tests.rs) \u2014 a process/traceability issue, not a defect in 00171's own work",
+      "file": "ddb-core/src/git_ops/read.rs",
+      "severity": "low",
+      "consensus": "3/4",
+      "action": "discard",
+      "reason": "Git history identifies interleaved, separately authored PRD 00202 commits; not scope creep by 00171. Full work_start_sha is intentionally preserved."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] Per-push CI coverage dropped: `test.yml`'s new `Smoke test (e2e)` step runs only the 30 `smoke_*` tests (of 565), yet ~26 of smoke.sh's 56 sections were mapped to pre-existing modules outside that filter (delete_backlinks, tags, checkboxes, folder_namespace, search_links, link_kinds, rename, sql_lifecycle, alter_table_rename, cli_create_fk_freshness, inline_zone, discover, fix, sequence, help, cascade_delete, sql_expressions_test, set_flag, date_default, alter_column_type, schema_apply, poison_file_reindex, cli_create_unregistered_type, cli_update_app_error, sync_crdt); smoke.sh ran those on every push, now they run nightly only, contradicting the PRD's \"CI keeps identical coverage\" \u2014 .github/workflows/test.yml:45-48 \u2014 replace the `smoke_` step and the five `--exact` steps with one `cargo test -p ddb-e2e` step (the full suite took 223 s in the 5cf4c36 linux-e2e job), drop the `DDB_BIN` env (nothing under tests/ reads it), and fix the test.yml sentence at AGENTS.md:116.",
+      "file": ".github/workflows/test.yml",
+      "severity": "high",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a742 totalCount assertions dropped: bash 1505/1517 asserted `totalCount == 1`; the cited \"ALREADY COVERED\" tests request the field but never read it \u2014 tests/e2e/serve.rs:1408-1410 (`filter_base_field_title_eq`) and :1443-1445 (`filter_base_field_title_contains`) \u2014 add `assert_eq!(result[\"data\"][\"tasks\"][\"totalCount\"].as_i64().unwrap(), 1)` to each.",
+      "file": "tests/e2e/serve.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a744.E1 JOIN pin degraded to single-character containment: `row_str.contains('a')`/`contains('1')` also pass on `[\"abc\",\"10\"]`; bash 1699-1700 grepped the quoted tokens \u2014 tests/e2e/integration_junction_sync.rs:35-43 \u2014 parse `rows[0]` as JSON and `assert_eq!(row, json!([\"a\",\"1\"]))`.",
+      "file": "tests/e2e/integration_junction_sync.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a759.A cross-process read-back dropped: bash 2667-2677 read the typed column back through a separate `ddb query` process (its comment names that as the point); the Rust target reads through the same server's executeSql \u2014 tests/e2e/rest.rs:153-154 \u2014 add `repo.ddb().args([\"query\", \"SELECT category FROM item WHERE id = '<id>'\"]).assert().success().stdout(contains(\"books\"))`.",
+      "file": "tests/e2e/rest.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a718d2 eq-exactness fixture lost: bash 341-346 seeded `https://example.com/page` so a prefix/LIKE `eq` would fail; the \"ALREADY COVERED\" test seeds two identical `https://example.com` plus `https://other.org`, so a prefix match still passes \u2014 tests/e2e/serve.rs:1830-1857 (`search_where_filter_materialized_column_eq`) \u2014 change Link B's url to `https://example.com/page` and expect 1 hit / totalCount 1.",
+      "file": "tests/e2e/serve.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a738b2b raw-scalar pin with multiple junction rows lost: bash 1260-1265 linked three categories and asserted `rlcat_id == <first-linked>`; the cited test links one \u2014 tests/e2e/reference_raw_id.rs:112-143 \u2014 add a three-category variant asserting `category_id` equals the first-linked id.",
+      "file": "tests/e2e/reference_raw_id.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] \u00a717.J2 numeric-id assertion weakened: bash 217 required `\"message\":\"[0-9]+\"`, Rust asserts `!config_id.is_empty()` \u2014 tests/e2e/integration_graphql_jink.rs:158 \u2014 assert a 14-digit numeric id.",
+      "file": "tests/e2e/integration_graphql_jink.rs",
+      "severity": "medium",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "PRD checklist unchecked and file still in wip/ despite verifiably complete, CI-green implementation",
+      "file": "dev/local/prds/wip/00171-migrate-shell-scenarios-to-e2e-v1.md",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "PRD is intentionally wip until review converges and a fresh finalize session accepts it."
+    },
+    {
+      "cycle": 1,
+      "issue": "[FIX] Slop: `stdout()` copy-pasted in smoke_core.rs:6, smoke_sql.rs:4, smoke_search.rs:4; the 14-digit-id check re-implemented as `assert_doogat_id` (smoke_sql.rs:12), `is_14_digit_id` (integration_id_poison.rs:40) and inline at integration_nosql_cli.rs:40,88, integration_singleton_parity.rs:61, integration_singleton_races.rs:87,111 \u2014 tests/e2e/common.rs \u2014 move one `stdout()` and one `assert_doogat_id()` there and call them (also closes the \u00a717.J2 item).",
+      "file": "tests/e2e/common.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "auto-fix",
+      "reason": "Cycle 1: bounded additive test/CI coverage repair or specified helper deduplication; no product contract change."
+    },
+    {
+      "cycle": 1,
+      "issue": "[VERIFY] Tier 2 has not run on the deletion commit: the green manual dispatch (run 33991344845, 2026-09-05 20:51-21:48, `565 passed; 0 failed; 0 ignored` on linux-e2e and windows-full) is on 5cf4c36, one commit before c8b72bd; only test.yml (run 34016441899, 21 min, green) has run on c8b72bd \u2014 after the next nightly run `gh run list --repo doogat/ddb --workflow=full-validation.yml --limit 1 --json headSha,conclusion,createdAt,updatedAt`; it must show headSha c8b72bd or later, conclusion success, a real duration (\u226545 min), and `gh run view --job <linux-e2e id> --log` must contain `test result: ok. 565 passed; 0 failed; 0 ignored`.",
+      "file": "N/A",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "Live GitHub confirmed the contract-required full validation before deletion and Test after deletion. A fixed duration and old exact test count are not validity gates. Rework will be pushed for fresh CI. Not queued: command shape."
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] \u00a754.D/\u00a755.D psql-absent skip semantic not ported \u2014 moot: the PgWire legs use tokio-postgres (`pgwire_singleton`, `integration_55_d_cli_vs_pgwire_singleton_insert_race`), so no client-absent path exists to degrade; recorded so nobody re-adds a skip.",
+      "file": "tests/e2e/pgwire_singleton.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "Rust PgWire client is a declared dependency; every platform runs the assertions, so no missing-client branch remains."
+    },
+    {
+      "cycle": 1,
+      "issue": "[KNOWN] The mapping table cites three reserved slugs that resolve to no test (`integration_49_structured_error_propagation`, `integration_50_alter_table_rename`, `integration_50_cross_process_fk_freshness`; mapping.md:230,235,340,465,538) \u2014 each row documents the slug as intentionally unused for a banner-only section whose assertions map to sub-rows; every other cited target (179 qualified, 112 bare) resolves against `cargo test -p ddb-e2e -- --list` (565 tests).",
+      "file": "dev/local/designs/00171-migrate-shell-scenarios-to-e2e-v1-mapping.md",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discard",
+      "reason": "Mapping explicitly labels these as non-executable banner sections and maps their executable subrows to registered tests."
+    },
+    {
+      "cycle": 2,
+      "issue": "Blake re-raised four cycle-1 settled decisions (PRD still in wip/ with unchecked boxes; \u00a754.D psql-absent skip not ported; no #[serial] markers) plus Bob raised three of the same settled class (serve.rs 2011 lines; rest.rs either-or hedge outside the diff)",
+      "severity": "high/medium/low",
+      "consensus": "1/4",
+      "action": "discarded or settled-deferral per the ledger",
+      "reason": "Cycle 2 decision gate: --ledger-dismiss BLAKE matched none of them because his wording changed, so they were dismissed by gate judgment on issue text plus file and appended to 00171-migrate-shell-scenarios-to-e2e-v1-ledger.json with reasons. Blake is blind to the ledger by construction."
+    },
+    {
+      "cycle": 2,
+      "issue": "Bob: obsolete DDB_BIN env survives on the linux-e2e step of full-validation.yml; and Bob VERIFY: 14-digit-id consolidation completeness unverified outside the touched modules",
+      "severity": "low",
+      "consensus": "1/4",
+      "action": "discarded - contradicts computed facts / answered by gate-run evidence",
+      "reason": "Cycle 2 decision gate ran both checks itself. rg -n DDB_BIN over the repo excluding dev/local returns zero hits, so the DDB_BIN claim is refuted. rg -n over tests/e2e for the 14-digit shapes shows survivors only in modules PRD 00171 never touched, matching Eve KNOWN 2 and the surgical-change rule; every 00171-authored site named in cycle 1 is consolidated. Bob had no grep in his sandbox and said so."
+    },
+    {
+      "cycle": 2,
+      "issue": "DDB_BIN cycle-2 dismissal superseded after hidden-directory search correction; Eve input isolation repaired in a fresh native Fable child",
+      "severity": "low",
+      "consensus": "2/4",
+      "action": "restored finding; review input corrected",
+      "reason": "Direct rg of .github/workflows/full-validation.yml finds DDB_BIN at line 61. The old search omitted hidden directories. False discard removed from active ledger, full old ledger archived. Corrected Eve raw response and re-consolidation retained; original findings preserved. No code edits, acceptance or state resume; maintainer decision pending."
+    }
+  ],
+  "rework_task_ids": [],
+  "cap_pause_reason": {
+    "cycle": 2,
+    "cap": 2,
+    "review_file": "dev/local/reviews/00171-migrate-shell-scenarios-to-e2e-v1-review-2.md",
+    "head_sha": "876a153b4039128f8052526629773fa189058c71",
+    "unresolved_findings": [
+      {
+        "issue": "Nightly macOS ConnectionReset in a migrated e2e test, cause unconfirmed. integration_warnings_update::integration_58_a_graphql_update_warnings_empty failed once at c8b72bd in Nightly 34020494801 at tests/e2e/common.rs:186. At the reviewed SHA it passed on all three platforms with no code change, no retry, no skip. Eve traced the readiness path and found it sound for HTTP; cause remains unconfirmed. Alice established that task 15 moved the full e2e suite from nightly-only to every push, so this flake exposure increased as a direct result of this PRD rework, with no resilience added. Severity contested: Blake (blind) 1/4 rates it high; Alice, Bob and Eve rate it low with PRD 00188 named as the durable home.",
+        "severity": "high",
+        "consensus": "1/4",
+        "file": "tests/e2e/common.rs:186",
+        "decision_needed": "Does an unexplained flake in migrated test code, whose exposure this PRD increased, block acceptance of 00171? Options: (a) accept with the flake recorded against PRD 00188, (b) fix here by adding retry-on-reset to the e2e request path, (c) raise the cap for one more cycle."
+      },
+      {
+        "issue": "Section 38b2b link order does not exclude a MAX(id) resolver. reference_raw_id.rs:164 mints alpha, beta, gamma ascending so category_ids[2] is the largest id; :195 links [2],[0],[1] and :215 asserts category_ids[2]. Confirmed by reading. Fix: link the middle id first and assert category_ids[1], which excludes min-id, max-id and last-linked at once.",
+        "severity": "medium",
+        "consensus": "1/4",
+        "file": "tests/e2e/reference_raw_id.rs",
+        "status": "actionable, unfixed at cap"
+      },
+      {
+        "issue": "Section 38b2b object resolver unpinned on multiple junction rows. The deleted bash asserted BOTH the scalar and the object resolver on three junction rows; the new test queries only category_id, so an object resolver drifting from the scalar row is unpinned. Bears on the PRD No lost semantics success metric.",
+        "severity": "medium",
+        "consensus": "1/4",
+        "file": "tests/e2e/reference_raw_id.rs",
+        "status": "actionable, unfixed at cap"
+      },
+      {
+        "issue": "The new 73-line test duplicates the seed loop at reference_raw_id.rs:320-338 verbatim apart from table and variable names, and exceeds the 50-line guideline. Confirmed by reading. One seed_labeled_rows helper closes both.",
+        "severity": "medium",
+        "consensus": "2/4",
+        "file": "tests/e2e/reference_raw_id.rs",
+        "status": "actionable, unfixed at cap"
+      },
+      {
+        "issue": "Section 18d2 pins the hit count but never which row survived. serve.rs:1854-1860 asserts hits.len()==1 and totalCount==1 and never reads hits[0][title], so an eq returning the wrong single row passes. Confirmed by reading.",
+        "severity": "low",
+        "consensus": "1/4",
+        "file": "tests/e2e/serve.rs",
+        "status": "actionable, unfixed at cap"
+      },
+      {
+        "issue": "common::stdout is a noun name for a newly crate-wide action helper that runs ddb and asserts success; it reads as std::io::stdout or the assert_cmd stdout assertion. Rename to run_stdout or capture_stdout and update the three importers.",
+        "severity": "low",
+        "consensus": "2/4",
+        "file": "tests/e2e/common.rs",
+        "status": "actionable, unfixed at cap"
+      },
+      {
+        "issue": "Redundant predicate in integration_nosql_cli.rs: the contains predicate is strictly implied by the new line-equality check on the same captured output, and the clone exists only to feed it.",
+        "severity": "low",
+        "consensus": "1/4",
+        "file": "tests/e2e/integration_nosql_cli.rs",
+        "status": "actionable, unfixed at cap"
+      },
+      {
+        "issue": "Unused DDB_BIN remains at .github/workflows/full-validation.yml:61; the initial zero-hit search skipped hidden directories. The cycle-2 discard is superseded; restore this low-severity cleanup.",
+        "severity": "low",
+        "consensus": "2/4",
+        "file": ".github/workflows/full-validation.yml",
+        "status": "actionable, pending authorized tail sweep"
+      },
+      {
+        "issue": "Corrected Eve: strengthen the two sibling section 18z8 nonempty-ID assertions with the existing assert_doogat_id helper.",
+        "severity": "medium",
+        "consensus": "1/4",
+        "file": "tests/e2e/integration_graphql_jink.rs",
+        "status": "actionable, pending authorized tail sweep"
+      },
+      {
+        "issue": "Corrected Eve: assess redundant seeding sleeps; preserve the known repo-aware ID throughput ceiling. Claimed three-second improvement is unverified; no minting-code change is authorized.",
+        "severity": "low",
+        "consensus": "1/4",
+        "file": "tests/e2e/reference_raw_id.rs",
+        "status": "pending bounded disposition"
+      },
+      {
+        "issue": "Corrected Eve first-reference-order documentation check ran. data-model.md and indexer.md lack the explicit rule; server.md does not state multi-reference singular scalar/object selection order. Clarify existing behavior without changing policy.",
+        "severity": "low",
+        "consensus": "1/4",
+        "file": "docs/src/technical/server.md",
+        "status": "pending bounded disposition"
+      }
+    ]
+  }
+}

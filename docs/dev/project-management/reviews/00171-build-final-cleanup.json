@@ -1,0 +1,829 @@
+{
+  "archive": "dev/local/reviews/00171-build-final-dispatch-inputs.tar.gz",
+  "archive_sha256": "3e95b512273fdc7c93b138d582329eb0987d885c8527b000a452a174fe552480",
+  "file_count": 163,
+  "byte_verified_before_removal": true,
+  "files": [
+    {
+      "path": "dev/local/tmp/00171-build-progress-card.txt",
+      "bytes": 2520,
+      "sha256": "76662c6be90af78a47720bfa9a287d45a871787b4ef96de0f0b52220bcf5ce3e"
+    },
+    {
+      "path": "dev/local/tmp/00171-e2e-list.txt",
+      "bytes": 35425,
+      "sha256": "2183d19ec412017c46e46685a896356a50fef17f2d0b08aec30337dae1a3de7c"
+    },
+    {
+      "path": "dev/local/tmp/00171-mapping-discovery.json",
+      "bytes": 61137,
+      "sha256": "11201fbd0f1b1afb3988121ca9b05ef6a1bbf293e81b784b317ed9b326459c02"
+    },
+    {
+      "path": "dev/local/tmp/00171-mapping-rows.json",
+      "bytes": 150833,
+      "sha256": "600aba992a64ad7adb38c24d9dd0665371215140a88dea6091e2f6e452c45464"
+    },
+    {
+      "path": "dev/local/tmp/00171-pat12-meta.json",
+      "bytes": 1115,
+      "sha256": "a850c45465e876bb642cd0e884758515de7bd5374bce6283f12fbd3ade67fd84"
+    },
+    {
+      "path": "dev/local/tmp/00171-pat14-meta.json",
+      "bytes": 11128,
+      "sha256": "1b83d6302ff5798589e4c5ea66c37eb7c3536551e2b1e53acefdbf88ea5a3665"
+    },
+    {
+      "path": "dev/local/tmp/00171-task14-live-references.txt",
+      "bytes": 6494,
+      "sha256": "be89498fe202da2b48d019d535dccfe1f13ce2a10f3aea00a31506cee573adb8"
+    },
+    {
+      "path": "dev/local/tmp/00171-task14-sql-targets.txt",
+      "bytes": 4145,
+      "sha256": "ee385d58bed8bfa046648fbd2c4be662a2747ab7caf405581ea4bc4cdbbad102"
+    },
+    {
+      "path": "dev/local/tmp/attempt-task-14.json",
+      "bytes": 319,
+      "sha256": "42247489910199fcdadaa17bdb722c81cdb0d15537e5531a435db1ee8c1bcb97"
+    },
+    {
+      "path": "dev/local/tmp/devon-12-instructions.txt",
+      "bytes": 2802,
+      "sha256": "867715453249defb6519f4bc98d092e4660b33919e4f4df9640a4c90932bf468"
+    },
+    {
+      "path": "dev/local/tmp/devon-14-prologue.txt",
+      "bytes": 3734,
+      "sha256": "0fc1475bf624ee5c721bba57ed65c6959c5571d6be97a48c3b0b8395e7778e7c"
+    },
+    {
+      "path": "dev/local/tmp/dispatch-devon-14.txt",
+      "bytes": 32756,
+      "sha256": "624429e94ac33741f52ef3533999a5c5c67f19e26ff1f60b9d7c3ec05cfb6129"
+    },
+    {
+      "path": "dev/local/tmp/dispatch-ivan-14.txt",
+      "bytes": 10848,
+      "sha256": "6bbcf82b4ab3df98fc8c4ab75951ffdb032346cda682e04d057050accca1eca5"
+    },
+    {
+      "path": "dev/local/tmp/dispatch-tess-12-parity.txt",
+      "bytes": 6586,
+      "sha256": "7dfaf9b8a9f6ff344316edac8e68eccb33606a092b4aa728174e2c555f44d7ac"
+    },
+    {
+      "path": "dev/local/tmp/dispatch-tess-12-retry.txt",
+      "bytes": 7325,
+      "sha256": "1c09e759fb668eddd4c2b43d4cd6ff091f4a29244b37037aa360cc8067f28e04"
+    },
+    {
+      "path": "dev/local/tmp/ivan-14-checks.txt",
+      "bytes": 1854,
+      "sha256": "8d7838c96e8003f85dadea69de368ea8626f72c6b505d0e66c55819b865ef5ba"
+    },
+    {
+      "path": "dev/local/tmp/ivan-14-context.txt",
+      "bytes": 3781,
+      "sha256": "ee9018e090222897135ec1865a9b297aa8e03c82b6da9938287737411b06149d"
+    },
+    {
+      "path": "dev/local/tmp/ivan-14-files.txt",
+      "bytes": 2118,
+      "sha256": "d8b4aaae53a1819a0364b07fcd066aa7f35b2fb07c6a366297ef1aebfba1e916"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs-comments.diff.txt",
+      "bytes": 41826,
+      "sha256": "e4dc6691f32aef15e8e94eb7a9c859eee4586ef8a5fa0160ea401161af372075"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs-comments.prompt.md",
+      "bytes": 51348,
+      "sha256": "bf7951282cf13aa3e69126cf2c14930664fbe1de9a9b5670faaae802be92c7cc"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs-comments.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs-comments.task_description.txt",
+      "bytes": 3217,
+      "sha256": "9e1f61458f52e953c3f4896a900c7ce4feeab802527c1faf27d2c7fea4e1bea9"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs-comments.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs.correction-prompt.md",
+      "bytes": 35155,
+      "sha256": "18c2db3eda9fbcc3a3350d0b7c1f08d8b416c44c21c5a0213e4de21b1e1333e5"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs.diff.txt",
+      "bytes": 25202,
+      "sha256": "2d97f378f54311aad4efb2f43367f8efc9c6deddd68b3fb65513451cf6111ece"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs.prompt.md",
+      "bytes": 34880,
+      "sha256": "88e6c35b5339a7466b10fdf111afa3515920394d1627de9aaed7fd142b3ec3b6"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs.task_description.txt",
+      "bytes": 3373,
+      "sha256": "ba06f492d45720180708a095eaf5b4a0ac3769f01ab433f72f4e48fe2a6d7b8a"
+    },
+    {
+      "path": "dev/local/tmp/pat14-01-docs.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-02-rust-comments.diff.txt",
+      "bytes": 16624,
+      "sha256": "1906e262ef1e8b95ef6071509b37669da0a734f1261744b7ba89fe396b3a4cca"
+    },
+    {
+      "path": "dev/local/tmp/pat14-02-rust-comments.prompt.md",
+      "bytes": 27084,
+      "sha256": "48d492c3d0ac02fa5f2cbb863dc40eb1c936dc3fbcd85244ac83d3f76751cbe0"
+    },
+    {
+      "path": "dev/local/tmp/pat14-02-rust-comments.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-02-rust-comments.task_description.txt",
+      "bytes": 4155,
+      "sha256": "1a0a3f4139b4b5d46ca2d2b34cbf96a718ebb20ced168555e2ebe815a11ca4bc"
+    },
+    {
+      "path": "dev/local/tmp/pat14-02-rust-comments.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-03-tests-smoke-sh-01.diff.txt",
+      "bytes": 32091,
+      "sha256": "8efc4ad37a149ec0a18e9dfe1d0909b0af6a77a81b27dc95c798f8110aa5050d"
+    },
+    {
+      "path": "dev/local/tmp/pat14-03-tests-smoke-sh-01.prompt.md",
+      "bytes": 48581,
+      "sha256": "34216327a85152985ff906fe8c1b17586d0753bddecef1d44f4a0a0915bf09e8"
+    },
+    {
+      "path": "dev/local/tmp/pat14-03-tests-smoke-sh-01.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-03-tests-smoke-sh-01.task_description.txt",
+      "bytes": 10185,
+      "sha256": "f2f14cf44d2312f8536350e0f400e8942233806624d50b53438471d47074e6c0"
+    },
+    {
+      "path": "dev/local/tmp/pat14-03-tests-smoke-sh-01.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-04-tests-smoke-sh-02.diff.txt",
+      "bytes": 6226,
+      "sha256": "163b98a03abf66ab048857c7a36f1293074121a2d7c2238828b8df965c814172"
+    },
+    {
+      "path": "dev/local/tmp/pat14-04-tests-smoke-sh-02.prompt.md",
+      "bytes": 17046,
+      "sha256": "e4f2e2c14fb41e083faba7dd6e0bcefca8406a39ef83492b7ba71628c9a125c3"
+    },
+    {
+      "path": "dev/local/tmp/pat14-04-tests-smoke-sh-02.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-04-tests-smoke-sh-02.task_description.txt",
+      "bytes": 4515,
+      "sha256": "77c09296e8d97514ac4022477ec0e575496ba01f90e715f565986bbe421d9e89"
+    },
+    {
+      "path": "dev/local/tmp/pat14-04-tests-smoke-sh-02.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-05-tests-smoke-ps1-01.diff.txt",
+      "bytes": 32136,
+      "sha256": "aaa4bbe3b3de90958763a8efc119f64d465d073b6ac2fb8b562149d3cf532e2c"
+    },
+    {
+      "path": "dev/local/tmp/pat14-05-tests-smoke-ps1-01.prompt.md",
+      "bytes": 45527,
+      "sha256": "f320d186dfcd61a54587c9cead86e5b4dd853912459413ab938d18135521e308"
+    },
+    {
+      "path": "dev/local/tmp/pat14-05-tests-smoke-ps1-01.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-05-tests-smoke-ps1-01.task_description.txt",
+      "bytes": 7086,
+      "sha256": "40e5c9e65769fb476ec5afb1719ec5efd1e6c26d3f52d72093c061a3b5671614"
+    },
+    {
+      "path": "dev/local/tmp/pat14-05-tests-smoke-ps1-01.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-06-tests-smoke-ps1-02.diff.txt",
+      "bytes": 17786,
+      "sha256": "9059b4aa4379e15b0c72062041077587431653f91abd817e38f9202c14f9af32"
+    },
+    {
+      "path": "dev/local/tmp/pat14-06-tests-smoke-ps1-02.prompt.md",
+      "bytes": 28929,
+      "sha256": "e23db44f917ca6e8834bb475e3eab94969aba5d758e8afdc2ed69f3af1197e50"
+    },
+    {
+      "path": "dev/local/tmp/pat14-06-tests-smoke-ps1-02.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-06-tests-smoke-ps1-02.task_description.txt",
+      "bytes": 4838,
+      "sha256": "43205124483babd8a83481a26ca6507fc40afc364b753955e8d839a70e87ff28"
+    },
+    {
+      "path": "dev/local/tmp/pat14-06-tests-smoke-ps1-02.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-07-tests-integration-sh-01.diff.txt",
+      "bytes": 32011,
+      "sha256": "198876e7c6e944caff47e54d69a03651f2a33cd85538d6cb8ff7e320c1ae534a"
+    },
+    {
+      "path": "dev/local/tmp/pat14-07-tests-integration-sh-01.prompt.md",
+      "bytes": 44385,
+      "sha256": "c39351f06a6cef84ef54690836a17018318dba94983d9e2705e3df2db2dec486"
+    },
+    {
+      "path": "dev/local/tmp/pat14-07-tests-integration-sh-01.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-07-tests-integration-sh-01.task_description.txt",
+      "bytes": 6069,
+      "sha256": "26d3eb8cc831c61001d85825fd2ee5414f7666fb5975e5fa3f19590a6a9955d9"
+    },
+    {
+      "path": "dev/local/tmp/pat14-07-tests-integration-sh-01.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-08-tests-integration-sh-02.codex-prompt.md",
+      "bytes": 44705,
+      "sha256": "140f40cb0f568b290df0fe68c4838947e38976b08979893c088ef0482f456e7c"
+    },
+    {
+      "path": "dev/local/tmp/pat14-08-tests-integration-sh-02.correction-prompt.md",
+      "bytes": 44794,
+      "sha256": "cefb399f2c8c512d5971807696bc606e64f2a028eeaeabde92a751907741800d"
+    },
+    {
+      "path": "dev/local/tmp/pat14-08-tests-integration-sh-02.diff.txt",
+      "bytes": 32139,
+      "sha256": "81277fd55fb454fcaf1bb31ab29b10a719a828b11de3dfa49dfe97fabf479950"
+    },
+    {
+      "path": "dev/local/tmp/pat14-08-tests-integration-sh-02.prompt.md",
+      "bytes": 44519,
+      "sha256": "42dcbf14bf766854048f96ae5c37d1dd44f6afcc80b296692e878c5d2796c6d6"
+    },
+    {
+      "path": "dev/local/tmp/pat14-08-tests-integration-sh-02.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-08-tests-integration-sh-02.task_description.txt",
+      "bytes": 6075,
+      "sha256": "3b62b8e86ce99c9645fd81bbacdfc169c264983b84539f24c385ba710f1ea14f"
+    },
+    {
+      "path": "dev/local/tmp/pat14-08-tests-integration-sh-02.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-09-tests-integration-sh-03.diff.txt",
+      "bytes": 32150,
+      "sha256": "1ffa1834320f518396fd2d5c0f1a96f866944e8d9cbb95a5f2b533167401963d"
+    },
+    {
+      "path": "dev/local/tmp/pat14-09-tests-integration-sh-03.prompt.md",
+      "bytes": 46382,
+      "sha256": "3e2db8691ee99f58d1de7e4f9c00d947e9a17a5d4f7599c2cd0b280607659ad0"
+    },
+    {
+      "path": "dev/local/tmp/pat14-09-tests-integration-sh-03.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-09-tests-integration-sh-03.task_description.txt",
+      "bytes": 7927,
+      "sha256": "4501c6ff558d196d0db830b7c5a3eba69698a9fa154eb87851fb3686795cff2f"
+    },
+    {
+      "path": "dev/local/tmp/pat14-09-tests-integration-sh-03.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-10-tests-integration-sh-04.codex-prompt.md",
+      "bytes": 44409,
+      "sha256": "859628ccba2a40867ea5c1893f98af6b05bb9565852d9dc22862f77a1cc2c428"
+    },
+    {
+      "path": "dev/local/tmp/pat14-10-tests-integration-sh-04.diff.txt",
+      "bytes": 32110,
+      "sha256": "5a403342f4b5d2e17fd39d0a83413743ab32e22d13dd45fb2ab116304429ce48"
+    },
+    {
+      "path": "dev/local/tmp/pat14-10-tests-integration-sh-04.prompt.md",
+      "bytes": 44223,
+      "sha256": "9339ef0d67ef42f471ca7ad7bb1eea0d3988006ef5404f6068bbf6929a5858d2"
+    },
+    {
+      "path": "dev/local/tmp/pat14-10-tests-integration-sh-04.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-10-tests-integration-sh-04.task_description.txt",
+      "bytes": 5808,
+      "sha256": "8c728ba553e363d3f33d3ecb3c8a796a8b7eb1179c8a8555048556c414c886ea"
+    },
+    {
+      "path": "dev/local/tmp/pat14-10-tests-integration-sh-04.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-11-tests-integration-sh-05.codex-prompt.md",
+      "bytes": 46561,
+      "sha256": "aa2e1fe5c89dc23d2c25ddf917f5684cf24a69e19080909f3542470a16fd7348"
+    },
+    {
+      "path": "dev/local/tmp/pat14-11-tests-integration-sh-05.diff.txt",
+      "bytes": 32119,
+      "sha256": "fbb0d5ca61514055d09b5d353d96621e3e6f63f8a73569f31077e80c91b63a39"
+    },
+    {
+      "path": "dev/local/tmp/pat14-11-tests-integration-sh-05.prompt.md",
+      "bytes": 46375,
+      "sha256": "2d0adc7c1a9df2f6077fbca338f6d0df1372bcc924cfe827db9632f736a0a91e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-11-tests-integration-sh-05.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-11-tests-integration-sh-05.task_description.txt",
+      "bytes": 7951,
+      "sha256": "9fece6829a869d4a4cf23ee16796695c89ba50f06b66e805bcaffe14680c1266"
+    },
+    {
+      "path": "dev/local/tmp/pat14-11-tests-integration-sh-05.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-12-tests-integration-sh-06.codex-prompt.md",
+      "bytes": 47878,
+      "sha256": "7b58c3a16cc584cacbcdf9c14d9d393d3f7828728eb114db98137f6b3d619876"
+    },
+    {
+      "path": "dev/local/tmp/pat14-12-tests-integration-sh-06.diff.txt",
+      "bytes": 32154,
+      "sha256": "db14fdc4d4ece497fa223161e7055e74bcf1a78a725da71697641842a2d6075e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-12-tests-integration-sh-06.prompt.md",
+      "bytes": 47692,
+      "sha256": "05ac7d643506dc7303a859f9053a2f108714d3d7bfcfc5b7aebaa3b090f4945e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-12-tests-integration-sh-06.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-12-tests-integration-sh-06.task_description.txt",
+      "bytes": 9233,
+      "sha256": "8c4bae2292d212ba157c0b707c346647ccba92ca232d92f6b7f45fa6db685d40"
+    },
+    {
+      "path": "dev/local/tmp/pat14-12-tests-integration-sh-06.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-13-tests-integration-sh-07.codex-prompt.md",
+      "bytes": 35790,
+      "sha256": "09fe373a2261ccc31bad18462dd2858321e65c40632ca6a3a44d8ec068e57dd8"
+    },
+    {
+      "path": "dev/local/tmp/pat14-13-tests-integration-sh-07.diff.txt",
+      "bytes": 22900,
+      "sha256": "7d83d3185b01431d27bafdf718a89bd3f9e4614f4dc5c80424b69cb97db9ee5a"
+    },
+    {
+      "path": "dev/local/tmp/pat14-13-tests-integration-sh-07.prompt.md",
+      "bytes": 35604,
+      "sha256": "afae9e6436b943fe013dd4a43ca29ee88d29f21895ffbb877432fcd817e2275c"
+    },
+    {
+      "path": "dev/local/tmp/pat14-13-tests-integration-sh-07.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-13-tests-integration-sh-07.task_description.txt",
+      "bytes": 6399,
+      "sha256": "d88d5c320f25727e62da3db1367900e08d8ee18379c276f787529b153baecc1d"
+    },
+    {
+      "path": "dev/local/tmp/pat14-13-tests-integration-sh-07.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-14-tests-integration-ps1-01.codex-prompt.md",
+      "bytes": 43670,
+      "sha256": "5cb8916a28a43b00533b9ac2a753f4c013d180221da6aeda8be00f6647c165ef"
+    },
+    {
+      "path": "dev/local/tmp/pat14-14-tests-integration-ps1-01.diff.txt",
+      "bytes": 32096,
+      "sha256": "5dfd9292178b13cd86691c90b187b071cc18fc298de62c4bc3d898f692f99325"
+    },
+    {
+      "path": "dev/local/tmp/pat14-14-tests-integration-ps1-01.prompt.md",
+      "bytes": 43484,
+      "sha256": "429233bc7ef42202054f5bc330b747ed6403b111c0a8c6ca9e8b3e28e678e609"
+    },
+    {
+      "path": "dev/local/tmp/pat14-14-tests-integration-ps1-01.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-14-tests-integration-ps1-01.task_description.txt",
+      "bytes": 5083,
+      "sha256": "465674af4096e291c8966d816d40adffb77760057b7c0f8637fe8d61ec66a413"
+    },
+    {
+      "path": "dev/local/tmp/pat14-14-tests-integration-ps1-01.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-15-tests-integration-ps1-02.codex-prompt.md",
+      "bytes": 44428,
+      "sha256": "04dd2720a41d030154872f8423599533eae92a2f5342e4108696079674b9c9c8"
+    },
+    {
+      "path": "dev/local/tmp/pat14-15-tests-integration-ps1-02.diff.txt",
+      "bytes": 32099,
+      "sha256": "b8dc03d818738ffddf3cac31daae8098503922df9d684f847ceca20307da292b"
+    },
+    {
+      "path": "dev/local/tmp/pat14-15-tests-integration-ps1-02.prompt.md",
+      "bytes": 44242,
+      "sha256": "5642934df32c60d3cd8f9c7ba037ea294eba72a31af50d114050ca1f4d35b2b7"
+    },
+    {
+      "path": "dev/local/tmp/pat14-15-tests-integration-ps1-02.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-15-tests-integration-ps1-02.task_description.txt",
+      "bytes": 5838,
+      "sha256": "a6cff2ca4c1ee31353c23f5b92ba74c0dec8f85dc4cf3e930769958cae54cd54"
+    },
+    {
+      "path": "dev/local/tmp/pat14-15-tests-integration-ps1-02.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-16-tests-integration-ps1-03.codex-prompt.md",
+      "bytes": 45203,
+      "sha256": "2ce45b0f9c64c57a1c5b4a6f1467dbe9114305bf395342725e65e071dae112b4"
+    },
+    {
+      "path": "dev/local/tmp/pat14-16-tests-integration-ps1-03.diff.txt",
+      "bytes": 32147,
+      "sha256": "86328b4f6f46e2bcd7a8266b140cb4e888638ebcb4e478f315698eaf18ccf5ef"
+    },
+    {
+      "path": "dev/local/tmp/pat14-16-tests-integration-ps1-03.prompt.md",
+      "bytes": 45017,
+      "sha256": "03b604599b8d1ea980aea6f9e2c1883c534540e0b5104ec6badd0840a183e521"
+    },
+    {
+      "path": "dev/local/tmp/pat14-16-tests-integration-ps1-03.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-16-tests-integration-ps1-03.task_description.txt",
+      "bytes": 6565,
+      "sha256": "a73225d46a33f95ace5ca55a77fcd9be402a266b15faf6250c68e07ac936107d"
+    },
+    {
+      "path": "dev/local/tmp/pat14-16-tests-integration-ps1-03.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-17-tests-integration-ps1-04.codex-prompt.md",
+      "bytes": 44086,
+      "sha256": "0d12cda16ff974eb4d82a6af04726b1406c95337239c51a40ecfa24eb505818a"
+    },
+    {
+      "path": "dev/local/tmp/pat14-17-tests-integration-ps1-04.diff.txt",
+      "bytes": 32030,
+      "sha256": "3dba9514add2b03c543ab529cd91a77af6be46988e1e0429a4122e603d032fe7"
+    },
+    {
+      "path": "dev/local/tmp/pat14-17-tests-integration-ps1-04.prompt.md",
+      "bytes": 43900,
+      "sha256": "86b5888037e74de2eb6ac8bedb661477c824de7e3bff005922ca60c98928102b"
+    },
+    {
+      "path": "dev/local/tmp/pat14-17-tests-integration-ps1-04.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-17-tests-integration-ps1-04.task_description.txt",
+      "bytes": 5565,
+      "sha256": "4ee743ba160dd21bfa3f6b279991113db6d02600652520827287b45c062ecd50"
+    },
+    {
+      "path": "dev/local/tmp/pat14-17-tests-integration-ps1-04.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-18-tests-integration-ps1-05.codex-prompt.md",
+      "bytes": 44846,
+      "sha256": "85af87a17bc53454700b0a4bde9ff176428dc7f03bc809e9bef1f75f5d975ea9"
+    },
+    {
+      "path": "dev/local/tmp/pat14-18-tests-integration-ps1-05.diff.txt",
+      "bytes": 32169,
+      "sha256": "54c13b06e761656116ed26f9dd9b69a144aeeb16bd0928c5f0ecacc64995363d"
+    },
+    {
+      "path": "dev/local/tmp/pat14-18-tests-integration-ps1-05.prompt.md",
+      "bytes": 44660,
+      "sha256": "38fbfb5701bb0a793ce155517b0442c3c0c99302d86e0b1c72bedf1a996624ad"
+    },
+    {
+      "path": "dev/local/tmp/pat14-18-tests-integration-ps1-05.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-18-tests-integration-ps1-05.task_description.txt",
+      "bytes": 6186,
+      "sha256": "c44b92b6b81aa8184becd5b3b2b0836f040c22e79553ede84158fa08cd9037a2"
+    },
+    {
+      "path": "dev/local/tmp/pat14-18-tests-integration-ps1-05.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-19-tests-integration-ps1-06.codex-prompt.md",
+      "bytes": 46420,
+      "sha256": "02ab8d1f0ab812c0d00fcea911b81808c1fc90bca9651b89d8228d99a87a7f9d"
+    },
+    {
+      "path": "dev/local/tmp/pat14-19-tests-integration-ps1-06.diff.txt",
+      "bytes": 32167,
+      "sha256": "13517b0542db34e326e8210a04fe6103f8abc4d1f52a8b8973c67662be9e8123"
+    },
+    {
+      "path": "dev/local/tmp/pat14-19-tests-integration-ps1-06.prompt.md",
+      "bytes": 46234,
+      "sha256": "38ba4bbdae6bd8b6079ec2a14f70bc958d06ead1eb07ad2c606aadd33a096b0b"
+    },
+    {
+      "path": "dev/local/tmp/pat14-19-tests-integration-ps1-06.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-19-tests-integration-ps1-06.task_description.txt",
+      "bytes": 7762,
+      "sha256": "caca855691a4d3f820964b90cefa03422b163c17409e501e6f293cb4780de82a"
+    },
+    {
+      "path": "dev/local/tmp/pat14-19-tests-integration-ps1-06.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-20-tests-integration-ps1-07.codex-prompt.md",
+      "bytes": 45447,
+      "sha256": "79a82f2da503fe32fe79d5c17dcf1c014a76041d554d7044dac00d3a4767a209"
+    },
+    {
+      "path": "dev/local/tmp/pat14-20-tests-integration-ps1-07.diff.txt",
+      "bytes": 32122,
+      "sha256": "dd7d39a787aa8245487c98d35b09e628078a1fc5c13ad090af9b3010441d4506"
+    },
+    {
+      "path": "dev/local/tmp/pat14-20-tests-integration-ps1-07.prompt.md",
+      "bytes": 45261,
+      "sha256": "6a26d7b61f248cf21ecb62cd46bcc92230923bb43836d7761543e77baa698363"
+    },
+    {
+      "path": "dev/local/tmp/pat14-20-tests-integration-ps1-07.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-20-tests-integration-ps1-07.task_description.txt",
+      "bytes": 6834,
+      "sha256": "18c2d452b4c10cbaff68beddaa07eb7747ff15cccd50ed108ec36567da38b2b1"
+    },
+    {
+      "path": "dev/local/tmp/pat14-20-tests-integration-ps1-07.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-21-tests-integration-ps1-08.codex-prompt.md",
+      "bytes": 15088,
+      "sha256": "9cf347331d414077cf9be634f4bd9252ef894ee51939d546e9e0501169e53a4e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-21-tests-integration-ps1-08.diff.txt",
+      "bytes": 4733,
+      "sha256": "c9a3511ef5cb51f13bff48981cd46aea3458e09c55c54e924b0944d8664b9c10"
+    },
+    {
+      "path": "dev/local/tmp/pat14-21-tests-integration-ps1-08.prompt.md",
+      "bytes": 14902,
+      "sha256": "052e118beebe9a90e7d42e57145e6d04fa0df1206f80417a1802bb13e8540a67"
+    },
+    {
+      "path": "dev/local/tmp/pat14-21-tests-integration-ps1-08.task_acceptance_criteria.txt",
+      "bytes": 354,
+      "sha256": "fd717dcb797bd335590f8d165313c952ccdc75666e84db253142ae6e259a078e"
+    },
+    {
+      "path": "dev/local/tmp/pat14-21-tests-integration-ps1-08.task_description.txt",
+      "bytes": 3864,
+      "sha256": "c30bf7cdb719cc8a8af17f1cb249b51529b06a811ba1bfe4400e1ed193d3f3ab"
+    },
+    {
+      "path": "dev/local/tmp/pat14-21-tests-integration-ps1-08.task_subject.txt",
+      "bytes": 111,
+      "sha256": "b772706636367e02cf116266271a17f917b433f47f38327acfdfce500a01a410"
+    },
+    {
+      "path": "dev/local/tmp/pat14-correction.txt",
+      "bytes": 275,
+      "sha256": "77de19aef574fe93f0320781d4ffab5432d26f0f3d376360925d66da5858d74e"
+    },
+    {
+      "path": "dev/local/tmp/prepare-pat14.py",
+      "bytes": 5637,
+      "sha256": "d577e897b3750d790432739dd61a6a56154068da7d5e64d2e8a9fbb201cdaa34"
+    },
+    {
+      "path": "dev/local/tmp/resume-pat14-after-quota.py",
+      "bytes": 2039,
+      "sha256": "a0ea21bc8fb5591647048ea04e999440cab41f58eaf7620786e1366df44df001"
+    },
+    {
+      "path": "dev/local/tmp/review-task-14-verification.txt",
+      "bytes": 2463,
+      "sha256": "a66e4d5ae20d56cb85f348792785c63b294c5c0b6e5fcd0588fea1918f2d39d4"
+    },
+    {
+      "path": "dev/local/tmp/tess-12-acceptance.txt",
+      "bytes": 220,
+      "sha256": "c453bb012c5cbc96a452a1e1f4743f65de49dc360f5bc3c9b17c1ae05636e6f5"
+    },
+    {
+      "path": "dev/local/tmp/tess-12-description.txt",
+      "bytes": 3343,
+      "sha256": "4999099b9d673a32f5cdaa3caad9504b50318bea8418fff57800456f65fd14f1"
+    },
+    {
+      "path": "dev/local/tmp/tess-12-quality-parity.txt",
+      "bytes": 810,
+      "sha256": "57b6b7dac7c8c6415adf8a51ce1db8abfecfe1c36c11cf463d2ff1e0272d4932"
+    },
+    {
+      "path": "dev/local/tmp/tess-12-quality.txt",
+      "bytes": 1549,
+      "sha256": "dbf00e24bd1047a47155c3822707ca3a8357a76855a1ca1c098b3dca1590b837"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/baseline.log",
+      "bytes": 33966,
+      "sha256": "58963c7af0df75edcad3d8619ad525bff649526576f9dbbfd1716520581ab562"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/body_to_title-focused.log",
+      "bytes": 2058,
+      "sha256": "036bd10d6956edcaf1d062da8131f5eacdb4ba14622af07e5cee8c410a8b2015"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/body_to_title.jsonl",
+      "bytes": 1136,
+      "sha256": "8386d90d2873beba880051ccae8d2fb44c2761511aa322e228f535cee79bbf23"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/body_to_title.rb",
+      "bytes": 78,
+      "sha256": "c7dda36f1ec202dd4316d4fbb7652dea2ab11e5663b5ba16d374e159b9e73afe"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/drop_insert_title-focused.log",
+      "bytes": 778,
+      "sha256": "f2b9e6df9549fbba4e5631adbdfc962bd174583024d43327642a629d78c3b7c2"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/drop_insert_title-full.log",
+      "bytes": 45000,
+      "sha256": "ebc9c09d3c2b8255f6259dc1b46d36bdaee3c1cd88c7370a6aa1143aafb6496e"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/drop_insert_title.jsonl",
+      "bytes": 38732,
+      "sha256": "870a2231329b9ed8e4f0d512d1b00a79c8e98275af81b5aee370788688985551"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/drop_insert_title.rb",
+      "bytes": 78,
+      "sha256": "c7dda36f1ec202dd4316d4fbb7652dea2ab11e5663b5ba16d374e159b9e73afe"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/drop_singleton-focused.log",
+      "bytes": 3487,
+      "sha256": "d998efd068c39e0f22e109865c0561c267d9557c88834db796a0572ff88c4695"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/drop_singleton.jsonl",
+      "bytes": 1138,
+      "sha256": "0bfc57f9676c0d1e3e28e03f8389a49222a2b25f861db9397931dede1792791c"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/drop_singleton.rb",
+      "bytes": 78,
+      "sha256": "c7dda36f1ec202dd4316d4fbb7652dea2ab11e5663b5ba16d374e159b9e73afe"
+    },
+    {
+      "path": "dev/local/tmp/00171-devon14/real-focused-control.log",
+      "bytes": 778,
+      "sha256": "db5b0e6326ff5120f49d65c6ba1c887fc267c05cfba1c2b22086409859522e0c"
+    }
+  ],
+  "preserved": [
+    "dev/local/tmp/00171-handoff-20260905-1255.md",
+    "all durable review/design/state/ledger artifacts",
+    "all unrelated PRD scratch",
+    "prior-session task7/design scratch"
+  ]
+}

@@ -1,0 +1,24 @@
+```
+[BLAKE] 🟡 Multi-process race tests not marked #[serial] as PRD explicitly requires (mitigated by per-test port/tempdir isolation) | File: tests/e2e/integration_singleton_races.rs | Task: 5
+[BLAKE] ⚪ PRD checklist unchecked and file still in wip/ despite verifiably complete, CI-green implementation | File: dev/local/prds/wip/00171-migrate-shell-scenarios-to-e2e-v1.md | Task: general
+```
+
+B1: pass
+B2: pass
+B3: pass
+B4: pass
+B5: pass
+B6: pass
+B7: pass
+B8: pass
+B9: pass
+B10: pass
+B11: pass
+B12: pass
+B13: pass
+B14: pass
+B15: pass
+B16: pass
+B17: fail
+B18: pass
+B19: pass

@@ -1,0 +1,44 @@
+{
+  "sha": "c8b72bd9126c83d054264ce6ac3738e8f6d0abda",
+  "commands": [
+    {
+      "command": "cargo build",
+      "exit": 0,
+      "summary": "Finished dev profile in 1m03s"
+    },
+    {
+      "command": "cargo build -p ddb-cli",
+      "exit": 0,
+      "summary": "Finished dev profile in 0.15s"
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets",
+      "exit": 0,
+      "summary": "Finished dev profile in 2m04s"
+    },
+    {
+      "command": "cargo test-ci",
+      "exit": 0,
+      "summaries": [
+        "42 passed; 0 failed; 0 ignored; finished in 1.75s",
+        "1555 passed; 0 failed; 0 ignored; finished in 952.16s",
+        "222 passed; 0 failed; 0 ignored; finished in 0.53s"
+      ]
+    },
+    {
+      "command": "CARGO_BIN_EXE_ddb=/Users/bob/git/src/github.com/doogat/ddb/target/debug/ddb /usr/bin/time -p cargo test -p ddb-e2e",
+      "exit": 0,
+      "summary": "565 passed; 0 failed; 0 ignored; finished in 53.60s; real66.90s"
+    }
+  ],
+  "passed": 2384,
+  "failed": 0,
+  "skipped": 0,
+  "supplemental_control": {
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0,
+    "test_seconds": 7.34,
+    "note": "Excluded from aggregate required-gate counts; actual mutants and this control are documented in task14 Devon report."
+  }
+}
