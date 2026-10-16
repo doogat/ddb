@@ -4,7 +4,7 @@ mod handlers;
 mod tests;
 
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock};
 
 use chrono::Utc;
 use ddb_core::app_contract::AppOutput;
@@ -316,11 +316,6 @@ macro_rules! no_emit_intent {
                     emit_deleted_if(bus, intent, self);
                 }
             }
-            impl ReloadSignal for Result<$ty, DoogatError> {
-                fn succeeded(&self) -> bool {
-                    self.is_ok()
-                }
-            }
         )*
     };
 }
@@ -359,58 +354,79 @@ impl IntentEmit for Result<AppOutput<SchemaApplyReport>, DoogatError> {
 /// Schema reload intent carried alongside the closure: whether `call` triggers
 /// (and awaits) a schema reload after the verb completes.
 pub enum ReloadIntent {
-    /// Never reload.
+    /// Nothing can change the schema: no reload check, regardless of result.
     None,
-    /// Reload iff `true` and the verb returned `Ok`.
+    /// Caller has already decided, from SQL text classified via
+    /// `requires_schema_reload` before the write ran. Reload iff
+    /// `self.is_ok() && bool`.
     Explicit(bool),
-    /// Reload iff not `dry_run` and the verb's schema-apply result was applied.
+    /// `applySchema` only: reload iff the result is `Ok` AND `!dry_run &&
+    /// value.applied`.
     SchemaApply { dry_run: bool },
 }
 
-/// Reads the reload-relevant facts out of a verb's result.
+/// Reads whether a verb's result, under the given [`ReloadIntent`], must
+/// trigger a schema reload.
 pub trait ReloadSignal {
-    /// The verb returned `Ok`.
-    fn succeeded(&self) -> bool;
-    /// The verb is a schema apply that actually applied changes.
-    fn schema_applied(&self) -> bool {
-        false
+    fn schema_changed(&self, intent: &ReloadIntent) -> bool;
+}
+
+/// Implement [`ReloadSignal`] as "never reloads, whatever the intent" for verb
+/// return types that cannot change the schema.
+macro_rules! no_reload_intent {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl ReloadSignal for Result<$ty, DoogatError> {
+                fn schema_changed(&self, _intent: &ReloadIntent) -> bool {
+                    false
+                }
+            }
+        )*
+    };
+}
+
+no_reload_intent!(
+    (),
+    bool,
+    i64,
+    ParsedDoogat,
+    Option<ParsedDoogat>,
+    Vec<ParsedDoogat>,
+    AppOutput<ParsedDoogat>,
+    PaginatedSearchResult,
+    Vec<TableSchema>,
+    Vec<String>,
+    ddb_core::types::AttachmentInfo,
+    Vec<ddb_core::types::AttachmentInfo>,
+    CompactionReport,
+    MaintenanceReport,
+    SyncReport,
+    Vec<UnlinkedMention>,
+    Vec<Suggestion>,
+    Vec<StaleDoogat>,
+    Vec<OrphanDoogat>,
+    SequenceInfo,
+    Vec<SequenceNode>,
+    Vec<BrokenSequence>,
+    UpsertOutcome,
+);
+
+impl ReloadSignal for Result<SqlResult, DoogatError> {
+    fn schema_changed(&self, intent: &ReloadIntent) -> bool {
+        matches!(intent, ReloadIntent::Explicit(true)) && self.is_ok()
     }
 }
 
-impl ReloadIntent {
-    fn should_reload<R: ReloadSignal>(&self, result: &R) -> bool {
-        match self {
-            ReloadIntent::None => false,
-            ReloadIntent::Explicit(reload) => *reload && result.succeeded(),
-            ReloadIntent::SchemaApply { dry_run } => !dry_run && result.schema_applied(),
-        }
+impl ReloadSignal for Result<Vec<SqlResult>, DoogatError> {
+    fn schema_changed(&self, intent: &ReloadIntent) -> bool {
+        matches!(intent, ReloadIntent::Explicit(true)) && self.is_ok()
     }
 }
 
 impl ReloadSignal for Result<AppOutput<SchemaApplyReport>, DoogatError> {
-    fn succeeded(&self) -> bool {
-        self.is_ok()
-    }
-    fn schema_applied(&self) -> bool {
-        matches!(self, Ok(output) if output.value.applied)
-    }
-}
-
-impl ReloadSignal for Result<AppOutput<ParsedDoogat>, DoogatError> {
-    fn succeeded(&self) -> bool {
-        self.is_ok()
-    }
-}
-
-impl ReloadSignal for Result<Vec<ParsedDoogat>, DoogatError> {
-    fn succeeded(&self) -> bool {
-        self.is_ok()
-    }
-}
-
-impl ReloadSignal for Result<UpsertOutcome, DoogatError> {
-    fn succeeded(&self) -> bool {
-        self.is_ok()
+    fn schema_changed(&self, intent: &ReloadIntent) -> bool {
+        matches!(intent, ReloadIntent::SchemaApply { dry_run: false })
+            && matches!(self, Ok(o) if o.value.applied)
     }
 }
 
@@ -498,7 +514,7 @@ enum Envelope {
 pub struct ActorHandle {
     tx: mpsc::Sender<Envelope>,
     event_bus: EventBus,
-    reloader: Arc<RwLock<Option<Arc<SchemaReloader>>>>,
+    reloader: Arc<OnceLock<Arc<SchemaReloader>>>,
 }
 
 impl ActorHandle {
@@ -515,7 +531,7 @@ impl ActorHandle {
         Ok(Self {
             tx,
             event_bus,
-            reloader: Arc::new(RwLock::new(None)),
+            reloader: Arc::new(OnceLock::new()),
         })
     }
 
@@ -525,8 +541,7 @@ impl ActorHandle {
 
     /// Register the schema reloader `call` triggers per its [`ReloadIntent`].
     pub fn set_reloader(&self, reloader: Arc<SchemaReloader>) {
-        let mut slot = self.reloader.write().unwrap_or_else(|e| e.into_inner());
-        *slot = Some(reloader);
+        let _ = self.reloader.set(reloader);
     }
 
     /// Route ONE verb through the actor via a boxed closure.
@@ -575,13 +590,8 @@ impl ActorHandle {
         // Reply dropped (thread died mid-verb): structured error, never panic.
         let result = reply_rx.await.unwrap_or_else(|_| R::actor_dropped_reply());
 
-        if reload.should_reload(&result) {
-            let reloader = self
-                .reloader
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            if let Some(reloader) = reloader {
+        if result.schema_changed(&reload) {
+            if let Some(reloader) = self.reloader.get() {
                 reloader.trigger_reload_and_wait().await;
             }
         }

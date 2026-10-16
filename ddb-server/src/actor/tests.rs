@@ -315,20 +315,21 @@ async fn explicit_true_reloads_once_on_ok() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let tmp = tempfile::tempdir().unwrap();
         let actor = spawn_actor(tmp.path(), EventBus::new());
-        let setup = actor.call(EventIntent::None, ReloadIntent::None, apply(ITEM_SCHEMA, false));
-        assert!(setup.await.unwrap().value.applied);
         let reloader = register_reloader(tmp.path(), &actor);
         let before = reloader.version();
 
-        let schemas = actor
+        // Explicit(true) has teeth only for SqlResult/Vec<SqlResult> (the
+        // caller classified the SQL text itself); every other result type
+        // never reloads under this intent, whatever its value.
+        let result = actor
             .call(EventIntent::None, ReloadIntent::Explicit(true), |svc| {
-                svc.list_type_schemas()
+                svc.execute_sql("SELECT 1")
             })
             .await
             .unwrap();
 
         assert_eq!(reloader.version(), before + 1, "call must await its reload");
-        assert!(has_item(&schemas), "call must return the closure's value");
+        assert!(matches!(result, SqlResult::Rows { .. }), "call must return the closure's value");
         assert_reloads(&reloader, before, 1).await;
     })
     .await
@@ -466,21 +467,23 @@ async fn schema_apply_preview_with_pending_ops_does_not_reload() {
 }
 
 #[tokio::test]
-async fn explicit_true_reloads_once_for_schema_apply_result() {
+async fn explicit_true_ignored_for_schema_apply_result() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let tmp = tempfile::tempdir().unwrap();
         let actor = spawn_actor(tmp.path(), EventBus::new());
         let reloader = register_reloader(tmp.path(), &actor);
         let before = reloader.version();
 
+        // Explicit is the caller's own classification of SQL text; it has no
+        // meaning for a schema-apply result, which reloads only under
+        // ReloadIntent::SchemaApply.
         let output = actor
             .call(EventIntent::None, ReloadIntent::Explicit(true), apply(ITEM_SCHEMA, false))
             .await
             .unwrap();
 
         assert!(output.value.applied);
-        assert_eq!(reloader.version(), before + 1, "call must await its reload");
-        assert_reloads(&reloader, before, 1).await;
+        assert_reloads(&reloader, before, 0).await;
     })
     .await
     .expect("explicit(true) schema-apply test timed out");
