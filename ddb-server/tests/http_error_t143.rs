@@ -145,15 +145,20 @@ fn type_not_registered_structured_maps_to_422() {
 }
 
 #[test]
-fn unknown_structured_code_maps_to_422_with_code_passthrough() {
+fn unknown_structured_code_maps_to_500_redacted() {
+    // An unregistered structured code falls to the Internal category in the
+    // unified error_rendering policy (ddb-core/src/app_contract/error.rs),
+    // matching GraphQL's pre-existing AppError-based redaction. REST now
+    // agrees instead of passing the code/message through at 422.
     let e = DoogatError::Structured {
         code: "SOME_UNKNOWN_CODE",
         message: "x".into(),
         context: vec![],
     };
     let (status, body) = http_error_response(e);
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(body.0.error, "SOME_UNKNOWN_CODE");
+    assert_eq!(body.0.message, "internal error");
 }
 
 // ── PRD 00161 schema-apply structured codes (Contract C) ──────────────────────
@@ -172,12 +177,11 @@ fn schema_destructive_blocked_structured_maps_to_409() {
 
 #[test]
 fn schema_apply_partial_structured_maps_to_500() {
-    // REST passes the SCHEMA_APPLY_PARTIAL message through verbatim: the classify
-    // transport path does NOT redact structured-code messages (unlike the GraphQL
-    // app_contract path, which redacts Internal-category errors to "internal
-    // error"). Pin both the 500 status AND the message passthrough so the
-    // documented REST contract (detailed roll-back summary, not "internal error")
-    // cannot silently drift, and so the GraphQL/REST divergence stays visible.
+    // REST now redacts SCHEMA_APPLY_PARTIAL's message the same way GraphQL
+    // always has (Internal category, error_rendering), closing the
+    // cross-transport divergence this PRD unifies. Pin the 500 status AND the
+    // redacted message so a future change cannot silently leak the detailed
+    // roll-back summary back onto the REST surface.
     let detail = "schema apply failed after 1 of 2 operations and rolled back: create table failed";
     let e = DoogatError::Structured {
         code: codes::SCHEMA_APPLY_PARTIAL,
@@ -187,7 +191,7 @@ fn schema_apply_partial_structured_maps_to_500() {
     let (status, body) = http_error_response(e);
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(body.0.error, "SCHEMA_APPLY_PARTIAL");
-    assert_eq!(body.0.message, detail);
+    assert_eq!(body.0.message, "internal error");
 }
 
 // ── internal variants → 500 ──────────────────────────────────────────────────

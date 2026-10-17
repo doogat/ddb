@@ -4,38 +4,11 @@ use ddb_core::error::{DoogatError, ErrorContext, ErrorValue};
 
 /// Classify a DoogatError for external exposure.
 ///
-/// Returns `(error_code, user_safe_message)`. Internal errors are redacted
-/// to a generic message and the original is logged via tracing.
+/// Returns `(error_code, user_safe_message)`, derived from the shared
+/// `error_rendering` policy. Internal errors are redacted to a generic message.
 pub fn classify(e: &DoogatError) -> (&'static str, String) {
-    match e {
-        // Structured errors carry their own code and a user-safe message.
-        // PRD 00129 §6.
-        DoogatError::Structured { code, message, .. } => (code, message.clone()),
-        // Safe to expose — user-actionable
-        DoogatError::NotFound(m) => ("NOT_FOUND", m.clone()),
-        DoogatError::Validation(m) => ("VALIDATION_ERROR", m.clone()),
-        DoogatError::InvalidPath(m) => ("INVALID_PATH", m.clone()),
-        DoogatError::Conflict(m) => ("CONFLICT", m.clone()),
-        DoogatError::BadRequest(m) => ("BAD_REQUEST", m.clone()),
-        // SQL engine errors are user-actionable (unsupported DDL, bad syntax, etc.)
-        DoogatError::SqlEngine(m) => ("SQL_ERROR", m.clone()),
-        // All other variants are internal — redact completely.
-        // Explicit matches so the compiler forces a decision on new variants.
-        DoogatError::Git(_)
-        | DoogatError::Yaml(_)
-        | DoogatError::Sql(_)
-        | DoogatError::Automerge(_)
-        | DoogatError::Io(_)
-        | DoogatError::Toml(_)
-        | DoogatError::Parse(_)
-        | DoogatError::Sync(_)
-        | DoogatError::Index(_)
-        | DoogatError::VersionMismatch { .. }
-        | DoogatError::Redb(_) => {
-            tracing::error!(%e, "internal error");
-            ("INTERNAL_ERROR", "internal error".into())
-        }
-    }
+    let rendering = ddb_core::app_contract::error_rendering(AppError::from(e));
+    (rendering.code, rendering.message)
 }
 
 /// Convert a DoogatError to an `async_graphql::Error`, attaching
