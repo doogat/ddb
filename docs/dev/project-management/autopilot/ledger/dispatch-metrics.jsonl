@@ -245,3 +245,4 @@
 {"id":"785441c2","ended_at":1792246073,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"id":"2e9facb2","ended_at":1792246073,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792246073,"phase":"done","prd":"00173-unify-server-error-mapping-paths-v1.md"}
+{"kind":"handoff","site":"done","edge":"leave","at":1792246181,"phase":"build","prd":"00173-unify-server-error-mapping-paths-v1.md"}
