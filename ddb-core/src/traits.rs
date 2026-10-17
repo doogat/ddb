@@ -384,11 +384,11 @@ pub trait GitRemote {
     /// Register a named remote.
     fn add_remote(&self, name: &str, url: &str) -> Result<()>;
 
-    /// Fetch from a remote branch.
-    fn fetch(&self, remote: &str, branch: &str) -> Result<()>;
+    /// Fetch from a remote branch, bounded by `timeout`.
+    fn fetch(&self, remote: &str, branch: &str, timeout: std::time::Duration) -> Result<()>;
 
-    /// Push to a remote branch.
-    fn push(&self, remote: &str, branch: &str) -> Result<()>;
+    /// Push to a remote branch, bounded by `timeout`.
+    fn push(&self, remote: &str, branch: &str, timeout: std::time::Duration) -> Result<()>;
 
     /// Delete a remote-tracking ref, if it exists.
     fn delete_remote_ref(&self, remote: &str, branch: &str) -> Result<()>;

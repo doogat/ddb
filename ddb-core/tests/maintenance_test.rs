@@ -44,19 +44,19 @@ fn sync_with_auto_maintenance_succeeds() {
     repo_a
         .add_remote("origin", bare_dir.path().to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     sync_manager::register_node(&repo_a, "NodeA").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Node B (clone, register, push)
     let dir_b = tempfile::TempDir::new().unwrap();
     git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
     let repo_b = GitRepo::open(dir_b.path()).unwrap();
     sync_manager::register_node(&repo_b, "NodeB").unwrap();
-    repo_b.push("origin", "master").unwrap();
+    repo_b.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // A fetches B's node registration
-    repo_a.fetch("origin", "master").unwrap();
+    repo_a.fetch("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_a.merge_remote("origin", "master").unwrap();
 
     // A creates a doogat and pushes
@@ -67,7 +67,7 @@ fn sync_with_auto_maintenance_succeeds() {
             "create",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B syncs — auto-maintenance fires after sync
     let db_path = dir_b.path().join(".ddb/index.db");

@@ -43,6 +43,7 @@ pub async fn run(
 ) -> std::io::Result<()> {
     let start_time = Instant::now();
     let cfg = ServerConfig::load(port, pg_port, bind);
+    install_remote_timeouts(std::time::Duration::from_secs(cfg.remote_timeout_secs))?;
 
     let token = auth::load_or_create_token(&cfg.token_file)?;
     tracing::info!(path = %cfg.token_file.display(), "auth token");
@@ -90,6 +91,23 @@ pub async fn run(
         r = pg => r?,
     };
     Ok(())
+}
+
+/// Install libgit2's process-wide remote timeouts once, before any service
+/// opens a repository. Startup fails if the linked libgit2 rejects them:
+/// running with unbounded remote I/O is not an option.
+fn install_remote_timeouts(timeout: std::time::Duration) -> std::io::Result<()> {
+    static INSTALLED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    INSTALLED
+        .get_or_init(|| {
+            ddb_core::git_ops::set_libgit2_remote_timeouts(timeout).map_err(|e| e.to_string())
+        })
+        .clone()
+        .map_err(|e| {
+            std::io::Error::other(format!(
+                "cannot install libgit2 remote timeouts (linked libgit2 too old?): {e}"
+            ))
+        })
 }
 
 fn build_initial_schema(

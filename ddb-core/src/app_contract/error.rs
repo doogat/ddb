@@ -176,6 +176,12 @@ static ERROR_POLICY: &[ErrorPolicy] = &[
         http_status: 422,
         display_prefix: None,
     },
+    ErrorPolicy {
+        code: codes::REMOTE_TIMEOUT,
+        category: AppErrorCategory::Conflict,
+        http_status: 504,
+        display_prefix: None,
+    },
     // Explicitly registered as Internal: a code we know about and chose to
     // treat as internal, unlike an unregistered code that merely falls back.
     ErrorPolicy {

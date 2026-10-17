@@ -2095,19 +2095,19 @@ proptest! {
         let dir_a = tempfile::TempDir::new().unwrap();
         let repo_a = GitRepo::init(dir_a.path()).unwrap();
         repo_a.add_remote("origin", bare_dir.path().to_str().unwrap()).unwrap();
-        repo_a.push("origin", "master").unwrap();
+        repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
         sync_manager::register_node(&repo_a, "NodeA").unwrap();
-        repo_a.push("origin", "master").unwrap();
+        repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
         // Node B (clone)
         let dir_b = tempfile::TempDir::new().unwrap();
         git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
         let repo_b = GitRepo::open(dir_b.path()).unwrap();
         sync_manager::register_node(&repo_b, "NodeB").unwrap();
-        repo_b.push("origin", "master").unwrap();
+        repo_b.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
         // Sync A to get B's node file
-        repo_a.fetch("origin", "master").unwrap();
+        repo_a.fetch("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
         repo_a.merge_remote("origin", "master").unwrap();
 
         // Both nodes create `count` doogats with identical IDs
@@ -2136,7 +2136,7 @@ proptest! {
         }
 
         // A pushes
-        repo_a.push("origin", "master").unwrap();
+        repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
         // B syncs (triggers collision detection)
         let db_b = dir_b.path().join(".ddb/index.db");
@@ -2189,7 +2189,7 @@ proptest! {
         }
 
         // Sync back to A and verify convergence
-        repo_b.push("origin", "master").unwrap();
+        repo_b.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
         let db_a = dir_a.path().join(".ddb/index.db");
         std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
         let index_a = Index::open(&db_a).unwrap();

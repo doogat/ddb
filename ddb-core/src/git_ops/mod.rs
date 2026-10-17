@@ -5,6 +5,7 @@ mod remote;
 mod rename;
 pub(crate) mod write_lock;
 
+pub use remote::{set_libgit2_remote_timeouts, DEFAULT_REMOTE_TIMEOUT};
 pub use rename::rename_doogat;
 
 use std::path::{Path, PathBuf};
@@ -739,12 +740,12 @@ impl crate::traits::GitRemote for GitRepo {
         self.add_remote(name, url)
     }
 
-    fn fetch(&self, remote: &str, branch: &str) -> Result<()> {
-        self.fetch(remote, branch)
+    fn fetch(&self, remote: &str, branch: &str, timeout: Duration) -> Result<()> {
+        self.fetch(remote, branch, timeout)
     }
 
-    fn push(&self, remote: &str, branch: &str) -> Result<()> {
-        self.push(remote, branch)
+    fn push(&self, remote: &str, branch: &str, timeout: Duration) -> Result<()> {
+        self.push(remote, branch, timeout)
     }
 
     fn delete_remote_ref(&self, remote: &str, branch: &str) -> Result<()> {

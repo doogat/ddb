@@ -52,7 +52,7 @@ fn nfr03_sync_under_2s_at_5k() {
     repo_a
         .add_remote("origin", bare.path().to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     register_node(&repo_a, "NodeA").unwrap();
 
     // Repo B: clone
@@ -72,7 +72,7 @@ fn nfr03_sync_under_2s_at_5k() {
         .map(|(p, c)| (p.as_str(), c.as_str()))
         .collect();
     repo_a.commit_files(&refs, "add 10").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Measure sync on B
     let start = Instant::now();

@@ -1,7 +1,7 @@
 use crate::crdt_resolver;
 use crate::crdt_resolver::{lww_pick, LwwSide};
 use crate::error::{DoogatError, Result};
-use crate::git_ops::GitRepo;
+use crate::git_ops::{GitRepo, DEFAULT_REMOTE_TIMEOUT};
 use crate::hlc::Hlc;
 use crate::indexer::Index;
 use crate::parser;
@@ -251,7 +251,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
 
         // Fetch
         let phase_start = std::time::Instant::now();
-        self.repo.fetch(remote, branch)?;
+        self.repo.fetch(remote, branch, DEFAULT_REMOTE_TIMEOUT)?;
         tracing::info!(
             phase = "fetch",
             elapsed_ms = phase_start.elapsed().as_millis(),
@@ -427,7 +427,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         );
 
         let phase_start = std::time::Instant::now();
-        self.repo.push(remote, branch)?;
+        self.repo.push(remote, branch, DEFAULT_REMOTE_TIMEOUT)?;
         tracing::info!(
             phase = "push",
             elapsed_ms = phase_start.elapsed().as_millis(),

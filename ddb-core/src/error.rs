@@ -126,6 +126,8 @@ pub mod codes {
     /// `CREATE TABLE ... ZONE <value>` (or `SET zone`) named a zone that is
     /// not one of `frontmatter`, `body`, `reference`.
     pub const INVALID_ZONE: &str = "INVALID_ZONE";
+    /// A remote fetch or push did not finish within its timeout.
+    pub const REMOTE_TIMEOUT: &str = "REMOTE_TIMEOUT";
 
     /// Every code constant above. A new code must be added here so the
     /// error-policy registration test covers it.
@@ -143,10 +145,21 @@ pub mod codes {
         TRANSACTION_NOT_SUPPORTED,
         SQL_ERROR,
         INVALID_ZONE,
+        REMOTE_TIMEOUT,
     ];
 }
 
 impl DoogatError {
+    /// A remote `operation` (fetch/push) exceeded `timeout`. The message
+    /// carries no remote URL or credential detail.
+    pub fn remote_timeout(operation: &str, timeout: std::time::Duration) -> Self {
+        DoogatError::Structured {
+            code: codes::REMOTE_TIMEOUT,
+            message: format!("remote {operation} timed out after {}s", timeout.as_secs()),
+            context: vec![("operation".into(), ErrorValue::String(operation.into()))],
+        }
+    }
+
     /// `UNIQUE(col, ...)` constraint violation. The message reproduces
     /// SQLite's `"UNIQUE constraint failed: <table>.<col>[, <table>.<col>]..."`
     /// format so callers like jink that today match on

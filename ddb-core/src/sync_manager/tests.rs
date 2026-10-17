@@ -671,18 +671,18 @@ fn add_add_full_sync_both_survive() {
     repo_a
         .add_remote("origin", bare_dir.path().to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     register_node(&repo_a, "A").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let dir_b = tempfile::TempDir::new().unwrap();
     git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
     let repo_b = GitRepo::open(dir_b.path()).unwrap();
     register_node(&repo_b, "B").unwrap();
-    repo_b.push("origin", "master").unwrap();
+    repo_b.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Sync A to get B's node
-    repo_a.fetch("origin", "master").unwrap();
+    repo_a.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_a.merge_remote("origin", "master").unwrap();
 
     // Both create the same-ID doogat
@@ -703,7 +703,7 @@ fn add_add_full_sync_both_survive() {
         .unwrap();
 
     // A pushes, B syncs
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let db_b = dir_b.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
     let index_b = crate::indexer::Index::open(&db_b).unwrap();
@@ -728,7 +728,7 @@ fn add_add_full_sync_both_survive() {
     assert_eq!(files.len(), 2, "both doogats should survive: {files:?}");
 
     // Verify convergence: push B, sync A
-    repo_b.push("origin", "master").unwrap();
+    repo_b.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let db_a = dir_a.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
     let index_a = crate::indexer::Index::open(&db_a).unwrap();
@@ -767,18 +767,18 @@ fn add_add_collision_resolves_in_single_commit() {
     repo_a
         .add_remote("origin", bare_dir.path().to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     register_node(&repo_a, "A").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let dir_b = tempfile::TempDir::new().unwrap();
     git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
     let repo_b = GitRepo::open(dir_b.path()).unwrap();
     register_node(&repo_b, "B").unwrap();
-    repo_b.push("origin", "master").unwrap();
+    repo_b.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Sync A to get B's node
-    repo_a.fetch("origin", "master").unwrap();
+    repo_a.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_a.merge_remote("origin", "master").unwrap();
 
     // Both create the same-ID doogat
@@ -799,7 +799,7 @@ fn add_add_collision_resolves_in_single_commit() {
         .unwrap();
 
     // A pushes, then capture B's HEAD immediately before B syncs.
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let pre_sync_head = repo_b.head_oid().unwrap();
 
     let db_b = dir_b.path().join(".ddb/index.db");
@@ -856,7 +856,7 @@ fn sync_report_lists_every_verbatim_folded_collision_loser() {
     repo_a.commit_file(&path, body_a, "A creates").unwrap();
     repo_b.commit_file(&path, body_b, "B creates").unwrap();
 
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let db_b = dir_b.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
     let index_b = crate::indexer::Index::open(&db_b).unwrap();
@@ -912,18 +912,18 @@ fn setup_binary_sync_pair() -> (
     repo_a
         .add_remote("origin", bare_dir.path().to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     register_node(&repo_a, "A").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let dir_b = tempfile::TempDir::new().unwrap();
     git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
     let repo_b = GitRepo::open(dir_b.path()).unwrap();
     register_node(&repo_b, "B").unwrap();
-    repo_b.push("origin", "master").unwrap();
+    repo_b.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Sync A to pick up B's node registration
-    repo_a.fetch("origin", "master").unwrap();
+    repo_a.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_a.merge_remote("origin", "master").unwrap();
 
     (dir_a, repo_a, dir_b, repo_b, bare_dir)
@@ -1129,7 +1129,7 @@ fn binary_lww_preserves_exact_bytes() {
     repo_a
         .commit_binary_file(bin_path, &non_utf8, "A adds non-utf8 binary")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B commits different content at ordinary wall-clock time (the losing side).
     repo_b
@@ -1174,13 +1174,13 @@ fn binary_ref_delete_vs_edit_uses_resurrection() {
     repo_a
         .commit_binary_file(bin_path, content, "add binary")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_b.merge_remote("origin", "master").unwrap();
 
     // Node A: delete the binary file
     repo_a.delete_file(bin_path, "delete binary").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Node B: modify the binary file (edit wins in delete-vs-edit)
     let new_content = b"MODIFIED_BINARY";
@@ -1223,15 +1223,15 @@ fn theirs_deleted_ours_untouched_stays_deleted() {
             "A creates",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B picks it up
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_b.merge_remote("origin", "master").unwrap();
 
     // A deletes it and pushes
     repo_a.delete_file(&format!("ddb/{id}.md"), "A deletes").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B does NOTHING to the file.
 
@@ -1267,15 +1267,15 @@ fn theirs_deleted_ours_edited_resurrects_with_marker() {
             "A creates",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B picks it up
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_b.merge_remote("origin", "master").unwrap();
 
     // A deletes it and pushes
     repo_a.delete_file(&format!("ddb/{id}.md"), "A deletes").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B edits it
     repo_b
@@ -1336,7 +1336,7 @@ fn skewed_peer_does_not_win_indefinitely() {
     repo_a
         .commit_binary_file(bin_path, b"A_CONTENT", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B commits a different edit at ordinary wall-clock time (lower HLC).
     repo_b
@@ -1468,7 +1468,7 @@ fn resolve_collision_with_backlinks(
     repo_peer
         .add_remote("origin", bare_dir.path().to_str().unwrap())
         .unwrap();
-    repo_peer.push("origin", "master").unwrap();
+    repo_peer.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let dir_ours = tempfile::TempDir::new().unwrap();
     git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_ours.path()).unwrap();
@@ -1485,7 +1485,7 @@ fn resolve_collision_with_backlinks(
     repo_peer
         .commit_file(&contested_path, theirs_doc, "peer creates contested")
         .unwrap();
-    repo_peer.push("origin", "master").unwrap();
+    repo_peer.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // The node under test independently mints the same ID, with its own linkers.
     for (path, content) in ours_linkers {
@@ -1497,7 +1497,7 @@ fn resolve_collision_with_backlinks(
         .commit_file(&contested_path, ours_doc, "node creates contested")
         .unwrap();
 
-    repo_ours.fetch("origin", "master").unwrap();
+    repo_ours.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let theirs_oid = match repo_ours.merge_remote("origin", "master").unwrap() {
         MergeResult::Conflicts(conflicts, theirs_oid) => {
             assert_eq!(
@@ -1890,7 +1890,7 @@ fn resolve_collision_with_push_order(a_pushes_first: bool) -> Vec<String> {
         .unwrap();
 
     let resolver_dir = if a_pushes_first {
-        repo_a.push("origin", "master").unwrap();
+        repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
         let db_b = dir_b.path().join(".ddb/index.db");
         std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
         let index_b = crate::indexer::Index::open(&db_b).unwrap();
@@ -1902,7 +1902,7 @@ fn resolve_collision_with_push_order(a_pushes_first: bool) -> Vec<String> {
         );
         dir_b.path()
     } else {
-        repo_b.push("origin", "master").unwrap();
+        repo_b.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
         let db_a = dir_a.path().join(".ddb/index.db");
         std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
         let index_a = crate::indexer::Index::open(&db_a).unwrap();

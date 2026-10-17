@@ -42,7 +42,7 @@ fn setup_sync_pair(
     repo_a
         .add_remote("origin", bare_dir.to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     register_node(&repo_a, "NodeA").unwrap();
 
     let db_a = dir_a.join("index.db");
@@ -80,7 +80,7 @@ fn bench_sync_fast_forward(c: &mut Criterion) {
                     .map(|(p, c)| (p.as_str(), c.as_str()))
                     .collect();
                 repo_a.commit_files(&refs, "add 10").unwrap();
-                repo_a.push("origin", "master").unwrap();
+                repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
                 (bare, da, db, repo_b, index_b)
             },
@@ -112,7 +112,7 @@ fn bench_sync_fast_forward_5k(c: &mut Criterion) {
                     .map(|(p, c)| (p.as_str(), c.as_str()))
                     .collect();
                 repo_a.commit_files(&refs, "add 10").unwrap();
-                repo_a.push("origin", "master").unwrap();
+                repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
                 (bare, da, db, repo_b, index_b)
             },

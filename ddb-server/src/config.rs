@@ -10,12 +10,19 @@ pub struct ServerConfig {
     pub maintenance_enabled: bool,
     pub maintenance_interval_secs: u64,
     pub read_pool_size: usize,
+    pub remote_timeout_secs: u64,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct FileConfig {
     server: Option<ServerSection>,
     maintenance: Option<MaintenanceSection>,
+    remote: Option<RemoteSection>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RemoteSection {
+    timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -78,6 +85,14 @@ impl ServerConfig {
             .and_then(|s| s.read_pool_size)
             .unwrap_or_else(crate::read_pool::ReadPool::default_pool_size);
 
+        // 0 would disable libgit2's timeouts entirely, so floor at 1s.
+        let remote_timeout_secs = file_cfg
+            .remote
+            .as_ref()
+            .and_then(|r| r.timeout_secs)
+            .unwrap_or(30)
+            .max(1);
+
         Self {
             port,
             pg_port,
@@ -86,6 +101,7 @@ impl ServerConfig {
             maintenance_enabled,
             maintenance_interval_secs,
             read_pool_size,
+            remote_timeout_secs,
         }
     }
 

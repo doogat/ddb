@@ -20,19 +20,19 @@ fn setup_two_nodes() -> (
     repo_a
         .add_remote("origin", bare_dir.path().to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     sync_manager::register_node(&repo_a, "NodeA").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Node B (clone)
     let dir_b = tempfile::TempDir::new().unwrap();
     git2::Repository::clone(bare_dir.path().to_str().unwrap(), dir_b.path()).unwrap();
     let repo_b = GitRepo::open(dir_b.path()).unwrap();
     sync_manager::register_node(&repo_b, "NodeB").unwrap();
-    repo_b.push("origin", "master").unwrap();
+    repo_b.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Sync A to get B's node file
-    repo_a.fetch("origin", "master").unwrap();
+    repo_a.fetch("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_a.merge_remote("origin", "master").unwrap();
 
     (dir_a, repo_a, dir_b, repo_b, bare_dir)
@@ -77,7 +77,7 @@ fn assert_singleton_default_values_seed_sync_once() {
     let seed_row = rows_a[0].clone();
 
     let head_b_before_sync = repo_b.head_oid().unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let index_b = open_index(&dir_b);
     let mut mgr_b = SyncManager::open(&repo_b).unwrap();
@@ -133,7 +133,7 @@ fn two_node_sync_no_conflicts() {
     repo_a
         .commit_file("ddb/20260226120000.md", content, "A creates note")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B syncs
     let db_b = dir_b.path().join(".ddb/index.db");
@@ -162,7 +162,7 @@ fn two_node_sync_with_conflict_resolution() {
     repo_a
         .commit_file("ddb/20260226120000.md", original, "add original")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B gets the original
     let db_b = dir_b.path().join(".ddb/index.db");
@@ -172,14 +172,14 @@ fn two_node_sync_with_conflict_resolution() {
     mgr_b.sync("origin", "master", &index_b).unwrap();
 
     // A pulls B's sync state update, then edits title AND body (same lines)
-    repo_a.fetch("origin", "master").unwrap();
+    repo_a.fetch("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_a.merge_remote("origin", "master").unwrap();
 
     let a_edit = "---\nid: 20260226120000\ntitle: Title From A\ntags:\n  - shared\n---\nBody edited by A.\n---\n- source:: Wikipedia\n- edited-by:: A";
     repo_a
         .commit_file("ddb/20260226120000.md", a_edit, "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // B edits: changes same body line AND adds different reference field
     let b_edit = "---\nid: 20260226120000\ntitle: Title From B\ntags:\n  - shared\n---\nBody edited by B.\n---\n- source:: Wikipedia\n- edited-by:: B";
@@ -238,7 +238,7 @@ columns:
             "add app_config singleton typedef",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let db_b = dir_b.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
@@ -246,7 +246,7 @@ columns:
     let mut mgr_b = SyncManager::open(&repo_b).unwrap();
     mgr_b.sync("origin", "master", &index_b).unwrap();
 
-    repo_a.fetch("origin", "master").unwrap();
+    repo_a.fetch("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_a.merge_remote("origin", "master").unwrap();
 
     let row_a = "\
@@ -272,7 +272,7 @@ Body from A
             ),
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let row_b = "\
 ---
@@ -378,7 +378,7 @@ Body from A
             ),
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let db_b = dir_b.path().join(".ddb/index.db");
     std::fs::create_dir_all(db_b.parent().unwrap()).unwrap();
@@ -444,7 +444,7 @@ fn two_node_singleton_without_default_values_does_not_seed_on_sync_prd_00139() {
         "bare SINGLETON must not auto-seed on A"
     );
 
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let index_b = open_index(&dir_b);
     let mut mgr_b = SyncManager::open(&repo_b).unwrap();

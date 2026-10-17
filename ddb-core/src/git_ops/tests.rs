@@ -246,7 +246,7 @@ fn setup_two_repos() -> (TempDir, GitRepo, TempDir, GitRepo, TempDir) {
     repo_a
         .add_remote("origin", bare_dir.path().to_str().unwrap())
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Repo B (clone)
     let dir_b = TempDir::new().unwrap();
@@ -264,9 +264,9 @@ fn push_and_fetch_cycle() {
     repo_a
         .commit_file("ddb/test.md", "hello", "add test")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let result = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(result, MergeResult::FastForward(_)));
 
@@ -277,7 +277,7 @@ fn push_and_fetch_cycle() {
 #[test]
 fn merge_already_up_to_date() {
     let (_da, _repo_a, _db, repo_b, _bare) = setup_two_repos();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let result = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(result, MergeResult::AlreadyUpToDate));
 }
@@ -290,12 +290,12 @@ fn merge_detects_conflicts() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     match result {
@@ -328,7 +328,7 @@ fn setup_unrelated_repos(remote_name: &str) -> (TempDir, GitRepo, TempDir, GitRe
     repo_a
         .add_remote(remote_name, dir_b.path().to_str().unwrap())
         .unwrap();
-    repo_a.fetch(remote_name, "master").unwrap();
+    repo_a.fetch(remote_name, "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     (dir_a, repo_a, dir_b, repo_b)
 }
@@ -547,7 +547,7 @@ fn merge_conflicts_populate_hlc() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let ours_seed = crate::hlc::Hlc {
         wall_ms: u64::MAX / 2 + 1_000_000,
@@ -558,7 +558,7 @@ fn merge_conflicts_populate_hlc() {
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     match result {
@@ -1480,8 +1480,8 @@ fn merge_blocks_while_write_lock_held() {
     repo_a
         .commit_file("ddb/x.md", "from a", "a change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let dir_b_path = dir_b.path().to_path_buf();
     let released = Arc::new(AtomicBool::new(false));
@@ -1577,8 +1577,8 @@ fn conflicted_merge_arm_behavior_unchanged() {
     repo_a
         .commit_file("ddb/x.md", "base", "base x")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
@@ -1589,13 +1589,13 @@ fn conflicted_merge_arm_behavior_unchanged() {
             "theirs change",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: a conflicting local edit to the shared file.
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours change")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -1641,8 +1641,8 @@ fn commit_merge_blocks_while_write_lock_held() {
 
     // Reach a Conflicts state so commit_merge is the method under test.
     repo_a.commit_file("ddb/x.md", "base", "base x").unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
@@ -1652,12 +1652,12 @@ fn commit_merge_blocks_while_write_lock_held() {
             "theirs change",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours change")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -1724,8 +1724,8 @@ fn conflicted_merge_keeps_ours_only_edit() {
     repo_a
         .commit_files(&[("ddb/x.md", "base-x"), ("ddb/z.md", "base-z")], "base")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
@@ -1733,14 +1733,14 @@ fn conflicted_merge_keeps_ours_only_edit() {
     repo_a
         .commit_file("ddb/x.md", "theirs x", "theirs change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: edit z.md AND conflict on the shared file.
     repo_b.commit_file("ddb/z.md", "ours-z", "ours z").unwrap();
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours x")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -1771,22 +1771,22 @@ fn conflicted_merge_keeps_ours_clean_delete() {
     repo_a
         .commit_files(&[("ddb/x.md", "base-x"), ("ddb/d.md", "base-d")], "base")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
     repo_a
         .commit_file("ddb/x.md", "theirs x", "theirs change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: delete d.md AND conflict on the shared file.
     repo_b.delete_file("ddb/d.md", "ours delete d").unwrap();
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours x")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -1813,8 +1813,8 @@ fn conflicted_merge_drops_theirs_deletion() {
     repo_a
         .commit_files(&[("ddb/x.md", "base-x"), ("ddb/y.md", "base-y")], "base")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
@@ -1823,13 +1823,13 @@ fn conflicted_merge_drops_theirs_deletion() {
     repo_a
         .commit_file("ddb/x.md", "theirs x", "theirs change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: conflict on the shared file only (y untouched).
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours x")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -1856,15 +1856,15 @@ fn conflicted_merge_keeps_ours_created_doogat() {
     repo_a
         .commit_file("ddb/x.md", "base-x", "base")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
     repo_a
         .commit_file("ddb/x.md", "theirs x", "theirs change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: create a new doogat AND conflict on the shared file.
     repo_b
@@ -1873,7 +1873,7 @@ fn conflicted_merge_keeps_ours_created_doogat() {
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours x")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -1904,8 +1904,8 @@ fn conflicted_merge_line_merges_both_edits() {
             "base",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
@@ -1919,7 +1919,7 @@ fn conflicted_merge_line_merges_both_edits() {
             "theirs change",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: edit ONLY line 1 of b4 AND conflict on the shared file.
     repo_b
@@ -1931,7 +1931,7 @@ fn conflicted_merge_line_merges_both_edits() {
             "ours change",
         )
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -1964,8 +1964,8 @@ fn conflicted_merge_theirs_rename_single_path() {
     repo_a
         .commit_files(&[("ddb/x.md", "base-x"), ("ddb/z.md", "base-z")], "base")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
@@ -1976,12 +1976,12 @@ fn conflicted_merge_theirs_rename_single_path() {
     repo_a
         .commit_file("ddb/x.md", "theirs x", "theirs change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours x")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2009,15 +2009,15 @@ fn conflicted_merge_ours_rename_single_path() {
     repo_a
         .commit_files(&[("ddb/x.md", "base-x"), ("ddb/w.md", "base-w")], "base")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
     repo_a
         .commit_file("ddb/x.md", "theirs x", "theirs change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: rename w.md -> w2.md AND conflict on the shared file.
     repo_b
@@ -2026,7 +2026,7 @@ fn conflicted_merge_ours_rename_single_path() {
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours x")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2055,20 +2055,20 @@ fn conflicted_merge_diverged_head_fails_loud() {
     repo_a
         .commit_file("ddb/x.md", "base-x", "base")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
     repo_a
         .commit_file("ddb/x.md", "theirs x", "theirs change")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/x.md", "ours x", "ours x")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2113,8 +2113,8 @@ fn conflicted_merge_abort_leaves_worktree_clean() {
             "base",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let ff = repo_b.merge_remote("origin", "master").unwrap();
     assert!(matches!(ff, MergeResult::FastForward(_)));
 
@@ -2128,7 +2128,7 @@ fn conflicted_merge_abort_leaves_worktree_clean() {
             "theirs change",
         )
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours: conflict on BOTH the shared text file and the binary reference.
     repo_b
@@ -2140,7 +2140,7 @@ fn conflicted_merge_abort_leaves_worktree_clean() {
             "ours change",
         )
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let (theirs_oid, winner_oid) = match result {
@@ -2210,11 +2210,11 @@ fn clean_merge_commit_carries_hlc_trailer_and_absorbs_theirs() {
     };
     std::fs::write(dir_a.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
     repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours diverges on a DIFFERENT file, so the merge is clean (non-FF).
     repo_b.commit_file("ddb/b.md", "from b", "add b").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let merge_oid = match result {
@@ -2255,10 +2255,10 @@ fn fast_forward_absorbs_theirs_hlc_into_next_write() {
     };
     std::fs::write(dir_a.path().join(".git/ddb-hlc"), theirs_seed.to_string()).unwrap();
     repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours has no diverging commit, so the merge fast-forwards (no merge commit).
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let result = repo_b.merge_remote("origin", "master").unwrap();
     assert!(
         matches!(result, MergeResult::FastForward(_)),
@@ -2301,13 +2301,13 @@ fn resolved_merge_commit_carries_hlc_trailer_and_absorbs_theirs() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours conflicts on the SAME file with a normal clock.
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2356,11 +2356,11 @@ fn clean_merge_ordinary_peer_stamps_wall_clock_band() {
     // Peer (theirs, repo_a) is NOT seeded: it commits with its natural
     // current-wall-clock HLC.
     repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours diverges on a DIFFERENT file, so the merge is clean (non-FF).
     repo_b.commit_file("ddb/b.md", "from b", "add b").unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let merge_oid = match result {
@@ -2392,10 +2392,10 @@ fn fast_forward_ordinary_peer_next_write_wall_clock_band() {
 
     // Peer (repo_a) is NOT seeded: it commits at its natural wall clock.
     repo_a.commit_file("ddb/a.md", "from a", "add a").unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours has no diverging commit, so the merge fast-forwards (no merge commit).
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let result = repo_b.merge_remote("origin", "master").unwrap();
     assert!(
         matches!(result, MergeResult::FastForward(_)),
@@ -2428,13 +2428,13 @@ fn resolved_merge_ordinary_peer_stamps_wall_clock_band() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Ours conflicts on the SAME file with a normal clock.
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2485,12 +2485,12 @@ fn commit_merge_folds_single_loser_into_same_commit_as_winner() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2564,12 +2564,12 @@ fn commit_merge_folds_two_losers_into_distinct_paths_in_same_commit() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2679,12 +2679,12 @@ fn commit_merge_commits_nothing_when_one_loser_in_the_batch_cannot_be_rewritten(
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -2796,11 +2796,11 @@ fn conflicted_add_add(
     repo_a
         .commit_file(CONTESTED_PATH, theirs, "A creates")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_b
         .commit_file(CONTESTED_PATH, ours, "B creates")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let theirs_oid = match repo_b.merge_remote("origin", "master").unwrap() {
         MergeResult::Conflicts(conflicts, theirs_oid) => {
             assert_eq!(conflicts.len(), 1);
@@ -3189,7 +3189,7 @@ fn verbatim_loser_still_gets_its_inbound_links_rewritten() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
@@ -3197,7 +3197,7 @@ fn verbatim_loser_still_gets_its_inbound_links_rewritten() {
     repo_b
         .commit_file("ddb/linker.md", &linker, "add linker")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let MergeResult::Conflicts(_, theirs_oid) = repo_b.merge_remote("origin", "master").unwrap()
     else {
         panic!("expected Conflicts");
@@ -3289,12 +3289,12 @@ fn commit_merge_advances_loser_past_id_occupied_in_different_type_folder() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -3415,12 +3415,12 @@ fn commit_merge_advances_loser_past_id_occupied_in_typedef() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -3505,12 +3505,12 @@ fn commit_merge_advances_second_loser_past_first_losers_in_batch_assigned_id() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -3605,12 +3605,12 @@ fn fold_flat_loser_and_read_result() -> (String, String) {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -3703,7 +3703,7 @@ fn commit_merge_leaves_non_utf8_linker_untouched_but_still_rewrites_valid_linker
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
@@ -3788,7 +3788,7 @@ fn commit_merge_leaves_non_utf8_linker_untouched_but_still_rewrites_valid_linker
         )
         .unwrap();
 
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
         MergeResult::Conflicts(conflicts, theirs_oid) => {
@@ -3895,12 +3895,12 @@ fn commit_merge_logs_reassignment_warn_with_old_and_new_identity() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -4007,12 +4007,12 @@ fn commit_merge_logs_distinct_reassignment_warn_per_loser() {
     repo_a
         .commit_file("ddb/note.md", "version A", "A edits")
         .unwrap();
-    repo_a.push("origin", "master").unwrap();
+    repo_a.push("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     repo_b
         .commit_file("ddb/note.md", "version B", "B edits")
         .unwrap();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     let result = repo_b.merge_remote("origin", "master").unwrap();
     let theirs_oid = match result {
@@ -4135,7 +4135,7 @@ fn commit_merge_logs_distinct_reassignment_warn_per_loser() {
 #[test]
 fn delete_remote_ref_removes_existing_ref() {
     let (_da, _repo_a, _db, repo_b, _bare) = setup_two_repos();
-    repo_b.fetch("origin", "master").unwrap();
+    repo_b.fetch("origin", "master", crate::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
     // Precondition: the remote-tracking ref exists after fetch.
     assert!(repo_b
