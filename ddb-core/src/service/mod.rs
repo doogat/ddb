@@ -152,6 +152,8 @@ mod create_unregistered_policy_tests;
 mod delete_tests;
 #[cfg(test)]
 mod mock_index_tests;
+#[cfg(all(test, feature = "nosql"))]
+mod shared_mirror_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
