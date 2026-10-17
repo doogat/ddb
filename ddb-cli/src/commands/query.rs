@@ -96,3 +96,148 @@ pub(crate) fn backlinks(repo: &std::path::Path, id: &str) -> ddb_core::error::Re
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use ddb_core::error::DoogatError;
+
+    /// Init a repo with two doogats sharing `cliterm`, differing in type/tags.
+    fn seeded_repo() -> tempfile::TempDir {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let svc = DoogatService::init(tmp.path()).unwrap();
+        svc.create_doogat(
+            "Soup",
+            &["dinner".to_string()],
+            Some("recipe"),
+            "cliterm soup",
+        )
+        .unwrap();
+        svc.create_doogat(
+            "Cake",
+            &["dinner".to_string(), "sweet".to_string()],
+            Some("dessert"),
+            "cliterm cake",
+        )
+        .unwrap();
+        tmp
+    }
+
+    /// Parse `ddb search ...` argv and return the Search variant's fields
+    /// as (query, limit, offset, doogat_type, tag).
+    fn parse_search(
+        argv: &[&str],
+    ) -> (
+        String,
+        Option<usize>,
+        Option<usize>,
+        Option<String>,
+        Option<String>,
+    ) {
+        let cli = crate::Cli::try_parse_from(argv).expect("search argv must parse");
+        match cli.command {
+            crate::Command::Search {
+                query,
+                limit,
+                offset,
+                doogat_type,
+                tag,
+            } => (query, limit, offset, doogat_type, tag),
+            _ => panic!("expected the Search command"),
+        }
+    }
+
+    fn assert_validation(result: ddb_core::error::Result<()>, what: &str) {
+        match result {
+            Err(DoogatError::Validation(_)) => {}
+            other => panic!("{what}: expected DoogatError::Validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn omitted_limit_and_offset_reach_search_as_none_not_clap_defaults() {
+        // None lets PageRequest::decode apply the shared 50/0 defaults;
+        // the old clap default_value of 20/0 must be gone.
+        let (query, limit, offset, doogat_type, tag) = parse_search(&["ddb", "search", "foo"]);
+        assert_eq!(query, "foo");
+        assert_eq!(limit, None, "an omitted --limit must not get a clap default");
+        assert_eq!(offset, None, "an omitted --offset must not get a clap default");
+        assert_eq!(doogat_type, None);
+        assert_eq!(tag, None);
+    }
+
+    #[test]
+    fn type_and_tag_flags_parse_into_search_filters() {
+        let (query, limit, offset, doogat_type, tag) = parse_search(&[
+            "ddb", "search", "foo", "--type", "recipe", "--tag", "sweet", "--limit", "5",
+            "--offset", "2",
+        ]);
+        assert_eq!(query, "foo");
+        assert_eq!(limit, Some(5));
+        assert_eq!(offset, Some(2));
+        assert_eq!(doogat_type.as_deref(), Some("recipe"));
+        assert_eq!(tag.as_deref(), Some("sweet"));
+    }
+
+    #[test]
+    fn cli_search_with_type_and_tag_filters_succeeds() {
+        let tmp = seeded_repo();
+
+        search(
+            tmp.path(),
+            "cliterm",
+            None,
+            None,
+            Some("recipe".to_string()),
+            None,
+        )
+        .expect("type-filtered search must succeed");
+        search(
+            tmp.path(),
+            "cliterm",
+            None,
+            None,
+            None,
+            Some("sweet".to_string()),
+        )
+        .expect("tag-filtered search must succeed");
+        search(
+            tmp.path(),
+            "cliterm",
+            None,
+            None,
+            Some("dessert".to_string()),
+            Some("dinner".to_string()),
+        )
+        .expect("type+tag-filtered search must succeed");
+    }
+
+    #[test]
+    fn cli_search_with_omitted_limit_and_offset_succeeds() {
+        let tmp = seeded_repo();
+
+        search(tmp.path(), "cliterm", None, None, None, None)
+            .expect("omitted limit/offset must decode to the default page");
+    }
+
+    #[test]
+    fn cli_search_rejects_zero_limit_through_page_request() {
+        let tmp = seeded_repo();
+
+        assert_validation(
+            search(tmp.path(), "cliterm", Some(0), None, None, None),
+            "--limit 0",
+        );
+    }
+
+    #[test]
+    fn cli_search_rejects_limit_over_max_through_page_request() {
+        let tmp = seeded_repo();
+
+        assert_validation(
+            search(tmp.path(), "cliterm", Some(10_001), None, None, None),
+            "--limit 10001",
+        );
+    }
+}

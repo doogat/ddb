@@ -403,6 +403,165 @@ mod tests {
         assert_eq!(result.meta.title.as_deref(), Some("ReadAfterWrite"));
     }
 
+    // --- search_command (app-contract facade through the pool) ---
+
+    use ddb_core::app_contract::{PageRequest, SearchCommand};
+
+    fn search_cmd(
+        query: &str,
+        limit: usize,
+        offset: usize,
+        types: Option<Vec<&str>>,
+        tag: Option<&str>,
+    ) -> SearchCommand {
+        SearchCommand {
+            query: query.to_string(),
+            page: PageRequest { limit, offset },
+            types: types.map(|t| t.into_iter().map(str::to_string).collect()),
+            tag: tag.map(str::to_string),
+        }
+    }
+
+    /// Three doogats sharing `poolterm`, differing in type and tags.
+    /// Returns (soup_id, cake_id, note_id).
+    fn seed_search_fixtures(path: &std::path::Path) -> (String, String, String) {
+        let svc = DoogatService::open(path).unwrap();
+        let soup = svc
+            .create_doogat(
+                "Soup",
+                &["dinner".to_string()],
+                Some("recipe"),
+                "poolterm soup",
+            )
+            .unwrap();
+        let cake = svc
+            .create_doogat(
+                "Cake",
+                &["dinner".to_string(), "sweet".to_string()],
+                Some("dessert"),
+                "poolterm cake",
+            )
+            .unwrap();
+        let note = svc
+            .create_doogat("Note", &[], None, "poolterm note")
+            .unwrap();
+        (soup, cake, note)
+    }
+
+    fn sorted_hit_ids(items: &[ddb_core::types::SearchResult]) -> Vec<String> {
+        let mut ids: Vec<String> = items.iter().map(|h| h.id.clone()).collect();
+        ids.sort();
+        ids
+    }
+
+    #[tokio::test]
+    async fn search_command_through_pool_matches_direct_service_output() {
+        let (_dir, path) = setup_repo();
+        seed_search_fixtures(&path);
+
+        let direct = DoogatService::open(&path)
+            .unwrap()
+            .search_command(search_cmd("poolterm", 10, 0, None, None))
+            .unwrap();
+        let pool = ReadPool::new(path, 2).unwrap();
+        let pooled = pool
+            .search_command(search_cmd("poolterm", 10, 0, None, None))
+            .await
+            .expect("search_command through the pool must succeed");
+
+        assert_eq!(pooled.value.total, 3);
+        assert_eq!(pooled.value.total, direct.value.total);
+        assert_eq!(pooled.value.query, "poolterm");
+        assert_eq!(pooled.value.query, direct.value.query);
+        assert_eq!(pooled.value.items.len(), direct.value.items.len());
+        for (p, d) in pooled.value.items.iter().zip(direct.value.items.iter()) {
+            assert_eq!(p.id, d.id, "id changed through the pool");
+            assert_eq!(p.title, d.title, "title changed through the pool");
+            assert_eq!(p.path, d.path, "path changed through the pool");
+            assert_eq!(p.snippet, d.snippet, "snippet changed through the pool");
+            assert_eq!(p.rank, d.rank, "rank changed through the pool");
+            assert_eq!(p.updated_at, d.updated_at, "updated_at changed");
+            assert_eq!(p.tags, d.tags, "tags changed through the pool");
+            assert_eq!(p.doogat_type, d.doogat_type, "doogat_type changed");
+            assert_eq!(p.fields, d.fields, "fields changed through the pool");
+            assert_eq!(p.created_at, d.created_at, "created_at changed");
+        }
+        assert!(
+            pooled.warnings.is_empty(),
+            "a clean index must produce no warnings through the pool"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_command_through_pool_applies_types_filter() {
+        let (_dir, path) = setup_repo();
+        let (soup, _cake, _note) = seed_search_fixtures(&path);
+        let pool = ReadPool::new(path, 2).unwrap();
+
+        let out = pool
+            .search_command(search_cmd("poolterm", 10, 0, Some(vec!["recipe"]), None))
+            .await
+            .unwrap();
+
+        assert_eq!(sorted_hit_ids(&out.value.items), vec![soup]);
+        assert_eq!(out.value.total, 1, "total must respect the types filter");
+    }
+
+    #[tokio::test]
+    async fn search_command_through_pool_applies_tag_filter() {
+        let (_dir, path) = setup_repo();
+        let (_soup, cake, _note) = seed_search_fixtures(&path);
+        let pool = ReadPool::new(path, 2).unwrap();
+
+        let out = pool
+            .search_command(search_cmd("poolterm", 10, 0, None, Some("sweet")))
+            .await
+            .unwrap();
+
+        assert_eq!(sorted_hit_ids(&out.value.items), vec![cake]);
+        assert_eq!(out.value.total, 1, "total must respect the tag filter");
+    }
+
+    #[tokio::test]
+    async fn search_command_through_pool_honours_page_and_reports_full_total() {
+        let (_dir, path) = setup_repo();
+        seed_search_fixtures(&path);
+        let pool = ReadPool::new(path, 2).unwrap();
+
+        let first = pool
+            .search_command(search_cmd("poolterm", 2, 0, None, None))
+            .await
+            .unwrap();
+        let second = pool
+            .search_command(search_cmd("poolterm", 2, 2, None, None))
+            .await
+            .unwrap();
+
+        assert_eq!(first.value.items.len(), 2, "limit 2 caps the first page");
+        assert_eq!(second.value.items.len(), 1, "offset 2 leaves one hit");
+        assert_eq!(first.value.total, 3, "total is the full match count");
+        assert_eq!(second.value.total, 3, "total is the full match count");
+        let mut all: Vec<String> = first
+            .value
+            .items
+            .iter()
+            .chain(second.value.items.iter())
+            .map(|h| h.id.clone())
+            .collect();
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), 3, "the two pages must not overlap");
+    }
+
+    #[tokio::test]
+    async fn search_command_through_pool_fails_on_invalid_path() {
+        let pool = ReadPool::new(PathBuf::from("/nonexistent/repo"), 2).unwrap();
+        let result = pool
+            .search_command(search_cmd("anything", 10, 0, None, None))
+            .await;
+        assert!(result.is_err(), "an unopenable repo must surface an error");
+    }
+
     #[tokio::test]
     async fn pool_exhaustion_queues_reads() {
         let (_dir, path) = setup_repo();
