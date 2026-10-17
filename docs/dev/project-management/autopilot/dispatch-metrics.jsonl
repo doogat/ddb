@@ -163,3 +163,6 @@
 {"kind":"handoff","site":"build","edge":"leave","at":1792196932,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792196955,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"id":"953ddf79","kind":"ivan","task":"3","queued_at":1792197016,"prompt_bytes":23748}
+{"id":"953ddf79","ended_at":1792198363,"elapsed_s":null,"outcome":"lost","detail":"open at build/resume handoff"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792198363,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792203143,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
