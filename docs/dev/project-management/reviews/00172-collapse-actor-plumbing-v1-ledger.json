@@ -1,0 +1,26 @@
+[
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "`call<R>` does not replace the per-verb `ActorHandle` methods. All 36 remain as thin wrappers (`ddb-server/src/actor/mod.rs:414-829`), and every adapter still calls them. Only the tests call `call` directly. The spec says `call` is \"the single generic entrypoint replacing 36 per-verb methods\" and that callers pass the service method as a closure. It also says adding a verb touches one call site.",
+    "file": "ddb-server/src/actor/mod.rs:414",
+    "reason": "Settled by the reviewed design doc (designs/00172-collapse-actor-plumbing-v1-design.md:315-323): every public ActorHandle verb signature deliberately stays unchanged, only its body moves onto call. The four synchronized touch points the PRD targets (command variant, reply variant, handle method, dispatch arm) are reduced to one wrapper. Removing the wrappers would rewrite every adapter call site and exceed this PRD's scope."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "Adding a verb still has several touch points, which defeats the PRD's main metric. `call` requires `R: FromActorError + IntentEmit + ReloadSignal`. A new return type needs entries in both `no_emit_intent!` and `no_reload_intent!`. A new verb also needs a wrapper method, so that is up to three edits instead of one.",
+    "file": "ddb-server/src/actor/mod.rs:104-255",
+    "reason": "Same settled design decision as the wrapper finding. The explicit macro type lists are mandated by the design and by task 1 (enumerate by hand, do not derive by mirroring) so a missing impl is a compile error rather than a silent no-reload. Two additive macro lines plus one wrapper is still a large reduction from four synchronized enum/dispatch edits. Tracked as an ergonomics follow-up, not a defect of this PRD."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "The reload decision is not a single derivation helper in `ddb-server/src/reload.rs`, which the spec names as the home. The logic lives in `ddb-server/src/actor/mod.rs` as `ReloadIntent` and `ReloadSignal`. The SQL-text classification is still decided separately in two wrappers, and `apply_schema` passes its own intent. So the decision is made at three sites that feed one check, and `reload.rs` is unchanged.",
+    "file": "ddb-server/src/actor/mod.rs:178-255",
+    "reason": "The reviewed design doc relocated the helper deliberately (design:61-64 leaves reload.rs unchanged apart from the one-line set_reloader wiring in lib.rs; design:330-337 puts the derivation inside ActorHandle::call). The PRD metric is one derivation helper with one call site, which holds: trigger_reload_and_wait is called once, in call. The three intent-construction sites are pure caller-local classification feeding that single check."
+  }
+]

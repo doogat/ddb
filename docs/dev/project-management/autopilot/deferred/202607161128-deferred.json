@@ -511,6 +511,42 @@
       "authority": "yes, that is what I want to do, proceed",
       "acceptance_id": "00171-C2-11",
       "prd": "00171-migrate-shell-scenarios-to-e2e-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "cycle": 1,
+      "ref": "R5",
+      "issue": "call<R> does not replace the per-verb ActorHandle methods; all 36 remain as thin wrappers and every adapter still calls them (blind lens reads this as PRD metric non-compliance)",
+      "severity": "high",
+      "consensus": "1/4",
+      "file": "ddb-server/src/actor/mod.rs:414",
+      "action": "defer",
+      "reason": "Contradicts the reviewed design doc (designs/00172-collapse-actor-plumbing-v1-design.md:315-323, Resolver/handler-side change): the public signature of every ActorHandle verb method deliberately stays the same, only its body moves onto call. Blake had no design doc (blind lens). The PRD tax of four synchronized touch points (command variant, reply variant, handle method, dispatch arm) is reduced to one wrapper method, which is the metric in substance. Removing the 36 wrappers would rewrite every adapter call site and exceed this PRD scope.",
+      "prd": "00172-collapse-actor-plumbing-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "cycle": 1,
+      "ref": "R6",
+      "issue": "Adding a verb still has several touch points: a new return type needs entries in both no_emit_intent! and no_reload_intent!, plus a wrapper method, so up to three edits instead of one",
+      "severity": "high",
+      "consensus": "1/4",
+      "file": "ddb-server/src/actor/mod.rs:104-255",
+      "action": "defer",
+      "reason": "Same settled design decision as R5 (wrappers retained by design). The explicit macro type lists are mandated by the design and by task 1 (enumerate explicitly by hand against the 36-verb return-type list; do NOT derive by mirroring), chosen so a missing impl is a compile error rather than a silent no-reload. Two additive macro lines plus one wrapper is still a large reduction from the four synchronized enum/dispatch edits the PRD targets. Revisit as an ergonomics follow-up, not as a defect in this PRD.",
+      "prd": "00172-collapse-actor-plumbing-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "cycle": 1,
+      "ref": "R8",
+      "issue": "The reload decision is not a single derivation helper in ddb-server/src/reload.rs, which the PRD names as the home; ReloadIntent/ReloadSignal live in actor/mod.rs and reload.rs is unchanged",
+      "severity": "medium",
+      "consensus": "1/4",
+      "file": "ddb-server/src/actor/mod.rs:178-255",
+      "action": "defer",
+      "reason": "The reviewed design doc relocated the helper deliberately: designs/00172-collapse-actor-plumbing-v1-design.md:61-64 leaves SchemaReloader/reload.rs unchanged apart from the one-line set_reloader wiring in lib.rs, and :330-337 puts the derivation inside ActorHandle::call. The PRD success metric is one derivation helper with one call site, which holds (trigger_reload_and_wait is called once, in call); the file it lives in is not the metric. The three intent-construction sites are pure caller-local classification feeding that single check, not three decisions.",
+      "prd": "00172-collapse-actor-plumbing-v1.md"
     }
   ]
 }

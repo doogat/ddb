@@ -167,3 +167,15 @@
 {"kind":"handoff","site":"build","edge":"resume","at":1792198363,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792203143,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792203424,"phase":"review","prd":"00172-collapse-actor-plumbing-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792203461,"phase":"review","prd":"00172-collapse-actor-plumbing-v1.md"}
+{"id":"e8bee6a4","kind":"bob","task":"review-00172-c1","queued_at":1792204714,"prompt_bytes":13491}
+{"id":"2d829897","kind":"carl","task":"review-00172-c1","queued_at":1792204714,"prompt_bytes":6576}
+{"id":"e8bee6a4","ended_at":1792206414,"elapsed_s":1700,"outcome":"ok","detail":"retry"}
+{"id":"2d829897","ended_at":1792206417,"elapsed_s":1703,"outcome":"ok","detail":null}
+{"id":"4eaa005d","kind":"ivan","task":"7","queued_at":1792208001,"prompt_bytes":27265}
+{"id":"4eaa005d","ended_at":1792208796,"elapsed_s":795,"outcome":"ok","detail":null}
+{"id":"f8ae85a3","kind":"pat","task":"7","queued_at":1792208884,"prompt_bytes":104807}
+{"id":"40ae0758","kind":"pat","task":"7","queued_at":1792208906,"prompt_bytes":53795}
+{"id":"f8ae85a3","ended_at":1792209592,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"40ae0758","ended_at":1792209592,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792209592,"phase":"review","prd":"00172-collapse-actor-plumbing-v1.md"}
