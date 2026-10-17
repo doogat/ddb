@@ -587,6 +587,30 @@
       "action": "deferred to batch end",
       "reason": "the PRD explicitly keeps the thin wrapper, and NoSQL delegating to the REST helper makes the wiring assertion the correct test; both are acknowledged in code comments",
       "prd": "00173-unify-server-error-mapping-paths-v1.md"
+    },
+    {
+      "type": "design-scope",
+      "issue": "Push has no wall-clock deadline or PushOptions; push is bounded only by the process-global libgit2 idle timeout, so a trickling remote never aborts a push (ddb-core/src/git_ops/remote.rs:27)",
+      "severity": "high",
+      "consensus": "1/4",
+      "reason": "scoped out by the reviewed design (git2-rs push callbacks cannot abort); residual trickle-only gap recorded as a known limitation",
+      "prd": "00174-decouple-maintenance-from-write-actor-v1.md"
+    },
+    {
+      "type": "design-scope",
+      "issue": "Native libgit2 stall timeouts are installed only at server startup, so CLI/FFI callers of the changed core fetch/push run unbounded (ddb-core/src/git_ops/remote.rs:72)",
+      "severity": "high",
+      "consensus": "1/4",
+      "reason": "PRD success metric forbids CLI/FFI behaviour change; installing process-global opts from core would violate it. Follow-up decision deferred to batch end",
+      "prd": "00174-decouple-maintenance-from-write-actor-v1.md"
+    },
+    {
+      "type": "out-of-scope",
+      "issue": "Pre-existing oversize files touched only for call arity: ddb-core/src/git_ops/mod.rs (1135), git_ops/tests.rs (4168), sync_manager/tests.rs (2143), tests/property_tests.rs (2400)",
+      "severity": "low",
+      "consensus": "1/4",
+      "reason": "pre-existing; splitting them is a dedicated PRD, out of scope under the surgical-changes rule",
+      "prd": "00174-decouple-maintenance-from-write-actor-v1.md"
     }
   ]
 }

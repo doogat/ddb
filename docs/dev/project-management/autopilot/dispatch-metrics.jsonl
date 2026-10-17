@@ -248,3 +248,13 @@
 {"kind":"handoff","site":"done","edge":"leave","at":1792246181,"phase":"build","prd":"00173-unify-server-error-mapping-paths-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792246205,"phase":"build","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792257060,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792257087,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
+{"id":"682a7dd8","kind":"bob","task":"review-20261017-c1","queued_at":1792258789,"prompt_bytes":12849}
+{"id":"6272ec80","kind":"carl","task":"review-20261017-c1","queued_at":1792258789,"prompt_bytes":6585}
+{"id":"1d74cb8f","kind":"bob","task":"review-20261017-c1","queued_at":1792259521,"prompt_bytes":227199}
+{"id":"682a7dd8","ended_at":1792259567,"elapsed_s":778,"outcome":"error","detail":"lack-of-input"}
+{"id":"1d74cb8f","ended_at":1792259570,"elapsed_s":49,"outcome":"ok","detail":"retry"}
+{"id":"6272ec80","ended_at":1792259573,"elapsed_s":784,"outcome":"ok","detail":null}
+{"id":"1d74cb8f","ended_at":1792260903,"elapsed_s":1382,"outcome":"ok","detail":null}
+{"id":"6272ec80","ended_at":1792260903,"elapsed_s":2114,"outcome":"ok","detail":null}
+{"kind":"handoff","site":"review","edge":"leave","at":1792260948,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
