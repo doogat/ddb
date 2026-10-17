@@ -10,7 +10,8 @@ use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
 use ddb_core::error::DoogatError;
 use ddb_core::service::SORTABLE_COLUMNS;
-use ddb_core::types::{ConflictAction, ListFilter, ParsedDoogat, SearchFilters, Value as DdbValue};
+use ddb_core::app_contract::{PageRequest, SearchCommand};
+use ddb_core::types::{ConflictAction, ListFilter, ParsedDoogat, Value as DdbValue};
 
 // ── Query / body types ───────────────────────────────────────────
 
@@ -125,12 +126,39 @@ pub struct DoogatJson {
     pub reference_section: String,
 }
 
+/// One REST search hit: every core `SearchResult` field, serialized from the
+/// core type (no transport-local field subset).
 #[derive(Serialize)]
 struct SearchHit {
     id: String,
     title: String,
+    path: String,
     snippet: String,
     rank: f64,
+    updated_at: String,
+    tags: Vec<String>,
+    #[serde(rename = "type")]
+    doogat_type: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    fields: BTreeMap<String, String>,
+    created_at: Option<String>,
+}
+
+impl From<ddb_core::types::SearchResult> for SearchHit {
+    fn from(r: ddb_core::types::SearchResult) -> Self {
+        Self {
+            id: r.id,
+            title: r.title,
+            path: r.path,
+            snippet: r.snippet,
+            rank: r.rank,
+            updated_at: r.updated_at,
+            tags: r.tags,
+            doogat_type: r.doogat_type,
+            fields: r.fields.unwrap_or_default(),
+            created_at: r.created_at,
+        }
+    }
 }
 
 // `ErrorBody` now lives in `http_error` (one shape for every HTTP surface).
@@ -208,7 +236,6 @@ pub fn router() -> Router {
 struct ListParams {
     doogat_type: Option<String>,
     tag: Option<String>,
-    q: Option<String>,
     backlinks: Option<String>,
     sort_field: Option<String>,
     sort_desc: Option<bool>,
@@ -270,7 +297,6 @@ fn parse_list_params(
     Ok(ListParams {
         doogat_type: raw.get("type").cloned(),
         tag: raw.get("tag").cloned(),
-        q: raw.get("q").cloned(),
         backlinks: raw.get("backlinks").cloned(),
         sort_field,
         sort_desc,
@@ -284,41 +310,67 @@ async fn list_doogats(
     Extension(read_pool): Extension<ReadPool>,
     Query(raw_params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
-    let params = parse_list_params(&raw_params)?;
-
-    if let Some(q) = params.q {
-        return handle_search(read_pool, q, params.page, params.per_page).await;
+    // Search decodes its own page window (validated, unclamped); only the plain
+    // list path keeps `parse_list_params`'s 1-200 clamp.
+    if let Some(q) = raw_params.get("q") {
+        let cmd = SearchCommand {
+            query: q.clone(),
+            page: decode_search_page(&raw_params)?,
+            types: raw_params.get("type").map(|t| vec![t.clone()]),
+            tag: raw_params.get("tag").cloned(),
+        };
+        return handle_search(read_pool, cmd).await;
     }
 
+    let params = parse_list_params(&raw_params)?;
     fetch_paginated_list(read_pool, params).await
+}
+
+/// Decode REST `page`/`per_page` into a validated [`PageRequest`]. `page`
+/// defaults to 1 and must be >= 1; `per_page` defaults to
+/// [`PageRequest::DEFAULT_LIMIT`]. Out-of-range values are 400
+/// `VALIDATION_ERROR`, never clamped.
+fn decode_search_page(raw: &std::collections::HashMap<String, String>) -> RestResult<PageRequest> {
+    let page: i64 = match raw.get("page") {
+        Some(v) => v.parse().map_err(|_| {
+            rest_error(DoogatError::Validation(format!(
+                "invalid page value '{v}'; must be a positive integer"
+            )))
+        })?,
+        None => 1,
+    };
+    if page < 1 {
+        return Err(rest_error(DoogatError::Validation(format!(
+            "page must be >= 1, got {page}"
+        ))));
+    }
+    let per_page: Option<i64> = match raw.get("per_page") {
+        Some(v) => Some(v.parse().map_err(|_| {
+            rest_error(DoogatError::Validation(format!(
+                "invalid per_page value '{v}'; must be an integer 1-{}",
+                PageRequest::MAX_LIMIT
+            )))
+        })?),
+        None => None,
+    };
+    let per_page_for_offset = per_page.unwrap_or(PageRequest::DEFAULT_LIMIT as i64);
+    let offset = per_page_for_offset.checked_mul(page - 1).ok_or_else(|| {
+        rest_error(DoogatError::Validation(format!(
+            "page {page} with per_page {per_page_for_offset} overflows the result offset"
+        )))
+    })?;
+    PageRequest::decode(per_page, Some(offset)).map_err(rest_error)
 }
 
 async fn handle_search(
     read_pool: ReadPool,
-    q: String,
-    page: i64,
-    per_page: i64,
+    cmd: SearchCommand,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
-    let limit = per_page as usize;
-    let offset = (page as usize - 1) * limit;
-    let result = read_pool
-        .search(q, limit, offset, SearchFilters::default())
-        .await
-        .map_err(rest_error)?;
-    let hits: Vec<SearchHit> = result
-        .hits
-        .into_iter()
-        .map(|r| SearchHit {
-            id: r.id,
-            title: r.title,
-            snippet: r.snippet,
-            rank: r.rank,
-        })
-        .collect();
+    let output = read_pool.search_command(cmd).await.map_err(rest_error)?;
     Ok(Json(
         serde_json::to_value(SearchResponse {
-            data: hits,
-            total_count: result.total_count,
+            data: output.value.items.into_iter().map(SearchHit::from).collect(),
+            total_count: output.value.total,
         })
         .unwrap(),
     ))
