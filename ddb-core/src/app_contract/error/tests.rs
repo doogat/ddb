@@ -205,6 +205,27 @@ fn ffi_variant_maps_each_category() {
 }
 
 #[test]
+fn every_code_constant_is_registered_in_error_policy() {
+    for code in codes::ALL {
+        assert!(
+            super::policy_for(code).is_some(),
+            "code {code} is missing from ERROR_POLICY; an unregistered code renders as a redacted 500"
+        );
+    }
+}
+
+#[test]
+fn error_policy_has_no_duplicate_codes() {
+    for (i, row) in super::ERROR_POLICY.iter().enumerate() {
+        assert!(
+            super::ERROR_POLICY[..i].iter().all(|p| p.code != row.code),
+            "duplicate ERROR_POLICY row for code {}",
+            row.code
+        );
+    }
+}
+
+#[test]
 fn borrowed_and_owned_conversions_agree() {
     let make: [fn() -> DoogatError; 4] = [
         || DoogatError::NotFound("doc 1".into()),

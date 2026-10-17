@@ -126,6 +126,24 @@ pub mod codes {
     /// `CREATE TABLE ... ZONE <value>` (or `SET zone`) named a zone that is
     /// not one of `frontmatter`, `body`, `reference`.
     pub const INVALID_ZONE: &str = "INVALID_ZONE";
+
+    /// Every code constant above. A new code must be added here so the
+    /// error-policy registration test covers it.
+    pub const ALL: &[&str] = &[
+        UNIQUE_VIOLATION,
+        REFERENCES_VIOLATION,
+        NOT_NULL_VIOLATION,
+        UNKNOWN_FIELD,
+        TYPE_NOT_REGISTERED,
+        CASCADE_CYCLE,
+        SINGLETON_VIOLATION,
+        SINGLETON_NOT_FOUND,
+        SCHEMA_APPLY_PARTIAL,
+        SCHEMA_DESTRUCTIVE_BLOCKED,
+        TRANSACTION_NOT_SUPPORTED,
+        SQL_ERROR,
+        INVALID_ZONE,
+    ];
 }
 
 impl DoogatError {
