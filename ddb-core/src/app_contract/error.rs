@@ -347,7 +347,7 @@ pub fn error_rendering(app: AppError) -> ErrorRendering {
     let is_internal = matches!(category, AppErrorCategory::Internal);
     let http_status: u16 = match code {
         "SQL_ERROR" | "NOT_NULL_VIOLATION" | "UNKNOWN_FIELD" | "TYPE_NOT_REGISTERED" => 422,
-        "VALIDATION_ERROR" => 400,
+        "VALIDATION_ERROR" | "INVALID_PATH" | "BAD_REQUEST" => 400,
         _ => match category {
             AppErrorCategory::NotFound => 404,
             AppErrorCategory::Conflict => 409,
@@ -422,8 +422,8 @@ mod tests {
             (DoogatError::NotFound("doc 1".into()), "NOT_FOUND", C::NotFound, 404, F::NotFound),
             (DoogatError::Validation("bad id".into()), "VALIDATION_ERROR", C::InvalidInput, 400, F::Validation),
             (DoogatError::Parse("bad yaml".into()), "PARSE_ERROR", C::InvalidInput, 422, F::Validation),
-            (DoogatError::InvalidPath("../x".into()), "INVALID_PATH", C::InvalidInput, 422, F::Validation),
-            (DoogatError::BadRequest("no body".into()), "BAD_REQUEST", C::InvalidInput, 422, F::Validation),
+            (DoogatError::InvalidPath("../x".into()), "INVALID_PATH", C::InvalidInput, 400, F::Validation),
+            (DoogatError::BadRequest("no body".into()), "BAD_REQUEST", C::InvalidInput, 400, F::Validation),
             (DoogatError::Conflict("stale".into()), "CONFLICT", C::Conflict, 409, F::Conflict),
             (DoogatError::SqlEngine("no such column: bogus".into()), "SQL_ERROR", C::InvalidInput, 422, F::Validation),
         ];
