@@ -318,6 +318,17 @@ mod tests {
     }
 
     #[test]
+    fn sql_engine_error_maps_to_sql_error_code_with_invalid_input_category() {
+        let err = crate::error::DoogatError::SqlEngine("no such column: bogus".into());
+        let app: crate::app_contract::AppError = err.into();
+        assert_eq!(app.code, "SQL_ERROR");
+        assert_eq!(
+            app.category,
+            crate::app_contract::AppErrorCategory::InvalidInput
+        );
+    }
+
+    #[test]
     fn schema_unsupported_change_usable_as_app_warning_code() {
         let warning = crate::app_contract::AppWarning {
             code: crate::app_contract::SCHEMA_UNSUPPORTED_CHANGE,
