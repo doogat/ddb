@@ -86,10 +86,9 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
 
 ### In progress
 
-None.
+- [ ] **00174-decouple-maintenance-from-write-actor-v1** (selected 2026-10-17, batch resumed by maintainer) — off-thread maintenance worker + bounded remote timeouts; depends on 00162 (shipped) and 00172 (shipped).
 
-### Remaining backlog (29 PRDs; not selected)
-- [ ] 00174-decouple-maintenance-from-write-actor-v1
+### Remaining backlog (28 PRDs; not selected)
 - [ ] 00175-route-read-delete-through-contract-v1
 - [ ] 00176-route-search-through-contract-v1
 - [ ] 00177-ffi-crud-through-contract-v1
@@ -131,10 +130,10 @@ Numeric order = autopilot execution order (memory `project_ddb_growth_roadmap`);
 
 Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration shell scenarios to the Rust e2e crate`): only self-hits, 00171's own PRD file (repo and portfolio scope return the identical five rows, all within the PRD itself or adjacent Phase-2-titled sections of other backlog PRDs); no external prior art. Staleness stamp (`engram status --scope portfolio`, 2026-08-16, nonzero exit): memory stale=14, prd stale=1, transcripts stale=2 dead=5640, code stale=4 (skipped=3598), discovery/findings clean; many sibling repos report absent prd/decision/discovery layers. Review harvest: `dev/local/reviews/*-review-NN.md` files upserted (30 total, incl. 00170's two cycles); the `*-audit.md` renders still fail to parse (`missing frontmatter`) and are NOT harvested — the audit trail survives only as files, so it dies with a `dev/local` GC.
 
-## GitHub State (refreshed 2026-10-17)
+## GitHub State (refreshed 2026-10-17, this session)
 
-- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 215 unreleased commits on master now.
-- **Nightly RED 5 straight days (2026-10-12 through 2026-10-16), all pinned to commit `d7867d23`** (= `d7867d2 fix(sync): fold frontmatter-less collision losers byte-unchanged`, the most recent master commit before this session). `full-validation / windows-full` fails: `sync_manager::tests::sync_report_lists_every_verbatim_folded_collision_loser` panics with a byte-array payload `[65, 32, 98, 111, 100, 121, ...]` = `"A body, no frontmatter\r\n"` — a Windows CRLF vs. Unix LF mismatch in that commit's new byte-unchanged-fold assertion. Linux results not shown in the excerpt; likely Windows-only (CRLF). Not yet triaged into a PRD. This commit predates PRD 00172 and is unrelated to actor-plumbing collapse work — flag as a separate follow-up, do not fix inside 00172's scope.
+- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 247 unreleased commits on master now.
+- **Nightly/Test RED on latest master commit `5b5f9eb2`** (00173 just landed). `full-validation / macos-full`: 573/574 e2e tests pass; `server_mutations::batch_update_empty` fails with `ConnectionReset` (`hyper::Error(Io, Os { code: 54, ... })`) against the local GraphQL test server — looks like a flaky/transient server-shutdown-timing issue in that one e2e test, not a 00173 regression (00173's own Tier-1 gate was green at `b4e2359`: 1945 test-ci + 574 e2e). Not yet triaged into a PRD; worth a rerun to confirm flake vs. real regression before assuming either way. Prior CRLF/Windows sync-fold failure (`d7867d23`, 2026-10-12..16) superseded by this newer commit; not re-verified this session.
 
 ### Prior snapshot (2026-09-07)
 
