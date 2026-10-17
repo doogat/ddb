@@ -1,0 +1,10 @@
+[
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "low",
+    "issue": "I did not confirm the tests pass. `cargo test -p ddb-server --test error_parity --test http_error_t143 --lib error` hit the 300 s tool timeout while compiling, and I found no output after that. This review is static.",
+    "file": "ddb-server/tests/error_parity.rs:1",
+    "reason": "Not a defect in the work: a reviewer self-note about his own tool budget. The cycle ran the project gate itself at this HEAD: cargo test-ci, 1932 passed, 0 failed, 0 skipped, exit 0. Recorded in this review file's Tests: line."
+  }
+]

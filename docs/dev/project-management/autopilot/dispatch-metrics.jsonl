@@ -185,3 +185,11 @@
 {"kind":"handoff","site":"done","edge":"leave","at":1792212148,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792212178,"phase":"build","prd":"00173-unify-server-error-mapping-paths-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792221695,"phase":"review","prd":"00173-unify-server-error-mapping-paths-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792221726,"phase":"review","prd":"00173-unify-server-error-mapping-paths-v1.md"}
+{"id":"a92b661b","kind":"bob","task":"review-20261017-00173-c1","queued_at":1792222950,"prompt_bytes":13477}
+{"id":"17ac438c","kind":"carl","task":"review-20261017-00173-c1","queued_at":1792222950,"prompt_bytes":6603}
+{"id":"a92b661b","ended_at":1792224053,"elapsed_s":1103,"outcome":"ok","detail":"retry"}
+{"id":"17ac438c","ended_at":1792224056,"elapsed_s":1106,"outcome":"ok","detail":null}
+{"id":"a92b661b","ended_at":1792225745,"elapsed_s":2795,"outcome":"ok","detail":null}
+{"id":"17ac438c","ended_at":1792225745,"elapsed_s":2795,"outcome":"ok","detail":null}
+{"kind":"handoff","site":"review","edge":"leave","at":1792225789,"phase":"review","prd":"00173-unify-server-error-mapping-paths-v1.md"}
