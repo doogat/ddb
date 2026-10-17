@@ -610,14 +610,14 @@ async fn dead_actor_yields_structured_error_not_panic() {
 }
 
 // ---------------------------------------------------------------------------
-// Event-bus parity: legacy `match &msg.cmd` emission vs IntentEmit emission.
-//
-// Each mutation kind runs once through the legacy `Envelope::Enum` path (which
-// `actor_loop` still serves with its `match &msg.cmd` introspection and
-// `emit_mutation_events`) and once through the migrated `ActorHandle` verb
-// (closure + `EventIntent` + `IntentEmit`), on the same actor and bus. Events are
-// compared as `(kind, doogat_id, doogat_type)`; timestamps are `Utc::now()` on
-// both paths and are not part of the contract.
+// Event-bus emission pins for the migrated `ActorHandle` verbs (closure +
+// `EventIntent` + `IntentEmit`). These were originally written (PRD 00172
+// task 3) to prove IntentEmit emission was identical to the legacy
+// `match &msg.cmd` / `emit_mutation_events` path before that path was
+// deleted (task 5); now that the legacy enum transport is gone, they pin the
+// IntentEmit path's own behavior directly. Events are compared as
+// `(kind, doogat_id, doogat_type)`; timestamps are `Utc::now()` and are not
+// part of the contract.
 
 type Ev = (EventKind, String, Option<String>);
 
@@ -647,14 +647,6 @@ fn events_for(kind: EventKind, doogats: &[ParsedDoogat]) -> Vec<Ev> {
 
 fn item() -> Option<String> {
     Some("item".into())
-}
-
-/// Send one command through the legacy enum transport and await its reply.
-async fn send_legacy(actor: &ActorHandle, cmd: ActorCommand) -> ActorReply {
-    let (reply, rx) = oneshot::channel();
-    let sent = actor.tx.send(Envelope::Enum(ActorMsg { cmd, reply })).await;
-    assert!(sent.is_ok(), "legacy path: actor stopped");
-    rx.await.expect("legacy path dropped reply")
 }
 
 /// Fresh actor with the `item` type registered.
@@ -696,74 +688,35 @@ fn create_input(title: &str) -> BatchCreateInput {
 }
 
 #[tokio::test]
-async fn create_emits_identical_events_on_legacy_and_intent_paths() {
+async fn create_doogat_emits_one_created_event() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let tmp = tempfile::tempdir().unwrap();
         let bus = EventBus::new();
         let actor = parity_actor(tmp.path(), bus.clone()).await;
         let mut rx = bus.subscribe();
 
-        let ActorReply::CreateOutput(reply) = send_legacy(
-            &actor,
-            ActorCommand::CreateDoogat {
-                title: Some("legacy".into()),
-                body: Some("body".into()),
-                tags: vec![],
-                doogat_type: item(),
-                fields: Default::default(),
-                on_conflict: ConflictAction::default(),
-            },
-        )
-        .await
-        else {
-            panic!("legacy create must reply CreateOutput");
-        };
-        let old_value = reply.unwrap().value;
-        let old = drain(&mut rx);
-
-        let new_value = actor
+        let value = actor
             .create_doogat(Some("intent".into()), Some("body".into()), vec![], item(), Default::default(), ConflictAction::default())
             .await
             .unwrap()
             .value;
-        let new = drain(&mut rx);
+        let events = drain(&mut rx);
 
-        assert_eq!(old, events_for(EventKind::Created, &[old_value]));
-        assert_eq!(new, events_for(EventKind::Created, &[new_value]));
-        assert_eq!(shape(&old), vec![(EventKind::Created, item())]);
-        assert_eq!(shape(&old), shape(&new));
+        assert_eq!(events, events_for(EventKind::Created, &[value]));
+        assert_eq!(shape(&events), vec![(EventKind::Created, item())]);
     })
     .await
-    .expect("create parity test timed out");
+    .expect("create event test timed out");
 }
 
 #[tokio::test]
-async fn update_emits_identical_events_on_legacy_and_intent_paths() {
+async fn update_doogat_emits_one_updated_event() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let tmp = tempfile::tempdir().unwrap();
         let bus = EventBus::new();
         let actor = parity_actor(tmp.path(), bus.clone()).await;
         let id = new_item(&actor, "target").await;
         let mut rx = bus.subscribe();
-
-        let ActorReply::UpdateOutput(reply) = send_legacy(
-            &actor,
-            ActorCommand::UpdateDoogat {
-                id: id.clone(),
-                title: Some("legacy".into()),
-                body: None,
-                tags: None,
-                doogat_type: None,
-                fields: Default::default(),
-                unset_fields: vec![],
-            },
-        )
-        .await
-        else {
-            panic!("legacy update must reply UpdateOutput");
-        };
-        assert!(reply.is_ok());
-        let old = drain(&mut rx);
 
         actor
             .update_doogat(UpdateDoogatParams {
@@ -777,44 +730,33 @@ async fn update_emits_identical_events_on_legacy_and_intent_paths() {
             })
             .await
             .unwrap();
-        let new = drain(&mut rx);
+        let events = drain(&mut rx);
 
-        assert_eq!(old, vec![(EventKind::Updated, id, item())]);
-        assert_eq!(old, new);
+        assert_eq!(events, vec![(EventKind::Updated, id, item())]);
     })
     .await
-    .expect("update parity test timed out");
+    .expect("update event test timed out");
 }
 
 #[tokio::test]
-async fn delete_emits_identical_events_on_legacy_and_intent_paths() {
+async fn delete_doogat_emits_one_deleted_event_failed_delete_emits_none() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let tmp = tempfile::tempdir().unwrap();
         let bus = EventBus::new();
         let actor = parity_actor(tmp.path(), bus.clone()).await;
-        let old_id = new_item(&actor, "legacy").await;
-        let new_id = new_item(&actor, "intent").await;
+        let id = new_item(&actor, "intent").await;
         let mut rx = bus.subscribe();
 
-        let reply = send_legacy(&actor, ActorCommand::DeleteDoogat { id: old_id.clone() }).await;
-        assert!(matches!(reply, ActorReply::Deleted(Ok(()))));
-        let old = drain(&mut rx);
+        actor.delete_doogat(id.clone()).await.unwrap();
+        let events = drain(&mut rx);
+        assert_eq!(events, vec![(EventKind::Deleted, id.clone(), item())]);
 
-        actor.delete_doogat(new_id.clone()).await.unwrap();
-        let new = drain(&mut rx);
-
-        assert_eq!(old, vec![(EventKind::Deleted, old_id.clone(), item())]);
-        assert_eq!(new, vec![(EventKind::Deleted, new_id.clone(), item())]);
-        assert_eq!(shape(&old), shape(&new));
-
-        // A failed delete (doogat already gone) emits nothing on either path.
-        let reply = send_legacy(&actor, ActorCommand::DeleteDoogat { id: old_id }).await;
-        assert!(matches!(reply, ActorReply::Deleted(Err(_))));
-        assert!(actor.delete_doogat(new_id).await.is_err());
+        // A failed delete (doogat already gone) emits nothing.
+        assert!(actor.delete_doogat(id).await.is_err());
         assert!(drain(&mut rx).is_empty(), "a failed delete must emit no event");
     })
     .await
-    .expect("delete parity test timed out");
+    .expect("delete event test timed out");
 }
 
 /// Regression pin for the shared-cell mechanism: the closure resolves the type
@@ -839,7 +781,7 @@ async fn delete_emits_exactly_one_deleted_event_with_resolved_type() {
 }
 
 #[tokio::test]
-async fn batch_update_emits_identical_events_on_legacy_and_intent_paths() {
+async fn batch_update_emits_one_updated_event_per_doogat() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let tmp = tempfile::tempdir().unwrap();
         let bus = EventBus::new();
@@ -848,54 +790,34 @@ async fn batch_update_emits_identical_events_on_legacy_and_intent_paths() {
         let b = new_item(&actor, "b").await;
         let mut rx = bus.subscribe();
 
-        let updates = |t: &str| vec![update_input(&a, t), update_input(&b, t)];
-        let ActorReply::DoogatList(reply) =
-            send_legacy(&actor, ActorCommand::BatchUpdate { updates: updates("legacy") }).await
-        else {
-            panic!("legacy batch update must reply DoogatList");
-        };
-        let old_list = reply.unwrap();
-        let old = drain(&mut rx);
+        let updates = vec![update_input(&a, "intent"), update_input(&b, "intent")];
+        let list = actor.batch_update(updates).await.unwrap();
+        let events = drain(&mut rx);
 
-        let new_list = actor.batch_update(updates("intent")).await.unwrap();
-        let new = drain(&mut rx);
-
-        assert_eq!(old, events_for(EventKind::Updated, &old_list));
-        assert_eq!(new, events_for(EventKind::Updated, &new_list));
-        assert_eq!(old.len(), 2);
-        assert_eq!(old, new);
+        assert_eq!(events, events_for(EventKind::Updated, &list));
+        assert_eq!(events.len(), 2);
     })
     .await
-    .expect("batch-update parity test timed out");
+    .expect("batch-update event test timed out");
 }
 
 #[tokio::test]
-async fn create_many_emits_identical_events_on_legacy_and_intent_paths() {
+async fn create_many_emits_one_created_event_per_doogat() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let tmp = tempfile::tempdir().unwrap();
         let bus = EventBus::new();
         let actor = parity_actor(tmp.path(), bus.clone()).await;
         let mut rx = bus.subscribe();
 
-        let inputs = |t: &str| vec![create_input(&format!("{t} 1")), create_input(&format!("{t} 2"))];
-        let ActorReply::DoogatList(reply) =
-            send_legacy(&actor, ActorCommand::CreateMany { inputs: inputs("legacy") }).await
-        else {
-            panic!("legacy create-many must reply DoogatList");
-        };
-        let old_list = reply.unwrap();
-        let old = drain(&mut rx);
+        let inputs = vec![create_input("intent 1"), create_input("intent 2")];
+        let list = actor.create_many(inputs).await.unwrap();
+        let events = drain(&mut rx);
 
-        let new_list = actor.create_many(inputs("intent")).await.unwrap();
-        let new = drain(&mut rx);
-
-        assert_eq!(old, events_for(EventKind::Created, &old_list));
-        assert_eq!(new, events_for(EventKind::Created, &new_list));
-        assert_eq!(shape(&old), vec![(EventKind::Created, item()); 2]);
-        assert_eq!(shape(&old), shape(&new));
+        assert_eq!(events, events_for(EventKind::Created, &list));
+        assert_eq!(shape(&events), vec![(EventKind::Created, item()); 2]);
     })
     .await
-    .expect("create-many parity test timed out");
+    .expect("create-many event test timed out");
 }
 
 /// Fresh actor with `item` registered as a SINGLETON typedef.
@@ -906,48 +828,32 @@ async fn singleton_actor(dir: &std::path::Path, bus: EventBus) -> ActorHandle {
     actor
 }
 
-/// Upsert creates then updates the same singleton, so each path runs the same
-/// create-then-update sequence on its own fresh repo.
+/// Upsert creates then updates the same singleton: first call creates, second
+/// call updates the same row.
 #[tokio::test]
-async fn upsert_emits_identical_events_on_legacy_and_intent_paths() {
+async fn upsert_singleton_emits_created_then_updated_event() {
     tokio::time::timeout(Duration::from_secs(60), async {
-        let legacy_tmp = tempfile::tempdir().unwrap();
-        let legacy_bus = EventBus::new();
-        let legacy = singleton_actor(legacy_tmp.path(), legacy_bus.clone()).await;
-        let mut legacy_rx = legacy_bus.subscribe();
-        let mut legacy_ids = Vec::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let bus = EventBus::new();
+        let actor = singleton_actor(tmp.path(), bus.clone()).await;
+        let mut rx = bus.subscribe();
+        let mut ids = Vec::new();
         for _ in 0..2 {
-            let cmd = ActorCommand::UpsertSingleton { type_name: "item".into(), fields: Default::default() };
-            let ActorReply::Upsert(reply) = send_legacy(&legacy, cmd).await else {
-                panic!("legacy upsert must reply Upsert");
-            };
-            legacy_ids.push(reply.unwrap().id);
+            let outcome = actor.upsert_singleton("item".into(), Default::default()).await.unwrap();
+            ids.push(outcome.id);
         }
-        let old = drain(&mut legacy_rx);
+        let events = drain(&mut rx);
 
-        let intent_tmp = tempfile::tempdir().unwrap();
-        let intent_bus = EventBus::new();
-        let intent = singleton_actor(intent_tmp.path(), intent_bus.clone()).await;
-        let mut intent_rx = intent_bus.subscribe();
-        let mut intent_ids = Vec::new();
-        for _ in 0..2 {
-            let outcome = intent.upsert_singleton("item".into(), Default::default()).await.unwrap();
-            intent_ids.push(outcome.id);
-        }
-        let new = drain(&mut intent_rx);
-
-        let expected = |ids: &[String]| {
+        assert_eq!(
+            events,
             vec![
                 (EventKind::Created, ids[0].clone(), item()),
                 (EventKind::Updated, ids[1].clone(), item()),
             ]
-        };
-        assert_eq!(old, expected(&legacy_ids));
-        assert_eq!(new, expected(&intent_ids));
-        assert_eq!(shape(&old), shape(&new));
+        );
     })
     .await
-    .expect("upsert parity test timed out");
+    .expect("upsert event test timed out");
 }
 
 // ---------------------------------------------------------------------------

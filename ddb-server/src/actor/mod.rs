@@ -1,5 +1,3 @@
-mod handlers;
-
 #[cfg(test)]
 mod tests;
 
@@ -37,183 +35,6 @@ pub struct UpdateDoogatParams {
     pub doogat_type: Option<String>,
     pub fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
     pub unset_fields: Vec<String>,
-}
-
-/// Commands the actor understands.
-pub enum ActorCommand {
-    GetDoogat {
-        id: String,
-    },
-    ListDoogats {
-        doogat_type: Option<String>,
-        tag: Option<String>,
-        backlinks_of: Option<String>,
-        field_filters: Vec<(String, String)>,
-        limit: Option<i64>,
-        offset: Option<i64>,
-    },
-    Search {
-        query: String,
-        limit: usize,
-        offset: usize,
-        filters: SearchFilters,
-    },
-    CreateDoogat {
-        title: Option<String>,
-        body: Option<String>,
-        tags: Vec<String>,
-        doogat_type: Option<String>,
-        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
-        on_conflict: ConflictAction,
-    },
-    UpdateDoogat {
-        id: String,
-        title: Option<String>,
-        body: Option<String>,
-        tags: Option<Vec<String>>,
-        doogat_type: Option<String>,
-        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
-        unset_fields: Vec<String>,
-    },
-    DeleteDoogat {
-        id: String,
-    },
-    ExecuteSql {
-        sql: String,
-    },
-    BatchUpdate {
-        updates: Vec<BatchUpdateInput>,
-    },
-    CreateMany {
-        inputs: Vec<BatchCreateInput>,
-    },
-    ExecuteBatch {
-        statements: Vec<String>,
-    },
-    GetTypeSchemas,
-    GetBacklinks {
-        id: String,
-    },
-    CountDoogats {
-        doogat_type: Option<String>,
-        tag: Option<String>,
-        backlinks_of: Option<String>,
-        field_filters: Vec<(String, String)>,
-    },
-    FilteredList(ddb_core::types::TypedListQuery),
-    AggregateQuery {
-        sql: String,
-        params: Vec<QueryValue>,
-    },
-    AttachFile {
-        doogat_id: String,
-        filename: String,
-        bytes: Vec<u8>,
-        mime: String,
-    },
-    DetachFile {
-        doogat_id: String,
-        filename: String,
-    },
-    ListAttachments {
-        doogat_id: String,
-    },
-    Compact {
-        force: bool,
-        no_backup: bool,
-        backup_path: Option<String>,
-    },
-    GitMaintenance {
-        task: Option<String>,
-    },
-    Sync {
-        remote: String,
-        branch: String,
-    },
-    NoSqlGet {
-        id: String,
-    },
-    NoSqlScanType {
-        type_name: String,
-    },
-    NoSqlScanTag {
-        tag: String,
-    },
-    NoSqlBacklinks {
-        id: String,
-    },
-    UnlinkedMentions {
-        id: String,
-    },
-    SuggestLinks {
-        id: String,
-        limit: usize,
-    },
-    StaleDoogats {
-        type_filter: Option<String>,
-    },
-    OrphanDoogats {
-        type_filter: Option<String>,
-    },
-    SequenceInfo {
-        id: String,
-    },
-    SequenceChildren {
-        id: String,
-    },
-    SequenceBreadcrumb {
-        id: String,
-    },
-    BrokenSequences,
-    HealthCheck,
-    UpsertSingleton {
-        type_name: String,
-        fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
-    },
-    ApplySchema {
-        schema_doc: String,
-        dry_run: bool,
-        allow_destructive: bool,
-    },
-}
-
-/// Replies from the actor.
-pub enum ActorReply {
-    Doogat(Box<ActorResult<ParsedDoogat>>),
-    CreateOutput(Box<ActorResult<AppOutput<ParsedDoogat>>>),
-    UpdateOutput(Box<ActorResult<AppOutput<ParsedDoogat>>>),
-    DoogatList(ActorResult<Vec<ParsedDoogat>>),
-    SearchResults(ActorResult<PaginatedSearchResult>),
-    SqlResult(ActorResult<SqlResult>),
-    SqlResults(ActorResult<Vec<SqlResult>>),
-    TypeSchemas(ActorResult<Vec<TableSchema>>),
-    Backlinks(ActorResult<Vec<String>>),
-    Deleted(ActorResult<()>),
-    Count(ActorResult<i64>),
-    /// Single row of string values from an aggregate query.
-    AggregateRow(ActorResult<Vec<String>>),
-    Attachment(ActorResult<ddb_core::types::AttachmentInfo>),
-    AttachmentList(ActorResult<Vec<ddb_core::types::AttachmentInfo>>),
-    Maintenance(ActorResult<CompactionReport>),
-    GitMaintenance(ActorResult<MaintenanceReport>),
-    SyncResult(ActorResult<SyncReport>),
-    NoSqlDoogat(Box<ActorResult<Option<ParsedDoogat>>>),
-    NoSqlIds(ActorResult<Vec<String>>),
-    UnlinkedMentions(ActorResult<Vec<UnlinkedMention>>),
-    Suggestions(ActorResult<Vec<Suggestion>>),
-    StaleDoogats(ActorResult<Vec<StaleDoogat>>),
-    OrphanDoogats(ActorResult<Vec<OrphanDoogat>>),
-    SequenceInfoResult(ActorResult<SequenceInfo>),
-    SequenceNodes(ActorResult<Vec<SequenceNode>>),
-    BrokenSequences(ActorResult<Vec<BrokenSequence>>),
-    HealthStatus(ActorResult<bool>),
-    Upsert(ActorResult<UpsertOutcome>),
-    SchemaApply(Box<ActorResult<AppOutput<SchemaApplyReport>>>),
-}
-
-struct ActorMsg {
-    cmd: ActorCommand,
-    reply: oneshot::Sender<ActorReply>,
 }
 
 /// Explicit event intent carried alongside the closure for event-bearing verbs.
@@ -494,28 +315,17 @@ impl IntentEmit for Result<UpsertOutcome, DoogatError> {
 /// `R`.
 type ActorRun = Box<dyn FnOnce(&mut DoogatService, &EventBus) + Send>;
 
-/// A closure-carrying message: the closure IS the dispatch. Introduced beside the
-/// legacy [`ActorMsg`] during Phase 0 so both transports compile; the enum path is
-/// deleted in Phase 2.
+/// A closure-carrying message: the closure IS the dispatch.
 struct ClosureMsg {
     run: ActorRun,
     #[allow(dead_code)]
     event: EventIntent,
 }
 
-/// One envelope the actor channel carries, tagging which transport a message uses.
-/// Phase 0 additive shim: the [`Envelope::Enum`] arm drives the legacy
-/// `ActorCommand`/`ActorReply` path, the [`Envelope::Closure`] arm drives the new
-/// closure path. Collapses to just the closure form in Phase 2.
-enum Envelope {
-    Enum(ActorMsg),
-    Closure(ClosureMsg),
-}
-
 /// Async handle to the repo actor.
 #[derive(Clone)]
 pub struct ActorHandle {
-    tx: mpsc::Sender<Envelope>,
+    tx: mpsc::Sender<ClosureMsg>,
     event_bus: EventBus,
     reloader: Arc<OnceLock<Arc<SchemaReloader>>>,
 }
@@ -526,7 +336,7 @@ impl ActorHandle {
         // Validate repo opens before spawning
         let _ = DoogatService::open(&repo_path)?;
 
-        let (tx, rx) = mpsc::channel::<Envelope>(64);
+        let (tx, rx) = mpsc::channel::<ClosureMsg>(64);
         let bus = event_bus.clone();
         std::thread::spawn(move || {
             actor_loop(repo_path, rx, bus);
@@ -580,10 +390,10 @@ impl ActorHandle {
             let _ = reply_tx.send(result);
         });
 
-        let msg = Envelope::Closure(ClosureMsg {
+        let msg = ClosureMsg {
             run,
             event: EventIntent::None,
-        });
+        };
 
         // Actor gone: return a structured error, never panic.
         if self.tx.send(msg).await.is_err() {
@@ -1020,7 +830,7 @@ impl ActorHandle {
 }
 
 /// The blocking actor loop, runs on its own OS thread.
-fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<Envelope>, event_bus: EventBus) {
+fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ClosureMsg>, event_bus: EventBus) {
     let mut svc = match DoogatService::open_shared(&repo_path) {
         Ok(s) => s,
         Err(e) => {
@@ -1033,63 +843,9 @@ fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<Envelope>, event_bus: E
         tracing::warn!(%e, "actor: index rebuild on startup failed");
     }
 
-    while let Some(envelope) = rx.blocking_recv() {
-        // Closure path (new): the closure IS the dispatch and emits its own events
-        // at the boundary (Option A). The legacy enum path stays below, unchanged,
-        // until Phase 2 deletes it.
-        let msg = match envelope {
-            Envelope::Closure(closure_msg) => {
-                (closure_msg.run)(&mut svc, &event_bus);
-                continue;
-            }
-            Envelope::Enum(msg) => msg,
-        };
-
-        let (delete_id, delete_type) = match &msg.cmd {
-            ActorCommand::DeleteDoogat { id } => (
-                Some(id.clone()),
-                svc.get_doogat_parsed(id)
-                    .ok()
-                    .and_then(|z| z.meta.doogat_type),
-            ),
-            _ => (None, None),
-        };
-        let is_batch_update = matches!(&msg.cmd, ActorCommand::BatchUpdate { .. });
-        let is_create_many = matches!(&msg.cmd, ActorCommand::CreateMany { .. });
-        let upsert_type = match &msg.cmd {
-            ActorCommand::UpsertSingleton { type_name, .. } => Some(type_name.clone()),
-            _ => None,
-        };
-        let mutation_kind = match &msg.cmd {
-            ActorCommand::CreateDoogat { .. } => Some(EventKind::Created),
-            ActorCommand::UpdateDoogat { .. } => Some(EventKind::Updated),
-            ActorCommand::DeleteDoogat { .. } => Some(EventKind::Deleted),
-            _ => None,
-        };
-
-        let reply = handlers::handle_command(&mut svc, msg.cmd);
-        emit_mutation_events(
-            &event_bus,
-            &reply,
-            mutation_kind.as_ref(),
-            &delete_id,
-            &delete_type,
-            is_batch_update,
-            is_create_many,
-        );
-        if let (Some(t), ActorReply::Upsert(Ok(outcome))) = (&upsert_type, &reply) {
-            event_bus.send(DoogatEvent {
-                kind: if outcome.created {
-                    EventKind::Created
-                } else {
-                    EventKind::Updated
-                },
-                doogat_id: outcome.id.clone(),
-                doogat_type: Some(t.clone()),
-                timestamp: Utc::now(),
-            });
-        }
-        let _ = msg.reply.send(reply);
+    while let Some(closure_msg) = rx.blocking_recv() {
+        // The closure IS the dispatch and emits its own events at the boundary.
+        (closure_msg.run)(&mut svc, &event_bus);
     }
 }
 
@@ -1108,54 +864,5 @@ fn doogat_event(
             .unwrap_or_default(),
         doogat_type: z.meta.doogat_type.clone(),
         timestamp,
-    }
-}
-
-/// Emit events for successful singular and batch mutations.
-fn emit_mutation_events(
-    event_bus: &EventBus,
-    reply: &ActorReply,
-    mutation_kind: Option<&EventKind>,
-    delete_id: &Option<String>,
-    delete_type: &Option<String>,
-    is_batch_update: bool,
-    is_create_many: bool,
-) {
-    if let Some(kind) = mutation_kind {
-        match (kind, reply) {
-            (EventKind::Created, ActorReply::CreateOutput(r)) => {
-                if let Ok(output) = r.as_ref() {
-                    event_bus.send(doogat_event(kind, &output.value, Utc::now()));
-                }
-            }
-            (EventKind::Updated, ActorReply::UpdateOutput(r)) => {
-                if let Ok(output) = r.as_ref() {
-                    event_bus.send(doogat_event(kind, &output.value, Utc::now()));
-                }
-            }
-            (EventKind::Deleted, ActorReply::Deleted(Ok(()))) => {
-                event_bus.send(DoogatEvent {
-                    kind: kind.clone(),
-                    doogat_id: delete_id.clone().unwrap_or_default(),
-                    doogat_type: delete_type.clone(),
-                    timestamp: Utc::now(),
-                });
-            }
-            _ => {}
-        }
-    }
-
-    if is_batch_update || is_create_many {
-        if let ActorReply::DoogatList(Ok(ref doogats)) = reply {
-            let kind = if is_create_many {
-                EventKind::Created
-            } else {
-                EventKind::Updated
-            };
-            let now = Utc::now();
-            for z in doogats {
-                event_bus.send(doogat_event(&kind, z, now));
-            }
-        }
     }
 }
