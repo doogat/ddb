@@ -67,17 +67,8 @@ impl ServerConfig {
             .map(PathBuf::from)
             .unwrap_or_else(|| config_dir.join("token"));
 
-        let maintenance_enabled = file_cfg
-            .maintenance
-            .as_ref()
-            .and_then(|m| m.enabled)
-            .unwrap_or(true);
-        let maintenance_interval_secs = file_cfg
-            .maintenance
-            .as_ref()
-            .and_then(|m| m.interval_secs)
-            .unwrap_or(3600)
-            .max(60);
+        let (maintenance_enabled, maintenance_interval_secs) =
+            Self::maintenance_fields(file_cfg.maintenance.as_ref());
 
         let read_pool_size = file_cfg
             .server
@@ -85,13 +76,7 @@ impl ServerConfig {
             .and_then(|s| s.read_pool_size)
             .unwrap_or_else(crate::read_pool::ReadPool::default_pool_size);
 
-        // 0 would disable libgit2's timeouts entirely, so floor at 1s.
-        let remote_timeout_secs = file_cfg
-            .remote
-            .as_ref()
-            .and_then(|r| r.timeout_secs)
-            .unwrap_or(30)
-            .max(1);
+        let remote_timeout_secs = Self::remote_timeout_secs(file_cfg.remote.as_ref());
 
         Self {
             port,
@@ -103,6 +88,24 @@ impl ServerConfig {
             read_pool_size,
             remote_timeout_secs,
         }
+    }
+
+    /// Map the `[maintenance]` TOML section to (enabled, interval_secs),
+    /// applying defaults and the 60s interval floor.
+    fn maintenance_fields(section: Option<&MaintenanceSection>) -> (bool, u64) {
+        let enabled = section.and_then(|m| m.enabled).unwrap_or(true);
+        let interval_secs = section.and_then(|m| m.interval_secs).unwrap_or(3600).max(60);
+        (enabled, interval_secs)
+    }
+
+    /// Map the `[remote]` TOML section to its timeout, applying the
+    /// default and the 1s floor (0 would disable libgit2's timeouts
+    /// entirely).
+    fn remote_timeout_secs(section: Option<&RemoteSection>) -> u64 {
+        section
+            .and_then(|r| r.timeout_secs)
+            .unwrap_or(ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT.as_secs())
+            .max(1)
     }
 
     fn read_file(config_dir: &std::path::Path) -> FileConfig {
@@ -159,5 +162,23 @@ mod tests {
         std::fs::write(dir.path().join("config.toml"), "[server]\nport = 9999\n").unwrap();
         let cfg = ServerConfig::read_file(dir.path());
         assert_eq!(cfg.server.as_ref().and_then(|s| s.port), Some(9999));
+    }
+
+    #[test]
+    fn remote_timeout_secs_absent_section_uses_default() {
+        let secs = ServerConfig::remote_timeout_secs(None);
+        assert_eq!(secs, ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT.as_secs());
+    }
+
+    #[test]
+    fn remote_timeout_secs_parses_configured_value() {
+        let section = RemoteSection { timeout_secs: Some(90) };
+        assert_eq!(ServerConfig::remote_timeout_secs(Some(&section)), 90);
+    }
+
+    #[test]
+    fn remote_timeout_secs_floors_zero_at_one() {
+        let section = RemoteSection { timeout_secs: Some(0) };
+        assert_eq!(ServerConfig::remote_timeout_secs(Some(&section)), 1);
     }
 }
