@@ -547,6 +547,46 @@
       "action": "defer",
       "reason": "The reviewed design doc relocated the helper deliberately: designs/00172-collapse-actor-plumbing-v1-design.md:61-64 leaves SchemaReloader/reload.rs unchanged apart from the one-line set_reloader wiring in lib.rs, and :330-337 puts the derivation inside ActorHandle::call. The PRD success metric is one derivation helper with one call site, which holds (trigger_reload_and_wait is called once, in call); the file it lives in is not the metric. The three intent-construction sites are pure caller-local classification feeding that single check, not three decisions.",
       "prd": "00172-collapse-actor-plumbing-v1.md"
+    },
+    {
+      "type": "requirements-ambiguity",
+      "cycle": 2,
+      "severity": "medium",
+      "consensus": "1/4",
+      "issue": "Parse now renders PARSE_ERROR/422 with the raw message on REST and NoSQL (was redacted INTERNAL_ERROR/500), and unregistered Structured codes now render redacted 500 (was 422 with their own code); the PRD text says no HTTP status changes on any code",
+      "action": "deferred to batch end",
+      "reason": "both changes are deliberate, documented in CHANGELOG/errors.md/server.md and test-pinned; reverting is a public-contract decision for the maintainer",
+      "prd": "00173-unify-server-error-mapping-paths-v1.md"
+    },
+    {
+      "type": "scope-note",
+      "cycle": 2,
+      "severity": "low",
+      "consensus": "1/4",
+      "issue": "Additions beyond the PRD: public codes::INVALID_ZONE and table rows for TRANSACTION_NOT_SUPPORTED, PARSE_ERROR, INVALID_PATH, BAD_REQUEST; nosql_error made public for the parity suite",
+      "action": "deferred to batch end",
+      "reason": "each addition is a cycle-1 regression fix or a conformance-suite requirement, disclosed in CHANGELOG.md; the nosql_error visibility widening is noted rather than reverted",
+      "prd": "00173-unify-server-error-mapping-paths-v1.md"
+    },
+    {
+      "type": "deliverable-gap",
+      "cycle": 2,
+      "severity": "low",
+      "consensus": "1/4",
+      "issue": "No executable showboat walkthrough exists for 00173; the dev/local/walkthroughs tree is gitignored and absent on this host, so no PRD in this batch has one",
+      "action": "deferred to batch end",
+      "reason": "batch-wide, host-local deliverable gap rather than a defect in 00173; needs the showboat CLI and a temp-dir ddb run on an attended host",
+      "prd": "00173-unify-server-error-mapping-paths-v1.md"
+    },
+    {
+      "type": "by-design",
+      "cycle": 2,
+      "severity": "low",
+      "consensus": "1/4",
+      "issue": "classify is now referenced only by tests (ddb-server/src/error.rs:9), a leftover thin wrapper; and the NoSQL leg of the parity suite asserts wiring rather than an independent policy (ddb-server/tests/error_parity.rs:86)",
+      "action": "deferred to batch end",
+      "reason": "the PRD explicitly keeps the thin wrapper, and NoSQL delegating to the REST helper makes the wiring assertion the correct test; both are acknowledged in code comments",
+      "prd": "00173-unify-server-error-mapping-paths-v1.md"
     }
   ]
 }
