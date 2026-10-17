@@ -258,3 +258,5 @@
 {"id":"1d74cb8f","ended_at":1792260903,"elapsed_s":1382,"outcome":"ok","detail":null}
 {"id":"6272ec80","ended_at":1792260903,"elapsed_s":2114,"outcome":"ok","detail":null}
 {"kind":"handoff","site":"review","edge":"leave","at":1792260948,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
+{"id":"c8131729","kind":"ivan","task":"5","queued_at":1792261038,"prompt_bytes":23888}
+{"id":"d4903546","kind":"ivan","task":"5","queued_at":1792261045,"prompt_bytes":23888}
