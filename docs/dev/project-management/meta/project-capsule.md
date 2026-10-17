@@ -81,9 +81,10 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
   - Test 34086467208 and Full Validation 34092612666 passed at `876a153`; each platform ran 566 passing e2e tests, 0 failures, 2 unrelated hazard skips. Local cycle-2 fast tests: 1819/0/0. Older build/Clippy evidence retains its original SHA. The historical macOS reset remains unreproduced and deferred under 00188.
   - Batch: 9 completed PRDs; 16 deferrals for 00171 (5 earlier + 11 accepted), 47 total. Audit/report reconciled. State resets to `build/build` for a future manual resume only; no next PRD selected or wrapper launched.
 
-### Remaining backlog (31 PRDs; not selected)
+- [x] **00172 collapse-actor-plumbing-v1** (DONE 2026-10-17, in `done/`; cycle 1, tail-swept) — collapsed the ActorCommand/ActorReply twin-enum dispatch into a single generic `ActorHandle::call<R>` entrypoint, with `EventIntent`/`IntentEmit` for event emission and `ReloadIntent`/`ReloadSignal` collapsing the 5 hand-wired per-adapter schema-reload triggers into one derivation site. `handle_command` and `actor/handlers.rs` deleted entirely. Cycle 1 converged (0 CRITICAL, 2 HIGH both settled deferrals with design-doc evidence; doubt D1-D5 all pass); 14 medium/low findings swept via 4 tail-sweep tasks (ClosureMsg dead field removed, actor/tests.rs split under 800 lines, stale docs/comments fixed, PgWire/GraphQL reload-parity test gap closed, dead REST reloader Extension layer dropped). Tier 1 green (1913 tests) at `1cd221c`+2 chore commits.
 
-- [ ] 00172-collapse-actor-plumbing-v1
+### Remaining backlog (30 PRDs; not selected)
+
 - [ ] 00173-unify-server-error-mapping-paths-v1
 - [ ] 00174-decouple-maintenance-from-write-actor-v1
 - [ ] 00175-route-read-delete-through-contract-v1
