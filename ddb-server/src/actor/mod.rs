@@ -105,7 +105,9 @@ impl ActorHandle {
     /// Register the schema reloader `call` triggers per its [`ReloadIntent`].
     pub fn set_reloader(&self, reloader: Arc<SchemaReloader>) {
         if self.reloader.set(reloader).is_err() {
-            tracing::warn!("actor: schema reloader already registered; second registration ignored");
+            tracing::warn!(
+                "actor: schema reloader already registered; second registration ignored"
+            );
         }
     }
 
