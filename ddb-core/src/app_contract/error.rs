@@ -328,6 +328,11 @@ pub struct ErrorRendering {
 /// classify never carried this prefix (it matches DoogatError variants
 /// directly and clones the inner String), so this is the one place that
 /// strips it before any transport sees the message.
+///
+/// Internal-category errors are logged here via `tracing::error!` with the
+/// unredacted message before redaction — the single logging point for every
+/// transport (legacy `classify`'s per-variant match used to log on REST/NoSQL
+/// directly; that is now centralized here instead of duplicated per caller).
 pub fn error_rendering(app: AppError) -> ErrorRendering {
     let AppError { code, message, category, field, details } = app;
     let prefix = match code {
@@ -357,6 +362,7 @@ pub fn error_rendering(app: AppError) -> ErrorRendering {
     };
     let ffi_variant = FfiVariant::from(category.clone());
     if is_internal {
+        tracing::error!(code = %code, message = %message, "internal error");
         ErrorRendering {
             code,
             message: "internal error".to_string(),
