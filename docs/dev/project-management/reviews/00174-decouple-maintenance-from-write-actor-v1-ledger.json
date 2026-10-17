@@ -1,5 +1,258 @@
 [
-  {"cycle": 1, "disposition": "settled-deferral", "severity": "high", "issue": "Push has no deadline, `PushOptions` or callbacks. `remote.push` passes `None` (`ddb-core/src/git_ops/remote.rs:70-77`), and the push path in `remote.rs` has no wall-clock deadline. Push relies only on the process-global libgit2 idle timeout. A remote that trickles bytes, or any transport the idle timeout does not cover, never aborts a push. Fetch has the same gap before any progress callback fires, for example a slowly dribbled ref advertisement. The spec requires an abort-capable mechanism, `FetchOptions`/`PushOptions`, and one options/credentials construction point for 00191. Fetch installs callbacks and push installs none.", "file": "ddb-core/src/git_ops/remote.rs:27", "reason": "Scoped out by the reviewed design doc on purpose: git2-rs's push_transfer_progress/pack_progress are void FnMuts and cannot abort, so push's bound is the bidirectional libgit2 idle timeout. The design states the residual trickle-only push gap explicitly and instructs the implementor not to close it in this PRD. Deferred to batch end as a known limitation, not re-argued per cycle."},
-  {"cycle": 1, "disposition": "settled-deferral", "severity": "high", "issue": "Silent-stall protection is installed only by server startup. CLI/FFI callers use the changed core operations without installing these options; push's timeout argument only classifies errors after return and cannot terminate a stall. Initialize default native timeouts safely for supported standalone callers, without adding a CLI knob.", "file": "ddb-core/src/git_ops/remote.rs:72", "reason": "The PRD's success metric is explicit: \"No CLI/FFI change\". Installing process-global libgit2 timeouts from core would change CLI and FFI behaviour, which this PRD forbids; the server is the only configured consumer. Deferred to batch end as a follow-up decision rather than reversing a stated PRD boundary mid-cycle."},
-  {"cycle": 1, "disposition": "settled-deferral", "severity": "low", "issue": "The diff touches files already over the 800-line limit, and it only changes call arities there: ddb-core/src/git_ops/mod.rs (1135 lines), ddb-core/src/git_ops/tests.rs (4168), ddb-core/src/sync_manager/tests.rs (2143) and ddb-core/tests/property_tests.rs (2400). The new fixtures were correctly put in a separate file.", "file": "ddb-core/src/git_ops/tests.rs", "reason": "Pre-existing file sizes; this PRD only changed call arities in those files and correctly placed its new fixtures in a separate module. Splitting them is out of scope under the surgical-changes rule and belongs to a dedicated split PRD."}
+{
+"cycle": 1,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "Push has no deadline, `PushOptions` or callbacks. `remote.push` passes `None` (`ddb-core/src/git_ops/remote.rs:70-77`), and the push path in `remote.rs` has no wall-clock deadline. Push relies only on the process-global libgit2 idle timeout. A remote that trickles bytes, or any transport the idle timeout does not cover, never aborts a push. Fetch has the same gap before any progress callback fires, for example a slowly dribbled ref advertisement. The spec requires an abort-capable mechanism, `FetchOptions`/`PushOptions`, and one options/credentials construction point for 00191. Fetch installs callbacks and push installs none.",
+"file": "ddb-core/src/git_ops/remote.rs:27",
+"reason": "Scoped out by the reviewed design doc on purpose: git2-rs's push_transfer_progress/pack_progress are void FnMuts and cannot abort, so push's bound is the bidirectional libgit2 idle timeout. The design states the residual trickle-only push gap explicitly and instructs the implementor not to close it in this PRD. Deferred to batch end as a known limitation, not re-argued per cycle."
+},
+{
+"cycle": 1,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "Silent-stall protection is installed only by server startup. CLI/FFI callers use the changed core operations without installing these options; push's timeout argument only classifies errors after return and cannot terminate a stall. Initialize default native timeouts safely for supported standalone callers, without adding a CLI knob.",
+"file": "ddb-core/src/git_ops/remote.rs:72",
+"reason": "The PRD's success metric is explicit: \"No CLI/FFI change\". Installing process-global libgit2 timeouts from core would change CLI and FFI behaviour, which this PRD forbids; the server is the only configured consumer. Deferred to batch end as a follow-up decision rather than reversing a stated PRD boundary mid-cycle."
+},
+{
+"cycle": 1,
+"disposition": "settled-deferral",
+"severity": "low",
+"issue": "The diff touches files already over the 800-line limit, and it only changes call arities there: ddb-core/src/git_ops/mod.rs (1135 lines), ddb-core/src/git_ops/tests.rs (4168), ddb-core/src/sync_manager/tests.rs (2143) and ddb-core/tests/property_tests.rs (2400). The new fixtures were correctly put in a separate file.",
+"file": "ddb-core/src/git_ops/tests.rs",
+"reason": "Pre-existing file sizes; this PRD only changed call arities in those files and correctly placed its new fixtures in a separate module. Splitting them is out of scope under the surgical-changes rule and belongs to a dedicated split PRD."
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "R4/R14 only partly resolved. Config parsing and the `.max(1)` floor now have tests, and the libgit2 option install is behind a `Once`. `remote_callbacks` (the fetch `transfer_progress`/`sideband_progress` wall-clock deadline) still has no test, and the module doc now just states that as a known limitation. A deterministic test needs no wire-format emulation. Fetch from a local `file://` repo that has objects, using `timeout = Duration::ZERO`, so the deadline is already past when the first transfer callback fires. Assert `REMOTE_TIMEOUT`, and assert that a normal timeout succeeds. This fails if the callback layer is removed.",
+"file": "ddb-core/src/git_ops/remote_timeout_tests.rs:8",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "R2/R15 not resolved. `probe_overlap_with_burst_gets` computes an overlap flag, and the test discards it as `_observed_overlap`. The test therefore still passes against the pre-change single-actor code whenever compact finishes in milliseconds, which the doc comment itself admits. Burst GETs do not make this deterministic. A deterministic alternative needs no hook in `ddb-core`. Reuse `stalled_remote()` from `integration_sync_decoupling.rs`: start a `sync` that blocks the maintenance worker for the libgit2 timeout, assert `!sync.is_finished()`, issue the NoSQL GET, and assert it returns well before the sync ends. At minimum, assert the overlap flag, or rename the test so it does not claim to prove decoupling.",
+"file": "tests/e2e/integration_nosql_during_compact.rs:130",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "R1 resolved (configured `[remote] timeout_secs` now reaches `sync_with_timeout` -> `fetch`/`push` -> `map_remote_error`), but nothing tests the plumbing. `ActorHandle::sync` could go back to `DEFAULT_REMOTE_TIMEOUT` and every test would still pass. The e2e stall test runs at the 30s default, which equals the hard-coded constant. Add a test with a short configured timeout (for example `ActorHandle::spawn(.., 2s)` or `ServerGuard` with `[remote] timeout_secs=2` against `stalled_remote()`) that asserts `REMOTE_TIMEOUT` well under 30s.",
+"file": "ddb-server/src/actor/mod.rs:483",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "Documentation names an API that does not exist. The new `nosql.rs` doc comment and `docs/src/technical/server.md:36` say NoSQL reads are serialized against mirror writes via `NoSqlMirrorPort::lock_for_read`, \"which `DoogatService` holds for the read's full duration\". `rg lock_for_read` finds only those two doc mentions. The code instead retries `RedbIndex::open` 20 times at 10 ms (`ddb-core/src/service/utility.rs:121`). The rework turned the earlier overclaim (R6/R8) into a false claim about a lock that is not there. Rewrite both texts to describe what the code does, or implement the lock.",
+"file": "ddb-core/src/nosql.rs:229",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "NoSQL docs and code comment describe a mechanism that does not exist. docs/src/technical/server.md:36 and ddb-core/src/nosql.rs:232 say NoSQL reads are serialized against mirror writes via `NoSqlMirrorPort::lock_for_read`. That method exists nowhere (rg finds only those two comments); the trait at ddb-core/src/traits.rs:352 has only the two mirror methods. Commit 92571f5 replaced it with a bounded retry (20 x 10 ms) on the read side only (ddb-core/src/service/utility.rs:121); docs were not updated. The \"never two opens competing\" claim is false",
+"file": "ddb-server/src/actor/mod.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "NoSQL mirror writes can now be silently lost. RedbMirror::with_index (ddb-core/src/nosql.rs:261) opens redb with no retry, and nosql_index_doogat discards the error (ddb-core/src/service/write_helpers.rs:254, `let _ =`). A NoSQL read on the write-actor thread holds the exclusive redb handle for its whole rebuild (utility.rs:141; open_nosql_fresh rebuilds on every read). A maintenance-thread mirror write landing in that window fails with DatabaseAlreadyOpen and is dropped. Conversely a read can fail after 200 ms of retries. Single-threading used to make this impossible. Mitigated only because each read rebuilds the whole mirror",
+"file": "ddb-core/src/service/utility.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "NoSQL reads still bypass the mirror's `open_lock`. Retrying reads for 190ms does not serialize access: a read can acquire redb first and make a concurrent mirror write fail immediately, or exhaust retries during a longer write. The new documentation incorrectly claims `lock_for_read` provides serialization. Hold the shared mirror lock throughout each read's handle lifetime and add a read/write concurrency regression.",
+"file": "ddb-core/src/service/utility.rs:123",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "high",
+"issue": "integration_nosql_get_stays_bounded_while_compact_runs ignores probe_overlap_with_burst_gets and does not verify overlap",
+"file": "tests/e2e/integration_nosql_during_compact.rs:130",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "`docs/src/technical/server.md:36` contains the same false `lock_for_read` claim, plus \"never two opens competing\". The retry only covers the read's own open. The read keeps its handle open through `rebuild` and the query, and a mirror write's `RedbIndex::open` has no retry.",
+"file": "docs/src/technical/server.md:36",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "The open-retry in `open_nosql` is speculative, untested and not behavior-preserving in intent. Mirror writes come only from `nosql_index_doogat` (create.rs:267, create.rs:522, write_helpers.rs:38) and `mirror_remove_doogat` (delete.rs:90). All of these run on the write-actor thread, the same thread as NoSQL reads, so the \"maintenance-thread mirror write races a read\" window the comments describe does not occur. Either drop the loop and narrow the comment, or keep it and add a test: hold a `RedbIndex` open in one thread, release it after about 50 ms, and assert `nosql_get` succeeds. A message-substring match on `\"already open\"` is also brittle.",
+"file": "ddb-core/src/service/utility.rs:121",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "Simplification: `open_nosql` ends with `last_err.expect(\"loop always runs at least once\")`, a panic path in library code that AGENTS.md forbids (\"No runtime panics in library/FFI code\"). The `attempt < 19` bookkeeping is also hand-rolled. Restructure so the last attempt returns its own error, for example loop `0..19` with `continue` and a final plain `RedbIndex::open(..)` call.",
+"file": "ddb-core/src/service/utility.rs:136",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "R16 only partly resolved. The lost-update test now races a real `sync` that merges a diverged remote. It never asserts the maintenance-produced write landed (for example `remote-file.txt` present in the worktree or \"remote change\" in `git log`). It also does not force overlap: sync may complete before the creates start. Add the landed-write assertion at minimum.",
+"file": "tests/e2e/integration_sync_decoupling.rs:200",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "`diverge_remote` is 66 lines (over the 50-line limit) and repeats the same `Command::new(\"git\")...status().unwrap(); assert!(status.success())` shape nine times. Extract a `git(args: &[&str])` helper.",
+"file": "tests/e2e/integration_sync_decoupling.rs:114",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "Compact does not take the 00162 write lease around its writes. The spec says git-write portions of sync/compact hold the lease. cleanup_crdt_temp (ddb-core/src/compaction/mod.rs:117), compact_crdt_group (:174-178) and run_gc (:308, `git gc`) run on the maintenance thread with no with_write_lock. Sync's own commits do lock. Intent is ambiguous (gc under the lock would violate the no-subprocess-in-hold rule), but neither the lease nor an explicit documented exemption exists, and the \"no prune regression\" metric is unproven",
+"file": "ddb-core/src/compaction/mod.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "The NoSQL-during-compact e2e test cannot fail. tests/e2e/integration_nosql_during_compact.rs:56-62 admits compact finishes in single-digit ms, so overlap is best-effort and not asserted (:128-130). It passes even if NoSQL reads were still on the blocked thread, so the Phase 2 acceptance is not proven. No actor-level test pairs a blocked maintenance closure with a NoSQL read or create (ddb-server/src/actor/tests/mod.rs has no maintenance test)",
+"file": "tests/e2e/integration_nosql_during_compact.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "The lost-update test is weak. integration_maintenance_and_actor_writes_both_land (tests/e2e/integration_sync_decoupling.rs:183) fires sync alongside 5 creates but does not force or assert overlap of a maintenance write and an actor write. Core-side, lock_hook_tests verify deferral via pending flags and the commit-graph file; none uses a deliberately slow `git maintenance`/commit-graph to show a concurrent writer acquiring the lock within the normal bound, as the Phase 0 acceptance describes",
+"file": "ddb-core/src/git_ops/mod.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "A push timeout hides partial progress. Sync does fetch, merge, commit and singleton sweep locally, then push. If push times out, the error is only \"remote push timed out after Ns\" (ddb-core/src/error.rs:158); nothing says the local merge is already committed. The spec's risk section requires reporting completed progress honestly",
+"file": "ddb-core/src/error.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "Switching the lost-update scenario to sync introduces a maintenance git write, but does not establish overlapping write attempts or assert that the remote-produced `remote-file.txt` survives. Synchronize the worker and actor write attempts, then verify both remote content and created records in committed Git state and derived reads.",
+"file": "tests/e2e/integration_sync_decoupling.rs:186",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "The module-local `Once` prevents repeated timeout setters but does not establish initialization before other parallel tests use libgit2 repositories. Isolate native-timeout fixtures in child processes that install options before opening repositories.",
+"file": "ddb-core/src/git_ops/remote_timeout_tests.rs:38",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "The previously required executable walkthrough remains absent from the supplied deliverables. Create a showboat walkthrough demonstrating a responsive mutation during blocked sync and the resulting REMOTE_TIMEOUT.",
+"file": "N/A",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "Function diverge_remote exceeds 50 lines (81 lines); extract bare remote setup and divergent commit helpers",
+"file": "tests/e2e/integration_sync_decoupling.rs:114",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "Phantom method NoSqlMirrorPort::lock_for_read documented as concurrency mechanism but does not exist in code",
+"file": "ddb-core/src/nosql.rs:231",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "medium",
+"issue": "integration_maintenance_and_actor_writes_both_land does not verify the maintenance write landed or survived in Git",
+"file": "tests/e2e/integration_sync_decoupling.rs:235",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "low",
+"issue": "Format drift: an extra blank line was added before `#[cfg(test)]`, and the single-line `ActorHandle::spawn(..., ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap()` calls exceed 100 columns. Wrap them as in the other test files changed in this diff.",
+"file": "ddb-core/src/nosql.rs:276",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "low",
+"issue": "The diff adds `docs/dev/project-management/reviews/...-review-1.md` and the ledger JSON. Confirm these belong in the rework commit. Autopilot state files normally land in separate chore commits.",
+"file": "N/A",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "low",
+"issue": "map_remote_error (ddb-core/src/git_ops/remote.rs:44) labels any git error arriving within 200 ms of the timeout as REMOTE_TIMEOUT; a real auth/protocol failure at about 29.8 s is misreported",
+"file": "ddb-core/src/git_ops/remote.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "low",
+"issue": "docs/src/technical/server.md:28 still says NoSQL lookups go through ReadPool, contradicting server.md:36 and :1026. The constraint note at :1026 only points to a code comment, which is itself stale. The sync.md update is one paragraph",
+"file": "docs/src/technical/server.md",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "low",
+"issue": "CHANGELOG.md:18-19 records the timeout and the worker but omits the public API change (GitRepo::fetch/push now require a timeout argument) and the behavior change that commit-graph and write-threshold maintenance now run after guard drop for all callers, CLI included",
+"file": "CHANGELOG.md",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+},
+{
+"cycle": 2,
+"disposition": "settled-deferral",
+"severity": "low",
+"issue": "The libgit2 timeout is process-global, installed once via a OnceLock (ddb-server/src/lib.rs:101). A second run with a different configured value in the same process silently keeps the first. Low risk",
+"file": "ddb-server/src/lib.rs",
+"reason": "rework cap (2) reached with this finding unresolved; deferred to batch end"
+}
 ]

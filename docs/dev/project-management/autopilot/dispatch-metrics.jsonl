@@ -263,3 +263,11 @@
 {"id":"c8131729","ended_at":1792267908,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"id":"d4903546","ended_at":1792267908,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792267908,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792267948,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
+{"id":"9b716045","kind":"bob","task":"review-20261017-c2","queued_at":1792269194,"prompt_bytes":25922}
+{"id":"1e058f02","kind":"carl","task":"review-20261017-c2","queued_at":1792269194,"prompt_bytes":19353}
+{"id":"4663bb2a","kind":"bob","task":"review-20261017-c2","queued_at":1792269579,"prompt_bytes":185884}
+{"id":"4663bb2a","ended_at":1792269645,"elapsed_s":66,"outcome":"ok","detail":"retry"}
+{"id":"9b716045","ended_at":1792269649,"elapsed_s":455,"outcome":"error","detail":"lack-of-input"}
+{"id":"1e058f02","ended_at":1792269649,"elapsed_s":455,"outcome":"ok","detail":null}
+{"kind":"handoff","site":"review","edge":"leave","at":1792270803,"phase":"done","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
