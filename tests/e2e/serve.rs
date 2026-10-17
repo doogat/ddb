@@ -479,9 +479,10 @@ fn hot_schema_reload_create_and_query() {
         "schemaVersion query failed: {result}"
     );
     let version = result["data"]["schemaVersion"].as_i64().unwrap();
-    assert!(
-        version > 1,
-        "schemaVersion should be >1 after reload, got {version}"
+    assert_eq!(
+        version,
+        v1 + 1,
+        "schemaVersion should increment by exactly 1 after a single reload: {v1} → {version}"
     );
 }
 
@@ -515,7 +516,11 @@ fn hot_schema_reload_schema_version_increments() {
         "schemaVersion failed: {result}"
     );
     let v2 = result["data"]["schemaVersion"].as_i64().unwrap();
-    assert!(v2 > v1, "schemaVersion should increment: {v1} → {v2}");
+    assert_eq!(
+        v2,
+        v1 + 1,
+        "schemaVersion should increment by exactly 1: {v1} → {v2}"
+    );
 }
 
 #[test]

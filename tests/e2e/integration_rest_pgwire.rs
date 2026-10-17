@@ -278,3 +278,54 @@ fn integration_21_pgwire_ddl_triggers_schema_reload() {
          proving the reload fired without a restart"
     );
 }
+
+/// Returns the current `schemaVersion` exposed by the dynamic GraphQL schema.
+fn schema_version(server: &ServerGuard) -> i64 {
+    let result = server.graphql(r#"{ schemaVersion }"#);
+    assert_graphql_ok(&result);
+    result["data"]["schemaVersion"]
+        .as_i64()
+        .expect("schemaVersion must be an integer")
+}
+
+/// PRD 00172 task 4 (tail-sweep gap): the reload decision inside
+/// `ActorHandle::call` must be conditional on `ReloadIntent`, not unconditional
+/// on every statement. A non-schema PgWire statement (INSERT) issued over the
+/// real wire protocol must leave `schemaVersion` unchanged.
+#[test]
+fn integration_22_pgwire_dml_does_not_trigger_schema_reload() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    execute_sql(&server, "CREATE TABLE pgdmltest (label TEXT)");
+
+    let version_before = schema_version(&server);
+
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let (client, connection) = tokio_postgres::Config::new()
+            .host("127.0.0.1")
+            .port(server.pg_port)
+            .user("ddb")
+            .password(&server.token)
+            .dbname("ddb")
+            .connect(tokio_postgres::NoTls)
+            .await
+            .expect("PgWire connection failed");
+        tokio::spawn(async move {
+            connection.await.ok();
+        });
+
+        // Non-SELECT, non-schema-changing branch (pgwire.rs do_query): must
+        // not request a reload.
+        client
+            .simple_query("INSERT INTO pgdmltest (label) VALUES ('no-reload')")
+            .await
+            .expect("PgWire INSERT failed");
+    });
+
+    let version_after = schema_version(&server);
+    assert_eq!(
+        version_after, version_before,
+        "a non-schema PgWire statement must not bump schemaVersion"
+    );
+}
