@@ -87,6 +87,68 @@ HashMap tracker; Layer 2 (`sql_engine/dml.rs::handle_insert`) emits it when
 `rows.len() > 1` against an empty SINGLETON table. Both share the same
 `<intra-batch>` literal so the contract is uniform.
 
+## Unified Transport Rendering Policy (PRD 00173)
+
+`ddb_core::app_contract::error_rendering(AppError) -> ErrorRendering` is the
+**single** code → (HTTP status, redaction, FFI hint) policy. Every server
+transport derives its output from it and must never re-decide redaction or
+status itself:
+
+```rust
+pub struct ErrorRendering {
+    pub code: &'static str,
+    pub message: String,       // redacted for Internal-category errors
+    pub http_status: u16,
+    pub category: AppErrorCategory,
+    pub field: Option<String>,
+    pub details: Vec<(String, AppErrorDetail)>,
+    pub ffi_variant: FfiVariant,
+}
+```
+
+- `GraphQL` (`to_graphql_error_from_app`), `REST` and `NoSQL HTTP`
+  (`http_error_response`, shared by both) all call `error_rendering` and
+  encode its fields — none of them decide a status code or a redaction rule
+  independently any more.
+- `AppError.message` is `DoogatError::to_string()`, which for every simple
+  variant carries a thiserror `Display` prefix (`"sql engine: "`,
+  `"not found: "`, `"validation: "`, `"invalid path: "`, `"conflict: "`,
+  `"bad request: "`, `"parse: "`). `error_rendering` strips it once, centrally,
+  before any transport sees the message.
+- `DoogatError::SqlEngine` now converts to `AppError` with code `SQL_ERROR`
+  (category `InvalidInput`) — `SQL_ERROR` is a first-class `codes::SQL_ERROR`
+  constant, not a wire-only string. SQL syntax errors render identically on
+  GraphQL and REST (`SQL_ERROR` + message, never redacted).
+- HTTP status is per-code, not strictly per-category: `SQL_ERROR`,
+  `NOT_NULL_VIOLATION`, `UNKNOWN_FIELD`, and `TYPE_NOT_REGISTERED` stay `422`
+  while `VALIDATION_ERROR`, `INVALID_PATH`, and `BAD_REQUEST` are `400`, even
+  though all are `InvalidInput` category. This is deliberate — it preserves
+  every status REST served before unification — and must not be "fixed" into
+  a single per-category status without a compatibility review.
+- `Internal`-category errors are logged once, centrally, inside
+  `error_rendering` via `tracing::error!(code, message, "internal error")`
+  with the unredacted message, before the message is replaced with the
+  literal `"internal error"` and `field`/`details` are dropped. Transports
+  never log this themselves.
+- `FfiVariant` (`NotFound` / `Validation` / `Conflict` / `Internal`) is a
+  core-only, adapter-neutral hint derived 1:1 from `AppErrorCategory`. It
+  exists so a future FFI rewrite can replace the lossy `DoogatError -> DdbError`
+  allowlist in `ddb-core/src/ffi/records.rs` with a mapping from this enum,
+  and so a future PgWire rewrite can consume `ErrorRendering.message`/`.code`
+  directly instead of `Display`-wrapping raw errors. Neither FFI nor PgWire
+  consumes it yet — this PRD only defines and unit-tests the surface.
+- Cross-transport parity is pinned by `ddb-server/tests/error_parity.rs`,
+  which drives a representative code set through all three transports and
+  asserts identical code + redaction, plus the documented per-code status.
+
+**Compatibility note:** two REST/GraphQL response shapes changed when this
+policy landed. GraphQL SQL errors are no longer redacted to `INTERNAL_ERROR`
+— they now render `SQL_ERROR` with the SQL engine's message, matching REST.
+REST `SCHEMA_APPLY_PARTIAL` and any other `Internal`-category structured code
+now redacts its message to `"internal error"` instead of passing the raw
+detail through — matching GraphQL's pre-existing redaction. No HTTP status
+changed for any existing code.
+
 ## CLI Error Handling
 
 The CLI's `main()` function calls `run(cli)` which returns `Result<()>`. On error, it prints `"error: {e}"` to stderr and exits with code 1.

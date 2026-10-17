@@ -69,12 +69,22 @@ exception.
 
 | Helper | Location | Signature | Consumers |
 |--------|----------|-----------|-----------|
+| Error-rendering policy | `ddb-core/src/app_contract/error.rs` | `error_rendering(AppError) -> ErrorRendering` | `classify`, `to_graphql_error_from_app` (GraphQL), `http_error_response` (REST/NoSQL) |
 | HTTP error mapping | `ddb-server/src/http_error.rs` | `http_error_response(DoogatError) -> (StatusCode, Json<ErrorBody>)` | REST (`rest.rs`), NoSQL HTTP (`nosql_api.rs`) |
 | SQL schema-mutation classifier | `ddb-core/src/sql_engine/classify.rs` | `requires_schema_reload(&str) -> bool` | called once inside `ActorHandle::call` via `ReloadIntent` (`actor/mod.rs`) |
 | GraphQL input decoding | `ddb-server/src/schema/input.rs` | `opt_string`, `opt_string_list`, `string_list`, `fields_map`, `opt_fields_map`, `conflict_action` | mutation resolvers (`schema/mutations/operations.rs`) |
 
+- **Error-rendering policy** (PRD 00173) is the single source of truth for
+  code, HTTP status, redaction, and an FFI hint (`FfiVariant`), given an
+  adapter-neutral `AppError`. `classify` (GraphQL/REST shared classification),
+  `to_graphql_error_from_app`, and `http_error_response` are all thin
+  encoders over this one function — none of them decide redaction or status
+  independently. Full policy description, the per-code status table, and the
+  compatibility note for the GraphQL SQL-error and REST redaction shape
+  changes: [Error Handling](./errors.md#unified-transport-rendering-policy-prd-00173).
 - **HTTP error mapping** turns a `DoogatError` into a status code plus a
-  `{ error, message }` body. The `error` field carries the unified code
+  `{ error, message }` body, by converting to `AppError` and calling the
+  error-rendering policy above. The `error` field carries the unified code
   vocabulary (`NOT_FOUND`, `VALIDATION_ERROR`, `UNIQUE_VIOLATION`, ...), the same
   codes GraphQL exposes under `extensions.code`. REST and NoSQL HTTP route every
   error through this one helper, so a given `DoogatError` yields the same shape
