@@ -548,16 +548,6 @@ fn internal_structured_schema_apply_partial() -> DoogatError {
     alarming_structured(ddb_core::error::codes::SCHEMA_APPLY_PARTIAL)
 }
 
-/// An unregistered code that cannot be baked into an implementation,
-/// because it does not exist until the test runs.
-fn unregistered_code_minted_at_runtime() -> &'static str {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock is after the unix epoch")
-        .as_nanos();
-    Box::leak(format!("UNREGISTERED_{nanos}").into_boxed_str())
-}
-
 /// The only extensions a redacted error may carry: the code, nothing else.
 fn only_code_extensions(code: &str) -> async_graphql::ErrorExtensionValues {
     let mut map = async_graphql::ErrorExtensionValues::default();
@@ -582,11 +572,7 @@ fn legacy_graphql_error_on_internal_structured_code_exposes_only_code() {
 
 #[test]
 fn legacy_graphql_error_on_unregistered_structured_code_exposes_only_code() {
-    for code in [
-        "NOT_A_CODE",
-        "SCHEMA_APPLY_PENDING",
-        unregistered_code_minted_at_runtime(),
-    ] {
+    for code in ["NOT_A_CODE", "SCHEMA_APPLY_PENDING", "UNREGISTERED_CODE"] {
         for fixture in [alarming_structured(code), structured_with_benign_context(code)] {
             let err = to_graphql_error(fixture);
             assert_eq!(err.message, "internal error", "{code}: message");
