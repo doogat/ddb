@@ -4,17 +4,17 @@ mod handlers;
 mod tests;
 
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::Utc;
-use ddb_core::app_contract::AppOutput;
+use ddb_core::app_contract::{AppOutput, CreateCommand, UnregisteredTypePolicy, UpdateCommand};
 use ddb_core::error::DoogatError;
 use ddb_core::schema_diff::plan::SchemaApplyReport;
 use ddb_core::service::DoogatService;
-use ddb_core::sql_engine::SqlResult;
+use ddb_core::sql_engine::{requires_schema_reload, SqlResult};
 use ddb_core::types::{
-    BatchCreateInput, BatchUpdateInput, BrokenSequence, CompactionReport, ConflictAction,
-    MaintenanceReport, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, QueryValue,
+    BatchCreateInput, BatchUpdateInput, BrokenSequence, CompactOptions, CompactionReport,
+    ConflictAction, ListFilter, MaintenanceReport, OrphanDoogat, PaginatedSearchResult, ParsedDoogat, QueryValue,
     SearchFilters, SequenceInfo, SequenceNode, StaleDoogat, Suggestion, SyncReport, TableSchema,
     UnlinkedMention,
 };
@@ -229,11 +229,11 @@ pub enum EventIntent {
     Created,
     /// `update`: one `Updated` for the returned doogat.
     Updated,
-    /// `delete`: one `Deleted`. The id+type are resolved BEFORE the delete closure
-    /// runs (the row is gone afterward), so the intent carries them.
+    /// `delete`: one `Deleted`. The closure resolves the type into the shared cell
+    /// BEFORE deleting (the row is gone afterward); emission reads it back after.
     Deleted {
         id: String,
-        doogat_type: Option<String>,
+        doogat_type: Arc<Mutex<Option<String>>>,
     },
     /// `batch_create`: one `Created` per returned doogat.
     CreateMany,
@@ -297,7 +297,10 @@ fn emit_deleted_if<T>(bus: &EventBus, intent: &EventIntent, result: &Result<T, D
             bus.send(DoogatEvent {
                 kind: EventKind::Deleted,
                 doogat_id: id.clone(),
-                doogat_type: doogat_type.clone(),
+                doogat_type: doogat_type
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
                 timestamp: Utc::now(),
             });
         }
@@ -599,10 +602,10 @@ impl ActorHandle {
     }
 
     pub async fn get_doogat(&self, id: String) -> ActorResult<ParsedDoogat> {
-        match self.send(ActorCommand::GetDoogat { id }).await {
-            ActorReply::Doogat(r) => *r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.get_doogat_parsed(&id)
+        })
+        .await
     }
 
     pub async fn list_doogats(
@@ -614,30 +617,28 @@ impl ActorHandle {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> ActorResult<Vec<ParsedDoogat>> {
-        match self
-            .send(ActorCommand::ListDoogats {
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.list_doogats_filtered(&ListFilter {
                 doogat_type,
                 tag,
                 backlinks_of,
                 field_filters,
                 limit,
                 offset,
+                ..Default::default()
             })
-            .await
-        {
-            ActorReply::DoogatList(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        })
+        .await
     }
 
     pub async fn filtered_list(
         &self,
         q: ddb_core::types::TypedListQuery,
     ) -> ActorResult<Vec<ParsedDoogat>> {
-        match self.send(ActorCommand::FilteredList(q)).await {
-            ActorReply::DoogatList(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.typed_filtered_list(&q)
+        })
+        .await
     }
 
     pub async fn aggregate_query(
@@ -645,13 +646,10 @@ impl ActorHandle {
         sql: String,
         params: Vec<QueryValue>,
     ) -> ActorResult<Vec<String>> {
-        match self
-            .send(ActorCommand::AggregateQuery { sql, params })
-            .await
-        {
-            ActorReply::AggregateRow(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.aggregate_query(&sql, &params)
+        })
+        .await
     }
 
     pub async fn search(
@@ -661,18 +659,10 @@ impl ActorHandle {
         offset: usize,
         filters: SearchFilters,
     ) -> ActorResult<PaginatedSearchResult> {
-        match self
-            .send(ActorCommand::Search {
-                query,
-                limit,
-                offset,
-                filters,
-            })
-            .await
-        {
-            ActorReply::SearchResults(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.search_paginated_filtered(&query, limit, offset, &filters)
+        })
+        .await
     }
 
     pub async fn create_doogat(
@@ -684,96 +674,114 @@ impl ActorHandle {
         fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
         on_conflict: ConflictAction,
     ) -> ActorResult<AppOutput<ParsedDoogat>> {
-        match self
-            .send(ActorCommand::CreateDoogat {
+        self.call(EventIntent::Created, ReloadIntent::None, move |svc| {
+            let cmd = CreateCommand {
                 title,
                 body,
                 tags,
                 doogat_type,
                 fields,
                 on_conflict,
-            })
-            .await
-        {
-            ActorReply::CreateOutput(r) => *r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+                // PRD 00155: GraphQL + REST reject unregistered types
+                // (TYPE_NOT_REGISTERED). Only the CLI opts into BaseOnly.
+                unregistered_type_policy: UnregisteredTypePolicy::Strict,
+            };
+            svc.create(cmd)
+        })
+        .await
     }
 
     pub async fn update_doogat(
         &self,
         params: UpdateDoogatParams,
     ) -> ActorResult<AppOutput<ParsedDoogat>> {
-        match self
-            .send(ActorCommand::UpdateDoogat {
+        self.call(EventIntent::Updated, ReloadIntent::None, move |svc| {
+            let cmd = UpdateCommand {
                 id: params.id,
                 title: params.title,
-                body: params.body,
                 tags: params.tags,
                 doogat_type: params.doogat_type,
+                body: params.body,
                 fields: params.fields,
                 unset_fields: params.unset_fields,
-            })
-            .await
-        {
-            ActorReply::UpdateOutput(r) => *r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+            };
+            svc.update(cmd)
+        })
+        .await
     }
 
     pub async fn batch_update(
         &self,
         updates: Vec<BatchUpdateInput>,
     ) -> ActorResult<Vec<ParsedDoogat>> {
-        match self.send(ActorCommand::BatchUpdate { updates }).await {
-            ActorReply::DoogatList(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::BatchUpdate, ReloadIntent::None, move |svc| {
+            svc.batch_update(&updates)
+        })
+        .await
     }
 
     pub async fn create_many(
         &self,
         inputs: Vec<BatchCreateInput>,
     ) -> ActorResult<Vec<ParsedDoogat>> {
-        match self.send(ActorCommand::CreateMany { inputs }).await {
-            ActorReply::DoogatList(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::CreateMany, ReloadIntent::None, move |svc| {
+            svc.batch_create(&inputs)
+        })
+        .await
     }
 
     pub async fn delete_doogat(&self, id: String) -> ActorResult<()> {
-        match self.send(ActorCommand::DeleteDoogat { id }).await {
-            ActorReply::Deleted(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        let doogat_type: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let doogat_type_for_closure = doogat_type.clone();
+        self.call(
+            EventIntent::Deleted {
+                id: id.clone(),
+                doogat_type,
+            },
+            ReloadIntent::None,
+            move |svc| {
+                let resolved = svc
+                    .get_doogat_parsed(&id)
+                    .ok()
+                    .and_then(|z| z.meta.doogat_type);
+                *doogat_type_for_closure
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = resolved;
+                svc.delete_doogat(&id, &format!("delete doogat {id}"))
+                    .map(|_broken| ())
+            },
+        )
+        .await
     }
 
     pub async fn execute_sql(&self, sql: String) -> ActorResult<SqlResult> {
-        match self.send(ActorCommand::ExecuteSql { sql }).await {
-            ActorReply::SqlResult(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        let reload = ReloadIntent::Explicit(requires_schema_reload(&sql));
+        self.call(EventIntent::None, reload, move |svc| svc.execute_sql(&sql))
+            .await
     }
 
     pub async fn execute_batch(&self, statements: Vec<String>) -> ActorResult<Vec<SqlResult>> {
-        match self.send(ActorCommand::ExecuteBatch { statements }).await {
-            ActorReply::SqlResults(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        let reload =
+            ReloadIntent::Explicit(statements.iter().any(|s| requires_schema_reload(s)));
+        let combined = statements.join(";\n");
+        self.call(EventIntent::None, reload, move |svc| {
+            svc.execute_batch(&combined)
+        })
+        .await
     }
 
     pub async fn get_type_schemas(&self) -> ActorResult<Vec<TableSchema>> {
-        match self.send(ActorCommand::GetTypeSchemas).await {
-            ActorReply::TypeSchemas(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.list_type_schemas()
+        })
+        .await
     }
 
     pub async fn get_backlinks(&self, id: String) -> ActorResult<Vec<String>> {
-        match self.send(ActorCommand::GetBacklinks { id }).await {
-            ActorReply::Backlinks(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.backlink_ids(&id)
+        })
+        .await
     }
 
     pub async fn count_doogats(
@@ -783,18 +791,18 @@ impl ActorHandle {
         backlinks_of: Option<String>,
         field_filters: Vec<(String, String)>,
     ) -> ActorResult<i64> {
-        match self
-            .send(ActorCommand::CountDoogats {
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.count_doogats_filtered(&ListFilter {
                 doogat_type,
                 tag,
                 backlinks_of,
                 field_filters,
+                limit: None,
+                offset: None,
+                ..Default::default()
             })
-            .await
-        {
-            ActorReply::Count(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        })
+        .await
     }
 
     pub async fn attach_file(
@@ -804,41 +812,27 @@ impl ActorHandle {
         bytes: Vec<u8>,
         mime: String,
     ) -> ActorResult<ddb_core::types::AttachmentInfo> {
-        match self
-            .send(ActorCommand::AttachFile {
-                doogat_id,
-                filename,
-                bytes,
-                mime,
-            })
-            .await
-        {
-            ActorReply::Attachment(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.attach_file(&doogat_id, &filename, &bytes, &mime)
+        })
+        .await
     }
 
     pub async fn detach_file(&self, doogat_id: String, filename: String) -> ActorResult<()> {
-        match self
-            .send(ActorCommand::DetachFile {
-                doogat_id,
-                filename,
-            })
-            .await
-        {
-            ActorReply::Deleted(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.detach_file(&doogat_id, &filename)
+        })
+        .await
     }
 
     pub async fn list_attachments(
         &self,
         doogat_id: String,
     ) -> ActorResult<Vec<ddb_core::types::AttachmentInfo>> {
-        match self.send(ActorCommand::ListAttachments { doogat_id }).await {
-            ActorReply::AttachmentList(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.list_attachments(&doogat_id)
+        })
+        .await
     }
 
     pub async fn compact(
@@ -847,128 +841,145 @@ impl ActorHandle {
         no_backup: bool,
         backup_path: Option<String>,
     ) -> ActorResult<CompactionReport> {
-        match self
-            .send(ActorCommand::Compact {
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            let result = svc.compact(&CompactOptions {
                 force,
-                no_backup,
-                backup_path,
-            })
-            .await
-        {
-            ActorReply::Maintenance(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+                skip_backup: no_backup,
+                backup_path: backup_path.map(PathBuf::from),
+            });
+            if result.is_ok() {
+                if let Err(e) = svc.rebuild_if_stale() {
+                    tracing::warn!(%e, "actor: index rebuild after compact failed");
+                }
+            }
+            result
+        })
+        .await
     }
 
     pub async fn run_maintenance(&self, task: Option<String>) -> ActorResult<MaintenanceReport> {
-        match self.send(ActorCommand::GitMaintenance { task }).await {
-            ActorReply::GitMaintenance(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            let tasks_vec: Vec<&str>;
+            let tasks_opt = match &task {
+                Some(t) => {
+                    tasks_vec = vec![t.as_str()];
+                    Some(tasks_vec.as_slice())
+                }
+                None => None,
+            };
+            svc.run_maintenance(tasks_opt)
+        })
+        .await
     }
 
     pub async fn sync(&self, remote: String, branch: String) -> ActorResult<SyncReport> {
-        match self.send(ActorCommand::Sync { remote, branch }).await {
-            ActorReply::SyncResult(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            let result = svc.sync(&remote, &branch);
+            if result.is_ok() {
+                if let Err(e) = svc.rebuild_if_stale() {
+                    tracing::warn!(%e, "actor: index rebuild after sync failed");
+                }
+            }
+            result
+        })
+        .await
     }
 
     pub async fn nosql_get(&self, id: String) -> ActorResult<Option<ParsedDoogat>> {
-        match self.send(ActorCommand::NoSqlGet { id }).await {
-            ActorReply::NoSqlDoogat(r) => *r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.nosql_get(&id)
+        })
+        .await
     }
 
     pub async fn nosql_scan_type(&self, type_name: String) -> ActorResult<Vec<String>> {
-        match self.send(ActorCommand::NoSqlScanType { type_name }).await {
-            ActorReply::NoSqlIds(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.nosql_scan_type(&type_name)
+        })
+        .await
     }
 
     pub async fn nosql_scan_tag(&self, tag: String) -> ActorResult<Vec<String>> {
-        match self.send(ActorCommand::NoSqlScanTag { tag }).await {
-            ActorReply::NoSqlIds(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.nosql_scan_tag(&tag)
+        })
+        .await
     }
 
     pub async fn nosql_backlinks(&self, id: String) -> ActorResult<Vec<String>> {
-        match self.send(ActorCommand::NoSqlBacklinks { id }).await {
-            ActorReply::NoSqlIds(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.nosql_backlinks(&id)
+        })
+        .await
     }
 
     pub async fn unlinked_mentions(&self, id: String) -> ActorResult<Vec<UnlinkedMention>> {
-        match self.send(ActorCommand::UnlinkedMentions { id }).await {
-            ActorReply::UnlinkedMentions(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.unlinked_mentions(&id)
+        })
+        .await
     }
 
     pub async fn suggest_links(&self, id: String, limit: usize) -> ActorResult<Vec<Suggestion>> {
-        match self.send(ActorCommand::SuggestLinks { id, limit }).await {
-            ActorReply::Suggestions(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.suggest_links(&id, limit)
+        })
+        .await
     }
 
     pub async fn stale_doogats(
         &self,
         type_filter: Option<String>,
     ) -> ActorResult<Vec<StaleDoogat>> {
-        match self.send(ActorCommand::StaleDoogats { type_filter }).await {
-            ActorReply::StaleDoogats(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.stale_doogats(type_filter.as_deref())
+        })
+        .await
     }
 
     pub async fn orphan_doogats(
         &self,
         type_filter: Option<String>,
     ) -> ActorResult<Vec<OrphanDoogat>> {
-        match self.send(ActorCommand::OrphanDoogats { type_filter }).await {
-            ActorReply::OrphanDoogats(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.orphan_doogats(type_filter.as_deref())
+        })
+        .await
     }
 
     pub async fn sequence_info(&self, id: String) -> ActorResult<SequenceInfo> {
-        match self.send(ActorCommand::SequenceInfo { id }).await {
-            ActorReply::SequenceInfoResult(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.sequence_info(&id)
+        })
+        .await
     }
 
     pub async fn sequence_children(&self, id: String) -> ActorResult<Vec<SequenceNode>> {
-        match self.send(ActorCommand::SequenceChildren { id }).await {
-            ActorReply::SequenceNodes(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.sequence_children(&id)
+        })
+        .await
     }
 
     pub async fn sequence_breadcrumb(&self, id: String) -> ActorResult<Vec<SequenceNode>> {
-        match self.send(ActorCommand::SequenceBreadcrumb { id }).await {
-            ActorReply::SequenceNodes(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.sequence_breadcrumb(&id)
+        })
+        .await
     }
 
     pub async fn broken_sequences(&self) -> ActorResult<Vec<BrokenSequence>> {
-        match self.send(ActorCommand::BrokenSequences).await {
-            ActorReply::BrokenSequences(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.broken_sequences()
+        })
+        .await
     }
 
     pub async fn health_check(&self) -> ActorResult<bool> {
-        match self.send(ActorCommand::HealthCheck).await {
-            ActorReply::HealthStatus(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+            svc.health_check()
+        })
+        .await
     }
 
     pub async fn upsert_singleton(
@@ -976,13 +987,14 @@ impl ActorHandle {
         type_name: String,
         fields: std::collections::BTreeMap<String, ddb_core::types::Value>,
     ) -> ActorResult<UpsertOutcome> {
-        match self
-            .send(ActorCommand::UpsertSingleton { type_name, fields })
-            .await
-        {
-            ActorReply::Upsert(r) => r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
+        self.call(
+            EventIntent::Upsert {
+                type_name: type_name.clone(),
+            },
+            ReloadIntent::None,
+            move |svc| svc.upsert_singleton(&type_name, fields),
+        )
+        .await
     }
 
     pub async fn apply_schema(
@@ -991,34 +1003,19 @@ impl ActorHandle {
         dry_run: bool,
         allow_destructive: bool,
     ) -> ActorResult<AppOutput<SchemaApplyReport>> {
-        match self
-            .send(ActorCommand::ApplySchema {
-                schema_doc,
-                dry_run,
-                allow_destructive,
-            })
-            .await
-        {
-            ActorReply::SchemaApply(r) => *r,
-            _ => Err(DoogatError::Validation("unexpected reply".into())),
-        }
-    }
-
-    async fn send(&self, cmd: ActorCommand) -> ActorReply {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        let msg = ActorMsg {
-            cmd,
-            reply: reply_tx,
-        };
-        // If send fails, the actor is gone
-        if self.tx.send(Envelope::Enum(msg)).await.is_err() {
-            return ActorReply::Deleted(Err(DoogatError::Validation("actor stopped".into())));
-        }
-        reply_rx
-            .await
-            .unwrap_or(ActorReply::Deleted(Err(DoogatError::Validation(
-                "actor dropped reply".into(),
-            ))))
+        self.call(
+            EventIntent::None,
+            ReloadIntent::SchemaApply { dry_run },
+            move |svc| {
+                let cmd = ddb_core::app_contract::ApplySchemaCommand {
+                    schema_doc,
+                    dry_run,
+                    allow_destructive,
+                };
+                svc.apply_schema(cmd)
+            },
+        )
+        .await
     }
 }
 
