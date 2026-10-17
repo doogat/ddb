@@ -5,6 +5,14 @@ use crate::types::{AttachmentInfo, CommitHash, DoogatId, FixReport, ParsedDoogat
 
 use super::DoogatService;
 
+/// Whether `e` is redb's `DatabaseAlreadyOpen` conflict rather than a real
+/// failure. `RedbIndex::open` flattens every redb error to a `DoogatError::Redb(String)`
+/// (`nosql.rs`'s `redb_err`), so the only signal left is the message text.
+#[cfg(feature = "nosql")]
+fn is_transient_open_conflict(e: &crate::error::DoogatError) -> bool {
+    matches!(e, crate::error::DoogatError::Redb(msg) if msg.contains("already open"))
+}
+
 impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     // ── Utility ─────────────────────────────────────────────────────────
 
@@ -100,10 +108,32 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
 
     // ── NoSQL reads ─────────────────────────────────────────────────────
 
+    /// Open the NoSQL redb handle, retrying briefly on a transient
+    /// `DatabaseAlreadyOpen` conflict. redb allows only one open handle on
+    /// the file at a time (`nosql.rs`'s `RedbMirror` doc comment); since
+    /// 00174 split the write actor and maintenance worker onto separate
+    /// threads sharing one mirror, a NoSQL read opening its own handle here
+    /// can now race a mirror write's own transient open on the other
+    /// thread. Both opens are brief (one redb transaction), so a short
+    /// bounded retry resolves the race without a cross-thread lock spanning
+    /// two independently-owned `DoogatService` instances.
     #[cfg(feature = "nosql")]
     fn open_nosql(&self) -> Result<crate::nosql::RedbIndex> {
         let redb_path = self.repo_path.join(".ddb/nosql.redb");
-        crate::nosql::RedbIndex::open(&redb_path)
+        let mut last_err = None;
+        for attempt in 0..20 {
+            match crate::nosql::RedbIndex::open(&redb_path) {
+                Ok(idx) => return Ok(idx),
+                Err(e) if is_transient_open_conflict(&e) => {
+                    last_err = Some(e);
+                    if attempt < 19 {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.expect("loop always runs at least once"))
     }
 
     /// Open and rebuild the NoSQL index, returning a ready-to-query handle.

@@ -11,7 +11,12 @@ use tower::ServiceExt; // for `oneshot`
 async fn setup(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
     ddb_core::service::DoogatService::init(dir).expect("init repo");
     let event_bus = EventBus::new();
-    let actor = ActorHandle::spawn(dir.to_path_buf(), event_bus).expect("spawn actor");
+    let actor = ActorHandle::spawn(
+        dir.to_path_buf(),
+        event_bus,
+        ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT,
+    )
+    .expect("spawn actor");
     let pool = ReadPool::new(dir.to_path_buf(), 1).expect("read pool");
     (actor, pool)
 }

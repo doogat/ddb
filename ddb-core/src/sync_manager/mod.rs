@@ -239,9 +239,22 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         Ok(nodes)
     }
 
-    /// Full sync cycle: fetch → merge → resolve → push → update state → reindex.
-    #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
+    /// Full sync cycle at the default remote timeout. See
+    /// `sync_with_timeout` for the configurable form.
     pub fn sync(&mut self, remote: &str, branch: &str, index: &Index) -> Result<SyncReport> {
+        self.sync_with_timeout(remote, branch, index, DEFAULT_REMOTE_TIMEOUT)
+    }
+
+    /// Full sync cycle: fetch → merge → resolve → push → update state →
+    /// reindex, bounding the fetch and push legs by `remote_timeout`.
+    #[cfg_attr(feature = "profiling", tracing::instrument(skip_all))]
+    pub fn sync_with_timeout(
+        &mut self,
+        remote: &str,
+        branch: &str,
+        index: &Index,
+        remote_timeout: std::time::Duration,
+    ) -> Result<SyncReport> {
         let sync_start = std::time::Instant::now();
         tracing::info!(remote, branch, "sync_start");
 
@@ -251,7 +264,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
 
         // Fetch
         let phase_start = std::time::Instant::now();
-        self.repo.fetch(remote, branch, DEFAULT_REMOTE_TIMEOUT)?;
+        self.repo.fetch(remote, branch, remote_timeout)?;
         tracing::info!(
             phase = "fetch",
             elapsed_ms = phase_start.elapsed().as_millis(),
@@ -268,7 +281,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
             "sync_phase"
         );
 
-        self.finalize_sync(remote, branch, index, &mut report)?;
+        self.finalize_sync(remote, branch, index, remote_timeout, &mut report)?;
 
         tracing::info!(total_ms = sync_start.elapsed().as_millis(), "sync_complete");
         Ok(report)
@@ -390,6 +403,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         remote: &str,
         branch: &str,
         index: &Index,
+        remote_timeout: std::time::Duration,
         report: &mut SyncReport,
     ) -> Result<()> {
         let phase_start = std::time::Instant::now();
@@ -427,7 +441,7 @@ impl<'a, G: GitBackend> SyncManager<'a, G> {
         );
 
         let phase_start = std::time::Instant::now();
-        self.repo.push(remote, branch, DEFAULT_REMOTE_TIMEOUT)?;
+        self.repo.push(remote, branch, remote_timeout)?;
         tracing::info!(
             phase = "push",
             elapsed_ms = phase_start.elapsed().as_millis(),

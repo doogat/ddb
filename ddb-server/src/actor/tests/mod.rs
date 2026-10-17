@@ -13,7 +13,7 @@ async fn shared_actor_preserves_schema_applys_owned_transaction() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let tmp = tempfile::tempdir().unwrap();
         DoogatService::init(tmp.path()).unwrap();
-        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), EventBus::new()).unwrap();
+        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), EventBus::new(), ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
         let schema = "types:\n  - name: item\n    columns:\n      - name: label\n        data_type: TEXT\n        zone: frontmatter\n";
         actor.apply_schema(schema.into(), false, false).await.unwrap();
         actor.execute_sql("INSERT INTO item (label) VALUES ('committed')".into()).await.unwrap();
@@ -29,7 +29,7 @@ async fn actor_service_uses_shared_transaction_scope() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let tmp = tempfile::tempdir().unwrap();
         DoogatService::init(tmp.path()).unwrap();
-        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), EventBus::new()).unwrap();
+        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), EventBus::new(), ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
         for sql in ["BEGIN", "COMMIT", "ROLLBACK", "SELECT 1; BEGIN"] {
             let err = actor.execute_sql(sql.into()).await.unwrap_err();
             assert!(
@@ -81,7 +81,7 @@ async fn read_returns_value_and_emits_no_event() {
         let tmp = tempfile::tempdir().unwrap();
         DoogatService::init(tmp.path()).unwrap();
         let bus = EventBus::new();
-        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), bus.clone()).unwrap();
+        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), bus.clone(), ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
         // Subscribe BEFORE the call so any emitted event would be observed.
         let mut rx = bus.subscribe();
@@ -122,7 +122,7 @@ async fn mutation_returns_value_and_emits_created_event() {
         let tmp = tempfile::tempdir().unwrap();
         DoogatService::init(tmp.path()).unwrap();
         let bus = EventBus::new();
-        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), bus.clone()).unwrap();
+        let actor = ActorHandle::spawn(tmp.path().to_path_buf(), bus.clone(), ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap();
 
         // Subscribe BEFORE the call so the emitted event is observed.
         let mut rx = bus.subscribe();
@@ -172,5 +172,5 @@ const ITEM_SCHEMA: &str = "types:\n  - name: item\n    columns:\n      - name: l
 
 fn spawn_actor(dir: &std::path::Path, bus: EventBus) -> ActorHandle {
     DoogatService::init(dir).unwrap();
-    ActorHandle::spawn(dir.to_path_buf(), bus).unwrap()
+    ActorHandle::spawn(dir.to_path_buf(), bus, ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT).unwrap()
 }

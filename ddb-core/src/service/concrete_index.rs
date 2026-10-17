@@ -19,6 +19,18 @@ use super::DoogatService;
 
 impl<G: GitBackend> DoogatService<G, Index> {
     pub fn sync(&self, remote: &str, branch: &str) -> Result<SyncReport> {
+        self.sync_with_timeout(remote, branch, git_ops::DEFAULT_REMOTE_TIMEOUT)
+    }
+
+    /// Sync bounding the fetch/push legs by `remote_timeout` instead of
+    /// `git_ops::DEFAULT_REMOTE_TIMEOUT`, so a server can honor its
+    /// configured `[remote] timeout_secs`.
+    pub fn sync_with_timeout(
+        &self,
+        remote: &str,
+        branch: &str,
+        remote_timeout: std::time::Duration,
+    ) -> Result<SyncReport> {
         let mut mgr = match SyncManager::open(&self.repo) {
             Ok(m) => m,
             Err(DoogatError::NotFound(msg)) => {
@@ -35,7 +47,7 @@ impl<G: GitBackend> DoogatService<G, Index> {
             }
             Err(e) => return Err(e),
         };
-        mgr.sync(remote, branch, &self.index)
+        mgr.sync_with_timeout(remote, branch, &self.index, remote_timeout)
     }
 
     pub fn import_bundle(&self, path: &Path) -> Result<SyncReport> {

@@ -8,7 +8,12 @@ use std::collections::BTreeMap;
 async fn spawn_actor(dir: &std::path::Path) -> ActorHandle {
     ddb_core::service::DoogatService::init(dir).expect("init repo");
     let event_bus = EventBus::new();
-    ActorHandle::spawn(dir.to_path_buf(), event_bus).expect("spawn actor")
+    ActorHandle::spawn(
+        dir.to_path_buf(),
+        event_bus,
+        ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT,
+    )
+    .expect("spawn actor")
 }
 
 #[tokio::test]

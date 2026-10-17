@@ -43,7 +43,8 @@ pub async fn run(
 ) -> std::io::Result<()> {
     let start_time = Instant::now();
     let cfg = ServerConfig::load(port, pg_port, bind);
-    install_remote_timeouts(std::time::Duration::from_secs(cfg.remote_timeout_secs))?;
+    let remote_timeout = std::time::Duration::from_secs(cfg.remote_timeout_secs);
+    install_remote_timeouts(remote_timeout)?;
 
     let token = auth::load_or_create_token(&cfg.token_file)?;
     tracing::info!(path = %cfg.token_file.display(), "auth token");
@@ -51,7 +52,7 @@ pub async fn run(
 
     let attachment_root = repo_path.join("reference");
     let event_bus = EventBus::new();
-    let actor = ActorHandle::spawn(repo_path.clone(), event_bus)
+    let actor = ActorHandle::spawn(repo_path.clone(), event_bus, remote_timeout)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     let read_pool = read_pool::ReadPool::new(repo_path, cfg.read_pool_size)
         .map_err(|e| std::io::Error::other(e.to_string()))?;

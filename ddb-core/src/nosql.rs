@@ -226,10 +226,16 @@ impl RedbIndex {
 ///
 /// Opens the database per call because redb holds an exclusive file lock while
 /// a handle is open. `open_lock` serializes those opens, so services sharing
-/// one mirror (behind an `Arc`) never collide on `DatabaseAlreadyOpen`.
+/// one mirror (behind an `Arc`) never collide on `DatabaseAlreadyOpen` —
+/// including a NoSQL read (`nosql_get`, `nosql_scan_type`, `nosql_scan_tag`,
+/// `nosql_backlinks`) that opens its own handle outside this type via
+/// `NoSqlMirrorPort::lock_for_read`, which `DoogatService` holds for the
+/// read's full duration (not just its own opens): since 00174 split the
+/// write actor and maintenance worker onto separate threads sharing one
+/// mirror, a read racing a maintenance-thread mirror write is a real window,
+/// not a hypothetical one.
 ///
-/// This exclusive-open constraint is also why NoSQL reads (`nosql_get`,
-/// `nosql_scan_type`, `nosql_scan_tag`, `nosql_backlinks`) stay on the
+/// This exclusive-open constraint is also why NoSQL reads stay on the
 /// write-actor's dispatch channel instead of fanning out onto `ReadPool`: a
 /// naive `ReadPool`-style fan-out spins up a fresh `DoogatService` per task,
 /// and each of those would open its own redb handle on this same file,
@@ -267,6 +273,7 @@ impl crate::traits::NoSqlMirrorPort for RedbMirror {
         self.with_index(|idx| idx.remove_doogat(id))
     }
 }
+
 
 #[cfg(test)]
 mod tests {

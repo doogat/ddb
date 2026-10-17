@@ -143,7 +143,12 @@ mod tests {
     fn test_actor_and_pool(dir: &std::path::Path) -> (ActorHandle, ReadPool) {
         DoogatService::init(dir).expect("init repo");
         let event_bus = EventBus::new();
-        let actor = ActorHandle::spawn(dir.to_path_buf(), event_bus).expect("spawn actor");
+        let actor = ActorHandle::spawn(
+            dir.to_path_buf(),
+            event_bus,
+            ddb_core::git_ops::DEFAULT_REMOTE_TIMEOUT,
+        )
+        .expect("spawn actor");
         let pool = ReadPool::new(dir.to_path_buf(), 1).expect("read pool");
         (actor, pool)
     }

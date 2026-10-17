@@ -79,6 +79,7 @@ pub struct ActorHandle {
     maintenance_tx: mpsc::Sender<ActorRun>,
     event_bus: EventBus,
     reloader: Arc<OnceLock<Arc<SchemaReloader>>>,
+    remote_timeout: std::time::Duration,
 }
 
 impl ActorHandle {
@@ -89,9 +90,17 @@ impl ActorHandle {
     /// slow maintenance verb never stalls ordinary writes. Each thread owns its
     /// own repository and SQLite index; both share ONE NoSQL mirror handle. The
     /// repo write lock serializes their git writes.
-    pub fn spawn(repo_path: PathBuf, event_bus: EventBus) -> ActorResult<Self> {
+    ///
+    /// `remote_timeout` bounds `sync`'s fetch/push legs (`ServerConfig`'s
+    /// configured `[remote] timeout_secs`, or `git_ops::DEFAULT_REMOTE_TIMEOUT`
+    /// for callers that have no server config to read, e.g. tests).
+    pub fn spawn(
+        repo_path: PathBuf,
+        event_bus: EventBus,
+        remote_timeout: std::time::Duration,
+    ) -> ActorResult<Self> {
         let mirror = DoogatService::shared_mirror(&repo_path);
-        let write_svc =DoogatService::open_shared_with_mirror(&repo_path, mirror.clone())?;
+        let write_svc = DoogatService::open_shared_with_mirror(&repo_path, mirror.clone())?;
         let maintenance_svc = DoogatService::open_shared_with_mirror(&repo_path, mirror)?;
 
         let (tx, rx) = mpsc::channel::<ActorRun>(64);
@@ -112,6 +121,7 @@ impl ActorHandle {
             maintenance_tx,
             event_bus,
             reloader: Arc::new(OnceLock::new()),
+            remote_timeout,
         })
     }
 
@@ -470,8 +480,9 @@ impl ActorHandle {
     }
 
     pub async fn sync(&self, remote: String, branch: String) -> ActorResult<SyncReport> {
+        let remote_timeout = self.remote_timeout;
         self.call_maintenance(EventIntent::None, ReloadIntent::None, move |svc| {
-            let result = svc.sync(&remote, &branch);
+            let result = svc.sync_with_timeout(&remote, &branch, remote_timeout);
             if result.is_ok() {
                 if let Err(e) = svc.rebuild_if_stale() {
                     tracing::warn!(%e, "actor: index rebuild after sync failed");
