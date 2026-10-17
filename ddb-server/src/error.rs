@@ -15,13 +15,9 @@ pub fn classify(e: &DoogatError) -> (&'static str, String) {
 /// `extensions.code` and any structured per-code context fields
 /// (PRD 00129 §6).
 ///
-/// Delegates to [`to_graphql_error_from_app`] so this path makes no
-/// redaction decision of its own: the structured context is no longer
-/// copied here, it arrives as the shared `error_rendering` policy's
-/// already-redacted-or-not `field`/`details`. Attaching the raw context
-/// here would have shipped details the policy discarded for
-/// `Internal`-category codes, and would have disagreed with the
-/// `AppError` path and with REST.
+/// Delegates to [`to_graphql_error_from_app`], so message, `field` and
+/// context all come from the shared `error_rendering` policy and this path
+/// makes no redaction decision of its own.
 ///
 /// Returning `Error` (not `ServerError`) is load-bearing: dynamic-schema
 /// `FieldFuture::new` closures resolve to `Result<_, async_graphql::Error>`
