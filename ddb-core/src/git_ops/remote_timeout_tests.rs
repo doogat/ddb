@@ -5,16 +5,40 @@
 //! (stall before progress) or after a partial ref advertisement (stall
 //! mid-transfer). libgit2's process-wide idle timeout must abort the call,
 //! and `fetch`/`push` must surface it as `REMOTE_TIMEOUT`.
+//!
+//! Known limitation: these fixtures all go fully silent, so they exercise
+//! libgit2's native idle timeout, never the fetch-only
+//! `transfer_progress`/`sideband_progress` deadline in `remote_callbacks`
+//! (the secondary layer for a connection that keeps trickling small bytes
+//! forever, just under the idle threshold). Faking a byte-level trickle
+//! that libgit2's smart-HTTP transport accepts as a live, in-progress
+//! packfile (rather than a protocol error) requires emulating enough of
+//! the real pack-negotiation wire format that a fixture built from a raw
+//! TCP listener risks being fragile or wrong rather than a reliable proof;
+//! it was not attempted here.
 
 use super::{set_libgit2_remote_timeouts, GitRepo};
 use crate::error::{codes, DoogatError};
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::mpsc;
+use std::sync::{mpsc, Once};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const BOUND: Duration = Duration::from_secs(1);
+
+/// libgit2's global timeout options are documented as not thread-safe, and
+/// cargo test runs these functions on parallel threads by default. Every
+/// test in this module wants the exact same global value (`BOUND`), so
+/// installing it more than once is pure risk with no benefit: guard every
+/// call behind a single process-wide `Once`.
+static REMOTE_TIMEOUTS_INSTALLED: Once = Once::new();
+
+fn ensure_remote_timeouts_installed() {
+    REMOTE_TIMEOUTS_INSTALLED.call_once(|| {
+        set_libgit2_remote_timeouts(BOUND).unwrap();
+    });
+}
 
 const FETCH_PARTIAL: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Content-Type: application/x-git-upload-pack-advertisement\r\n\
@@ -72,7 +96,7 @@ fn assert_remote_timeout(err: &DoogatError) {
 }
 
 fn assert_stall_times_out(op: Op, prefix: &'static [u8]) {
-    set_libgit2_remote_timeouts(BOUND).unwrap();
+    ensure_remote_timeouts_installed();
     let (url, closed) = stalled_remote(prefix);
     let dir = TempDir::new().unwrap();
     let repo = GitRepo::init(dir.path()).unwrap();
@@ -120,7 +144,7 @@ fn push_stalled_mid_transfer_returns_remote_timeout() {
 /// a fetch on the same repository is blocked on a stalled remote.
 #[test]
 fn unrelated_writer_proceeds_during_blocked_fetch() {
-    set_libgit2_remote_timeouts(BOUND).unwrap();
+    ensure_remote_timeouts_installed();
     let (url, _closed) = stalled_remote(b"");
     let dir = TempDir::new().unwrap();
     let repo = GitRepo::init(dir.path()).unwrap();
