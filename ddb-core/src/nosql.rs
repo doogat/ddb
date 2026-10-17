@@ -225,24 +225,34 @@ impl RedbIndex {
 /// Production `NoSqlMirrorPort` backed by the redb index.
 ///
 /// Opens the database per call because redb holds an exclusive file lock while
-/// a handle is open.
+/// a handle is open. `open_lock` serializes those opens, so services sharing
+/// one mirror (behind an `Arc`) never collide on `DatabaseAlreadyOpen`.
 pub struct RedbMirror {
     path: std::path::PathBuf,
+    open_lock: std::sync::Mutex<()>,
 }
 
 impl RedbMirror {
     pub fn new(path: std::path::PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            open_lock: std::sync::Mutex::new(()),
+        }
+    }
+
+    fn with_index<T>(&self, f: impl FnOnce(&RedbIndex) -> Result<T>) -> Result<T> {
+        let _guard = self.open_lock.lock().unwrap_or_else(|e| e.into_inner());
+        f(&RedbIndex::open(&self.path)?)
     }
 }
 
 impl crate::traits::NoSqlMirrorPort for RedbMirror {
     fn mirror_index_doogat(&self, doogat: &ParsedDoogat) -> Result<()> {
-        RedbIndex::open(&self.path)?.index_doogat(doogat)
+        self.with_index(|idx| idx.index_doogat(doogat))
     }
 
     fn mirror_remove_doogat(&self, id: &str) -> Result<()> {
-        RedbIndex::open(&self.path)?.remove_doogat(id)
+        self.with_index(|idx| idx.remove_doogat(id))
     }
 }
 

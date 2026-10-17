@@ -38,7 +38,7 @@ fn services_sharing_one_mirror_both_land_mirror_writes() {
             std::thread::spawn(move || {
                 let repo = GitRepo::open(&path).unwrap();
                 let index = Index::open(&path.join(".ddb/index.db")).unwrap();
-                let mut svc = DoogatService::from_parts(repo, index, Box::new(mirror), path);
+                let svc = DoogatService::from_parts(repo, index, Box::new(mirror), path);
                 (0..3)
                     .map(|i| {
                         let out = svc.create(create_cmd(format!("{name}-{i}"))).unwrap();

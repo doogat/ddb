@@ -370,6 +370,18 @@ impl NoSqlMirrorPort for NoopMirror {
     }
 }
 
+/// One mirror handle shared by several services (server actor + maintenance
+/// worker).
+impl<T: NoSqlMirrorPort + ?Sized> NoSqlMirrorPort for std::sync::Arc<T> {
+    fn mirror_index_doogat(&self, doogat: &ParsedDoogat) -> Result<()> {
+        (**self).mirror_index_doogat(doogat)
+    }
+
+    fn mirror_remove_doogat(&self, id: &str) -> Result<()> {
+        (**self).mirror_remove_doogat(id)
+    }
+}
+
 /// CRDT-based conflict resolution strategy.
 pub trait ConflictResolver {
     fn resolve_conflicts(

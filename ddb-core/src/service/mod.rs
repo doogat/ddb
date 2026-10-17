@@ -67,12 +67,34 @@ pub struct DoogatService<G: GitBackend = GitRepo, I: IndexPort = Index> {
 impl DoogatService<GitRepo, Index> {
     /// Open an existing Doogat DB repository with the default adapters.
     pub fn open(path: &Path) -> Result<Self> {
+        let nosql = Self::default_mirror(&path.join(".ddb"));
+        Self::open_with_mirror(path, nosql)
+    }
+
+    /// Open with the default git and index adapters around a caller-supplied
+    /// mirror. Each call opens its own repository and SQLite index.
+    fn open_with_mirror(path: &Path, nosql: Box<dyn NoSqlMirrorPort + Send + Sync>) -> Result<Self> {
         let repo = GitRepo::open(path)?;
         let db_dir = path.join(".ddb");
         std::fs::create_dir_all(&db_dir)?;
         let index = Index::open(&db_dir.join("index.db"))?;
-        let nosql = Self::default_mirror(&db_dir);
         Ok(Self::from_parts(repo, index, nosql, path.to_path_buf()))
+    }
+
+    /// The default NoSQL mirror as a handle several services can share.
+    pub fn shared_mirror(path: &Path) -> std::sync::Arc<dyn NoSqlMirrorPort + Send + Sync> {
+        Self::default_mirror(&path.join(".ddb")).into()
+    }
+
+    /// Like [`Self::open_shared`], but around an existing shared mirror so
+    /// several services on one repo use one mirror handle.
+    pub fn open_shared_with_mirror(
+        path: &Path,
+        nosql: std::sync::Arc<dyn NoSqlMirrorPort + Send + Sync>,
+    ) -> Result<Self> {
+        let mut service = Self::open_with_mirror(path, Box::new(nosql))?;
+        service.transaction_scope = TransactionScope::Shared;
+        Ok(service)
     }
 
     /// Initialize a new Doogat DB repository at `path` and open it.

@@ -76,23 +76,40 @@ type ActorRun = Box<dyn FnOnce(&mut DoogatService, &EventBus) + Send>;
 #[derive(Clone)]
 pub struct ActorHandle {
     tx: mpsc::Sender<ActorRun>,
+    maintenance_tx: mpsc::Sender<ActorRun>,
     event_bus: EventBus,
     reloader: Arc<OnceLock<Arc<SchemaReloader>>>,
 }
 
 impl ActorHandle {
     /// Spawn the actor on a std::thread. Returns the handle for async callers.
+    ///
+    /// Two threads run [`actor_loop`]: the write actor (`tx`) and a maintenance
+    /// worker (`maintenance_tx`) for sync, compact and run_maintenance, so a
+    /// slow maintenance verb never stalls ordinary writes. Each thread owns its
+    /// own repository and SQLite index; both share ONE NoSQL mirror handle. The
+    /// repo write lock serializes their git writes.
     pub fn spawn(repo_path: PathBuf, event_bus: EventBus) -> ActorResult<Self> {
-        // Validate repo opens before spawning
-        let _ = DoogatService::open(&repo_path)?;
+        let mirror = DoogatService::shared_mirror(&repo_path);
+        let write_svc =DoogatService::open_shared_with_mirror(&repo_path, mirror.clone())?;
+        let maintenance_svc = DoogatService::open_shared_with_mirror(&repo_path, mirror)?;
 
         let (tx, rx) = mpsc::channel::<ActorRun>(64);
+        let (maintenance_tx, maintenance_rx) = mpsc::channel::<ActorRun>(8);
         let bus = event_bus.clone();
+        // Only the write actor rebuilds on startup; two concurrent cold-start
+        // rebuilds of one index would race.
         std::thread::spawn(move || {
-            actor_loop(repo_path, rx, bus);
+            if let Err(e) = write_svc.rebuild_if_stale() {
+                tracing::warn!(%e, "actor: index rebuild on startup failed");
+            }
+            actor_loop(write_svc, rx, bus)
         });
+        let bus = event_bus.clone();
+        std::thread::spawn(move || actor_loop(maintenance_svc, maintenance_rx, bus));
         Ok(Self {
             tx,
+            maintenance_tx,
             event_bus,
             reloader: Arc::new(OnceLock::new()),
         })
@@ -130,6 +147,29 @@ impl ActorHandle {
         F: FnOnce(&mut DoogatService) -> R + Send + 'static,
         R: FromActorError + IntentEmit + ReloadSignal + Send + 'static,
     {
+        self.dispatch(&self.tx, event, reload, f).await
+    }
+
+    /// Like [`Self::call`], but on the maintenance worker thread.
+    async fn call_maintenance<R, F>(&self, event: EventIntent, reload: ReloadIntent, f: F) -> R
+    where
+        F: FnOnce(&mut DoogatService) -> R + Send + 'static,
+        R: FromActorError + IntentEmit + ReloadSignal + Send + 'static,
+    {
+        self.dispatch(&self.maintenance_tx, event, reload, f).await
+    }
+
+    async fn dispatch<R, F>(
+        &self,
+        tx: &mpsc::Sender<ActorRun>,
+        event: EventIntent,
+        reload: ReloadIntent,
+        f: F,
+    ) -> R
+    where
+        F: FnOnce(&mut DoogatService) -> R + Send + 'static,
+        R: FromActorError + IntentEmit + ReloadSignal + Send + 'static,
+    {
         let (reply_tx, reply_rx) = oneshot::channel::<R>();
 
         // Box a type-erased closure that OWNS reply_tx and runs the caller's `f`.
@@ -143,7 +183,7 @@ impl ActorHandle {
         });
 
         // Actor gone: return a structured error, never panic.
-        if self.tx.send(run).await.is_err() {
+        if tx.send(run).await.is_err() {
             return R::actor_stopped();
         }
 
@@ -398,7 +438,7 @@ impl ActorHandle {
         no_backup: bool,
         backup_path: Option<String>,
     ) -> ActorResult<CompactionReport> {
-        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+        self.call_maintenance(EventIntent::None, ReloadIntent::None, move |svc| {
             let result = svc.compact(&CompactOptions {
                 force,
                 skip_backup: no_backup,
@@ -415,7 +455,7 @@ impl ActorHandle {
     }
 
     pub async fn run_maintenance(&self, task: Option<String>) -> ActorResult<MaintenanceReport> {
-        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+        self.call_maintenance(EventIntent::None, ReloadIntent::None, move |svc| {
             let tasks_vec: Vec<&str>;
             let tasks_opt = match &task {
                 Some(t) => {
@@ -430,7 +470,7 @@ impl ActorHandle {
     }
 
     pub async fn sync(&self, remote: String, branch: String) -> ActorResult<SyncReport> {
-        self.call(EventIntent::None, ReloadIntent::None, move |svc| {
+        self.call_maintenance(EventIntent::None, ReloadIntent::None, move |svc| {
             let result = svc.sync(&remote, &branch);
             if result.is_ok() {
                 if let Err(e) = svc.rebuild_if_stale() {
@@ -577,19 +617,7 @@ impl ActorHandle {
 }
 
 /// The blocking actor loop, runs on its own OS thread.
-fn actor_loop(repo_path: PathBuf, mut rx: mpsc::Receiver<ActorRun>, event_bus: EventBus) {
-    let mut svc = match DoogatService::open_shared(&repo_path) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(%e, "actor: failed to open DoogatService");
-            return;
-        }
-    };
-
-    if let Err(e) = svc.rebuild_if_stale() {
-        tracing::warn!(%e, "actor: index rebuild on startup failed");
-    }
-
+fn actor_loop(mut svc: DoogatService, mut rx: mpsc::Receiver<ActorRun>, event_bus: EventBus) {
     while let Some(run) = rx.blocking_recv() {
         // The closure IS the dispatch and emits its own events at the boundary.
         run(&mut svc, &event_bus);
