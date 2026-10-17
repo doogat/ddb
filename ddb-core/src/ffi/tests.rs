@@ -1650,6 +1650,247 @@ fn bundle_import_ffi_success_preserves_sibling_and_legacy_refs() {
     }
 }
 
+// --- Contract-routed search FFI tests (PRD 00176, task 4) ---
+//
+// The FFI `SearchResult` record carries all 10 core fields (`fields` as
+// `Vec<FieldEntry>`). `search_filtered` and `search_paginated` both decode
+// their page through `PageRequest` and run `search_command`, so an
+// out-of-range limit (outside `1..=10_000`) is a hard error, never a silently
+// unbounded or clamped page.
+
+/// `(key, value)` pairs of an FFI `fields` list, sorted for order-free compare.
+fn field_pairs(fields: &[super::records::FieldEntry]) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = fields
+        .iter()
+        .map(|f| (f.key.clone(), f.value.clone()))
+        .collect();
+    pairs.sort();
+    pairs
+}
+
+fn sorted_hit_ids(hits: &[SearchResult]) -> Vec<String> {
+    let mut ids: Vec<String> = hits.iter().map(|h| h.id.clone()).collect();
+    ids.sort();
+    ids
+}
+
+fn owned(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| s.to_string()).collect()
+}
+
+/// Three doogats sharing `ffifilterterm`, differing in type and tags. Soup
+/// carries a `color: teal` frontmatter extra. Returns (soup, cake, note) ids.
+fn seed_ffi_search_fixtures(driver: &DoogatDriver) -> (String, String, String) {
+    driver.reindex().unwrap();
+    let svc = driver.svc.lock().unwrap();
+    let mut extra = std::collections::BTreeMap::new();
+    extra.insert(
+        "color".to_string(),
+        crate::types::Value::String("teal".to_string()),
+    );
+    let soup = svc
+        .create_doogat_with_extra(
+            "Soup",
+            &owned(&["dinner"]),
+            Some("recipe"),
+            "ffifilterterm soup",
+            extra,
+        )
+        .expect("create soup")
+        .meta
+        .id
+        .expect("soup has an id")
+        .0;
+    let cake = svc
+        .create_doogat(
+            "Cake",
+            &owned(&["dinner", "sweet"]),
+            Some("dessert"),
+            "ffifilterterm cake",
+        )
+        .expect("create cake");
+    let note = svc
+        .create_doogat("Note", &[], None, "ffifilterterm note")
+        .expect("create note");
+    (soup, cake, note)
+}
+
+fn assert_ffi_validation_err(result: Result<PaginatedSearchResult, DdbError>, what: &str) {
+    match result {
+        Err(DdbError::Validation { .. }) => {}
+        Err(other) => panic!("{what}: expected DdbError::Validation, got {other:?}"),
+        Ok(page) => panic!(
+            "{what}: expected an out-of-range limit to be rejected, got Ok with {} hits",
+            page.hits.len()
+        ),
+    }
+}
+
+#[test]
+fn ffi_search_result_record_carries_all_ten_core_fields() {
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert("color".to_string(), "teal".to_string());
+    fields.insert("size".to_string(), "large".to_string());
+    let core = crate::types::SearchResult {
+        id: "20260601000000".to_string(),
+        title: "Record Title".to_string(),
+        path: "ddb/20260601000000.md".to_string(),
+        snippet: "a snippet".to_string(),
+        rank: -1.5,
+        updated_at: "2026-06-01T00:00:00Z".to_string(),
+        tags: owned(&["alpha", "beta"]),
+        doogat_type: Some("recipe".to_string()),
+        fields: Some(fields),
+        created_at: Some("2026-05-31".to_string()),
+    };
+
+    let record: SearchResult = core.into();
+
+    assert_eq!(record.id, "20260601000000");
+    assert_eq!(record.title, "Record Title");
+    assert_eq!(record.path, "ddb/20260601000000.md");
+    assert_eq!(record.snippet, "a snippet");
+    assert_eq!(record.rank, -1.5);
+    assert_eq!(record.updated_at, "2026-06-01T00:00:00Z");
+    assert_eq!(record.tags, owned(&["alpha", "beta"]));
+    assert_eq!(record.doogat_type.as_deref(), Some("recipe"));
+    assert_eq!(
+        field_pairs(&record.fields),
+        vec![
+            ("color".to_string(), "teal".to_string()),
+            ("size".to_string(), "large".to_string()),
+        ],
+        "every core field entry must reach the FFI record as a FieldEntry"
+    );
+    assert_eq!(record.created_at.as_deref(), Some("2026-05-31"));
+}
+
+#[test]
+fn ffi_search_filtered_by_type_returns_only_matching_hits_with_full_field_set() {
+    let (_tmp, driver) = fresh_driver();
+    let (soup, _cake, _note) = seed_ffi_search_fixtures(&driver);
+
+    let page = driver
+        .search_filtered(
+            "ffifilterterm".into(),
+            Some(10),
+            Some(0),
+            Some(owned(&["recipe"])),
+            None,
+        )
+        .expect("type-filtered search must succeed");
+
+    assert_eq!(sorted_hit_ids(&page.hits), vec![soup.clone()]);
+    assert_eq!(page.total_count, 1, "total must respect the types filter");
+
+    let hit = &page.hits[0];
+    assert_eq!(hit.title, "Soup");
+    assert!(!hit.path.is_empty(), "path must be populated");
+    assert!(!hit.snippet.is_empty(), "snippet must be populated");
+    assert!(!hit.updated_at.is_empty(), "updated_at must be populated");
+    assert_eq!(hit.doogat_type.as_deref(), Some("recipe"));
+    assert_eq!(hit.tags, owned(&["dinner"]));
+    assert!(
+        field_pairs(&hit.fields).contains(&("color".to_string(), "teal".to_string())),
+        "frontmatter extra must reach the FFI hit's fields, got {:?}",
+        field_pairs(&hit.fields)
+    );
+    assert!(
+        hit.created_at.is_some(),
+        "created_at must be populated from the doogat's date"
+    );
+}
+
+#[test]
+fn ffi_search_filtered_by_tag_returns_only_tagged_hits() {
+    let (_tmp, driver) = fresh_driver();
+    let (_soup, cake, _note) = seed_ffi_search_fixtures(&driver);
+
+    let page = driver
+        .search_filtered(
+            "ffifilterterm".into(),
+            Some(10),
+            Some(0),
+            None,
+            Some("sweet".into()),
+        )
+        .expect("tag-filtered search must succeed");
+
+    assert_eq!(sorted_hit_ids(&page.hits), vec![cake]);
+    assert_eq!(page.total_count, 1, "total must respect the tag filter");
+    assert!(
+        page.hits.iter().all(|h| h.tags.contains(&"sweet".to_string())),
+        "every hit must carry the filtered tag"
+    );
+}
+
+#[test]
+fn ffi_search_filtered_without_limit_or_offset_applies_page_request_defaults() {
+    let (_tmp, driver) = fresh_driver();
+    {
+        let svc = driver.svc.lock().unwrap();
+        for i in 0..51u32 {
+            let id = format!("20260601{:02}{:02}00", i / 60, i % 60);
+            let content =
+                format!("---\nid: {id}\ntitle: Default {i}\n---\nffidefaultterm body {i}\n");
+            svc.repo
+                .commit_file(&format!("ddb/{id}.md"), &content, "add default fixture")
+                .unwrap();
+        }
+    }
+    driver.reindex().unwrap();
+
+    let page = driver
+        .search_filtered("ffidefaultterm".into(), None, None, None, None)
+        .expect("search with default page must succeed");
+
+    assert_eq!(page.total_count, 51, "all 51 fixtures must match");
+    assert_eq!(
+        page.hits.len(),
+        50,
+        "an absent limit must default to PageRequest::DEFAULT_LIMIT (50)"
+    );
+
+    let explicit = driver
+        .search_filtered("ffidefaultterm".into(), Some(50), Some(0), None, None)
+        .expect("explicit first page must succeed");
+    assert_eq!(
+        page.hits.iter().map(|h| &h.id).collect::<Vec<_>>(),
+        explicit.hits.iter().map(|h| &h.id).collect::<Vec<_>>(),
+        "an absent offset must default to 0 (the first page)"
+    );
+}
+
+#[test]
+fn ffi_search_filtered_rejects_out_of_range_limit() {
+    let (_tmp, driver) = fresh_driver();
+    seed_ffi_search_fixtures(&driver);
+
+    assert_ffi_validation_err(
+        driver.search_filtered("ffifilterterm".into(), Some(0), None, None, None),
+        "search_filtered limit 0",
+    );
+    assert_ffi_validation_err(
+        driver.search_filtered("ffifilterterm".into(), Some(10_001), None, None, None),
+        "search_filtered limit 10_001",
+    );
+}
+
+#[test]
+fn ffi_search_paginated_rejects_out_of_range_limit() {
+    let (_tmp, driver) = fresh_driver();
+    seed_ffi_search_fixtures(&driver);
+
+    assert_ffi_validation_err(
+        driver.search_paginated("ffifilterterm".into(), 0, 0),
+        "search_paginated limit 0",
+    );
+    assert_ffi_validation_err(
+        driver.search_paginated("ffifilterterm".into(), 10_001, 0),
+        "search_paginated limit 10_001",
+    );
+}
+
 #[test]
 fn bundle_import_ffi_retry_cleans_only_its_payload_namespace() {
     for prune in [false, true] {
