@@ -712,4 +712,184 @@ mod tests {
         };
         assert_eq!(warning.code, "SCHEMA_UNSUPPORTED_CHANGE");
     }
+
+    #[test]
+    fn invalid_zone_code_constant_has_exact_value() {
+        assert_eq!(crate::error::codes::INVALID_ZONE, "INVALID_ZONE");
+    }
+
+    /// INVALID_ZONE is a registered, user-actionable structured code: it must
+    /// classify as InvalidInput / 422 / Validation and keep its own message and
+    /// context, not fall through to the Internal + "internal error" redaction.
+    #[test]
+    fn invalid_zone_renders_invalid_input_422_validation_keeping_message_and_details() {
+        let err = DoogatError::Structured {
+            code: codes::INVALID_ZONE,
+            message: "unknown zone: footer".into(),
+            context: vec![
+                ("zone".into(), ErrorValue::String("footer".into())),
+                (
+                    "allowed".into(),
+                    ErrorValue::List(vec![
+                        "frontmatter".into(),
+                        "body".into(),
+                        "sections".into(),
+                    ]),
+                ),
+            ],
+        };
+        let r = render(err);
+        assert_eq!(r.code, "INVALID_ZONE");
+        assert_eq!(r.category, AppErrorCategory::InvalidInput);
+        assert_eq!(r.http_status, 422);
+        assert_eq!(r.ffi_variant, FfiVariant::Validation);
+        assert_eq!(r.message, "unknown zone: footer");
+        assert_eq!(r.field, None);
+        assert_eq!(
+            r.details,
+            vec![
+                (
+                    "zone".to_string(),
+                    super::AppErrorDetail::String("footer".into())
+                ),
+                (
+                    "allowed".to_string(),
+                    super::AppErrorDetail::List(vec![
+                        "frontmatter".into(),
+                        "body".into(),
+                        "sections".into(),
+                    ])
+                ),
+            ]
+        );
+    }
+
+    /// An unregistered structured code stays Internal / 500 / "internal error",
+    /// and the redaction also drops context that would otherwise populate
+    /// `field` (the "column"/"columns" keys) - nothing leaks on this path.
+    #[test]
+    fn unregistered_structured_code_redacts_message_field_and_details() {
+        let err = DoogatError::Structured {
+            code: "SOME_UNREGISTERED_CODE",
+            message: "secret repo path /home/x leaked".into(),
+            context: vec![
+                ("column".into(), ErrorValue::String("url".into())),
+                ("columns".into(), ErrorValue::List(vec!["url".into()])),
+            ],
+        };
+        let r = render(err);
+        assert_eq!(r.code, "SOME_UNREGISTERED_CODE");
+        assert_eq!(r.category, AppErrorCategory::Internal);
+        assert_eq!(r.http_status, 500);
+        assert_eq!(r.ffi_variant, FfiVariant::Internal);
+        assert_eq!(r.message, "internal error");
+        assert_eq!(r.field, None);
+        assert!(r.details.is_empty());
+    }
+
+    /// Status, category and FFI hint come from `code` alone. Each probe renders
+    /// twice with prose that points at a *different* category, and both
+    /// renderings must land on the code's own row of the policy table.
+    #[test]
+    fn rendering_is_code_driven_not_message_driven() {
+        use AppErrorCategory as C;
+        use FfiVariant as F;
+        let probes = [
+            (codes::INVALID_ZONE, C::InvalidInput, 422, F::Validation),
+            (codes::UNIQUE_VIOLATION, C::Conflict, 409, F::Conflict),
+            (codes::SINGLETON_NOT_FOUND, C::NotFound, 404, F::NotFound),
+            (codes::SCHEMA_APPLY_PARTIAL, C::Internal, 500, F::Internal),
+        ];
+        for (code, category, http_status, ffi_variant) in probes {
+            for message in ["not found: nothing here", "conflict while validating input"] {
+                let r = render(structured(code, message));
+                assert_eq!(r.category, category, "category for {code} / {message}");
+                assert_eq!(r.http_status, http_status, "status for {code} / {message}");
+                assert_eq!(r.ffi_variant, ffi_variant, "ffi hint for {code} / {message}");
+            }
+        }
+    }
+
+    /// Borrowed and owned conversions must stay in lockstep on every field,
+    /// including `field` and `details`.
+    fn assert_conversions_agree(err: DoogatError) {
+        let borrowed = AppError::from(&err);
+        let owned = AppError::from(err);
+        assert_eq!(borrowed.code, owned.code, "code for {}", owned.code);
+        assert_eq!(borrowed.message, owned.message, "message for {}", owned.code);
+        assert_eq!(
+            borrowed.category, owned.category,
+            "category for {}",
+            owned.code
+        );
+        assert_eq!(borrowed.field, owned.field, "field for {}", owned.code);
+        assert_eq!(borrowed.details, owned.details, "details for {}", owned.code);
+        assert_eq!(borrowed, owned, "conversion for {}", owned.code);
+    }
+
+    #[test]
+    fn borrowed_and_owned_conversions_agree_for_every_simple_variant() {
+        let make: [fn() -> DoogatError; 8] = [
+            || DoogatError::NotFound("doc 1".into()),
+            || DoogatError::Validation("bad id".into()),
+            || DoogatError::Parse("bad yaml".into()),
+            || DoogatError::InvalidPath("../x".into()),
+            || DoogatError::BadRequest("no body".into()),
+            || DoogatError::Conflict("stale".into()),
+            || DoogatError::SqlEngine("no such column: bogus".into()),
+            || DoogatError::Git("boom".into()),
+        ];
+        for f in make {
+            assert_conversions_agree(f());
+        }
+    }
+
+    #[test]
+    fn borrowed_and_owned_conversions_agree_for_every_structured_code() {
+        let under_test = [
+            codes::SINGLETON_NOT_FOUND,
+            codes::UNIQUE_VIOLATION,
+            codes::SINGLETON_VIOLATION,
+            codes::REFERENCES_VIOLATION,
+            codes::CASCADE_CYCLE,
+            codes::SCHEMA_DESTRUCTIVE_BLOCKED,
+            codes::NOT_NULL_VIOLATION,
+            codes::UNKNOWN_FIELD,
+            codes::TYPE_NOT_REGISTERED,
+            codes::TRANSACTION_NOT_SUPPORTED,
+            codes::INVALID_ZONE,
+            codes::SCHEMA_APPLY_PARTIAL,
+            "SOME_UNREGISTERED_CODE",
+        ];
+        for code in under_test {
+            assert_conversions_agree(structured(code, "detail text"));
+        }
+    }
+
+    /// The samples that actually carry `field` and both `details` variants: a
+    /// conversion that dropped either on one side only would still pass the
+    /// loop above if both sides came out empty, so pin them non-empty here.
+    #[test]
+    fn borrowed_and_owned_conversions_agree_for_field_and_context_bearing_errors() {
+        assert_conversions_agree(DoogatError::not_null_violation("link", "url"));
+        assert_conversions_agree(DoogatError::unique_violation("link", ["url"], ["https://x"]));
+        assert_conversions_agree(DoogatError::Structured {
+            code: codes::INVALID_ZONE,
+            message: "zone is not addressable".into(),
+            context: vec![
+                ("zone".into(), ErrorValue::String("footer".into())),
+                (
+                    "allowed".into(),
+                    ErrorValue::List(vec!["frontmatter".into(), "body".into()]),
+                ),
+            ],
+        });
+
+        let not_null = AppError::from(DoogatError::not_null_violation("link", "url"));
+        assert_eq!(not_null.field.as_deref(), Some("url"));
+        let unique = AppError::from(DoogatError::unique_violation("link", ["url"], ["https://x"]));
+        assert_eq!(unique.field.as_deref(), Some("url"));
+        let zone = AppError::from(structured(codes::INVALID_ZONE, "zone is not addressable"));
+        assert!(!zone.details.is_empty());
+    }
 }
