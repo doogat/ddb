@@ -99,6 +99,82 @@ pub fn crud_baseline() -> WorkflowFixture {
     }
 }
 
+/// Search with `SearchCommand`'s `types` / `tag` filters (PRD 00176).
+///
+/// Seeds two registered types (so GraphQL's strict typed create accepts them
+/// and `type` / `fields` come back non-null) plus one untyped doogat, with
+/// overlapping tags, all sharing the search term `filterterm`. Then runs the
+/// same search four ways: type only, tag only, type + tag, and unfiltered as
+/// the control proving the filters actually narrow the result.
+/// `cross_driver_crud.rs` asserts CLI and GraphQL return the same seeded
+/// doogats with all ten core `SearchResult` fields equal (modulo per-repo ids
+/// and timestamps; see `comparator::anonymize_search_hits`).
+pub fn filtered_search() -> WorkflowFixture {
+    WorkflowFixture {
+        id: "filtered_search".into(),
+        title: "Search filtered by type and tag returns the same full hits".into(),
+        setup: SetupExpectation {
+            auth_mode: AuthMode::None,
+            timeout_ms: 30_000,
+            setup_steps: vec![],
+        },
+        steps: vec![
+            Step {
+                op: StepOp::ExecuteSql,
+                args: serde_json::json!({"sql": "CREATE TABLE fs_recipe (cuisine VARCHAR(100))"}),
+            },
+            Step {
+                op: StepOp::ExecuteSql,
+                args: serde_json::json!({"sql": "CREATE TABLE fs_dessert (cuisine VARCHAR(100))"}),
+            },
+            Step {
+                op: StepOp::CreateDoogat,
+                args: serde_json::json!({
+                    "title": "Thai soup", "body": "filterterm soup", "type": "fs_recipe",
+                    "tags": ["dinner"], "fields": {"cuisine": "thai"},
+                }),
+            },
+            Step {
+                op: StepOp::CreateDoogat,
+                args: serde_json::json!({
+                    "title": "Lime cake", "body": "filterterm cake", "type": "fs_dessert",
+                    "tags": ["dinner", "sweet"], "fields": {"cuisine": "thai"},
+                }),
+            },
+            Step {
+                op: StepOp::CreateDoogat,
+                args: serde_json::json!({
+                    "title": "Plain note", "body": "filterterm note", "tags": ["sweet"],
+                }),
+            },
+            Step {
+                op: StepOp::Search,
+                args: serde_json::json!({"query": "filterterm", "types": ["fs_recipe"]}),
+            },
+            Step {
+                op: StepOp::Search,
+                args: serde_json::json!({"query": "filterterm", "tag": "sweet"}),
+            },
+            Step {
+                op: StepOp::Search,
+                args: serde_json::json!({
+                    "query": "filterterm", "types": ["fs_dessert"], "tag": "dinner",
+                }),
+            },
+            Step {
+                op: StepOp::Search,
+                args: serde_json::json!({"query": "filterterm"}),
+            },
+        ],
+        expected: ExpectedBehavior {
+            value: None,
+            warnings: vec![],
+            error: None,
+        },
+        interfaces: vec![InterfaceId::Cli, InterfaceId::Graphql],
+    }
+}
+
 // PRD 00150 blind-review I-1: pin the GraphQL WarningEntry shape contract.
 //
 // The release-readiness §3.3 checklist in

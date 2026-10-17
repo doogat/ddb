@@ -48,14 +48,27 @@ pub struct Step {
     pub args: serde_json::Value,
 }
 
+/// Operation a `Step` runs. Arguments travel in `Step::args` (JSON), not in
+/// the variant, so `StepOp` stays `Copy` and `step_refs` can resolve `$N.id`
+/// references uniformly across every op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StepOp {
+    /// Args: `title` (required), `body`, `tags` (string array), `type`,
+    /// `fields` (object of string values). All but `title` are optional.
     CreateDoogat,
     ReadDoogat,
     UpdateDoogat,
     DeleteDoogat,
     ListDoogats,
+    /// Args: `query` (required); optional filters mirroring
+    /// `ddb_core::app_contract::SearchCommand`: `types` (string array) and
+    /// `tag` (string). The CLI's `--type` flag takes one value, so a
+    /// multi-element `types` is passed as repeated flags and the CLI rejects
+    /// it; keep cross-driver fixtures to a single type.
     Search,
+    /// Args: `sql` (required). Runs a SQL statement (e.g. `CREATE TABLE` to
+    /// register a typedef before typed creates). Result value is `Null`.
+    ExecuteSql,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn step_op_variants_are_six_and_distinct() {
+    fn step_op_variants_are_seven_and_distinct() {
         let variants: Vec<StepOp> = vec![
             StepOp::CreateDoogat,
             StepOp::ReadDoogat,
@@ -189,8 +202,9 @@ mod tests {
             StepOp::DeleteDoogat,
             StepOp::ListDoogats,
             StepOp::Search,
+            StepOp::ExecuteSql,
         ];
-        assert_eq!(variants.len(), 6);
+        assert_eq!(variants.len(), 7);
         for i in 0..variants.len() - 1 {
             assert_ne!(variants[i], variants[i + 1]);
         }

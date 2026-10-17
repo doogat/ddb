@@ -50,7 +50,11 @@ WorkflowFixture {
 
 `AuthMode` variants: `None`, `Token { env_var: String }`, `Embedded`.
 
-`StepOp` variants: `CreateDoogat`, `ReadDoogat`, `UpdateDoogat`, `DeleteDoogat`, `ListDoogats`, `Search`.
+`StepOp` variants: `CreateDoogat`, `ReadDoogat`, `UpdateDoogat`, `DeleteDoogat`, `ListDoogats`, `Search`, `ExecuteSql`.
+
+Step arguments live in `Step::args` JSON. `CreateDoogat` accepts optional `tags` (string array), `type`, and `fields` (object of strings) beside `title` / `body`. `Search` accepts optional `types` (string array) and `tag` filters, mirroring `SearchCommand`. `ExecuteSql` takes `sql` (e.g. `CREATE TABLE` to register a typedef before typed creates).
+
+The `filtered_search` workflow compares search hits field by field: `comparator::parse_cli_search_hits` / `parse_graphql_search_hits` decode each transport into all ten core `SearchResult` fields, and `anonymize_search_hits` masks per-repo ids and timestamps. `search_hits_match` then requires every other field to match exactly, except the BM25 `rank`, which separate indexes score a few ULPs apart and is compared within a 1e-9 relative tolerance.
 
 ## Step reference resolution
 

@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::super::common::{ddb_bin, DdbTestRepo};
-use super::args::{optional_string, require_string};
+use super::args::{optional_string, optional_string_list, optional_string_map, require_string};
 use super::fixture::{Step, StepOp, WorkflowFixture};
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
 
@@ -72,7 +72,9 @@ impl CliDriver {
             StepOp::CreateDoogat | StepOp::ReadDoogat | StepOp::ListDoogats | StepOp::Search => {
                 ConformanceValue::String(stdout)
             }
-            StepOp::UpdateDoogat | StepOp::DeleteDoogat => ConformanceValue::Null,
+            StepOp::UpdateDoogat | StepOp::DeleteDoogat | StepOp::ExecuteSql => {
+                ConformanceValue::Null
+            }
         };
 
         ConformanceResult::Ok {
@@ -93,13 +95,23 @@ fn build_args(step: &Step) -> Result<Vec<String>, &'static str> {
         StepOp::CreateDoogat => {
             let title = require_string(&step.args, "title")?;
             let body = optional_string(&step.args, "body").unwrap_or_default();
-            Ok(vec![
+            let mut args = vec![
                 "create".into(),
                 "--title".into(),
                 title,
                 "--body".into(),
                 body,
-            ])
+            ];
+            if let Some(tags) = optional_string_list(&step.args, "tags")? {
+                args.extend(["--tags".into(), tags.join(",")]);
+            }
+            if let Some(doogat_type) = optional_string(&step.args, "type") {
+                args.extend(["--type".into(), doogat_type]);
+            }
+            for (key, value) in optional_string_map(&step.args, "fields")?.unwrap_or_default() {
+                args.extend(["--set".into(), format!("{key}={value}")]);
+            }
+            Ok(args)
         }
         StepOp::ReadDoogat => {
             let id = require_string(&step.args, "id")?;
@@ -117,7 +129,18 @@ fn build_args(step: &Step) -> Result<Vec<String>, &'static str> {
         StepOp::ListDoogats => Ok(vec!["query".into(), "SELECT id, title FROM doogats".into()]),
         StepOp::Search => {
             let query = require_string(&step.args, "query")?;
-            Ok(vec!["search".into(), query])
+            let mut args = vec!["search".into(), query];
+            for doogat_type in optional_string_list(&step.args, "types")?.unwrap_or_default() {
+                args.extend(["--type".into(), doogat_type]);
+            }
+            if let Some(tag) = optional_string(&step.args, "tag") {
+                args.extend(["--tag".into(), tag]);
+            }
+            Ok(args)
+        }
+        StepOp::ExecuteSql => {
+            let sql = require_string(&step.args, "sql")?;
+            Ok(vec!["query".into(), sql])
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::super::common::{DdbTestRepo, ServerGuard};
-use super::args::{optional_string, require_string};
+use super::args::{optional_string, optional_string_list, optional_string_map, require_string};
 use super::fixture::{Step, StepOp, WorkflowFixture};
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
 
@@ -96,6 +96,7 @@ impl GraphqlDriver {
             StepOp::DeleteDoogat => self.run_delete(&step.args, timeout),
             StepOp::ListDoogats => self.run_list(timeout),
             StepOp::Search => self.run_search(&step.args, timeout),
+            StepOp::ExecuteSql => self.run_execute_sql(&step.args, timeout),
         }
     }
 
@@ -105,10 +106,36 @@ impl GraphqlDriver {
             Err(field) => return setup_failed_missing(field),
         };
         let body = optional_string(args, "body").unwrap_or_default();
+        let mut input = serde_json::Map::new();
+        input.insert("title".into(), title.into());
+        input.insert("content".into(), body.into());
+        // Optional typed/tagged create inputs are only sent when the fixture
+        // names them, so untyped fixtures post the same input as before.
+        match optional_string_list(args, "tags") {
+            Ok(Some(tags)) => {
+                input.insert("tags".into(), tags.into());
+            }
+            Ok(None) => {}
+            Err(field) => return setup_failed_missing(field),
+        }
+        if let Some(doogat_type) = optional_string(args, "type") {
+            input.insert("type".into(), doogat_type.into());
+        }
+        match optional_string_map(args, "fields") {
+            Ok(Some(fields)) => {
+                let object: serde_json::Map<String, serde_json::Value> =
+                    fields.into_iter().map(|(k, v)| (k, v.into())).collect();
+                // CreateDoogatInput.fields is a JSON-encoded string.
+                let encoded = serde_json::Value::Object(object).to_string();
+                input.insert("fields".into(), encoded.into());
+            }
+            Ok(None) => {}
+            Err(field) => return setup_failed_missing(field),
+        }
         let result = match self.post_graphql(
             serde_json::json!({
                 "query": r#"mutation($input: CreateDoogatInput!) { createDoogat(input: $input) { id title body } }"#,
-                "variables": { "input": { "title": title, "content": body } },
+                "variables": { "input": input },
             }),
             timeout,
         ) {
@@ -237,10 +264,25 @@ impl GraphqlDriver {
             Ok(v) => v,
             Err(field) => return setup_failed_missing(field),
         };
+        let mut variables = serde_json::Map::new();
+        variables.insert("q".into(), query.into());
+        match optional_string_list(args, "types") {
+            Ok(Some(types)) => {
+                variables.insert("types".into(), types.into());
+            }
+            Ok(None) => {}
+            Err(field) => return setup_failed_missing(field),
+        }
+        if let Some(tag) = optional_string(args, "tag") {
+            variables.insert("tag".into(), tag.into());
+        }
+        // Select all ten core `SearchResult` fields so the value carries the
+        // same field set the CLI prints and cross-driver tests can compare
+        // hits field by field.
         let result = match self.post_graphql(
             serde_json::json!({
-                "query": r#"query($q: String!) { search(query: $q) { hits { id title } totalCount } }"#,
-                "variables": { "q": query },
+                "query": r#"query($q: String!, $types: [String], $tag: String) { search(query: $q, types: $types, tag: $tag) { hits { id title path snippet rank updated_at tags type fields created_at } totalCount } }"#,
+                "variables": variables,
             }),
             timeout,
         ) {
@@ -254,6 +296,30 @@ impl GraphqlDriver {
         let text = serde_json::to_string(hits).unwrap_or_default();
         ConformanceResult::Ok {
             value: ConformanceValue::String(text),
+            warnings: vec![],
+        }
+    }
+
+    fn run_execute_sql(&self, args: &serde_json::Value, timeout: Duration) -> ConformanceResult {
+        let sql = match require_string(args, "sql") {
+            Ok(v) => v,
+            Err(field) => return setup_failed_missing(field),
+        };
+        let result = match self.post_graphql(
+            serde_json::json!({
+                "query": r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+                "variables": { "sql": sql },
+            }),
+            timeout,
+        ) {
+            Ok(v) => v,
+            Err(setup_failed) => return setup_failed,
+        };
+        if let Some(errors) = non_empty_errors(&result) {
+            return graphql_err(&errors[0]);
+        }
+        ConformanceResult::Ok {
+            value: ConformanceValue::Null,
             warnings: vec![],
         }
     }
