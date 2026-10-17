@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ffi**: `RebuildReport` gained a `warnings` field carrying one `RebuildWarningRecord { code, message }` per file the reindex skipped, so Swift/Kotlin consumers of `reindex()` see the full per-file list instead of a silently partial index. Codes are the stable `MALFORMED_YAML`, `UNREADABLE_FILE`, `CROSS_ZONE_DUPLICATE`, and `MISSING_REQUIRED` strings. (PRD 00169)
 - **parser**: frontmatter larger than 256 KiB is now rejected at the parse boundary and skipped like any other malformed file, instead of being handed to the YAML parser. (PRD 00169)
 - **cli**: `ddb reindex --strict` fails on the first unreadable or malformed file instead of skipping it. (PRD 00169)
+- **sync**: remote fetch and push are bounded by a timeout (default 30s; server config `[remote] timeout_secs`). A stalled remote now fails with the `REMOTE_TIMEOUT` error (HTTP 504) instead of hanging.
 
 ### Changed
 
