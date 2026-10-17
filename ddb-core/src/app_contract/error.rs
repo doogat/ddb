@@ -164,6 +164,213 @@ impl From<DoogatError> for AppError {
     }
 }
 
+/// Borrowing mirror of `From<DoogatError>`: `DoogatError` is not `Clone`, so
+/// classification that must keep the error borrowed clones only the payload
+/// fields each arm needs. Keep the arms in lockstep with the by-value impl.
+impl From<&DoogatError> for AppError {
+    fn from(err: &DoogatError) -> Self {
+        let message = err.to_string();
+        match err {
+            DoogatError::NotFound(_) => AppError {
+                code: "NOT_FOUND",
+                message,
+                category: AppErrorCategory::NotFound,
+                field: None,
+                details: vec![],
+            },
+            DoogatError::Validation(_) => AppError {
+                code: "VALIDATION_ERROR",
+                message,
+                category: AppErrorCategory::InvalidInput,
+                field: None,
+                details: vec![],
+            },
+            DoogatError::Parse(_) => AppError {
+                code: "PARSE_ERROR",
+                message,
+                category: AppErrorCategory::InvalidInput,
+                field: None,
+                details: vec![],
+            },
+            DoogatError::InvalidPath(_) => AppError {
+                code: "INVALID_PATH",
+                message,
+                category: AppErrorCategory::InvalidInput,
+                field: None,
+                details: vec![],
+            },
+            DoogatError::BadRequest(_) => AppError {
+                code: "BAD_REQUEST",
+                message,
+                category: AppErrorCategory::InvalidInput,
+                field: None,
+                details: vec![],
+            },
+            DoogatError::Conflict(_) => AppError {
+                code: "CONFLICT",
+                message,
+                category: AppErrorCategory::Conflict,
+                field: None,
+                details: vec![],
+            },
+            DoogatError::SqlEngine(_) => AppError {
+                code: codes::SQL_ERROR,
+                message,
+                category: AppErrorCategory::InvalidInput,
+                field: None,
+                details: vec![],
+            },
+            DoogatError::Structured { code, context, .. } => {
+                let code: &'static str = code;
+                let category = match code {
+                    codes::SINGLETON_NOT_FOUND => AppErrorCategory::NotFound,
+                    codes::UNIQUE_VIOLATION
+                    | codes::SINGLETON_VIOLATION
+                    | codes::REFERENCES_VIOLATION
+                    | codes::CASCADE_CYCLE
+                    | codes::SCHEMA_DESTRUCTIVE_BLOCKED => AppErrorCategory::Conflict,
+                    codes::NOT_NULL_VIOLATION
+                    | codes::UNKNOWN_FIELD
+                    | codes::TYPE_NOT_REGISTERED
+                    | codes::TRANSACTION_NOT_SUPPORTED => AppErrorCategory::InvalidInput,
+                    codes::SCHEMA_APPLY_PARTIAL => AppErrorCategory::Internal,
+                    _ => AppErrorCategory::Internal,
+                };
+                let details: Vec<(String, AppErrorDetail)> = context
+                    .clone()
+                    .into_iter()
+                    .map(|(k, v)| (k, AppErrorDetail::from(v)))
+                    .collect();
+                let field = match code {
+                    codes::NOT_NULL_VIOLATION => details
+                        .iter()
+                        .find(|(k, _)| k == "column")
+                        .and_then(|(_, v)| {
+                            if let AppErrorDetail::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        }),
+                    codes::UNIQUE_VIOLATION => details
+                        .iter()
+                        .find(|(k, _)| k == "columns")
+                        .and_then(|(_, v)| {
+                            if let AppErrorDetail::List(cols) = v {
+                                if cols.len() == 1 {
+                                    Some(cols[0].clone())
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }),
+                    _ => None,
+                };
+                AppError {
+                    code,
+                    message,
+                    category,
+                    field,
+                    details,
+                }
+            }
+            _ => AppError {
+                code: "INTERNAL_ERROR",
+                message,
+                category: AppErrorCategory::Internal,
+                field: None,
+                details: vec![],
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfiVariant {
+    NotFound,
+    Validation,
+    Conflict,
+    Internal,
+}
+
+impl From<AppErrorCategory> for FfiVariant {
+    fn from(c: AppErrorCategory) -> Self {
+        match c {
+            AppErrorCategory::NotFound => FfiVariant::NotFound,
+            AppErrorCategory::InvalidInput => FfiVariant::Validation,
+            AppErrorCategory::Conflict => FfiVariant::Conflict,
+            AppErrorCategory::Internal => FfiVariant::Internal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorRendering {
+    pub code: &'static str,
+    pub message: String,
+    pub http_status: u16,
+    pub category: AppErrorCategory,
+    pub field: Option<String>,
+    pub details: Vec<(String, AppErrorDetail)>,
+    pub ffi_variant: FfiVariant,
+}
+
+/// The single code -> (status, redaction, ffi-hint) policy. Every transport
+/// adapter (GraphQL, REST, NoSQL HTTP; PgWire/FFI in later work) derives its
+/// output from this function and must not re-decide redaction or status.
+///
+/// AppError.message is DoogatError::to_string(), which for every simple
+/// variant carries a thiserror Display prefix ("sql engine: ", "not found: ",
+/// "validation: ", "invalid path: ", "conflict: ", "bad request: ",
+/// "parse: " - ddb-core/src/error.rs's #[error(...)] attributes). Legacy
+/// classify never carried this prefix (it matches DoogatError variants
+/// directly and clones the inner String), so this is the one place that
+/// strips it before any transport sees the message.
+pub fn error_rendering(app: AppError) -> ErrorRendering {
+    let AppError { code, message, category, field, details } = app;
+    let prefix = match code {
+        "NOT_FOUND" => Some("not found: "),
+        "VALIDATION_ERROR" => Some("validation: "),
+        "INVALID_PATH" => Some("invalid path: "),
+        "CONFLICT" => Some("conflict: "),
+        "BAD_REQUEST" => Some("bad request: "),
+        "SQL_ERROR" => Some("sql engine: "),
+        "PARSE_ERROR" => Some("parse: "),
+        _ => None,
+    };
+    let message = match prefix {
+        Some(p) => message.strip_prefix(p).unwrap_or(&message).to_string(),
+        None => message,
+    };
+    let is_internal = matches!(category, AppErrorCategory::Internal);
+    let http_status: u16 = match code {
+        "SQL_ERROR" | "NOT_NULL_VIOLATION" | "UNKNOWN_FIELD" | "TYPE_NOT_REGISTERED" => 422,
+        "VALIDATION_ERROR" => 400,
+        _ => match category {
+            AppErrorCategory::NotFound => 404,
+            AppErrorCategory::Conflict => 409,
+            AppErrorCategory::Internal => 500,
+            AppErrorCategory::InvalidInput => 422,
+        },
+    };
+    let ffi_variant = FfiVariant::from(category.clone());
+    if is_internal {
+        ErrorRendering {
+            code,
+            message: "internal error".to_string(),
+            http_status,
+            category,
+            field: None,
+            details: vec![],
+            ffi_variant,
+        }
+    } else {
+        ErrorRendering { code, message, http_status, category, field, details, ffi_variant }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // The conversion tests below use fully-qualified paths (`crate::error::...`,
