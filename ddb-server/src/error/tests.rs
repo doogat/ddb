@@ -6,6 +6,7 @@
 use super::*;
 use async_graphql::Value;
 use ddb_core::app_contract::AppErrorCategory;
+use ddb_core::error::ErrorValue;
 
 fn ext(err: &ServerError, key: &str) -> Value {
     let exts = err.extensions.as_ref().expect("extensions should be set");

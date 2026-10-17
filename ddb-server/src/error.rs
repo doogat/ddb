@@ -1,6 +1,6 @@
 use async_graphql::{Error, ServerError};
 use ddb_core::app_contract::{AppError, AppErrorDetail};
-use ddb_core::error::{DoogatError, ErrorContext, ErrorValue};
+use ddb_core::error::DoogatError;
 
 /// Classify a DoogatError for external exposure.
 ///
@@ -15,6 +15,14 @@ pub fn classify(e: &DoogatError) -> (&'static str, String) {
 /// `extensions.code` and any structured per-code context fields
 /// (PRD 00129 §6).
 ///
+/// Delegates to [`to_graphql_error_from_app`] so this path makes no
+/// redaction decision of its own: the structured context is no longer
+/// copied here, it arrives as the shared `error_rendering` policy's
+/// already-redacted-or-not `field`/`details`. Attaching the raw context
+/// here would have shipped details the policy discarded for
+/// `Internal`-category codes, and would have disagreed with the
+/// `AppError` path and with REST.
+///
 /// Returning `Error` (not `ServerError`) is load-bearing: dynamic-schema
 /// `FieldFuture::new` closures resolve to `Result<_, async_graphql::Error>`
 /// and rely on `?` propagating the value-with-extensions directly. Going
@@ -22,15 +30,7 @@ pub fn classify(e: &DoogatError) -> (&'static str, String) {
 /// `impl<T: Display> From<T> for Error` (PRD 00131), which builds a fresh
 /// `Error` from `to_string()` and silently drops `extensions`.
 pub fn to_graphql_error(e: DoogatError) -> Error {
-    let (code, message) = classify(&e);
-    let mut err = Error::new(message);
-    let mut map = async_graphql::ErrorExtensionValues::default();
-    map.set("code", code);
-    if let DoogatError::Structured { context, .. } = &e {
-        attach_context(&mut map, context);
-    }
-    err.extensions = Some(map);
-    err
+    to_graphql_error_from_app(AppError::from(e))
 }
 
 /// `ServerError` variant of [`to_graphql_error`] for non-resolver call
@@ -77,21 +77,6 @@ pub fn to_graphql_error_from_app(app: AppError) -> Error {
     }
     err.extensions = Some(map);
     err
-}
-
-/// Copy each `(key, value)` pair from a structured-error context into the
-/// GraphQL extensions map, converting `ErrorValue::List` to a JSON array.
-fn attach_context(map: &mut async_graphql::ErrorExtensionValues, context: &ErrorContext) {
-    use async_graphql::Value;
-    for (key, val) in context {
-        let value = match val {
-            ErrorValue::String(s) => Value::String(s.clone()),
-            ErrorValue::List(items) => {
-                Value::List(items.iter().map(|s| Value::String(s.clone())).collect())
-            }
-        };
-        map.set(key, value);
-    }
 }
 
 #[cfg(test)]
