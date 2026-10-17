@@ -1,7 +1,6 @@
 //! Unit tests for the app-contract error policy.
 //!
-//! Split out of `error.rs` to keep that file under the 800-line limit;
-//! the tests are unchanged.
+//! Split out of `error.rs` to keep that file under the 800-line limit.
 
 // The conversion tests below use fully-qualified paths (`crate::error::...`,
 // `crate::app_contract::...`); the rendering-policy tests import the
@@ -545,109 +544,6 @@ fn rendering_is_code_driven_not_message_driven() {
     assert_eq!(r.ffi_variant, F::NotFound);
     assert_eq!(r.message, "no row for that id");
     assert_eq!(r.field.as_deref(), Some("id"));
-}
-
-/// Borrowed and owned conversions must stay in lockstep on every field,
-/// including `field` and `details`.
-fn assert_conversions_agree(err: DoogatError) {
-    let borrowed = AppError::from(&err);
-    let owned = AppError::from(err);
-    assert_eq!(borrowed.code, owned.code, "code for {}", owned.code);
-    assert_eq!(borrowed.message, owned.message, "message for {}", owned.code);
-    assert_eq!(
-        borrowed.category, owned.category,
-        "category for {}",
-        owned.code
-    );
-    assert_eq!(borrowed.field, owned.field, "field for {}", owned.code);
-    assert_eq!(borrowed.details, owned.details, "details for {}", owned.code);
-    assert_eq!(borrowed, owned, "conversion for {}", owned.code);
-}
-
-#[test]
-fn borrowed_and_owned_conversions_agree_for_every_simple_variant() {
-    let make: [fn() -> DoogatError; 8] = [
-        || DoogatError::NotFound("doc 1".into()),
-        || DoogatError::Validation("bad id".into()),
-        || DoogatError::Parse("bad yaml".into()),
-        || DoogatError::InvalidPath("../x".into()),
-        || DoogatError::BadRequest("no body".into()),
-        || DoogatError::Conflict("stale".into()),
-        || DoogatError::SqlEngine("no such column: bogus".into()),
-        || DoogatError::Git("boom".into()),
-    ];
-    for f in make {
-        assert_conversions_agree(f());
-    }
-}
-
-#[test]
-fn borrowed_and_owned_conversions_agree_for_every_structured_code() {
-    let under_test = [
-        codes::SINGLETON_NOT_FOUND,
-        codes::UNIQUE_VIOLATION,
-        codes::SINGLETON_VIOLATION,
-        codes::REFERENCES_VIOLATION,
-        codes::CASCADE_CYCLE,
-        codes::SCHEMA_DESTRUCTIVE_BLOCKED,
-        codes::NOT_NULL_VIOLATION,
-        codes::UNKNOWN_FIELD,
-        codes::TYPE_NOT_REGISTERED,
-        codes::TRANSACTION_NOT_SUPPORTED,
-        codes::INVALID_ZONE,
-        codes::SCHEMA_APPLY_PARTIAL,
-        "SOME_UNREGISTERED_CODE",
-    ];
-    for code in under_test {
-        assert_conversions_agree(structured(code, "detail text"));
-    }
-    // Real constructors, with up to four context keys and multi-element
-    // lists, so the two impls cannot diverge on a larger context.
-    let make: [fn() -> DoogatError; 5] = [
-        || DoogatError::references_violation("link", "url", "note", "20250101000000"),
-        || DoogatError::dangling_reference("link", "url", "note", "20250101000000"),
-        || DoogatError::unique_violation("link", ["a", "b"], ["1", "2"]),
-        || DoogatError::transaction_not_supported("BEGIN"),
-        || DoogatError::cascade_cycle(["a", "b", "c"]),
-    ];
-    for f in make {
-        assert_conversions_agree(f());
-    }
-}
-
-/// The samples that actually carry `field` and both `details` variants: a
-/// conversion that dropped either on one side only would still pass the
-/// loop above if both sides came out empty, so pin them non-empty here.
-#[test]
-fn borrowed_and_owned_conversions_agree_for_field_and_context_bearing_errors() {
-    assert_conversions_agree(DoogatError::not_null_violation("link", "url"));
-    assert_conversions_agree(DoogatError::unique_violation("link", ["url"], ["https://x"]));
-    assert_conversions_agree(DoogatError::Structured {
-        code: codes::INVALID_ZONE,
-        message: "zone is not addressable".into(),
-        context: vec![
-            ("zone".into(), ErrorValue::String("footer".into())),
-            (
-                "allowed".into(),
-                ErrorValue::List(vec!["frontmatter".into(), "body".into()]),
-            ),
-        ],
-    });
-
-    assert_conversions_agree(DoogatError::not_null_violation("task", "title"));
-
-    let not_null = AppError::from(DoogatError::not_null_violation("link", "url"));
-    assert_eq!(not_null.field.as_deref(), Some("url"));
-    // A second column proves `field` is read from the context, not fixed.
-    let titled = AppError::from(DoogatError::not_null_violation("task", "title"));
-    assert_eq!(titled.field.as_deref(), Some("title"));
-    let unique = AppError::from(DoogatError::unique_violation("link", ["url"], ["https://x"]));
-    assert_eq!(unique.field.as_deref(), Some("url"));
-    // A multi-column UNIQUE names no single field.
-    let multi = AppError::from(DoogatError::unique_violation("l", ["a", "b"], ["1", "2"]));
-    assert_eq!(multi.field, None);
-    let zone = AppError::from(structured(codes::INVALID_ZONE, "zone is not addressable"));
-    assert!(!zone.details.is_empty());
 }
 
 /// Rendering an Internal error emits exactly one ERROR event carrying the

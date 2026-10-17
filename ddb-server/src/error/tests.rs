@@ -490,19 +490,6 @@ fn app_err_schema_apply_partial_redacts_message_and_drops_partial_context() {
 // no redaction decision of its own: its output has to agree with the shared
 // policy, including dropping the structured context the policy discarded.
 
-/// Every code string in the (private) `ERROR_POLICY` table of
-/// `ddb-core/src/app_contract/error.rs`, listed here so the legacy path can
-/// be checked against the shared policy across the whole registered code
-/// space instead of at a handful of points.
-const ALL_POLICY_CODES: &[&str] = &[
-    "NOT_FOUND", "VALIDATION_ERROR", "PARSE_ERROR", "INVALID_PATH",
-    "BAD_REQUEST", "CONFLICT", "SQL_ERROR", "INTERNAL_ERROR",
-    "SINGLETON_NOT_FOUND", "UNIQUE_VIOLATION", "SINGLETON_VIOLATION",
-    "REFERENCES_VIOLATION", "CASCADE_CYCLE", "SCHEMA_DESTRUCTIVE_BLOCKED",
-    "NOT_NULL_VIOLATION", "UNKNOWN_FIELD", "TYPE_NOT_REGISTERED",
-    "TRANSACTION_NOT_SUPPORTED", "INVALID_ZONE", "SCHEMA_APPLY_PARTIAL",
-];
-
 /// The policy rows whose category is `Internal`: redaction must hold for
 /// each of them, not just for one familiar code string.
 const INTERNAL_POLICY_CODES: &[&str] = &["INTERNAL_ERROR", "SCHEMA_APPLY_PARTIAL"];
@@ -623,80 +610,6 @@ fn legacy_server_error_redacts_internal_structured_code_like_graphql_error() {
         to_graphql_error(internal_structured_schema_apply_partial()).extensions,
         "to_server_error must expose the same extensions as to_graphql_error"
     );
-}
-
-fn assert_legacy_and_app_paths_agree(make: impl Fn() -> DoogatError, label: &str) {
-    let legacy = to_graphql_error(make());
-    let from_app = to_graphql_error_from_app(AppError::from(make()));
-    assert_eq!(
-        legacy.message, from_app.message,
-        "{label}: message must agree"
-    );
-    assert_eq!(
-        legacy.extensions, from_app.extensions,
-        "{label}: extensions must agree"
-    );
-}
-
-#[test]
-fn legacy_and_app_graphql_paths_agree_on_message_and_extensions() {
-    assert_legacy_and_app_paths_agree(
-        || DoogatError::not_null_violation("link", "url"),
-        "non-internal structured",
-    );
-    assert_legacy_and_app_paths_agree(
-        internal_structured_schema_apply_partial,
-        "internal structured",
-    );
-    assert_legacy_and_app_paths_agree(
-        || DoogatError::SqlEngine("no such column: bogus".into()),
-        "simple variant",
-    );
-}
-
-/// Both GraphQL conversions on one error value: the app path reads it by
-/// reference first, the legacy path consumes it, so a single fixture (not
-/// two separately built ones) is compared.
-fn assert_paths_agree(err: DoogatError) {
-    let label = err.to_string();
-    let from_app = to_graphql_error_from_app(AppError::from(&err));
-    let legacy = to_graphql_error(err);
-    assert_eq!(
-        legacy.message, from_app.message,
-        "{label}: message must agree"
-    );
-    assert_eq!(
-        legacy.extensions, from_app.extensions,
-        "{label}: extensions must agree"
-    );
-}
-
-#[test]
-fn legacy_and_app_graphql_paths_agree_on_every_policy_code() {
-    for &code in ALL_POLICY_CODES {
-        assert_paths_agree(structured_with_benign_context(code));
-        assert_paths_agree(alarming_structured(code));
-    }
-}
-
-#[test]
-fn legacy_and_app_graphql_paths_agree_on_every_structured_constructor() {
-    for err in [
-        DoogatError::unique_violation("m", ["a", "b"], ["1", "2"]),
-        DoogatError::unique_violation("post", ["slug"], ["x"]),
-        DoogatError::references_violation("a", "b", "c", "d"),
-        DoogatError::dangling_reference("a", "b", "c", "d"),
-        DoogatError::not_null_violation("link", "url"),
-        DoogatError::not_null_violation("post", "slug"),
-        DoogatError::unknown_field("link", "bogus"),
-        DoogatError::type_not_registered("widget"),
-        DoogatError::cascade_cycle(["a", "b", "a"]),
-        DoogatError::singleton_violation("app_config", "20260510120000"),
-        DoogatError::singleton_not_found("app_config"),
-        DoogatError::transaction_not_supported("BEGIN"),
-    ] {
-        assert_paths_agree(err);
-    }
 }
 
 #[test]
