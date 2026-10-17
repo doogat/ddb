@@ -227,6 +227,18 @@ impl RedbIndex {
 /// Opens the database per call because redb holds an exclusive file lock while
 /// a handle is open. `open_lock` serializes those opens, so services sharing
 /// one mirror (behind an `Arc`) never collide on `DatabaseAlreadyOpen`.
+///
+/// This exclusive-open constraint is also why NoSQL reads (`nosql_get`,
+/// `nosql_scan_type`, `nosql_scan_tag`, `nosql_backlinks`) stay on the
+/// write-actor's dispatch channel instead of fanning out onto `ReadPool`: a
+/// naive `ReadPool`-style fan-out spins up a fresh `DoogatService` per task,
+/// and each of those would open its own redb handle on this same file,
+/// contending on the exclusive lock above rather than running concurrently.
+/// The maintenance worker now running `compact`/`sync`/`run_maintenance` on
+/// its own thread (00174) already keeps those verbs from stalling NoSQL
+/// reads sitting behind them on the write-actor channel. A shared
+/// read-only redb handle (so concurrent readers don't need `open_lock` at
+/// all) is a separate follow-up, not implemented here.
 pub struct RedbMirror {
     path: std::path::PathBuf,
     open_lock: std::sync::Mutex<()>,
