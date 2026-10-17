@@ -54,8 +54,8 @@ interface.
   (`NOT_FOUND`, `VALIDATION_ERROR`, `UNIQUE_VIOLATION`, ...) — the same codes
   GraphQL exposes under `extensions.code`.
 - **SQL schema-mutation classification** is one helper,
-  `requires_schema_reload` (`ddb-core/src/sql_engine/classify.rs`), shared by
-  GraphQL `executeSql`/`executeBatch` and PgWire.
+  `requires_schema_reload` (`ddb-core/src/sql_engine/classify.rs`), called
+  once inside `ActorHandle::call` via `ReloadIntent`.
 - **GraphQL input decoding** is shared across the four dynamic mutations via
   `ddb-server/src/schema/input.rs`.
 

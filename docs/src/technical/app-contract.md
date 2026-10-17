@@ -150,7 +150,7 @@ Per AGENTS.md: "New cross-interface behavior belongs in the app contract first; 
 
 A `CreateCommand` flows uniformly through both transports:
 
-1. **GraphQL**: `ddb-server/src/actor/handlers.rs` parses the `createDoogat` mutation input, builds a `CreateCommand`, and forwards it to the actor.
+1. **GraphQL**: `ddb-server/src/schema/mutations/operations.rs` parses the `createDoogat` mutation input and calls `ActorHandle::create`, which builds a `CreateCommand` in `ddb-server/src/actor/mod.rs`.
 2. **CLI**: `ddb-cli/src/commands/crud.rs` parses `ddb create` flags into a `CreateCommand`.
 3. Both call `DoogatService::create(cmd)` and receive `Result<AppOutput<ParsedDoogat>, DoogatError>`.
 4. On `Ok(AppOutput { value, warnings })`, each transport renders `value` in its native format (GraphQL object, CLI text, REST JSON) and emits `warnings`: CLI prints to stderr; REST includes a `warnings` array in the response body (always present). GraphQL warning forwarding is deferred to PRD 00154.

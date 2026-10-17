@@ -70,7 +70,7 @@ exception.
 | Helper | Location | Signature | Consumers |
 |--------|----------|-----------|-----------|
 | HTTP error mapping | `ddb-server/src/http_error.rs` | `http_error_response(DoogatError) -> (StatusCode, Json<ErrorBody>)` | REST (`rest.rs`), NoSQL HTTP (`nosql_api.rs`) |
-| SQL schema-mutation classifier | `ddb-core/src/sql_engine/classify.rs` | `requires_schema_reload(&str) -> bool` | GraphQL `executeSql`/`executeBatch` (`schema/mutations/operations.rs`), PgWire (`pgwire.rs`) |
+| SQL schema-mutation classifier | `ddb-core/src/sql_engine/classify.rs` | `requires_schema_reload(&str) -> bool` | called once inside `ActorHandle::call` via `ReloadIntent` (`actor/mod.rs`) |
 | GraphQL input decoding | `ddb-server/src/schema/input.rs` | `opt_string`, `opt_string_list`, `string_list`, `fields_map`, `opt_fields_map`, `conflict_action` | mutation resolvers (`schema/mutations/operations.rs`) |
 
 - **HTTP error mapping** turns a `DoogatError` into a status code plus a
@@ -352,7 +352,7 @@ Constraint violations on `createDoogat` / typed `INSERT` against a populated SIN
 
 `upsert_<type>` input is a JSON object of typed field values only; it carries no `title`. When the upsert creates the first row, the resolver defaults that row's title to the type name (e.g. `app_config`), since the service typed-create path requires a title.
 
-The plural query field (`<type_name>s`) and `createDoogat` are still generated for SINGLETON typedefs (backward compat); `createDoogat` rejects with `SINGLETON_VIOLATION` once a row exists. ALTER TABLE `SET/DROP SINGLETON` triggers the existing schema reload (any DDL through `executeSql` does so per `mutations/operations.rs::executeSql`); the singular field appears or disappears on the next `schemaVersion` poll.
+The plural query field (`<type_name>s`) and `createDoogat` are still generated for SINGLETON typedefs (backward compat); `createDoogat` rejects with `SINGLETON_VIOLATION` once a row exists. ALTER TABLE `SET/DROP SINGLETON` triggers the existing schema reload (any DDL through `executeSql` does so via `ActorHandle::call`'s `ReloadIntent`); the singular field appears or disappears on the next `schemaVersion` poll.
 
 ### Search query syntax
 
@@ -977,7 +977,7 @@ Set `enabled = false` to disable. CLI flags don't override maintenance config �
 
 - Spawns on startup if `maintenance_enabled` is true
 - Skips the first tick (waits one full interval before first run)
-- Calls `compact()` + `detect_stale_nodes()` via `ActorHandle::run_maintenance`, which routes through the generic `ActorHandle::call` closure entrypoint, returns `CompactionReport`
+- Calls `compact()` + `detect_stale_nodes()` via `ActorHandle::compact`, which routes through the generic `ActorHandle::call` closure entrypoint, returns `CompactionReport`
 - Also available on demand via the `compact` GraphQL mutation
 - Git maintenance available via the `maintenance(task: String)` GraphQL mutation, which calls `ActorHandle::run_maintenance` the same way, returns `MaintenanceReport`
 - Logs at `info` on success, `warn` on failure — maintenance errors are non-fatal
@@ -1042,7 +1042,8 @@ ddb-server/src/
 ├── lib.rs           # pub async fn run() entrypoint
 ├── actor/           # Thread-safe GitRepo+Index bridge
 │   ├── mod.rs       # RepoActor, event bus, command dispatch
-│   └── handlers.rs  # Command handler implementations
+│   ├── event.rs     # Event bus
+│   └── reload_signal.rs # ReloadIntent/ReloadSignal
 ├── schema/          # Dynamic GraphQL schema
 │   ├── mod.rs       # Schema builder (query, mutation, subscription)
 │   ├── base_types.rs # Value converters, type builders, helpers
@@ -1072,5 +1073,5 @@ ddb-server/src/
 ```
 
 The SQL schema-mutation classifier (`requires_schema_reload`) lives in
-`ddb-core/src/sql_engine/classify.rs`, shared by the GraphQL and PgWire
-transports rather than duplicated per adapter.
+`ddb-core/src/sql_engine/classify.rs`, called once inside `ActorHandle::call`
+via `ReloadIntent` rather than duplicated per adapter.

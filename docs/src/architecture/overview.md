@@ -178,8 +178,8 @@ ddb/
 │   └── src/
 │       ├── lib.rs              # Server entrypoint (axum)
 │       ├── actor/              # Thread-safe core bridge
-│       │   ├── mod.rs          # RepoActor, event bus
-│       │   └── handlers.rs     # Command dispatch logic
+│       │   ├── mod.rs          # RepoActor, event bus, closure dispatch
+│       │   └── reload_signal.rs # ReloadIntent/ReloadSignal
 │       ├── schema/             # Dynamic GraphQL schema
 │       │   ├── mod.rs          # Schema builder
 │       │   ├── base_types.rs   # Value converters, type builders
