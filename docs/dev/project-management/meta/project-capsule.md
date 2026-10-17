@@ -85,11 +85,12 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
 - [x] **00173 unify-server-error-mapping-paths-v1** (DONE 2026-10-17, in `done/`; 2 cycles, 14/14 tasks) — single error-rendering policy in `app_contract::error`, retiring the 4-way mapper fan-out (GraphQL/REST/NoSQL/PgWire) and the FFI allowlist's lossy collapse. Cycle 2 tail-swept (tasks 12-14). Tier 1 green at `b4e2359` (build, clippy@1.89.0, test-ci 1945 passed, e2e 574 passed, mdbook build); no CRITICAL/HIGH outstanding, no deferrals.
 - [x] **00174 decouple-maintenance-from-write-actor-v1** (DONE 2026-10-17, in `done/`; 2 cycles, 8/8 tasks) — off-thread maintenance worker + bounded libgit2 remote timeouts (install-once, configurable `[remote] timeout_secs`), decoupling sync/compact from the write actor. Cycle 2 hit `rework_cap` 2 with 0 CRITICAL / 5 HIGH unresolved (doc claims a `NoSqlMirrorPort::lock_for_read` method that does not exist — reads actually use a bounded open-retry; NoSQL-during-compact and lost-update e2e tests don't assert the overlap/landed-write they claim to prove; push timeout caused by a real remote has no deadline/callbacks) plus a 25-item medium/low tail, all deferred at cap-out (no sweep). 12 HIGH-severity findings minted as hold-triage stubs 00222-00233. Doubt lens pass.
 
-- [ ] **00175 route-read-delete-through-contract-v1** (selected 2026-10-17, in `wip/`) — design doc already existed (reused, review-log gate passed); planning next.
+- [!] **00175 route-read-delete-through-contract-v1** (STALLED, moved to `hold/`) — parked by the loop before this session; detail not re-derived here, see batch deferred JSON. Resume via `mv docs/dev/project-management/prds/hold/00175-route-read-delete-through-contract-v1.md docs/dev/project-management/prds/backlog/`.
+- [ ] **00176 route-search-through-contract-v1** (selected 2026-10-17, in `wip/`) — routing `search()` through the app contract; design run next.
 
-### Remaining backlog (27 PRDs; not selected)
-- [ ] 00176-route-search-through-contract-v1
+### Remaining backlog (26 PRDs; not selected)
 - [ ] 00177-ffi-crud-through-contract-v1
+
 - [ ] 00178-structured-fields-input-v1
 - [ ] 00179-sql-identifier-escaping-materializer-v1
 - [ ] 00180-server-security-resource-hardening-v1
