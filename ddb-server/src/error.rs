@@ -1,5 +1,5 @@
 use async_graphql::{Error, ServerError};
-use ddb_core::app_contract::{AppError, AppErrorCategory, AppErrorDetail};
+use ddb_core::app_contract::{AppError, AppErrorDetail};
 use ddb_core::error::{DoogatError, ErrorContext, ErrorValue};
 
 /// Classify a DoogatError for external exposure.
@@ -51,67 +51,29 @@ pub fn to_server_error(e: DoogatError) -> ServerError {
 /// Convert an adapter-neutral `AppError` (the application contract envelope
 /// from PRD 00147) into an `async_graphql::Error`.
 ///
-/// Internal-category errors have their message redacted to `"internal error"`
-/// for the network surface and logged via `tracing` — this preserves the
-/// PRD 00129 §6 / PRD 00131 redaction behavior at the new AppError boundary.
-/// Non-internal categories expose their safe message plus `app.code`, optional
-/// `app.field`, and all `app.details` entries. Internal errors expose only the
-/// redacted message and stable code.
+/// Code, message, field and details come from the shared `error_rendering`
+/// policy, which strips the Display prefix, redacts internal-category errors
+/// to `"internal error"` with no field/details, and logs them centrally
+/// (PRD 00129 §6 / PRD 00131 redaction behavior at the AppError boundary).
 pub fn to_graphql_error_from_app(app: AppError) -> Error {
-    let AppError {
-        code,
-        message: raw_message,
-        category,
-        field,
-        details,
-    } = app;
-    let is_internal = matches!(category, AppErrorCategory::Internal);
-
-    let message = if is_internal {
-        tracing::error!(code = %code, message = %raw_message, "internal error");
-        "internal error".to_string()
-    } else {
-        // DoogatError::from uses err.to_string() which adds a thiserror Display
-        // prefix (e.g. "not found: ") for simple variants. Structured variants
-        // use #[error("{message}")] so they have no prefix. Strip for parity
-        // with the legacy classify() behavior used by to_graphql_error.
-        let prefix = match code {
-            "NOT_FOUND" => Some("not found: "),
-            "VALIDATION_ERROR" => Some("validation: "),
-            "INVALID_PATH" => Some("invalid path: "),
-            "CONFLICT" => Some("conflict: "),
-            "BAD_REQUEST" => Some("bad request: "),
-            "SQL_ERROR" => Some("sql engine: "),
-            "PARSE_ERROR" => Some("parse: "),
-            _ => None,
-        };
-        match prefix {
-            Some(p) => raw_message
-                .strip_prefix(p)
-                .unwrap_or(&raw_message)
-                .to_string(),
-            None => raw_message,
-        }
-    };
-    let mut err = Error::new(message);
+    let rendering = ddb_core::app_contract::error_rendering(app);
+    let mut err = Error::new(rendering.message);
     let mut map = async_graphql::ErrorExtensionValues::default();
-    map.set("code", code);
-    if !is_internal {
-        if let Some(field) = field {
-            map.set("field", field);
-        }
-        for (key, val) in details {
-            let value = match val {
-                AppErrorDetail::String(s) => async_graphql::Value::String(s),
-                AppErrorDetail::List(items) => async_graphql::Value::List(
-                    items
-                        .into_iter()
-                        .map(async_graphql::Value::String)
-                        .collect(),
-                ),
-            };
-            map.set(key, value);
-        }
+    map.set("code", rendering.code);
+    if let Some(field) = rendering.field {
+        map.set("field", field);
+    }
+    for (key, val) in rendering.details {
+        let value = match val {
+            AppErrorDetail::String(s) => async_graphql::Value::String(s),
+            AppErrorDetail::List(items) => async_graphql::Value::List(
+                items
+                    .into_iter()
+                    .map(async_graphql::Value::String)
+                    .collect(),
+            ),
+        };
+        map.set(key, value);
     }
     err.extensions = Some(map);
     err
@@ -136,6 +98,7 @@ fn attach_context(map: &mut async_graphql::ErrorExtensionValues, context: &Error
 mod tests {
     use super::*;
     use async_graphql::Value;
+    use ddb_core::app_contract::AppErrorCategory;
 
     fn ext(err: &ServerError, key: &str) -> Value {
         let exts = err.extensions.as_ref().expect("extensions should be set");
