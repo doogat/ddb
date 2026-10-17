@@ -8,7 +8,10 @@
 //! `ddb-core/tests/app_contract_adapter_guard.rs`.
 
 mod error;
-pub use error::{AppError, AppErrorCategory, AppErrorDetail, SCHEMA_UNSUPPORTED_CHANGE};
+pub use error::{
+    AppError, AppErrorCategory, AppErrorDetail, ErrorRendering, FfiVariant,
+    SCHEMA_UNSUPPORTED_CHANGE, error_rendering,
+};
 
 mod output;
 pub use output::{AppOutput, AppWarning};
