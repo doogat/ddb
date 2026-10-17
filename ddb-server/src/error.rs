@@ -467,6 +467,16 @@ mod tests {
     }
 
     #[test]
+    fn app_err_sql_engine_renders_sql_error_with_stripped_prefix_not_redacted() {
+        let err = to_graphql_error_from_app(AppError::from(DoogatError::SqlEngine(
+            "no such column: bogus".into(),
+        )));
+        assert_eq!(ext_err(&err, "code"), Value::String("SQL_ERROR".into()));
+        assert_eq!(err.message, "no such column: bogus");
+        assert!(!err.message.contains("sql engine: "));
+    }
+
+    #[test]
     fn app_err_internal_variants_redact_to_internal_error() {
         for (app, label) in [
             (
