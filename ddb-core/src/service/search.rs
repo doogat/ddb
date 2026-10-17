@@ -396,6 +396,8 @@ mod tests {
         );
         assert!(!hit.snippet.is_empty(), "snippet must be populated");
         assert!(!hit.updated_at.is_empty(), "updated_at must be populated");
+        assert!(created.meta.date.is_some(), "fixture must carry a date");
+        assert_eq!(hit.created_at, created.meta.date, "created_at must be the doogat's date");
 
         // Every field identical to what the index returned.
         assert_hit_unmodified(hit, &direct.hits[0]);
@@ -522,7 +524,7 @@ mod tests {
             &svc,
             cmd("filterterm", 10, 0, Some(vec!["recipe", "dessert"]), Some("dinner")),
         );
-        let mut expected = vec![soup, cake.clone()];
+        let mut expected = vec![soup.clone(), cake.clone()];
         expected.sort();
         assert_eq!(sorted_ids(&both.value.items), expected);
         assert_eq!(both.value.total, 2);
@@ -537,6 +539,19 @@ mod tests {
             "the tag filter must still apply alongside the types filter"
         );
         assert_eq!(narrowed.value.total, 1);
+
+        // cake is tagged `dinner` but is a dessert: the types filter must
+        // still apply alongside the tag filter.
+        let typed = run(
+            &svc,
+            cmd("filterterm", 10, 0, Some(vec!["recipe"]), Some("dinner")),
+        );
+        assert_eq!(
+            sorted_ids(&typed.value.items),
+            vec![soup],
+            "the types filter must still apply alongside the tag filter"
+        );
+        assert_eq!(typed.value.total, 1);
     }
 
     #[test]
