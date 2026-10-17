@@ -166,9 +166,165 @@ impl From<DoogatError> for AppError {
 
 #[cfg(test)]
 mod tests {
-    // All references below are fully-qualified (`crate::error::...`,
-    // `crate::app_contract::...`) because `super::*` would only bring this
-    // module's own items into scope, none of which these tests use.
+    // The conversion tests below use fully-qualified paths (`crate::error::...`,
+    // `crate::app_contract::...`); the rendering-policy tests import the
+    // policy items from this module.
+    use super::{error_rendering, AppError, AppErrorCategory, ErrorRendering, FfiVariant};
+    use crate::error::{codes, DoogatError, ErrorValue};
+
+    fn render(err: DoogatError) -> ErrorRendering {
+        error_rendering(AppError::from(err))
+    }
+
+    /// Asserts code, category, status and FFI hint, plus the redaction rule:
+    /// Internal renders "internal error" with no field/details; everything
+    /// else keeps the (prefix-stripped) message.
+    fn assert_rendering(
+        err: DoogatError,
+        code: &str,
+        category: AppErrorCategory,
+        http_status: u16,
+        ffi_variant: FfiVariant,
+        message: &str,
+    ) {
+        let r = render(err);
+        assert_eq!(r.code, code, "code for {code}");
+        assert_eq!(r.category, category, "category for {code}");
+        assert_eq!(r.http_status, http_status, "status for {code}");
+        assert_eq!(r.ffi_variant, ffi_variant, "ffi hint for {code}");
+        assert_eq!(r.message, message, "message for {code}");
+        if category == AppErrorCategory::Internal {
+            assert_eq!(r.field, None, "redacted field for {code}");
+            assert!(r.details.is_empty(), "redacted details for {code}");
+        }
+    }
+
+    fn structured(code: &'static str, message: &str) -> DoogatError {
+        DoogatError::Structured {
+            code,
+            message: message.into(),
+            context: vec![("table".into(), ErrorValue::String("t".into()))],
+        }
+    }
+
+    #[test]
+    fn simple_variants_render_with_category_status_ffi_hint_and_stripped_prefix() {
+        use AppErrorCategory as C;
+        use FfiVariant as F;
+        let cases = [
+            (DoogatError::NotFound("doc 1".into()), "NOT_FOUND", C::NotFound, 404, F::NotFound),
+            (DoogatError::Validation("bad id".into()), "VALIDATION_ERROR", C::InvalidInput, 400, F::Validation),
+            (DoogatError::Parse("bad yaml".into()), "PARSE_ERROR", C::InvalidInput, 422, F::Validation),
+            (DoogatError::InvalidPath("../x".into()), "INVALID_PATH", C::InvalidInput, 422, F::Validation),
+            (DoogatError::BadRequest("no body".into()), "BAD_REQUEST", C::InvalidInput, 422, F::Validation),
+            (DoogatError::Conflict("stale".into()), "CONFLICT", C::Conflict, 409, F::Conflict),
+            (DoogatError::SqlEngine("no such column: bogus".into()), "SQL_ERROR", C::InvalidInput, 422, F::Validation),
+        ];
+        let messages = ["doc 1", "bad id", "bad yaml", "../x", "no body", "stale", "no such column: bogus"];
+        for ((err, code, cat, status, ffi), msg) in cases.into_iter().zip(messages) {
+            assert_rendering(err, code, cat, status, ffi, msg);
+        }
+    }
+
+    #[test]
+    fn structured_codes_render_with_category_status_and_ffi_hint() {
+        use AppErrorCategory as C;
+        use FfiVariant as F;
+        let cases = [
+            (codes::SINGLETON_NOT_FOUND, C::NotFound, 404, F::NotFound),
+            (codes::UNIQUE_VIOLATION, C::Conflict, 409, F::Conflict),
+            (codes::SINGLETON_VIOLATION, C::Conflict, 409, F::Conflict),
+            (codes::REFERENCES_VIOLATION, C::Conflict, 409, F::Conflict),
+            (codes::CASCADE_CYCLE, C::Conflict, 409, F::Conflict),
+            (codes::SCHEMA_DESTRUCTIVE_BLOCKED, C::Conflict, 409, F::Conflict),
+            (codes::NOT_NULL_VIOLATION, C::InvalidInput, 422, F::Validation),
+            (codes::UNKNOWN_FIELD, C::InvalidInput, 422, F::Validation),
+            (codes::TYPE_NOT_REGISTERED, C::InvalidInput, 422, F::Validation),
+            (codes::TRANSACTION_NOT_SUPPORTED, C::InvalidInput, 422, F::Validation),
+        ];
+        for (code, cat, status, ffi) in cases {
+            assert_rendering(structured(code, "detail text"), code, cat, status, ffi, "detail text");
+        }
+    }
+
+    #[test]
+    fn non_internal_structured_rendering_keeps_details() {
+        let r = render(structured(codes::SCHEMA_DESTRUCTIVE_BLOCKED, "blocked"));
+        assert_eq!(
+            r.details,
+            vec![("table".to_string(), super::AppErrorDetail::String("t".into()))]
+        );
+    }
+
+    #[test]
+    fn not_null_violation_rendering_keeps_field() {
+        let r = render(DoogatError::not_null_violation("link", "url"));
+        assert_eq!(r.field.as_deref(), Some("url"));
+        assert_eq!(r.message, "NOT NULL constraint violated: link.url");
+    }
+
+    #[test]
+    fn schema_apply_partial_renders_internal_500_redacted() {
+        let r = render(structured(codes::SCHEMA_APPLY_PARTIAL, "halted after 2 of 3"));
+        assert_eq!(r.code, "SCHEMA_APPLY_PARTIAL");
+        assert_eq!(r.category, AppErrorCategory::Internal);
+        assert_eq!(r.http_status, 500);
+        assert_eq!(r.ffi_variant, FfiVariant::Internal);
+        assert_eq!(r.message, "internal error");
+        assert_eq!(r.field, None);
+        assert!(r.details.is_empty());
+    }
+
+    #[test]
+    fn internal_variants_render_500_redacted() {
+        assert_rendering(
+            DoogatError::Git("secret repo path /home/x".into()),
+            "INTERNAL_ERROR",
+            AppErrorCategory::Internal,
+            500,
+            FfiVariant::Internal,
+            "internal error",
+        );
+        assert_rendering(
+            structured("SOME_UNREGISTERED_CODE", "leaky detail"),
+            "SOME_UNREGISTERED_CODE",
+            AppErrorCategory::Internal,
+            500,
+            FfiVariant::Internal,
+            "internal error",
+        );
+    }
+
+    #[test]
+    fn only_outer_display_prefix_is_stripped_not_matching_inner_text() {
+        let r = render(DoogatError::SqlEngine("sql engine: inner detail".into()));
+        assert_eq!(r.message, "sql engine: inner detail");
+        let r = render(DoogatError::NotFound("not found: nested".into()));
+        assert_eq!(r.message, "not found: nested");
+    }
+
+    #[test]
+    fn ffi_variant_maps_each_category() {
+        assert_eq!(FfiVariant::from(AppErrorCategory::NotFound), FfiVariant::NotFound);
+        assert_eq!(FfiVariant::from(AppErrorCategory::InvalidInput), FfiVariant::Validation);
+        assert_eq!(FfiVariant::from(AppErrorCategory::Conflict), FfiVariant::Conflict);
+        assert_eq!(FfiVariant::from(AppErrorCategory::Internal), FfiVariant::Internal);
+    }
+
+    #[test]
+    fn borrowed_and_owned_conversions_agree() {
+        let make: [fn() -> DoogatError; 4] = [
+            || DoogatError::NotFound("doc 1".into()),
+            || DoogatError::unique_violation("link", ["url"], ["https://x"]),
+            || DoogatError::Git("boom".into()),
+            || structured(codes::SCHEMA_APPLY_PARTIAL, "halted"),
+        ];
+        for f in make {
+            let err = f();
+            let borrowed = AppError::from(&err);
+            assert_eq!(borrowed, AppError::from(err));
+        }
+    }
 
     #[test]
     fn schema_apply_partial_code_constant_has_exact_value() {
