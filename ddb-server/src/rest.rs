@@ -556,3 +556,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod search_tests;
