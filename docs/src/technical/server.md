@@ -27,7 +27,7 @@ Client → HTTP (axum) → Bearer auth middleware → GraphQL POST /graphql
 
 Read and write operations follow different paths. **Reads** (GraphQL queries, REST GETs, NoSQL lookups, pgwire SELECTs) go through the `ReadPool`, which dispatches each request to a `tokio::task::spawn_blocking` closure with its own freshly-opened `Index` and `GitRepo` handles. A semaphore caps concurrency (default: `min(available_parallelism, 4)`). SQLite WAL mode allows concurrent readers without blocking writes.
 
-**Writes** (mutations, SQL DML, DDL) still serialize through the single-writer actor to maintain consistency. The actor bridges sync and async worlds: it runs on `std::thread::spawn` with `blocking_recv()`, while the HTTP layer is fully async (tokio + axum). Communication uses `tokio::sync::mpsc` for commands and `oneshot` channels for replies.
+**Writes** (mutations, SQL DML, DDL) still serialize through the single-writer actor to maintain consistency. The actor bridges sync and async worlds: it runs on `std::thread::spawn` with `blocking_recv()`, while the HTTP layer is fully async (tokio + axum). Dispatch is closure-carrying, not enum-carrying: every verb routes through one generic `ActorHandle::call<R>` entrypoint, which boxes a closure over `&mut DoogatService` and sends it down `tokio::sync::mpsc` with a per-call `oneshot` reply channel. An explicit `EventIntent` passed alongside the closure declares which event kind (if any) the verb emits; a `ReloadIntent` declares whether the actor must trigger and await a schema reload after the verb completes. Both are read at the closure boundary against the verb's actual result (`Ok`-gated), replacing the old per-command `match` dispatch and the five hand-wired per-adapter reload triggers with a single derivation site inside `call`.
 
 The `sql` query field uses `sqlparser` to classify queries: pure `SELECT` statements route through `ReadPool`, everything else goes to the actor.
 
@@ -977,9 +977,9 @@ Set `enabled = false` to disable. CLI flags don't override maintenance config �
 
 - Spawns on startup if `maintenance_enabled` is true
 - Skips the first tick (waits one full interval before first run)
-- Calls `compact()` + `detect_stale_nodes()` via `ActorCommand::RunMaintenance`, returns `CompactionReport`
+- Calls `compact()` + `detect_stale_nodes()` via `ActorHandle::run_maintenance`, which routes through the generic `ActorHandle::call` closure entrypoint, returns `CompactionReport`
 - Also available on demand via the `compact` GraphQL mutation
-- Git maintenance available via the `maintenance(task: String)` GraphQL mutation (`ActorCommand::GitMaintenance`), returns `MaintenanceReport`
+- Git maintenance available via the `maintenance(task: String)` GraphQL mutation, which calls `ActorHandle::run_maintenance` the same way, returns `MaintenanceReport`
 - Logs at `info` on success, `warn` on failure — maintenance errors are non-fatal
 - `run_maintenance` propagates errors (returns `Err` on compaction failure); callers handle this gracefully
 
