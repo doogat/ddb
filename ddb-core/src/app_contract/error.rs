@@ -92,6 +92,13 @@ impl From<DoogatError> for AppError {
                 field: None,
                 details: vec![],
             },
+            DoogatError::SqlEngine(_) => AppError {
+                code: codes::SQL_ERROR,
+                message,
+                category: AppErrorCategory::InvalidInput,
+                field: None,
+                details: vec![],
+            },
             DoogatError::Structured { code, context, .. } => {
                 let category = match code {
                     codes::SINGLETON_NOT_FOUND => AppErrorCategory::NotFound,

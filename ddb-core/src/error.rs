@@ -120,6 +120,7 @@ pub mod codes {
     /// A transaction verb reached `execute_sql`, or a batch left a transaction
     /// open, on a service shared by independent server clients.
     pub const TRANSACTION_NOT_SUPPORTED: &str = "TRANSACTION_NOT_SUPPORTED";
+    pub const SQL_ERROR: &str = "SQL_ERROR";
 }
 
 impl DoogatError {
