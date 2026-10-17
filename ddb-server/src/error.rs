@@ -577,4 +577,173 @@ mod tests {
         );
         assert!(exts.get("failed_op").is_none(), "failed_op must not leak");
     }
+
+    // --- Legacy GraphQL path (`to_graphql_error` / `to_server_error`) must make
+    // no redaction decision of its own: its output has to agree with the shared
+    // policy, including dropping the structured context the policy discarded.
+
+    fn internal_structured_schema_apply_partial() -> DoogatError {
+        DoogatError::Structured {
+            code: ddb_core::error::codes::SCHEMA_APPLY_PARTIAL,
+            message: "applied [CREATE TABLE a]; failed at CREATE TABLE b: disk full".into(),
+            context: vec![
+                (
+                    "applied_ops".into(),
+                    ErrorValue::List(vec!["CREATE TABLE a".into()]),
+                ),
+                (
+                    "failed_op".into(),
+                    ErrorValue::String("CREATE TABLE b".into()),
+                ),
+            ],
+        }
+    }
+
+    fn unregistered_structured_code() -> DoogatError {
+        DoogatError::Structured {
+            code: "NOT_A_CODE",
+            message: "/Users/secret/.ddb/objects/ab/cdef is unreadable".into(),
+            context: vec![
+                (
+                    "failed_op".into(),
+                    ErrorValue::String("/Users/secret/.ddb/objects/ab/cdef".into()),
+                ),
+                (
+                    "applied_ops".into(),
+                    ErrorValue::List(vec!["read blob ab/cdef".into()]),
+                ),
+            ],
+        }
+    }
+
+    #[test]
+    fn legacy_graphql_error_on_internal_structured_code_exposes_only_code() {
+        let err = to_graphql_error(internal_structured_schema_apply_partial());
+        let exts = err.extensions.as_ref().expect("extensions should be set");
+
+        assert_eq!(err.message, "internal error");
+        assert_eq!(
+            exts.get("code").cloned().unwrap_or(Value::Null),
+            Value::String("SCHEMA_APPLY_PARTIAL".into())
+        );
+        assert!(exts.get("field").is_none(), "field must not leak");
+        assert!(
+            exts.get("applied_ops").is_none(),
+            "applied_ops must not leak"
+        );
+        assert!(exts.get("failed_op").is_none(), "failed_op must not leak");
+    }
+
+    #[test]
+    fn legacy_graphql_error_on_unregistered_structured_code_exposes_only_code() {
+        let err = to_graphql_error(unregistered_structured_code());
+        let exts = err.extensions.as_ref().expect("extensions should be set");
+
+        assert_eq!(err.message, "internal error");
+        assert!(!err.message.contains("secret"));
+        assert_eq!(
+            exts.get("code").cloned().unwrap_or(Value::Null),
+            Value::String("NOT_A_CODE".into())
+        );
+        assert!(exts.get("field").is_none(), "field must not leak");
+        assert!(
+            exts.get("applied_ops").is_none(),
+            "applied_ops must not leak"
+        );
+        assert!(exts.get("failed_op").is_none(), "failed_op must not leak");
+    }
+
+    #[test]
+    fn legacy_graphql_error_on_non_internal_code_keeps_context_and_adds_field() {
+        let err = to_graphql_error(DoogatError::not_null_violation("link", "url"));
+
+        assert_eq!(err.message, "NOT NULL constraint violated: link.url");
+        assert_eq!(
+            ext_err(&err, "code"),
+            Value::String("NOT_NULL_VIOLATION".into())
+        );
+        assert_eq!(ext_err(&err, "table"), Value::String("link".into()));
+        assert_eq!(ext_err(&err, "column"), Value::String("url".into()));
+        assert_eq!(ext_err(&err, "field"), Value::String("url".into()));
+    }
+
+    #[test]
+    fn legacy_server_error_redacts_internal_structured_code_like_graphql_error() {
+        let err = to_server_error(internal_structured_schema_apply_partial());
+
+        assert_eq!(err.message, "internal error");
+        assert_eq!(
+            ext(&err, "code"),
+            Value::String("SCHEMA_APPLY_PARTIAL".into())
+        );
+        {
+            let exts = err.extensions.as_ref().expect("extensions should be set");
+            assert!(exts.get("field").is_none(), "field must not leak");
+            assert!(
+                exts.get("applied_ops").is_none(),
+                "applied_ops must not leak"
+            );
+            assert!(exts.get("failed_op").is_none(), "failed_op must not leak");
+        }
+        assert_eq!(
+            err.extensions,
+            to_graphql_error(internal_structured_schema_apply_partial()).extensions,
+            "to_server_error must expose the same extensions as to_graphql_error"
+        );
+    }
+
+    fn assert_legacy_and_app_paths_agree(make: impl Fn() -> DoogatError, label: &str) {
+        let legacy = to_graphql_error(make());
+        let from_app = to_graphql_error_from_app(AppError::from(make()));
+        assert_eq!(
+            legacy.message, from_app.message,
+            "{label}: message must agree"
+        );
+        assert_eq!(
+            legacy.extensions, from_app.extensions,
+            "{label}: extensions must agree"
+        );
+    }
+
+    #[test]
+    fn legacy_and_app_graphql_paths_agree_on_message_and_extensions() {
+        assert_legacy_and_app_paths_agree(
+            || DoogatError::not_null_violation("link", "url"),
+            "non-internal structured",
+        );
+        assert_legacy_and_app_paths_agree(
+            internal_structured_schema_apply_partial,
+            "internal structured",
+        );
+        assert_legacy_and_app_paths_agree(
+            || DoogatError::SqlEngine("no such column: bogus".into()),
+            "simple variant",
+        );
+    }
+
+    #[test]
+    fn legacy_graphql_error_round_trips_string_and_ordered_list_context() {
+        let err = to_graphql_error(DoogatError::Structured {
+            code: ddb_core::error::codes::UNIQUE_VIOLATION,
+            message: "duplicate row".into(),
+            context: vec![
+                ("table".into(), ErrorValue::String("link".into())),
+                (
+                    "columns".into(),
+                    ErrorValue::List(vec!["c1".into(), "c2".into(), "c3".into()]),
+                ),
+            ],
+        });
+
+        assert_eq!(err.message, "duplicate row");
+        assert_eq!(ext_err(&err, "table"), Value::String("link".into()));
+        assert_eq!(
+            ext_err(&err, "columns"),
+            Value::List(vec![
+                Value::String("c1".into()),
+                Value::String("c2".into()),
+                Value::String("c3".into()),
+            ])
+        );
+    }
 }
