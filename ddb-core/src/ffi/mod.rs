@@ -12,7 +12,7 @@ mod tests;
 
 pub use driver::DoogatDriver;
 pub use records::{
-    AttachmentInfo, ColumnDefRecord, DdbError, DdbErrorContextEntry, PaginatedSearchResult,
-    RebuildReport, RebuildWarningRecord, SchemaApplyReportRecord, SchemaPlanOpRecord,
-    SchemaWarningRecord, SearchResult, SqlResultRecord, TypeSchemaRecord,
+    AttachmentInfo, ColumnDefRecord, DdbError, DdbErrorContextEntry, FieldEntry,
+    PaginatedSearchResult, RebuildReport, RebuildWarningRecord, SchemaApplyReportRecord,
+    SchemaPlanOpRecord, SchemaWarningRecord, SearchResult, SqlResultRecord, TypeSchemaRecord,
 };

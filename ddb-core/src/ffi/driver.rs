@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::app_contract::{PageRequest, SearchCommand};
 use crate::error::DoogatError;
 use crate::service::DoogatService;
 
@@ -107,10 +108,40 @@ impl DoogatDriver {
         offset: u32,
     ) -> Result<PaginatedSearchResult, DdbError> {
         self.with_service(|svc| {
-            let result = svc
-                .search_paginated(&query, limit as usize, offset as usize)
-                .map_err(DdbError::from)?;
-            Ok(result.into())
+            let cmd = SearchCommand {
+                query,
+                page: PageRequest::decode(Some(i64::from(limit)), Some(i64::from(offset)))?,
+                types: None,
+                tag: None,
+            };
+            let output = svc.search_command(cmd)?;
+            Ok(PaginatedSearchResult {
+                hits: output.value.items.into_iter().map(Into::into).collect(),
+                total_count: output.value.total as u64,
+            })
+        })
+    }
+
+    pub fn search_filtered(
+        &self,
+        query: String,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        types: Option<Vec<String>>,
+        tag: Option<String>,
+    ) -> Result<PaginatedSearchResult, DdbError> {
+        self.with_service(|svc| {
+            let cmd = SearchCommand {
+                query,
+                page: PageRequest::decode(limit.map(i64::from), offset.map(i64::from))?,
+                types,
+                tag,
+            };
+            let output = svc.search_command(cmd)?;
+            Ok(PaginatedSearchResult {
+                hits: output.value.items.into_iter().map(Into::into).collect(),
+                total_count: output.value.total as u64,
+            })
         })
     }
 

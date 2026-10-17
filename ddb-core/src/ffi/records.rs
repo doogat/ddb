@@ -128,6 +128,13 @@ impl From<DoogatError> for DdbError {
     }
 }
 
+/// FFI-safe frontmatter field entry (one key/value pair of a search hit).
+#[derive(uniffi::Record)]
+pub struct FieldEntry {
+    pub key: String,
+    pub value: String,
+}
+
 /// FFI-safe search result.
 #[derive(uniffi::Record)]
 pub struct SearchResult {
@@ -137,6 +144,10 @@ pub struct SearchResult {
     pub snippet: String,
     pub rank: f64,
     pub updated_at: String,
+    pub tags: Vec<String>,
+    pub doogat_type: Option<String>,
+    pub fields: Vec<FieldEntry>,
+    pub created_at: Option<String>,
 }
 
 impl From<crate::types::SearchResult> for SearchResult {
@@ -148,6 +159,15 @@ impl From<crate::types::SearchResult> for SearchResult {
             snippet: r.snippet,
             rank: r.rank,
             updated_at: r.updated_at,
+            tags: r.tags,
+            doogat_type: r.doogat_type,
+            fields: r
+                .fields
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(key, value)| FieldEntry { key, value })
+                .collect(),
+            created_at: r.created_at,
         }
     }
 }
