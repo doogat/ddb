@@ -1015,6 +1015,13 @@
       "cycle": 2,
       "reason": "rework cap reached with this finding unresolved",
       "prd": "00174-decouple-maintenance-from-write-actor-v1.md"
+    },
+    {
+      "type": "stall",
+      "site": "plan_expansion",
+      "detail": "module_drift; note /Users/bob/git/src/github.com/doogat/ddb/docs/dev/project-management/autopilot/split-notes/00175-route-read-delete-through-contract-v1.md",
+      "op_id": "c4d00e86f50f",
+      "prd": "00175-route-read-delete-through-contract-v1.md"
     }
   ]
 }

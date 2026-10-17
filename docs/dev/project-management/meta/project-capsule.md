@@ -85,7 +85,7 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
 - [x] **00173 unify-server-error-mapping-paths-v1** (DONE 2026-10-17, in `done/`; 2 cycles, 14/14 tasks) — single error-rendering policy in `app_contract::error`, retiring the 4-way mapper fan-out (GraphQL/REST/NoSQL/PgWire) and the FFI allowlist's lossy collapse. Cycle 2 tail-swept (tasks 12-14). Tier 1 green at `b4e2359` (build, clippy@1.89.0, test-ci 1945 passed, e2e 574 passed, mdbook build); no CRITICAL/HIGH outstanding, no deferrals.
 - [x] **00174 decouple-maintenance-from-write-actor-v1** (DONE 2026-10-17, in `done/`; 2 cycles, 8/8 tasks) — off-thread maintenance worker + bounded libgit2 remote timeouts (install-once, configurable `[remote] timeout_secs`), decoupling sync/compact from the write actor. Cycle 2 hit `rework_cap` 2 with 0 CRITICAL / 5 HIGH unresolved (doc claims a `NoSqlMirrorPort::lock_for_read` method that does not exist — reads actually use a bounded open-retry; NoSQL-during-compact and lost-update e2e tests don't assert the overlap/landed-write they claim to prove; push timeout caused by a real remote has no deadline/callbacks) plus a 25-item medium/low tail, all deferred at cap-out (no sweep). 12 HIGH-severity findings minted as hold-triage stubs 00222-00233. Doubt lens pass.
 
-- [ ] **00175 route-read-delete-through-contract-v1** (selected 2026-10-17, in `wip/`) — build gate entered, catchup/design running this session.
+- [ ] **00175 route-read-delete-through-contract-v1** (selected 2026-10-17, in `wip/`) — design doc already existed (reused, review-log gate passed); planning next.
 
 ### Remaining backlog (27 PRDs; not selected)
 - [ ] 00176-route-search-through-contract-v1
@@ -130,8 +130,8 @@ Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration
 
 ## GitHub State (refreshed 2026-10-17, this session)
 
-- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 247 unreleased commits on master now.
-- **Nightly/Test RED on latest master commit `5b5f9eb2`** (00173 just landed). `full-validation / macos-full`: 573/574 e2e tests pass; `server_mutations::batch_update_empty` fails with `ConnectionReset` (`hyper::Error(Io, Os { code: 54, ... })`) against the local GraphQL test server — looks like a flaky/transient server-shutdown-timing issue in that one e2e test, not a 00173 regression (00173's own Tier-1 gate was green at `b4e2359`: 1945 test-ci + 574 e2e). Not yet triaged into a PRD; worth a rerun to confirm flake vs. real regression before assuming either way. Prior CRLF/Windows sync-fold failure (`d7867d23`, 2026-10-12..16) superseded by this newer commit; not re-verified this session.
+- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 311 unreleased commits on master now.
+- **Nightly/Test RED on latest master commit `a7a5efdd`.** Failure is `cargo-deny`'s dependency-policy check, not a test regression: `unsafe-libyaml` unmaintained advisory (RUSTSEC-2024-0449, via deprecated `serde_yaml`) and two yanked-crate warnings (`chacha20` 0.10.0, `spin` 0.9.8) trip `advisories FAILED`. Unrelated to this session's PRD (00175); not yet triaged into a PRD of its own. Prior `server_mutations::batch_update_empty` ConnectionReset flake (`5b5f9eb2`) and CRLF/Windows sync-fold failure (`d7867d23`) are both superseded by this newer commit; not re-verified this session.
 
 ### Prior snapshot (2026-09-07)
 
