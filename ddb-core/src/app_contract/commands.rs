@@ -1,5 +1,6 @@
 //! Command types for the application contract layer.
 
+use crate::error::{DoogatError, Result};
 use crate::types::{ConflictAction, Value};
 use std::collections::BTreeMap;
 
@@ -76,16 +77,66 @@ pub struct ApplySchemaCommand {
     pub allow_destructive: bool,
 }
 
+/// A validated page window. Build one from raw transport input with
+/// [`PageRequest::decode`], which rejects out-of-range values instead of
+/// clamping them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageRequest {
+    pub limit: usize,
+    pub offset: usize,
+}
+
+impl PageRequest {
+    pub const DEFAULT_LIMIT: usize = 50;
+    pub const MAX_LIMIT: usize = 10_000;
+
+    /// Decode raw `limit`/`offset` input. An absent `limit` defaults to
+    /// [`Self::DEFAULT_LIMIT`]; an absent `offset` defaults to 0. A `limit`
+    /// outside `1..=MAX_LIMIT` or a negative `offset` is a
+    /// `DoogatError::Validation` error.
+    pub fn decode(limit: Option<i64>, offset: Option<i64>) -> Result<Self> {
+        let limit = match limit {
+            None => Self::DEFAULT_LIMIT,
+            Some(l) => {
+                if l <= 0 || l > Self::MAX_LIMIT as i64 {
+                    return Err(DoogatError::Validation(format!(
+                        "limit must be between 1 and {}, got {l}",
+                        Self::MAX_LIMIT
+                    )));
+                }
+                usize::try_from(l).map_err(|_| {
+                    DoogatError::Validation(format!("limit {l} does not fit in usize"))
+                })?
+            }
+        };
+        let offset = match offset {
+            None => 0,
+            Some(o) => {
+                if o < 0 {
+                    return Err(DoogatError::Validation(format!(
+                        "offset must be non-negative, got {o}"
+                    )));
+                }
+                usize::try_from(o).map_err(|_| {
+                    DoogatError::Validation(format!("offset {o} does not fit in usize"))
+                })?
+            }
+        };
+        Ok(Self { limit, offset })
+    }
+}
+
 /// Command to run a full-text search against the SQLite FTS5 index.
 ///
-/// `query` is passed through the search-query normalizer. `limit` and
-/// `offset` enable pagination; transports that do not expose pagination
-/// may leave them `None` to use service defaults.
+/// `query` is passed through the search-query normalizer. `page` is the
+/// validated page window. `types` keeps only hits whose `doogat_type` is
+/// listed; `tag` keeps only hits carrying that tag. `None` means no filter.
 #[derive(Debug, Clone)]
 pub struct SearchCommand {
     pub query: String,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
+    pub page: PageRequest,
+    pub types: Option<Vec<String>>,
+    pub tag: Option<String>,
 }
 
 #[cfg(test)]

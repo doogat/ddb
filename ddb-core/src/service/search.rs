@@ -1,3 +1,4 @@
+use crate::app_contract::{summarize_reindex_warnings, AppOutput, AppSearchResult, SearchCommand};
 use crate::error::Result;
 use crate::parser;
 use crate::types::{
@@ -37,6 +38,32 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         self.ensure_fresh()?;
         self.index
             .search_paginated_filtered(query, limit, offset, filters)
+    }
+
+    /// App facade entrypoint: run a filtered, paginated search from a
+    /// `SearchCommand`. Hits come back exactly as the index returns them;
+    /// `total` is the index's full match count, not the page length.
+    /// `warnings` carries at most one `REINDEX_SKIPPED_FILES` entry,
+    /// summarizing any files the up-front freshness reindex had to skip.
+    pub fn search_command(&self, cmd: SearchCommand) -> Result<AppOutput<AppSearchResult>> {
+        let reindex_warnings = self.ensure_fresh()?;
+        let filters = SearchFilters {
+            types: cmd.types,
+            tag: cmd.tag,
+            where_filters: None,
+        };
+        let result =
+            self.search_paginated_filtered(&cmd.query, cmd.page.limit, cmd.page.offset, &filters)?;
+        Ok(AppOutput {
+            value: AppSearchResult {
+                items: result.hits,
+                total: result.total_count,
+                query: cmd.query,
+            },
+            warnings: summarize_reindex_warnings(reindex_warnings)
+                .into_iter()
+                .collect(),
+        })
     }
 
     pub fn reindex(&self) -> Result<RebuildReport> {

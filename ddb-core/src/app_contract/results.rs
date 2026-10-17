@@ -55,7 +55,7 @@ pub struct ListResult {
 /// `ddb_core`. The `App` prefix mirrors `AppOutput`/`AppError`/`AppWarning`.
 #[derive(Debug, Clone)]
 pub struct AppSearchResult {
-    pub items: Vec<ParsedDoogat>,
+    pub items: Vec<crate::types::SearchResult>,
     pub total: usize,
     pub query: String,
 }

@@ -27,7 +27,7 @@ pub fn describe_consistency_warning(warning: &crate::types::ConsistencyWarning) 
 
 mod commands;
 pub use commands::{
-    ApplySchemaCommand, CreateCommand, DeleteCommand, ReadCommand, SearchCommand,
+    ApplySchemaCommand, CreateCommand, DeleteCommand, PageRequest, ReadCommand, SearchCommand,
     UnregisteredTypePolicy, UpdateCommand,
 };
 
