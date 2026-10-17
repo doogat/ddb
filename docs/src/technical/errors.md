@@ -141,13 +141,23 @@ pub struct ErrorRendering {
   which drives a representative code set through all three transports and
   asserts identical code + redaction, plus the documented per-code status.
 
-**Compatibility note:** two REST/GraphQL response shapes changed when this
-policy landed. GraphQL SQL errors are no longer redacted to `INTERNAL_ERROR`
+**Compatibility note:** several response shapes changed when this policy
+landed. GraphQL SQL errors are no longer redacted to `INTERNAL_ERROR`
 — they now render `SQL_ERROR` with the SQL engine's message, matching REST.
 REST `SCHEMA_APPLY_PARTIAL` and any other `Internal`-category structured code
 now redacts its message to `"internal error"` instead of passing the raw
-detail through — matching GraphQL's pre-existing redaction. No HTTP status
-changed for any existing code.
+detail through — matching GraphQL's pre-existing redaction; its 500 status is
+unchanged. Two statuses did change. A structured code absent from
+`ERROR_POLICY` classifies `Internal`, so it now renders HTTP 500 with its
+message redacted to `"internal error"` and its `field`/`details` dropped,
+where before REST gave it 422 with its own message. `DoogatError::Parse` is
+now the registered `PARSE_ERROR` row (`InvalidInput`, 422) and exposes its
+message with the `"parse: "` prefix stripped, where before it rendered
+`INTERNAL_ERROR` with HTTP 500 and a redacted message. The legacy GraphQL
+path (`to_graphql_error`) routes through the same policy, so both redaction
+changes reach it: an unregistered structured code is redacted there too (its
+code is kept, its `context` no longer attached), and `Parse` is exposed as
+`PARSE_ERROR`.
 
 ## CLI Error Handling
 

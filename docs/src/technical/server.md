@@ -914,7 +914,12 @@ No server restart is needed. Clients can poll the `schemaVersion` query field to
 | `Conflict` | `CONFLICT` | Original message |
 | `BadRequest` | `BAD_REQUEST` | Original message |
 | `SqlEngine` | `SQL_ERROR` | Original message (user-actionable: syntax errors, unsupported DDL, constraint violations) |
-| All others | `INTERNAL_ERROR` | Redacted to `"internal error"` (details logged server-side) |
+| `Parse` | `PARSE_ERROR` | Original message (the `"parse: "` prefix is stripped) |
+| `Structured` | The error's own `code` | Original message. A code the policy registers as `Internal` category (`SCHEMA_APPLY_PARTIAL`), and any code the policy does not register, redacts to `"internal error"` |
+| `Git`, `Yaml`, `Sql`, `Io`, and the other internal variants | `INTERNAL_ERROR` | Redacted to `"internal error"` (details logged server-side) |
+
+Per-code HTTP statuses live in the one policy table, documented under
+[Error Handling](./errors.md#unified-transport-rendering-policy-prd-00173).
 
 ### Structured error codes (PRD 00129 §6)
 
