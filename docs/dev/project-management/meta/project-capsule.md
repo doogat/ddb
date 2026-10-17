@@ -83,9 +83,11 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
 
 - [x] **00172 collapse-actor-plumbing-v1** (DONE 2026-10-17, in `done/`; cycle 1, tail-swept) — collapsed the ActorCommand/ActorReply twin-enum dispatch into a single generic `ActorHandle::call<R>` entrypoint, with `EventIntent`/`IntentEmit` for event emission and `ReloadIntent`/`ReloadSignal` collapsing the 5 hand-wired per-adapter schema-reload triggers into one derivation site. `handle_command` and `actor/handlers.rs` deleted entirely. Cycle 1 converged (0 CRITICAL, 2 HIGH both settled deferrals with design-doc evidence; doubt D1-D5 all pass); 14 medium/low findings swept via 4 tail-sweep tasks (ClosureMsg dead field removed, actor/tests.rs split under 800 lines, stale docs/comments fixed, PgWire/GraphQL reload-parity test gap closed, dead REST reloader Extension layer dropped). Tier 1 green (1913 tests) at `1cd221c`+2 chore commits.
 
-### Remaining backlog (30 PRDs; not selected)
+### In progress
 
-- [ ] 00173-unify-server-error-mapping-paths-v1
+- [ ] **00173-unify-server-error-mapping-paths-v1** (wip, 2026-10-17) — single error-rendering policy in `app_contract::error`, retiring the 4-way mapper fan-out (GraphQL/REST/NoSQL/PgWire) and the FFI allowlist's lossy collapse.
+
+### Remaining backlog (29 PRDs; not selected)
 - [ ] 00174-decouple-maintenance-from-write-actor-v1
 - [ ] 00175-route-read-delete-through-contract-v1
 - [ ] 00176-route-search-through-contract-v1

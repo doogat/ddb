@@ -68,8 +68,10 @@ Pins the parity so it cannot silently drift again.
 
 ### Repository Structure
 ```text
-ddb-core/src/app_contract/
-└── error.rs           # Maps to: Complete the AppError conversion (add SqlEngine arm; register SQL_ERROR; own the sole neutral ErrorRendering policy)
+ddb-core/src/
+├── error.rs            # Maps to: Complete the AppError conversion (register codes::SQL_ERROR)
+└── app_contract/
+    └── error.rs        # Maps to: Complete the AppError conversion (add SqlEngine arm; own the sole neutral ErrorRendering policy)
 ddb-server/src/
 ├── error.rs           # Maps to: Unified error classification (classify/to_graphql encode the core ErrorRendering)
 ├── http_error.rs      # Maps to: Transport adapters (REST/NoSQL) — thin wrapper over the policy
@@ -77,6 +79,10 @@ ddb-server/src/
 └── nosql_api.rs       # Maps to: Transport adapters (NoSQL HTTP) — consumes the policy
 ddb-server/tests/
 └── error_parity_*.rs  # Maps to: Error-parity conformance tests
+docs/src/technical/
+├── errors.md          # Maps to: documents the unified policy and ffi_variant/redaction surface
+└── server.md          # Maps to: documents the unified policy and ffi_variant/redaction surface
+CHANGELOG.md            # Maps to: compatibility note for the REST/GraphQL SQL-error and redaction shape change
 ```
 
 ### Module: app_contract::error (ddb-core/src/app_contract/error.rs)
