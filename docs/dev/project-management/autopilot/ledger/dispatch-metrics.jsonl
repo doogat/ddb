@@ -183,3 +183,5 @@
 {"kind":"handoff","site":"review","edge":"leave","at":1792212016,"phase":"done","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792212039,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
 {"kind":"handoff","site":"done","edge":"leave","at":1792212148,"phase":"build","prd":"00172-collapse-actor-plumbing-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792212178,"phase":"build","prd":"00173-unify-server-error-mapping-paths-v1.md"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792221695,"phase":"review","prd":"00173-unify-server-error-mapping-paths-v1.md"}
