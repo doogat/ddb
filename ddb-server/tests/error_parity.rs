@@ -79,6 +79,10 @@ fn assert_rest(err: DoogatError, expect: &Expect) {
     );
 }
 
+/// Drives the NoSQL transport's own entry point. `nosql_error` delegates to the
+/// REST helper, so this leg pins the wiring and the serialized body shape, not
+/// an independent NoSQL policy: a NoSQL adapter that stopped delegating, or
+/// serialized a different body, fails here.
 async fn assert_nosql(err: DoogatError, expect: &Expect) {
     let resp = nosql_error(err);
     assert_eq!(
