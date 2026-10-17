@@ -3,15 +3,11 @@ use async_graphql::{Name, Value as GqlValue};
 use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
 use ddb_core::schema_diff::plan::SchemaApplyReport;
-use ddb_core::sql_engine::requires_schema_reload;
 use ddb_core::types::{BatchCreateInput, BatchUpdateInput};
 use indexmap::IndexMap;
 
-use std::sync::Arc;
-
 use crate::actor::ActorHandle;
 use crate::error::{to_graphql_error, to_graphql_error_from_app};
-use crate::reload::SchemaReloader;
 use crate::warning_extension::forward_warnings;
 
 use crate::schema::base_types::*;
@@ -261,13 +257,6 @@ pub(super) fn build_execute_sql_field() -> Field {
             let fmt = validate_format(&ctx)?;
             let result = a.execute_sql(sql.clone()).await.map_err(to_graphql_error)?;
 
-            // Await schema reload if this was a typedef-mutating statement
-            if requires_schema_reload(&sql) {
-                if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>() {
-                    reloader.trigger_reload_and_wait().await;
-                }
-            }
-
             Ok(Some(FieldValue::owned_any(sql_result_to_value(
                 &result, fmt,
             ))))
@@ -298,16 +287,8 @@ pub(super) fn build_execute_batch_field() -> Field {
                     .map(|v| v.string().unwrap_or_default().to_string())
                     .collect();
 
-                let has_ddl = statements.iter().any(|s| requires_schema_reload(s));
-
                 let results =
                     a.execute_batch(statements).await.map_err(to_graphql_error)?;
-
-                if has_ddl {
-                    if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>() {
-                        reloader.trigger_reload_and_wait().await;
-                    }
-                }
 
                 Ok(Some(FieldValue::list(
                     results.iter().map(|r| FieldValue::owned_any(sql_result_to_value(r, fmt))),
@@ -570,15 +551,6 @@ pub(super) fn build_apply_schema_field() -> Field {
                 .await
                 .map_err(|e| to_graphql_error_from_app(e.into()))?;
             forward_warnings(&ctx, &output.warnings);
-            // Surface newly created/altered typedefs in the dynamic GraphQL
-            // schema immediately, mirroring executeSql/executeBatch after DDL. A
-            // dry run mutates nothing and an empty plan leaves applied == false,
-            // so neither path reloads.
-            if !dry_run && output.value.applied {
-                if let Ok(reloader) = ctx.data::<Arc<SchemaReloader>>() {
-                    reloader.trigger_reload_and_wait().await;
-                }
-            }
             Ok(Some(FieldValue::owned_any(schema_apply_report_to_value(
                 &output.value,
             ))))

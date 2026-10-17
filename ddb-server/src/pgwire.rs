@@ -22,11 +22,10 @@ use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use ddb_core::sql_engine::{requires_schema_reload, SqlResult};
+use ddb_core::sql_engine::SqlResult;
 
 use crate::actor::ActorHandle;
 use crate::read_pool::ReadPool;
-use crate::reload::SchemaReloader;
 
 /// True when `sql` references pg_catalog as a schema qualifier (e.g. psql's \dt, tab-completion).
 /// Matches `pg_catalog.` with the dot to avoid false positives on user data containing "pg_catalog".
@@ -80,7 +79,6 @@ impl AuthSource for DdbAuthSource {
 struct DdbBackend {
     actor: ActorHandle,
     read_pool: ReadPool,
-    reloader: Arc<SchemaReloader>,
 }
 
 #[async_trait]
@@ -113,9 +111,6 @@ impl SimpleQueryHandler for DdbBackend {
                 .await
                 .map_err(|e| PgWireError::ApiError(Box::new(e)))?;
 
-            if requires_schema_reload(query) {
-                self.reloader.trigger_reload_and_wait().await;
-            }
             // `upper` still feeds command-tag formatting below.
             (r, query.to_uppercase())
         };
@@ -332,7 +327,6 @@ pub async fn start(
     actor: ActorHandle,
     read_pool: ReadPool,
     token: String,
-    reloader: Arc<SchemaReloader>,
     bind: &str,
     port: u16,
 ) -> std::io::Result<()> {
@@ -345,11 +339,7 @@ pub async fn start(
         Arc::new(params),
     ));
 
-    let query = Arc::new(DdbBackend {
-        actor,
-        read_pool,
-        reloader,
-    });
+    let query = Arc::new(DdbBackend { actor, read_pool });
     let handlers = Arc::new(DdbPgHandlers { auth, query });
 
     let addr = format!("{bind}:{port}");

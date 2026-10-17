@@ -88,14 +88,7 @@ pub async fn run(
     eprintln!("listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    let pg = pgwire::start(
-        rest_actor,
-        read_pool,
-        token,
-        reloader,
-        &cfg.bind,
-        cfg.pg_port,
-    );
+    let pg = pgwire::start(rest_actor, read_pool, token, &cfg.bind, cfg.pg_port);
 
     tokio::select! {
         r = axum::serve(listener, app) => r?,

@@ -221,3 +221,60 @@ fn integration_20_maintenance_mutation() {
     assert!(maintenance["fallbackUsed"].is_boolean(), "{result}");
     assert!(maintenance["tasksRun"].is_array(), "{result}");
 }
+
+/// True when the dynamic GraphQL schema exposes a type named `name`.
+fn has_gql_type(server: &ServerGuard, name: &str) -> bool {
+    let result = server.graphql(r#"{ __schema { types { name } } }"#);
+    assert_graphql_ok(&result);
+    result["data"]["__schema"]["types"]
+        .as_array()
+        .expect("__schema.types must be an array")
+        .iter()
+        .any(|t| t["name"] == name)
+}
+
+/// PRD 00172 task 4: PgWire's own hand-wired `requires_schema_reload` +
+/// `trigger_reload_and_wait` call (pgwire.rs:116-117) was deleted — the reload
+/// decision now lives inside `ActorHandle::call` (via `ReloadIntent`), reached
+/// through the SAME `execute_sql` path PgWire's non-SELECT branch calls. Issuing
+/// a schema-changing DDL statement over the real PgWire wire protocol must still
+/// trigger exactly one reload, proven by the new type becoming queryable through
+/// the dynamic GraphQL schema in this same server instance, with no restart.
+#[test]
+fn integration_21_pgwire_ddl_triggers_schema_reload() {
+    let repo = DdbTestRepo::init();
+    let server = ServerGuard::start(&repo);
+
+    assert!(
+        !has_gql_type(&server, "Pgddltest"),
+        "Pgddltest must not exist before the DDL runs"
+    );
+
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let (client, connection) = tokio_postgres::Config::new()
+            .host("127.0.0.1")
+            .port(server.pg_port)
+            .user("ddb")
+            .password(&server.token)
+            .dbname("ddb")
+            .connect(tokio_postgres::NoTls)
+            .await
+            .expect("PgWire connection failed");
+        tokio::spawn(async move {
+            connection.await.ok();
+        });
+
+        // Non-SELECT branch (pgwire.rs do_query), the one whose hand-wired
+        // reload trigger this task deletes.
+        client
+            .simple_query("CREATE TABLE pgddltest (label TEXT)")
+            .await
+            .expect("PgWire CREATE TABLE failed");
+    });
+
+    assert!(
+        has_gql_type(&server, "Pgddltest"),
+        "Pgddltest must be queryable through GraphQL immediately after the PgWire DDL, \
+         proving the reload fired without a restart"
+    );
+}

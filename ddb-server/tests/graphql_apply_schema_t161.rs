@@ -292,9 +292,11 @@ async fn real_apply_triggers_schema_reload_dry_run_does_not() {
     let tmp = tempfile::tempdir().unwrap();
     let (actor, pool) = setup(tmp.path()).await;
 
-    // The reloader owns its own actor/pool clones for the background reload loop;
-    // build_schema registers `Some(reloader)` so the resolver can find it in ctx.
+    // The reloader owns its own actor/pool clones for the background reload loop.
+    // The reload decision now lives inside ActorHandle::call (PRD 00172 task 4),
+    // so the actor itself must be wired with the reloader, matching lib.rs.
     let (reloader, _shared) = SchemaReloader::new(actor.clone(), pool.clone());
+    actor.set_reloader(Arc::clone(&reloader));
     let schema = ddb_server::schema::build_schema(actor, pool, vec![], Some(Arc::clone(&reloader)))
         .expect("schema must build");
 
@@ -336,5 +338,99 @@ async fn real_apply_triggers_schema_reload_dry_run_does_not() {
         "a real (non-dry-run) applySchema that creates a typedef must trigger a schema reload \
          (version must increment); before={version_before_real} after={}",
         reloader.version()
+    );
+}
+
+/// PRD 00172 task 4: `operations.rs`'s own hand-wired reload trigger after
+/// `executeSql` was deleted — the reload decision now lives inside
+/// `ActorHandle::call` (via `ReloadIntent::Explicit`, pre-classified from the
+/// SQL text). A DDL statement must still trigger exactly one reload; a non-DDL
+/// statement must trigger none.
+#[tokio::test]
+async fn execute_sql_ddl_triggers_schema_reload_dml_does_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (actor, pool) = setup(tmp.path()).await;
+
+    let (reloader, _shared) = SchemaReloader::new(actor.clone(), pool.clone());
+    actor.set_reloader(Arc::clone(&reloader));
+    let schema = ddb_server::schema::build_schema(actor, pool, vec![], Some(Arc::clone(&reloader)))
+        .expect("schema must build");
+
+    let ddl = r#"mutation { executeSql(sql: "CREATE TABLE sqlddltest (label TEXT)") { message } }"#;
+    let version_before_ddl = reloader.version();
+    let result = schema.execute(ddl).await;
+    assert!(
+        result.errors.is_empty(),
+        "executeSql DDL: expected no GraphQL errors, got: {:?}",
+        result.errors
+    );
+    assert!(
+        reloader.version() > version_before_ddl,
+        "a CREATE TABLE via executeSql must trigger a schema reload (version must increment); \
+         before={version_before_ddl} after={}",
+        reloader.version()
+    );
+
+    let dml = r#"mutation { executeSql(sql: "INSERT INTO sqlddltest (label) VALUES ('x')") { message affected } }"#;
+    let version_before_dml = reloader.version();
+    let result = schema.execute(dml).await;
+    assert!(
+        result.errors.is_empty(),
+        "executeSql DML: expected no GraphQL errors, got: {:?}",
+        result.errors
+    );
+    assert_eq!(
+        reloader.version(),
+        version_before_dml,
+        "an INSERT via executeSql must NOT trigger a schema reload"
+    );
+}
+
+/// PRD 00172 task 4: same guard for `executeBatch`, whose reload trigger is
+/// classified across every statement in the batch (`.any(requires_schema_reload)`)
+/// rather than a single statement.
+#[tokio::test]
+async fn execute_batch_with_ddl_triggers_schema_reload_pure_dml_does_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (actor, pool) = setup(tmp.path()).await;
+
+    let (reloader, _shared) = SchemaReloader::new(actor.clone(), pool.clone());
+    actor.set_reloader(Arc::clone(&reloader));
+    let schema = ddb_server::schema::build_schema(actor, pool, vec![], Some(Arc::clone(&reloader)))
+        .expect("schema must build");
+
+    let batch_with_ddl = r#"mutation { executeBatch(statements: [
+        "CREATE TABLE batchddltest (label TEXT)",
+        "INSERT INTO batchddltest (label) VALUES ('x')"
+    ]) { message } }"#;
+    let version_before_ddl = reloader.version();
+    let result = schema.execute(batch_with_ddl).await;
+    assert!(
+        result.errors.is_empty(),
+        "executeBatch with DDL: expected no GraphQL errors, got: {:?}",
+        result.errors
+    );
+    assert!(
+        reloader.version() > version_before_ddl,
+        "a batch containing CREATE TABLE must trigger a schema reload (version must increment); \
+         before={version_before_ddl} after={}",
+        reloader.version()
+    );
+
+    let pure_dml_batch = r#"mutation { executeBatch(statements: [
+        "INSERT INTO batchddltest (label) VALUES ('y')",
+        "INSERT INTO batchddltest (label) VALUES ('z')"
+    ]) { message } }"#;
+    let version_before_dml = reloader.version();
+    let result = schema.execute(pure_dml_batch).await;
+    assert!(
+        result.errors.is_empty(),
+        "executeBatch pure DML: expected no GraphQL errors, got: {:?}",
+        result.errors
+    );
+    assert_eq!(
+        reloader.version(),
+        version_before_dml,
+        "a batch with no DDL must NOT trigger a schema reload"
     );
 }

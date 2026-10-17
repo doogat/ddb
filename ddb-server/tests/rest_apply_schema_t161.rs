@@ -334,9 +334,11 @@ async fn real_apply_triggers_schema_reload_dry_run_does_not() {
     let tmp = tempfile::tempdir().unwrap();
     let (actor, pool) = setup(tmp.path()).await;
 
-    // The reloader owns its own actor/pool clones for the background reload loop;
-    // the router registers it as an Extension so the apply handler can find it.
+    // The reloader owns its own actor/pool clones for the background reload loop.
+    // The reload decision now lives inside ActorHandle::call (PRD 00172 task 4),
+    // so the actor itself must be wired with the reloader, matching lib.rs.
     let (reloader, _shared) = SchemaReloader::new(actor.clone(), pool.clone());
+    actor.set_reloader(Arc::clone(&reloader));
     let app = axum::Router::new()
         .nest("/rest", ddb_server::rest::router())
         .layer(axum::Extension(actor))
