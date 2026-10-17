@@ -32,3 +32,12 @@ Ivan (opus):
 Orchestrator, resolving Ivan's `send`-removal choice:
 
 - Removing `send` orphaned the `Envelope::Enum` variant, producing one `dead_code` clippy warning. Verified empirically that restoring `send` makes it worse (clippy then flags `send` itself as unused too, since nothing legitimately calls it under this task's acceptance criteria). Left the single warning in place as a known, task-sequenced gap: task 5 in this PRD deletes `ActorCommand`/`ActorReply`/`handle_command`/the dead introspection block, which resolves it. Confirmed this never reaches CI's `-D warnings` gate because this repo pushes `master` once per PRD (after task 6), not per task.
+
+## 10: [D1] prose (PRD 00173, review cycle 1 rework)
+
+Ivan (opus):
+
+- "The per-code status table" in `errors.md#unified-transport-rendering-policy-prd-00173` means that section as a whole; the statuses are prose bullets there, not a literal Markdown table, so the link names the section the way server.md:82 already does.
+- Named the catch-all row's variants (`Git`, `Yaml`, `Sql`, `Io`, "and the other internal variants") instead of keeping a bare "All others", to make the exclusion of `Parse` and `Structured` explicit.
+- Cited `SCHEMA_APPLY_PARTIAL` as the example registered `Internal` code in the new server.md `Structured` row, taking its registration from the dispatch's verified facts rather than reading `app_contract/error.rs` (not on the allowlist).
+- Changed the errors.md note's opening count from "two" to "several" rather than picking a new exact number, since the changes now span statuses, redaction, and two GraphQL paths.
