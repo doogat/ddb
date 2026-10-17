@@ -569,6 +569,8 @@ fn internal_rendering_logs_unredacted_message_once_and_non_internal_logs_nothing
             .with_ansi(false)
             .finish();
         tracing::subscriber::with_default(subscriber, || {
+            // Other tests may have cached "never" interest for this callsite.
+            tracing::callsite::rebuild_interest_cache();
             render(err);
         });
         let bytes: Vec<u8> = buf.lock().unwrap().clone();
