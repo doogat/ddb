@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **server**: `ddb_server::nosql_api::nosql_error` is now public, so the cross-transport error-parity conformance suite can drive the NoSQL transport's own error entry point instead of asserting against the shared helper it delegates to. (PRD 00173)
 - **server**: GraphQL, REST, and NoSQL HTTP error responses now render from one unified policy (`error_rendering`) instead of four divergent mappers. Two response shapes change as a result: GraphQL SQL syntax errors no longer redact to `INTERNAL_ERROR` — they now render `SQL_ERROR` with the SQL engine's message, matching REST; and REST `SCHEMA_APPLY_PARTIAL` (and any other `Internal`-category structured code) now redacts its message to `"internal error"` instead of passing the raw detail through, matching GraphQL's existing redaction. No HTTP status code changed for any existing error code. (PRD 00173)
 - **cli**: `ddb reindex` now prints one line per report warning (path and reason) from the rebuild report itself, in addition to the existing `indexed N doogats` and `N warning(s)` lines. Previously the paths reached the user only through the tracing subscriber, so `RUST_LOG=error` or `--log-dir` left the command naming nothing. `ddb_core::app_contract::describe_consistency_warning` is now public so transports render warnings through the one core definition. (PRD 00169)
 - **traits**: `GitRemote` gained a required `delete_remote_ref` method with no default implementation. (PRD 00168)

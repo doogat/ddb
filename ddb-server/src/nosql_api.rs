@@ -20,7 +20,9 @@ struct IdsResponse {
     ids: Vec<String>,
 }
 
-fn nosql_error(e: DoogatError) -> axum::response::Response {
+/// The NoSQL transport's single error entry point, exercised by the
+/// cross-transport error-parity conformance suite (`tests/error_parity.rs`).
+pub fn nosql_error(e: DoogatError) -> axum::response::Response {
     crate::http_error::http_error_response(e).into_response()
 }
 
