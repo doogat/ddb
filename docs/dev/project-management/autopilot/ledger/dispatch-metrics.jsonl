@@ -260,3 +260,6 @@
 {"kind":"handoff","site":"review","edge":"leave","at":1792260948,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
 {"id":"c8131729","kind":"ivan","task":"5","queued_at":1792261038,"prompt_bytes":23888}
 {"id":"d4903546","kind":"ivan","task":"5","queued_at":1792261045,"prompt_bytes":23888}
+{"id":"c8131729","ended_at":1792267908,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"d4903546","ended_at":1792267908,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792267908,"phase":"review","prd":"00174-decouple-maintenance-from-write-actor-v1.md"}
