@@ -437,6 +437,24 @@ mod tests {
         for ((err, code, cat, status, ffi), msg) in cases.into_iter().zip(messages) {
             assert_rendering(err, code, cat, status, ffi, msg);
         }
+        // Same rule on generated payloads: the rendered message is exactly the
+        // payload the caller supplied, for any payload - not a fixed set of
+        // Display strings.
+        let ctors: [(fn(String) -> DoogatError, &str); 7] = [
+            (DoogatError::NotFound, "NOT_FOUND"),
+            (DoogatError::Validation, "VALIDATION_ERROR"),
+            (DoogatError::Parse, "PARSE_ERROR"),
+            (DoogatError::InvalidPath, "INVALID_PATH"),
+            (DoogatError::BadRequest, "BAD_REQUEST"),
+            (DoogatError::Conflict, "CONFLICT"),
+            (DoogatError::SqlEngine, "SQL_ERROR"),
+        ];
+        for (i, (ctor, code)) in ctors.into_iter().enumerate() {
+            let payload = format!("payload-{i}");
+            let r = render(ctor(payload.clone()));
+            assert_eq!(r.code, code, "code for generated {code}");
+            assert_eq!(r.message, payload, "stripped message for {code}");
+        }
     }
 
     #[test]
@@ -457,6 +475,12 @@ mod tests {
         ];
         for (code, cat, status, ffi) in cases {
             assert_rendering(structured(code, "detail text"), code, cat, status, ffi, "detail text");
+            // No non-internal code may drop its context on the way out.
+            assert_eq!(
+                render(structured(code, "detail text")).details,
+                vec![("table".to_string(), super::AppErrorDetail::String("t".into()))],
+                "details for {code}"
+            );
         }
     }
 
@@ -490,14 +514,32 @@ mod tests {
 
     #[test]
     fn internal_variants_render_500_redacted() {
-        assert_rendering(
-            DoogatError::Git("secret repo path /home/x".into()),
-            "INTERNAL_ERROR",
-            AppErrorCategory::Internal,
-            500,
-            FfiVariant::Internal,
-            "internal error",
-        );
+        let expect_internal = |err: DoogatError| {
+            assert_rendering(
+                err,
+                "INTERNAL_ERROR",
+                AppErrorCategory::Internal,
+                500,
+                FfiVariant::Internal,
+                "internal error",
+            );
+        };
+        let internal: [fn() -> DoogatError; 9] = [
+            || DoogatError::Git("secret repo path /home/x".into()),
+            || DoogatError::Io(std::io::Error::other("disk gone")),
+            || DoogatError::Yaml("bad anchor".into()),
+            || DoogatError::Sql("database is locked".into()),
+            || DoogatError::Automerge("bad change".into()),
+            || DoogatError::Toml("bad table".into()),
+            || DoogatError::Sync("peer refused".into()),
+            || DoogatError::Index("index corrupt".into()),
+            || DoogatError::VersionMismatch { repo: 3, driver: 2 },
+        ];
+        for f in internal {
+            expect_internal(f());
+        }
+        #[cfg(feature = "nosql")]
+        expect_internal(DoogatError::Redb("transaction aborted".into()));
         assert_rendering(
             structured("SOME_UNREGISTERED_CODE", "leaky detail"),
             "SOME_UNREGISTERED_CODE",
@@ -514,6 +556,17 @@ mod tests {
         assert_eq!(r.message, "sql engine: inner detail");
         let r = render(DoogatError::NotFound("not found: nested".into()));
         assert_eq!(r.message, "not found: nested");
+        // Generated payloads that repeat the outer prefix: exactly one prefix
+        // is removed, whatever the payload text is.
+        let ctors: [(fn(String) -> DoogatError, &str); 3] = [
+            (DoogatError::SqlEngine, "sql engine: "),
+            (DoogatError::NotFound, "not found: "),
+            (DoogatError::Parse, "parse: "),
+        ];
+        for (i, (ctor, prefix)) in ctors.into_iter().enumerate() {
+            let payload = format!("{prefix}inner-{i}");
+            assert_eq!(render(ctor(payload.clone())).message, payload, "payload {i}");
+        }
     }
 
     #[test]
@@ -785,6 +838,28 @@ mod tests {
         assert_eq!(r.message, "internal error");
         assert_eq!(r.field, None);
         assert!(r.details.is_empty());
+
+        // A second, unrelated unregistered code redacts the same way: the rule
+        // is the Internal category, not one known code string.
+        let other = render(structured("ANOTHER_UNKNOWN_CODE", "also secret"));
+        assert_eq!(other.category, AppErrorCategory::Internal);
+        assert_eq!(other.http_status, 500);
+        assert_eq!(other.message, "internal error");
+        assert!(other.details.is_empty());
+
+        // Internal category arriving on any code at all still redacts.
+        let hand_built = error_rendering(AppError {
+            code: "ANY_OTHER",
+            message: "secret repo path /home/x".into(),
+            category: AppErrorCategory::Internal,
+            field: Some("url".into()),
+            details: vec![("table".into(), super::AppErrorDetail::String("t".into()))],
+        });
+        assert_eq!(hand_built.message, "internal error");
+        assert_eq!(hand_built.http_status, 500);
+        assert_eq!(hand_built.ffi_variant, FfiVariant::Internal);
+        assert_eq!(hand_built.field, None);
+        assert!(hand_built.details.is_empty());
     }
 
     /// Status, category and FFI hint come from `code` alone. Each probe renders
@@ -808,6 +883,20 @@ mod tests {
                 assert_eq!(r.ffi_variant, ffi_variant, "ffi hint for {code} / {message}");
             }
         }
+        // An AppError that already carries a category keeps it: rendering reads
+        // the `category` field instead of re-deriving one from `code`.
+        let r = error_rendering(AppError {
+            code: "SOME_NEW_CODE",
+            message: "no row for that id".into(),
+            category: C::NotFound,
+            field: Some("id".into()),
+            details: vec![("table".into(), super::AppErrorDetail::String("t".into()))],
+        });
+        assert_eq!(r.category, C::NotFound);
+        assert_eq!(r.http_status, 404);
+        assert_eq!(r.ffi_variant, F::NotFound);
+        assert_eq!(r.message, "no row for that id");
+        assert_eq!(r.field.as_deref(), Some("id"));
     }
 
     /// Borrowed and owned conversions must stay in lockstep on every field,
@@ -864,6 +953,18 @@ mod tests {
         for code in under_test {
             assert_conversions_agree(structured(code, "detail text"));
         }
+        // Real constructors, with up to four context keys and multi-element
+        // lists, so the two impls cannot diverge on a larger context.
+        let make: [fn() -> DoogatError; 5] = [
+            || DoogatError::references_violation("link", "url", "note", "20250101000000"),
+            || DoogatError::dangling_reference("link", "url", "note", "20250101000000"),
+            || DoogatError::unique_violation("link", ["a", "b"], ["1", "2"]),
+            || DoogatError::transaction_not_supported("BEGIN"),
+            || DoogatError::cascade_cycle(["a", "b", "c"]),
+        ];
+        for f in make {
+            assert_conversions_agree(f());
+        }
     }
 
     /// The samples that actually carry `field` and both `details` variants: a
@@ -885,11 +986,60 @@ mod tests {
             ],
         });
 
+        assert_conversions_agree(DoogatError::not_null_violation("task", "title"));
+
         let not_null = AppError::from(DoogatError::not_null_violation("link", "url"));
         assert_eq!(not_null.field.as_deref(), Some("url"));
+        // A second column proves `field` is read from the context, not fixed.
+        let titled = AppError::from(DoogatError::not_null_violation("task", "title"));
+        assert_eq!(titled.field.as_deref(), Some("title"));
         let unique = AppError::from(DoogatError::unique_violation("link", ["url"], ["https://x"]));
         assert_eq!(unique.field.as_deref(), Some("url"));
+        // A multi-column UNIQUE names no single field.
+        let multi = AppError::from(DoogatError::unique_violation("l", ["a", "b"], ["1", "2"]));
+        assert_eq!(multi.field, None);
         let zone = AppError::from(structured(codes::INVALID_ZONE, "zone is not addressable"));
         assert!(!zone.details.is_empty());
+    }
+
+    /// Rendering an Internal error emits exactly one ERROR event carrying the
+    /// unredacted message (the single logging point), and rendering a
+    /// non-internal error logs nothing.
+    #[test]
+    fn internal_rendering_logs_unredacted_message_once_and_non_internal_logs_nothing() {
+        struct SharedBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for SharedBuf {
+            fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(data);
+                Ok(data.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        fn capture(err: DoogatError) -> String {
+            let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let sink = std::sync::Arc::clone(&buf);
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(move || SharedBuf(std::sync::Arc::clone(&sink)))
+                .with_ansi(false)
+                .finish();
+            tracing::subscriber::with_default(subscriber, || {
+                render(err);
+            });
+            let bytes: Vec<u8> = buf.lock().unwrap().clone();
+            String::from_utf8(bytes).unwrap()
+        }
+
+        let logged = capture(structured(codes::SCHEMA_APPLY_PARTIAL, "halted after 2 of 3"));
+        assert_eq!(logged.matches("ERROR").count(), 1, "one error event: {logged}");
+        assert!(
+            logged.contains("halted after 2 of 3"),
+            "unredacted message logged: {logged}"
+        );
+
+        let quiet = capture(structured(codes::INVALID_ZONE, "unknown zone: footer"));
+        assert!(!quiet.contains("ERROR"), "no error event: {quiet}");
+        assert!(!quiet.contains("unknown zone"), "nothing logged: {quiet}");
     }
 }
