@@ -120,7 +120,12 @@ pub mod codes {
     /// A transaction verb reached `execute_sql`, or a batch left a transaction
     /// open, on a service shared by independent server clients.
     pub const TRANSACTION_NOT_SUPPORTED: &str = "TRANSACTION_NOT_SUPPORTED";
+    /// A SQL statement failed in the SQL engine (parse, translation or
+    /// execution) for a reason attributable to the statement itself.
     pub const SQL_ERROR: &str = "SQL_ERROR";
+    /// `CREATE TABLE ... ZONE <value>` (or `SET zone`) named a zone that is
+    /// not one of `frontmatter`, `body`, `reference`.
+    pub const INVALID_ZONE: &str = "INVALID_ZONE";
 }
 
 impl DoogatError {

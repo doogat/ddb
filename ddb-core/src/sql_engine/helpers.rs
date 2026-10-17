@@ -604,7 +604,7 @@ fn parse_zone_value(value: &str) -> Result<Zone> {
         "body" => Ok(Zone::Body),
         "reference" => Ok(Zone::Reference),
         other => Err(DoogatError::Structured {
-            code: "INVALID_ZONE",
+            code: crate::error::codes::INVALID_ZONE,
             message: format!("invalid zone: {} (use frontmatter, body, or reference)", other),
             context: vec![],
         }),
