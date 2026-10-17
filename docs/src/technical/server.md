@@ -31,6 +31,14 @@ Read and write operations follow different paths. **Reads** (GraphQL queries, RE
 
 The `sql` query field uses `sqlparser` to classify queries: pure `SELECT` statements route through `ReadPool`, everything else goes to the actor.
 
+### Write-actor / maintenance-worker split
+
+`ActorHandle::spawn` starts two `std::thread`s, both running `actor_loop`: the original write-actor thread (ordinary mutations — CRUD, SQL DML/DDL — and NoSQL reads) and a dedicated maintenance worker thread that handles only `sync`, `compact`, and `run_maintenance`. Each thread opens its own `GitRepo` and SQLite `Index`, but both are constructed from ONE NoSQL mirror handle built once in `ActorHandle::spawn`, so there is a single redb handle shared by both threads rather than two competing opens (see "NoSQL REST API" below for why a second open would fail). The two threads coordinate their git writes through the existing repo-scoped cross-process write lock (`.git/ddb-write.lock`) described in `git-ops.md` § "Write serialization (cross-process lock)" — the same mechanism that already serializes a CLI process against a running server — rather than a new primitive. A slow or hung `sync` or `compact` therefore blocks only other maintenance verbs, never an unrelated create/update or a NoSQL read. Only the write-actor thread runs the startup index rebuild, since two concurrent cold-start rebuilds of one index would race.
+
+### Remote timeout
+
+`sync`'s `fetch`/`push` calls are bounded by a configured timeout (`[remote] timeout_secs` in `ServerConfig`, default 30s). Two mechanisms enforce it: `set_libgit2_remote_timeouts` installs libgit2's process-wide connect-timeout and socket-idle-timeout options before the call, and a fetch-only progress-callback layer adds a secondary wall-clock bound on top. A remote that stalls past the deadline fails with the structured `REMOTE_TIMEOUT` error (`Conflict` category, HTTP 504) instead of hanging the maintenance worker indefinitely.
+
 ## Interface Promises
 
 `ddb serve` exposes four network interfaces. They are not equivalent:
@@ -1014,6 +1022,8 @@ When built with the `nosql` feature (enabled by default), the server exposes key
 | `GET` | `/nosql/:id/backlinks` | Backlinks for a doogat |
 
 The actor holds an `Option<RedbIndex>` alongside `Index`. Every create/update/delete that touches SQLite also writes to redb (dual-write). The redb index is rebuilt once at startup and kept in sync via dual-writes.
+
+NoSQL reads (`nosql_get`, `nosql_scan_type`, `nosql_scan_tag`, `nosql_backlinks`) dispatch on the write-actor thread rather than fanning out onto `ReadPool`. The reason is an redb constraint, not a design preference — see the doc comment on `NoSqlMirrorPort`'s production implementation in `ddb-core/src/nosql.rs` for the exact wording and the noted follow-up (a shared read-only redb handle, not yet implemented).
 
 ## REST API
 

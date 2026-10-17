@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **parser**: frontmatter larger than 256 KiB is now rejected at the parse boundary and skipped like any other malformed file, instead of being handed to the YAML parser. (PRD 00169)
 - **cli**: `ddb reindex --strict` fails on the first unreadable or malformed file instead of skipping it. (PRD 00169)
 - **sync**: remote fetch and push are bounded by a timeout (default 30s; server config `[remote] timeout_secs`). A stalled remote now fails with the `REMOTE_TIMEOUT` error (HTTP 504) instead of hanging.
+- **server**: `sync`, `compact`, and `run_maintenance` now run on a dedicated maintenance worker thread instead of the write-actor thread. A slow or hung sync/compact no longer stalls unrelated creates/updates or NoSQL reads.
 
 ### Changed
 

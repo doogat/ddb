@@ -55,6 +55,8 @@ Reads the UUID from `.git/ddb-node`, then loads the corresponding `.nodes/{uuid}
 
 > **Write-lock coverage**: the merge step's write section (the merge or fast-forward commit, the ref move, and the forced checkout) holds the repo-scoped cross-process write lock, and the conflicted-merge path additionally rebuilds its tree from a fresh in-memory `merge_commits` three-way merge re-run under the lock (as of PRD 00200), so a `ddb sync` racing a concurrent locked CRUD write can neither revert that write's working-tree file nor orphan its commit. See `git-ops.md` § "Write serialization (cross-process lock)". Bundle import now merges through this same locked engine (00168); only its unbundle/fetch object-preparation leg, which writes git objects and `refs/remotes/bundle/<payload-id>/*`, still runs outside the lock. A separate bundle-import lease (FT-7a) serializes cooperating importers from namespace inspection through cleanup, but it is not the write lock and sync does not take it (see `bundle.md` § "Import serialization").
 
+> **Maintenance worker**: in the server, `sync` now runs on a dedicated maintenance worker thread rather than the write-actor thread, so a slow or hung sync no longer blocks ordinary mutations. `fetch`/`push` are bounded by the configured remote timeout. See `server.md` § "Write-actor / maintenance-worker split" and § "Remote timeout" for the mechanism.
+
 ### Four-Bucket Conflict Partition
 
 When `merge_remote()` returns `Conflicts`, the conflict list is partitioned into four buckets before resolution:
