@@ -1,5 +1,6 @@
 use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
+use ddb_core::app_contract::{PageRequest, SearchCommand};
 use ddb_core::error::DoogatError;
 use ddb_core::search_query;
 use ddb_core::types::{ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
@@ -12,6 +13,7 @@ use crate::actor::ActorHandle;
 use crate::error::to_graphql_error;
 use crate::read_pool::ReadPool;
 use crate::reload::SchemaReloader;
+use crate::warning_extension::forward_warnings;
 
 use super::base_types::*;
 
@@ -143,8 +145,8 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                 FieldFuture::new(async move {
                     let pool = ctx.data::<ReadPool>()?;
                     let q = ctx.args.try_get("query")?.string()?.to_string();
-                    let limit = validate_limit(&ctx)?.unwrap_or(20) as usize;
-                    let offset = validate_offset(&ctx)?.unwrap_or(0) as usize;
+                    let page = PageRequest::decode(validate_limit(&ctx)?, validate_offset(&ctx)?)
+                        .map_err(to_graphql_error)?;
 
                     let types = ctx
                         .args
@@ -199,26 +201,40 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                                 .collect::<Vec<_>>()
                         });
 
-                    let filters = SearchFilters {
-                        types,
-                        tag,
-                        where_filters,
-                    };
-
                     let normalized = search_query::normalize(&q);
-                    let result = pool
-                        .search(q, limit, offset, filters)
-                        .await
-                        .map_err(to_graphql_error)?;
+                    // SearchCommand has no slot for structured `where`
+                    // filters, so only the types/tag case routes through the
+                    // app-contract facade.
+                    let (hits, total) = if where_filters.is_some() {
+                        let filters = SearchFilters {
+                            types,
+                            tag,
+                            where_filters,
+                        };
+                        let result = pool
+                            .search(q, page.limit, page.offset, filters)
+                            .await
+                            .map_err(to_graphql_error)?;
+                        (result.hits, result.total_count)
+                    } else {
+                        let output = pool
+                            .search_command(SearchCommand {
+                                query: q,
+                                page,
+                                types,
+                                tag,
+                            })
+                            .await
+                            .map_err(to_graphql_error)?;
+                        forward_warnings(&ctx, &output.warnings);
+                        (output.value.items, output.value.total)
+                    };
                     let mut obj = IndexMap::new();
                     obj.insert(
                         Name::new("hits"),
-                        GqlValue::List(result.hits.iter().map(search_hit_to_value).collect()),
+                        GqlValue::List(hits.iter().map(search_hit_to_value).collect()),
                     );
-                    obj.insert(
-                        Name::new("totalCount"),
-                        GqlValue::from(result.total_count as i64),
-                    );
+                    obj.insert(Name::new("totalCount"), GqlValue::from(total as i64));
                     obj.insert(
                         Name::new("queryNormalized"),
                         GqlValue::from(normalized),
@@ -236,7 +252,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                 "where",
                 TypeRef::named_list("SearchFieldFilter"),
             ).description("Structured field filters. Each entry specifies a field name and an eq, contains, or in operator."))
-            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return. Default 20."))
+            .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return (1-10000). Default 50."))
             .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip for pagination. Default 0."))
             .description("Full-text search with optional structured where filters. Returns paginated hits with BM25 ranking."),
         );

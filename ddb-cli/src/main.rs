@@ -333,12 +333,18 @@ enum Command {
     Search {
         /// Search query
         query: String,
-        /// Maximum results to return
-        #[arg(long, default_value = "20")]
-        limit: usize,
-        /// Number of results to skip
-        #[arg(long, default_value = "0")]
-        offset: usize,
+        /// Maximum results to return (default 50, max 10000)
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Number of results to skip (default 0)
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Only return doogats of this type
+        #[arg(long = "type")]
+        doogat_type: Option<String>,
+        /// Only return doogats carrying this tag
+        #[arg(long)]
+        tag: Option<String>,
     },
     /// Register this device as a sync node
     RegisterNode {

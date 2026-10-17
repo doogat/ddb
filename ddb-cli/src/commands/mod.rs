@@ -47,7 +47,9 @@ pub(crate) fn run(cli: crate::Cli) -> ddb_core::error::Result<()> {
             query,
             limit,
             offset,
-        } => query::search(repo, &query, limit, offset),
+            doogat_type,
+            tag,
+        } => query::search(repo, &query, limit, offset, doogat_type, tag),
         Command::RegisterNode { name } => sync::register_node(repo, &name),
         Command::Status => maintenance::status(repo),
         Command::Compact {

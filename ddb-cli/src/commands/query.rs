@@ -1,3 +1,4 @@
+use ddb_core::app_contract::{PageRequest, SearchCommand};
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
 
@@ -41,20 +42,48 @@ pub(crate) fn query(repo: &std::path::Path, sql: &str) -> ddb_core::error::Resul
 pub(crate) fn search(
     repo: &std::path::Path,
     query: &str,
-    limit: usize,
-    offset: usize,
+    limit: Option<usize>,
+    offset: Option<usize>,
+    doogat_type: Option<String>,
+    tag: Option<String>,
 ) -> ddb_core::error::Result<()> {
+    let to_i64 = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+    let page = PageRequest::decode(limit.map(to_i64), offset.map(to_i64))?;
     let svc = DoogatService::open(repo)?;
-    let result = svc.search_paginated(query, limit, offset)?;
-    if result.hits.is_empty() {
+    let output = svc.search_command(SearchCommand {
+        query: query.to_string(),
+        page,
+        types: doogat_type.map(|t| vec![t]),
+        tag,
+    })?;
+    crate::warnings::write_warnings(&output.warnings, &mut std::io::stderr())
+        .unwrap_or_else(|e| eprintln!("warning write failed: {e}"));
+    let result = output.value;
+    if result.items.is_empty() {
         outln!("no results")?;
-    } else {
-        let start = offset + 1;
-        let end = offset + result.hits.len();
-        outln!("Showing {start}-{end} of {} results", result.total_count)?;
-        for r in &result.hits {
-            outln!("[{}] {} ({})", r.id, r.title, r.path)?;
-            outln!("  {}", r.snippet)?;
+        return Ok(());
+    }
+    let start = page.offset + 1;
+    let end = page.offset + result.items.len();
+    outln!("Showing {start}-{end} of {} results", result.total)?;
+    for r in &result.items {
+        outln!("[{}] {} ({})", r.id, r.title, r.path)?;
+        outln!("  {}", r.snippet)?;
+        outln!(
+            "  type: {}  rank: {}  tags: {}",
+            r.doogat_type.as_deref().unwrap_or("-"),
+            r.rank,
+            r.tags.join(", ")
+        )?;
+        outln!(
+            "  created: {}  updated: {}",
+            r.created_at.as_deref().unwrap_or("-"),
+            r.updated_at
+        )?;
+        if let Some(fields) = &r.fields {
+            for (k, v) in fields {
+                outln!("  {k}: {v}")?;
+            }
         }
     }
     Ok(())

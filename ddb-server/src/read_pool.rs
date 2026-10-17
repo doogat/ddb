@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ddb_core::app_contract::{AppOutput, AppSearchResult, SearchCommand};
 use ddb_core::error::DoogatError;
 use ddb_core::service::DoogatService;
 use ddb_core::sql_engine::SqlResult;
@@ -91,6 +92,13 @@ impl ReadPool {
     ) -> Result<PaginatedSearchResult> {
         self.with_service(move |svc| svc.search_paginated_filtered(&query, limit, offset, &filters))
             .await
+    }
+
+    pub async fn search_command(
+        &self,
+        cmd: SearchCommand,
+    ) -> Result<AppOutput<AppSearchResult>> {
+        self.with_service(move |svc| svc.search_command(cmd)).await
     }
 
     pub async fn count_doogats(
