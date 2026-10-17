@@ -224,6 +224,8 @@ The `sql`, `executeSql`, and `executeBatch` fields accept an optional `format` a
 
 Object format eliminates positional coupling between client code and SELECT column order.
 
+The GraphQL `sql` query field routes non-SELECT SQL (DDL included) to the same `execute_sql` path as the `executeSql` mutation. A DDL statement sent through `sql` therefore triggers a schema reload, the same as through `executeSql` — this is a deliberate consequence of PRD 00172's single actor-bridge reload site, not a query/mutation split by statement kind.
+
 ### Queries
 
 ```graphql
