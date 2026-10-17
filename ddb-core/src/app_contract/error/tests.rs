@@ -588,3 +588,29 @@ fn internal_rendering_logs_unredacted_message_once_and_non_internal_logs_nothing
     assert!(!quiet.contains("ERROR"), "no error event: {quiet}");
     assert!(!quiet.contains("unknown zone"), "nothing logged: {quiet}");
 }
+
+#[test]
+fn remote_timeout_code_is_registered_in_all() {
+    assert_eq!(codes::REMOTE_TIMEOUT, "REMOTE_TIMEOUT");
+    assert!(codes::ALL.contains(&codes::REMOTE_TIMEOUT));
+}
+
+/// A stalled remote is a retryable conflict-class failure surfaced as a
+/// gateway timeout, with an operator-safe message (no URL/credentials).
+#[test]
+fn remote_timeout_renders_conflict_504_keeping_message() {
+    let err = DoogatError::remote_timeout("fetch", std::time::Duration::from_secs(30));
+    let r = render(err);
+    assert_eq!(r.code, "REMOTE_TIMEOUT");
+    assert_eq!(r.category, AppErrorCategory::Conflict);
+    assert_eq!(r.http_status, 504);
+    assert_eq!(r.ffi_variant, FfiVariant::Conflict);
+    assert_eq!(r.message, "remote fetch timed out after 30s");
+    assert_eq!(
+        r.details,
+        vec![(
+            "operation".to_string(),
+            super::AppErrorDetail::String("fetch".into())
+        )]
+    );
+}

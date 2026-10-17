@@ -906,6 +906,9 @@ impl crate::traits::GitBackend for GitRepo {
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod remote_timeout_tests;
+
 /// FT-5: the `GitBackend::with_write_lock` hook and the subprocess deferral
 /// (commit-graph rewrite, write-threshold maintenance) it relies on. Kept
 /// next to the lock so a change to either is reviewed against both.
