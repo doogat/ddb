@@ -10,7 +10,7 @@ use crate::types::{BatchCreateInput, DoogatId, DoogatMeta, ParsedDoogat, TableSc
 
 use crate::traits::{GitBackend, IndexPort};
 
-use super::update::parsed_fields;
+use super::update::{parsed_fields, unregistered_type_warning};
 use super::write_helpers::stringify_typed_input_fields;
 use super::{DoogatService, ExtraFieldUpdates};
 
@@ -121,12 +121,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         )?;
         Ok(Some(AppOutput {
             value,
-            warnings: vec![AppWarning {
-                code: "UNREGISTERED_TYPE_BASE_ONLY",
-                message: format!(
-                    "type '{ty}' is not a registered typedef; created a base doogat without typed validation"
-                ),
-            }],
+            warnings: vec![unregistered_type_warning(ty)],
         }))
     }
 

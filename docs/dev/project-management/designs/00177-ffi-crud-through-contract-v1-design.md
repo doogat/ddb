@@ -203,17 +203,17 @@ with warnings, already uses `with_service_mut`, `driver.rs:227`).
 pub fn update_structured(
     &self,
     id: String,
-    title: Option<String>,
-    tags: Option<Vec<String>>,
-    doogat_type: Option<String>,
-    body: Option<String>,
-    fields: Vec<FieldEntryValue>,
-    unset_fields: Vec<String>,
+    input: UpdateStructuredInput,
 ) -> Result<UpdateResultRecord, DdbError>
 ```
 
-Body mirrors `create_structured`, building `UpdateCommand { id, title, tags,
-doogat_type, body, fields: fields_to_core(fields), unset_fields }` (no
+Implemented (task 5 rework): the flat argument list above was dropped for a
+single `UpdateStructuredInput` record (`title`, `tags`, `doogat_type`, `body`,
+`fields`, `unset_fields`) — `clippy::too_many_arguments` on the 8-argument
+flat form (threshold 7); see the assumptions ledger. Body mirrors
+`create_structured`, building `UpdateCommand { id, title: input.title, tags:
+input.tags, doogat_type: input.doogat_type, body: input.body, fields:
+fields_to_core(input.fields), unset_fields: input.unset_fields }` (no
 `on_conflict`/`unregistered_type_policy` field on `UpdateCommand` — it has
 neither, per `commands.rs:47-59`) and calling `svc.update(cmd)`.
 
@@ -225,6 +225,11 @@ Both verbs return `AppOutput<ParsedDoogat>` (confirmed:
 doogat payload" language refers to this `ParsedDoogat` payload). One shared
 shape covers both:
 
+Implemented (task 6 rework): the original five-field shape above dropped
+`body`, `meta.date`, `meta.extra`, `sections`, `links` and `updated_at` -
+exactly the fields the review flagged as lossy. Both records now carry the
+full lossless mirror:
+
 ```rust
 #[derive(Debug, uniffi::Record)]
 pub struct CreateResultRecord {
@@ -233,35 +238,27 @@ pub struct CreateResultRecord {
     pub doogat_type: Option<String>,
     pub tags: Vec<String>,
     pub path: String,
+    pub body: String,
+    pub date: Option<String>,
+    pub extra: Vec<FieldEntryValue>,
+    pub sections: Vec<SectionRecord>,
+    pub links: Vec<LinkRecord>,
+    pub updated_at: Option<String>,
     pub warnings: Vec<RebuildWarningRecord>,
 }
-
-#[derive(Debug, uniffi::Record)]
-pub struct UpdateResultRecord {
-    pub id: String,
-    pub title: Option<String>,
-    pub doogat_type: Option<String>,
-    pub tags: Vec<String>,
-    pub path: String,
-    pub warnings: Vec<RebuildWarningRecord>,
-}
-
-impl CreateResultRecord {
-    fn from_output(out: crate::app_contract::AppOutput<crate::types::ParsedDoogat>) -> Self {
-        let p = out.value;
-        Self {
-            id: p.meta.id.map(|i| i.to_string()).unwrap_or_default(),
-            title: p.meta.title,
-            doogat_type: p.meta.doogat_type,
-            tags: p.meta.tags,
-            path: p.path,
-            warnings: out.warnings.into_iter().map(|w| RebuildWarningRecord { code: w.code.to_string(), message: w.message }).collect(),
-        }
-    }
-}
-// UpdateResultRecord::from_output is identical; a shared private fn
-// `parsed_doogat_result(out) -> (String, Option<String>, Option<String>, Vec<String>, String, Vec<RebuildWarningRecord>)`
-// backs both `from_output`s to avoid duplicating the five-field extraction.
+// UpdateResultRecord is identical in shape. `SectionRecord`/`LinkRecord`
+// (plus `ZoneRecord`/`LinkKindRecord`) are new FFI mirrors of the core
+// `Section`/`Link`/`Zone`/`LinkKind` types, re-exported from `ffi::`
+// alongside the other structured-CRUD types. `meta.extra`'s `BTreeMap<String,
+// Value>` degrades through the existing `core_to_field_value` conversion
+// (now compiled outside `#[cfg(test)]`, since production code needs it
+// too) - nested lists/maps inside an extra value still degrade per that
+// function's documented contract, so "lossless" covers the named fields,
+// not arbitrarily nested `extra` values.
+//
+// A shared private `DoogatResultParts` struct (not a positional tuple - it
+// grew from 6 to 12 fields) backs both `from_output`s to avoid duplicating
+// the field extraction.
 ```
 
 `id` is `String`, not `DoogatId`, following `SearchResult.id`

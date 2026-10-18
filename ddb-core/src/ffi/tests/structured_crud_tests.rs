@@ -100,6 +100,25 @@ fn context_value(context: &[DdbErrorContextEntry], key: &str) -> Option<String> 
         .and_then(|entry| entry.value.clone())
 }
 
+/// The create/update result record must report what was actually stored,
+/// not echo its own call arguments.
+fn assert_record_matches_stored(
+    rec_title: Option<&str>,
+    rec_doogat_type: Option<&str>,
+    rec_tags: &[String],
+    stored_meta: &DoogatMeta,
+) {
+    assert_eq!(
+        (rec_title, rec_doogat_type, rec_tags),
+        (
+            stored_meta.title.as_deref(),
+            stored_meta.doogat_type.as_deref(),
+            stored_meta.tags.as_slice(),
+        ),
+        "the returned record must report what was stored, not echo its own arguments"
+    );
+}
+
 #[test]
 fn create_structured_registered_type_persists_meta_fields_and_body() {
     let (_tmp, driver) = fresh_driver();
@@ -130,14 +149,11 @@ fn create_structured_registered_type_persists_meta_fields_and_body() {
     );
 
     let stored = stored_doogat(&driver, &rec.id, &rec.path);
-    assert_eq!(
-        (rec.title.as_deref(), rec.doogat_type.as_deref(), &rec.tags),
-        (
-            stored.meta.title.as_deref(),
-            stored.meta.doogat_type.as_deref(),
-            &stored.meta.tags
-        ),
-        "the returned record must report what was stored, not echo its own arguments"
+    assert_record_matches_stored(
+        rec.title.as_deref(),
+        rec.doogat_type.as_deref(),
+        &rec.tags,
+        &stored.meta,
     );
     assert_eq!(stored.meta.title.as_deref(), Some("Config"));
     assert_eq!(stored.meta.doogat_type.as_deref(), Some("app_config"));
@@ -510,14 +526,11 @@ fn update_structured_applies_new_title_tags_type_and_body() {
         "the replaced body must be gone, got:\n{}",
         stored.body
     );
-    assert_eq!(
-        (rec.title.as_deref(), rec.doogat_type.as_deref(), &rec.tags),
-        (
-            stored.meta.title.as_deref(),
-            stored.meta.doogat_type.as_deref(),
-            &stored.meta.tags
-        ),
-        "the returned record must report what was stored"
+    assert_record_matches_stored(
+        rec.title.as_deref(),
+        rec.doogat_type.as_deref(),
+        &rec.tags,
+        &stored.meta,
     );
 }
 

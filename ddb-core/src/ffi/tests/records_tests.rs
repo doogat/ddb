@@ -66,8 +66,11 @@ fn core_map_inside_list_is_dropped_not_panicked() {
 fn core_top_level_map_degrades_without_panicking() {
     let mut inner = BTreeMap::new();
     inner.insert("nested".to_string(), Value::Bool(true));
-    // Must return some FieldValue instead of panicking.
-    let _ = core_to_field_value(Value::Map(inner));
+    assert_eq!(
+        core_to_field_value(Value::Map(inner)),
+        FieldValue::List(Vec::new()),
+        "a top-level map must degrade to an empty list, per its documented contract"
+    );
 }
 
 #[test]

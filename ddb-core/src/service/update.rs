@@ -9,6 +9,17 @@ use crate::traits::{GitBackend, IndexPort};
 use super::validation::UniqueGroupKey;
 use super::{DoogatService, ExtraFieldUpdates};
 
+/// Shared with `create`'s BaseOnly fallback - one copy of the code and
+/// message text so the two warnings cannot drift apart.
+pub(super) fn unregistered_type_warning(ty: &str) -> AppWarning {
+    AppWarning {
+        code: "UNREGISTERED_TYPE_BASE_ONLY",
+        message: format!(
+            "type '{ty}' is not a registered typedef; stored a base doogat without typed validation"
+        ),
+    }
+}
+
 impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
     /// Update a doogat, merging provided fields into the existing content.
     pub fn update_doogat(
@@ -218,18 +229,18 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
         let mut warnings: Vec<AppWarning> = summarize_reindex_warnings(reindex_warnings)
             .into_iter()
             .collect();
-        // PRD 00177: mirrors `create`'s BaseOnly fallback warning - a resulting
-        // type with no registered typedef was stored untyped, so the caller
-        // must be told the same way `create` tells it.
-        if let Some(ty) = value.meta.doogat_type.as_deref() {
-            let schemas = self.list_type_schemas()?;
-            if !schemas.iter().any(|s| s.table_name == ty) {
-                warnings.push(AppWarning {
-                    code: "UNREGISTERED_TYPE_BASE_ONLY",
-                    message: format!(
-                        "type '{ty}' is not a registered typedef; stored a base doogat without typed validation"
-                    ),
-                });
+        // PRD 00177: mirrors `create`'s BaseOnly fallback warning - only when
+        // THIS call retyped the doogat to something unregistered (not on
+        // every subsequent update of an already-unregistered doogat). The
+        // update already committed, so a schema-lookup failure here degrades
+        // to no warning rather than erroring an update that actually landed.
+        if let Some(ty) = cmd.doogat_type.as_deref() {
+            let is_registered = self
+                .list_type_schemas()
+                .map(|schemas| schemas.iter().any(|s| s.table_name == ty))
+                .unwrap_or(true);
+            if !is_registered {
+                warnings.push(unregistered_type_warning(ty));
             }
         }
         Ok(AppOutput { value, warnings })
