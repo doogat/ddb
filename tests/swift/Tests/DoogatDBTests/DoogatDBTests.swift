@@ -21,13 +21,11 @@ final class DoogatDBTests: XCTestCase {
     }
 
     func testCreateAndReadDoogat() throws {
-        let content = """
-        ---
-        title: Test Note
-        ---
-        Hello from Swift.
-        """
-        let id = try driver.createDoogat(content: content, message: "create test doogat")
+        let result = try driver.createStructured(
+            title: "Test Note", tags: [], doogatType: nil,
+            body: "Hello from Swift.", fields: [], onConflict: .error
+        )
+        let id = result.id
         XCTAssertFalse(id.isEmpty, "doogat id should not be empty")
 
         try _ = driver.reindex()
@@ -38,13 +36,10 @@ final class DoogatDBTests: XCTestCase {
     }
 
     func testSearch() throws {
-        let content = """
-        ---
-        title: Searchable Note
-        ---
-        Unique content for FTS5 search verification.
-        """
-        let _ = try driver.createDoogat(content: content, message: "create searchable doogat")
+        let _ = try driver.createStructured(
+            title: "Searchable Note", tags: [], doogatType: nil,
+            body: "Unique content for FTS5 search verification.", fields: [], onConflict: .error
+        )
         try _ = driver.reindex()
 
         let results = try driver.search(query: "Searchable")
@@ -53,13 +48,11 @@ final class DoogatDBTests: XCTestCase {
     }
 
     func testListDoogats() throws {
-        let content = """
-        ---
-        title: Listed Note
-        ---
-        Body.
-        """
-        let id = try driver.createDoogat(content: content, message: "create listed doogat")
+        let result = try driver.createStructured(
+            title: "Listed Note", tags: [], doogatType: nil,
+            body: "Body.", fields: [], onConflict: .error
+        )
+        let id = result.id
 
         let list = try driver.listDoogats()
         XCTAssertTrue(list.contains(where: { $0.contains(id) }),
@@ -82,9 +75,9 @@ final class DoogatDBTests: XCTestCase {
 
         // Single doogat create latency
         let createStart = ContinuousClock.now
-        let _ = try perfDriver.createDoogat(
-            content: "---\ntitle: Perf Test\n---\nBody.",
-            message: "perf create"
+        let _ = try perfDriver.createStructured(
+            title: "Perf Test", tags: [], doogatType: nil,
+            body: "Body.", fields: [], onConflict: .error
         )
         let createDuration = ContinuousClock.now - createStart
         let createMs = Double(createDuration.components.attoseconds) / 1e15 +
@@ -93,9 +86,9 @@ final class DoogatDBTests: XCTestCase {
 
         // Populate ~100 doogats for search benchmark
         for i in 1...99 {
-            let _ = try perfDriver.createDoogat(
-                content: "---\ntitle: Bulk Note \(i)\n---\nContent number \(i).",
-                message: "bulk \(i)"
+            let _ = try perfDriver.createStructured(
+                title: "Bulk Note \(i)", tags: [], doogatType: nil,
+                body: "Content number \(i).", fields: [], onConflict: .error
             )
         }
         try _ = perfDriver.reindex()
@@ -251,9 +244,9 @@ final class DoogatDBTests: XCTestCase {
     func testDeltaBundleExportImport() throws {
         // Register local node and create initial content
         let _ = try driver.registerNode(name: "source-node")
-        let _ = try driver.createDoogat(
-            content: "---\ntitle: Pre-sync Note\n---\nBefore delta.",
-            message: "create pre-sync note"
+        let _ = try driver.createStructured(
+            title: "Pre-sync Note", tags: [], doogatType: nil,
+            body: "Before delta.", fields: [], onConflict: .error
         )
 
         // Capture current HEAD as remote's sync point
@@ -279,9 +272,9 @@ final class DoogatDBTests: XCTestCase {
         try git("commit", "-m", "register remote node", in: tmpDir)
 
         // Create new content after remote's sync point
-        let _ = try driver.createDoogat(
-            content: "---\ntitle: Post-sync Note\n---\nAfter delta.",
-            message: "create post-sync note"
+        let _ = try driver.createStructured(
+            title: "Post-sync Note", tags: [], doogatType: nil,
+            body: "After delta.", fields: [], onConflict: .error
         )
 
         // Export delta bundle targeting the remote node
@@ -314,10 +307,14 @@ final class DoogatDBTests: XCTestCase {
         let _ = try driver.registerNode(name: "test-source")
 
         // Create some doogats in source repo
-        let content1 = "---\ntitle: Bundle Note 1\n---\nFirst note."
-        let content2 = "---\ntitle: Bundle Note 2\n---\nSecond note."
-        let _ = try driver.createDoogat(content: content1, message: "create note 1")
-        let _ = try driver.createDoogat(content: content2, message: "create note 2")
+        let _ = try driver.createStructured(
+            title: "Bundle Note 1", tags: [], doogatType: nil,
+            body: "First note.", fields: [], onConflict: .error
+        )
+        let _ = try driver.createStructured(
+            title: "Bundle Note 2", tags: [], doogatType: nil,
+            body: "Second note.", fields: [], onConflict: .error
+        )
 
         // Export full bundle
         let bundlePath = tmpDir.appendingPathComponent("export.tar").path
