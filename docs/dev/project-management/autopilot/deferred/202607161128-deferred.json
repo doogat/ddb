@@ -294,7 +294,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "Several newly-ported multi-process race test functions run well past the 50-line guideline (integration_61_b_concurrent_cli_and_graphql_write_lock \u2248145 lines, integration_55_d_cli_vs_pgwire_singleton_insert_race \u2248152 lines)",
+      "issue": "Several newly-ported multi-process race test functions run well past the 50-line guideline (integration_61_b_concurrent_cli_and_graphql_write_lock ≈145 lines, integration_55_d_cli_vs_pgwire_singleton_insert_race ≈152 lines)",
       "file": "tests/e2e/integration_write_lock_races.rs",
       "severity": "low",
       "consensus": "1/4",
@@ -305,7 +305,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "The mechanical fail-first/tautology finder for this cycle reports \"Checked 0 test function(s)\" and \"replay: skipped (the diff touches no test function)\" despite ~60 new/changed e2e test files \u2014 the automated tautology net did not fire for this diff",
+      "issue": "The mechanical fail-first/tautology finder for this cycle reports \"Checked 0 test function(s)\" and \"replay: skipped (the diff touches no test function)\" despite ~60 new/changed e2e test files — the automated tautology net did not fire for this diff",
       "file": "N/A",
       "severity": "low",
       "consensus": "1/4",
@@ -316,7 +316,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "[KNOWN] PRD says the \u00a755/\u00a761 race sections are \"marked serial\"; no serial marker exists (no serial_test, no shared mutex) \u2014 design doc lines 92-100 and 289 supersede this with per-test tempdir + unique-port isolation, and every race outcome is order-independent (SINGLETON forces exactly one winner; 61.B requires every write to land), so a serial marker would only slow the suite.",
+      "issue": "[KNOWN] PRD says the §55/§61 race sections are \"marked serial\"; no serial marker exists (no serial_test, no shared mutex) — design doc lines 92-100 and 289 supersede this with per-test tempdir + unique-port isolation, and every race outcome is order-independent (SINGLETON forces exactly one winner; 61.B requires every write to land), so a serial marker would only slow the suite.",
       "file": "tests/e2e/integration_singleton_races.rs",
       "severity": "low",
       "consensus": "1/4",
@@ -327,7 +327,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "[KNOWN] PRD spawn helper \"polls /health\"; `ServerGuard::start` (tests/e2e/common.rs:81-102) waits on the stderr \"listening on\" lines plus a 50 ms sleep, no /health poll \u2014 design lines 84-89 reused the existing guard unchanged, the health round trip is pinned by `serve::health_returns_ok`, and the internals are 00188's to change.",
+      "issue": "[KNOWN] PRD spawn helper \"polls /health\"; `ServerGuard::start` (tests/e2e/common.rs:81-102) waits on the stderr \"listening on\" lines plus a 50 ms sleep, no /health poll — design lines 84-89 reused the existing guard unchanged, the health round trip is pinned by `serve::health_returns_ok`, and the internals are 00188's to change.",
       "file": "tests/e2e/common.rs",
       "severity": "low",
       "consensus": "1/4",
@@ -614,7 +614,7 @@
     },
     {
       "issue": "Push has no deadline, PushOptions or callbacks; push relies only on the process-global libgit2 idle timeout, so a trickling remote never aborts a push.",
-      "severity": "\ud83d\udfe0",
+      "severity": "🟠",
       "file": "ddb-core/src/git_ops/remote.rs:27",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -623,7 +623,7 @@
     },
     {
       "issue": "Silent-stall protection is installed only by server startup; CLI/FFI callers use the changed core operations without installing the native timeout options.",
-      "severity": "\ud83d\udfe0",
+      "severity": "🟠",
       "file": "ddb-core/src/git_ops/remote.rs:72",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -632,7 +632,7 @@
     },
     {
       "issue": "The diff touches files already over the 800-line limit (git_ops/mod.rs 1135, git_ops/tests.rs 4168, sync_manager/tests.rs 2143, property_tests.rs 2400), changing only call arities there.",
-      "severity": "\u26aa",
+      "severity": "⚪",
       "file": "ddb-core/src/git_ops/tests.rs",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1138,7 +1138,11 @@
       "site": "plan_expansion",
       "detail": "module_drift; note docs/dev/project-management/autopilot/split-notes/00177-ffi-crud-through-contract-v1.md",
       "op_id": "ff204285de36",
-      "prd": "00177-ffi-crud-through-contract-v1.md"
+      "prd": "00177-ffi-crud-through-contract-v1.md",
+      "resolved": {
+        "note": "superseded: PRD 00177 replanned and completed; this plan_expansion stall no longer applies",
+        "resolved_by": "phase-done finalize"
+      }
     },
     {
       "type": "assumed-ambiguity",
@@ -1146,7 +1150,11 @@
       "question": "Task 3's note 5 states SqlEngine renders DdbError::Io (FfiVariant::Internal), but the 00173 policy table it is told to derive from categorizes codes::SQL_ERROR as AppErrorCategory::InvalidInput (ddb-core/src/app_contract/error.rs:101-106), which maps to FfiVariant::Validation. The note and the policy cannot both hold. Separately, the test ddb-core/tests/app_contract_error_t6.rs::maps_internal_core_errors_to_internal_app_errors asserts SqlEngine SHOULD be INTERNAL_ERROR/Internal and is currently FAILING on master (run 39110566975), so the repo already disagrees with itself about this arm.",
       "assumption": "The policy table wins. Task 3's acceptance criterion is 'the FFI error variant equals the policy's ffi_variant for each category', and the contract body it specifies derives the variant from error_rendering(), so SqlEngine renders DdbError::Validation today, not Io. The parity test is written against error_rendering(AppError::from(&err)).ffi_variant rather than hardcoded per-arm expectations, so the FFI layer follows automatically if SQL_ERROR's category is later corrected to Internal. The note's prose is treated as a derived claim that is wrong for this one arm; no new policy table is introduced.",
       "out_of_scope_flag": "The failing master test app_contract_error_t6::maps_internal_core_errors_to_internal_app_errors is a pre-existing Tier-2 regression from 00173, not caused by 00177. It needs its own triage: either SQL_ERROR's category becomes Internal or that test's expectation is wrong. cargo test-ci does not run that target, which is why Tier 1 is green while master Test is red.",
-      "prd": "00177-ffi-crud-through-contract-v1.md"
+      "prd": "00177-ffi-crud-through-contract-v1.md",
+      "resolved": {
+        "note": "assumption applied during implementation; recorded here for awareness, no outstanding action",
+        "resolved_by": "phase-done finalize"
+      }
     },
     {
       "type": "assumed-ambiguity",
@@ -1154,6 +1162,273 @@
       "question": "The task says msg is err.to_string() for every policy-derived arm and that this 'preserves today's FFI error string text exactly'. For DoogatError::Io(std::io::Error) that is false: today the arm is `DoogatError::Io(e) => DdbError::Io { msg: e.to_string() }`, which uses the INNER io::Error's text and drops DoogatError's own `io: ` Display prefix. A uniform err.to_string() would change that message to `io: <inner>`. The task's arm list omits Io, so neither side is specified.",
       "assumption": "Apply the contract uniformly: msg = err.to_string() for every policy-derived arm, including Io, so the message gains the `io: ` prefix like every other arm. The contract's code is treated as authoritative over its prose rationale (same resolution as the SqlEngine arm). This is a cosmetic FFI message-text change on one arm, it loses no information, and it removes a special case rather than adding one. Recorded in CHANGELOG. The alternative - carving Io out to preserve the inner-only text - would add a third carve-out the design doc did not sanction.",
       "note": "DoogatError::Toml also stops producing DdbError::Config and now renders DdbError::Io (Internal) via the policy. DdbError::Config, Git, Yaml, Sql, Automarge, Parse and SqlEngine variants remain declared in the FFI enum but are no longer produced by this conversion; they are left in place because removing a uniffi enum variant is a separate breaking-surface decision the task did not ask for.",
+      "prd": "00177-ffi-crud-through-contract-v1.md",
+      "resolved": {
+        "note": "assumption applied during implementation; recorded here for awareness, no outstanding action",
+        "resolved_by": "phase-done finalize"
+      }
+    },
+    {
+      "issue": "The `DdbError` variants `Git`, `Yaml`, `Sql`, `Automerge`, `Parse`, `Config` and `SqlEngine` are still exported but nothing produces them any more. The code, the ledger and the docs say so, but Swift/Kotlin consumers still get dead cases. Remove them in a follow-up breaking-surface PRD",
+      "severity": "🟡",
+      "file": "ddb-core/src/ffi/records.rs:41",
+      "reason": "deferred by review-close",
+      "type": "deferred_decision",
+      "cycle": 2,
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "issue": "`core_to_field_value` and `core_to_field_scalar` are `#[cfg(test)]` only, so about nine tests in `records_tests.rs` (round trip, verbatim strings, bit-exact numbers, repeated items, native variants) exercise code that never ships. The design allowed this, but the tests cover only the `field_value_to_core` direction as production behavior. Drop the test-only direction and its tests, or keep it and say so in the file header",
+      "severity": "🟡",
+      "file": "ddb-core/src/ffi/records.rs:398",
+      "reason": "deferred by review-close",
+      "type": "deferred_decision",
+      "cycle": 2,
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "issue": "`ddb-core/src/ffi/tests.rs` is now 1982 lines (limit 800) and this diff grew it by 20 net lines. The overage is already recorded as a deferred low, but the file was edited again rather than split. The new test files are under the limit",
+      "severity": "🟡",
+      "file": "ddb-core/src/ffi/tests.rs:1",
+      "reason": "deferred by review-close",
+      "type": "deferred_decision",
+      "cycle": 2,
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "issue": "`meta.id.map(|id| id.0).unwrap_or_default()` returns an empty `id` string if the service ever returns a doogat without an id, instead of an error. Create and update always set one today, so this only masks a future contract break",
+      "severity": "⚪",
+      "file": "ddb-core/src/ffi/records.rs:502",
+      "reason": "deferred by review-close",
+      "type": "deferred_decision",
+      "cycle": 2,
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "issue": "`doogat_result_parts` returns a 6-tuple behind a `DoogatResultParts` alias, and two `from_output` bodies re-destructure it field by field. A private `struct DoogatResultFields` (or one constructor with `Self { .. }` built from a shared helper) is easier to read. The design doc prescribes the tuple, so this is optional",
+      "severity": "⚪",
+      "file": "ddb-core/src/ffi/records.rs:489",
+      "reason": "deferred by review-close",
+      "type": "deferred_decision",
+      "cycle": 2,
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "issue": "`FfiVariant::NotFound` maps to `DdbError::NotFound { msg }`, which has no `code`/`context` fields, so a `Structured` `SINGLETON_NOT_FOUND`'s context is silently discarded at the boundary while Conflict/Validation keep theirs",
+      "severity": "⚪",
+      "file": "ddb-core/src/ffi/records.rs:320",
+      "reason": "deferred by review-close",
+      "type": "deferred_decision",
+      "cycle": 2,
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R1 (cycle 2): DoogatService::update emits UNREGISTERED_TYPE_BASE_ONLY on every transport (CLI stderr, GraphQL/REST warnings), ungated by any policy, while the PRD Transport Impact says CLI/GraphQL/REST are unchanged. No CHANGELOG entry, docs still call the warning create-only, no service-level or non-FFI test pins it.",
+      "severity": "high",
+      "file": "ddb-core/src/service/update.rs:237",
+      "consensus": "3/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R2 (cycle 2): the result records extra field is not lossless and nothing documents the limit - a frontmatter map becomes FieldValue::List([]) and nested list/map items are dropped with only a tracing::warn!, so update_structured reports a wrong value rather than an omitted one.",
+      "severity": "high",
+      "file": "ddb-core/src/ffi/records.rs:441",
+      "consensus": "2/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R3 (cycle 2): the two new mirror tests are near-copies (~35 duplicated lines), update_result_record_mirrors_body_extra_sections_links_and_updated_at is 60 lines (limit 50), and neither asserts sections/links/extra are non-empty, so both go vacuous if the fixture stops producing them.",
+      "severity": "medium",
+      "file": "ddb-core/src/ffi/tests/records_tests.rs:503",
+      "consensus": "2/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R4 (cycle 2): prior finding R14 only partly resolved - update_structured_unsets_key_and_sets_field_keeping_other_frontmatter (~65 lines), create_structured_registered_type_persists_meta_fields_and_body (~54) and update_structured_applies_new_title_tags_type_and_body still exceed the 50-line limit.",
+      "severity": "medium",
+      "file": "ddb-core/src/ffi/tests/structured_crud_tests.rs:120",
+      "consensus": "2/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R5 (cycle 2): ffi.md:133-134 still documents CreateResultRecord/UpdateResultRecord with the old six fields; the new body/date/extra/sections/links/updated_at fields and the SectionRecord/LinkRecord/ZoneRecord/LinkKindRecord types are undocumented, and CHANGELOG.md:12 plus building-apps.md:196 describe the old shape.",
+      "severity": "medium",
+      "file": "docs/src/technical/ffi.md:133",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R6 (cycle 2): parser change outside the PRD - serialize and serialize_yaml_value no longer route extra-field values through yaml_quote, which changes frontmatter output on every write path (CLI, GraphQL, REST, FFI); values already stored with the old quoting are not migrated.",
+      "severity": "medium",
+      "file": "ddb-core/src/parser/mod.rs:672",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R7/R10 (cycle 2): ddb.udl is out of sync with the Rust records - CreateResultRecord and UpdateResultRecord declare six fields against twelve in Rust, and SectionRecord, LinkRecord, ZoneRecord and LinkKindRecord are undeclared, in a file this cycle edited.",
+      "severity": "medium",
+      "file": "ddb-core/src/ddb.udl:110",
+      "consensus": "2/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R8 (cycle 2): tests/swift/Sources/DoogatDB/ddb_core.swift is tracked although .gitignore lists it as generated; it still declares the removed createDoogat/updateDoogat and has no createStructured, while the migrated Swift tests call createStructured. Regenerated bindings were not committed.",
+      "severity": "medium",
+      "file": "tests/swift/Sources/DoogatDB/ddb_core.swift:547",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R9 (cycle 2): docs contradict the shipped behavior - UNREGISTERED_TYPE_BASE_ONLY is documented as create-only in building-apps.md:353 and its per-interface table, app-contract.md scopes it to create, and CHANGELOG.md:12 describes only create.",
+      "severity": "medium",
+      "file": "docs/src/guide/building-apps.md:353",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R11 (cycle 2): the records are still not the lossless ParsedDoogat mirror the PRD requires - reference_section, inline_fields, body_tags and checkboxes are dropped and the doc comment hedges lossless-for-the-named-fields; reference_section cannot be re-derived from body.",
+      "severity": "medium",
+      "file": "ddb-core/src/ffi/records.rs:566",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R12/R13 (cycle 2): the new re-export test carries constant and no-op asserts (self-comparing assert_eq! and an empty assert_reexported<T>()) and is a weak oracle - an in-crate use resolves for pub(crate) too, so it cannot fail if the re-export stops being public.",
+      "severity": "medium",
+      "file": "ddb-core/src/ffi/tests/records_tests.rs:543",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R14 (cycle 2): stale, now-false comment and dead indirection in the e2e parity test - it still says ConflictActionRecord is not re-exported and is unnameable, and routes through ConflictAction::Error.into() with a ddb_core::types import.",
+      "severity": "medium",
+      "file": "tests/e2e/integration_ffi_warning_parity.rs:46",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R15 (cycle 2): the new update-warning branch is half-tested - no test updates an already-unregistered-typed doogat with doogat_type None and asserts zero warnings, and the service change has no colocated service-level test at all.",
+      "severity": "medium",
+      "file": "ddb-core/src/service/update_facade_tests.rs:16",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R16 (cycle 2): duplicated registration check - list_type_schemas() plus an any() scan now exists in both create.rs:111 and update.rs:238, and update loads the schema list a third time after the write.",
+      "severity": "medium",
+      "file": "ddb-core/src/service/update.rs:238",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R17/R21/R22 (cycle 2) low tail, test and comment quality: the try_baseonly_unregistered doc comment is now false (FFI is a second BaseOnly caller and its on_conflict is ignored there) and the create warning text changed from created to stored with no CHANGELOG entry; the new parser regression omits the # character CHANGELOG.md:53 claims round-trips; updated_at is compared as a Debug string rather than Option<String>.",
+      "severity": "low",
+      "file": "ddb-core/src/service/create.rs:97",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R18/R23 (cycle 2): Swift/Kotlin bindgen and the hand-migrated Swift suite were not run by any reviewer, so bindings regenerate clean and the nine rewritten Swift call sites compiling are unconfirmed. Queued as a verification check (checks-2.json, dev/bin/build-xcframework); the mobile toolchain is absent on this host.",
+      "severity": "low",
+      "file": "tests/swift/Tests/DoogatDBTests/DoogatDBTests.swift:21",
+      "consensus": "2/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R19 (cycle 2): DdbError::Io carries the unredacted err.to_string() for Internal-category errors, while the shared error_rendering redacts those to internal error for every other transport - a documented divergence from the one error policy.",
+      "severity": "low",
+      "file": "ddb-core/src/ffi/records.rs:102",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R20 (cycle 2): DoogatDriver::read_doogat returns a raw String and delete_doogat takes a message, so neither is routed through the app contract - owned by PRD 00175, noted here for traceability.",
+      "severity": "low",
+      "file": "ddb-core/src/ffi/driver.rs:96",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "cap-overflow",
+      "cycle": 2,
+      "issue": "R24/R25 (cycle 2): carried forward from cycle 1 verification queue - cargo test-ci exits 101 at HEAD 757c55f (2062 passed, 1 failed) because of the known load-sensitive flake actor::tests::shared_actor_preserves_schema_applys_owned_transaction, which is green when re-run in isolation but is not pinned as ignored, so the fast tier stays red under load. cargo test -p ddb-e2e passed this cycle (603 passed, 0 failed, 2 ignored).",
+      "severity": "low",
+      "file": "ddb-server/src/actor/tests/mod.rs:22",
+      "consensus": "1/3",
+      "action": "deferred to batch end",
+      "reason": "rework cap reached with this finding unresolved",
       "prd": "00177-ffi-crud-through-contract-v1.md"
     }
   ]

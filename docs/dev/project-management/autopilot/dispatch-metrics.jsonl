@@ -437,3 +437,5 @@
 {"id":"55606738","ended_at":1792348914,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"id":"16d452f7","ended_at":1792348914,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792348914,"phase":"done","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"kind":"handoff","site":"done","edge":"leave","at":1792349215,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"done","edge":"leave","at":1792349223,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
