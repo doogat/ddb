@@ -1062,6 +1062,26 @@
       "consensus": "1/4",
       "reason": "Pre-existing flake in ddb-server/src/actor/tests/mod.rs, a file outside this PRD diff; passes in isolation in ~1s",
       "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "type": "out-of-scope",
+      "cycle": 2,
+      "issue": "Over-max errors surface as VALIDATION_ERROR (HTTP 400 on REST) while app_contract/error.rs lists the same InvalidInput category with 422 on another code path - the cross-surface status for one category is inconsistent.",
+      "severity": "low",
+      "action": "deferred",
+      "file": "ddb-core/src/app_contract/commands.rs:102",
+      "reason": "Error-policy table coherence is PRD 00173s scope (unify-server-error-mapping-paths), not search routing; tests and docs here consistently say 400.",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "type": "out-of-scope",
+      "cycle": 2,
+      "issue": "The GraphQL types argument silently drops non-string list entries through filter_map - a silent-drop path on a filter input.",
+      "severity": "low",
+      "action": "deferred",
+      "file": "ddb-server/src/schema/queries.rs:157",
+      "reason": "Pre-existing GraphQL argument-coercion behaviour untouched by this PRD; changing it is a public input-validation change needing its own compatibility review.",
+      "prd": "00176-route-search-through-contract-v1.md"
     }
   ]
 }

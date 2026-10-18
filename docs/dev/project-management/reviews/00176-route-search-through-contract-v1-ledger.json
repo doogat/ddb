@@ -38,5 +38,29 @@
     "issue": "Parallel cargo test-ci times out on shared_actor_preserves_schema_applys_owned_transaction under thread contention",
     "file": "ddb-server/src/actor/tests/mod.rs:14",
     "reason": "Pre-existing flake in an untouched file (ddb-server/src/actor/tests/mod.rs is not in this PRD's diff); passes in isolation in ~1s. Unrelated to the search changes, so it is not reworked under this PRD."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "Server warning delivery remains unresolved: both new warning regressions are ignored and fail when included. REST now serializes warnings, but the documented ReadPool stale-check bypass prevents their collection; the GraphQL `where` branch remains unchanged. Carry actor-side reindex warnings into both read responses and enable both regressions.",
+    "file": "tests/e2e/integration_search_pagination_warnings.rs:135",
+    "reason": "Settled in cycle 1 (state.deferred_decisions, cycle 1): ReadPool opens DoogatService with set_skip_stale_check(true), so no read path can collect reindex warnings. Making reader warnings reachable is an architecture change to ReadPool's staleness policy, outside this PRD's search-routing scope; the two regressions are committed as #[ignore]d tests so the gap is pinned, executable and visible rather than dropped. This ledger entry is the durable disposition Alice's R7 asked for."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "The `search` resolver closure is still about 98 lines (queries.rs:144-243), over the 50-line limit. `queries.rs` is 909 lines, over the 800-line limit. base_types.rs still keeps its own check_limit/MAX_LIMIT copy of the pagination bound.",
+    "file": "ddb-server/src/schema/queries.rs:144",
+    "reason": "Settled in cycle 1 (state.deferred_decisions, cycle 1, 'structural/refactor-only'): both the oversized resolver and the base_types duplicate pre-date this PRD, which only re-pointed the resolver body at SearchCommand. Splitting queries.rs and collapsing the second pagination copy is a server-schema refactor with its own blast radius (surgical-changes rule)."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "FFI search_paginated and search_filtered duplicate the SearchCommand build, the search_command call and the AppWarning -> RebuildWarningRecord mapping; the new FFI search tests went into ddb-core/src/ffi/tests.rs (1962 lines) instead of a sibling ffi/search_tests.rs.",
+    "file": "ddb-core/src/ffi/driver.rs:118",
+    "reason": "Settled in cycle 1 (state.deferred_decisions, cycle 1, 'structural/refactor-only'): both methods are behaviourally correct and tested; the duplication and the test-file split are refactors with no behavioural effect, deferred to keep the PRD's cycle budget on the contract routing itself."
   }
 ]
