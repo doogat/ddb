@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ffi**: `DoogatDriver.create_structured(title, tags, doogat_type, body, fields, on_conflict)` and `update_structured(id, title, tags, doogat_type, body, fields, unset_fields)` take typed input and route through the app contract, returning `CreateResultRecord`/`UpdateResultRecord` with the id, meta, path and any warnings. They replace the raw-markdown `create_doogat`/`update_doogat` exports: conflict handling is explicit (`ConflictActionRecord`), an unregistered `doogat_type` creates a base doogat with an `UNREGISTERED_TYPE_BASE_ONLY` warning instead of failing, and warnings reach Swift/Kotlin callers instead of being dropped. Regenerate the bindings. (PRD 00177)
 - **ffi**: `DoogatDriver.search_filtered(query, limit, offset, types, tag)` searches with the same type/tag filters and pagination policy as CLI, GraphQL, and REST; regenerate Swift/Kotlin bindings to use it. (PRD 00176)
 - **ffi**: search hits (`SearchResult`) now carry all ten core fields, adding `tags`, `doogat_type`, `fields` (as a list of new `FieldEntry { key, value }` records), and `created_at`; existing fields are unchanged. (PRD 00176)
 - **ffi**: `PaginatedSearchResult` gained a `warnings` field carrying one `RebuildWarningRecord { code, message }` per file a freshness reindex skipped during the search, so Swift/Kotlin consumers of `search_paginated`/`search_filtered` see an incomplete index instead of silently partial hits. The field is additive; regenerate the bindings. (PRD 00176)
@@ -43,10 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **ffi**: `DoogatDriver.create_doogat(content, message)` and `DoogatDriver.update_doogat(id, content, message)`, the raw-markdown FFI CRUD exports, are gone with no deprecation period. Use `create_structured` / `update_structured` instead; regenerate the Swift/Kotlin bindings. (PRD 00177)
 - **sync**: `SyncManager::resolve_post_merge_conflicts`, a public library API, is gone with no deprecation period. (PRD 00168)
 
 ### Fixed
 
+- **parser**: a frontmatter field whose value contains `:`, `[`, `]`, `{`, `}` or `#` now round-trips instead of accumulating quotes. The writer quoted the value twice (once via `serde_yaml`, then again), so a field set to `a: b` was stored as `"'a: b'"` and read back as the literal `'a: b'`. Affects every write path that stores such a value — CLI `--field`, GraphQL/REST create and update, and the FFI structured methods. (PRD 00177)
 - **rest**: `GET /rest/doogats?q=...` now applies its `type` and `tag` filters instead of dropping them silently and returning unfiltered hits. (PRD 00176)
 - **server**: GraphQL resolvers no longer expose a structured error's raw context after the policy redacted its message. An `Internal`-category code (`SCHEMA_APPLY_PARTIAL`, or any unregistered code) returned `"internal error"` while still shipping the discarded detail in `extensions`; it now exposes the code alone, matching REST. For errors that are not redacted, `extensions` now also carries the policy's `field` hint, which this path never emitted. (PRD 00173)
 - **server**: `CREATE TABLE ... ZONE <bad>` again returns its own message with HTTP 422 instead of a redacted 500 `internal error`. Its `INVALID_ZONE` code was never registered in the error policy, so the unified renderer treated it as an unknown code and redacted it. The code is now `ddb_core::error::codes::INVALID_ZONE` and registered as an `InvalidInput` / 422 row of the one policy table. (PRD 00173)

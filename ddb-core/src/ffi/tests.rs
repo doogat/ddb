@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::records::{ConflictActionRecord, FieldEntryValue, FieldValue};
 use super::*;
 use crate::error::DoogatError;
 use crate::git_ops::GitRepo;
@@ -14,6 +15,20 @@ fn fresh_driver() -> (TempDir, DoogatDriver) {
     let tmp = TempDir::new().unwrap();
     let driver = DoogatDriver::create_repo(tmp.path().to_str().unwrap().to_string()).unwrap();
     (tmp, driver)
+}
+
+/// Create a plain untyped doogat (title + body only) through the FFI path.
+fn create_simple(driver: &DoogatDriver, title: &str, body: &str) {
+    driver
+        .create_structured(
+            Some(title.into()),
+            vec![],
+            None,
+            Some(body.into()),
+            vec![],
+            ConflictActionRecord::Error,
+        )
+        .unwrap();
 }
 
 fn setup_app_config_singleton_typedef(driver: &DoogatDriver) {
@@ -398,9 +413,7 @@ fn export_delta_bundle_targets_node() {
     driver.register_node("Local".to_string()).unwrap();
 
     // Create initial content (before remote's sync point)
-    driver
-        .create_doogat("---\ntitle: first\n---\nBody1".into(), "add first".into())
-        .unwrap();
+    create_simple(&driver, "first", "Body1");
 
     // Capture head as remote's sync point
     let sync_point = {
@@ -425,9 +438,7 @@ fn export_delta_bundle_targets_node() {
     }
 
     // Add new content after remote's sync point
-    driver
-        .create_doogat("---\ntitle: second\n---\nBody2".into(), "add second".into())
-        .unwrap();
+    create_simple(&driver, "second", "Body2");
 
     // Export delta bundle targeting node2
     let output = _tmp.path().join("delta.bundle.tar");
@@ -441,9 +452,7 @@ fn export_delta_bundle_targets_node() {
 fn export_delta_bundle_unknown_node_errors() {
     let (_tmp, driver) = fresh_driver();
     driver.register_node("Local".to_string()).unwrap();
-    driver
-        .create_doogat("---\ntitle: test\n---\nBody".into(), "add".into())
-        .unwrap();
+    create_simple(&driver, "test", "Body");
 
     let output = _tmp.path().join("delta.bundle.tar");
     let result = driver.export_delta_bundle(
@@ -459,9 +468,7 @@ fn export_delta_bundle_smaller_than_full() {
     driver.register_node("Local".to_string()).unwrap();
 
     // Create initial content
-    driver
-        .create_doogat("---\ntitle: first\n---\nBody1".into(), "add first".into())
-        .unwrap();
+    create_simple(&driver, "first", "Body1");
 
     // Capture head as remote's sync point
     let sync_point = {
@@ -487,12 +494,7 @@ fn export_delta_bundle_smaller_than_full() {
 
     // Add more content after sync point
     for i in 0..3 {
-        driver
-            .create_doogat(
-                format!("---\ntitle: note{i}\n---\nContent {i}"),
-                format!("add note{i}"),
-            )
-            .unwrap();
+        create_simple(&driver, &format!("note{i}"), &format!("Content {i}"));
     }
 
     // Export both bundle types
@@ -544,17 +546,32 @@ fn ffi_singleton_create_exposes_structured_error_context() {
     setup_app_config_singleton_typedef(&driver);
 
     let first_id = driver
-        .create_doogat(
-            "---\ntitle: Config\ntype: app_config\ntheme: dark\n---\n".into(),
-            "add first config".into(),
+        .create_structured(
+            Some("Config".into()),
+            vec![],
+            Some("app_config".into()),
+            None,
+            vec![FieldEntryValue {
+                key: "theme".into(),
+                value: FieldValue::Str("dark".into()),
+            }],
+            ConflictActionRecord::Error,
         )
-        .expect("first singleton create should succeed");
+        .expect("first singleton create should succeed")
+        .id;
     assert!(!first_id.is_empty());
 
     let err = driver
-        .create_doogat(
-            "---\ntitle: Config 2\ntype: app_config\ntheme: light\n---\n".into(),
-            "add second config".into(),
+        .create_structured(
+            Some("Config 2".into()),
+            vec![],
+            Some("app_config".into()),
+            None,
+            vec![FieldEntryValue {
+                key: "theme".into(),
+                value: FieldValue::Str("light".into()),
+            }],
+            ConflictActionRecord::Error,
         )
         .expect_err("second singleton create must reject");
 

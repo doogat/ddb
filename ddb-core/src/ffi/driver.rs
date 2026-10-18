@@ -10,8 +10,9 @@ use crate::error::DoogatError;
 use crate::service::DoogatService;
 
 use super::records::{
-    empty_error_context, AttachmentInfo, DdbError, PaginatedSearchResult, RebuildReport,
-    RebuildWarningRecord, SchemaApplyReportRecord, SearchResult, SqlResultRecord, TypeSchemaRecord,
+    empty_error_context, fields_to_core, AttachmentInfo, ConflictActionRecord, CreateResultRecord,
+    DdbError, FieldEntryValue, PaginatedSearchResult, RebuildReport, RebuildWarningRecord,
+    SchemaApplyReportRecord, SearchResult, SqlResultRecord, TypeSchemaRecord, UpdateResultRecord,
 };
 
 /// High-level facade for mobile/desktop FFI consumers.
@@ -64,10 +65,30 @@ impl DoogatDriver {
         })
     }
 
-    pub fn create_doogat(&self, content: String, message: String) -> Result<String, DdbError> {
+    /// Create a doogat from structured input, routed through the app contract.
+    /// An unregistered `doogat_type` yields a base-only create with an
+    /// `UNREGISTERED_TYPE_BASE_ONLY` warning.
+    pub fn create_structured(
+        &self,
+        title: Option<String>,
+        tags: Vec<String>,
+        doogat_type: Option<String>,
+        body: Option<String>,
+        fields: Vec<FieldEntryValue>,
+        on_conflict: ConflictActionRecord,
+    ) -> Result<CreateResultRecord, DdbError> {
         self.with_service(|svc| {
-            svc.create_doogat_raw(&content, &message)
-                .map_err(DdbError::from)
+            let cmd = crate::app_contract::CreateCommand {
+                title,
+                tags,
+                doogat_type,
+                body,
+                fields: fields_to_core(fields),
+                on_conflict: on_conflict.into(),
+                unregistered_type_policy: crate::app_contract::UnregisteredTypePolicy::BaseOnly,
+            };
+            let out = svc.create(cmd).map_err(DdbError::from)?;
+            Ok(CreateResultRecord::from_output(out))
         })
     }
 
@@ -75,15 +96,31 @@ impl DoogatDriver {
         self.with_service(|svc| svc.read_doogat(&id).map_err(DdbError::from))
     }
 
-    pub fn update_doogat(
+    /// Update a doogat from structured input, routed through the app contract.
+    /// A `None` argument leaves the stored value unchanged; `unset_fields`
+    /// removes frontmatter keys.
+    pub fn update_structured(
         &self,
         id: String,
-        content: String,
-        message: String,
-    ) -> Result<(), DdbError> {
+        title: Option<String>,
+        tags: Option<Vec<String>>,
+        doogat_type: Option<String>,
+        body: Option<String>,
+        fields: Vec<FieldEntryValue>,
+        unset_fields: Vec<String>,
+    ) -> Result<UpdateResultRecord, DdbError> {
         self.with_service(|svc| {
-            svc.update_doogat_raw(&id, &content, &message)
-                .map_err(DdbError::from)
+            let cmd = crate::app_contract::UpdateCommand {
+                id,
+                title,
+                tags,
+                doogat_type,
+                body,
+                fields: fields_to_core(fields),
+                unset_fields,
+            };
+            let out = svc.update(cmd).map_err(DdbError::from)?;
+            Ok(UpdateResultRecord::from_output(out))
         })
     }
 

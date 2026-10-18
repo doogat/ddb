@@ -669,7 +669,7 @@ fn serialize_yaml_value(out: &mut String, key: &str, value: &serde_yaml::Value) 
         _ => {
             let yaml_val = serde_yaml::to_string(value).unwrap_or_default();
             let yaml_val = yaml_val.trim().trim_end_matches('\n');
-            out.push_str(&format!("{key}: {}\n", yaml_quote(yaml_val)));
+            out.push_str(&format!("{key}: {yaml_val}\n"));
         }
     }
 }
@@ -707,7 +707,7 @@ pub fn serialize(doogat: &crate::types::ParsedDoogat) -> String {
             let sv = to_serde_yaml(value);
             let yaml_val = serde_yaml::to_string(&sv).unwrap_or_default();
             let yaml_val = yaml_val.trim().trim_end_matches('\n');
-            out.push_str(&format!("{key}: {}\n", yaml_quote(yaml_val)));
+            out.push_str(&format!("{key}: {yaml_val}\n"));
         }
     }
 
