@@ -23,7 +23,7 @@ pub struct CreateBody {
     pub tags: Vec<String>,
     #[serde(rename = "type")]
     pub doogat_type: Option<String>,
-    pub fields: Option<String>,
+    pub fields: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,7 +33,7 @@ pub struct UpdateBody {
     pub tags: Option<Vec<String>>,
     #[serde(rename = "type")]
     pub doogat_type: Option<String>,
-    pub fields: Option<String>,
+    pub fields: Option<serde_json::Value>,
     #[serde(rename = "unsetFields")]
     pub unset_fields: Option<Vec<String>>,
 }
@@ -210,6 +210,55 @@ pub fn doogat_to_json(z: &ParsedDoogat) -> DoogatJson {
             .collect(),
         references,
         reference_section: z.reference_section.clone(),
+    }
+}
+
+/// Decode the REST `fields` JSON object into the core fields input. Each
+/// top-level key maps to `Some(value)`, or to `None` for an explicit `null`.
+/// Any non-object value is rejected (the old encoded-string shape included).
+fn json_value_to_fields_input(
+    v: serde_json::Value,
+) -> Result<BTreeMap<String, Option<DdbValue>>, String> {
+    match v {
+        serde_json::Value::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| json_scalar_to_opt_value(v).map(|v| (k, v)))
+            .collect(),
+        other => Err(format!("fields must be a JSON object, got {other}")),
+    }
+}
+
+/// Decode one top-level field value: JSON `null` is the per-field `None`
+/// signal; anything else decodes strictly.
+fn json_scalar_to_opt_value(v: serde_json::Value) -> Result<Option<DdbValue>, String> {
+    match v {
+        serde_json::Value::Null => Ok(None),
+        other => json_scalar_to_value_strict(other).map(Some),
+    }
+}
+
+/// Decode a JSON value with native types kept; a `null` nested inside a
+/// list or object is rejected.
+fn json_scalar_to_value_strict(v: serde_json::Value) -> Result<DdbValue, String> {
+    use serde_json::Value as J;
+    match v {
+        J::Null => Err("null is only allowed as a top-level field value".to_string()),
+        J::Bool(b) => Ok(DdbValue::Bool(b)),
+        J::Number(n) => n
+            .as_f64()
+            .map(DdbValue::Number)
+            .ok_or_else(|| format!("number {n} is not representable")),
+        J::String(s) => Ok(DdbValue::String(s)),
+        J::Array(items) => items
+            .into_iter()
+            .map(json_scalar_to_value_strict)
+            .collect::<Result<_, _>>()
+            .map(DdbValue::List),
+        J::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| json_scalar_to_value_strict(v).map(|v| (k, v)))
+            .collect::<Result<_, _>>()
+            .map(DdbValue::Map),
     }
 }
 
@@ -442,11 +491,12 @@ async fn create_doogat(
     Extension(actor): Extension<ActorHandle>,
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<SingleResponse>), (StatusCode, Json<ErrorBody>)> {
-    let fields = match body.fields {
-        Some(json_str) => crate::schema::parse_fields_json(&json_str)
-            .map_err(|msg| rest_error(ddb_core::error::DoogatError::Validation(msg)))?,
-        None => std::collections::BTreeMap::new(),
+    let raw = match body.fields {
+        Some(v) => json_value_to_fields_input(v)
+            .map_err(|msg| rest_error(DoogatError::Validation(msg)))?,
+        None => BTreeMap::new(),
     };
+    let fields = ddb_core::app_contract::normalize_create_fields(raw);
     let output = actor
         .create_doogat(
             body.title,
@@ -470,12 +520,16 @@ async fn update_doogat(
     Path(id): Path<String>,
     Json(body): Json<UpdateBody>,
 ) -> Result<Json<SingleResponse>, (StatusCode, Json<ErrorBody>)> {
-    let fields = match body.fields {
-        Some(json_str) => crate::schema::parse_fields_json(&json_str)
-            .map_err(|msg| rest_error(ddb_core::error::DoogatError::Validation(msg)))?,
-        None => std::collections::BTreeMap::new(),
+    let raw = match body.fields {
+        Some(v) => json_value_to_fields_input(v)
+            .map_err(|msg| rest_error(DoogatError::Validation(msg)))?,
+        None => BTreeMap::new(),
     };
-    let unset_fields = body.unset_fields.unwrap_or_default();
+    let (fields, unset_fields) = ddb_core::app_contract::normalize_update_fields(
+        raw,
+        body.unset_fields.unwrap_or_default(),
+    )
+    .map_err(rest_error)?;
     let output = actor
         .update_doogat(crate::actor::UpdateDoogatParams {
             id,
