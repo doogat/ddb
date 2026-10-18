@@ -164,20 +164,16 @@ fn fix_verbose_output() {
 fn fix_verbose_reports_title_noncompliant() {
     let repo = DdbTestRepo::init();
 
-    // Create typedef with title_template
     repo.ddb()
         .args(["query", "CREATE TABLE widget (name TEXT, description TEXT)"])
         .assert()
         .success();
-    repo.ddb()
-        .args([
-            "query",
-            "ALTER TABLE widget SET TITLE TEMPLATE '{name} Widget'",
-        ])
-        .assert()
-        .success();
 
-    // Insert a doogat — its auto-derived title won't match the template
+    // Insert BEFORE the template exists, so the stored title is the auto-derived
+    // "Foo" and cannot match the template added next. Inserting after the
+    // template is set now yields a compliant title ("Foo Widget") with nothing
+    // to report: that ordering only looked non-compliant while frontmatter
+    // values containing `{` were written double-quoted (fixed in PRD 00177).
     let out = repo
         .ddb()
         .args([
@@ -191,6 +187,14 @@ fn fix_verbose_reports_title_noncompliant() {
         "insert failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+
+    repo.ddb()
+        .args([
+            "query",
+            "ALTER TABLE widget SET TITLE TEMPLATE '{name} Widget'",
+        ])
+        .assert()
+        .success();
 
     // Verbose dry-run should report title non-compliance
     repo.ddb()
