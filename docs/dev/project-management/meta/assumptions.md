@@ -22,3 +22,45 @@ Ivan:
 - `core_value` has only the variants String, Number, Bool, List and Map.
 - The new conversion functions and `from_output` are `pub(super)`, matching the existing `SchemaApplyReportRecord::from_output`.
 - `core_to_field_scalar` is `#[cfg(test)]` too, because its only caller is `core_to_field_value`, which is `#[cfg(test)]`.
+
+## 2: create_structured/update_structured on DoogatDriver; remove raw FFI CRUD exports
+
+Tess (initial):
+- The `ConflictActionRecord::Error` rejection is asserted as `DdbError::Validation { code: Some(codes::SINGLETON_VIOLATION) }` rather than merely `is_err()`, mirroring the existing raw-path test `ffi_singleton_create_exposes_structured_error_context`.
+- `path` is asserted as `ddb/{id}.md` (AGENTS.md storage convention); `path` is not an input, so it cannot "echo" one.
+- The `app_config` singleton typedef is the "registered type" fixture, so no unknown-field-on-typed-doogat behavior is exercised.
+- A type-less structured create persists arbitrary given fields into frontmatter.
+- Field presence/absence is asserted by substring on `read_doogat` raw content, using distinctive key names.
+
+Tess (strengthen):
+- `UNREGISTERED_TYPE_BASE_ONLY` has no exported constant (only literals in `service/create.rs`), so the test keeps a local `const` with that literal spelling.
+- Scalar frontmatter typing is not pinned by the requirements, so numeric/boolean fields are asserted representation-tolerantly; a `FieldValue::List` must round-trip as a YAML sequence.
+- The error variant for `update_structured` on an unknown id is unspecified, so the test accepts `DdbError::NotFound` or `DdbError::Validation` and pins the side effects instead. (Pat raised this as a LOW — see the review note.)
+- A create/update through the service updates the SQLite index synchronously (no `reindex()` needed).
+- `execute_sql("CREATE TABLE widget (size TEXT)")` registers a second type for the create path.
+- `fresh_driver`, `setup_app_config_singleton_typedef` and `head_at` are reachable unchanged from the submodule.
+
+Ivan:
+- `create_simple(driver, title, body)` is an acceptable local test helper (6 call sites) for the migrated bundle-export fixtures.
+- Migrated fixtures map raw `---\ntitle: X\n---\nBody` to `title: Some("X")`, no tags, no type, `body: Some("Body")`, `ConflictActionRecord::Error`, dropping the raw path's commit message (the structured API has no message parameter and those tests never assert on it).
+- `ffi_singleton_create_exposes_structured_error_context` keeps its now-duplicated coverage rather than being deleted.
+
+## 3: Replace lossy FFI error allowlist with policy-derived ffi_variant
+
+Tess (initial):
+- `DdbError::Conflict`'s fields are exactly `{ msg: String, code: Option<String>, context: Vec<DdbErrorContextEntry> }`, mirroring the existing `Validation` arm.
+- `FfiVariant::NotFound -> DdbError::NotFound { msg }` carries no code/context, so a `Structured { code: SINGLETON_NOT_FOUND }` loses its context at the FFI boundary.
+- The Validation arm's code/context rule applies to non-`Structured` sources too (`code: Some(policy code)`, empty context).
+- `DoogatError::Toml` now maps to `DdbError::Io`, i.e. `DdbError::Config` is no longer produced.
+
+Tess (strengthen):
+- Context entry order on the Conflict/Validation arms is the source `ErrorContext` order (PRD 00129 §6 contract), so full-vector equality is asserted.
+- `DoogatError::Structured` may be constructed directly in tests with synthetic code/message/context to cover `codes::ALL`.
+- For the `NotFound` and `Io` FFI arms no code/context is asserted, since those variants have no such fields.
+- `DoogatError::Redb` is left uncovered (in-contract): it is `#[cfg(feature = "nosql")]` and covering it would need a feature gate in the test file.
+
+Ivan:
+- The new `Conflict` variant sits immediately before `VersionMismatch`; uniffi error variants are name-matched in generated bindings, so position is not load-bearing.
+- Fixing the unlisted fifth stale assertion in `masterless_b_fails` (ffi/tests.rs:1455) is in scope, being the same precondition class in the same three tests.
+- `msg.starts_with("sync: bundle merge failed:")` is the right strength for that site, preserving the original `starts_with` rather than weakening to `contains`.
+- Updating two doc comments that named the old variant counts as part of re-pointing.

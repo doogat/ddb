@@ -1,6 +1,6 @@
 # Project Capsule: Doogat DB
 
-Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `876a153`; 16/16 tasks completed, two review cycles, batch intentionally stopped). Older architecture and other-PRD entries retain their original verification scope.
+Generated: 2026-10-18 (00177 build resuming at task 2/5; GitHub State and Active Work refreshed). Prior header: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `876a153`; 16/16 tasks completed, two review cycles, batch intentionally stopped). Older architecture and other-PRD entries retain their original verification scope.
 
 **Capsule pruned this session.** Prior version had grown to ~56K tokens via a chained "Prior header follows" history reaching back to 2026-05 plus 12 duplicate `## GitHub State` blocks and 3 duplicate `## Project Health` blocks. That history is not lost — every completed PRD's story lives in `dev/local/prds/done/`, its review trail in `dev/local/reviews/<prd>-audit.md`, and the cross-PRD narrative in the `project_*` memory files (see § Project Memories). This capsule now carries only current state; update it going forward instead of appending another header chain.
 
@@ -90,7 +90,7 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
 
 ### Remaining backlog (24 PRDs; not selected — 00177 re-selected ahead of 00178, see below)
 
-**Selected: 00177-ffi-crud-through-contract-v1** (build/catchup, this session) — routes FFI `create_doogat`/`update_doogat` through `CreateCommand`/`UpdateCommand` (structured inputs, `on_conflict`, `BaseOnly` unregistered-type policy, warnings), retires the lossy FFI error-variant allowlist, removes raw FFI CRUD exports. Had stalled at `plan_expansion` (`module_drift`, a planned-vs-PRD-task-count mismatch, not a content defect) and was parked to `hold/`; this session un-parked it and selected it ahead of 00178 because 00178's FFI leg (`create_structured`/`update_structured`) is an explicit, unimplemented dependency of 00178 — verified by grep, no such symbols exist yet. Its design doc already exists and passes the empty-review-log gate, so Phase 1.5 reused it; only `/autopilot:plan-tasks` needs to re-run with a corrected task/module split.
+**Selected: 00177-ffi-crud-through-contract-v1** (build/work, task 1/5 done, resuming at task 2 — 2026-10-18) — routes FFI `create_doogat`/`update_doogat` through `CreateCommand`/`UpdateCommand` (structured inputs, `on_conflict`, `BaseOnly` unregistered-type policy, warnings), retires the lossy FFI error-variant allowlist, removes raw FFI CRUD exports. Had stalled at `plan_expansion` (`module_drift`, a planned-vs-PRD-task-count mismatch, not a content defect) and was parked to `hold/`; this session un-parked it and selected it ahead of 00178 because 00178's FFI leg (`create_structured`/`update_structured`) is an explicit, unimplemented dependency of 00178 — verified by grep, no such symbols exist yet. Its design doc already exists and passes the empty-review-log gate, so Phase 1.5 reused it; only `/autopilot:plan-tasks` needs to re-run with a corrected task/module split.
 
 - [ ] 00178-structured-fields-input-v1 (depends on 00177, see above — do not select before 00177 lands)
 - [ ] 00179-sql-identifier-escaping-materializer-v1
@@ -131,10 +131,11 @@ Numeric order = autopilot execution order (memory `project_ddb_growth_roadmap`);
 
 Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration shell scenarios to the Rust e2e crate`): only self-hits, 00171's own PRD file (repo and portfolio scope return the identical five rows, all within the PRD itself or adjacent Phase-2-titled sections of other backlog PRDs); no external prior art. Staleness stamp (`engram status --scope portfolio`, 2026-08-16, nonzero exit): memory stale=14, prd stale=1, transcripts stale=2 dead=5640, code stale=4 (skipped=3598), discovery/findings clean; many sibling repos report absent prd/decision/discovery layers. Review harvest: `dev/local/reviews/*-review-NN.md` files upserted (30 total, incl. 00170's two cycles); the `*-audit.md` renders still fail to parse (`missing frontmatter`) and are NOT harvested — the audit trail survives only as files, so it dies with a `dev/local` GC.
 
-## GitHub State (refreshed 2026-10-18, this session)
+## GitHub State (refreshed 2026-10-18, work-resume catchup)
 
-- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 351 unreleased commits on master now (00176 landed since the 311 count).
-- **Nightly/Test RED on master commit `a7a5efdd`/`5b5f9eb2` (unchanged from last session) — still `cargo-deny`'s dependency-policy check (`unsafe-libyaml` unmaintained RUSTSEC-2024-0449 via deprecated `serde_yaml`; yanked `chacha20` 0.10.0, `spin` 0.9.8), not a test regression.** Unrelated to 00177; not yet triaged into its own PRD. The newest master commit (`83db619`, this session's autopilot state record) has a Test/Nightly run `in_progress` at catchup time — not yet resolved.
+- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 351 unreleased commits on master.
+- **Test RED on master `78be1e86` (run 39110566975) with a REAL test regression, newly surfaced this session:** `ddb-core/tests/app_contract_error_t6.rs::maps_internal_core_errors_to_internal_app_errors` fails — a SqlEngine error renders as `SQL_ERROR`/`InvalidInput` where the test expects `INTERNAL_ERROR`/`Internal`. Landed with 00173's single-error-policy work (memory `project_two_error_mapping_paths`). It is a `--tests` integration target, so `cargo test-ci` (Tier 1) never runs it — the same Tier-1 blind spot as the 00164-00166 sync_test regression. Not 00177's doing; needs triage into its own PRD. Earlier `cargo-deny` dependency-policy red (unmaintained `unsafe-libyaml`, yanked `chacha20`/`spin`) is still unfixed too.
+- Nightly at `2026-10-18` was `in_progress` at catchup time.
 
 ### Prior snapshot (2026-09-07)
 
