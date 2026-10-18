@@ -1674,4 +1674,120 @@ mod tests {
         assert!(err.message.contains("invalid format"));
         assert!(err.message.contains("csv"));
     }
+
+    fn gql_map(pairs: Vec<(&str, GqlValue)>) -> IndexMap<Name, GqlValue> {
+        pairs.into_iter().map(|(k, v)| (Name::new(k), v)).collect()
+    }
+
+    fn gql_num(n: f64) -> GqlValue {
+        GqlValue::Number(async_graphql::Number::from_f64(n).unwrap())
+    }
+
+    fn gql_str(v: &str) -> GqlValue {
+        GqlValue::String(v.to_string())
+    }
+
+    #[test]
+    fn decode_json_fields_object_keeps_native_variants_and_marks_null_as_none() {
+        let input = gql_map(vec![
+            ("s", gql_str("42")),
+            ("t", gql_str("true")),
+            ("n", gql_num(42.25)),
+            ("i", gql_num(7.0)),
+            ("b", GqlValue::Boolean(false)),
+            ("l", GqlValue::List(vec![gql_str("a"), gql_num(2.0), GqlValue::Boolean(true)])),
+            ("m", GqlValue::Object(gql_map(vec![("inner", gql_num(-1.5))]))),
+            ("gone", GqlValue::Null),
+        ]);
+        let decoded = decode_json_fields_object(&input).expect("plain JSON values must decode");
+
+        let expected: ddb_core::app_contract::RawFieldsInput = [
+            ("s", Some(Value::String("42".into()))),
+            ("t", Some(Value::String("true".into()))),
+            ("n", Some(Value::Number(42.25))),
+            ("i", Some(Value::Number(7.0))),
+            ("b", Some(Value::Bool(false))),
+            (
+                "l",
+                Some(Value::List(vec![
+                    Value::String("a".into()),
+                    Value::Number(2.0),
+                    Value::Bool(true),
+                ])),
+            ),
+            (
+                "m",
+                Some(Value::Map(
+                    [("inner".to_string(), Value::Number(-1.5))].into_iter().collect(),
+                )),
+            ),
+            ("gone", None),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        assert_eq!(
+            decoded, expected,
+            "strings stay strings, numbers/bools stay native, top-level null is None"
+        );
+    }
+
+    #[test]
+    fn decode_json_fields_object_keeps_empty_values_present() {
+        let input = gql_map(vec![
+            ("empty_s", gql_str("")),
+            ("empty_l", GqlValue::List(vec![])),
+            ("empty_m", GqlValue::Object(IndexMap::new())),
+        ]);
+        let decoded = decode_json_fields_object(&input).expect("empty values must decode");
+        assert_eq!(decoded.get("empty_s"), Some(&Some(Value::String(String::new()))));
+        assert_eq!(decoded.get("empty_l"), Some(&Some(Value::List(vec![]))));
+        assert_eq!(
+            decoded.get("empty_m"),
+            Some(&Some(Value::Map(std::collections::BTreeMap::new()))),
+            "empty values are not null and must not decode to None"
+        );
+    }
+
+    #[test]
+    fn decode_json_fields_object_empty_map_yields_empty_input() {
+        let decoded = decode_json_fields_object(&IndexMap::new()).expect("empty object decodes");
+        assert!(decoded.is_empty(), "got {decoded:?}");
+    }
+
+    #[test]
+    fn decode_json_fields_object_rejects_null_inside_list() {
+        let input = gql_map(vec![(
+            "l",
+            GqlValue::List(vec![gql_str("a"), GqlValue::Null]),
+        )]);
+        assert!(
+            decode_json_fields_object(&input).is_err(),
+            "null is only a top-level per-field signal, never a list element"
+        );
+    }
+
+    #[test]
+    fn decode_json_fields_object_rejects_null_inside_nested_object() {
+        let input = gql_map(vec![(
+            "m",
+            GqlValue::Object(gql_map(vec![("ok", gql_num(1.0)), ("bad", GqlValue::Null)])),
+        )]);
+        assert!(
+            decode_json_fields_object(&input).is_err(),
+            "null is only a top-level per-field signal, never a nested object value"
+        );
+    }
+
+    #[test]
+    fn decode_json_fields_object_rejects_null_deep_inside_list_of_objects() {
+        let input = gql_map(vec![(
+            "l",
+            GqlValue::List(vec![GqlValue::Object(gql_map(vec![("bad", GqlValue::Null)]))]),
+        )]);
+        assert!(
+            decode_json_fields_object(&input).is_err(),
+            "a null nested at any depth below the top level must be rejected"
+        );
+    }
 }
