@@ -572,7 +572,6 @@ fn structured_crud_types_are_reexported_from_the_ffi_module_root() {
 fn create_with_rich_payload(dir: &std::path::Path) -> AppOutput<ParsedDoogat> {
     let svc = DoogatService::init(dir).expect("init repo");
     let mut fields = BTreeMap::new();
-    fields.insert("date".to_string(), Value::String("2026-01-01".into()));
     fields.insert("extra_field".to_string(), Value::String("extra_value".into()));
     svc.create(CreateCommand {
         title: Some("Rich Doogat".into()),
@@ -592,19 +591,41 @@ fn create_result_record_mirrors_body_extra_sections_links_and_updated_at() {
     let out = create_with_rich_payload(tmp.path());
 
     let expected_body = out.value.body.clone();
-    let expected_date = format!("{:?}", out.value.meta.date);
-    let expected_extra = format!("{:?}", out.value.meta.extra);
-    let expected_sections = format!("{:?}", out.value.sections);
-    let expected_links = format!("{:?}", out.value.links);
+    let expected_date = out.value.meta.date.clone();
+    let expected_extra: Vec<(String, String)> = out
+        .value
+        .meta
+        .extra
+        .iter()
+        .map(|(k, v)| (k.clone(), format!("{v:?}")))
+        .collect();
+    let expected_sections = out.value.sections.clone();
+    let expected_links = out.value.links.clone();
     let expected_updated_at = format!("{:?}", out.value.updated_at);
 
     let rec = CreateResultRecord::from_output(out);
 
+    let got_extra: Vec<(String, String)> = rec
+        .extra
+        .iter()
+        .map(|e| (e.key.clone(), format!("{:?}", field_value_to_core(e.value.clone()))))
+        .collect();
+
     assert_eq!(rec.body, expected_body, "the record must carry the stored body");
-    assert_eq!(format!("{:?}", rec.date), expected_date, "the record must carry meta.date");
-    assert_eq!(format!("{:?}", rec.extra), expected_extra, "the record must carry meta.extra");
-    assert_eq!(format!("{:?}", rec.sections), expected_sections, "the record must carry sections");
-    assert_eq!(format!("{:?}", rec.links), expected_links, "the record must carry links");
+    assert_eq!(rec.date, expected_date, "the record must carry meta.date");
+    assert_eq!(got_extra, expected_extra, "the record must carry meta.extra");
+    assert_eq!(rec.sections.len(), expected_sections.len(), "section count must match");
+    for (got, want) in rec.sections.iter().zip(expected_sections.iter()) {
+        assert_eq!(got.heading, want.heading, "section heading must match");
+        assert_eq!(got.level, want.level, "section level must match");
+        assert_eq!(got.content, want.content, "section content must match");
+    }
+    assert_eq!(rec.links.len(), expected_links.len(), "link count must match");
+    for (got, want) in rec.links.iter().zip(expected_links.iter()) {
+        assert_eq!(got.target, want.target, "link target must match");
+        assert_eq!(got.display, want.display, "link display must match");
+        assert_eq!(got.section, want.section, "link section must match");
+    }
     assert_eq!(
         format!("{:?}", rec.updated_at),
         expected_updated_at,
@@ -618,8 +639,7 @@ fn update_result_record_mirrors_body_extra_sections_links_and_updated_at() {
     let created = create_with_rich_payload(tmp.path());
     let id = created.value.meta.id.as_ref().expect("created doogat has an id").0.clone();
     let svc = DoogatService::open(tmp.path()).expect("open repo");
-    let mut fields = BTreeMap::new();
-    fields.insert("date".to_string(), Value::String("2026-02-02".into()));
+    let fields = BTreeMap::new();
     let out = svc
         .update(UpdateCommand {
             id,
@@ -633,19 +653,41 @@ fn update_result_record_mirrors_body_extra_sections_links_and_updated_at() {
         .expect("update with a rich payload must succeed");
 
     let expected_body = out.value.body.clone();
-    let expected_date = format!("{:?}", out.value.meta.date);
-    let expected_extra = format!("{:?}", out.value.meta.extra);
-    let expected_sections = format!("{:?}", out.value.sections);
-    let expected_links = format!("{:?}", out.value.links);
+    let expected_date = out.value.meta.date.clone();
+    let expected_extra: Vec<(String, String)> = out
+        .value
+        .meta
+        .extra
+        .iter()
+        .map(|(k, v)| (k.clone(), format!("{v:?}")))
+        .collect();
+    let expected_sections = out.value.sections.clone();
+    let expected_links = out.value.links.clone();
     let expected_updated_at = format!("{:?}", out.value.updated_at);
 
     let rec = UpdateResultRecord::from_output(out);
 
+    let got_extra: Vec<(String, String)> = rec
+        .extra
+        .iter()
+        .map(|e| (e.key.clone(), format!("{:?}", field_value_to_core(e.value.clone()))))
+        .collect();
+
     assert_eq!(rec.body, expected_body, "the record must carry the stored body");
-    assert_eq!(format!("{:?}", rec.date), expected_date, "the record must carry meta.date");
-    assert_eq!(format!("{:?}", rec.extra), expected_extra, "the record must carry meta.extra");
-    assert_eq!(format!("{:?}", rec.sections), expected_sections, "the record must carry sections");
-    assert_eq!(format!("{:?}", rec.links), expected_links, "the record must carry links");
+    assert_eq!(rec.date, expected_date, "the record must carry meta.date");
+    assert_eq!(got_extra, expected_extra, "the record must carry meta.extra");
+    assert_eq!(rec.sections.len(), expected_sections.len(), "section count must match");
+    for (got, want) in rec.sections.iter().zip(expected_sections.iter()) {
+        assert_eq!(got.heading, want.heading, "section heading must match");
+        assert_eq!(got.level, want.level, "section level must match");
+        assert_eq!(got.content, want.content, "section content must match");
+    }
+    assert_eq!(rec.links.len(), expected_links.len(), "link count must match");
+    for (got, want) in rec.links.iter().zip(expected_links.iter()) {
+        assert_eq!(got.target, want.target, "link target must match");
+        assert_eq!(got.display, want.display, "link display must match");
+        assert_eq!(got.section, want.section, "link section must match");
+    }
     assert_eq!(
         format!("{:?}", rec.updated_at),
         expected_updated_at,

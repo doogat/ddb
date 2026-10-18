@@ -5,7 +5,7 @@
 use crate::app_contract::AppOutput;
 use crate::error::{DoogatError, ErrorContext, ErrorValue};
 use crate::sql_engine::SqlResult;
-use crate::types::{ConflictAction, ParsedDoogat, Value};
+use crate::types::{ConflictAction, Link, LinkKind, ParsedDoogat, Section, Value, Zone};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -385,7 +385,6 @@ fn field_scalar_to_core(v: FieldScalar) -> Value {
     }
 }
 
-#[cfg(test)]
 fn core_to_field_scalar(v: Value) -> Option<FieldScalar> {
     match v {
         Value::String(s) => Some(FieldScalar::Str(s)),
@@ -408,7 +407,6 @@ pub(super) fn field_value_to_core(v: FieldValue) -> Value {
 
 /// Convert a core value to its FFI form. Nested lists/maps inside a list are
 /// dropped with a warning; a top-level map degrades to an empty list.
-#[cfg(test)]
 pub(super) fn core_to_field_value(v: Value) -> FieldValue {
     match v {
         Value::String(s) => FieldValue::Str(s),
@@ -438,6 +436,94 @@ pub(super) fn fields_to_core(fields: Vec<FieldEntryValue>) -> BTreeMap<String, V
         .into_iter()
         .map(|e| (e.key, field_value_to_core(e.value)))
         .collect()
+}
+
+fn extra_to_fields(extra: BTreeMap<String, Value>) -> Vec<FieldEntryValue> {
+    extra
+        .into_iter()
+        .map(|(key, value)| FieldEntryValue {
+            key,
+            value: core_to_field_value(value),
+        })
+        .collect()
+}
+
+/// FFI-safe mirror of [`Zone`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ZoneRecord {
+    Frontmatter,
+    Body,
+    Reference,
+}
+
+impl From<Zone> for ZoneRecord {
+    fn from(z: Zone) -> Self {
+        match z {
+            Zone::Frontmatter => ZoneRecord::Frontmatter,
+            Zone::Body => ZoneRecord::Body,
+            Zone::Reference => ZoneRecord::Reference,
+        }
+    }
+}
+
+/// FFI-safe mirror of [`LinkKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum LinkKindRecord {
+    WikiLink,
+    MarkdownLink,
+    Embed,
+    BareUrl,
+}
+
+impl From<LinkKind> for LinkKindRecord {
+    fn from(k: LinkKind) -> Self {
+        match k {
+            LinkKind::WikiLink => LinkKindRecord::WikiLink,
+            LinkKind::MarkdownLink => LinkKindRecord::MarkdownLink,
+            LinkKind::Embed => LinkKindRecord::Embed,
+            LinkKind::BareUrl => LinkKindRecord::BareUrl,
+        }
+    }
+}
+
+/// FFI-safe mirror of [`Link`].
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LinkRecord {
+    pub target: String,
+    pub display: Option<String>,
+    pub section: Option<String>,
+    pub kind: LinkKindRecord,
+    pub zone: ZoneRecord,
+}
+
+impl From<Link> for LinkRecord {
+    fn from(l: Link) -> Self {
+        Self {
+            target: l.target,
+            display: l.display,
+            section: l.section,
+            kind: l.kind.into(),
+            zone: l.zone.into(),
+        }
+    }
+}
+
+/// FFI-safe mirror of [`Section`].
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SectionRecord {
+    pub heading: String,
+    pub level: u8,
+    pub content: String,
+}
+
+impl From<Section> for SectionRecord {
+    fn from(s: Section) -> Self {
+        Self {
+            heading: s.heading,
+            level: s.level,
+            content: s.content,
+        }
+    }
 }
 
 /// FFI-safe mirror of [`ConflictAction`].
@@ -477,7 +563,9 @@ pub struct UpdateStructuredInput {
     pub unset_fields: Vec<String>,
 }
 
-/// FFI-safe create result.
+/// FFI-safe create result, a lossless mirror of the core [`ParsedDoogat`]
+/// payload (PRD 00177): an id-only create must not drop required result
+/// fields.
 #[derive(Debug, uniffi::Record)]
 pub struct CreateResultRecord {
     pub id: String,
@@ -485,10 +573,17 @@ pub struct CreateResultRecord {
     pub doogat_type: Option<String>,
     pub tags: Vec<String>,
     pub path: String,
+    pub body: String,
+    pub date: Option<String>,
+    pub extra: Vec<FieldEntryValue>,
+    pub sections: Vec<SectionRecord>,
+    pub links: Vec<LinkRecord>,
+    pub updated_at: Option<String>,
     pub warnings: Vec<RebuildWarningRecord>,
 }
 
-/// FFI-safe update result.
+/// FFI-safe update result, a lossless mirror of the core [`ParsedDoogat`]
+/// payload (PRD 00177).
 #[derive(Debug, uniffi::Record)]
 pub struct UpdateResultRecord {
     pub id: String,
@@ -496,61 +591,92 @@ pub struct UpdateResultRecord {
     pub doogat_type: Option<String>,
     pub tags: Vec<String>,
     pub path: String,
+    pub body: String,
+    pub date: Option<String>,
+    pub extra: Vec<FieldEntryValue>,
+    pub sections: Vec<SectionRecord>,
+    pub links: Vec<LinkRecord>,
+    pub updated_at: Option<String>,
     pub warnings: Vec<RebuildWarningRecord>,
 }
 
 /// Fields shared by the create and update result records, copied verbatim.
-type DoogatResultParts = (
-    String,
-    Option<String>,
-    Option<String>,
-    Vec<String>,
-    String,
-    Vec<RebuildWarningRecord>,
-);
+struct DoogatResultParts {
+    id: String,
+    title: Option<String>,
+    doogat_type: Option<String>,
+    tags: Vec<String>,
+    path: String,
+    body: String,
+    date: Option<String>,
+    extra: Vec<FieldEntryValue>,
+    sections: Vec<SectionRecord>,
+    links: Vec<LinkRecord>,
+    updated_at: Option<String>,
+    warnings: Vec<RebuildWarningRecord>,
+}
 
 fn doogat_result_parts(out: AppOutput<ParsedDoogat>) -> DoogatResultParts {
     let meta = out.value.meta;
-    (
-        meta.id.map(|id| id.0).unwrap_or_default(),
-        meta.title,
-        meta.doogat_type,
-        meta.tags,
-        out.value.path,
-        out.warnings
+    DoogatResultParts {
+        id: meta.id.map(|id| id.0).unwrap_or_default(),
+        title: meta.title,
+        doogat_type: meta.doogat_type,
+        tags: meta.tags,
+        path: out.value.path,
+        body: out.value.body,
+        date: meta.date,
+        extra: extra_to_fields(meta.extra),
+        sections: out.value.sections.into_iter().map(Into::into).collect(),
+        links: out.value.links.into_iter().map(Into::into).collect(),
+        updated_at: out.value.updated_at,
+        warnings: out
+            .warnings
             .into_iter()
             .map(|w| RebuildWarningRecord {
                 code: w.code.to_string(),
                 message: w.message,
             })
             .collect(),
-    )
+    }
 }
 
 impl CreateResultRecord {
     pub(super) fn from_output(out: AppOutput<ParsedDoogat>) -> Self {
-        let (id, title, doogat_type, tags, path, warnings) = doogat_result_parts(out);
+        let p = doogat_result_parts(out);
         Self {
-            id,
-            title,
-            doogat_type,
-            tags,
-            path,
-            warnings,
+            id: p.id,
+            title: p.title,
+            doogat_type: p.doogat_type,
+            tags: p.tags,
+            path: p.path,
+            body: p.body,
+            date: p.date,
+            extra: p.extra,
+            sections: p.sections,
+            links: p.links,
+            updated_at: p.updated_at,
+            warnings: p.warnings,
         }
     }
 }
 
 impl UpdateResultRecord {
     pub(super) fn from_output(out: AppOutput<ParsedDoogat>) -> Self {
-        let (id, title, doogat_type, tags, path, warnings) = doogat_result_parts(out);
+        let p = doogat_result_parts(out);
         Self {
-            id,
-            title,
-            doogat_type,
-            tags,
-            path,
-            warnings,
+            id: p.id,
+            title: p.title,
+            doogat_type: p.doogat_type,
+            tags: p.tags,
+            path: p.path,
+            body: p.body,
+            date: p.date,
+            extra: p.extra,
+            sections: p.sections,
+            links: p.links,
+            updated_at: p.updated_at,
+            warnings: p.warnings,
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::app_contract::{summarize_reindex_warnings, AppOutput, UpdateCommand};
+use crate::app_contract::{summarize_reindex_warnings, AppOutput, AppWarning, UpdateCommand};
 use crate::error::{DoogatError, Result};
 use crate::parser;
 use crate::sql_engine::apply_updates_to_doogat;
@@ -215,12 +215,24 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             cmd.body.as_deref(),
             &extra,
         )?;
-        Ok(AppOutput {
-            value,
-            warnings: summarize_reindex_warnings(reindex_warnings)
-                .into_iter()
-                .collect(),
-        })
+        let mut warnings: Vec<AppWarning> = summarize_reindex_warnings(reindex_warnings)
+            .into_iter()
+            .collect();
+        // PRD 00177: mirrors `create`'s BaseOnly fallback warning - a resulting
+        // type with no registered typedef was stored untyped, so the caller
+        // must be told the same way `create` tells it.
+        if let Some(ty) = value.meta.doogat_type.as_deref() {
+            let schemas = self.list_type_schemas()?;
+            if !schemas.iter().any(|s| s.table_name == ty) {
+                warnings.push(AppWarning {
+                    code: "UNREGISTERED_TYPE_BASE_ONLY",
+                    message: format!(
+                        "type '{ty}' is not a registered typedef; stored a base doogat without typed validation"
+                    ),
+                });
+            }
+        }
+        Ok(AppOutput { value, warnings })
     }
 
     /// Batch-update multiple doogats in a single atomic commit.
