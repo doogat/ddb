@@ -420,3 +420,10 @@
 {"id":"fe5d552c","ended_at":1792337846,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"id":"67930470","ended_at":1792337846,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792337846,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"id":"f6918168","kind":"pat","task":"7","queued_at":1792338135,"prompt_bytes":11205}
+{"id":"70c390cb","kind":"pat","task":"8","queued_at":1792339564,"prompt_bytes":11076}
+{"id":"2c4fd5a8","kind":"pat","task":"9","queued_at":1792339903,"prompt_bytes":19538}
+{"id":"f6918168","ended_at":1792343040,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"70c390cb","ended_at":1792343040,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"2c4fd5a8","ended_at":1792343040,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792343040,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
