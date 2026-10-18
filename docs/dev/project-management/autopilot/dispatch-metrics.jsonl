@@ -395,3 +395,7 @@
 {"id":"f093399e","kind":"pat","task":"4","queued_at":1792326231,"prompt_bytes":30226}
 {"id":"f093399e","ended_at":1792326254,"elapsed_s":23,"outcome":"ok","detail":null}
 {"kind":"handoff","site":"build","edge":"leave","at":1792326347,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792326383,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"id":"f450f9cd","kind":"ivan","task":"5","queued_at":1792326547,"prompt_bytes":27531}
+{"id":"f450f9cd","ended_at":1792326977,"elapsed_s":430,"outcome":"ok","detail":null}
+{"kind":"handoff","site":"build","edge":"leave","at":1792330177,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}

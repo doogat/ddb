@@ -82,3 +82,14 @@ Ivan (signature collapse):
 - Derived `Debug, Clone, PartialEq` on `UpdateStructuredInput`, matching the neighbouring `FieldEntryValue`; the task did not specify derives.
 - Record field order follows the old argument order.
 - The single `ddb-server` actor-test timeout seen in a full `test-ci` run is a pre-existing load flake (green on an isolated rerun in 1.11s), not a regression from this change.
+
+## 5: Docs/UDL for structured FFI CRUD + e2e deletion safety net
+
+Ivan (docs):
+- Swift binding names in the updated snippet follow UniFFI's standard camelCase conversion (`createStructured`, `doogatType:`, `onConflict: .error`); bindings were not regenerated to confirm the exact Swift argument labels.
+- The UDL additions use UniFFI's UDL syntax for payload enums (`[Enum] interface`) and optional sequences (`sequence<string>? tags`); nothing parses this file, so the syntax is unverified by any tool.
+- "the bindings are Experimental and the product is pre-1.0" is the author's phrasing of the PRD's "beta maintainer decision" for why there is no deprecation window; the PRD's Transport Impact section itself was not read.
+
+Orchestrator (verification):
+- `tests/e2e/fix.rs::fix_verbose_reports_title_noncompliant` was treated as a test whose scenario this PRD made obsolete, not as an implementation defect: it passes at `work_start_sha` (235edf08) and fails at HEAD because task 2's parser fix makes `ALTER TABLE ... SET TITLE TEMPLATE '{name} Widget'` store a working template, so the inserted row's title now complies. Repaired by inserting before setting the template, keeping the original assertion.
+- The `ddb-server` actor timeout recurred in this task's run and was again judged the known load flake (isolated rerun green).
