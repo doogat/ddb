@@ -411,3 +411,12 @@
 {"id":"728550fc","ended_at":1792335211,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"id":"103a4a76","ended_at":1792335211,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792335211,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"id":"02d4390f","kind":"tess","task":"6","queued_at":1792335342,"prompt_bytes":55691}
+{"id":"8b1f788e","kind":"tess","task":"6","queued_at":1792335354,"prompt_bytes":43334}
+{"id":"fe5d552c","kind":"pat","task":"6","queued_at":1792337285,"prompt_bytes":27818}
+{"id":"67930470","kind":"pat","task":"6","queued_at":1792337692,"prompt_bytes":15226}
+{"id":"02d4390f","ended_at":1792337846,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"8b1f788e","ended_at":1792337846,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"fe5d552c","ended_at":1792337846,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"67930470","ended_at":1792337846,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792337846,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
