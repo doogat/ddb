@@ -60,19 +60,28 @@ pub(crate) fn string_list(obj: &GqlObject, key: &str) -> Vec<String> {
     opt_string_list(obj, key).unwrap_or_default()
 }
 
-/// Decode the `fields` JSON-object field into raw input. Empty when absent;
-/// the legacy JSON-encoded-string shape gets a migration error.
-fn raw_fields(obj: &GqlObject) -> Result<RawFieldsInput, String> {
-    match obj.get("fields") {
+/// Decode a `fields`-shaped `JSON`-scalar value into raw input. Absent/null
+/// decodes empty; the legacy JSON-encoded-string shape gets a migration error.
+/// Shared by the per-object helpers below and by the singleton `input`
+/// argument, which carries the same value directly rather than nested under a
+/// `fields` key.
+pub(crate) fn decode_fields_value(value: Option<&GqlValue>) -> Result<RawFieldsInput, String> {
+    match value {
         Some(GqlValue::Object(map)) => decode_json_fields_object(map),
         Some(GqlValue::String(_)) => Err(
             "fields must be a JSON object, not a JSON-encoded string (migrate the \
              GraphQL variable type to JSON)"
                 .to_string(),
         ),
+        Some(GqlValue::Null) | None => Ok(RawFieldsInput::new()),
         Some(other) => Err(format!("fields must be a JSON object, got {other:?}")),
-        None => Ok(RawFieldsInput::new()),
     }
+}
+
+/// Decode the `fields` JSON-object field into raw input. Empty when absent;
+/// the legacy JSON-encoded-string shape gets a migration error.
+fn raw_fields(obj: &GqlObject) -> Result<RawFieldsInput, String> {
+    decode_fields_value(obj.get("fields"))
 }
 
 /// Create path: decode `fields`, dropping null keys.
@@ -94,10 +103,9 @@ pub(crate) fn fields_and_unsets(obj: &GqlObject) -> Result<FieldsAndUnsets, Stri
 pub(crate) fn opt_fields_and_unsets(
     obj: &GqlObject,
 ) -> Result<Option<FieldsAndUnsets>, String> {
-    if obj.contains_key("fields") {
-        fields_and_unsets(obj).map(Some)
-    } else {
-        Ok(None)
+    match obj.get("fields") {
+        Some(GqlValue::Null) | None => Ok(None),
+        Some(_) => fields_and_unsets(obj).map(Some),
     }
 }
 

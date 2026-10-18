@@ -8,6 +8,7 @@ use crate::actor::{ActorHandle, UpdateDoogatParams};
 use crate::error::to_graphql_error;
 use crate::read_pool::ReadPool;
 use crate::schema::base_types::*;
+use crate::schema::input::decode_fields_value;
 
 /// Build the per-singleton `update_*` and `upsert_*` mutation fields for one
 /// singleton typedef. Returned in registration order (update first, upsert
@@ -40,10 +41,8 @@ pub(super) fn build_singleton_fields(schema: &TableSchema) -> (Field, Field) {
                 // Reuse the existing JSON-scalar fields transport so singleton
                 // typedef mutations stay aligned with updateDoogat without
                 // generating per-typedef input objects.
-                let raw = decode_json_fields_object(
-                    ctx.args.try_get("input")?.object()?.as_index_map(),
-                )
-                .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                let raw = decode_fields_value(Some(ctx.args.try_get("input")?.as_value()))
+                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
                 let (fields, unset_fields) =
                     ddb_core::app_contract::normalize_update_fields(raw, vec![])
                         .map_err(to_graphql_error)?;
@@ -96,10 +95,8 @@ pub(super) fn build_singleton_fields(schema: &TableSchema) -> (Field, Field) {
             let table_name = table_name.clone();
             FieldFuture::new(async move {
                 let a = ctx.data::<ActorHandle>()?;
-                let raw = decode_json_fields_object(
-                    ctx.args.try_get("input")?.object()?.as_index_map(),
-                )
-                .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                let raw = decode_fields_value(Some(ctx.args.try_get("input")?.as_value()))
+                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
                 let fields = ddb_core::app_contract::normalize_create_fields(raw);
                 let outcome = a
                     .upsert_singleton(table_name.clone(), fields)
