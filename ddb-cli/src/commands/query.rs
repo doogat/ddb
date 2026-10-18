@@ -238,6 +238,10 @@ mod tests {
         );
     }
 
+    // `usize::MAX` only exceeds `i64::MAX` on 64-bit targets; on a 32-bit
+    // target it converts cleanly and the search is valid, so the rejection
+    // this test pins does not apply there.
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn cli_search_rejects_offset_above_i64_max_instead_of_clamping() {
         // `to_i64` must reject an offset that cannot fit in `i64`, not saturate
