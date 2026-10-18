@@ -8,6 +8,7 @@ use crate::git_ops::GitRepo;
 use crate::service::DoogatService;
 use tempfile::TempDir;
 
+mod error_parity_tests;
 mod records_tests;
 mod structured_crud_tests;
 
