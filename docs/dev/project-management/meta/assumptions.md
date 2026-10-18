@@ -35,6 +35,17 @@ Ivan:
 - The nested-null error names the full path (`key[i]` / `key.sub`), not just the top-level key.
 - The `normalize_update_fields` error in the singleton `update_*` resolver maps through `to_graphql_error`.
 
+## 4: Conformance: create-with-typed-fields step (GraphQL leg; REST deferred)
+
+Ivan:
+- The fixture is GraphQL-only (`interfaces: [Graphql]`), because the CLI driver sends fields as strings.
+- The test is added to `cross_driver_crud.rs` next to `filtered_search`'s test rather than in a new file.
+- Reading the stored frontmatter from the test repo's work tree is an acceptable way to assert native types, alongside SQL `typeof`, since the existing search-hit path turns every field into a string.
+- For `priority`, "numeric" means it parses as f64 3.0, because core renders it as `3.0`.
+- Fixing the GraphQL driver's legacy string encoding of `fields` is in scope, because the fixture cannot run without it (task 3 made the server reject the old stringified form, which had already broken `filtered_search_returns_same_hits_and_full_field_set_on_cli_and_graphql` on master).
+
+Known gap recorded in the task: the test cannot distinguish a native boolean from a stringified one at this layer, because core coerces both to the column's declared type before either the stored frontmatter or the SQL index see them. A regression here would need an untyped field or a server-level unit test to catch.
+
 ## 2: REST: accept object fields through boundary decoder + core normalization
 
 Tess (initial):
