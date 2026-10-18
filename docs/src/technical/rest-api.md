@@ -40,8 +40,10 @@ GET /rest/doogats
 
 The search branch decodes into the app contract's `SearchCommand` (PRD 00176,
 see [app-contract.md](app-contract.md#search-searchcommand-pagerequest-appsearchresult)).
-`type` becomes `SearchCommand.types` (one type) and `tag` becomes
-`SearchCommand.tag`. A filter that matches nothing returns an empty `data` array,
+`type` becomes `SearchCommand.types` and `tag` becomes `SearchCommand.tag`.
+REST accepts exactly one `type` value, deliberately: the query string carries no
+list form, so a multi-type filter stays a GraphQL and FFI capability, where the
+argument is already a list. Repeat the search per type to cover several. A filter that matches nothing returns an empty `data` array,
 not the unfiltered result. `backlinks`, `sort`, and `field.{name}` do not apply to
 search.
 

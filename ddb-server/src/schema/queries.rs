@@ -128,11 +128,11 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
             )
             .argument(
                 InputValue::new("limit", TypeRef::named(TypeRef::INT))
-                    .description("Maximum results to return."),
+                    .description("Maximum results to return. 1-10000. Default 50."),
             )
             .argument(
                 InputValue::new("offset", TypeRef::named(TypeRef::INT))
-                    .description("Number of results to skip for pagination."),
+                    .description("Number of results to skip for pagination. Default 0."),
             )
             .description("List doogats with optional type, tag, and backlink filters."),
         );
