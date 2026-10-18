@@ -295,3 +295,28 @@
 {"id":"0edb58f0","ended_at":1792293385,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"id":"fa5355f4","ended_at":1792293385,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792293385,"phase":"review","prd":"00176-route-search-through-contract-v1.md"}
+{"id":"300545c1","kind":"tess","task":"7","queued_at":1792293920,"prompt_bytes":154831}
+{"id":"dded34a8","kind":"tess","task":"7","queued_at":1792293995,"prompt_bytes":35085}
+{"id":"dbd3a991","kind":"ivan","task":"7","queued_at":1792294536,"prompt_bytes":29106}
+{"id":"5ebf6af0","kind":"pat","task":"7","queued_at":1792295246,"prompt_bytes":19942}
+{"id":"93ba5c28","kind":"tess","task":"8","queued_at":1792295428,"prompt_bytes":39235}
+{"id":"6f1aafd3","kind":"ivan","task":"8","queued_at":1792296233,"prompt_bytes":28741}
+{"id":"6e75407d","kind":"ivan","task":"8","queued_at":1792296248,"prompt_bytes":28741}
+{"id":"93e9ebb3","kind":"pat","task":"8","queued_at":1792298684,"prompt_bytes":14083}
+{"id":"4f2e3911","kind":"ivan","task":"9","queued_at":1792298778,"prompt_bytes":21935}
+{"id":"4ff5b9ad","kind":"ivan","task":"9","queued_at":1792298867,"prompt_bytes":22245}
+{"id":"9fe38ad9","kind":"deslop","task":"9","queued_at":1792300175,"prompt_bytes":4138}
+{"id":"9fe38ad9","ended_at":1792300546,"elapsed_s":371,"outcome":"ok","detail":null}
+{"id":"799bcd95","kind":"pat","task":"9","queued_at":1792300576,"prompt_bytes":17079}
+{"id":"300545c1","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"dded34a8","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"dbd3a991","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"5ebf6af0","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"93ba5c28","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"6f1aafd3","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"6e75407d","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"93e9ebb3","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"4f2e3911","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"4ff5b9ad","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"799bcd95","ended_at":1792300749,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792300749,"phase":"review","prd":"00176-route-search-through-contract-v1.md"}
