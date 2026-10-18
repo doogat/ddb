@@ -19,8 +19,8 @@ Goals (from PRD 00147):
 | File | Owns |
 |------|------|
 | `mod.rs` | Module re-exports and the adapter-neutrality invariant note. |
-| `commands.rs` | Input command DTOs (`CreateCommand`, `ReadCommand`, `UpdateCommand`, `DeleteCommand`, `SearchCommand`). |
-| `results.rs` | Result payloads (`BrokenBacklink`, `DeleteResult`). |
+| `commands.rs` | Input command DTOs (`CreateCommand`, `ReadCommand`, `UpdateCommand`, `DeleteCommand`, `SearchCommand`) and the shared `PageRequest` pagination policy. |
+| `results.rs` | Result payloads (`BrokenBacklink`, `DeleteResult`, `AppSearchResult`). |
 | `output.rs` | `AppOutput<T>` envelope and `AppWarning`. |
 | `error.rs` | `AppError`, `AppErrorCategory`, and the `From<DoogatError>` mapping. |
 
@@ -54,7 +54,12 @@ pub struct CreateCommand {
 pub struct ReadCommand { pub id: String }
 pub struct UpdateCommand { /* id + optional title/tags/type/body + fields */ }
 pub struct DeleteCommand { pub id: String }
-pub struct SearchCommand { pub query: String, pub limit: Option<usize>, pub offset: Option<usize> }
+pub struct SearchCommand {
+    pub query: String,
+    pub page: PageRequest,
+    pub types: Option<Vec<String>>,
+    pub tag: Option<String>,
+}
 ```
 
 `title` and `body` are `Option` so transports can omit them and rely on
@@ -69,6 +74,82 @@ while the GraphQL and REST actor passes `Strict` (rejects unregistered types wit
 `docs/src/guide/building-apps.md` for the per-interface contract matrix.
 
 Per AGENTS.md: "no `rusqlite`, `git2`, `redb`, `axum`, or `async_graphql` in `ddb-core/src/types/**`; convert at adapter boundaries." The same rule applies here. Commands carry only domain types (e.g. `crate::types::Value`) and `std` types.
+
+## Search: `SearchCommand`, `PageRequest`, `AppSearchResult`
+
+Search has one contract entrypoint (PRD 00176). CLI, GraphQL, REST, and FFI
+decode their own request shape into a `SearchCommand` and call
+`DoogatService::search_command`.
+
+### `PageRequest`
+
+```rust
+pub struct PageRequest { pub limit: usize, pub offset: usize }
+
+impl PageRequest {
+    pub const DEFAULT_LIMIT: usize = 50;
+    pub const MAX_LIMIT: usize = 10_000;
+    pub fn decode(limit: Option<i64>, offset: Option<i64>) -> Result<Self>;
+}
+```
+
+`PageRequest::decode` is the one search pagination policy. Transports pass the
+raw values they received, or `None` when the caller omitted them:
+
+| Input | Result |
+|-------|--------|
+| `limit` absent | `50` |
+| `limit` in `1..=10_000` | that value |
+| `limit` `<= 0` or `> 10_000` | `DoogatError::Validation` |
+| `offset` absent | `0` |
+| `offset` `>= 0` | that value |
+| `offset` `< 0` | `DoogatError::Validation` |
+| a value that does not fit in `usize` | `DoogatError::Validation` |
+
+It never clamps. Every error maps to `VALIDATION_ERROR` /
+`AppErrorCategory::InvalidInput` (HTTP 400) through the shared error table. Before
+00176, each transport had its own copy: GraphQL defaulted to 20 and erred above
+10,000, REST clamped silently to 1-200, the CLI defaulted to 20 through clap, and
+FFI `search_paginated` had no bounds. All four now decode through `PageRequest`.
+`PageRequest` holds no search-specific fields, so a later list contract and
+00180's NoSQL scan cap can reuse it.
+
+### `SearchCommand`
+
+`query` goes through the search-query normalizer unchanged. `types` (match any
+listed type) and `tag` (match this tag) map onto `crate::types::SearchFilters`.
+Relation `where` filters are not part of `SearchCommand`. They stay a GraphQL
+specialization (00159/00182); see the GraphQL resolver fork in
+[server.md](server.md#search-resolver-and-searchcommand).
+
+### `AppSearchResult`
+
+```rust
+pub struct AppSearchResult {
+    pub items: Vec<crate::types::SearchResult>,
+    pub total: usize,
+    pub query: String,
+}
+```
+
+`items` is one page of the canonical core `SearchResult`, with all ten fields:
+`id`, `title`, `path`, `snippet`, `rank`, `updated_at`, `tags`, `doogat_type`,
+`fields`, `created_at`. `total` is the full match count, not the page length.
+`query` echoes the request. Transports serialize every hit field. They do not
+define their own field subset.
+
+### `search_command`
+
+```rust
+pub fn search_command(&self, cmd: SearchCommand) -> Result<AppOutput<AppSearchResult>>
+```
+
+It runs `ensure_fresh()`, builds `SearchFilters { types, tag, where_filters: None }`,
+and calls `search_paginated_filtered`. The `warnings` vector holds at most one
+`REINDEX_SKIPPED_FILES` entry. The older `search(&str)`,
+`search_paginated`, and `search_paginated_filtered` methods stay as the mechanism
+under the facade. CLI and FFI call `search_command` directly. GraphQL and REST
+reach it through `ReadPool::search_command`.
 
 ## `AppOutput<T>`
 

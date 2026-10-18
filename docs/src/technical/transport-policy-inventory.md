@@ -38,6 +38,8 @@ interface.
 | Input decoding | transport (`clap`) | app-glue (`schema/input.rs`) | transport (`serde`) | transport (SQL text) | transport (UniFFI args) | transport (query params) |
 | Create routing | app facade (`DoogatService::create`) | app facade (via actor) | app facade (via actor) | n/a (SQL `INSERT`) | direct service (`_raw`) | n/a (read-only) |
 | Update routing | app facade (`DoogatService::update`) | app facade (via actor) | app facade (via actor) | n/a (SQL `UPDATE`) | direct service (`_raw`) | n/a (read-only) |
+| Search routing | app facade (`DoogatService::search_command`) | app facade (`ReadPool::search_command`); `where` filters fork to `ReadPool::search` | app facade (`ReadPool::search_command`) | specialized (SQL FTS5 `SELECT`) | app facade (`search_paginated`, `search_filtered`) | specialized (`type=` / `tag=` scan) |
+| Search pagination policy | app (`PageRequest::decode`) | app (`PageRequest::decode`) | app (`PageRequest::decode`, after REST's checked `page`/`per_page` → offset) | specialized (SQL `LIMIT`/`OFFSET`) | app (`PageRequest::decode`) | n/a (scan cap lands in 00180) |
 | Error mapping | transport text + `format_app_error` | app vocab (`classify` / `to_graphql_error*`) | app vocab (`http_error_response`) | specialized (PG error strings) | specialized (untyped strings) | app vocab (`http_error_response`) |
 | Warning channel | text on stderr | `extensions.warnings` | `warnings` array | specialized (none) | specialized (none) | n/a (read-only) |
 | Schema-reload classification | n/a | app-glue (`classify.rs`) | n/a | app-glue (`classify.rs`) | n/a | n/a |
@@ -75,6 +77,27 @@ These were this PRD's targets; both are now migrated:
   (parsed via `parse_fields_json`), so typed create is expressible over REST;
   the named typed columns are populated from `fields` on the created doogat
   (design contract C-7). This closed the D-04/D-09 overclaim.
+
+### Closed by PRD 00176 (now app-owned)
+
+- **Search routing.** CLI, GraphQL, REST, and FFI decode their search request
+  into `SearchCommand { query, page, types, tag }` and call
+  `DoogatService::search_command` (GraphQL and REST through
+  `ReadPool::search_command`). REST and FFI now apply the `type`/`tag` filters
+  they used to drop, and every transport serializes all ten core `SearchResult`
+  fields. The one remaining fork is GraphQL's relation `where` filter, which
+  `SearchCommand` does not carry (00159/00182). That branch calls
+  `ReadPool::search` with the same decoded page.
+- **Search pagination policy.** One `PageRequest` policy replaces four copies:
+  default limit 50, maximum 10,000, default offset 0, and a validation error for
+  any out-of-range value (never a silent clamp). Before 00176: GraphQL defaulted
+  to 20, REST clamped silently to 1-200, the CLI defaulted to 20 through clap,
+  and FFI `search_paginated` had no bounds. REST's plain list branch (no `q`)
+  keeps its own 1-200 clamp. It is out of scope for 00176.
+- **Search warnings.** CLI (stderr) and GraphQL (`extensions.warnings`) forward
+  the facade's `REINDEX_SKIPPED_FILES` warning. The REST search response has no
+  `warnings` array yet, and FFI has no warning channel (see below), so both still
+  drop it.
 
 ### Specialized (deliberate per-interface difference)
 

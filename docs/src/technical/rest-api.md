@@ -18,14 +18,14 @@ GET /rest/doogats
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `type` | string | Filter by doogat type |
-| `tag` | string | Filter by tag |
-| `backlinks` | string | Filter by backlinks of doogat ID |
+| `type` | string | Filter by doogat type (list and search) |
+| `tag` | string | Filter by tag (list and search) |
+| `backlinks` | string | Filter by backlinks of doogat ID (list only) |
 | `q` | string | Full-text search (returns search hits instead of doogats) |
-| `sort` | string | Sort field: `id`, `title`, `date`, `type`. Prefix with `-` for descending (e.g. `sort=-date`). Default: `date` descending. Invalid fields return 400. |
-| `field.{name}` | string | Filter by inline field value (repeatable for AND logic) |
+| `sort` | string | Sort field: `id`, `title`, `date`, `type`. Prefix with `-` for descending (e.g. `sort=-date`). Default: `date` descending. Invalid fields return 400. (list only) |
+| `field.{name}` | string | Filter by inline field value (repeatable for AND logic) (list only) |
 | `page` | int | Page number (default: 1) |
-| `per_page` | int | Results per page (default: 50, max: 200) |
+| `per_page` | int | Results per page (default: 50). List: values outside 1-200 are clamped. Search: 1-10,000, values outside that range return 400. |
 
 **List response:**
 
@@ -36,13 +36,61 @@ GET /rest/doogats
 }
 ```
 
-**Search response** (when `q` is provided):
+**Search** (when `q` is provided):
+
+The search branch decodes into the app contract's `SearchCommand` (PRD 00176,
+see [app-contract.md](app-contract.md#search-searchcommand-pagerequest-appsearchresult)).
+`type` becomes `SearchCommand.types` (one type) and `tag` becomes
+`SearchCommand.tag`. A filter that matches nothing returns an empty `data` array,
+not the unfiltered result. `backlinks`, `sort`, and `field.{name}` do not apply to
+search.
+
+Pagination goes through the shared `PageRequest` policy, not the list clamp:
+
+- `page` defaults to 1. A `page` below 1 or a non-integer `page` returns 400
+  `VALIDATION_ERROR`.
+- `per_page` defaults to 50. A `per_page` outside 1-10,000 or a non-integer
+  `per_page` returns 400 `VALIDATION_ERROR`.
+- The offset is `(page - 1) * per_page`, computed with an overflow check. An
+  overflow returns 400 `VALIDATION_ERROR`.
+
+**Search response:**
 
 ```json
 {
-  "data": [{ "id": "...", "title": "...", "snippet": "...", "rank": 1.0 }]
+  "data": [{
+    "id": "...",
+    "title": "...",
+    "path": "ddb/....md",
+    "snippet": "...",
+    "rank": -1.0,
+    "updated_at": "...",
+    "tags": ["..."],
+    "type": "...",
+    "fields": { "key": "value" },
+    "created_at": "..."
+  }],
+  "total_count": 1
 }
 ```
+
+Each hit carries all ten fields of the core `SearchResult`. `type` and
+`created_at` are `null` when the doogat has none. `fields` is left out when the
+hit has no typed fields. `total_count` is the full match count, not the page
+length.
+
+**Compatibility (PRD 00176):**
+
+- The hit shape widened from four fields (`id`, `title`, `snippet`, `rank`) to
+  ten. The change is additive. No field was renamed or removed.
+- `type` and `tag` used to be dropped silently on the search branch. They now
+  filter the hits.
+- Search `per_page` used to be clamped silently to 1-200. It is now validated
+  against 1-10,000: `per_page=500` now returns 500 hits, not 200, and
+  `per_page=10001` or `per_page=0` now returns 400, not a clamped 200 OK. A
+  `page` below 1 used to be treated as 1 and now returns 400. An absent
+  `per_page` still gives 50.
+- The plain list branch (no `q`) did not change. It keeps the 1-200 clamp.
 
 ### Get Doogat
 

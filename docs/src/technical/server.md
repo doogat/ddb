@@ -416,6 +416,25 @@ An empty `in: []` produces no matches (the clause evaluates to false).
 
 The dedicated `tag` argument on `search` and the `where` tag filter work independently. Both can be used in the same query.
 
+### Search resolver and SearchCommand
+
+The `search` resolver (`ddb-server/src/schema/queries.rs`) routes through the app
+contract (PRD 00176; see [app-contract.md](app-contract.md#search-searchcommand-pagerequest-appsearchresult)):
+
+1. It decodes `limit` / `offset` through `PageRequest::decode`. An omitted
+   `limit` gives 50 (it was 20 before 00176). An omitted `offset` gives 0. A
+   `limit` outside 1-10,000 or a negative `offset` is a `VALIDATION_ERROR`.
+2. With no `where` argument, it builds `SearchCommand { query, page, types, tag }`
+   and calls `ReadPool::search_command`. The resolver forwards the facade's
+   warnings into `extensions.warnings`.
+3. With a `where` argument, it takes the one GraphQL-only fork.
+   `SearchCommand` has no slot for relation `where` filters (00159/00182), so the
+   resolver builds `SearchFilters { types, tag, where_filters }` and calls the
+   older `ReadPool::search` with the same decoded `page`. The pagination policy is
+   the same on both branches. Only the filter routing differs.
+
+Both branches return the same ten-field `SearchHit` through `search_hit_to_value`.
+
 ### Query normalization
 
 The server can normalize search queries to a canonical form so that semantically equivalent queries always produce the same string. This is useful for saved searches, deduplication, and matching.

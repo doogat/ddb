@@ -37,7 +37,7 @@ The embedded interface makes the following promises, consistent with the product
 | Capability | Promise | Notes |
 |-----------|---------|-------|
 | Create / read / update / delete (base CRUD methods or typed SQL via `execute_sql`) | `Guaranteed` | Same Git-backed semantics as CLI and GraphQL |
-| FTS5 search (`search`, `search_paginated`) | `Guaranteed` | Same `Index` path as the server |
+| FTS5 search (`search`, `search_paginated`, `search_filtered`) | `Guaranteed` | Same `Index` path as the server; `search_paginated` and `search_filtered` route through the app contract's `SearchCommand` |
 | SQL (DDL, DML, SELECT via `execute_sql`) | `Guaranteed` | Delegates to the same `SqlEngine` as `ddb serve` |
 | Transactions (`begin_transaction`, `commit_transaction`, `rollback_transaction`) | `Guaranteed` | Multi-statement atomicity; not available per-call over GraphQL - use `executeBatch` there |
 | Type discovery (`list_type_schemas`) | `Guaranteed` | Returns typedef doogats with column metadata |
@@ -87,10 +87,35 @@ DoogatDriver::create_repo(repo_path: String) -> Result<Self, DdbError>
 
 | Method | Delegates to |
 |--------|-------------|
-| `search(query)` | `search_paginated(query, MAX, 0)`, returns hits only |
-| `search_paginated(query, limit, offset)` | `index.search_paginated` (FTS5 with LIMIT/OFFSET) |
+| `search(query)` | `DoogatService::search` (unfiltered, no pagination), returns hits only |
+| `search_paginated(query, limit, offset)` | `PageRequest::decode` → `DoogatService::search_command` (no filters) |
+| `search_filtered(query, limit, offset, types, tag)` | `PageRequest::decode` → `DoogatService::search_command` with `types` / `tag` |
 | `list_doogats()` | `repo.list_doogats` |
 | `execute_sql(sql)` | See [SQL (SqlEngine-backed)](#sql-sqlengine-backed) |
+
+#### Filtered search (PRD 00176)
+
+```rust
+search_filtered(
+    query: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    types: Option<Vec<String>>,
+    tag: Option<String>,
+) -> Result<PaginatedSearchResult, DdbError>
+```
+
+`search_filtered` builds a `SearchCommand` (see
+[app-contract.md](app-contract.md#search-searchcommand-pagerequest-appsearchresult)),
+so it uses the same filters and the same pagination policy as CLI, GraphQL, and
+REST. `types` matches any listed type. `tag` matches one tag. An omitted `limit`
+gives 50 and an omitted `offset` gives 0. A `limit` of 0 or above 10,000 fails
+with `DdbError::Validation`.
+
+`search_paginated` keeps its signature but now decodes through `PageRequest` too.
+**Compatibility:** a `limit` of 0 or above 10,000 used to run without bounds. It
+now fails with `DdbError::Validation`. Calls with a `limit` in 1-10,000 behave as
+before. The unpaginated `search(query)` did not change.
 
 ### Attachments
 
@@ -179,7 +204,8 @@ after a poisoned lock, never a Rust panic.
 
 ## FFI Records
 
-- `SearchResult` — `{ id, title, path, snippet, rank, updated_at }` (mirrors `types::SearchResult`)
+- `SearchResult` — `{ id, title, path, snippet, rank, updated_at, tags: Vec<String>, doogat_type: Option<String>, fields: Vec<FieldEntry>, created_at: Option<String> }`, all ten fields of `types::SearchResult`. PRD 00176 widened it from six fields; the change is additive (the first six keep their names and types). `fields` is empty for untyped hits.
+- `FieldEntry` — `{ key, value }`, one typed-field pair of a search hit. UniFFI records here carry no maps, so `types::SearchResult.fields` (`BTreeMap<String, String>`) crosses the boundary as a list of pairs in key order.
 - `PaginatedSearchResult` — `{ hits: Vec<SearchResult>, total_count: u64 }`
 - `RebuildReport` — `{ indexed, tables_materialized, types_inferred }` (subset of `types::RebuildReport`, omits warnings)
 - `AttachmentInfo` — `{ name, mime, size, path }` (mirrors `types::AttachmentInfo`)
@@ -234,6 +260,11 @@ cargo run -p ddb-uniffi-bindgen --bin uniffi-bindgen -- generate \
 Output files:
 - Swift: `ddb_core.swift`, `ddb_coreFFI.h`, `ddb_coreFFI.modulemap`
 - Kotlin: `uniffi/ddb_core/ddb_core.kt`
+
+Regenerate the bindings after any record or method change. PRD 00176 added
+`search_filtered` and `FieldEntry` and widened `SearchResult`, so Swift/Kotlin
+consumers built from older bindings do not see the new method or the four new
+hit fields until they regenerate.
 
 ## Thread Safety
 
