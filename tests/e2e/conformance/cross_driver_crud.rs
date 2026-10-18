@@ -220,6 +220,72 @@ fn filtered_search_returns_same_hits_and_full_field_set_on_cli_and_graphql() {
     }
 }
 
+// PRD 00148 Phase 2 (GraphQL leg; REST deferred to PRD 00175): a create with
+// `fields: {"done": true, "priority": 3}` sent as a JSON object must land
+// `done` as a SQL boolean, not the string "true", and `priority` as a number.
+#[test]
+fn typed_fields_create_stores_native_boolean_and_number_on_graphql() {
+    let fixture = workflows::typed_fields_create();
+    let driver = GraphqlDriver::new();
+    let results = driver.run_workflow(&fixture);
+    assert_eq!(results.len(), fixture.steps.len());
+    for (i, result) in results.iter().enumerate() {
+        assert!(
+            matches!(result, super::result::ConformanceResult::Ok { .. }),
+            "GraphQL step {i} ({:?}) should return Ok, got: {result:?}",
+            fixture.steps[i].op
+        );
+    }
+
+    let rows_json = search_value("GraphQL", 2, &results[2]);
+    let rows: Vec<String> = serde_json::from_str(rows_json)
+        .unwrap_or_else(|e| panic!("executeSql rows not a JSON list: {e}: {rows_json}"));
+    assert_eq!(rows.len(), 1, "expected exactly one tf_task row: {rows:?}");
+    let row: Vec<String> = serde_json::from_str(&rows[0])
+        .unwrap_or_else(|e| panic!("row is not a JSON array: {e}: {}", rows[0]));
+    let [done, done_type, priority, priority_type] = row.as_slice() else {
+        panic!("expected 4 columns, got {row:?}");
+    };
+
+    // SQLite has no boolean storage class: a native boolean is stored as an
+    // integer (the SQL engine renders BOOLEAN columns back as "true"); the
+    // stringified regression stores text "true", which `typeof` reports.
+    assert_eq!(done_type, "integer", "done stored as {done_type} ({done:?}), not a boolean");
+    assert_eq!(done, "true", "done must be boolean true, got {done:?}");
+    assert_eq!(priority_type, "integer", "priority stored as {priority_type} ({priority:?})");
+    assert_eq!(priority, "3");
+
+    // The index coerces by column type, so SQL alone cannot tell a native
+    // boolean from the string "true". The stored frontmatter can: YAML keeps
+    // a native `true` / `3` unquoted and quotes the string forms.
+    let id = match &results[1] {
+        super::result::ConformanceResult::Ok {
+            value: super::result::ConformanceValue::String(id),
+            ..
+        } => id,
+        other => panic!("create should return the id, got {other:?}"),
+    };
+    let path = driver.repo_path().join(format!("ddb/{id}.md"));
+    let stored = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let frontmatter: Vec<&str> = stored.lines().map(str::trim_end).collect();
+    assert!(
+        frontmatter.contains(&"done: true"),
+        "done must be stored as a native (unquoted) boolean:\n{stored}"
+    );
+    // Core writes INTEGER-column numbers as floats (`3.0`); numeric is the
+    // contract here, so parse rather than pin the rendering.
+    let priority_value = frontmatter
+        .iter()
+        .find_map(|line| line.strip_prefix("priority: "))
+        .unwrap_or_else(|| panic!("priority missing from frontmatter:\n{stored}"));
+    assert_eq!(
+        priority_value.parse::<f64>().ok(),
+        Some(3.0),
+        "priority must be stored as an unquoted number:\n{stored}"
+    );
+}
+
 /// Seeding (typedefs + creates) must succeed on both drivers before search
 /// parity means anything.
 fn assert_seed_steps_ok(

@@ -175,6 +175,56 @@ pub fn filtered_search() -> WorkflowFixture {
     }
 }
 
+/// Create with native JSON-typed `fields` (PRD 00148 Phase 2, GraphQL leg).
+///
+/// Registers a type with a BOOLEAN `done` and an INTEGER `priority` column,
+/// creates a doogat with `fields: {"done": true, "priority": 3}` as a JSON
+/// object (not a JSON-encoded string), then reads the materialized row back
+/// with SQLite's `typeof()` so the assertion sees the stored storage class,
+/// not a stringified rendering. `cross_driver_crud.rs` asserts `done` is not
+/// stored as text and `priority` is an integer.
+///
+/// GraphQL only: the CLI driver passes fields as `key=value` strings, and the
+/// REST leg the PRD names is owned by PRD 00175 (no REST driver exists yet).
+pub fn typed_fields_create() -> WorkflowFixture {
+    WorkflowFixture {
+        id: "typed_fields_create".into(),
+        title: "Create with JSON-typed fields stores a native boolean and number".into(),
+        setup: SetupExpectation {
+            auth_mode: AuthMode::None,
+            timeout_ms: 30_000,
+            setup_steps: vec![],
+        },
+        steps: vec![
+            Step {
+                op: StepOp::ExecuteSql,
+                args: serde_json::json!({
+                    "sql": "CREATE TABLE tf_task (done BOOLEAN, priority INTEGER)",
+                }),
+            },
+            Step {
+                op: StepOp::CreateDoogat,
+                args: serde_json::json!({
+                    "title": "Typed task", "type": "tf_task",
+                    "fields": {"done": true, "priority": 3},
+                }),
+            },
+            Step {
+                op: StepOp::ExecuteSql,
+                args: serde_json::json!({
+                    "sql": "SELECT done, typeof(done), priority, typeof(priority) FROM tf_task",
+                }),
+            },
+        ],
+        expected: ExpectedBehavior {
+            value: None,
+            warnings: vec![],
+            error: None,
+        },
+        interfaces: vec![InterfaceId::Graphql],
+    }
+}
+
 // PRD 00150 blind-review I-1: pin the GraphQL WarningEntry shape contract.
 //
 // The release-readiness §3.3 checklist in

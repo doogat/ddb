@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use super::super::common::{DdbTestRepo, ServerGuard};
-use super::args::{optional_string, optional_string_list, optional_string_map, require_string};
+use super::args::{optional_string, optional_string_list, require_string};
 use super::fixture::{Step, StepOp, WorkflowFixture};
 use super::result::{ConformanceError, ConformanceResult, ConformanceValue};
 
 pub struct GraphqlDriver {
-    _repo: DdbTestRepo,
+    repo: DdbTestRepo,
     server: ServerGuard,
 }
 
@@ -14,10 +14,7 @@ impl GraphqlDriver {
     pub fn new() -> Self {
         let repo = DdbTestRepo::init();
         let server = ServerGuard::start(&repo);
-        Self {
-            _repo: repo,
-            server,
-        }
+        Self { repo, server }
     }
 
     /// Test-only: kill the underlying server so subsequent `run_workflow`
@@ -26,6 +23,12 @@ impl GraphqlDriver {
     pub fn kill_server_for_test(&mut self) {
         self.server.kill();
         std::thread::sleep(Duration::from_millis(50));
+    }
+
+    /// Test-only: the repo work tree the server writes to, so tests can read
+    /// a doogat's stored frontmatter directly.
+    pub fn repo_path(&self) -> &std::path::Path {
+        self.repo.dir.path()
     }
 
     pub fn run_workflow(&self, fixture: &WorkflowFixture) -> Vec<ConformanceResult> {
@@ -121,16 +124,14 @@ impl GraphqlDriver {
         if let Some(doogat_type) = optional_string(args, "type") {
             input.insert("type".into(), doogat_type.into());
         }
-        match optional_string_map(args, "fields") {
-            Ok(Some(fields)) => {
-                let object: serde_json::Map<String, serde_json::Value> =
-                    fields.into_iter().map(|(k, v)| (k, v.into())).collect();
-                // CreateDoogatInput.fields is a JSON-encoded string.
-                let encoded = serde_json::Value::Object(object).to_string();
-                input.insert("fields".into(), encoded.into());
+        // CreateDoogatInput.fields is a JSON scalar: forward the fixture's
+        // object as-is so native booleans/numbers reach the server unchanged.
+        match args.get("fields") {
+            None | Some(serde_json::Value::Null) => {}
+            Some(fields @ serde_json::Value::Object(_)) => {
+                input.insert("fields".into(), fields.clone());
             }
-            Ok(None) => {}
-            Err(field) => return setup_failed_missing(field),
+            Some(_) => return setup_failed_missing("fields"),
         }
         let result = match self.post_graphql(
             serde_json::json!({
@@ -307,7 +308,7 @@ impl GraphqlDriver {
         };
         let result = match self.post_graphql(
             serde_json::json!({
-                "query": r#"mutation($sql: String!) { executeSql(sql: $sql) { message } }"#,
+                "query": r#"mutation($sql: String!) { executeSql(sql: $sql) { message rows } }"#,
                 "variables": { "sql": sql },
             }),
             timeout,
@@ -318,8 +319,18 @@ impl GraphqlDriver {
         if let Some(errors) = non_empty_errors(&result) {
             return graphql_err(&errors[0]);
         }
+        // DDL/DML returns no rows and stays `Null`; a SELECT returns its rows
+        // (each a JSON-encoded array) as one JSON text so fixtures can read
+        // materialized values back.
+        let rows = &result["data"]["executeSql"]["rows"];
+        let value = match rows.as_array() {
+            Some(items) if !items.is_empty() => {
+                ConformanceValue::String(serde_json::to_string(rows).unwrap_or_default())
+            }
+            _ => ConformanceValue::Null,
+        };
         ConformanceResult::Ok {
-            value: ConformanceValue::Null,
+            value,
             warnings: vec![],
         }
     }
