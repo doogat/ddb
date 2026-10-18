@@ -17,7 +17,6 @@ fn fresh_driver() -> (TempDir, DoogatDriver) {
     (tmp, driver)
 }
 
-/// Create a plain untyped doogat (title + body only) through the FFI path.
 fn create_simple(driver: &DoogatDriver, title: &str, body: &str) {
     driver
         .create_structured(
