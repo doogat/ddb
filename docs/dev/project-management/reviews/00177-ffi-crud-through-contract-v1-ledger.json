@@ -62,5 +62,37 @@
     "issue": "The GraphQL/CLI parity tests live in tests/e2e/integration_ffi_warning_parity.rs, not in ddb-core/src/ffi/tests.rs as the PRD's structure map says. The GraphQL parity check uses the TITLE_FROM_TEMPLATE warning, because GraphQL rejects unregistered types under `Strict`. This is reasonable. The CLI parity check covers `BaseOnly` code and message.",
     "file": "tests/e2e/integration_ffi_warning_parity.rs:66",
     "reason": "Not a defect - the finder's own text concludes the placement and the warning choice are reasonable. A GraphQL parity test needs a running server, which belongs in tests/e2e/, not a ddb-core unit module. The PRD's structure map is indicative, not binding on test placement."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "`DoogatService::update` now emits `UNREGISTERED_TYPE_BASE_ONLY` for every transport, not only FFI. The PRD Transport Impact section says CLI, GraphQL and REST are \"Unchanged\". Nothing is updated for it: CHANGELOG, docs, compat checklist, and no service-level or non-FFI test pins it",
+    "file": "ddb-core/src/service/update.rs:237",
+    "reason": "Cap-overflow at cycle 2 of 2 (rework_cap reached with the finding unresolved). Deferred to batch end as a cross-interface app-contract decision: either gate the warning on an update-side policy or record the Transport Impact change. 3/3 consensus."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "high",
+    "issue": "`extra` in the result records is not lossless, and nothing in the user-facing docs says so. A frontmatter map becomes `FieldValue::List([])` and nested items are dropped with only a `tracing::warn!`, so a field is reported with a wrong value rather than omitted",
+    "file": "ddb-core/src/ffi/records.rs:441",
+    "reason": "Cap-overflow at cycle 2 of 2. Deferred to batch end: closing it means either an FFI warning code this PRD does not define or a documented lossiness limit. 2/3 consensus."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "Remaining cycle-2 medium and low tail: R3-R22 of the cycle-2 consolidated table (test-length and vacuous-assert findings, UDL record drift, create-only warning docs, dropped ParsedDoogat fields, weak re-export oracle, stale e2e comment, half-tested update-warning branch, duplicated registration check, Io redaction divergence, parser `#` gap, Debug-string comparison)",
+    "file": "docs/dev/project-management/reviews/00177-ffi-crud-through-contract-v1-review-2.md",
+    "reason": "Cap-overflow at cycle 2 of 2; each finding is recorded individually in `state.deferred_decisions` and verbatim in the cycle-2 review file. Medium and low never block convergence and the cap forbids a third rework pass."
+  },
+  {
+    "cycle": 2,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "`cargo test-ci` exits 101 at HEAD 757c55f because of the known load-sensitive flake `actor::tests::shared_actor_preserves_schema_applys_owned_transaction` (2062 passed, 1 failed; green when re-run in isolation)",
+    "file": "ddb-server/src/actor/tests/mod.rs:22",
+    "reason": "Carried forward from cycle 1's verification queue and re-measured this cycle. Pre-existing flake unrelated to this PRD's diff; pinning or fixing it is its own change."
   }
 ]

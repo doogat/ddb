@@ -1,0 +1,18 @@
+[
+  {
+    "source": "bob",
+    "finding": "Fast tier at this HEAD — run `cargo test-ci` to completion and report the pass/fail counts.",
+    "file": "N/A",
+    "command": "cargo test-ci",
+    "result": {
+      "exit": 101,
+      "note": "2062 passed, 1 failed, 0 skipped at HEAD 757c55f; the single failure is the known load-sensitive flake actor::tests::shared_actor_preserves_schema_applys_owned_transaction, re-run in isolation this cycle and green"
+    }
+  },
+  {
+    "source": "bob",
+    "finding": "Bindings regenerate clean and the migrated Swift suite still compiles — run the repo bindgen for swift and kotlin, then build tests/swift against the regenerated bindings.",
+    "file": "tests/swift/Tests/DoogatDBTests/DoogatDBTests.swift:24",
+    "command": "dev/bin/build-xcframework"
+  }
+]

@@ -427,3 +427,13 @@
 {"id":"70c390cb","ended_at":1792343040,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"id":"2c4fd5a8","ended_at":1792343040,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792343040,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792343140,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"id":"fda4eab3","kind":"bob","task":"review-c2-20261018","queued_at":1792344421,"prompt_bytes":37671}
+{"id":"b85053d7","kind":"carl","task":"review-c2-20261018","queued_at":1792344421,"prompt_bytes":30738}
+{"id":"55606738","kind":"bob","task":"review-c2-20261018","queued_at":1792344998,"prompt_bytes":37671}
+{"id":"16d452f7","kind":"carl","task":"review-c2-20261018","queued_at":1792344998,"prompt_bytes":30738}
+{"id":"fda4eab3","ended_at":1792348587,"elapsed_s":4166,"outcome":"error","detail":"lack-of-input"}
+{"id":"b85053d7","ended_at":1792348593,"elapsed_s":4172,"outcome":"error","detail":"exit 144 (stalled >50min, killed)"}
+{"id":"55606738","ended_at":1792348914,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"16d452f7","ended_at":1792348914,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792348914,"phase":"done","prd":"00177-ffi-crud-through-contract-v1.md"}
