@@ -1891,6 +1891,59 @@ fn ffi_search_paginated_rejects_out_of_range_limit() {
     );
 }
 
+// --- search_paginated/search_filtered warning-forwarding tests (PRD 00176, task 8) ---
+//
+// `search_command` already collects per-file reindex-skip warnings into
+// `AppOutput::warnings` on the same `rebuild_if_stale` path `reindex()` warns
+// through. `search_paginated`/`search_filtered` must surface them on
+// `PaginatedSearchResult.warnings` (as `RebuildWarningRecord`-shaped entries,
+// same `code`/`message` fields `reindex()` already puts on `RebuildReport.warnings`),
+// not discard them.
+
+const VALID_DOOGAT_FFIWARN: &str = "---
+title: FfiWarn Doogat
+---
+ffiwarnterm body
+";
+
+#[test]
+fn search_paginated_surfaces_reindex_skip_warning_for_poison_file() {
+    let (_tmp, driver) = fresh_driver();
+    let poison_path = "ddb/20260101000010.md";
+    commit_doogat(&driver, poison_path, POISON_DOOGAT_UNCLOSED_BRACKET);
+    commit_doogat(&driver, "ddb/20260101000011.md", VALID_DOOGAT_FFIWARN);
+
+    let page = driver
+        .search_paginated("ffiwarnterm".into(), 10, 0)
+        .expect("search_paginated must succeed despite the poison file");
+
+    let warning = page
+        .warnings
+        .iter()
+        .find(|w| w.message.contains(poison_path))
+        .expect("search_paginated should surface a reindex-skip warning naming the poison file");
+    assert_eq!(warning.code, "MALFORMED_YAML");
+}
+
+#[test]
+fn search_filtered_surfaces_reindex_skip_warning_for_poison_file() {
+    let (_tmp, driver) = fresh_driver();
+    let poison_path = "ddb/20260101000012.md";
+    commit_doogat(&driver, poison_path, POISON_DOOGAT_UNCLOSED_BRACKET);
+    commit_doogat(&driver, "ddb/20260101000013.md", VALID_DOOGAT_FFIWARN);
+
+    let page = driver
+        .search_filtered("ffiwarnterm".into(), None, None, None, None)
+        .expect("search_filtered must succeed despite the poison file");
+
+    let warning = page
+        .warnings
+        .iter()
+        .find(|w| w.message.contains(poison_path))
+        .expect("search_filtered should surface a reindex-skip warning naming the poison file");
+    assert_eq!(warning.code, "MALFORMED_YAML");
+}
+
 #[test]
 fn bundle_import_ffi_retry_cleans_only_its_payload_namespace() {
     for prune in [false, true] {

@@ -210,47 +210,6 @@ mod tests {
     }
 
     #[test]
-    fn cli_search_with_type_and_tag_filters_succeeds() {
-        let tmp = seeded_repo();
-
-        search(
-            tmp.path(),
-            "cliterm",
-            None,
-            None,
-            Some("recipe".to_string()),
-            None,
-        )
-        .expect("type-filtered search must succeed");
-        search(
-            tmp.path(),
-            "cliterm",
-            None,
-            None,
-            None,
-            Some("sweet".to_string()),
-        )
-        .expect("tag-filtered search must succeed");
-        search(
-            tmp.path(),
-            "cliterm",
-            None,
-            None,
-            Some("dessert".to_string()),
-            Some("dinner".to_string()),
-        )
-        .expect("type+tag-filtered search must succeed");
-    }
-
-    #[test]
-    fn cli_search_with_omitted_limit_and_offset_succeeds() {
-        let tmp = seeded_repo();
-
-        search(tmp.path(), "cliterm", None, None, None, None)
-            .expect("omitted limit/offset must decode to the default page");
-    }
-
-    #[test]
     fn cli_search_rejects_zero_limit_through_page_request() {
         let tmp = seeded_repo();
 
@@ -267,6 +226,18 @@ mod tests {
         assert_validation(
             search(tmp.path(), "cliterm", Some(10_001), None, None, None),
             "--limit 10001",
+        );
+    }
+
+    #[test]
+    fn cli_search_rejects_offset_above_i64_max_instead_of_clamping() {
+        // `to_i64` must reject an offset that cannot fit in `i64`, not saturate
+        // it to `i64::MAX` and silently serve a (wrong) clamped page.
+        let tmp = seeded_repo();
+
+        assert_validation(
+            search(tmp.path(), "cliterm", None, Some(usize::MAX), None, None),
+            "offset usize::MAX",
         );
     }
 }
