@@ -563,9 +563,10 @@ pub struct UpdateStructuredInput {
     pub unset_fields: Vec<String>,
 }
 
-/// FFI-safe create result, a lossless mirror of the core [`ParsedDoogat`]
-/// payload (PRD 00177): an id-only create must not drop required result
-/// fields.
+/// FFI-safe create result, a lossless-for-the-named-fields mirror of the
+/// core [`ParsedDoogat`] payload (PRD 00177): an id-only create must not
+/// drop required result fields. `extra` still degrades nested lists/maps
+/// per [`core_to_field_value`]'s documented contract.
 #[derive(Debug, uniffi::Record)]
 pub struct CreateResultRecord {
     pub id: String,
@@ -582,8 +583,9 @@ pub struct CreateResultRecord {
     pub warnings: Vec<RebuildWarningRecord>,
 }
 
-/// FFI-safe update result, a lossless mirror of the core [`ParsedDoogat`]
-/// payload (PRD 00177).
+/// FFI-safe update result, a lossless-for-the-named-fields mirror of the
+/// core [`ParsedDoogat`] payload (PRD 00177). `extra` still degrades nested
+/// lists/maps per [`core_to_field_value`]'s documented contract.
 #[derive(Debug, uniffi::Record)]
 pub struct UpdateResultRecord {
     pub id: String,
