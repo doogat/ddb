@@ -609,6 +609,155 @@ mod tests {
             &vec!["20260301120200".to_string()]
         );
     }
+
+    // ── fields boundary decoder (PRD 00178) ──────────────────────────
+
+    use serde_json::json;
+
+    #[test]
+    fn fields_object_decodes_native_values_without_string_coercion() {
+        let raw = json_value_to_fields_input(json!({
+            "s": "true",
+            "n": 42,
+            "f": -1.5,
+            "b_true": true,
+            "b_false": false,
+            "l": ["a", 2, true],
+            "m": {"inner": -1.5, "flag": false},
+        }))
+        .expect("a JSON object of scalars and containers must decode");
+
+        let mut nested = BTreeMap::new();
+        nested.insert("inner".to_string(), DdbValue::Number(-1.5));
+        nested.insert("flag".to_string(), DdbValue::Bool(false));
+        let expected = [
+            ("s", DdbValue::String("true".into())),
+            ("n", DdbValue::Number(42.0)),
+            ("f", DdbValue::Number(-1.5)),
+            ("b_true", DdbValue::Bool(true)),
+            ("b_false", DdbValue::Bool(false)),
+            (
+                "l",
+                DdbValue::List(vec![
+                    DdbValue::String("a".into()),
+                    DdbValue::Number(2.0),
+                    DdbValue::Bool(true),
+                ]),
+            ),
+            ("m", DdbValue::Map(nested)),
+        ];
+        assert_eq!(raw.len(), expected.len(), "no key may be dropped, got {raw:?}");
+        for (key, want) in expected {
+            assert_eq!(
+                raw.get(key),
+                Some(&Some(want)),
+                "'{key}' must keep its native JSON type, got {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fields_empty_values_stay_present_not_null() {
+        let raw = json_value_to_fields_input(json!({"s": "", "l": [], "m": {}}))
+            .expect("empty values must decode");
+        assert_eq!(raw.get("s"), Some(&Some(DdbValue::String(String::new()))));
+        assert_eq!(raw.get("l"), Some(&Some(DdbValue::List(vec![]))));
+        assert_eq!(raw.get("m"), Some(&Some(DdbValue::Map(BTreeMap::new()))));
+    }
+
+    #[test]
+    fn fields_empty_object_decodes_to_no_entries() {
+        let raw = json_value_to_fields_input(json!({})).expect("{} must decode");
+        assert!(raw.is_empty(), "got {raw:?}");
+    }
+
+    #[test]
+    fn fields_top_level_null_becomes_a_none_entry_not_a_dropped_key() {
+        let raw = json_value_to_fields_input(json!({"gone": null, "kept": 7}))
+            .expect("a top-level null is a valid per-field signal");
+        assert_eq!(
+            raw.get("gone"),
+            Some(&None),
+            "a null field must stay as an explicit None so create omits and update unsets it"
+        );
+        assert_eq!(raw.get("kept"), Some(&Some(DdbValue::Number(7.0))));
+        assert_eq!(raw.len(), 2, "got {raw:?}");
+
+        assert_eq!(
+            json_scalar_to_opt_value(serde_json::Value::Null),
+            Ok(None),
+            "a top-level JSON null maps to None"
+        );
+    }
+
+    #[test]
+    fn fields_rejects_null_nested_inside_a_list_or_object() {
+        for (case, fields) in [
+            ("null in list", json!({"l": ["a", null]})),
+            ("null as only list item", json!({"l": [null]})),
+            ("null in object", json!({"m": {"inner": null}})),
+            ("null in list inside list", json!({"l": [[1, null]]})),
+            ("null in object inside list", json!({"l": [{"k": null}]})),
+        ] {
+            let result = json_value_to_fields_input(fields);
+            assert!(
+                result.is_err(),
+                "{case}: null is only a top-level signal and must be rejected, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fields_rejects_any_non_object_top_level_value() {
+        for (case, fields) in [
+            ("old encoded-string shape", json!("{\"a\":1}")),
+            ("plain string", json!("hello")),
+            ("number", json!(5)),
+            ("array", json!([{"a": 1}])),
+        ] {
+            let result = json_value_to_fields_input(fields);
+            assert!(
+                result.is_err(),
+                "{case}: fields must be a JSON object, never reparsed, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_body_accepts_a_fields_object_and_reads_null_or_absent_as_none() {
+        let body: CreateBody =
+            serde_json::from_value(json!({"title": "t", "fields": {"n": 1, "b": true}}))
+                .expect("CreateBody must accept fields as a JSON object");
+        assert_eq!(body.fields, Some(json!({"n": 1, "b": true})));
+
+        let body: CreateBody = serde_json::from_value(json!({"title": "t", "fields": null}))
+            .expect("fields: null must deserialize");
+        assert_eq!(body.fields, None, "fields: null means no fields");
+
+        let body: CreateBody =
+            serde_json::from_value(json!({"title": "t"})).expect("absent fields must deserialize");
+        assert_eq!(body.fields, None, "absent fields means no fields");
+    }
+
+    #[test]
+    fn update_body_accepts_a_fields_object_and_keeps_unset_fields_rename() {
+        let body: UpdateBody = serde_json::from_value(json!({
+            "fields": {"theme": "dark", "legacy": null},
+            "unsetFields": ["old"],
+        }))
+        .expect("UpdateBody must accept fields as a JSON object");
+        assert_eq!(body.fields, Some(json!({"theme": "dark", "legacy": null})));
+        assert_eq!(body.unset_fields, Some(vec!["old".to_string()]));
+
+        let body: UpdateBody = serde_json::from_value(json!({"fields": null}))
+            .expect("fields: null must deserialize");
+        assert_eq!(body.fields, None, "fields: null means no fields");
+        assert_eq!(body.unset_fields, None);
+
+        let body: UpdateBody =
+            serde_json::from_value(json!({"title": "t"})).expect("absent fields must deserialize");
+        assert_eq!(body.fields, None, "absent fields means no fields");
+    }
 }
 
 #[cfg(test)]
