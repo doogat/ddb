@@ -1,10 +1,70 @@
 //! Tier 1 parity tests for the FFI error mapping: the variant a core error
 //! surfaces as must be the one the single error policy (PRD 00173) assigns,
 //! derived at runtime, not a hand-maintained allowlist.
+//!
+//! Every message these tests feed in carries a runtime nonce, so a conversion
+//! that keys on literal message strings (or on a `Display` prefix) cannot
+//! reproduce the expectations.
 
 use crate::app_contract::{error_rendering, AppError, FfiVariant};
-use crate::error::{codes, DoogatError};
+use crate::error::{codes, DoogatError, ErrorValue};
 use crate::ffi::records::{DdbError, DdbErrorContextEntry};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// A value no implementation can hardcode: the wall clock in nanoseconds plus
+/// a per-call counter, so two probes never share a message either.
+fn nonce() -> String {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    format!("{nanos}-{}", SEQ.fetch_add(1, Ordering::Relaxed))
+}
+
+/// A message built at run time, so it cannot appear in any lookup table.
+fn probe_msg(label: &str) -> String {
+    format!("{label} {}", nonce())
+}
+
+/// Every `DoogatError` arm constructible in-crate outside the two carve-outs
+/// (`VersionMismatch`, and `Redb` which needs the `nosql` feature).
+fn simple_arms() -> Vec<DoogatError> {
+    vec![
+        DoogatError::Git(probe_msg("ref update failed")),
+        DoogatError::Yaml(probe_msg("bad frontmatter")),
+        DoogatError::Sql(probe_msg("no such table")),
+        DoogatError::Automerge(probe_msg("load failed")),
+        DoogatError::Io(std::io::Error::other(probe_msg("disk gone"))),
+        DoogatError::Toml(probe_msg("bad config")),
+        DoogatError::Parse(probe_msg("missing zone")),
+        DoogatError::NotFound(probe_msg("20260101000000")),
+        DoogatError::Validation(probe_msg("title required")),
+        DoogatError::InvalidPath(probe_msg("../escape")),
+        DoogatError::SqlEngine(probe_msg("boom")),
+        DoogatError::Conflict(probe_msg("merge conflict")),
+        DoogatError::Sync(probe_msg("fetch failed")),
+        DoogatError::Index(probe_msg("rebuild failed")),
+        DoogatError::BadRequest(probe_msg("missing id")),
+    ]
+}
+
+/// A `Structured` error for `code` whose message and context are built at run
+/// time, so neither can be recovered from a hardcoded table.
+fn structured_probe(code: &'static str) -> DoogatError {
+    DoogatError::Structured {
+        code,
+        message: probe_msg("structured"),
+        context: vec![("probe".into(), ErrorValue::str(nonce()))],
+    }
+}
+
+/// One `Structured` error per registered code, so no subset of `codes::ALL`
+/// can be classified by an allowlist with a default.
+fn structured_arms() -> Vec<DoogatError> {
+    codes::ALL.iter().copied().map(structured_probe).collect()
+}
 
 /// The policy-visible shape of a converted FFI error: the `FfiVariant` this
 /// variant stands for plus the message it carries. `None` for any variant the
@@ -20,49 +80,114 @@ fn policy_shape(err: &DdbError) -> Option<(FfiVariant, &str)> {
     }
 }
 
-/// Derive the expectation from `error_rendering` at runtime, then assert the
-/// conversion agrees with it and kept the source error's own message.
+/// The `code` and `context` a converted error carries; `None` for the two
+/// variants (`NotFound`, `Io`) that have no such fields.
+fn carried(err: &DdbError) -> Option<(Option<&str>, &[DdbErrorContextEntry])> {
+    match err {
+        DdbError::Conflict { code, context, .. } | DdbError::Validation { code, context, .. } => {
+            Some((code.as_deref(), context.as_slice()))
+        }
+        _ => None,
+    }
+}
+
+fn str_entry(key: &str, value: &str) -> DdbErrorContextEntry {
+    DdbErrorContextEntry {
+        key: key.into(),
+        value: Some(value.into()),
+        values: Vec::new(),
+    }
+}
+
+fn list_entry(key: &str, values: &[&str]) -> DdbErrorContextEntry {
+    DdbErrorContextEntry {
+        key: key.into(),
+        value: None,
+        values: values.iter().map(|v| (*v).to_string()).collect(),
+    }
+}
+
+/// Derive every expectation from `error_rendering` at run time: the variant,
+/// the policy `code` on the arms that carry one, the source error's own
+/// message, and an empty context for a source that has none.
 fn assert_parity(err: DoogatError) {
-    let expected = error_rendering(AppError::from(&err)).ffi_variant;
+    let expected = error_rendering(AppError::from(&err));
     let source_msg = err.to_string();
+    let structured = matches!(err, DoogatError::Structured { .. });
     let converted = DdbError::from(err);
     let (variant, msg) = policy_shape(&converted).unwrap_or_else(|| {
         panic!("{source_msg:?} converted outside the policy variants: {converted:?}")
     });
     assert_eq!(
-        variant, expected,
+        variant, expected.ffi_variant,
         "{source_msg:?} must take the policy's ffi_variant, got {converted:?}"
     );
     assert_eq!(
         msg, source_msg,
         "msg must stay the source error's own to_string(), got {converted:?}"
     );
+    if let Some((code, context)) = carried(&converted) {
+        assert_eq!(
+            code,
+            Some(expected.code),
+            "{source_msg:?} must carry the policy's code, got {converted:?}"
+        );
+        if !structured {
+            assert!(
+                context.is_empty(),
+                "an error with no structured context must carry none, got {converted:?}"
+            );
+        }
+    }
+}
+
+/// Assert the converted error carries exactly `code` and exactly `context` -
+/// no fabricated, dropped or leaked entry.
+fn assert_carried(converted: &DdbError, code: &str, context: &[DdbErrorContextEntry]) {
+    let (got_code, got_context) =
+        carried(converted).unwrap_or_else(|| panic!("{converted:?} carries no code or context"));
+    assert_eq!(
+        got_code,
+        Some(code),
+        "code must come from the policy, got {converted:?}"
+    );
+    assert_eq!(
+        got_context, context,
+        "context must be exactly the converted source context, got {converted:?}"
+    );
 }
 
 #[test]
 fn simple_error_arms_take_the_ffi_variant_the_policy_assigns() {
-    for err in [
-        DoogatError::Git("ref update failed".into()),
-        DoogatError::Yaml("bad frontmatter".into()),
-        DoogatError::Sql("no such table".into()),
-        DoogatError::Automerge("load failed".into()),
-        DoogatError::Toml("bad config".into()),
-        DoogatError::Parse("missing zone".into()),
-        DoogatError::NotFound("20260101000000".into()),
-        DoogatError::Validation("title required".into()),
-        DoogatError::InvalidPath("../escape".into()),
-        DoogatError::SqlEngine("boom".into()),
-        DoogatError::Conflict("merge conflict".into()),
-        DoogatError::Sync("fetch failed".into()),
-        DoogatError::Index("rebuild failed".into()),
-        DoogatError::BadRequest("missing id".into()),
-    ] {
+    for err in simple_arms() {
         assert_parity(err);
     }
 }
 
+/// `msg` is uniformly `err.to_string()`, which for the `Io` arm keeps
+/// `DoogatError`'s own `"io: "` prefix rather than the inner error's text.
+#[test]
+fn io_error_follows_the_policy_and_keeps_its_own_io_prefix() {
+    let err = DoogatError::Io(std::io::Error::other("disk gone"));
+    let expected = error_rendering(AppError::from(&err)).ffi_variant;
+    let converted = DdbError::from(err);
+    let (variant, msg) = policy_shape(&converted)
+        .unwrap_or_else(|| panic!("Io converted outside the policy: {converted:?}"));
+    assert_eq!(
+        variant, expected,
+        "the Io arm is policy-derived like every other non-carve-out arm, got {converted:?}"
+    );
+    assert_eq!(
+        msg, "io: disk gone",
+        "the uniform err.to_string() rule keeps DoogatError's io: prefix, got {converted:?}"
+    );
+}
+
 #[test]
 fn structured_error_codes_take_the_ffi_variant_the_policy_assigns() {
+    for err in structured_arms() {
+        assert_parity(err);
+    }
     for err in [
         DoogatError::singleton_not_found("app_config"),
         DoogatError::unique_violation("link", ["url"], ["https://x"]),
@@ -71,6 +196,29 @@ fn structured_error_codes_take_the_ffi_variant_the_policy_assigns() {
         DoogatError::singleton_violation("app_config", "20260101000000"),
     ] {
         assert_parity(err);
+    }
+}
+
+/// No `DoogatError` may reach a variant that predates the policy: those arms
+/// are unreachable now, so a parallel classification table cannot hide there.
+#[test]
+fn the_conversion_never_produces_a_legacy_pre_policy_variant() {
+    for err in simple_arms().into_iter().chain(structured_arms()) {
+        let source_msg = err.to_string();
+        let converted = DdbError::from(err);
+        assert!(
+            !matches!(
+                &converted,
+                DdbError::Git { .. }
+                    | DdbError::Yaml { .. }
+                    | DdbError::Sql { .. }
+                    | DdbError::Automerge { .. }
+                    | DdbError::Parse { .. }
+                    | DdbError::Config { .. }
+                    | DdbError::SqlEngine { .. }
+            ),
+            "{source_msg:?} reached a legacy pre-policy variant: {converted:?}"
+        );
     }
 }
 
@@ -84,33 +232,20 @@ fn singleton_not_found_surfaces_as_not_found_not_validation() {
 }
 
 #[test]
-fn conflict_sync_and_index_no_longer_collapse_to_git_or_sql() {
-    for err in [
-        DoogatError::Conflict("merge conflict".into()),
-        DoogatError::Sync("fetch failed".into()),
-        DoogatError::Index("rebuild failed".into()),
-    ] {
-        let converted = DdbError::from(err);
-        assert!(
-            !matches!(&converted, DdbError::Git { .. } | DdbError::Sql { .. }),
-            "the lossy legacy mapping is back: {converted:?}"
-        );
-    }
-}
-
-#[test]
 fn sql_engine_msg_keeps_its_display_prefix_instead_of_the_policy_message() {
-    let err = DoogatError::SqlEngine("boom".into());
+    let err = DoogatError::SqlEngine(probe_msg("boom"));
     let rendering = error_rendering(AppError::from(&err));
+    let source_msg = err.to_string();
     assert_eq!(
-        rendering.message, "boom",
+        format!("sql engine: {}", rendering.message),
+        source_msg,
         "the policy strips SQL_ERROR's display prefix, so the two messages differ"
     );
     let converted = DdbError::from(err);
     let (variant, msg) = policy_shape(&converted)
         .unwrap_or_else(|| panic!("SqlEngine converted outside the policy: {converted:?}"));
     assert_eq!(
-        msg, "sql engine: boom",
+        msg, source_msg,
         "FFI msg must be the source error's to_string(), not rendering.message"
     );
     assert_eq!(
@@ -121,35 +256,23 @@ fn sql_engine_msg_keeps_its_display_prefix_instead_of_the_policy_message() {
 
 #[test]
 fn structured_conflict_arm_carries_the_policy_code_and_converted_context() {
-    let err = DoogatError::unique_violation("link", ["url"], ["https://x"]);
+    let err = DoogatError::unique_violation("t-9f3", ["c-1", "c-2"], ["v-1", "v-2"]);
     let code = error_rendering(AppError::from(&err)).code;
     assert_eq!(code, codes::UNIQUE_VIOLATION);
-    match DdbError::from(err) {
-        DdbError::Conflict {
-            code: ffi_code,
-            context,
-            ..
-        } => {
-            assert_eq!(ffi_code.as_deref(), Some(code), "code comes from the policy");
-            assert!(
-                context.contains(&DdbErrorContextEntry {
-                    key: "table".into(),
-                    value: Some("link".into()),
-                    values: Vec::new(),
-                }),
-                "string context must survive: {context:?}"
-            );
-            assert!(
-                context.contains(&DdbErrorContextEntry {
-                    key: "columns".into(),
-                    value: None,
-                    values: vec!["url".into()],
-                }),
-                "list context must survive: {context:?}"
-            );
-        }
-        other => panic!("UNIQUE_VIOLATION is a conflict, got {other:?}"),
-    }
+    let converted = DdbError::from(err);
+    assert!(
+        matches!(&converted, DdbError::Conflict { .. }),
+        "UNIQUE_VIOLATION is a conflict, got {converted:?}"
+    );
+    assert_carried(
+        &converted,
+        code,
+        &[
+            str_entry("table", "t-9f3"),
+            list_entry("columns", &["c-1", "c-2"]),
+            list_entry("values", &["v-1", "v-2"]),
+        ],
+    );
 }
 
 #[test]
@@ -157,51 +280,64 @@ fn structured_validation_arm_carries_the_policy_code_and_converted_context() {
     let err = DoogatError::type_not_registered("widget");
     let rendering = error_rendering(AppError::from(&err));
     assert_eq!(rendering.ffi_variant, FfiVariant::Validation);
-    match DdbError::from(err) {
-        DdbError::Validation { code, context, .. } => {
-            assert_eq!(code.as_deref(), Some(rendering.code));
-            assert_eq!(
-                context,
-                vec![DdbErrorContextEntry {
-                    key: "type".into(),
-                    value: Some("widget".into()),
-                    values: Vec::new(),
-                }]
-            );
-        }
-        other => panic!("TYPE_NOT_REGISTERED is a validation error, got {other:?}"),
-    }
+    let converted = DdbError::from(err);
+    assert_carried(&converted, rendering.code, &[str_entry("type", "widget")]);
+
+    let err = DoogatError::not_null_violation("link", "url");
+    let rendering = error_rendering(AppError::from(&err));
+    assert_eq!(rendering.ffi_variant, FfiVariant::Validation);
+    let converted = DdbError::from(err);
+    assert_carried(
+        &converted,
+        rendering.code,
+        &[str_entry("table", "link"), str_entry("column", "url")],
+    );
 }
 
+/// Context that the message does not contain must still arrive intact, so it
+/// cannot have been scraped out of the message text.
 #[test]
-fn unstructured_validation_arm_carries_the_policy_code_and_no_context() {
-    let err = DoogatError::BadRequest("missing id".into());
-    let code = error_rendering(AppError::from(&err)).code;
-    match DdbError::from(err) {
-        DdbError::Validation {
-            code: ffi_code,
-            context,
-            ..
-        } => {
-            assert_eq!(
-                ffi_code.as_deref(),
-                Some(code),
-                "the policy code is populated even without structured context"
-            );
-            assert!(context.is_empty(), "no context to carry: {context:?}");
-        }
-        other => panic!("BAD_REQUEST is a validation error, got {other:?}"),
-    }
+fn validation_context_survives_when_it_is_not_recoverable_from_the_message() {
+    let secret = nonce();
+    let err = DoogatError::Structured {
+        code: codes::UNKNOWN_FIELD,
+        message: probe_msg("unknown column"),
+        context: vec![
+            ("hidden".into(), ErrorValue::str(secret.clone())),
+            ("choices".into(), ErrorValue::list(["k-1", "k-2"])),
+        ],
+    };
+    let rendering = error_rendering(AppError::from(&err));
+    assert_eq!(rendering.ffi_variant, FfiVariant::Validation);
+    let converted = DdbError::from(err);
+    assert_carried(
+        &converted,
+        rendering.code,
+        &[
+            str_entry("hidden", &secret),
+            list_entry("choices", &["k-1", "k-2"]),
+        ],
+    );
 }
 
 #[test]
 fn version_mismatch_bypasses_the_policy_and_keeps_its_own_variant() {
-    let converted = DdbError::from(DoogatError::VersionMismatch { repo: 3, driver: 2 });
-    match converted {
-        DdbError::VersionMismatch { msg } => assert_eq!(
-            msg, "repo format v3, driver supports up to v2",
-            "the carve-out message is fixed"
-        ),
-        other => panic!("VersionMismatch keeps its dedicated FFI variant, got {other:?}"),
+    for (repo, driver) in [(3u32, 2u32), (9, 1)] {
+        let err = DoogatError::VersionMismatch { repo, driver };
+        let expected = err
+            .to_string()
+            .strip_prefix("version mismatch: ")
+            .expect("VersionMismatch Display carries its prefix")
+            .to_string();
+        match DdbError::from(err) {
+            DdbError::VersionMismatch { msg } => {
+                assert_eq!(
+                    msg, expected,
+                    "the carve-out msg is the source error's own wording for repo={repo} driver={driver}"
+                );
+                assert_eq!(msg, format!("repo format v{repo}, driver supports up to v{driver}"));
+            }
+            other => panic!("VersionMismatch keeps its dedicated FFI variant, got {other:?}"),
+        }
     }
 }
