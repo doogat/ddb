@@ -1,6 +1,7 @@
 ---
 default_model: opus
 model_tier_rationale: invented contract - structured FFI records and policy consumed by 00187 and 00191
+plan_expansion: allow
 ---
 
 # Route FFI CRUD through the app contract

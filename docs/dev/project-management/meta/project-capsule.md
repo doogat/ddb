@@ -88,11 +88,12 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
 - [!] **00175 route-read-delete-through-contract-v1** (STALLED, moved to `hold/`) — parked by the loop before this session; detail not re-derived here, see batch deferred JSON. Resume via `mv docs/dev/project-management/prds/hold/00175-route-read-delete-through-contract-v1.md docs/dev/project-management/prds/backlog/`.
 - [x] **00176 route-search-through-contract-v1** (DONE 2026-10-18, in `done/`; 2 cycles, 14/14 tasks) — routed `search()` through the app contract (CLI + GraphQL + REST), tail-swept tasks 11-14. Cycle 2 converged: 0 CRITICAL/HIGH unresolved; one settled medium deferral (ReadPool `skip_stale_check` blocks REINDEX_SKIPPED_FILES warnings from reaching concurrent server reads — architecture decision needed) plus structural/cosmetic lows (queries.rs/main.rs/ffi tests.rs over the 800-line limit, FFI driver duplication, review nits). Pat-clean on all tail-sweep tasks.
 
-### Remaining backlog (25 PRDs; not selected — 00177 now selected, see below)
+### Remaining backlog (24 PRDs; not selected — 00177 re-selected ahead of 00178, see below)
 
-**Selected: 00177-ffi-crud-through-contract-v1** (build/catchup, this session) — routes FFI `create_doogat`/`update_doogat` through `CreateCommand`/`UpdateCommand` (structured inputs, `on_conflict`, `BaseOnly` unregistered-type policy, warnings), retires the lossy FFI error-variant allowlist in favor of 00173's `ffi_variant`, and removes the raw FFI CRUD exports (public-beta replacement, no deprecation window). Depends on 00173 (done), 00172 (done), 00175 (STALLED in `hold/` — the FFI-record-with-warnings pattern it shares still exists in `ffi/records.rs` via `SchemaApplyReportRecord::from_output`, so this PRD is not blocked by 00175's stall).
+**Selected: 00177-ffi-crud-through-contract-v1** (build/catchup, this session) — routes FFI `create_doogat`/`update_doogat` through `CreateCommand`/`UpdateCommand` (structured inputs, `on_conflict`, `BaseOnly` unregistered-type policy, warnings), retires the lossy FFI error-variant allowlist, removes raw FFI CRUD exports. Had stalled at `plan_expansion` (`module_drift`, a planned-vs-PRD-task-count mismatch, not a content defect) and was parked to `hold/`; this session un-parked it and selected it ahead of 00178 because 00178's FFI leg (`create_structured`/`update_structured`) is an explicit, unimplemented dependency of 00178 — verified by grep, no such symbols exist yet. Its design doc already exists and passes the empty-review-log gate, so Phase 1.5 reused it; only `/autopilot:plan-tasks` needs to re-run with a corrected task/module split.
 
-- [ ] 00178-structured-fields-input-v1
+- [ ] 00178-structured-fields-input-v1 (depends on 00177, see above — do not select before 00177 lands)
+- [ ] 00179-sql-identifier-escaping-materializer-v1
 - [ ] 00179-sql-identifier-escaping-materializer-v1
 - [ ] 00180-server-security-resource-hardening-v1
 - [ ] 00181-index-health-quarantine-surface-v1

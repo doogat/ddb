@@ -339,3 +339,20 @@
 {"kind":"handoff","site":"done","edge":"leave","at":1792311143,"phase":"build","prd":"00176-route-search-through-contract-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792311168,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792312474,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792312496,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792312671,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"id":"92338685","kind":"tess","task":"1","queued_at":1792313158,"prompt_bytes":109140}
+{"id":"d8bfa9b1","kind":"tess","task":"1","queued_at":1792313175,"prompt_bytes":34892}
+{"id":"6186e4d1","kind":"devon","task":"1","queued_at":1792313545,"prompt_bytes":3678}
+{"id":"260522c2","kind":"ivan","task":"1","queued_at":1792314001,"prompt_bytes":81756}
+{"id":"42cd17c2","kind":"ivan","task":"1","queued_at":1792314025,"prompt_bytes":27051}
+{"id":"8459b1c1","kind":"deslop","task":"1","queued_at":1792314347,"prompt_bytes":6121}
+{"id":"5a197084","kind":"pat","task":"1","queued_at":1792314452,"prompt_bytes":33083}
+{"id":"92338685","ended_at":1792314566,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"d8bfa9b1","ended_at":1792314566,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"6186e4d1","ended_at":1792314566,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"260522c2","ended_at":1792314566,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"42cd17c2","ended_at":1792314566,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"8459b1c1","ended_at":1792314566,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"5a197084","ended_at":1792314566,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792314566,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
