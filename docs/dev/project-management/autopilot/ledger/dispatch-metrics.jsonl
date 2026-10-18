@@ -337,3 +337,5 @@
 {"kind":"handoff","site":"review","edge":"leave","at":1792310948,"phase":"done","prd":"00176-route-search-through-contract-v1.md"}
 {"kind":"handoff","site":"done","edge":"resume","at":1792310978,"phase":"done","prd":"00176-route-search-through-contract-v1.md"}
 {"kind":"handoff","site":"done","edge":"leave","at":1792311143,"phase":"build","prd":"00176-route-search-through-contract-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792311168,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792312474,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}

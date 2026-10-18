@@ -88,8 +88,9 @@ Generated: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `8
 - [!] **00175 route-read-delete-through-contract-v1** (STALLED, moved to `hold/`) — parked by the loop before this session; detail not re-derived here, see batch deferred JSON. Resume via `mv docs/dev/project-management/prds/hold/00175-route-read-delete-through-contract-v1.md docs/dev/project-management/prds/backlog/`.
 - [x] **00176 route-search-through-contract-v1** (DONE 2026-10-18, in `done/`; 2 cycles, 14/14 tasks) — routed `search()` through the app contract (CLI + GraphQL + REST), tail-swept tasks 11-14. Cycle 2 converged: 0 CRITICAL/HIGH unresolved; one settled medium deferral (ReadPool `skip_stale_check` blocks REINDEX_SKIPPED_FILES warnings from reaching concurrent server reads — architecture decision needed) plus structural/cosmetic lows (queries.rs/main.rs/ffi tests.rs over the 800-line limit, FFI driver duplication, review nits). Pat-clean on all tail-sweep tasks.
 
-### Remaining backlog (26 PRDs; not selected)
-- [ ] 00177-ffi-crud-through-contract-v1
+### Remaining backlog (25 PRDs; not selected — 00177 now selected, see below)
+
+**Selected: 00177-ffi-crud-through-contract-v1** (build/catchup, this session) — routes FFI `create_doogat`/`update_doogat` through `CreateCommand`/`UpdateCommand` (structured inputs, `on_conflict`, `BaseOnly` unregistered-type policy, warnings), retires the lossy FFI error-variant allowlist in favor of 00173's `ffi_variant`, and removes the raw FFI CRUD exports (public-beta replacement, no deprecation window). Depends on 00173 (done), 00172 (done), 00175 (STALLED in `hold/` — the FFI-record-with-warnings pattern it shares still exists in `ffi/records.rs` via `SchemaApplyReportRecord::from_output`, so this PRD is not blocked by 00175's stall).
 
 - [ ] 00178-structured-fields-input-v1
 - [ ] 00179-sql-identifier-escaping-materializer-v1
@@ -129,10 +130,10 @@ Numeric order = autopilot execution order (memory `project_ddb_growth_roadmap`);
 
 Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration shell scenarios to the Rust e2e crate`): only self-hits, 00171's own PRD file (repo and portfolio scope return the identical five rows, all within the PRD itself or adjacent Phase-2-titled sections of other backlog PRDs); no external prior art. Staleness stamp (`engram status --scope portfolio`, 2026-08-16, nonzero exit): memory stale=14, prd stale=1, transcripts stale=2 dead=5640, code stale=4 (skipped=3598), discovery/findings clean; many sibling repos report absent prd/decision/discovery layers. Review harvest: `dev/local/reviews/*-review-NN.md` files upserted (30 total, incl. 00170's two cycles); the `*-audit.md` renders still fail to parse (`missing frontmatter`) and are NOT harvested — the audit trail survives only as files, so it dies with a `dev/local` GC.
 
-## GitHub State (refreshed 2026-10-17, this session)
+## GitHub State (refreshed 2026-10-18, this session)
 
-- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 311 unreleased commits on master now.
-- **Nightly/Test RED on latest master commit `a7a5efdd`.** Failure is `cargo-deny`'s dependency-policy check, not a test regression: `unsafe-libyaml` unmaintained advisory (RUSTSEC-2024-0449, via deprecated `serde_yaml`) and two yanked-crate warnings (`chacha20` 0.10.0, `spin` 0.9.8) trip `advisories FAILED`. Unrelated to this session's PRD (00175); not yet triaged into a PRD of its own. Prior `server_mutations::batch_update_empty` ConnectionReset flake (`5b5f9eb2`) and CRLF/Windows sync-fold failure (`d7867d23`) are both superseded by this newer commit; not re-verified this session.
+- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 351 unreleased commits on master now (00176 landed since the 311 count).
+- **Nightly/Test RED on master commit `a7a5efdd`/`5b5f9eb2` (unchanged from last session) — still `cargo-deny`'s dependency-policy check (`unsafe-libyaml` unmaintained RUSTSEC-2024-0449 via deprecated `serde_yaml`; yanked `chacha20` 0.10.0, `spin` 0.9.8), not a test regression.** Unrelated to 00177; not yet triaged into its own PRD. The newest master commit (`83db619`, this session's autopilot state record) has a Test/Nightly run `in_progress` at catchup time — not yet resolved.
 
 ### Prior snapshot (2026-09-07)
 

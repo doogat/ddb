@@ -1132,6 +1132,13 @@
       "action": "deferred",
       "reason": "cosmetic, auto-fixable but deferred to keep cycle moving within budget",
       "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "type": "stall",
+      "site": "plan_expansion",
+      "detail": "module_drift; note docs/dev/project-management/autopilot/split-notes/00177-ffi-crud-through-contract-v1.md",
+      "op_id": "ff204285de36",
+      "prd": "00177-ffi-crud-through-contract-v1.md"
     }
   ]
 }
