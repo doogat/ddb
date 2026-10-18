@@ -439,3 +439,15 @@
 {"kind":"handoff","site":"review","edge":"leave","at":1792348914,"phase":"done","prd":"00177-ffi-crud-through-contract-v1.md"}
 {"kind":"handoff","site":"done","edge":"leave","at":1792349215,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
 {"kind":"handoff","site":"done","edge":"leave","at":1792349223,"phase":"build","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792349250,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"id":"c670d728","kind":"tess","task":"1","queued_at":1792350237,"prompt_bytes":88868}
+{"id":"731b1e0f","kind":"tess","task":"1","queued_at":1792350249,"prompt_bytes":44028}
+{"id":"bb135e16","kind":"devon","task":"1","queued_at":1792350667,"prompt_bytes":4613}
+{"id":"bb135e16","ended_at":1792350904,"elapsed_s":237,"outcome":"ok","detail":null}
+{"id":"bbb3de08","kind":"ivan","task":"1","queued_at":1792351089,"prompt_bytes":16045}
+{"id":"008000b2","kind":"pat","task":"1","queued_at":1792351642,"prompt_bytes":25936}
+{"id":"c670d728","ended_at":1792351732,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"731b1e0f","ended_at":1792351732,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"bbb3de08","ended_at":1792351732,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"008000b2","ended_at":1792351732,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792351732,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
