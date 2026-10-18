@@ -37,8 +37,15 @@ mod tests {
                 ]),
             ),
             ("m", Value::Map(nested)),
+            ("empty_s", Value::String(String::new())),
+            ("empty_l", Value::List(vec![])),
+            ("empty_m", Value::Map(BTreeMap::new())),
         ]
     }
+
+    /// The keys of `every_variant()` holding empty-but-present values, which
+    /// must never be mistaken for null.
+    const EMPTY_KEYS: [&str; 3] = ["empty_s", "empty_l", "empty_m"];
 
     #[test]
     fn create_passes_every_value_variant_through_unchanged() {
@@ -53,6 +60,12 @@ mod tests {
 
         let out = normalize_create_fields(raw(input));
 
+        for key in EMPTY_KEYS {
+            assert!(
+                out.contains_key(key),
+                "empty value at '{key}' is not null and must not be omitted, got {out:?}"
+            );
+        }
         assert_eq!(
             out, expected,
             "create must keep native Number/Bool variants, never coerce to strings"
@@ -95,6 +108,16 @@ mod tests {
         let (fields, unset) =
             normalize_update_fields(raw(input), vec![]).expect("plain sets must normalize");
 
+        for key in EMPTY_KEYS {
+            assert!(
+                fields.contains_key(key),
+                "an empty value set at '{key}' must stay a set, got {fields:?}"
+            );
+            assert!(
+                !unset.iter().any(|u| u == key),
+                "an empty value set at '{key}' must not become an unset, got {unset:?}"
+            );
+        }
         assert_eq!(fields, expected, "update must keep native value variants");
         assert!(unset.is_empty(), "plain sets must unset nothing, got {unset:?}");
     }
@@ -155,6 +178,79 @@ mod tests {
     }
 
     #[test]
+    fn update_deduplicates_a_key_repeated_within_explicit_unsets() {
+        let (fields, unset) = normalize_update_fields(
+            RawFieldsInput::new(),
+            vec!["a".to_string(), "a".to_string()],
+        )
+        .expect("a repeated explicit unset is not a collision");
+
+        assert!(fields.is_empty(), "no key was set, got {fields:?}");
+        assert_eq!(
+            unset,
+            vec!["a".to_string()],
+            "a key repeated in unsetFields must appear exactly once"
+        );
+    }
+
+    #[test]
+    fn update_keeps_every_unset_when_three_or_more_are_combined() {
+        let (fields, unset) = normalize_update_fields(
+            raw(vec![
+                ("null_a", None),
+                ("null_b", None),
+                ("kept", Some(Value::Number(3.0))),
+            ]),
+            vec!["explicit_c".to_string(), "explicit_d".to_string()],
+        )
+        .expect("disjoint null and explicit unsets must merge");
+
+        assert_eq!(fields.len(), 1, "only the set key belongs in fields, got {fields:?}");
+        assert_eq!(
+            sorted(unset),
+            vec![
+                "explicit_c".to_string(),
+                "explicit_d".to_string(),
+                "null_a".to_string(),
+                "null_b".to_string(),
+            ],
+            "every distinct unset key must be returned, none dropped"
+        );
+    }
+
+    #[test]
+    fn update_with_explicit_unsets_only_keeps_sets_and_unsets_apart() {
+        let (fields, unset) = normalize_update_fields(
+            raw(vec![("a", Some(Value::String("v".into())))]),
+            vec!["b".to_string()],
+        )
+        .expect("a set key and a different unset key must not collide");
+
+        let mut expected = BTreeMap::new();
+        expected.insert("a".to_string(), Value::String("v".into()));
+        assert_eq!(fields, expected, "the set key must stay in fields");
+        assert_eq!(
+            unset,
+            vec!["b".to_string()],
+            "the explicit unset must be returned as given"
+        );
+    }
+
+    type NormalizedUpdate = crate::error::Result<(BTreeMap<String, Value>, Vec<String>)>;
+
+    fn assert_collision_on_clash(result: NormalizedUpdate, case: &str) {
+        match result {
+            Err(DoogatError::Validation(msg)) => assert!(
+                msg.contains("clash"),
+                "{case}: the collision error must name the key 'clash', got {msg:?}"
+            ),
+            other => {
+                panic!("{case}: a set/unset collision must be a Validation error, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
     fn update_rejects_a_key_both_set_and_explicitly_unset() {
         let result = normalize_update_fields(
             raw(vec![
@@ -163,10 +259,27 @@ mod tests {
             ]),
             vec!["clash".to_string()],
         );
+        assert_collision_on_clash(result, "clash is the only unset");
 
-        match result {
-            Err(DoogatError::Validation(_)) => {}
-            other => panic!("a set/unset collision must be a Validation error, got {other:?}"),
+        let result = normalize_update_fields(
+            raw(vec![("clash", Some(Value::String("v".into())))]),
+            vec!["other".to_string(), "clash".to_string()],
+        );
+        assert_collision_on_clash(result, "clash is not the first unset");
+
+        let mut map = BTreeMap::new();
+        map.insert("k".to_string(), Value::Bool(true));
+        for (case, value) in [
+            ("Number value", Value::Number(1.0)),
+            ("Bool value", Value::Bool(false)),
+            ("List value", Value::List(vec![Value::Number(1.0)])),
+            ("Map value", Value::Map(map)),
+        ] {
+            let result = normalize_update_fields(
+                raw(vec![("clash", Some(value))]),
+                vec!["clash".to_string()],
+            );
+            assert_collision_on_clash(result, case);
         }
     }
 
