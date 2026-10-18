@@ -2,8 +2,11 @@
 //!
 //! Split out of `ffi.rs` per PRD 00156.
 
+use crate::app_contract::AppOutput;
 use crate::error::{DoogatError, ErrorContext, ErrorValue};
 use crate::sql_engine::SqlResult;
+use crate::types::{ConflictAction, ParsedDoogat, Value};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct DdbErrorContextEntry {
@@ -357,6 +360,199 @@ impl SchemaApplyReportRecord {
                     message: w.message,
                 })
                 .collect(),
+        }
+    }
+}
+
+/// FFI-safe scalar field value (one element of a [`FieldValue::List`]).
+/// Non-recursive on purpose: uniffi 0.29.5 cannot express recursion
+/// through `Vec`.
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum FieldScalar {
+    Str(String),
+    Num(f64),
+    Bool(bool),
+}
+
+/// FFI-safe structured field value.
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum FieldValue {
+    Str(String),
+    Num(f64),
+    Bool(bool),
+    List(Vec<FieldScalar>),
+}
+
+/// FFI-safe frontmatter field input. A `Vec` of these stands in for a map
+/// because UniFFI records need a concrete field order.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct FieldEntryValue {
+    pub key: String,
+    pub value: FieldValue,
+}
+
+fn field_scalar_to_core(v: FieldScalar) -> Value {
+    match v {
+        FieldScalar::Str(s) => Value::String(s),
+        FieldScalar::Num(n) => Value::Number(n),
+        FieldScalar::Bool(b) => Value::Bool(b),
+    }
+}
+
+#[cfg(test)]
+fn core_to_field_scalar(v: Value) -> Option<FieldScalar> {
+    match v {
+        Value::String(s) => Some(FieldScalar::Str(s)),
+        Value::Number(n) => Some(FieldScalar::Num(n)),
+        Value::Bool(b) => Some(FieldScalar::Bool(b)),
+        Value::List(_) | Value::Map(_) => None,
+    }
+}
+
+pub(super) fn field_value_to_core(v: FieldValue) -> Value {
+    match v {
+        FieldValue::Str(s) => Value::String(s),
+        FieldValue::Num(n) => Value::Number(n),
+        FieldValue::Bool(b) => Value::Bool(b),
+        FieldValue::List(items) => {
+            Value::List(items.into_iter().map(field_scalar_to_core).collect())
+        }
+    }
+}
+
+/// Convert a core value to its FFI form. Nested lists/maps inside a list are
+/// dropped with a warning; a top-level map degrades to an empty list.
+#[cfg(test)]
+pub(super) fn core_to_field_value(v: Value) -> FieldValue {
+    match v {
+        Value::String(s) => FieldValue::Str(s),
+        Value::Number(n) => FieldValue::Num(n),
+        Value::Bool(b) => FieldValue::Bool(b),
+        Value::List(items) => FieldValue::List(
+            items
+                .into_iter()
+                .filter_map(|item| {
+                    let scalar = core_to_field_scalar(item);
+                    if scalar.is_none() {
+                        tracing::warn!("dropping nested list/map element from FFI field list");
+                    }
+                    scalar
+                })
+                .collect(),
+        ),
+        Value::Map(_) => {
+            tracing::warn!("dropping map field value at the FFI boundary");
+            FieldValue::List(Vec::new())
+        }
+    }
+}
+
+pub(super) fn fields_to_core(fields: Vec<FieldEntryValue>) -> BTreeMap<String, Value> {
+    fields
+        .into_iter()
+        .map(|e| (e.key, field_value_to_core(e.value)))
+        .collect()
+}
+
+/// FFI-safe mirror of [`ConflictAction`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ConflictActionRecord {
+    Error,
+    Ignore,
+}
+
+impl From<ConflictActionRecord> for ConflictAction {
+    fn from(a: ConflictActionRecord) -> Self {
+        match a {
+            ConflictActionRecord::Error => ConflictAction::Error,
+            ConflictActionRecord::Ignore => ConflictAction::Ignore,
+        }
+    }
+}
+
+impl From<ConflictAction> for ConflictActionRecord {
+    fn from(a: ConflictAction) -> Self {
+        match a {
+            ConflictAction::Error => ConflictActionRecord::Error,
+            ConflictAction::Ignore => ConflictActionRecord::Ignore,
+        }
+    }
+}
+
+/// FFI-safe create result.
+#[derive(Debug, uniffi::Record)]
+pub struct CreateResultRecord {
+    pub id: String,
+    pub title: Option<String>,
+    pub doogat_type: Option<String>,
+    pub tags: Vec<String>,
+    pub path: String,
+    pub warnings: Vec<RebuildWarningRecord>,
+}
+
+/// FFI-safe update result.
+#[derive(Debug, uniffi::Record)]
+pub struct UpdateResultRecord {
+    pub id: String,
+    pub title: Option<String>,
+    pub doogat_type: Option<String>,
+    pub tags: Vec<String>,
+    pub path: String,
+    pub warnings: Vec<RebuildWarningRecord>,
+}
+
+/// Fields shared by the create and update result records, copied verbatim.
+type DoogatResultParts = (
+    String,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    String,
+    Vec<RebuildWarningRecord>,
+);
+
+fn doogat_result_parts(out: AppOutput<ParsedDoogat>) -> DoogatResultParts {
+    let meta = out.value.meta;
+    (
+        meta.id.map(|id| id.0).unwrap_or_default(),
+        meta.title,
+        meta.doogat_type,
+        meta.tags,
+        out.value.path,
+        out.warnings
+            .into_iter()
+            .map(|w| RebuildWarningRecord {
+                code: w.code.to_string(),
+                message: w.message,
+            })
+            .collect(),
+    )
+}
+
+impl CreateResultRecord {
+    pub(super) fn from_output(out: AppOutput<ParsedDoogat>) -> Self {
+        let (id, title, doogat_type, tags, path, warnings) = doogat_result_parts(out);
+        Self {
+            id,
+            title,
+            doogat_type,
+            tags,
+            path,
+            warnings,
+        }
+    }
+}
+
+impl UpdateResultRecord {
+    pub(super) fn from_output(out: AppOutput<ParsedDoogat>) -> Self {
+        let (id, title, doogat_type, tags, path, warnings) = doogat_result_parts(out);
+        Self {
+            id,
+            title,
+            doogat_type,
+            tags,
+            path,
+            warnings,
         }
     }
 }

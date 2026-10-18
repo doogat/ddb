@@ -16,7 +16,8 @@ pub enum UnregisteredTypePolicy {
     /// Create a base doogat (no typed validation) when `doogat_type` names a
     /// type with no registered `_typedef`, attaching an
     /// `UNREGISTERED_TYPE_BASE_ONLY` warning. The CLI uses this to preserve
-    /// the released (≤ v0.2.5) contract.
+    /// the released (≤ v0.2.5) contract. FFI `create` is the second
+    /// consumer and uses it for the same base-only behavior.
     BaseOnly,
 }
 
