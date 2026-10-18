@@ -37,7 +37,7 @@ pub(super) fn build_singleton_fields(schema: &TableSchema) -> (Field, Field) {
             FieldFuture::new(async move {
                 let a = ctx.data::<ActorHandle>()?;
                 let pool = ctx.data::<ReadPool>()?;
-                // Reuse the existing JSON-string fields transport so singleton
+                // Reuse the existing JSON-scalar fields transport so singleton
                 // typedef mutations stay aligned with updateDoogat without
                 // generating per-typedef input objects.
                 let raw = decode_json_fields_object(
