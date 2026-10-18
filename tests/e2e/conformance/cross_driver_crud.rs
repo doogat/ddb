@@ -177,10 +177,7 @@ fn search_value<'a>(driver: &str, step: usize, result: &'a super::result::Confor
 // within a 1e-9 relative tolerance (`search_hits_match`).
 #[test]
 fn filtered_search_returns_same_hits_and_full_field_set_on_cli_and_graphql() {
-    use super::comparator::{
-        anonymize_search_hits, parse_cli_search_hits, parse_graphql_search_hits,
-        search_hits_match,
-    };
+    use super::comparator::{anonymize_search_hits, parse_cli_search_hits, parse_graphql_search_hits};
 
     let fixture = workflows::filtered_search();
     let cli_results = CliDriver::new().run_workflow(&fixture);
@@ -188,20 +185,7 @@ fn filtered_search_returns_same_hits_and_full_field_set_on_cli_and_graphql() {
     assert_eq!(cli_results.len(), fixture.steps.len());
     assert_eq!(graphql_results.len(), fixture.steps.len());
 
-    // Seeding (typedefs + creates) must succeed on both before search parity
-    // means anything.
-    for (i, step) in fixture.steps.iter().enumerate() {
-        if step.op != super::fixture::StepOp::Search {
-            for (driver, results) in [("CLI", &cli_results), ("GraphQL", &graphql_results)] {
-                assert!(
-                    matches!(results[i], super::result::ConformanceResult::Ok { .. }),
-                    "{driver} seed step {i} ({:?}) should return Ok, got: {:?}",
-                    step.op,
-                    results[i]
-                );
-            }
-        }
-    }
+    assert_seed_steps_ok(&fixture, &cli_results, &graphql_results);
 
     let cli_created = created_ids(&fixture, &cli_results);
     let graphql_created = created_ids(&fixture, &graphql_results);
@@ -230,26 +214,59 @@ fn filtered_search_returns_same_hits_and_full_field_set_on_cli_and_graphql() {
         let graphql_hits = anonymize_search_hits(&graphql_hits, &graphql_created)
             .unwrap_or_else(|e| panic!("GraphQL search step {step} ({args}): {e}"));
 
-        let mut titles: Vec<&str> = cli_hits.iter().map(|h| h.title.as_str()).collect();
-        titles.sort_unstable();
-        assert_eq!(
-            titles, expected_titles,
-            "search step {step} ({args}) returned the wrong doogats"
-        );
-        assert!(
-            search_hits_match(&cli_hits, &graphql_hits),
-            "search step {step} ({args}): CLI and GraphQL hits differ\n  cli={cli_hits:?}\n  graphql={graphql_hits:?}"
-        );
+        assert_search_hits_shape(step, args, expected_titles, &cli_hits, &graphql_hits);
+    }
+}
 
-        // Typed hits must carry their type and typed fields; this keeps the
-        // field-set comparison from passing on two all-null transports.
-        for hit in &cli_hits {
-            if hit.title != "Plain note" {
+/// Seeding (typedefs + creates) must succeed on both drivers before search
+/// parity means anything.
+fn assert_seed_steps_ok(
+    fixture: &super::fixture::WorkflowFixture,
+    cli_results: &[super::result::ConformanceResult],
+    graphql_results: &[super::result::ConformanceResult],
+) {
+    for (i, step) in fixture.steps.iter().enumerate() {
+        if step.op != super::fixture::StepOp::Search {
+            for (driver, results) in [("CLI", cli_results), ("GraphQL", graphql_results)] {
                 assert!(
-                    hit.doogat_type.is_some() && hit.fields.is_some() && !hit.tags.is_empty(),
-                    "search step {step}: typed hit lost type/fields/tags: {hit:?}"
+                    matches!(results[i], super::result::ConformanceResult::Ok { .. }),
+                    "{driver} seed step {i} ({:?}) should return Ok, got: {:?}",
+                    step.op,
+                    results[i]
                 );
             }
+        }
+    }
+}
+
+/// Asserts a single `Search` step's hits match the expected title set, match
+/// across drivers, and (for non-"Plain note" hits) carry type/fields/tags.
+fn assert_search_hits_shape(
+    step: usize,
+    args: &impl std::fmt::Display,
+    expected_titles: &[&str],
+    cli_hits: &[super::comparator::SearchHitShape],
+    graphql_hits: &[super::comparator::SearchHitShape],
+) {
+    let mut titles: Vec<&str> = cli_hits.iter().map(|h| h.title.as_str()).collect();
+    titles.sort_unstable();
+    assert_eq!(
+        titles, expected_titles,
+        "search step {step} ({args}) returned the wrong doogats"
+    );
+    assert!(
+        super::comparator::search_hits_match(cli_hits, graphql_hits),
+        "search step {step} ({args}): CLI and GraphQL hits differ\n  cli={cli_hits:?}\n  graphql={graphql_hits:?}"
+    );
+
+    // Typed hits must carry their type and typed fields; this keeps the
+    // field-set comparison from passing on two all-null transports.
+    for hit in cli_hits {
+        if hit.title != "Plain note" {
+            assert!(
+                hit.doogat_type.is_some() && hit.fields.is_some() && !hit.tags.is_empty(),
+                "search step {step}: typed hit lost type/fields/tags: {hit:?}"
+            );
         }
     }
 }

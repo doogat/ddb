@@ -134,48 +134,57 @@ pub fn parse_cli_search_hits(stdout: &str) -> Result<Vec<SearchHitShape>, String
     }
     let mut hits = Vec::new();
     while let Some(head) = lines.next() {
-        let (id, title, path) = parse_cli_hit_head(head)?;
-        let snippet = cli_line(lines.next(), "  ", "snippet")?.to_string();
-
-        let meta = cli_line(lines.next(), "  type: ", "type/rank/tags")?;
-        let (doogat_type, rest) = split_cli(meta, "  rank: ")?;
-        let (rank, tags) = split_cli(rest, "  tags:")?;
-        let rank: f64 = rank
-            .parse()
-            .map_err(|e| format!("CLI rank {rank:?} is not a number: {e}"))?;
-        let tags = tags.trim_start();
-        let tags: Vec<String> = if tags.is_empty() {
-            vec![]
-        } else {
-            tags.split(", ").map(str::to_string).collect()
-        };
-
-        let stamps = cli_line(lines.next(), "  created: ", "created/updated")?;
-        let (created_at, updated_at) = split_cli(stamps, "  updated:")?;
-
-        let mut fields = BTreeMap::new();
-        while let Some(line) = lines.next_if(|l| l.starts_with("  ")) {
-            let (key, value) = split_cli(&line[2..], ":")?;
-            fields.insert(
-                key.to_string(),
-                value.strip_prefix(' ').unwrap_or(value).to_string(),
-            );
-        }
-
-        hits.push(SearchHitShape {
-            id,
-            title,
-            path,
-            snippet,
-            rank,
-            updated_at: updated_at.trim_start().to_string(),
-            tags,
-            doogat_type: cli_dash_none(doogat_type),
-            fields: (!fields.is_empty()).then_some(fields),
-            created_at: cli_dash_none(created_at),
-        });
+        hits.push(parse_cli_hit_block(head, &mut lines)?);
     }
     Ok(hits)
+}
+
+/// Decode one hit block (header line already consumed into `head`; the
+/// snippet/meta/stamps/fields lines that follow are pulled from `lines`).
+fn parse_cli_hit_block(
+    head: &str,
+    lines: &mut std::iter::Peekable<std::str::Lines>,
+) -> Result<SearchHitShape, String> {
+    let (id, title, path) = parse_cli_hit_head(head)?;
+    let snippet = cli_line(lines.next(), "  ", "snippet")?.to_string();
+
+    let meta = cli_line(lines.next(), "  type: ", "type/rank/tags")?;
+    let (doogat_type, rest) = split_cli(meta, "  rank: ")?;
+    let (rank, tags) = split_cli(rest, "  tags:")?;
+    let rank: f64 = rank
+        .parse()
+        .map_err(|e| format!("CLI rank {rank:?} is not a number: {e}"))?;
+    let tags = tags.trim_start();
+    let tags: Vec<String> = if tags.is_empty() {
+        vec![]
+    } else {
+        tags.split(", ").map(str::to_string).collect()
+    };
+
+    let stamps = cli_line(lines.next(), "  created: ", "created/updated")?;
+    let (created_at, updated_at) = split_cli(stamps, "  updated:")?;
+
+    let mut fields = BTreeMap::new();
+    while let Some(line) = lines.next_if(|l| l.starts_with("  ")) {
+        let (key, value) = split_cli(&line[2..], ":")?;
+        fields.insert(
+            key.to_string(),
+            value.strip_prefix(' ').unwrap_or(value).to_string(),
+        );
+    }
+
+    Ok(SearchHitShape {
+        id,
+        title,
+        path,
+        snippet,
+        rank,
+        updated_at: updated_at.trim_start().to_string(),
+        tags,
+        doogat_type: cli_dash_none(doogat_type),
+        fields: (!fields.is_empty()).then_some(fields),
+        created_at: cli_dash_none(created_at),
+    })
 }
 
 fn parse_cli_hit_head(head: &str) -> Result<(String, String, String), String> {

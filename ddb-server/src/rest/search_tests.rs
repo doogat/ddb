@@ -291,7 +291,13 @@ async fn rest_search_type_filter_returns_only_matching_hits_with_full_shape() {
         "type filter must keep only the recipe hit, got: {body}"
     );
 
-    let hit = hits[0].as_object().expect("hit must be a JSON object");
+    assert_hit_has_full_shape(&hits[0], &soup);
+}
+
+/// Asserts a REST search hit carries all ten core `SearchResult` fields with
+/// the values expected for the seeded "Soup" recipe.
+fn assert_hit_has_full_shape(hit_value: &Value, soup: &str) {
+    let hit = hit_value.as_object().expect("hit must be a JSON object");
     for key in [
         "id",
         "title",
@@ -307,24 +313,27 @@ async fn rest_search_type_filter_returns_only_matching_hits_with_full_shape() {
         assert!(
             hit.contains_key(key),
             "search hit must carry `{key}` (core SearchResult field), got: {}",
-            hits[0]
+            hit_value
         );
     }
-    assert_eq!(hits[0]["title"], "Soup");
-    assert_eq!(hits[0]["type"], "recipe", "doogat_type serializes as `type`");
-    assert_eq!(hits[0]["tags"], serde_json::json!(["dinner"]));
-    assert_eq!(hits[0]["fields"]["cuisine"], "thai");
+    assert_eq!(hit_value["title"], "Soup");
+    assert_eq!(
+        hit_value["type"], "recipe",
+        "doogat_type serializes as `type`"
+    );
+    assert_eq!(hit_value["tags"], serde_json::json!(["dinner"]));
+    assert_eq!(hit_value["fields"]["cuisine"], "thai");
     assert!(
-        hits[0]["path"].as_str().is_some_and(|p| p.contains(&soup)),
+        hit_value["path"].as_str().is_some_and(|p| p.contains(soup)),
         "path must name the doogat file, got: {}",
-        hits[0]
+        hit_value
     );
     assert!(
-        hits[0]["created_at"]
+        hit_value["created_at"]
             .as_str()
             .is_some_and(|c| !c.is_empty()),
         "created_at must carry the doogat date, got: {}",
-        hits[0]
+        hit_value
     );
 }
 
