@@ -451,3 +451,16 @@
 {"id":"bbb3de08","ended_at":1792351732,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
 {"id":"008000b2","ended_at":1792351732,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792351732,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792351751,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"id":"6687ad99","kind":"tess","task":"2","queued_at":1792351845,"prompt_bytes":41850}
+{"id":"536395db","kind":"tess","task":"2","queued_at":1792351849,"prompt_bytes":41850}
+{"id":"6687ad99","ended_at":1792352392,"elapsed_s":547,"outcome":"ok","detail":null}
+{"id":"536395db","ended_at":1792352395,"elapsed_s":546,"outcome":"ok","detail":null}
+{"id":"929367ca","kind":"devon","task":"2","queued_at":1792352421,"prompt_bytes":5054}
+{"id":"929367ca","ended_at":1792352598,"elapsed_s":177,"outcome":"ok","detail":null}
+{"id":"2b32831e","kind":"tess","task":"2","queued_at":1792352623,"prompt_bytes":4926}
+{"id":"2b32831e","ended_at":1792352733,"elapsed_s":110,"outcome":"ok","detail":null}
+{"id":"457a3953","kind":"ivan","task":"2","queued_at":1792352752,"prompt_bytes":49506}
+{"id":"74605d21","kind":"deslop","task":"2","queued_at":1792353119,"prompt_bytes":6104}
+{"id":"74605d21","ended_at":1792353153,"elapsed_s":34,"outcome":"ok","detail":null}
+{"id":"eb253046","kind":"pat","task":"2","queued_at":1792353210,"prompt_bytes":23372}
