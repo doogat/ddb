@@ -7,6 +7,8 @@ use crate::git_ops::GitRepo;
 use crate::service::DoogatService;
 use tempfile::TempDir;
 
+mod records_tests;
+
 fn fresh_driver() -> (TempDir, DoogatDriver) {
     let tmp = TempDir::new().unwrap();
     let driver = DoogatDriver::create_repo(tmp.path().to_str().unwrap().to_string()).unwrap();
