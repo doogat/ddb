@@ -13,6 +13,7 @@ use super::records::{
     empty_error_context, fields_to_core, AttachmentInfo, ConflictActionRecord, CreateResultRecord,
     DdbError, FieldEntryValue, PaginatedSearchResult, RebuildReport, RebuildWarningRecord,
     SchemaApplyReportRecord, SearchResult, SqlResultRecord, TypeSchemaRecord, UpdateResultRecord,
+    UpdateStructuredInput,
 };
 
 /// High-level facade for mobile/desktop FFI consumers.
@@ -97,27 +98,22 @@ impl DoogatDriver {
     }
 
     /// Update a doogat from structured input, routed through the app contract.
-    /// A `None` argument leaves the stored value unchanged; `unset_fields`
-    /// removes frontmatter keys.
+    /// A `None` field of `input` leaves the stored value unchanged;
+    /// `input.unset_fields` removes frontmatter keys.
     pub fn update_structured(
         &self,
         id: String,
-        title: Option<String>,
-        tags: Option<Vec<String>>,
-        doogat_type: Option<String>,
-        body: Option<String>,
-        fields: Vec<FieldEntryValue>,
-        unset_fields: Vec<String>,
+        input: UpdateStructuredInput,
     ) -> Result<UpdateResultRecord, DdbError> {
         self.with_service(|svc| {
             let cmd = crate::app_contract::UpdateCommand {
                 id,
-                title,
-                tags,
-                doogat_type,
-                body,
-                fields: fields_to_core(fields),
-                unset_fields,
+                title: input.title,
+                tags: input.tags,
+                doogat_type: input.doogat_type,
+                body: input.body,
+                fields: fields_to_core(input.fields),
+                unset_fields: input.unset_fields,
             };
             let out = svc.update(cmd).map_err(DdbError::from)?;
             Ok(UpdateResultRecord::from_output(out))

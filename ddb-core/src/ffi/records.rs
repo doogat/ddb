@@ -465,6 +465,18 @@ impl From<ConflictAction> for ConflictActionRecord {
     }
 }
 
+/// FFI-safe structured update input. A `None` field leaves the stored value
+/// unchanged; `unset_fields` removes frontmatter keys.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct UpdateStructuredInput {
+    pub title: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub doogat_type: Option<String>,
+    pub body: Option<String>,
+    pub fields: Vec<FieldEntryValue>,
+    pub unset_fields: Vec<String>,
+}
+
 /// FFI-safe create result.
 #[derive(Debug, uniffi::Record)]
 pub struct CreateResultRecord {

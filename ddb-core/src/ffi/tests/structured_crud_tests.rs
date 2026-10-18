@@ -5,7 +5,7 @@ use super::{fresh_driver, head_at, setup_app_config_singleton_typedef};
 use crate::error::codes::SINGLETON_VIOLATION;
 use crate::ffi::records::{
     ConflictActionRecord, DdbError, DdbErrorContextEntry, FieldEntryValue, FieldScalar, FieldValue,
-    RebuildWarningRecord,
+    RebuildWarningRecord, UpdateStructuredInput,
 };
 use crate::ffi::DoogatDriver;
 use crate::types::{DoogatMeta, ParsedDoogat, Value};
@@ -411,12 +411,14 @@ fn update_structured_unsets_key_and_sets_field_keeping_other_frontmatter() {
     let rec = driver
         .update_structured(
             created.id.clone(),
-            None,
-            None,
-            None,
-            None,
-            vec![field("theme_hint", "new")],
-            vec!["legacy_flag".into()],
+            UpdateStructuredInput {
+                title: None,
+                tags: None,
+                doogat_type: None,
+                body: None,
+                fields: vec![field("theme_hint", "new")],
+                unset_fields: vec!["legacy_flag".into()],
+            },
         )
         .expect("update_structured must succeed");
 
@@ -471,12 +473,14 @@ fn update_structured_applies_new_title_tags_type_and_body() {
     let rec = driver
         .update_structured(
             created.id.clone(),
-            Some("Renamed".into()),
-            Some(vec!["t2".into(), "t3".into()]),
-            Some("app_config".into()),
-            Some("Fresh body".into()),
-            vec![field("theme", "dark")],
-            vec![],
+            UpdateStructuredInput {
+                title: Some("Renamed".into()),
+                tags: Some(vec!["t2".into(), "t3".into()]),
+                doogat_type: Some("app_config".into()),
+                body: Some("Fresh body".into()),
+                fields: vec![field("theme", "dark")],
+                unset_fields: vec![],
+            },
         )
         .expect("update_structured must apply every Some argument");
 
@@ -526,12 +530,14 @@ fn update_structured_field_is_queryable_in_the_typed_table() {
     driver
         .update_structured(
             first_id.clone(),
-            None,
-            None,
-            None,
-            None,
-            vec![field("theme", "light")],
-            vec![],
+            UpdateStructuredInput {
+                title: None,
+                tags: None,
+                doogat_type: None,
+                body: None,
+                fields: vec![field("theme", "light")],
+                unset_fields: vec![],
+            },
         )
         .expect("update_structured must succeed");
 
@@ -551,12 +557,14 @@ fn update_structured_on_an_unknown_id_errors_without_creating_a_doogat() {
     let err = driver
         .update_structured(
             missing.to_string(),
-            Some("Ghost".into()),
-            None,
-            None,
-            Some("Ghost body".into()),
-            vec![field("theme_hint", "new")],
-            vec![],
+            UpdateStructuredInput {
+                title: Some("Ghost".into()),
+                tags: None,
+                doogat_type: None,
+                body: Some("Ghost body".into()),
+                fields: vec![field("theme_hint", "new")],
+                unset_fields: vec![],
+            },
         )
         .expect_err("updating an id that does not exist must error");
 
