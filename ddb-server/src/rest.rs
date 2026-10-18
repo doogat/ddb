@@ -623,13 +623,24 @@ mod tests {
             "b_true": true,
             "b_false": false,
             "l": ["a", 2, true],
-            "m": {"inner": -1.5, "flag": false},
+            "m": {"inner": -1.5, "flag": false, "Inner": "upper"},
+            "tenth": 0.1,
+            "huge": 1e300,
+            "big_int": 9_007_199_254_740_993_u64,
+            "n_str": "42",
+            "inf": "inf",
+            "ll": [[1, 2], []],
+            "lm": [{"k": 1}],
+            "MixedCase": "v",
         }))
         .expect("a JSON object of scalars and containers must decode");
 
         let mut nested = BTreeMap::new();
         nested.insert("inner".to_string(), DdbValue::Number(-1.5));
         nested.insert("flag".to_string(), DdbValue::Bool(false));
+        nested.insert("Inner".to_string(), DdbValue::String("upper".into()));
+        let mut list_item_map = BTreeMap::new();
+        list_item_map.insert("k".to_string(), DdbValue::Number(1.0));
         let expected = [
             ("s", DdbValue::String("true".into())),
             ("n", DdbValue::Number(42.0)),
@@ -645,6 +656,24 @@ mod tests {
                 ]),
             ),
             ("m", DdbValue::Map(nested)),
+            // f64 precision: none of these survive an f32 round trip.
+            ("tenth", DdbValue::Number(0.1)),
+            ("huge", DdbValue::Number(1e300)),
+            ("big_int", DdbValue::Number(9_007_199_254_740_993_u64 as f64)),
+            // Numeric-looking strings stay strings.
+            ("n_str", DdbValue::String("42".into())),
+            ("inf", DdbValue::String("inf".into())),
+            // Nested lists and objects inside lists keep their shape.
+            (
+                "ll",
+                DdbValue::List(vec![
+                    DdbValue::List(vec![DdbValue::Number(1.0), DdbValue::Number(2.0)]),
+                    DdbValue::List(vec![]),
+                ]),
+            ),
+            ("lm", DdbValue::List(vec![DdbValue::Map(list_item_map)])),
+            // Keys keep their case, top-level and nested.
+            ("MixedCase", DdbValue::String("v".into())),
         ];
         assert_eq!(raw.len(), expected.len(), "no key may be dropped, got {raw:?}");
         for (key, want) in expected {
@@ -688,6 +717,31 @@ mod tests {
             Ok(None),
             "a top-level JSON null maps to None"
         );
+        assert_eq!(
+            json_scalar_to_opt_value(json!("x")),
+            Ok(Some(DdbValue::String("x".into()))),
+            "a non-null value must decode to Some"
+        );
+        assert_eq!(
+            json_scalar_to_opt_value(json!(0.1)),
+            Ok(Some(DdbValue::Number(0.1)))
+        );
+        assert_eq!(
+            json_scalar_to_opt_value(json!(false)),
+            Ok(Some(DdbValue::Bool(false)))
+        );
+        assert_eq!(
+            json_scalar_to_opt_value(json!(["a", 1])),
+            Ok(Some(DdbValue::List(vec![
+                DdbValue::String("a".into()),
+                DdbValue::Number(1.0),
+            ])))
+        );
+        let nested_null = json_scalar_to_opt_value(json!(["a", null]));
+        assert!(
+            nested_null.is_err(),
+            "a null nested in a list is not a top-level signal, got {nested_null:?}"
+        );
     }
 
     #[test]
@@ -698,6 +752,9 @@ mod tests {
             ("null in object", json!({"m": {"inner": null}})),
             ("null in list inside list", json!({"l": [[1, null]]})),
             ("null in object inside list", json!({"l": [{"k": null}]})),
+            ("null in object inside object", json!({"m": {"a": {"b": null}}})),
+            ("null in list inside object", json!({"m": {"l": [null]}})),
+            ("null in list three lists deep", json!({"l": [[[null]]]})),
         ] {
             let result = json_value_to_fields_input(fields);
             assert!(
@@ -714,6 +771,9 @@ mod tests {
             ("plain string", json!("hello")),
             ("number", json!(5)),
             ("array", json!([{"a": 1}])),
+            ("bool true", json!(true)),
+            ("bool false", json!(false)),
+            ("null", serde_json::Value::Null),
         ] {
             let result = json_value_to_fields_input(fields);
             assert!(
