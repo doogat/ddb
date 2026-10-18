@@ -138,7 +138,7 @@ fn integration_45_g13_title_template_omit() {
     );
 
     let created = server.graphql(
-        r#"mutation { createDoogat(input: {type: "g13link", fields: "{\"url\":\"https://example.com\"}"}) { id title } }"#,
+        r#"mutation { createDoogat(input: {type: "g13link", fields: {url: "https://example.com"}}) { id title } }"#,
     );
     assert!(
         created.get("errors").is_none(),
@@ -159,7 +159,7 @@ fn integration_45_g13_title_template_omit() {
     );
 
     let created_plain = server.graphql(
-        r#"mutation { createDoogat(input: {type: "g13plain", fields: "{\"url\":\"https://x\"}"}) { id } }"#,
+        r#"mutation { createDoogat(input: {type: "g13plain", fields: {url: "https://x"}}) { id } }"#,
     );
     assert!(
         created_plain.get("errors").is_some(),
@@ -182,8 +182,8 @@ fn integration_45_g12_intra_batch_ignore_surviving_id() {
     let result = server.graphql(
         r#"mutation {
             createMany(inputs: [
-                {title: "A", type: "g12item", fields: "{\"code\":\"K1\",\"label\":\"first\"}"},
-                {title: "A Dup", type: "g12item", fields: "{\"code\":\"K1\",\"label\":\"second\"}"}
+                {title: "A", type: "g12item", fields: {code: "K1", label: "first"}},
+                {title: "A Dup", type: "g12item", fields: {code: "K1", label: "second"}}
             ], onConflict: IGNORE) { id title }
         }"#,
     );

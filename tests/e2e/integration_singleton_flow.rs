@@ -45,7 +45,7 @@ fn integration_51_a_singleton_graphql_flow() {
     );
 
     let update_before_row = server.graphql(
-        r#"mutation { update_ig_app_config(input: "{\"theme\":\"dark\"}") { id theme } }"#,
+        r#"mutation { update_ig_app_config(input: {theme: "dark"}) { id theme } }"#,
     );
     assert!(
         update_before_row.get("errors").is_some(),
@@ -58,7 +58,7 @@ fn integration_51_a_singleton_graphql_flow() {
     );
 
     let first_upsert = server.graphql(
-        r#"mutation { upsert_ig_app_config(input: "{\"theme\":\"dark\"}") { id created } }"#,
+        r#"mutation { upsert_ig_app_config(input: {theme: "dark"}) { id created } }"#,
     );
     assert!(
         first_upsert.get("errors").is_none(),
@@ -87,7 +87,7 @@ fn integration_51_a_singleton_graphql_flow() {
     );
 
     let second_upsert = server.graphql(
-        r#"mutation { upsert_ig_app_config(input: "{\"theme\":\"light\"}") { id created } }"#,
+        r#"mutation { upsert_ig_app_config(input: {theme: "light"}) { id created } }"#,
     );
     assert!(
         second_upsert.get("errors").is_none(),
@@ -105,7 +105,7 @@ fn integration_51_a_singleton_graphql_flow() {
     );
 
     let update = server.graphql(
-        r#"mutation { update_ig_app_config(input: "{\"theme\":\"auto\"}") { id theme } }"#,
+        r#"mutation { update_ig_app_config(input: {theme: "auto"}) { id theme } }"#,
     );
     assert!(update.get("errors").is_none(), "update failed: {update}");
     assert_eq!(
@@ -120,7 +120,7 @@ fn integration_51_a_singleton_graphql_flow() {
     );
 
     let second_row = server.graphql(
-        r#"mutation { createDoogat(input: {type: "ig_app_config", title: "x", fields: "{\"theme\":\"system\"}"}) { id } }"#,
+        r#"mutation { createDoogat(input: {type: "ig_app_config", title: "x", fields: {theme: "system"}}) { id } }"#,
     );
     assert!(
         second_row.get("errors").is_some(),

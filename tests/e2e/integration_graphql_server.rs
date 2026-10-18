@@ -136,7 +136,7 @@ fn integration_18d_search_filter_by_type_and_tag() {
             "title": "SearchFilter Alpha",
             "type": "link",
             "tags": ["sf-tag"],
-            "fields": "{\"url\":\"https://example.com/sf1\"}"
+            "fields": { "url": "https://example.com/sf1" }
         }),
     );
     let beta = create_doogat(
@@ -148,7 +148,7 @@ fn integration_18d_search_filter_by_type_and_tag() {
         json!({
             "title": "SearchFilter Gamma",
             "type": "link",
-            "fields": "{\"url\":\"https://example.com/sf3\"}"
+            "fields": { "url": "https://example.com/sf3" }
         }),
     );
 

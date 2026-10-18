@@ -109,8 +109,8 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 
 - **Old behavior**: REST `POST/PUT /rest/doogats` typed payloads silently wrote only the base-doogat shape; type-specific tables were not populated atomically.
 - **New behavior**: REST typed *update* shipped earlier via `UpdateBody.fields`. REST typed *create* ships in PRD 00149 via the new `CreateBody.fields` member on the generic `POST /rest/doogats` endpoint (not a per-type route). Both are now expressible via the `fields` body member, with interface-local e2e coverage.
-- **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-string body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update).
-- **Required client changes**: add a `fields` JSON-string member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
+- **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-object body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update). (A JSON string until PRD 00178; see D-14.)
+- **Required client changes**: add a `fields` JSON-object member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
 ##### FFI not-found error variant on `get` (D-05)
 
 - **Old behavior**: FFI `DoogatDriver.read_doogat` throws `DdbError.io(msg)` with the substring `"not found"` when the id is missing.
@@ -139,8 +139,8 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 
 - **Old behavior**: REST `POST/PUT /rest/doogats` typed payloads routed through the base endpoint without atomic typed-column population (no per-type route shape).
 - **New behavior**: REST typed *update* shipped earlier via `UpdateBody.fields`. REST typed *create* ships in PRD 00149 via the new `CreateBody.fields` member on the generic `POST /rest/doogats` endpoint. Both populate typed columns through the unified AppCommand on the same base route — there is no per-type route shape, and none is planned.
-- **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-string body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update). Same base routes; no per-type routes.
-- **Required client changes**: add a `fields` JSON-string member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
+- **Replacement interface**: `POST /rest/doogats` with a `fields` JSON-object body member (typed create); `PUT /rest/doogats/:id` with a `fields` body member (typed update). Same base routes; no per-type routes. (A JSON string until PRD 00178; see D-14.)
+- **Required client changes**: add a `fields` JSON-object member to the create/update body to populate typed columns. Untyped create/update (no `fields`) is unchanged.
 ##### CLI warnings (D-10)
 
 - **Old behavior**: CLI warnings emit as human-readable text on stderr; no machine-readable envelope.
@@ -165,6 +165,12 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 - **New behavior**: planned structured-warnings field on FFI return types (e.g. `AppOutput<T>`-equivalent UniFFI record carrying `warnings: Vec<WarningEntry>`); not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will add the structured-warnings surface.
 - **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; FFI consumers needing warnings today must read them through GraphQL.
+##### Structured `fields` input on REST and GraphQL (D-14)
+
+- **Old behavior**: REST `fields` and GraphQL `fields` / singleton `input` took a JSON-encoded string (`"{\"done\":true}"`), declared `String` in GraphQL.
+- **New behavior**: PRD 00178 takes a native JSON object; booleans and numbers keep their type. A top-level `null` omits the key on create and unsets it on update. The encoded string is rejected (REST: HTTP 400 `VALIDATION_ERROR`; GraphQL: an error with the hint `migrate the GraphQL variable type to JSON`); it is never reparsed.
+- **Replacement interface**: `fields: { done: true }` on REST bodies and on `CreateDoogatInput`, `CreateManyItemInput`, `UpdateDoogatInput`; `input: { theme: "dark" }` on `update_<type>` / `upsert_<type>`. These GraphQL arguments are typed `JSON`.
+- **Required client changes**: send the object, not `JSON.stringify(...)` of it; change GraphQL variable declarations from `String` to `JSON` (`$input: String!` to `$input: JSON!` for singletons). This is a direct beta migration with no deprecation window (maintainer decision). FFI is unaffected.
 ### CRUD baseline
 
 Every public application interface supports the CRUD baseline operations listed below. Labels use the [promise vocabulary](#promise-labels). Per-interface evidence lives in the conformance harness (`tests/e2e/conformance/`) and the interface-local e2e suites.

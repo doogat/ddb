@@ -106,7 +106,7 @@ fn rest_search_returns_matching_results() {
     );
 }
 
-/// POST /rest/doogats with a `fields` JSON string populates typed columns on the created doogat.
+/// POST /rest/doogats with a `fields` JSON object populates typed columns on the created doogat.
 /// Registers a type via `CREATE TABLE item (category TEXT, priority INTEGER)`, creates a doogat
 /// of that type with typed fields, then reads the typed data back via `executeSql` SELECT to
 /// confirm the field values round-trip exactly.
@@ -131,7 +131,7 @@ fn rest_typed_create_populates_typed_columns() {
         json!({
             "title": "REST Typed Item",
             "type": "item",
-            "fields": "{\"category\":\"books\",\"priority\":\"1\"}"
+            "fields": { "category": "books", "priority": "1" }
         }),
     );
     assert_eq!(

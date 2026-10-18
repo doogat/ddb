@@ -158,7 +158,7 @@ fn integration_44_k_create_doogat_auto_junction() {
         .to_string();
 
     let created = server.graphql(&format!(
-        r#"mutation {{ createDoogat(input: {{ type: "j134_bm", title: "K", fields: "{{\"url\":\"https://k.example\",\"category\":\"{cat_id}\"}}" }}) {{ id }} }}"#
+        r#"mutation {{ createDoogat(input: {{ type: "j134_bm", title: "K", fields: {{url: "https://k.example", category: "{cat_id}"}} }}) {{ id }} }}"#
     ));
     assert!(
         created.get("errors").is_none(),

@@ -76,6 +76,26 @@ rather than a failed call. The field is required — there is no `Default` on
 `CreateCommand`, so every transport consciously states its policy. See
 `docs/src/guide/building-apps.md` for the per-interface contract matrix.
 
+### Structured `fields` input (PRD 00178)
+
+`fields` arrives from every transport as a native map, never a JSON-encoded
+string. Transports decode their wire shape into one `RawFieldsInput`
+(`BTreeMap<String, Option<Value>>`, where `None` is an explicit `null`), then
+call the shared normalizers in `app_contract/fields_normalize.rs`:
+
+- `normalize_create_fields` drops `None` keys, so a `null` on create omits the key.
+- `normalize_update_fields` moves `None` keys into `unset_fields`, so a `null`
+  on update unsets the key. No literal `null` text is ever written.
+
+REST (`CreateBody`/`UpdateBody.fields` as a JSON object), GraphQL (`fields` and
+singleton `input` typed `JSON`), and FFI (`Vec<FieldEntryValue>` plus
+`unset_fields`) all route through these two functions, so null handling cannot
+drift per transport. The old encoded-string form is rejected as `InvalidInput`
+on REST and GraphQL. This was a direct beta migration with no deprecation window
+(maintainer decision); see `compatibility-checklist.md` for the migration notes.
+The conformance harness covers the GraphQL leg only (`typed_fields_create`); its
+REST driver is owned by stalled PRD 00175 and is a known follow-up.
+
 Per AGENTS.md: "no `rusqlite`, `git2`, `redb`, `axum`, or `async_graphql` in `ddb-core/src/types/**`; convert at adapter boundaries." The same rule applies here. Commands carry only domain types (e.g. `crate::types::Value`) and `std` types.
 
 ## Search: `SearchCommand`, `PageRequest`, `AppSearchResult`

@@ -56,7 +56,7 @@ fn integration_45_a1_cross_mutation_parity_after_unique_failure() {
 
     // (b) createDoogat still works on the same table
     let created = server.graphql(
-        r#"mutation { createDoogat(input: { type: "a1item", title: "created-after-rollback", fields: "{\"name\":\"unique2\"}" }) { id title } }"#,
+        r#"mutation { createDoogat(input: { type: "a1item", title: "created-after-rollback", fields: {name: "unique2"} }) { id title } }"#,
     );
     assert!(
         created.get("errors").is_none(),

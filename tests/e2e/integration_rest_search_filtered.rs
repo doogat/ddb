@@ -37,14 +37,14 @@ fn seed(server: &ServerGuard) {
         server,
         json!({
             "title": "Thai soup", "body": format!("{TERM} soup"), "type": "rsf_recipe",
-            "tags": ["dinner"], "fields": "{\"cuisine\":\"thai\"}",
+            "tags": ["dinner"], "fields": { "cuisine": "thai" },
         }),
     );
     rest_create(
         server,
         json!({
             "title": "Lime cake", "body": format!("{TERM} cake"), "type": "rsf_dessert",
-            "tags": ["dinner", "sweet"], "fields": "{\"cuisine\":\"thai\"}",
+            "tags": ["dinner", "sweet"], "fields": { "cuisine": "thai" },
         }),
     );
     rest_create(

@@ -14,7 +14,7 @@ fn integration_45_g11_tags_filter_nullable_operators() {
     );
 
     let created = server.graphql(
-        r#"mutation { createDoogat(input: {title: "Tagged", type: "g11link", tags: ["rust", "sql"], fields: "{\"url\":\"https://example.com\"}"}) { id } }"#,
+        r#"mutation { createDoogat(input: {title: "Tagged", type: "g11link", tags: ["rust", "sql"], fields: {url: "https://example.com"}}) { id } }"#,
     );
     assert!(
         created.get("errors").is_none(),

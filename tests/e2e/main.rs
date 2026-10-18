@@ -49,6 +49,7 @@ mod integration_singleton_parity;
 mod integration_singleton_races;
 mod integration_sql_no_match;
 mod integration_sql_writes;
+mod integration_structured_fields_input;
 mod integration_sync;
 mod integration_sync_decoupling;
 mod integration_tags_filter;

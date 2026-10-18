@@ -21,12 +21,12 @@ fn two_concurrent_graphql_upserts_on_singleton_converge_on_one_row() {
     let (r1, r2) = std::thread::scope(|s| {
         let t1 = s.spawn(|| {
             server.graphql(
-                r#"mutation { upsert_app_config(input: "{\"theme\":\"dark\"}") { id created } }"#,
+                r#"mutation { upsert_app_config(input: {theme: "dark"}) { id created } }"#,
             )
         });
         let t2 = s.spawn(|| {
             server.graphql(
-                r#"mutation { upsert_app_config(input: "{\"theme\":\"dark\"}") { id created } }"#,
+                r#"mutation { upsert_app_config(input: {theme: "dark"}) { id created } }"#,
             )
         });
         (t1.join().unwrap(), t2.join().unwrap())
@@ -218,12 +218,12 @@ fn two_server_processes_racing_upsert_on_singleton_converge_on_one_row() {
     let (r1, r2) = std::thread::scope(|s| {
         let t1 = s.spawn(|| {
             server_a.graphql(
-                r#"mutation { upsert_app_config(input: "{\"theme\":\"dark\"}") { id created } }"#,
+                r#"mutation { upsert_app_config(input: {theme: "dark"}) { id created } }"#,
             )
         });
         let t2 = s.spawn(|| {
             server_b.graphql(
-                r#"mutation { upsert_app_config(input: "{\"theme\":\"dark\"}") { id created } }"#,
+                r#"mutation { upsert_app_config(input: {theme: "dark"}) { id created } }"#,
             )
         });
         (t1.join().unwrap(), t2.join().unwrap())

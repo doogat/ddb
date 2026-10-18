@@ -110,10 +110,16 @@ Returns `{ "data": { ... } }` or `404` if not found.
 POST /rest/doogats
 Content-Type: application/json
 
-{ "title": "...", "body": "...", "tags": ["..."], "type": "..." }
+{ "title": "...", "body": "...", "tags": ["..."], "type": "...", "fields": { "done": true, "priority": 3 } }
 ```
 
 Returns `201 Created` with `{ "data": { ... } }`.
+
+`fields` (optional) is a JSON object of typed column values (PRD 00178). Booleans, numbers, strings, lists, and nested objects keep their JSON type. A top-level `null` value omits that key on create and unsets it on update; no literal `null` text is written. A `null` nested inside a list or object is rejected. `"fields": null` or no `fields` member means no fields.
+
+**Direct beta migration, no deprecation window (maintainer decision).** Before PRD 00178 `fields` was a JSON-encoded string (`"fields": "{\"done\":true}"`). That form, and any other non-object value, is now rejected with HTTP 400 `VALIDATION_ERROR`; it is never reparsed. Send the object itself.
+
+Known gap: the cross-interface conformance harness (`tests/e2e/conformance/`) has no REST driver, so the `typed_fields_create` fixture runs only on GraphQL. REST coverage lives in the e2e scenario `tests/e2e/integration_structured_fields_input.rs`. The REST driver is owned by PRD 00175 (stalled) and is a tracked follow-up.
 
 ### Update Doogat
 
@@ -121,10 +127,10 @@ Returns `201 Created` with `{ "data": { ... } }`.
 PUT /rest/doogats/:id
 Content-Type: application/json
 
-{ "title": "...", "body": "..." }
+{ "title": "...", "body": "...", "fields": { "note": null } }
 ```
 
-All fields are optional (partial update). Returns `{ "data": { ... } }`.
+All fields are optional (partial update). `fields` follows the create rules above; a `null` value unsets that key. Returns `{ "data": { ... } }`.
 
 ### Delete Doogat
 

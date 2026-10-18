@@ -140,6 +140,41 @@ Fixtures that pin these shapes: `tests/e2e/integration_rest_search_filtered.rs`
 (`tests/e2e/conformance/workflows.rs`, CLI and GraphQL), and the FFI tests in
 `ddb-core/src/ffi/tests.rs`.
 
+## Compatibility notes: structured fields input (PRD 00178)
+
+Request-shape change, breaking, on REST and GraphQL. FFI already took native
+values (PRD 00177) and is unaffected.
+
+- **What breaks.** REST clients that send `fields` as a JSON-encoded string
+  (`"fields": "{\"done\":true}"`) now get HTTP 400 `VALIDATION_ERROR`. GraphQL
+  clients that send `fields` (on `CreateDoogatInput`, `CreateManyItemInput`,
+  `UpdateDoogatInput`) or singleton `input` as an encoded string get an error
+  with the hint `migrate the GraphQL variable type to JSON`. Operations that
+  declare those variables as `String` must be retyped to `JSON`. The server
+  does not reject the `String` declaration at validation time; the encoded
+  value is rejected at execution, and nothing is written. Old input is never
+  reparsed.
+- **Why no deprecation window.** Maintainer decision: ddb is in beta, and a
+  dual-shape period would keep a second decoder (and its null and type rules)
+  alive per transport. This is a direct beta migration.
+- **New semantics.** Values keep their JSON type (`true` stays a boolean, `3`
+  stays a number). A top-level `null` omits the key on create and unsets it on
+  update. A `null` nested in a list or object is rejected.
+- **What downstream consumers (jink) must do.** Drop `JSON.stringify` around
+  `fields` / singleton `input` and send the object. Change GraphQL variable
+  declarations from `String` to `JSON` (`String!` to `JSON!` for singleton
+  `input`). Use `null` for a field to clear it on update, or keep using
+  `unsetFields`. Ship this together with the ddb upgrade; there is no release
+  that accepts both shapes.
+- **Fixtures.** `tests/e2e/integration_structured_fields_input.rs` (GraphQL,
+  REST, FFI: native types, null omit/unset, encoded-string rejection) and the
+  `typed_fields_create` conformance fixture (GraphQL leg only).
+- **Known gap.** The conformance harness has no REST driver, so REST is pinned
+  only by the e2e scenario. The REST driver belongs to stalled PRD 00175 and is
+  a tracked follow-up.
+- **Revert path.** Revert the PRD 00178 commits; there is no data migration,
+  since stored documents are unchanged by the request-shape switch.
+
 ## Correctness fixes override compatibility
 
 Silent-data-loss and invalid-write behaviors must be fixed even when a

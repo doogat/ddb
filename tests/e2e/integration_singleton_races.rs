@@ -168,7 +168,7 @@ fn integration_55_c_graphql_create_doogat_singleton_insert_race() {
     let themes = ["typed-dark", "typed-light"];
     let mutations = themes.map(|theme| {
         format!(
-            r#"mutation {{ createDoogat(input: {{ type: "ig_race_typed", title: "x", fields: "{{\"theme\":\"{theme}\"}}" }}) {{ id }} }}"#
+            r#"mutation {{ createDoogat(input: {{ type: "ig_race_typed", title: "x", fields: {{theme: "{theme}"}} }}) {{ id }} }}"#
         )
     });
     let responses = race_graphql(&server, &mutations);

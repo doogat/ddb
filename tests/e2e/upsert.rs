@@ -77,7 +77,7 @@ fn create_many_on_conflict_ignore_returns_existing() {
     let r1 = server.graphql(
         r#"mutation {
             createMany(inputs: [
-                {title: "Widget ABC", type: "product", fields: "{\"code\":\"ABC\",\"label\":\"First\"}"}
+                {title: "Widget ABC", type: "product", fields: {code: "ABC", label: "First"}}
             ]) { id title }
         }"#,
     );
@@ -91,7 +91,7 @@ fn create_many_on_conflict_ignore_returns_existing() {
     let r2 = server.graphql(
         r#"mutation {
             createMany(
-                inputs: [{title: "Widget ABC Dup", type: "product", fields: "{\"code\":\"ABC\",\"label\":\"Second\"}"}],
+                inputs: [{title: "Widget ABC Dup", type: "product", fields: {code: "ABC", label: "Second"}}],
                 onConflict: IGNORE
             ) { id title }
         }"#,
@@ -123,7 +123,7 @@ fn create_many_without_on_conflict_errors_on_duplicate() {
     let r1 = server.graphql(
         r#"mutation {
             createMany(inputs: [
-                {title: "Widget XYZ", type: "product", fields: "{\"code\":\"XYZ\",\"label\":\"First\"}"}
+                {title: "Widget XYZ", type: "product", fields: {code: "XYZ", label: "First"}}
             ]) { id }
         }"#,
     );
@@ -133,7 +133,7 @@ fn create_many_without_on_conflict_errors_on_duplicate() {
     let r2 = server.graphql(
         r#"mutation {
             createMany(inputs: [
-                {title: "Widget XYZ Dup", type: "product", fields: "{\"code\":\"XYZ\",\"label\":\"Second\"}"}
+                {title: "Widget XYZ Dup", type: "product", fields: {code: "XYZ", label: "Second"}}
             ]) { id }
         }"#,
     );
@@ -152,7 +152,7 @@ fn create_many_on_conflict_ignore_mixed_new_and_existing() {
     let r1 = server.graphql(
         r#"mutation {
             createMany(inputs: [
-                {title: "Product AAA", type: "product", fields: "{\"code\":\"AAA\",\"label\":\"Original\"}"}
+                {title: "Product AAA", type: "product", fields: {code: "AAA", label: "Original"}}
             ]) { id title }
         }"#,
     );
@@ -167,8 +167,8 @@ fn create_many_on_conflict_ignore_mixed_new_and_existing() {
         r#"mutation {
             createMany(
                 inputs: [
-                    {title: "Product AAA dup", type: "product", fields: "{\"code\":\"AAA\",\"label\":\"Dup\"}"},
-                    {title: "Product BBB", type: "product", fields: "{\"code\":\"BBB\",\"label\":\"New\"}"}
+                    {title: "Product AAA dup", type: "product", fields: {code: "AAA", label: "Dup"}},
+                    {title: "Product BBB", type: "product", fields: {code: "BBB", label: "New"}}
                 ],
                 onConflict: IGNORE
             ) { id title }

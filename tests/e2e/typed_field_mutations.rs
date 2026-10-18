@@ -59,7 +59,7 @@ fn update_doogat_with_fields_updates_materialized_row() {
         serde_json::json!({
             "input": {
                 "id": id,
-                "fields": "{\"url\":\"https://new.com\"}"
+                "fields": { "url": "https://new.com" }
             }
         }),
     );
@@ -161,8 +161,8 @@ fn batch_update_with_per_item_fields() {
     // Batch update with per-item fields
     let query = format!(
         r#"mutation {{ batchUpdate(updates: [
-            {{id: "{id1}", fields: "{{\"url\":\"https://a-updated.com\"}}"}},
-            {{id: "{id2}", fields: "{{\"url\":\"https://b-updated.com\"}}"}}
+            {{id: "{id1}", fields: {{url: "https://a-updated.com"}}}},
+            {{id: "{id2}", fields: {{url: "https://b-updated.com"}}}}
         ]) {{ id title }} }}"#,
     );
     let r = server.graphql(&query);
@@ -237,8 +237,8 @@ fn delete_doogat_cleans_materialized_row() {
 
 /// `updateDoogat` with a JSON-array value for a declared scalar column must
 /// return a client-visible error and leave the materialized row unchanged.
-/// This covers GraphQL transport JSON parsing; service-layer structured-value
-/// validation is exercised by unit tests.
+/// Since PRD 00178 the list decodes natively, so the service-layer
+/// structured-value check is what rejects it.
 #[test]
 fn update_doogat_with_json_array_field_returns_error_and_leaves_content_unchanged() {
     let repo = DdbTestRepo::init();
@@ -272,14 +272,14 @@ fn update_doogat_with_json_array_field_returns_error_and_leaves_content_unchange
         serde_json::json!({
             "input": {
                 "id": id,
-                "fields": "{\"content\":[\"item1\",\"item2\"]}"
+                "fields": { "content": ["item1", "item2"] }
             }
         }),
     );
     let error_message = r["errors"][0]["message"].as_str().unwrap_or("");
     assert!(
-        error_message.contains("invalid fields JSON"),
-        "updateDoogat with a JSON-array field value must return a fields JSON error; got: {r}"
+        error_message.contains("expects a scalar"),
+        "updateDoogat with a JSON-array value for a scalar column must be rejected; got: {r}"
     );
 
     let rows = select_objects(

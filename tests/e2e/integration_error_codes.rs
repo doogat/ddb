@@ -28,7 +28,7 @@ fn integration_49_1_unique_violation_extensions_code() {
     let (_repo, server) = setup_puv_link();
 
     let first = server.graphql(
-        r#"mutation { createDoogat(input: {type: "puv_link", title: "first", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}) { id } }"#,
+        r#"mutation { createDoogat(input: {type: "puv_link", title: "first", fields: {slug: "hn", space: "news"}}) { id } }"#,
     );
     assert!(
         first.get("errors").is_none(),
@@ -36,7 +36,7 @@ fn integration_49_1_unique_violation_extensions_code() {
     );
 
     let dup = server.graphql(
-        r#"mutation { createDoogat(input: {type: "puv_link", title: "dup", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}) { id } }"#,
+        r#"mutation { createDoogat(input: {type: "puv_link", title: "dup", fields: {slug: "hn", space: "news"}}) { id } }"#,
     );
     assert!(
         dup.get("errors").is_some(),
@@ -67,7 +67,7 @@ fn integration_49_2_not_null_violation_extensions_code() {
     let (_repo, server) = setup_puv_link();
 
     let result = server.graphql(
-        r#"mutation { createDoogat(input: {type: "puv_link", title: "missing-slug", fields: "{\"space\":\"news\"}"}) { id } }"#,
+        r#"mutation { createDoogat(input: {type: "puv_link", title: "missing-slug", fields: {space: "news"}}) { id } }"#,
     );
     assert!(
         result.get("errors").is_some(),
@@ -90,13 +90,13 @@ fn integration_49_3_createmany_error_extensions_code() {
     let (_repo, server) = setup_puv_link();
 
     let seed = server.graphql(
-        r#"mutation { createDoogat(input: {type: "puv_link", title: "first", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}) { id } }"#,
+        r#"mutation { createDoogat(input: {type: "puv_link", title: "first", fields: {slug: "hn", space: "news"}}) { id } }"#,
     );
     assert!(seed.get("errors").is_none(), "seed create failed: {seed}");
 
     let result = server.graphql(
         r#"mutation { createMany(
-            inputs: [{type: "puv_link", title: "cm-dup", fields: "{\"slug\":\"hn\",\"space\":\"news\"}"}],
+            inputs: [{type: "puv_link", title: "cm-dup", fields: {slug: "hn", space: "news"}}],
             onConflict: ERROR
         ) { id } }"#,
     );
@@ -118,8 +118,8 @@ fn integration_49_4_createmany_intra_batch_error_extensions_code() {
     let result = server.graphql(
         r#"mutation { createMany(
             inputs: [
-                {type: "puv_link", title: "cm-a", fields: "{\"slug\":\"twin\",\"space\":\"news\"}"},
-                {type: "puv_link", title: "cm-b", fields: "{\"slug\":\"twin\",\"space\":\"news\"}"}
+                {type: "puv_link", title: "cm-a", fields: {slug: "twin", space: "news"}},
+                {type: "puv_link", title: "cm-b", fields: {slug: "twin", space: "news"}}
             ],
             onConflict: ERROR
         ) { id } }"#,

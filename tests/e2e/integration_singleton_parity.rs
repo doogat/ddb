@@ -85,7 +85,7 @@ fn integration_54_d_cross_protocol_singleton_duplicate_parity() {
         .assert()
         .success();
     let plain_typed = server.graphql(
-        r#"mutation { createDoogat(input: { type: "ig_parity_plain", title: "third", fields: "{\"theme\":\"q3\"}" }) { id } }"#,
+        r#"mutation { createDoogat(input: { type: "ig_parity_plain", title: "third", fields: {theme: "q3"} }) { id } }"#,
     );
     assert!(
         plain_typed.get("errors").is_none(),
@@ -118,7 +118,7 @@ fn integration_54_d_cross_protocol_singleton_duplicate_parity() {
 
     // GraphQL typed createDoogat: the same rejection, through the other mutation path.
     let gql_typed = server.graphql(
-        r#"mutation { createDoogat(input: { type: "ig_parity_cfg", title: "x", fields: "{\"theme\":\"p3\"}" }) { id } }"#,
+        r#"mutation { createDoogat(input: { type: "ig_parity_cfg", title: "x", fields: {theme: "p3"} }) { id } }"#,
     );
     let (typed_code, typed_table) = singleton_error_extensions(&gql_typed, "GraphQL createDoogat");
     assert_eq!(

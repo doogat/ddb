@@ -452,7 +452,7 @@ fn hyphenated_singleton_uses_snake_case_query_and_mutation_fields() {
 
     let update = server.graphql(
         r#"mutation {
-            update_foo_bar(input: "{\"theme\":\"light\"}") {
+            update_foo_bar(input: {theme: "light"}) {
                 id
                 theme
             }
@@ -475,7 +475,7 @@ fn hyphenated_singleton_uses_snake_case_query_and_mutation_fields() {
 
     let second_upsert = server.graphql(
         r#"mutation {
-            upsert_foo_bar(input: "{\"theme\":\"blue\"}") {
+            upsert_foo_bar(input: {theme: "blue"}) {
                 id
                 created
             }
@@ -657,8 +657,8 @@ fn create_many_with_type_and_fields() {
 
     let result = server.graphql(
         r#"mutation { createMany(inputs: [
-            {title: "Item 1", type: "item", fields: "{\"category\":\"books\",\"priority\":\"1\"}"},
-            {title: "Item 2", type: "item", fields: "{\"category\":\"music\",\"priority\":\"2\"}"}
+            {title: "Item 1", type: "item", fields: {category: "books", priority: "1"}},
+            {title: "Item 2", type: "item", fields: {category: "music", priority: "2"}}
         ]) { id title type } }"#,
     );
     assert!(

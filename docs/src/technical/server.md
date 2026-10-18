@@ -302,9 +302,9 @@ type Mutation {
   compact(force: Boolean): CompactResult!
 }
 
-input CreateDoogatInput { title: String!, content: String, tags: [String!], type: String }
-input CreateManyItemInput { title: String!, content: String, tags: [String!], type: String, fields: String }
-input UpdateDoogatInput { id: ID!, title: String, content: String, tags: [String!], type: String, fields: String, unsetFields: [String!] }
+input CreateDoogatInput { title: String!, content: String, tags: [String!], type: String, fields: JSON }
+input CreateManyItemInput { title: String!, content: String, tags: [String!], type: String, fields: JSON }
+input UpdateDoogatInput { id: ID!, title: String, content: String, tags: [String!], type: String, fields: JSON, unsetFields: [String!] }
 input AttachFileInput { doogatId: ID!, filename: String!, dataBase64: String!, mime: String }
 
 enum ConflictAction { ERROR, IGNORE }
@@ -324,7 +324,13 @@ type CompactResult {
 }
 ```
 
-`updateDoogat` accepts optional `fields` (a JSON string of key-value pairs, e.g. `"{\"url\":\"https://example.com\"}"`) to set type-specific frontmatter fields, and `unsetFields` (a list of field names to remove). When the doogat has a type with a typedef, `allowed_values` and foreign-key constraints are validated before the write. The materialized type table row is updated in place after the change.
+#### Structured `fields` input (PRD 00178)
+
+`fields` on `CreateDoogatInput`, `CreateManyItemInput`, and `UpdateDoogatInput`, and the `input` argument of the singleton `update_<type>` / `upsert_<type>` mutations, are typed `JSON`: pass a native JSON object, e.g. `fields: { done: true, priority: 3 }` inline or `{"done": true, "priority": 3}` as a variable value. Booleans, numbers, strings, lists, and nested objects keep their JSON type. A top-level `null` value is a per-field signal: on create it omits the key, on update it unsets the key (same as listing it in `unsetFields`). No literal `null` text is written. A `null` nested inside a list or object is rejected. An explicit `fields: null` means "no fields".
+
+**Direct beta migration, no deprecation window (maintainer decision).** Before PRD 00178 these arguments were a JSON-encoded `String` (`fields: "{\"url\":\"https://x\"}"`). That form is now rejected with `fields must be a JSON object, not a JSON-encoded string (migrate the GraphQL variable type to JSON)`; it is never reparsed. Clients must change both the value (send an object, not a string) and every operation variable declaration that carries it: `$fields: String` becomes `$fields: JSON`, and a singleton `$input: String!` becomes `$input: JSON!`. Note: the server does not reject a `String`-declared variable at validation time; an operation that keeps it and still sends the encoded string fails at execution with the error above and writes nothing.
+
+`updateDoogat` accepts optional `fields` (a JSON object of key-value pairs, e.g. `{ url: "https://example.com" }`) to set type-specific frontmatter fields, and `unsetFields` (a list of field names to remove). When the doogat has a type with a typedef, `allowed_values` and foreign-key constraints are validated before the write. The materialized type table row is updated in place after the change.
 
 `batchUpdate` applies multiple updates atomically in a single git commit. All updates must succeed or none are applied. If any ID is not found, the entire batch fails with no changes committed. An empty updates array returns an empty array with no git commit. Reuses `UpdateDoogatInput` so `fields` and `unsetFields` work per-item in a batch.
 
@@ -334,7 +340,7 @@ type CompactResult {
 
 `CreateDoogatInput.title` and `CreateManyItemInput.title` are nullable (PRD 00130 / issue #13). When `title` is omitted on a typedef that declares a `title_template`, the engine renders the title server-side from the template — the same path the SQL `INSERT` already used. Without a template (or for an untyped create), an omitted title rejects with `NOT_NULL_VIOLATION` on the `title` column.
 
-`createMany` creates multiple doogats atomically in a single git commit. All records are created or none (rollback on any failure). Returns created records in input order. The optional `fields` parameter accepts a JSON string of key-value pairs for typed columns (e.g. `"{\"category\":\"books\",\"priority\":\"1\"}"`). When the record has a type with a typedef, column defaults (including `DEFAULT NEXT` auto-increment) are resolved automatically for omitted fields. Allowed-value and foreign-key constraints are validated per record.
+`createMany` creates multiple doogats atomically in a single git commit. All records are created or none (rollback on any failure). Returns created records in input order. The optional `fields` parameter accepts a JSON object of key-value pairs for typed columns (e.g. `{ category: "books", priority: 1 }`). When the record has a type with a typedef, column defaults (including `DEFAULT NEXT` auto-increment) are resolved automatically for omitted fields. Allowed-value and foreign-key constraints are validated per record.
 
 Both `createDoogat` and `createMany` accept an optional `onConflict` argument. When set to `IGNORE`, if the new record would violate a `unique_together` constraint on the typedef, creation is skipped and the existing doogat is returned instead. When omitted or set to `ERROR` (default), a unique constraint violation returns an error. The pre-check queries the materialized typedef table directly (e.g. `SELECT id FROM "<type>" WHERE col1 = ? AND col2 = ?`) so it sees the same source of truth the SQL path's `UNIQUE` index uses, regardless of which zone the columns route to. (PRD 00133: pre-PRD-00133 the pre-check joined `_ddb_fields` which only indexes frontmatter, so unique_together silently stopped catching duplicates once typed creates routed TEXT columns to body.) The caller must pass the constrained columns via `fields`.
 
@@ -358,8 +364,8 @@ type Query {
 }
 
 type Mutation {
-  update_<type_name>(input: String!): <TypeName>!         # no id arg; rejects with SINGLETON_NOT_FOUND when empty
-  upsert_<type_name>(input: String!): UpsertResult!       # returns { id, created }
+  update_<type_name>(input: JSON!): <TypeName>!           # no id arg; rejects with SINGLETON_NOT_FOUND when empty
+  upsert_<type_name>(input: JSON!): UpsertResult!         # returns { id, created }
   # plus the existing createDoogat / updateDoogat (the latter still requires id and works on the singleton row)
 }
 
@@ -651,7 +657,7 @@ Every registered typedef adds a matching nested accessor to the base `Doogat` Gr
 
 ```graphql
 mutation {
-  createDoogat(input: {type: "link", title: "x", fields: "{\"url\":\"https://x\"}"}) {
+  createDoogat(input: {type: "link", title: "x", fields: {url: "https://x"}}) {
     id title
     link { url description }
   }
@@ -1054,7 +1060,7 @@ Promise labels (`Guaranteed`, `Specialized`, `Intentionally absent`, `Deprecated
 
 ### GraphQL
 
-No deprecated behavior. `Specialized` capabilities for GraphQL: bundle export/import (CLI is the canonical workflow; GraphQL exposes the engine for orchestration).
+No deprecated behavior. PRD 00178 removed the JSON-encoded `String` form of `fields` and singleton `input` as a direct beta migration with no deprecation window (see "Structured `fields` input" above). `Specialized` capabilities for GraphQL: bundle export/import (CLI is the canonical workflow; GraphQL exposes the engine for orchestration).
 
 ### REST
 

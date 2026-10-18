@@ -58,6 +58,8 @@ pub struct DoogatMeta {
 
 All fields are optional. The `extra` map captures any YAML fields not in the core schema, preserved through parse/serialize round-trips.
 
+Typed writes fill `extra` from a native JSON object on every transport (PRD 00178): REST and GraphQL `fields` are a JSON object (no longer a JSON-encoded string), and FFI passes `Vec<FieldEntryValue>`. Value types survive: `{ "done": true, "priority": 3 }` lands as `done: true` and `priority: 3.0` (core numbers are `f64`), not as quoted strings. A `null` never becomes a stored value: on create it omits the key, on update it removes the key from `extra`. This was a direct beta migration with no deprecation window (maintainer decision); GraphQL clients must also retype their `fields` variables from `String` to `JSON`. See [compatibility-checklist.md](compatibility-checklist.md#compatibility-notes-structured-fields-input-prd-00178).
+
 #### Reserved extra fields
 
 The `attachments` key in `extra` is managed by the attachments module. It holds a list of `AttachmentInfo` records serialized as YAML maps:
