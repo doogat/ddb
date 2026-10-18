@@ -46,6 +46,19 @@ Ivan:
 
 Known gap recorded in the task: the test cannot distinguish a native boolean from a stringified one at this layer, because core coerces both to the column's declared type before either the stored frontmatter or the SQL index see them. A regression here would need an untyped field or a server-level unit test to catch.
 
+## 5: E2E scenarios, docs, CHANGELOG, walkthrough, compat review for object-form fields
+
+Ivan:
+- Migrating the 27 e2e tests that tasks 1-4 broke (still sending the old encoded-string `fields`/singleton `input`) is in scope, as part of "do not break any existing e2e test".
+- The walkthrough prefix is `00001` because `dev/local/walkthroughs/` did not exist yet.
+- Extended scope to `docs/src/guide/building-apps.md` because the compatibility checklist mandates a Migration Note there, and two existing decision notes (D-04, D-09) told clients to send a JSON string.
+- FFI has no encoded-string or null `fields` input shape, so its error leg does not apply rather than being a gap.
+- `priority: 3.0` (core numbers are f64) counts as "stored as a number" for the happy-path acceptance criterion.
+
+**Finding, not fixed in this task (production code, out of scope for a docs/test task):** the PRD text and this task's own brief claim a GraphQL `String`-typed variable for `fields` "fails schema validation." It does not — a `$f: String` variable is accepted by the custom `JSON` scalar (`Scalar::new("JSON")`) and only fails at the fields-decoder step, with the same migration-pointing error message as a string literal. Data is never written and nothing is silently reparsed, so there is no correctness bug, but the hard validation-time break described in the PRD does not exist. Flag for the PRD-level review: either accept the current (safe, just later-than-advertised) rejection point, or open a follow-up to make the `JSON` scalar reject a `String`-typed variable at validation time.
+
+One e2e assertion changed as a side effect of the fix (not a weakening): `typed_field_mutations::update_doogat_with_json_array_field...` now expects "expects a scalar" instead of "invalid fields JSON" — the array now decodes natively, so the service-layer scalar check is what rejects it, not the old JSON-string parse.
+
 ## 2: REST: accept object fields through boundary decoder + core normalization
 
 Tess (initial):
