@@ -569,8 +569,8 @@ fn update_structured_on_an_unknown_id_errors_without_creating_a_doogat() {
         .expect_err("updating an id that does not exist must error");
 
     match err {
-        DdbError::NotFound { .. } | DdbError::Validation { .. } => {}
-        other => panic!("expected a not-found/validation error for an unknown id, got {other:?}"),
+        DdbError::NotFound { .. } => {}
+        other => panic!("expected exactly a NotFound error for an unknown id, got {other:?}"),
     }
     assert_eq!(
         doogat_paths(&driver),
@@ -580,5 +580,36 @@ fn update_structured_on_an_unknown_id_errors_without_creating_a_doogat() {
     assert!(
         driver.read_doogat(missing.to_string()).is_err(),
         "the unknown id must still not resolve after the failed update"
+    );
+}
+
+#[test]
+fn update_structured_to_an_unregistered_type_forwards_the_base_only_warning() {
+    let (_tmp, driver) = fresh_driver();
+    let created = create_note_with_two_fields(&driver);
+
+    let rec = driver
+        .update_structured(
+            created.id.clone(),
+            UpdateStructuredInput {
+                title: None,
+                tags: None,
+                doogat_type: Some("unregistered_widget".into()),
+                body: None,
+                fields: vec![],
+                unset_fields: vec![],
+            },
+        )
+        .expect("update_structured switching to an unregistered type must not error");
+
+    assert_eq!(
+        codes_of(&rec.warnings),
+        vec![UNREGISTERED_TYPE_BASE_ONLY],
+        "switching to an unregistered type must forward exactly the base-only warning code"
+    );
+    assert!(
+        rec.warnings.iter().all(|w| !w.message.is_empty()),
+        "the forwarded warning must carry a non-empty message, got {:?}",
+        rec.warnings
     );
 }

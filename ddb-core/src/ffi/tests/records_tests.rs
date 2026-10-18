@@ -530,3 +530,125 @@ fn update_result_record_reflects_a_real_update_output() {
         .collect();
     assert_eq!(got, expected_warnings);
 }
+
+/// Every structured-CRUD input/output type must be reachable from the
+/// crate's own public re-export path (`crate::ffi::<Type>`), not only from
+/// the private `crate::ffi::records` module. Without the re-export, this
+/// `use` fails to compile, so an external caller cannot name or construct
+/// these types to call `create_structured`/`update_structured`.
+#[test]
+fn structured_crud_types_are_reexported_from_the_ffi_module_root() {
+    use crate::ffi::{
+        ConflictActionRecord, CreateResultRecord, FieldEntryValue, FieldScalar, FieldValue,
+        UpdateResultRecord, UpdateStructuredInput,
+    };
+
+    let entry = FieldEntryValue {
+        key: "k".into(),
+        value: FieldValue::List(vec![FieldScalar::Str("v".into())]),
+    };
+    let input = UpdateStructuredInput {
+        title: None,
+        tags: None,
+        doogat_type: None,
+        body: None,
+        fields: vec![entry],
+        unset_fields: vec![],
+    };
+    assert_eq!(
+        input.fields.len(),
+        1,
+        "the publicly re-exported input type must be constructible from outside `ffi::records`"
+    );
+    assert_eq!(ConflictActionRecord::Error, ConflictActionRecord::Error);
+
+    fn assert_reexported<T>() {}
+    assert_reexported::<CreateResultRecord>();
+    assert_reexported::<UpdateResultRecord>();
+}
+
+/// Create a doogat whose body, meta fields, sections and links are all
+/// non-trivial, so a conversion that drops any of them is observable.
+fn create_with_rich_payload(dir: &std::path::Path) -> AppOutput<ParsedDoogat> {
+    let svc = DoogatService::init(dir).expect("init repo");
+    let mut fields = BTreeMap::new();
+    fields.insert("date".to_string(), Value::String("2026-01-01".into()));
+    fields.insert("extra_field".to_string(), Value::String("extra_value".into()));
+    svc.create(CreateCommand {
+        title: Some("Rich Doogat".into()),
+        tags: vec!["one".into()],
+        doogat_type: None,
+        body: Some("## Heading\n\nSome text with a [link](target.md).".into()),
+        fields,
+        on_conflict: ConflictAction::Error,
+        unregistered_type_policy: UnregisteredTypePolicy::BaseOnly,
+    })
+    .expect("create with a rich payload must succeed")
+}
+
+#[test]
+fn create_result_record_mirrors_body_extra_sections_links_and_updated_at() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = create_with_rich_payload(tmp.path());
+
+    let expected_body = out.value.body.clone();
+    let expected_date = format!("{:?}", out.value.meta.date);
+    let expected_extra = format!("{:?}", out.value.meta.extra);
+    let expected_sections = format!("{:?}", out.value.sections);
+    let expected_links = format!("{:?}", out.value.links);
+    let expected_updated_at = format!("{:?}", out.value.updated_at);
+
+    let rec = CreateResultRecord::from_output(out);
+
+    assert_eq!(rec.body, expected_body, "the record must carry the stored body");
+    assert_eq!(format!("{:?}", rec.date), expected_date, "the record must carry meta.date");
+    assert_eq!(format!("{:?}", rec.extra), expected_extra, "the record must carry meta.extra");
+    assert_eq!(format!("{:?}", rec.sections), expected_sections, "the record must carry sections");
+    assert_eq!(format!("{:?}", rec.links), expected_links, "the record must carry links");
+    assert_eq!(
+        format!("{:?}", rec.updated_at),
+        expected_updated_at,
+        "the record must carry updated_at"
+    );
+}
+
+#[test]
+fn update_result_record_mirrors_body_extra_sections_links_and_updated_at() {
+    let tmp = tempfile::tempdir().unwrap();
+    let created = create_with_rich_payload(tmp.path());
+    let id = created.value.meta.id.as_ref().expect("created doogat has an id").0.clone();
+    let svc = DoogatService::open(tmp.path()).expect("open repo");
+    let mut fields = BTreeMap::new();
+    fields.insert("date".to_string(), Value::String("2026-02-02".into()));
+    let out = svc
+        .update(UpdateCommand {
+            id,
+            title: None,
+            tags: None,
+            doogat_type: None,
+            body: Some("## New Heading\n\nUpdated text with a [link](new-target.md).".into()),
+            fields,
+            unset_fields: Vec::new(),
+        })
+        .expect("update with a rich payload must succeed");
+
+    let expected_body = out.value.body.clone();
+    let expected_date = format!("{:?}", out.value.meta.date);
+    let expected_extra = format!("{:?}", out.value.meta.extra);
+    let expected_sections = format!("{:?}", out.value.sections);
+    let expected_links = format!("{:?}", out.value.links);
+    let expected_updated_at = format!("{:?}", out.value.updated_at);
+
+    let rec = UpdateResultRecord::from_output(out);
+
+    assert_eq!(rec.body, expected_body, "the record must carry the stored body");
+    assert_eq!(format!("{:?}", rec.date), expected_date, "the record must carry meta.date");
+    assert_eq!(format!("{:?}", rec.extra), expected_extra, "the record must carry meta.extra");
+    assert_eq!(format!("{:?}", rec.sections), expected_sections, "the record must carry sections");
+    assert_eq!(format!("{:?}", rec.links), expected_links, "the record must carry links");
+    assert_eq!(
+        format!("{:?}", rec.updated_at),
+        expected_updated_at,
+        "the record must carry updated_at"
+    );
+}
