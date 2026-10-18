@@ -16,18 +16,54 @@ use crate::events;
 #[derive(Clone)]
 pub(crate) struct TypeSchemaMap(pub Arc<HashMap<String, TableSchema>>);
 
-/// Parse a JSON string of type-specific fields into a BTreeMap keyed by column name.
-/// All values are converted to `Value::String` since the transport layers only accept strings.
-/// Returns a plain String error; callers wrap it in their transport-specific error type.
-pub(crate) fn parse_fields_json(
-    json_str: &str,
-) -> Result<std::collections::BTreeMap<String, Value>, String> {
-    let map: std::collections::BTreeMap<String, String> =
-        serde_json::from_str(json_str).map_err(|e| format!("invalid fields JSON: {e}"))?;
-    Ok(map
-        .into_iter()
-        .map(|(k, v)| (k, Value::String(v)))
-        .collect())
+/// Decode a `JSON`-scalar object into `RawFieldsInput`, keeping native value
+/// variants. A top-level `Null` becomes `None` (a per-field null signal); a
+/// null nested inside a list or object is rejected with an error naming the
+/// offending key path.
+pub(crate) fn decode_json_fields_object(
+    obj: &IndexMap<Name, GqlValue>,
+) -> Result<ddb_core::app_contract::RawFieldsInput, String> {
+    obj.iter()
+        .map(|(k, v)| {
+            let value = match v {
+                GqlValue::Null => None,
+                other => Some(gql_to_value_strict(other, k.as_str())?),
+            };
+            Ok((k.to_string(), value))
+        })
+        .collect()
+}
+
+/// Convert a non-top-level JSON value; `path` names the location for errors.
+fn gql_to_value_strict(v: &GqlValue, path: &str) -> Result<Value, String> {
+    Ok(match v {
+        GqlValue::Null => {
+            return Err(format!(
+                "field '{path}': null is not allowed inside a nested list or object"
+            ))
+        }
+        GqlValue::String(s) => Value::String(s.clone()),
+        GqlValue::Number(n) => Value::Number(
+            n.as_f64()
+                .ok_or_else(|| format!("field '{path}': non-finite number"))?,
+        ),
+        GqlValue::Boolean(b) => Value::Bool(*b),
+        GqlValue::List(items) => Value::List(
+            items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| gql_to_value_strict(item, &format!("{path}[{i}]")))
+                .collect::<Result<_, _>>()?,
+        ),
+        GqlValue::Object(map) => Value::Map(
+            map.iter()
+                .map(|(k, item)| {
+                    Ok((k.to_string(), gql_to_value_strict(item, &format!("{path}.{k}"))?))
+                })
+                .collect::<Result<_, String>>()?,
+        ),
+        other => return Err(format!("field '{path}': unsupported value {other:?}")),
+    })
 }
 
 // -- Value converters --

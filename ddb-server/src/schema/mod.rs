@@ -639,8 +639,8 @@ mod tests {
             "SDL should contain singleton update mutation signature, got:\n{sdl}"
         );
         assert!(
-            sdl.contains("input: String!"),
-            "SDL should use String input for singleton update mutation, got:\n{sdl}"
+            sdl.contains("input: JSON!"),
+            "SDL should use JSON input for singleton update mutation, got:\n{sdl}"
         );
         assert!(
             sdl.contains("): App_config!"),
@@ -669,8 +669,8 @@ mod tests {
             "SDL should contain singleton upsert mutation signature, got:\n{sdl}"
         );
         assert!(
-            sdl.contains("input: String!"),
-            "SDL should use String input for singleton upsert mutation, got:\n{sdl}"
+            sdl.contains("input: JSON!"),
+            "SDL should use JSON input for singleton upsert mutation, got:\n{sdl}"
         );
         assert!(
             sdl.contains("): UpsertResult!"),

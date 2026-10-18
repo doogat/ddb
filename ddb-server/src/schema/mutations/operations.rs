@@ -12,7 +12,8 @@ use crate::warning_extension::forward_warnings;
 
 use crate::schema::base_types::*;
 use crate::schema::input::{
-    conflict_action, fields_map, opt_fields_map, opt_string, opt_string_list, string_list,
+    conflict_action, fields_and_unsets, fields_map, opt_fields_and_unsets, opt_string,
+    opt_string_list, string_list,
 };
 
 pub(super) fn build_create_doogat_field() -> Field {
@@ -60,9 +61,8 @@ pub(super) fn build_update_doogat_field() -> Field {
             let content = opt_string(map, "content");
             let tags = opt_string_list(map, "tags");
             let doogat_type = opt_string(map, "type");
-            let fields =
-                fields_map(map).map_err(|msg| async_graphql::ServerError::new(msg, None))?;
-            let unset_fields = string_list(map, "unsetFields");
+            let (fields, unset_fields) = fields_and_unsets(map)
+                .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
             let output = a
                 .update_doogat(crate::actor::UpdateDoogatParams {
                     id,
@@ -100,9 +100,12 @@ pub(super) fn build_batch_update_field() -> Field {
                 let body = opt_string(map, "content");
                 let tags = opt_string_list(map, "tags");
                 let doogat_type = opt_string(map, "type");
-                let fields = opt_fields_map(map)
-                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
-                let unset_fields = opt_string_list(map, "unsetFields");
+                let (fields, unset_fields) = match opt_fields_and_unsets(map)
+                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?
+                {
+                    Some((fields, unsets)) => (Some(fields), Some(unsets)),
+                    None => (None, opt_string_list(map, "unsetFields")),
+                };
                 updates.push(BatchUpdateInput {
                     id,
                     title,

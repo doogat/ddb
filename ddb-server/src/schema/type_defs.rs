@@ -434,7 +434,7 @@ pub(crate) fn build_type_defs() -> TypeDefs {
             TypeRef::named_list(TypeRef::STRING),
         ))
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
-        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)).description("JSON object of frontmatter key-value pairs for typed columns."));
+        .field(InputValue::new("fields", TypeRef::named("JSON")).description("JSON object of frontmatter key-value pairs for typed columns."));
 
     let create_many_item_input = InputObject::new("CreateManyItemInput")
         .description("Input for a single item in a batch create operation.")
@@ -445,7 +445,7 @@ pub(crate) fn build_type_defs() -> TypeDefs {
             TypeRef::named_list(TypeRef::STRING),
         ))
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
-        .field(InputValue::new("fields", TypeRef::named(TypeRef::STRING)).description("JSON object of frontmatter key-value pairs for typed columns."));
+        .field(InputValue::new("fields", TypeRef::named("JSON")).description("JSON object of frontmatter key-value pairs for typed columns."));
 
     let conflict_action_enum = Enum::new("ConflictAction")
         .description("Action to take when a unique constraint violation occurs during creation.")
@@ -463,7 +463,7 @@ pub(crate) fn build_type_defs() -> TypeDefs {
         ))
         .field(InputValue::new("type", TypeRef::named(TypeRef::STRING)))
         .field(
-            InputValue::new("fields", TypeRef::named(TypeRef::STRING))
+            InputValue::new("fields", TypeRef::named("JSON"))
                 .description("JSON object of type-specific field key-value pairs to set."),
         )
         .field(

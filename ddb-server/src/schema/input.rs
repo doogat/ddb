@@ -23,7 +23,9 @@ use async_graphql::{Name, Value as GqlValue};
 use ddb_core::types::{ConflictAction, Value as DdbValue};
 use indexmap::IndexMap;
 
-use super::base_types::parse_fields_json;
+use ddb_core::app_contract::{normalize_create_fields, normalize_update_fields, RawFieldsInput};
+
+use super::base_types::decode_json_fields_object;
 
 /// The underlying map of a dynamic GraphQL input object or argument set.
 pub(crate) type GqlObject = IndexMap<Name, GqlValue>;
@@ -58,21 +60,44 @@ pub(crate) fn string_list(obj: &GqlObject, key: &str) -> Vec<String> {
     opt_string_list(obj, key).unwrap_or_default()
 }
 
-/// Decode the `fields` JSON-string field into a typed-field map. Empty map when
-/// the field is absent or not a string. Errors propagate the JSON parse message.
-pub(crate) fn fields_map(obj: &GqlObject) -> Result<BTreeMap<String, DdbValue>, String> {
+/// Decode the `fields` JSON-object field into raw input. Empty when absent;
+/// the legacy JSON-encoded-string shape gets a migration error.
+fn raw_fields(obj: &GqlObject) -> Result<RawFieldsInput, String> {
     match obj.get("fields") {
-        Some(GqlValue::String(json)) => parse_fields_json(json),
-        _ => Ok(BTreeMap::new()),
+        Some(GqlValue::Object(map)) => decode_json_fields_object(map),
+        Some(GqlValue::String(_)) => Err(
+            "fields must be a JSON object, not a JSON-encoded string (migrate the \
+             GraphQL variable type to JSON)"
+                .to_string(),
+        ),
+        Some(other) => Err(format!("fields must be a JSON object, got {other:?}")),
+        None => Ok(RawFieldsInput::new()),
     }
 }
 
-/// Like [`fields_map`] but `None` when the field is absent (batch-update
-/// semantics: distinguish "leave fields unchanged" from "set fields to empty").
-pub(crate) fn opt_fields_map(obj: &GqlObject) -> Result<Option<BTreeMap<String, DdbValue>>, String> {
-    match obj.get("fields") {
-        Some(GqlValue::String(json)) => Ok(Some(parse_fields_json(json)?)),
-        _ => Ok(None),
+/// Create path: decode `fields`, dropping null keys.
+pub(crate) fn fields_map(obj: &GqlObject) -> Result<BTreeMap<String, DdbValue>, String> {
+    raw_fields(obj).map(normalize_create_fields)
+}
+
+/// Fields to set plus field names to unset.
+pub(crate) type FieldsAndUnsets = (BTreeMap<String, DdbValue>, Vec<String>);
+
+/// Update path: fields plus null-derived and explicit `unsetFields`, merged.
+pub(crate) fn fields_and_unsets(obj: &GqlObject) -> Result<FieldsAndUnsets, String> {
+    normalize_update_fields(raw_fields(obj)?, string_list(obj, "unsetFields"))
+        .map_err(|e| e.to_string())
+}
+
+/// Like [`fields_and_unsets`] but `None` when `fields` is absent (batch-update
+/// semantics: "leave fields unchanged" vs "set fields to empty").
+pub(crate) fn opt_fields_and_unsets(
+    obj: &GqlObject,
+) -> Result<Option<FieldsAndUnsets>, String> {
+    if obj.contains_key("fields") {
+        fields_and_unsets(obj).map(Some)
+    } else {
+        Ok(None)
     }
 }
 
