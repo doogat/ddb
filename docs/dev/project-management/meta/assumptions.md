@@ -64,3 +64,21 @@ Ivan:
 - Fixing the unlisted fifth stale assertion in `masterless_b_fails` (ffi/tests.rs:1455) is in scope, being the same precondition class in the same three tests.
 - `msg.starts_with("sync: bundle merge failed:")` is the right strength for that site, preserving the original `starts_with` rather than weakening to `contains`.
 - Updating two doc comments that named the old variant counts as part of re-pointing.
+
+## 4: Regenerate FFI bindings; add warnings/policy/error-variant parity tests
+
+Orchestrator:
+- The parity tests live in `tests/e2e/integration_ffi_warning_parity.rs`, not `ddb-core/src/ffi/tests.rs` as the plan task named: `ddb-core` cannot reach the GraphQL server or the `ddb` binary, so an in-crate test could only compare FFI against the app contract it already calls — the tautology the design doc rejects.
+- The CI-breaking `too many arguments (8/7)` lint on `update_structured`, landed by task 2 of this PRD, is 00177's own defect and was fixed inside this task rather than deferred.
+
+Ivan (tests):
+- The `TITLE_FROM_TEMPLATE` warning fires when the caller OMITS the title and the typedef has a `title_template` (the dispatch said the inverse); used the omitted-title fixture, matching `graphql_response_warnings_t154.rs`.
+- `ConflictActionRecord` is not re-exported from `ddb_core::ffi`, so the argument is built through the public `From<ConflictAction>` impl rather than adding a re-export.
+- A static title template `'auto-title'` with no field values is enough; mirrors `integration_warnings_update.rs`.
+- `ddb create` has no structured output mode, so the CLI side parses the stderr `warning: <CODE>: <MESSAGE>` line and compares both code and message.
+- Each transport side gets its own fresh `DdbTestRepo`; nothing runs in the project root.
+
+Ivan (signature collapse):
+- Derived `Debug, Clone, PartialEq` on `UpdateStructuredInput`, matching the neighbouring `FieldEntryValue`; the task did not specify derives.
+- Record field order follows the old argument order.
+- The single `ddb-server` actor-test timeout seen in a full `test-ci` run is a pre-existing load flake (green on an isolated rerun in 1.11s), not a regression from this change.
