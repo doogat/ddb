@@ -8,6 +8,7 @@ use crate::service::DoogatService;
 use tempfile::TempDir;
 
 mod records_tests;
+mod structured_crud_tests;
 
 fn fresh_driver() -> (TempDir, DoogatDriver) {
     let tmp = TempDir::new().unwrap();
