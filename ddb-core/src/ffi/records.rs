@@ -180,16 +180,6 @@ pub struct PaginatedSearchResult {
     pub warnings: Vec<RebuildWarningRecord>,
 }
 
-impl From<crate::types::PaginatedSearchResult> for PaginatedSearchResult {
-    fn from(r: crate::types::PaginatedSearchResult) -> Self {
-        Self {
-            hits: r.hits.into_iter().map(Into::into).collect(),
-            total_count: r.total_count as u64,
-            warnings: Vec::new(),
-        }
-    }
-}
-
 /// FFI-safe reindex warning (one per skipped/poisoned file).
 #[derive(Debug, uniffi::Record)]
 pub struct RebuildWarningRecord {
