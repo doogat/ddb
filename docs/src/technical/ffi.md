@@ -78,10 +78,76 @@ DoogatDriver::create_repo(repo_path: String) -> Result<Self, DdbError>
 
 | Method | Delegates to |
 |--------|-------------|
-| `create_doogat(content, message)` | `parser::parse` → `repo.commit_file` → `index.index_doogat` |
+| `create_structured(title, tags, doogat_type, body, fields, on_conflict)` | `CreateCommand` → `DoogatService::create` |
 | `read_doogat(id)` | `index.resolve_path` → `repo.read_file` |
-| `update_doogat(id, content, message)` | `index.resolve_path` → `repo.commit_file` → `index.index_doogat` |
+| `update_structured(id, input)` | `UpdateCommand` → `DoogatService::update` |
 | `delete_doogat(id, message)` | `index.resolve_path` → `repo.delete_file` → `index.remove_doogat` |
+
+#### Structured create and update (PRD 00177)
+
+```rust
+create_structured(
+    title: Option<String>,
+    tags: Vec<String>,
+    doogat_type: Option<String>,
+    body: Option<String>,
+    fields: Vec<FieldEntryValue>,
+    on_conflict: ConflictActionRecord,
+) -> Result<CreateResultRecord, DdbError>
+
+update_structured(
+    id: String,
+    input: UpdateStructuredInput,
+) -> Result<UpdateResultRecord, DdbError>
+
+pub struct UpdateStructuredInput {
+    pub title: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub doogat_type: Option<String>,
+    pub body: Option<String>,
+    pub fields: Vec<FieldEntryValue>,
+    pub unset_fields: Vec<String>,
+}
+```
+
+Both methods build an app-contract command (`CreateCommand` / `UpdateCommand`)
+and call `DoogatService::create` / `DoogatService::update`, so FFI runs the same
+business policy — typedef routing, validation, id minting, git commit — as CLI,
+GraphQL, and REST (see [app-contract.md](app-contract.md#command-dtos)). There
+is no `message` argument: the service writes the commit message itself.
+
+`fields` carries typed frontmatter values as a list of
+`FieldEntryValue { key, value: FieldValue }` pairs, because UniFFI records carry
+no maps. On update, a `None` member leaves the stored value unchanged and
+`unset_fields` removes frontmatter keys.
+
+`on_conflict: ConflictActionRecord` (`Error` or `Ignore`) makes
+duplicate-identity handling an explicit caller input instead of a hidden
+default. `create_structured` passes `UnregisteredTypePolicy::BaseOnly`, so an
+unregistered `doogat_type` creates a base doogat and returns an
+`UNREGISTERED_TYPE_BASE_ONLY` warning instead of failing — the CLI's lenient
+contract, not GraphQL's and REST's strict one.
+
+Both result records carry the doogat's meta plus the warning channel:
+
+- `CreateResultRecord` — `{ id, title: Option<String>, doogat_type: Option<String>, tags: Vec<String>, path, warnings: Vec<RebuildWarningRecord> }`
+- `UpdateResultRecord` — same shape
+
+`warnings` is the `AppOutput` warning list, so warnings such as
+`UNREGISTERED_TYPE_BASE_ONLY` and `REINDEX_SKIPPED_FILES` now reach
+Swift/Kotlin callers instead of being dropped at the boundary.
+
+**Breaking change, no deprecation window.** The raw-markdown exports
+`create_doogat(content, message)` and `update_doogat(id, content, message)` are
+gone. The maintainer decision recorded in PRD 00177 keeps FFI CRUD
+`Guaranteed` and ships the replacement with no deprecation period, because the
+bindings are Experimental and the product is pre-1.0. `read_doogat(id)` and
+`delete_doogat(id, message)` are unchanged.
+
+| Old call | New call |
+|----------|----------|
+| `create_doogat(content, message)` → new id | `create_structured(title, tags, doogat_type, body, fields, on_conflict)` → `CreateResultRecord`; split the Markdown you used to serialize into `title` / `tags` / `doogat_type` / `body` / `fields`, drop `message`, and read the new id from `CreateResultRecord.id` |
+| `update_doogat(id, content, message)` → `()` | `update_structured(id, UpdateStructuredInput { .. })` → `UpdateResultRecord`; send only the members you want to change instead of a whole replacement document, list removed frontmatter keys in `unset_fields`, and drop `message` |
 
 ### Query
 
@@ -168,29 +234,48 @@ Returns `SqlResultRecord`:
 
 ## Error Mapping
 
-`DdbError` is a UniFFI-exported enum mirroring `DoogatError` variants. Most variants carry a single `msg: String`; the `Validation` and `SqlEngine` variants additionally carry `code: Option<String>` and `context: Vec<DdbErrorContextEntry>` (populated from a `Structured` violation's code and context). The `From<DoogatError>` impl maps internal errors to FFI-safe variants:
+`DdbError` is the UniFFI-exported error enum. Which variant a core error becomes
+is derived from the single error-policy table in
+`ddb-core/src/app_contract/error.rs` (PRD 00177): `From<DoogatError>` calls
+`error_rendering(AppError::from(&err))` and `ffi/records.rs::category_variant`
+maps the resulting `ErrorRendering.ffi_variant` onto a variant. There is no
+FFI-local error allowlist any more, so FFI cannot disagree with CLI, GraphQL,
+REST, or NoSQL HTTP about an error's category.
+
+| `ErrorRendering.ffi_variant` | AppError category | `DdbError` |
+|------------------------------|-------------------|-----------|
+| `FfiVariant::NotFound` | `NotFound` | `NotFound { msg }` |
+| `FfiVariant::Validation` | `InvalidInput` | `Validation { msg, code, context }` |
+| `FfiVariant::Conflict` | `Conflict` | `Conflict { msg, code, context }` |
+| `FfiVariant::Internal` | `Internal` | `Io { msg }` |
+
+Two arms bypass the policy on purpose:
 
 | DoogatError | DdbError |
 |------------|---------|
-| `Git(msg)` | `Git { msg }` |
-| `Yaml(msg)` | `Yaml { msg }` |
-| `Sql(msg)` | `Sql { msg }` |
-| `Automerge(msg)` | `Automerge { msg }` |
-| `Io(e)` | `Io { msg: e.to_string() }` |
-| `Toml(msg)` | `Config { msg }` |
-| `Parse(msg)` | `Parse { msg }` |
-| `NotFound(msg)` | `NotFound { msg }` |
-| `Validation(msg)` | `Validation { msg, code: None, context: [] }` |
-| `InvalidPath(msg)` | `Validation { msg, code: None, context: [] }` |
-| `BadRequest(msg)` | `Validation { msg, code: None, context: [] }` |
-| `SqlEngine(msg)` | `SqlEngine { msg, code: None, context: [] }` |
-| `Conflict(msg)` | `Git { msg }` |
-| `Sync(msg)` | `Git { msg }` |
-| `Index(msg)` | `Sql { msg }` |
+| `VersionMismatch { repo, driver }` | `VersionMismatch { msg }` — the schema-version guard, checked before the policy |
 | `Redb(msg)` (nosql feature) | `Io { msg }` |
-| `VersionMismatch { repo, driver }` | `VersionMismatch { msg: "..." }` |
-| `Structured` (`REFERENCES_VIOLATION`, `CASCADE_CYCLE`) | `SqlEngine { msg, code: Some(code), context }` |
-| `Structured` (all other codes) | `Validation { msg, code: Some(code), context }` |
+
+`Conflict { msg, code, context }` is new in PRD 00177. It and `Validation` carry
+`code: Option<String>` — the policy's error code, now populated for every error
+on these paths, including ones from unstructured sources where it used to be
+`None` — and `context: Vec<DdbErrorContextEntry>`, which holds a `Structured`
+violation's context and is empty otherwise. `msg` is always the core error's own
+`Display` text, so an `Io` error keeps its `io: ` prefix and an internal error
+reaches the embedding app unredacted; the policy's message redaction applies to
+the network transports, not to this in-process one.
+
+**Breaking change (the second one in PRD 00177).** `Git`, `Yaml`, `Sql`,
+`Automerge`, `Parse`, `Config` and `SqlEngine` are still declared in the
+generated bindings but no path produces them any more
+(`ddb-core/src/ffi/tests/error_parity_tests.rs` pins that). Internal failures —
+git, sync, index, automerge, yaml, toml — all arrive as `Io`;
+`SINGLETON_NOT_FOUND` arrives as `NotFound` instead of `Validation`; and
+`SINGLETON_VIOLATION`, `REFERENCES_VIOLATION`, `CASCADE_CYCLE`,
+`UNIQUE_VIOLATION` and `SCHEMA_DESTRUCTIVE_BLOCKED` arrive as `Conflict`
+instead of `Validation` or `SqlEngine`. Swift/Kotlin code that branches on the
+retired variants must be rewritten against the four live ones, and the bindings
+regenerated.
 
 ### Service lock access
 
@@ -207,12 +292,12 @@ after a poisoned lock, never a Rust panic.
 - `SearchResult` — `{ id, title, path, snippet, rank, updated_at, tags: Vec<String>, doogat_type: Option<String>, fields: Vec<FieldEntry>, created_at: Option<String> }`, all ten fields of `types::SearchResult`. PRD 00176 widened it from six fields; the change is additive (the first six keep their names and types). `fields` is empty for untyped hits.
 - `FieldEntry` — `{ key, value }`, one typed-field pair of a search hit. UniFFI records here carry no maps, so `types::SearchResult.fields` (`BTreeMap<String, String>`) crosses the boundary as a list of pairs in key order.
 - `PaginatedSearchResult` — `{ hits: Vec<SearchResult>, total_count: u64, warnings: Vec<RebuildWarningRecord> }`. PRD 00176 added `warnings`; the change is additive, and the list is empty when the search raised none.
-- `RebuildReport` — `{ indexed, tables_materialized, types_inferred }` (subset of `types::RebuildReport`, omits warnings)
+- `RebuildReport` — `{ indexed, tables_materialized, types_inferred, warnings: Vec<RebuildWarningRecord> }` (PRD 00169 added `warnings`)
 - `AttachmentInfo` — `{ name, mime, size, path }` (mirrors `types::AttachmentInfo`)
 - `SqlResultRecord` — `{ columns, rows, affected_rows, message }` (flat conversion from `SqlResult` enum)
 - `TypeSchemaRecord` — `{ table_name, columns, crdt_strategy, template_sections }`
 - `ColumnDefRecord` — `{ name, data_type, references, required }`
-- `DdbErrorContextEntry` — `{ key, value: Option<String>, values }` (structured-error context attached to the `Validation` / `SqlEngine` variants)
+- `DdbErrorContextEntry` — `{ key, value: Option<String>, values }` (structured-error context attached to the `Validation` / `Conflict` variants)
 
 ## Compatibility and Deprecation
 
@@ -220,11 +305,11 @@ Promise labels (`Guaranteed`, `Specialized`, `Intentionally absent`, `Deprecated
 
 ### Deprecated behavior
 
-- **`DoogatDriver.search` wraps engine errors as `DdbError::Sql(msg)`**: throws the SQL variant carrying engine error text in the string payload; no per-code typed variant, so Swift/Kotlin consumers substring-match `msg` to branch on failure kind. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD will expose AppError codes as typed FFI enum variants on `DoogatError`, mirroring the AppError envelope PRD 00147 shipped for the network transports. Status: planned, not yet implemented.
-- **`DoogatDriver.read_doogat` throws `DdbError::Io(msg)` on not-found**: error message carries the substring `"not found"`; consumers detect missing-id failures via `msg.contains("not found")`. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds `DdbError::NotFound { id }` as a typed variant, mirroring AppError's `NOT_FOUND` code shipped by PRD 00147. Status: planned, not yet implemented.
-- **`DoogatDriver.delete_doogat` followed by `read_doogat` returns the same untyped not-found shape**: the post-delete read inherits the `DdbError::Io(msg)` "not found" shape; consumers cannot distinguish delete-then-read from any other IO failure without substring matching. Replacement: same typed `NotFound` variant under candidate `ffi-typed-errors-v1`. Status: planned, not yet implemented.
-- **`DoogatDriver.create_doogat` invalid-type error embeds code in `DdbError::Sql(msg)`**: throws the SQL variant whose message contains `TYPE_NOT_REGISTERED`; the structured code AppError already carries internally is recoverable only by parsing the message string. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD exposes AppError validation codes (including `TYPE_NOT_REGISTERED`) as typed FFI enum variants. Status: planned, not yet implemented.
-- **Most FFI return types omit the structured warning channel**: `RebuildReport` explicitly omits warnings, and every FFI return type except `PaginatedSearchResult` (which PRD 00176 gave a `warnings: Vec<RebuildWarningRecord>` field) drops AppWarning entries at the UniFFI boundary. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds a structured-warnings surface to FFI return types (e.g. `AppOutput<T>`-equivalent UniFFI record carrying `warnings: Vec<WarningEntry>`), mirroring the AppOutput shape PRD 00147 established for the network transports. Status: planned, not yet implemented.
+- **`DoogatDriver.search` offers no per-code error variant**: since PRD 00177 the variant is policy-derived (an internal engine failure arrives as `DdbError::Io`, a rejected input as `DdbError::Validation` carrying the policy `code`), so the old `DdbError::Sql(msg)` shape is gone — but there is still no variant per error code, and a consumer that must branch on a specific internal failure reads `msg`. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD will expose AppError codes as typed FFI enum variants on `DoogatError`, mirroring the AppError envelope PRD 00147 shipped for the network transports. Status: planned, not yet implemented.
+- **`DoogatDriver.read_doogat` not-found carries no id payload**: a missing id throws `DdbError::NotFound { msg }` (policy-derived since PRD 00177, not the old `DdbError::Io` "not found" shape), but the id itself is recoverable only from the message text. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds `DdbError::NotFound { id }` as a typed variant, mirroring AppError's `NOT_FOUND` code shipped by PRD 00147. Status: planned, not yet implemented.
+- **`DoogatDriver.delete_doogat` followed by `read_doogat` returns the same not-found shape**: the post-delete read throws the same payload-free `DdbError::NotFound { msg }`, so consumers cannot distinguish delete-then-read from any other missing id without reading the message. Replacement: same typed `NotFound` variant under candidate `ffi-typed-errors-v1`. Status: planned, not yet implemented.
+- **Resolved (PRD 00177): `DoogatDriver.create_doogat` invalid-type error embedded in `DdbError::Sql(msg)`**: `create_doogat` is gone. `create_structured` treats an unregistered `doogat_type` as a base-only create with an `UNREGISTERED_TYPE_BASE_ONLY` warning instead of an error, and the errors it does raise carry the policy's code in the `code` field of `DdbError::Validation` / `DdbError::Conflict`, so nothing has to parse `msg` for `TYPE_NOT_REGISTERED`. A dedicated variant per error code is still deferred to candidate `ffi-typed-errors-v1`.
+- **Some FFI return types omit the structured warning channel**: `create_structured` and `update_structured` return `warnings: Vec<RebuildWarningRecord>` (PRD 00177), as `PaginatedSearchResult` (PRD 00176) and `RebuildReport` (PRD 00169) do; the remaining return types still drop AppWarning entries at the UniFFI boundary. Replacement: candidate `ffi-typed-errors-v1` follow-up PRD adds a structured-warnings surface to the rest (e.g. `AppOutput<T>`-equivalent UniFFI record carrying `warnings: Vec<WarningEntry>`), mirroring the AppOutput shape PRD 00147 established for the network transports. Status: planned, not yet implemented.
 
 ### Specialized capabilities
 
@@ -233,8 +318,8 @@ Not deprecated, still binding promises:
 - **Attachments** — Attachments feature is Experimental per the stability tier table; methods exist and work, but the capability promise is narrower than core CRUD until Attachments moves Stable.
 - **Bundle export/import** — CLI is the canonical bundle workflow (`ddb bundle export/import`); FFI exposes the same engine for in-process orchestration. `import_bundle` keeps its signature and `Result<(), DdbError>` result and follows the per-payload ref namespace contract in [Bundle Protocol](bundle.md#recovery-workflow-and-interface-conformance): an import that fails after fetching (no `master`, a merge failure, or a node-registration or index-rebuild failure) keeps its fetched refs for a retry, while a failure before the fetch (unreadable archive, checksum mismatch, refused namespace, lease timeout) creates none and a failed cleanup after a landed import may leave only some; there is no abort call. A bundle without `master` fails instead of merging another import's kept `master`, and success deletes only its own namespace. Merge failures surface as `DdbError::Git` with a `bundle merge failed:` message. `ffi::tests::bundle_import_ffi_*` run the same golden workflow as the CLI e2e scenarios through the public Rust driver.
 - **Remote sync (push/pull/fetch)** — bundle-shaped only; no Git remote push/pull/fetch method on `DoogatDriver`. Continuous remote sync runs through CLI `ddb sync` or the GraphQL `sync` mutation.
-- **Warnings (structured)** — see the deprecated entry above; tracked as `Specialized` in the promise matrix until `ffi-typed-errors-v1` adds the structured-warnings channel.
-- **Create/update facade exclusion (PRD 00149)** — PRD 00149 thinned the create and update workflows onto the app-command facade (`DoogatService::create` / `DoogatService::update`, each returning `AppOutput<ParsedDoogat>`) for GraphQL, CLI, and REST. FFI was deliberately excluded: `DoogatDriver.create_doogat` and `update_doogat` keep their direct `_raw`/service-method paths with untyped string errors and no structured warning channel. See the deprecated entries above; migration is tracked under `ffi-typed-errors-v1`.
+- **Warnings (structured)** — create, update, search, and reindex carry warnings; the other return types do not yet. See the deprecated entry above; tracked as `Specialized` in the promise matrix until `ffi-typed-errors-v1` adds the channel to the rest.
+- **Create/update facade exclusion (PRD 00149) — closed by PRD 00177** — PRD 00149 thinned the create and update workflows onto the app-command facade (`DoogatService::create` / `DoogatService::update`, each returning `AppOutput<ParsedDoogat>`) for GraphQL, CLI, and REST, and deliberately left FFI out. PRD 00177 closed that gap: `create_structured` and `update_structured` build a `CreateCommand` / `UpdateCommand` and call the same facade entrypoints, so FFI shares the contract's business policy, its policy-derived error codes, and its warning channel. The raw-markdown `create_doogat` / `update_doogat` paths that stayed outside the facade are gone.
 
 ## Binding Generation
 

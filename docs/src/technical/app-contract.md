@@ -69,7 +69,10 @@ an explicit per-caller input rather than an accident of shared routing (PRD
 00155): the CLI passes `BaseOnly` (restoring the released lenient base-only
 create for unregistered types, with an `UNREGISTERED_TYPE_BASE_ONLY` warning),
 while the GraphQL and REST actor passes `Strict` (rejects unregistered types with
-`TYPE_NOT_REGISTERED`). The field is required — there is no `Default` on
+`TYPE_NOT_REGISTERED`). FFI `create_structured` passes `BaseOnly` too (PRD
+00177): an embedded app gets the same lenient base-only create as the CLI, with
+the `UNREGISTERED_TYPE_BASE_ONLY` warning on `CreateResultRecord.warnings`
+rather than a failed call. The field is required — there is no `Default` on
 `CreateCommand`, so every transport consciously states its policy. See
 `docs/src/guide/building-apps.md` for the per-interface contract matrix.
 
@@ -215,6 +218,14 @@ pub fn create(&self, cmd: CreateCommand) -> Result<AppOutput<ParsedDoogat>>
 ```
 
 (`Result<T>` is `ddb-core`'s alias for `std::result::Result<T, DoogatError>`.) Other CRUD verbs follow the same `cmd -> Result<AppOutput<...>>` shape as they migrate.
+
+FFI is no longer an exception. PRD 00177 replaced the raw-markdown
+`DoogatDriver.create_doogat` / `update_doogat` exports with
+`create_structured` / `update_structured`, which build a `CreateCommand` /
+`UpdateCommand` and call `DoogatService::create` / `DoogatService::update` like
+every other transport, then render the returned `AppOutput<ParsedDoogat>` as a
+`CreateResultRecord` / `UpdateResultRecord` carrying the value's meta and the
+warnings. See [ffi.md](ffi.md#structured-create-and-update-prd-00177).
 
 ## Transport adapter responsibilities
 

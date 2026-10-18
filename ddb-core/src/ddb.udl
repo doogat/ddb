@@ -63,18 +63,75 @@ dictionary TypeSchemaRecord {
     sequence<string> template_sections;
 };
 
+enum ConflictActionRecord {
+    "Error",
+    "Ignore",
+};
+
+[Enum]
+interface FieldScalar {
+    Str(string value);
+    Num(double value);
+    Bool(boolean value);
+};
+
+[Enum]
+interface FieldValue {
+    Str(string value);
+    Num(double value);
+    Bool(boolean value);
+    List(sequence<FieldScalar> value);
+};
+
+dictionary FieldEntryValue {
+    string key;
+    FieldValue value;
+};
+
+dictionary UpdateStructuredInput {
+    string? title;
+    sequence<string>? tags;
+    string? doogat_type;
+    string? body;
+    sequence<FieldEntryValue> fields;
+    sequence<string> unset_fields;
+};
+
+dictionary CreateResultRecord {
+    string id;
+    string? title;
+    string? doogat_type;
+    sequence<string> tags;
+    string path;
+    sequence<RebuildWarningRecord> warnings;
+};
+
+dictionary UpdateResultRecord {
+    string id;
+    string? title;
+    string? doogat_type;
+    sequence<string> tags;
+    string path;
+    sequence<RebuildWarningRecord> warnings;
+};
+
 interface DoogatDriver {
     [Throws=DdbError]
     constructor(string repo_path);
 
     [Throws=DdbError]
-    string create_doogat(string content, string message);
+    CreateResultRecord create_structured(string? title,
+                                         sequence<string> tags,
+                                         string? doogat_type,
+                                         string? body,
+                                         sequence<FieldEntryValue> fields,
+                                         ConflictActionRecord on_conflict);
 
     [Throws=DdbError]
     string read_doogat(string id);
 
     [Throws=DdbError]
-    void update_doogat(string id, string content, string message);
+    UpdateResultRecord update_structured(string id, UpdateStructuredInput input);
 
     [Throws=DdbError]
     void delete_doogat(string id, string message);

@@ -126,9 +126,9 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 ##### FFI invalid-type error variant on `create` (D-07)
 
 - **Old behavior**: FFI `DoogatDriver.create_doogat` with an invalid type throws `DdbError.sql(msg)` whose message string contains `TYPE_NOT_REGISTERED`.
-- **New behavior**: planned typed FFI variants for AppError validation codes (including `TYPE_NOT_REGISTERED`); not yet shipped.
-- **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will expose validation codes as typed `DoogatError` enum variants.
-- **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; parsing `msg` for `TYPE_NOT_REGISTERED` remains supported.
+- **New behavior**: shipped in PRD 00177. `create_doogat` is gone; `create_structured` creates a base doogat with an `UNREGISTERED_TYPE_BASE_ONLY` warning for an unregistered type instead of erroring, and every error it raises carries the policy code in `DdbError.validation`/`DdbError.conflict`'s `code` field. `DdbError.sql` is no longer produced at all.
+- **Replacement interface**: `DoogatDriver.create_structured(...)`, returning a `CreateResultRecord` with `warnings`; read `code` off the thrown `validation`/`conflict` error. A dedicated variant per code is still candidate `ffi-typed-errors-v1` work.
+- **Required client changes**: call `create_structured` instead of `create_doogat`, read the policy `code` instead of parsing `msg`, stop matching on `DdbError.sql`, and regenerate the Swift/Kotlin bindings. There is no deprecation window.
 ##### REST validation error vocabulary (D-08)
 
 - **Old behavior**: REST `POST /rest/doogats` (invalid) returns HTTP 400/422 with the `error` field carrying a short REST-local code string (and 500 on server errors).
@@ -193,13 +193,13 @@ Every public application interface supports the CRUD baseline operations listed 
 
 #### FFI (`DoogatDriver` via UniFFI)
 
-- **Create**: `Guaranteed` — `DoogatDriver.create_doogat(content, message)` returns the new doogat id; `execute_sql("INSERT ...")` returns created ids in `SqlResultRecord.message`.
+- **Create**: `Guaranteed` — `DoogatDriver.create_structured(title, tags, doogat_type, body, fields, on_conflict)` returns a `CreateResultRecord` with the new id, the doogat's meta, its path, and any warnings; `execute_sql("INSERT ...")` returns created ids in `SqlResultRecord.message`. An unregistered `doogat_type` creates a base doogat with an `UNREGISTERED_TYPE_BASE_ONLY` warning, matching the CLI rather than GraphQL/REST.
 - **Read (single by id)**: `Guaranteed` — `DoogatDriver.read_doogat(id)` returns raw Markdown; throws `DdbError` on missing id.
-- **Update**: `Guaranteed` — `DoogatDriver.update_doogat(...)` updates the doogat; `execute_sql("UPDATE ...")` returns affected rows.
+- **Update**: `Guaranteed` — `DoogatDriver.update_structured(id, UpdateStructuredInput { title, tags, doogat_type, body, fields, unset_fields })` returns an `UpdateResultRecord` with the same shape; a `None` member leaves the stored value unchanged and `unset_fields` removes frontmatter keys. `execute_sql("UPDATE ...")` returns affected rows.
 - **Delete**: `Guaranteed` — `DoogatDriver.delete_doogat(id, message)` removes the doogat; throws `DdbError` on missing id.
 - **List**: `Guaranteed` — `DoogatDriver.list_doogats()` returns ids; `execute_sql("SELECT ...")` returns a `SqlResultRecord` with columns and rows.
 - **Search (basics)**: `Guaranteed` — `DoogatDriver.search(query)` returns `Vec<SearchResult>` with `id`, `title`, `snippet`, `rank`.
-- **Validation error handling**: `Specialized` — validation failures throw `DdbError::Validation` or `DdbError::SqlEngine` with structured code/context when available; per-code enum variants (`TYPE_NOT_REGISTERED`, `UNIQUE_VIOLATION`, etc.) are deferred to the `ffi-typed-errors-v1` follow-up PRD. Use GraphQL when structured error codes are required.
+- **Validation error handling**: `Specialized` — validation failures throw `DdbError::Validation` and constraint violations throw `DdbError::Conflict`, both carrying the error policy's `code` and the structured `context` (PRD 00177); per-code enum variants (`TYPE_NOT_REGISTERED`, `UNIQUE_VIOLATION`, etc.) are deferred to the `ffi-typed-errors-v1` follow-up PRD. Use GraphQL when a typed per-code surface is required.
 - **Not-found behavior**: `Specialized` — missing id throws `DdbError::NotFound { msg }`; an id-specific not-found payload is deferred to the `ffi-typed-errors-v1` follow-up PRD.
 
 #### PgWire (port 2892)
@@ -479,7 +479,15 @@ Content-Type: application/json
 
 ```swift
 // FFI (Swift)
-let id = try driver.createDoogat(content: "---\ntitle: Baseline test\ntype: note\n---\n", message: "create")
+let created = try driver.createStructured(
+    title: "Baseline test",
+    tags: [],
+    doogatType: "note",
+    body: nil,
+    fields: [],
+    onConflict: .error
+)
+let id = created.id
 ```
 
 **Not-found behavior differs by interface** — see the [CRUD baseline table](#crud-baseline) for the exact response shape on each. GraphQL returns `extensions.code == "NOT_FOUND"`; CLI exits non-zero; PgWire returns zero rows; REST returns HTTP 404; FFI throws `DdbError::NotFound`.

@@ -135,7 +135,7 @@ Tests run with `AuthMode::None`; no environment variables need to be set for the
 
 The v1 harness intentionally defers the following items. Future PRDs pick each up.
 
-- **FFI driver** — deferred. The intended landing spot is the `uniffi` `DoogatDriver` facade in `ddb-core::ffi`. Will follow the same `Driver::run_workflow(&fixture) -> Vec<ConformanceResult>` shape as `CliDriver` / `GraphqlDriver`.
+- **FFI driver** — deferred. The intended landing spot is the `uniffi` `DoogatDriver` facade in `ddb-core::ffi`. Will follow the same `Driver::run_workflow(&fixture) -> Vec<ConformanceResult>` shape as `CliDriver` / `GraphqlDriver`. The create/update steps now have a comparable surface to map onto: PRD 00177 replaced the raw-markdown FFI exports with `create_structured` / `update_structured`, which take the same typed input the other transports parse into a `CreateCommand` / `UpdateCommand` and return the id, meta, path, and `warnings` a fixture step can compare. Unregistered-type create is the one documented divergence to expect — FFI passes `BaseOnly` like the CLI, not `Strict` like GraphQL.
 - **PgWire driver** — deferred. Targets the `ddb serve --pg-port` Postgres-wire endpoint. Belongs in the same `tests/e2e/conformance/` tree.
 - **REST driver** — deferred. Targets the `/rest/*` endpoints already served by `ddb serve`.
 - **NoSQL HTTP driver** — deferred. Targets the document-style HTTP API.
