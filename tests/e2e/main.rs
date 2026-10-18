@@ -30,6 +30,7 @@ mod integration_bundle_import_ref_namespace;
 mod integration_compact_stats;
 mod integration_crdt_conflicts;
 mod integration_error_codes;
+mod integration_ffi_warning_parity;
 mod integration_graphql_batch;
 mod integration_graphql_jink;
 mod integration_graphql_refs;
