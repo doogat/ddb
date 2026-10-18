@@ -12,6 +12,7 @@ interface DdbError {
     Config(string msg);
     Validation(string msg, string? code, sequence<DdbErrorContextEntry> context);
     SqlEngine(string msg, string? code, sequence<DdbErrorContextEntry> context);
+    Conflict(string msg, string? code, sequence<DdbErrorContextEntry> context);
     VersionMismatch(string msg);
 };
 
@@ -21,6 +22,11 @@ dictionary DdbErrorContextEntry {
     sequence<string> values;
 };
 
+dictionary FieldEntry {
+    string key;
+    string value;
+};
+
 dictionary SearchResult {
     string id;
     string title;
@@ -28,6 +34,10 @@ dictionary SearchResult {
     string snippet;
     double rank;
     string updated_at;
+    sequence<string> tags;
+    string? doogat_type;
+    sequence<FieldEntry> fields;
+    string? created_at;
 };
 
 dictionary RebuildWarningRecord {

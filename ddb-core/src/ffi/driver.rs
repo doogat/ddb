@@ -86,7 +86,7 @@ impl DoogatDriver {
                 body,
                 fields: fields_to_core(fields),
                 on_conflict: on_conflict.into(),
-                unregistered_type_policy: crate::app_contract::UnregisteredTypePolicy::BaseOnly,
+                unregistered_type_policy: crate::app_contract::FFI_UNREGISTERED_TYPE_POLICY,
             };
             let out = svc.create(cmd).map_err(DdbError::from)?;
             Ok(CreateResultRecord::from_output(out))

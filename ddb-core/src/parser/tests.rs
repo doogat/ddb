@@ -905,6 +905,44 @@ fn serialize_canonical_yaml_key_ordering() {
     assert!(alpha_idx < zeta_idx);
 }
 
+#[test]
+fn serialize_and_reparse_preserves_extra_field_with_yaml_special_chars() {
+    let mut extra = std::collections::BTreeMap::new();
+    extra.insert(
+        "query".to_string(),
+        Value::String("a: b [c] {d}".to_string()),
+    );
+
+    let parsed = crate::types::ParsedDoogat {
+        meta: DoogatMeta {
+            id: Some(DoogatId("20260226120000".into())),
+            title: Some("Special Chars".into()),
+            date: None,
+            tags: vec![],
+            doogat_type: None,
+            extra,
+        },
+        body: "Body.".into(),
+        sections: vec![],
+        reference_section: String::new(),
+        inline_fields: vec![],
+        links: vec![],
+        body_tags: vec![],
+        checkboxes: vec![],
+        path: "test.md".into(),
+        updated_at: None,
+    };
+
+    let serialized = serialize(&parsed);
+    let reparsed = parse(&serialized, "test.md").unwrap();
+
+    assert_eq!(
+        reparsed.meta.extra.get("query"),
+        Some(&Value::String("a: b [c] {d}".to_string())),
+        "a frontmatter value containing : [ ] {{ }} must round-trip unchanged: {serialized}"
+    );
+}
+
 // -- rewrite_id_field tests --
 
 #[test]
