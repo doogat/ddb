@@ -131,7 +131,11 @@ fn rest_search_applies_type_and_tag_filters_and_returns_full_hit_shape() {
         .find(|h| h["title"] == "Plain note")
         .unwrap_or_else(|| panic!("tag=sweet must include Plain note: {body}"));
     assert!(plain["type"].is_null(), "untyped hit type must be null: {plain}");
-    assert!(plain.get("fields").is_none(), "untyped hit must omit fields: {plain}");
+    assert_eq!(
+        plain["fields"],
+        json!({}),
+        "untyped hit must carry an empty `fields` key, not omit it: {plain}"
+    );
     assert_eq!(plain["tags"], json!(["sweet"]));
     assert!(plain["created_at"].is_string() && plain["path"].is_string(), "{plain}");
 }

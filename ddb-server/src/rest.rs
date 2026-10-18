@@ -109,6 +109,7 @@ fn warnings_to_json(warnings: Vec<ddb_core::app_contract::AppWarning>) -> Vec<Wa
 struct SearchResponse {
     data: Vec<SearchHit>,
     total_count: usize,
+    warnings: Vec<WarningJson>,
 }
 
 #[derive(Serialize)]
@@ -139,7 +140,6 @@ struct SearchHit {
     tags: Vec<String>,
     #[serde(rename = "type")]
     doogat_type: Option<String>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     fields: BTreeMap<String, String>,
     created_at: Option<String>,
 }
@@ -367,10 +367,12 @@ async fn handle_search(
     cmd: SearchCommand,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
     let output = read_pool.search_command(cmd).await.map_err(rest_error)?;
+    let warnings = warnings_to_json(output.warnings);
     Ok(Json(
         serde_json::to_value(SearchResponse {
             data: output.value.items.into_iter().map(SearchHit::from).collect(),
             total_count: output.value.total,
+            warnings,
         })
         .unwrap(),
     ))

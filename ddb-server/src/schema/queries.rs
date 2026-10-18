@@ -94,15 +94,15 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
                         .get("backlinksOf")
                         .and_then(|v| v.string().ok())
                         .map(|s| s.to_string());
-                    let limit = validate_limit(&ctx)?;
-                    let offset = validate_offset(&ctx)?;
+                    let page = PageRequest::decode(validate_limit(&ctx)?, validate_offset(&ctx)?)
+                        .map_err(to_graphql_error)?;
                     let doogats = pool
                         .list_doogats(ListFilter {
                             doogat_type,
                             tag,
                             backlinks_of,
-                            limit,
-                            offset,
+                            limit: Some(page.limit as i64),
+                            offset: Some(page.offset as i64),
                             ..Default::default()
                         })
                         .await
