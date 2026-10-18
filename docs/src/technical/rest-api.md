@@ -70,14 +70,16 @@ Pagination goes through the shared `PageRequest` policy, not the list clamp:
     "fields": { "key": "value" },
     "created_at": "..."
   }],
-  "total_count": 1
+  "total_count": 1,
+  "warnings": []
 }
 ```
 
 Each hit carries all ten fields of the core `SearchResult`. `type` and
-`created_at` are `null` when the doogat has none. `fields` is left out when the
-hit has no typed fields. `total_count` is the full match count, not the page
-length.
+`created_at` are `null` when the doogat has none. `fields` is always present and
+is `{}` when the hit has no typed fields. `total_count` is the full match count,
+not the page length. `warnings` carries structured index warnings and is `[]`
+when there are none.
 
 **Compatibility (PRD 00176):**
 

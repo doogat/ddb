@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ffi**: `DoogatDriver.search_filtered(query, limit, offset, types, tag)` searches with the same type/tag filters and pagination policy as CLI, GraphQL, and REST; regenerate Swift/Kotlin bindings to use it. (PRD 00176)
 - **ffi**: search hits (`SearchResult`) now carry all ten core fields, adding `tags`, `doogat_type`, `fields` (as a list of new `FieldEntry { key, value }` records), and `created_at`; existing fields are unchanged. (PRD 00176)
+- **ffi**: `PaginatedSearchResult` gained a `warnings` field carrying one `RebuildWarningRecord { code, message }` per file a freshness reindex skipped during the search, so Swift/Kotlin consumers of `search_paginated`/`search_filtered` see an incomplete index instead of silently partial hits. The field is additive; regenerate the bindings. (PRD 00176)
 - **rest**: `GET /rest/doogats?q=...` hits now carry all ten core search fields, adding `path`, `updated_at`, `tags`, `type`, `fields`, and `created_at`; existing fields are unchanged. (PRD 00176)
 - **cli**: `ddb search` gains `--type` and `--tag` filters and now prints every hit field (type, rank, tags, created/updated dates, typed fields). (PRD 00176)
 - **cli**: `ddb sync` now reports the number of doogats resurrected by a delete-vs-edit conflict resolution as a `resurrected: N` line (printed only when non-zero, alongside the existing collision and singleton-conflict counts). Previously `SyncReport.resurrected` was populated but never surfaced to the operator. (PRD 00163)
