@@ -24,9 +24,7 @@ pub enum UnregisteredTypePolicy {
 /// The documented FFI default for `UnregisteredTypePolicy` (see the variant's
 /// doc comment above): FFI mirrors the CLI's `BaseOnly` behaviour rather than
 /// GraphQL/REST's `Strict` default, because FFI preserves the released
-/// (≤ v0.2.5) contract the same way the CLI does. Named here, not buried in
-/// `create.rs`, so the FFI driver references the contract's own constant
-/// instead of hardcoding the variant inline.
+/// (≤ v0.2.5) contract the same way the CLI does.
 pub const FFI_UNREGISTERED_TYPE_POLICY: UnregisteredTypePolicy = UnregisteredTypePolicy::BaseOnly;
 
 /// Command to create a new doogat. `title` and `body` are optional so
