@@ -335,3 +335,5 @@
 {"id":"62cc7bfd","kind":"pat","task":"14","queued_at":1792306310,"prompt_bytes":6480}
 {"id":"62cc7bfd","ended_at":1792306335,"elapsed_s":25,"outcome":"ok","detail":null}
 {"kind":"handoff","site":"review","edge":"leave","at":1792310948,"phase":"done","prd":"00176-route-search-through-contract-v1.md"}
+{"kind":"handoff","site":"done","edge":"resume","at":1792310978,"phase":"done","prd":"00176-route-search-through-contract-v1.md"}
+{"kind":"handoff","site":"done","edge":"leave","at":1792311143,"phase":"build","prd":"00176-route-search-through-contract-v1.md"}

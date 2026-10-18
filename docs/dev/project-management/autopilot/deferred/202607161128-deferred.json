@@ -1082,6 +1082,56 @@
       "file": "ddb-server/src/schema/queries.rs:157",
       "reason": "Pre-existing GraphQL argument-coercion behaviour untouched by this PRD; changing it is a public input-validation change needing its own compatibility review.",
       "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "cycle": 1,
+      "type": "architecture-gap",
+      "issue": "REST and GraphQL where-filter search cannot forward REINDEX_SKIPPED_FILES warnings: ReadPool opens DoogatService with set_skip_stale_check(true) so ensure_fresh() is a no-op on every server read path (the actor keeps the index fresh out-of-band, not request-scoped reads). Fixing this requires an architecture decision on how/whether actor-side warnings reach a concurrent reader, not a local rest.rs/queries.rs fix.",
+      "severity": "medium",
+      "consensus": "task 7 findings 3/4/5",
+      "action": "deferred",
+      "reason": "architecture decision needed (ReadPool skip_stale_check design); two regression tests committed and marked #[ignore] with this reason pending the decision",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "cycle": 1,
+      "type": "structural",
+      "issue": "base_types.rs duplicates PageRequest pagination policy (own MAX_LIMIT/check_limit, limit:0 accepted) and queries.rs exceeds the 800-line file limit (909 lines) after this rework task's additive fix.",
+      "severity": "low",
+      "consensus": "task 7 findings 6/7 (Pat per-task review confirms both still unaddressed)",
+      "action": "deferred",
+      "reason": "structural/refactor-only, out of scope for this rework pass given cycle budget; not re-tested",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "cycle": 1,
+      "type": "review-nit",
+      "issue": "Pat per-task review (task 7) flagged 3 LOW nits: stale dispatch-file reference in test module doc comment, duplicated git()/commit_poison_file test helpers (vs poison_file_reindex.rs), and overlong inline #[ignore] reasons that should live in the deferred-decision record instead.",
+      "severity": "low",
+      "consensus": "1/1 (Pat)",
+      "action": "deferred",
+      "reason": "cosmetic, auto-fixable but deferred to keep cycle moving within budget",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "cycle": 1,
+      "type": "structural",
+      "issue": "ddb-core/src/ffi/driver.rs: search_paginated and search_filtered still duplicate the SearchCommand build/mapping (now including the new warnings-mapping block, growing the duplication); ddb-core/src/ffi/tests.rs now 1962 lines, still over the 800-line limit.",
+      "severity": "low",
+      "consensus": "task 8 findings 2/3 (Pat per-task review confirms both still unaddressed)",
+      "action": "deferred",
+      "reason": "structural/refactor-only, out of scope for this rework pass given cycle budget; not re-tested",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "cycle": 1,
+      "type": "review-nit",
+      "issue": "Pat per-task review (task 8) flagged 3 LOW nits: duplicated AppWarning->RebuildWarningRecord mapping block across search_paginated/search_filtered, new FFI tests still added to the over-800-line ffi/tests.rs, and the offset/limit overflow error message does not name which flag was rejected.",
+      "severity": "low",
+      "consensus": "1/1 (Pat)",
+      "action": "deferred",
+      "reason": "cosmetic, auto-fixable but deferred to keep cycle moving within budget",
+      "prd": "00176-route-search-through-contract-v1.md"
     }
   ]
 }
