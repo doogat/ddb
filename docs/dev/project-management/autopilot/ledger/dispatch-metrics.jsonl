@@ -469,3 +469,5 @@
 {"id":"08ec4d18","ended_at":1792354085,"elapsed_s":42,"outcome":"ok","detail":null}
 {"id":"04bcf7c7","kind":"tess","task":"3","queued_at":1792354101,"prompt_bytes":2534}
 {"id":"04bcf7c7","ended_at":1792354174,"elapsed_s":73,"outcome":"ok","detail":null}
+{"id":"a323c4af","kind":"deslop","task":"3","queued_at":1792355096,"prompt_bytes":1359}
+{"id":"a323c4af","ended_at":1792355210,"elapsed_s":114,"outcome":"ok","detail":null}

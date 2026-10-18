@@ -19,6 +19,22 @@ Ivan:
 - Unset order is explicit `unset_fields` first, then null-derived keys, in input order; the tests only pin order for single-source cases.
 - A key that is both null and explicitly unset is not a collision — kept once, as the tests require.
 
+## 3: GraphQL: fields to JSON scalar, decode through core normalization, update singleton mutations
+
+Tess (initial):
+- `decode_json_fields_object` returns `Result<RawFieldsInput, String>` with `RawFieldsInput: Debug + PartialEq`.
+- Error messages for nested-null rejection are not checked initially, only `is_err()`.
+
+Tess (strengthen):
+- The error from `decode_json_fields_object`/`fields_map`/`fields_and_unsets` implements `Debug`, so the key check uses `format!("{err:?}")`.
+- Renaming a test's key from `l` to `tags_list` counts as strengthening the test, not changing its logic.
+- `fields_map` and `fields_and_unsets` return `Result<_, String>`.
+
+Ivan:
+- `opt_fields_and_unsets` returns `None` whenever `fields` is absent, even if `unsetFields` is present; the batch-update call site uses `unsetFields` on its own in that case.
+- The nested-null error names the full path (`key[i]` / `key.sub`), not just the top-level key.
+- The `normalize_update_fields` error in the singleton `update_*` resolver maps through `to_graphql_error`.
+
 ## 2: REST: accept object fields through boundary decoder + core normalization
 
 Tess (initial):
