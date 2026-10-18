@@ -68,66 +68,52 @@ pub enum DdbError {
         code: Option<String>,
         context: Vec<DdbErrorContextEntry>,
     },
+    #[error("Conflict: {msg}")]
+    Conflict {
+        msg: String,
+        code: Option<String>,
+        context: Vec<DdbErrorContextEntry>,
+    },
     #[error("VersionMismatch: {msg}")]
     VersionMismatch { msg: String },
 }
 
 impl From<DoogatError> for DdbError {
     fn from(e: DoogatError) -> Self {
-        match e {
-            DoogatError::Git(msg) => DdbError::Git { msg },
-            DoogatError::Yaml(msg) => DdbError::Yaml { msg },
-            DoogatError::Sql(msg) => DdbError::Sql { msg },
-            DoogatError::Automerge(msg) => DdbError::Automerge { msg },
-            DoogatError::Io(e) => DdbError::Io { msg: e.to_string() },
-            DoogatError::Toml(msg) => DdbError::Config { msg },
-            DoogatError::Parse(msg) => DdbError::Parse { msg },
-            DoogatError::NotFound(msg) => DdbError::NotFound { msg },
-            DoogatError::Validation(msg) => DdbError::Validation {
-                msg,
-                code: None,
-                context: empty_error_context(),
-            },
-            DoogatError::InvalidPath(msg) => DdbError::Validation {
-                msg,
-                code: None,
-                context: empty_error_context(),
-            },
-            DoogatError::SqlEngine(msg) => DdbError::SqlEngine {
-                msg,
-                code: None,
-                context: empty_error_context(),
-            },
-            DoogatError::Conflict(msg) => DdbError::Git { msg },
-            DoogatError::Sync(msg) => DdbError::Git { msg },
-            DoogatError::Index(msg) => DdbError::Sql { msg },
-            DoogatError::BadRequest(msg) => DdbError::Validation {
-                msg,
-                code: None,
-                context: empty_error_context(),
-            },
-            DoogatError::VersionMismatch { repo, driver } => DdbError::VersionMismatch {
+        if let DoogatError::VersionMismatch { repo, driver } = &e {
+            return DdbError::VersionMismatch {
                 msg: format!("repo format v{repo}, driver supports up to v{driver}"),
-            },
-            #[cfg(feature = "nosql")]
-            DoogatError::Redb(msg) => DdbError::Io { msg },
-            DoogatError::Structured {
-                code,
-                message,
-                context,
-            } => match code {
-                "REFERENCES_VIOLATION" | "CASCADE_CYCLE" => DdbError::SqlEngine {
-                    msg: message,
-                    code: Some(code.to_string()),
-                    context: ffi_error_context(context),
-                },
-                _ => DdbError::Validation {
-                    msg: message,
-                    code: Some(code.to_string()),
-                    context: ffi_error_context(context),
-                },
-            },
+            };
         }
+        #[cfg(feature = "nosql")]
+        if let DoogatError::Redb(msg) = &e {
+            return DdbError::Io { msg: msg.clone() };
+        }
+        category_variant(e)
+    }
+}
+
+fn category_variant(err: DoogatError) -> DdbError {
+    use crate::app_contract::{error_rendering, AppError, FfiVariant};
+    let context = match &err {
+        DoogatError::Structured { context, .. } => ffi_error_context(context.clone()),
+        _ => empty_error_context(),
+    };
+    let msg = err.to_string();
+    let rendering = error_rendering(AppError::from(&err));
+    match rendering.ffi_variant {
+        FfiVariant::NotFound => DdbError::NotFound { msg },
+        FfiVariant::Conflict => DdbError::Conflict {
+            msg,
+            code: Some(rendering.code.to_string()),
+            context,
+        },
+        FfiVariant::Validation => DdbError::Validation {
+            msg,
+            code: Some(rendering.code.to_string()),
+            context,
+        },
+        FfiVariant::Internal => DdbError::Io { msg },
     }
 }
 

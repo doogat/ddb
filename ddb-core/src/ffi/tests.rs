@@ -576,7 +576,7 @@ fn ffi_singleton_create_exposes_structured_error_context() {
         .expect_err("second singleton create must reject");
 
     match err {
-        DdbError::Validation {
+        DdbError::Conflict {
             code: Some(code),
             context,
             ..
@@ -593,7 +593,7 @@ fn ffi_singleton_create_exposes_structured_error_context() {
             assert_eq!(table, Some("app_config"));
             assert_eq!(existing_id, Some(first_id.as_str()));
         }
-        other => panic!("expected Validation with structured code/context, got {other:?}"),
+        other => panic!("expected Conflict with structured code/context, got {other:?}"),
     }
 }
 
@@ -827,7 +827,7 @@ fn apply_schema_adds_column_without_allow_destructive() {
 
 /// A destructive drop without allow_destructive is blocked and mutates nothing.
 /// Live widget has label+note; a desired doc with only label implies dropping note.
-/// The call must Err with DdbError::Validation { code: SCHEMA_DESTRUCTIVE_BLOCKED },
+/// The call must Err with DdbError::Conflict { code: SCHEMA_DESTRUCTIVE_BLOCKED },
 /// and note must remain present afterward.
 #[test]
 fn apply_schema_destructive_drop_blocked_without_allow_destructive() {
@@ -845,12 +845,12 @@ fn apply_schema_destructive_drop_blocked_without_allow_destructive() {
         .expect_err("dropping a column without allow_destructive must error");
 
     match err {
-        DdbError::Validation {
+        DdbError::Conflict {
             code: Some(code), ..
         } => {
             assert_eq!(code, crate::error::codes::SCHEMA_DESTRUCTIVE_BLOCKED);
         }
-        other => panic!("expected Validation SCHEMA_DESTRUCTIVE_BLOCKED, got {other:?}"),
+        other => panic!("expected Conflict SCHEMA_DESTRUCTIVE_BLOCKED, got {other:?}"),
     }
 
     // The destructive apply must have mutated nothing: note still queryable.
@@ -1384,7 +1384,7 @@ fn failed_a_then_repaired(prune: bool) -> NsFixture {
     let a_master = head_at(node1.path());
     let result = import_at(&node2, &a_bundle);
     assert!(
-        matches!(&result, Err(DdbError::Git { msg }) if msg.contains("bundle merge failed")),
+        matches!(&result, Err(DdbError::Io { msg }) if msg.contains("bundle merge failed")),
         "setup invalid: import A must fail as a merge failure, got {result:?}"
     );
     let a_refs = kept_a_refs(&node2, &a_bundle, &a_master);
@@ -1443,7 +1443,7 @@ fn assert_b_merged_nothing(f: &NsFixture, prune: bool) {
     );
 }
 
-/// Masterless B fails as `DdbError::Git` with the merge-failure prefix naming
+/// Masterless B fails as `DdbError::Io` with the merge-failure prefix naming
 /// its payload and branches, merges nothing (A's stale master included), adds
 /// exactly its fetched head and leaves every other ref. Returns B's payload id.
 fn masterless_b_fails(f: &NsFixture, prune: bool) -> String {
@@ -1453,14 +1453,14 @@ fn masterless_b_fails(f: &NsFixture, prune: bool) -> String {
     let head_before = head_at(&f.node2);
 
     let msg = match import_at(&f.node2, &b_bundle) {
-        Err(DdbError::Git { msg }) => msg,
+        Err(DdbError::Io { msg }) => msg,
         other => panic!(
-            "prune={prune}: masterless B must fail as DdbError::Git, never merge A's stale \
+            "prune={prune}: masterless B must fail as DdbError::Io, never merge A's stale \
              master; got {other:?}"
         ),
     };
     assert!(
-        msg.starts_with("bundle merge failed:"),
+        msg.starts_with("sync: bundle merge failed:"),
         "prune={prune}: B must report a merge failure, got: {msg}"
     );
     let b_id = payload_id(&b_bundle);

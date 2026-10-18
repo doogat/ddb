@@ -262,7 +262,7 @@ fn create_structured_singleton_conflict_with_error_rejects() {
         .expect_err("Error must reject the second singleton create");
 
     match err {
-        DdbError::Validation { msg, code, context } => {
+        DdbError::Conflict { msg, code, context } => {
             assert_eq!(
                 code.as_deref(),
                 Some(SINGLETON_VIOLATION),
@@ -280,7 +280,7 @@ fn create_structured_singleton_conflict_with_error_rejects() {
                 "the rejection must name the existing doogat, got {context:?}"
             );
         }
-        other => panic!("expected a Validation error for the singleton collision, got {other:?}"),
+        other => panic!("expected a Conflict error for the singleton collision, got {other:?}"),
     }
     assert_eq!(
         doogat_paths(&driver),
