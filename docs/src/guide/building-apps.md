@@ -95,10 +95,10 @@ One note per deprecation entry, each tagged with its stable `D-0X` id. All depre
 - **Required client changes**: branch on the value of the `error` field using the unified code vocabulary; the field name is unchanged. The legacy REST-local short-strings have already been removed (REST errors route through the shared `http_error_response`/`classify` helper, shipped by PRD 00147/00143), so only the unified codes appear.
 ##### FFI search error variant (D-02)
 
-- **Old behavior**: FFI `DoogatDriver.search` throws `DdbError::Sql(msg)` carrying engine error text in the string payload.
-- **New behavior**: planned typed FFI error variants mirroring AppError codes; not yet shipped.
+- **Old behavior**: FFI `DoogatDriver.search` threw `DdbError::Sql(msg)` carrying engine error text in the string payload.
+- **New behavior**: PRD 00177 made the variant policy-derived: an internal engine failure now arrives as `DdbError::Io`, a rejected input as `DdbError::Validation` carrying the policy `code`. There is still no variant per error code; planned typed FFI error variants mirroring AppError codes are not yet shipped.
 - **Replacement interface**: candidate `ffi-typed-errors-v1` follow-up PRD will add per-code typed `DoogatError` enum variants.
-- **Required client changes**: none yet. Wait for `ffi-typed-errors-v1` to ship; current `catch DdbError.sql` substring-matching remains supported.
+- **Required client changes**: `catch DdbError.sql` is no longer reachable from `search` — switch to `catch DdbError.io` / `catch DdbError.validation`. Wait for `ffi-typed-errors-v1` to ship for a variant per error code.
 ##### REST CRUD mutation error envelope (D-03)
 
 - **Old behavior**: REST `POST/PUT /rest/doogats[/:id]` returns HTTP 4xx + `{ error, message }` envelope on validation failure. The `error` field carries a REST-local short-string code.
@@ -279,7 +279,7 @@ NoSQL HTTP is a read-only document fetch and prefix-scan surface. Use it for O(1
 FFI is the embedded/mobile surface. It runs in-process with no server needed and gives Swift and Kotlin apps direct access to the Git-backed repo, SQL engine, and FTS5 search. Use it for iOS/Android apps or any context where running a server process is not acceptable.
 
 **Specialized:**
-- *Validation error handling* - validation failures throw `DdbError::Validation` or `DdbError::SqlEngine` with structured code/context when available; per-code enum variants are deferred to `ffi-typed-errors-v1`. Use GraphQL when structured error codes are required.
+- *Validation error handling* - validation failures throw `DdbError::Validation` or `DdbError::Conflict` with structured code/context when available (PRD 00177 made the mapping policy-derived; `DdbError::SqlEngine` is no longer produced); per-code enum variants are deferred to `ffi-typed-errors-v1`. Use GraphQL when structured error codes are required.
 - *Not-found behavior* - missing id on `read_doogat` and `delete_doogat` throws `DdbError::NotFound { msg }`. An id-specific not-found payload is deferred to `ffi-typed-errors-v1`.
 
 **Intentionally absent:**
@@ -571,10 +571,12 @@ do {
 } catch DdbError.notFound(let msg) {
     // id not in repo
 } catch DdbError.validation(let msg) {
-    // constraint violation — code embedded in msg (e.g. "UNIQUE_VIOLATION: ...")
+    // rejected input — code embedded in msg (e.g. "TYPE_NOT_REGISTERED: ...")
     // per-code typed variants deferred to ffi-typed-errors-v1
-} catch DdbError.sql(let msg) {
-    // SQL-engine error
+} catch DdbError.conflict(let msg) {
+    // identity/reference conflict — code embedded in msg (e.g. "UNIQUE_VIOLATION: ...")
+} catch DdbError.io(let msg) {
+    // internal/unclassified failure (engine, sync, filesystem)
 }
 ```
 

@@ -814,7 +814,7 @@ Offline writes on two nodes can each land a row in the same SINGLETON typedef. `
 - `SINGLETON_VIOLATION` -- context carries `table` and `existing_id`.
 - `SINGLETON_NOT_FOUND` -- context carries `table`.
 
-`ddb-server/src/error.rs::to_graphql_error` auto-maps these to `extensions.code`; REST `rest_error` maps to HTTP 409 / 404; FFI surfaces them as structured `DdbError::Validation` / `DdbError::SqlEngine` variants.
+`ddb-server/src/error.rs::to_graphql_error` auto-maps these to `extensions.code`; REST `rest_error` maps to HTTP 409 / 404; FFI surfaces them as structured `DdbError::Conflict` (`SINGLETON_VIOLATION`) / `DdbError::NotFound` (`SINGLETON_NOT_FOUND`) variants (PRD 00177 policy-derived mapping).
 
 
 ## 17. Help Guides

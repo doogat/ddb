@@ -78,12 +78,14 @@ high-risk when it touches a `Guaranteed` capability on a flagship interface
 | Create response | GraphQL | `createDoogat` returns the created object with typed fields; `executeSql(INSERT ...)` returns created id in `SqlResult.message`. |
 | Create response | CLI | Prints the new doogat id on stdout; exits 0. |
 | Create response | REST | `POST /rest/doogats` returns `{ data, warnings }` JSON envelope. |
+| Create response | FFI | `create_structured(...)` (PRD 00177) returns `CreateResultRecord` (id, title, doogat_type, tags, path, body, date, extra, sections, links, updated_at, warnings); conflict behavior is caller-controlled via `on_conflict`. |
 | Read (single by id) | GraphQL | `doogat(id: ...)` returns the full object or a `NOT_FOUND` error envelope. |
 | Read (single by id) | CLI | `ddb read <id>` prints raw Markdown; not-found returns non-zero exit and stderr message. |
 | Read (single by id) | REST | `GET /rest/doogats/:id` returns `{ data, warnings }` JSON envelope. |
 | Update response | GraphQL | `updateDoogat` returns the updated object; `executeSql(UPDATE ...)` returns affected-row count. |
 | Update response | CLI | `ddb update <id> ...` prints the updated id; SQL `UPDATE` via `ddb query` prints affected-row count. |
 | Update response | REST | `PUT /rest/doogats/:id` returns `{ data, warnings }` JSON envelope. |
+| Update response | FFI | `update_structured(id, UpdateStructuredInput)` (PRD 00177) returns `UpdateResultRecord`, same field set as `CreateResultRecord`; `None` fields leave the current value unchanged, `unset_fields` removes frontmatter keys. |
 | Delete response | GraphQL | `deleteDoogat` returns confirmation; cascade cleans child rows atomically. |
 | Delete response | CLI | `ddb delete <id>` removes the doogat; SQL `DELETE` via `ddb query` prints affected-row count. |
 | Delete response | REST | `DELETE /rest/doogats/:id` returns HTTP 204. |
@@ -98,6 +100,7 @@ high-risk when it touches a `Guaranteed` capability on a flagship interface
 | Not-found error | GraphQL | `extensions.code == "NOT_FOUND"` in the error envelope. |
 | Not-found error | CLI | Non-zero exit and stderr message on read, update, and delete. |
 | Not-found error | REST | HTTP 404 + `{ "error": "NOT_FOUND", "message": "..." }`. |
+| Validation/conflict/not-found error | FFI | PRD 00177 made the `DdbError` variant policy-derived (`error_rendering`'s `ffi_variant`): a rejected input throws `DdbError::Validation { msg, code, context }`, an identity/reference conflict throws `DdbError::Conflict { msg, code, context }`, a missing id throws `DdbError::NotFound { msg }`, and an internal/unclassified failure throws `DdbError::Io { msg }`. `code` carries the same vocabulary as GraphQL's `extensions.code` when the source error is `Structured`. |
 
 ## Compatibility notes: search through the app contract (PRD 00176)
 

@@ -94,7 +94,6 @@ Generated: 2026-10-18 (00177 build resuming at task 4/5; GitHub State and Active
 
 - [ ] 00178-structured-fields-input-v1 (depends on 00177, see above — do not select before 00177 lands)
 - [ ] 00179-sql-identifier-escaping-materializer-v1
-- [ ] 00179-sql-identifier-escaping-materializer-v1
 - [ ] 00180-server-security-resource-hardening-v1
 - [ ] 00181-index-health-quarantine-surface-v1
 - [ ] 00182-where-filter-correctness-completeness-v2

@@ -95,7 +95,7 @@ The same golden workflow (failed A, local repair, masterless B refused, independ
 | Interface | Success | Failure | Conformance tests |
 |-----------|---------|---------|-------------------|
 | CLI `ddb bundle import <path>` | exit 0, `imported: conflicts resolved: <n>` | nonzero exit, no success line; a merge failure prints `bundle merge failed:` naming the payload namespace; a bundle without `master` also lists its delivered branches | `tests/e2e/integration_bundle_import_ref_namespace.rs` |
-| FFI `DoogatDriver::import_bundle` | `Ok(())` (no `SyncReport` crosses FFI) | `DdbError::Git { msg }` carrying the CLI's `bundle merge failed:` text: the payload namespace, plus the delivered branches for a bundle without `master` | `ddb-core/src/ffi/tests.rs` (`bundle_import_ffi_*`) |
+| FFI `DoogatDriver::import_bundle` | `Ok(())` (no `SyncReport` crosses FFI) | `DdbError::Io { msg }` carrying a `sync: bundle merge failed:` prefix (PRD 00177 policy-derived mapping) plus the CLI's text: the payload namespace, plus the delivered branches for a bundle without `master` | `ddb-core/src/ffi/tests.rs` (`bundle_import_ffi_*`) |
 
 The FFI tests exercise the public Rust driver, not generated Swift/Kotlin bindings. GraphQL, REST, PgWire and NoSQL HTTP have no bundle-import endpoint and make no bundle-import promise.
 
