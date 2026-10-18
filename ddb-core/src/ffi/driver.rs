@@ -118,6 +118,14 @@ impl DoogatDriver {
             Ok(PaginatedSearchResult {
                 hits: output.value.items.into_iter().map(Into::into).collect(),
                 total_count: output.value.total as u64,
+                warnings: output
+                    .warnings
+                    .into_iter()
+                    .map(|w| RebuildWarningRecord {
+                        code: w.code.to_string(),
+                        message: w.message,
+                    })
+                    .collect(),
             })
         })
     }
@@ -141,6 +149,14 @@ impl DoogatDriver {
             Ok(PaginatedSearchResult {
                 hits: output.value.items.into_iter().map(Into::into).collect(),
                 total_count: output.value.total as u64,
+                warnings: output
+                    .warnings
+                    .into_iter()
+                    .map(|w| RebuildWarningRecord {
+                        code: w.code.to_string(),
+                        message: w.message,
+                    })
+                    .collect(),
             })
         })
     }

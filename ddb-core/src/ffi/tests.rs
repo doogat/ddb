@@ -1922,7 +1922,7 @@ fn search_paginated_surfaces_reindex_skip_warning_for_poison_file() {
         .iter()
         .find(|w| w.message.contains(poison_path))
         .expect("search_paginated should surface a reindex-skip warning naming the poison file");
-    assert_eq!(warning.code, "MALFORMED_YAML");
+    assert_eq!(warning.code, "REINDEX_SKIPPED_FILES");
 }
 
 #[test]
@@ -1941,7 +1941,7 @@ fn search_filtered_surfaces_reindex_skip_warning_for_poison_file() {
         .iter()
         .find(|w| w.message.contains(poison_path))
         .expect("search_filtered should surface a reindex-skip warning naming the poison file");
-    assert_eq!(warning.code, "MALFORMED_YAML");
+    assert_eq!(warning.code, "REINDEX_SKIPPED_FILES");
 }
 
 #[test]

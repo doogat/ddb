@@ -47,8 +47,17 @@ pub(crate) fn search(
     doogat_type: Option<String>,
     tag: Option<String>,
 ) -> ddb_core::error::Result<()> {
-    let to_i64 = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
-    let page = PageRequest::decode(limit.map(to_i64), offset.map(to_i64))?;
+    let to_i64 = |n: usize| {
+        i64::try_from(n).map_err(|_| {
+            ddb_core::error::DoogatError::Validation(format!(
+                "value {n} does not fit in i64"
+            ))
+        })
+    };
+    let page = PageRequest::decode(
+        limit.map(to_i64).transpose()?,
+        offset.map(to_i64).transpose()?,
+    )?;
     let svc = DoogatService::open(repo)?;
     let output = svc.search_command(SearchCommand {
         query: query.to_string(),

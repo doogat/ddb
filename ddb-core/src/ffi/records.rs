@@ -177,6 +177,7 @@ impl From<crate::types::SearchResult> for SearchResult {
 pub struct PaginatedSearchResult {
     pub hits: Vec<SearchResult>,
     pub total_count: u64,
+    pub warnings: Vec<RebuildWarningRecord>,
 }
 
 impl From<crate::types::PaginatedSearchResult> for PaginatedSearchResult {
@@ -184,6 +185,7 @@ impl From<crate::types::PaginatedSearchResult> for PaginatedSearchResult {
         Self {
             hits: r.hits.into_iter().map(Into::into).collect(),
             total_count: r.total_count as u64,
+            warnings: Vec::new(),
         }
     }
 }
