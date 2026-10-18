@@ -43,9 +43,9 @@ see [app-contract.md](app-contract.md#search-searchcommand-pagerequest-appsearch
 `type` becomes `SearchCommand.types` and `tag` becomes `SearchCommand.tag`.
 REST accepts exactly one `type` value, deliberately: the query string carries no
 list form, so a multi-type filter stays a GraphQL and FFI capability, where the
-argument is already a list. Repeat the search per type to cover several. A filter that matches nothing returns an empty `data` array,
-not the unfiltered result. `backlinks`, `sort`, and `field.{name}` do not apply to
-search.
+argument is already a list. Repeat the search per type to cover several.
+A filter that matches nothing returns an empty `data` array, not the unfiltered
+result. `backlinks`, `sort`, and `field.{name}` do not apply to search.
 
 Pagination goes through the shared `PageRequest` policy, not the list clamp:
 
