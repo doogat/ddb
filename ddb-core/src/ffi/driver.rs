@@ -84,7 +84,12 @@ impl DoogatDriver {
                 tags,
                 doogat_type,
                 body,
-                fields: fields_to_core(fields),
+                fields: crate::app_contract::normalize_create_fields(
+                    fields_to_core(fields)
+                        .into_iter()
+                        .map(|(k, v)| (k, Some(v)))
+                        .collect(),
+                ),
                 on_conflict: on_conflict.into(),
                 unregistered_type_policy: crate::app_contract::FFI_UNREGISTERED_TYPE_POLICY,
             };
@@ -106,14 +111,21 @@ impl DoogatDriver {
         input: UpdateStructuredInput,
     ) -> Result<UpdateResultRecord, DdbError> {
         self.with_service(|svc| {
+            let raw = fields_to_core(input.fields)
+                .into_iter()
+                .map(|(k, v)| (k, Some(v)))
+                .collect();
+            let (fields, unset_fields) =
+                crate::app_contract::normalize_update_fields(raw, input.unset_fields)
+                    .map_err(DdbError::from)?;
             let cmd = crate::app_contract::UpdateCommand {
                 id,
                 title: input.title,
                 tags: input.tags,
                 doogat_type: input.doogat_type,
                 body: input.body,
-                fields: fields_to_core(input.fields),
-                unset_fields: input.unset_fields,
+                fields,
+                unset_fields,
             };
             let out = svc.update(cmd).map_err(DdbError::from)?;
             Ok(UpdateResultRecord::from_output(out))

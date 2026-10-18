@@ -31,6 +31,9 @@ pub use commands::{
     ReadCommand, SearchCommand, UnregisteredTypePolicy, UpdateCommand,
 };
 
+mod fields_normalize;
+pub use fields_normalize::{normalize_create_fields, normalize_update_fields, RawFieldsInput};
+
 mod results;
 pub use results::{
     AppSearchResult, BrokenBacklink, CreateResult, DeleteResult, ListResult, ReadResult,

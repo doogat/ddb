@@ -1,3 +1,49 @@
+//! One normalization chokepoint for transport field input: a `None` value is
+//! a null, which create omits and update turns into an unset.
+
+use std::collections::BTreeMap;
+
+use crate::error::{DoogatError, Result};
+use crate::types::Value;
+
+/// Field input as a transport received it; `None` marks an explicit null.
+pub type RawFieldsInput = BTreeMap<String, Option<Value>>;
+
+/// Drop null entries; every present value passes through unchanged.
+pub fn normalize_create_fields(raw: RawFieldsInput) -> BTreeMap<String, Value> {
+    raw.into_iter().filter_map(|(k, v)| v.map(|v| (k, v))).collect()
+}
+
+/// Split raw input into sets and unsets. Null entries join `unset_fields`
+/// (deduplicated); a key both set and explicitly unset is a validation error.
+pub fn normalize_update_fields(
+    raw: RawFieldsInput,
+    unset_fields: Vec<String>,
+) -> Result<(BTreeMap<String, Value>, Vec<String>)> {
+    let mut fields = BTreeMap::new();
+    let mut nulls = Vec::new();
+    for (key, value) in raw {
+        match value {
+            Some(v) => {
+                fields.insert(key, v);
+            }
+            None => nulls.push(key),
+        }
+    }
+    let mut unset: Vec<String> = Vec::new();
+    for key in unset_fields.into_iter().chain(nulls) {
+        if fields.contains_key(&key) {
+            return Err(DoogatError::Validation(format!(
+                "field '{key}' is both set and unset"
+            )));
+        }
+        if !unset.contains(&key) {
+            unset.push(key);
+        }
+    }
+    Ok((fields, unset))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app_contract::{normalize_create_fields, normalize_update_fields, RawFieldsInput};
