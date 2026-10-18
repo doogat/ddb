@@ -596,6 +596,102 @@ fn update_structured_on_an_unknown_id_errors_without_creating_a_doogat() {
     );
 }
 
+fn fields_only_update(
+    fields: Vec<FieldEntryValue>,
+    unset_fields: Vec<String>,
+) -> UpdateStructuredInput {
+    UpdateStructuredInput {
+        title: None,
+        tags: None,
+        doogat_type: None,
+        body: None,
+        fields,
+        unset_fields,
+    }
+}
+
+#[test]
+fn structured_create_and_update_keep_native_number_and_bool_variants() {
+    let (_tmp, driver) = fresh_driver();
+    let created = driver
+        .create_structured(
+            Some("Native".into()),
+            vec![],
+            None,
+            None,
+            vec![
+                typed_field("count", FieldValue::Num(7.5)),
+                typed_field("enabled", FieldValue::Bool(true)),
+                field("label", "x"),
+            ],
+            ConflictActionRecord::Error,
+        )
+        .expect("create_structured with native scalars must succeed");
+    let meta = stored_doogat(&driver, &created.id, &created.path).meta;
+    assert_eq!(meta.extra.get("count"), Some(&Value::Number(7.5)));
+    assert_eq!(meta.extra.get("enabled"), Some(&Value::Bool(true)));
+    assert_eq!(meta.extra.get("label"), Some(&Value::String("x".into())));
+
+    driver
+        .update_structured(
+            created.id.clone(),
+            fields_only_update(
+                vec![
+                    typed_field("count", FieldValue::Num(-2.0)),
+                    typed_field("enabled", FieldValue::Bool(false)),
+                    field("label", "y"),
+                ],
+                vec![],
+            ),
+        )
+        .expect("update_structured with native scalars must succeed");
+    let meta = stored_doogat(&driver, &created.id, &created.path).meta;
+    assert_eq!(
+        meta.extra.get("count"),
+        Some(&Value::Number(-2.0)),
+        "an updated number must stay a native number, not a string"
+    );
+    assert_eq!(
+        meta.extra.get("enabled"),
+        Some(&Value::Bool(false)),
+        "an updated bool must stay a native bool, not a string"
+    );
+    assert_eq!(meta.extra.get("label"), Some(&Value::String("y".into())));
+}
+
+#[test]
+fn update_structured_rejects_a_key_both_set_and_unset_without_writing() {
+    let (tmp, driver) = fresh_driver();
+    let created = create_note_with_two_fields(&driver);
+    let head_before = head_at(tmp.path());
+
+    let err = driver
+        .update_structured(
+            created.id.clone(),
+            fields_only_update(
+                vec![field("theme_hint", "new")],
+                vec!["theme_hint".into()],
+            ),
+        )
+        .expect_err("setting and unsetting the same key must be rejected");
+
+    match err {
+        DdbError::Validation { .. } => {}
+        other => panic!("a set/unset collision must be a Validation error, got {other:?}"),
+    }
+    assert_eq!(
+        head_at(tmp.path()),
+        head_before,
+        "a rejected collision must not write a commit"
+    );
+    let stored = stored_doogat(&driver, &created.id, &created.path);
+    assert_eq!(
+        frontmatter_text(&stored.meta, "theme_hint"),
+        "old",
+        "a rejected collision must leave the stored field untouched"
+    );
+}
+
 #[test]
 fn update_structured_to_an_unregistered_type_forwards_the_base_only_warning() {
     let (_tmp, driver) = fresh_driver();
