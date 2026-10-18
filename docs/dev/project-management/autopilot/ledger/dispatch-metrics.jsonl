@@ -281,3 +281,17 @@
 {"kind":"handoff","site":"build","edge":"leave","at":1792273966,"phase":"build","prd":"00176-route-search-through-contract-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792273999,"phase":"build","prd":"00176-route-search-through-contract-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792286237,"phase":"review","prd":"00176-route-search-through-contract-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792286269,"phase":"review","prd":"00176-route-search-through-contract-v1.md"}
+{"id":"0edb58f0","kind":"bob","task":"review-20261018-00176-c1","queued_at":1792287672,"prompt_bytes":13432}
+{"id":"fa5355f4","kind":"carl","task":"review-20261018-00176-c1","queued_at":1792287672,"prompt_bytes":6603}
+{"id":"4daa622e","kind":"bob","task":"review-20261018-00176-c1","queued_at":1792288710,"prompt_bytes":13432}
+{"id":"22b34304","kind":"carl","task":"review-20261018-00176-c1","queued_at":1792288710,"prompt_bytes":6603}
+{"id":"4daa622e","ended_at":1792291783,"elapsed_s":3073,"outcome":"ok","detail":null}
+{"id":"22b34304","ended_at":1792291786,"elapsed_s":3076,"outcome":"ok","detail":null}
+{"id":"36b7ee5e","kind":"bob","task":"review-20261018-00176-c1","queued_at":1792291844,"prompt_bytes":314258}
+{"id":"36b7ee5e","ended_at":1792291889,"elapsed_s":45,"outcome":"ok","detail":"retry"}
+{"id":"36b7ee5e","ended_at":1792293355,"elapsed_s":1511,"outcome":"ok","detail":null}
+{"id":"22b34304","ended_at":1792293355,"elapsed_s":4645,"outcome":"ok","detail":null}
+{"id":"0edb58f0","ended_at":1792293385,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"fa5355f4","ended_at":1792293385,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792293385,"phase":"review","prd":"00176-route-search-through-contract-v1.md"}

@@ -1,0 +1,42 @@
+[
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "The conformance `StepOp::Search` parity test runs CLI and GraphQL only. REST parity is covered separately in `integration_rest_search_filtered.rs`, not in the harness. The PRD's REST harness driver depends on 00175, so this is an accepted gap.",
+    "file": "tests/e2e/conformance/cross_driver_crud.rs:179",
+    "reason": "PRD 00176 itself scopes the harness REST driver to 00175 ('the harness's REST driver lands in 00175'); the reviewer agrees it is an accepted gap. Not a defect in this PRD's scope."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "The unbounded, unfiltered FFI `search(query)` still exists beside the policy-bound methods. It is not a regression, but one uncapped FFI search path remains.",
+    "file": "ddb-core/src/ffi/driver.rs:97",
+    "reason": "Pre-existing public FFI method kept for compatibility; the PRD adds the filtered/paginated methods additively and does not require removing or capping the legacy one. Removing it is a breaking FFI change that needs its own compatibility review."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "Required binding regeneration and Swift/Kotlin smoke results are not supplied. Regenerate both bindings and compile/run calls to search_filtered that read all ten SearchResult fields. Rust build/clippy results do not establish this acceptance criterion.",
+    "file": "ddb-core/src/ffi/records.rs:132",
+    "reason": "The Swift/Kotlin mobile toolchain is absent on this host (PRD 00191 was rescoped to bindgen for exactly this reason). UniFFI bindgen generation is verifiable here and was exercised; a device/SDK smoke run cannot be executed on this machine."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "Modified main.rs exceeds 800-line file limit (836 lines)",
+    "file": "ddb-cli/src/main.rs:1",
+    "reason": "ddb-cli/src/main.rs is a pre-existing oversized dispatch file; this PRD only added the search subcommand's arguments to it. Splitting the CLI dispatch is out of this PRD's scope (surgical-changes rule) and belongs to a dedicated refactor."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "Parallel cargo test-ci times out on shared_actor_preserves_schema_applys_owned_transaction under thread contention",
+    "file": "ddb-server/src/actor/tests/mod.rs:14",
+    "reason": "Pre-existing flake in an untouched file (ddb-server/src/actor/tests/mod.rs is not in this PRD's diff); passes in isolation in ~1s. Unrelated to the search changes, so it is not reworked under this PRD."
+  }
+]

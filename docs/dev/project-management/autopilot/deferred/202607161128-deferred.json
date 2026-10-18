@@ -1022,6 +1022,46 @@
       "detail": "module_drift; note /Users/bob/git/src/github.com/doogat/ddb/docs/dev/project-management/autopilot/split-notes/00175-route-read-delete-through-contract-v1.md",
       "op_id": "c4d00e86f50f",
       "prd": "00175-route-read-delete-through-contract-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "issue": "Conformance StepOp::Search parity runs CLI+GraphQL only; REST parity lives in integration_rest_search_filtered.rs",
+      "severity": "low",
+      "consensus": "1/4",
+      "reason": "PRD 00176 scopes the harness REST driver to 00175 (link-ok); accepted gap",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "issue": "Unbounded, unfiltered FFI search(query) still exists beside the policy-bound methods (ddb-core/src/ffi/driver.rs:97)",
+      "severity": "low",
+      "consensus": "1/4",
+      "reason": "Pre-existing public FFI method kept for compatibility; removing or capping it is a breaking FFI change needing its own compatibility review",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "issue": "Swift/Kotlin binding regeneration smoke results not supplied for the widened FFI SearchResult record",
+      "severity": "low",
+      "consensus": "1/4",
+      "reason": "Mobile toolchain absent on this host (PRD 00191 was rescoped to bindgen for the same reason); bindgen generation is the verifiable part here",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "issue": "ddb-cli/src/main.rs exceeds the 800-line file limit (836 lines)",
+      "severity": "low",
+      "consensus": "1/4",
+      "reason": "Pre-existing oversized CLI dispatch file; this PRD only appended the search flags. Splitting it is out of scope (surgical changes) and belongs to a dedicated refactor",
+      "prd": "00176-route-search-through-contract-v1.md"
+    },
+    {
+      "type": "settled-deferral",
+      "issue": "cargo test-ci: actor::tests::shared_actor_preserves_schema_applys_owned_transaction times out under full-suite parallel contention",
+      "severity": "low",
+      "consensus": "1/4",
+      "reason": "Pre-existing flake in ddb-server/src/actor/tests/mod.rs, a file outside this PRD diff; passes in isolation in ~1s",
+      "prd": "00176-route-search-through-contract-v1.md"
     }
   ]
 }
