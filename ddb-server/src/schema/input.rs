@@ -323,10 +323,78 @@ mod tests {
     #[test]
     fn opt_fields_and_unsets_rejects_legacy_json_string() {
         let o = obj(vec![("fields", legacy_string_fields())]);
-        assert!(
-            opt_fields_and_unsets(&o).is_err(),
-            "a JSON-encoded string must be rejected, not reparsed or treated as absent"
+        assert_migration_error(opt_fields_and_unsets(&o), "opt_fields_and_unsets");
+    }
+
+    #[test]
+    fn opt_fields_and_unsets_merges_explicit_unset_fields_with_null_unsets() {
+        let o = obj(vec![
+            (
+                "fields",
+                fields_obj(vec![("from_null", GqlValue::Null), ("set", GqlValue::Boolean(false))]),
+            ),
+            ("unsetFields", str_list(&["from_list", "from_null"])),
+        ]);
+        let (fields, unsets) = opt_fields_and_unsets(&o)
+            .expect("disjoint unsets must merge")
+            .expect("present fields must yield Some");
+        assert_eq!(
+            fields,
+            BTreeMap::from([("set".to_string(), DdbValue::Bool(false))])
         );
+        assert_eq!(
+            sorted(unsets),
+            vec!["from_list".to_string(), "from_null".to_string()],
+            "explicit unsetFields join null-derived unsets, each key once"
+        );
+    }
+
+    #[test]
+    fn fields_map_and_fields_and_unsets_reject_non_object_non_string_fields() {
+        let cases = [
+            ("boolean", GqlValue::Boolean(true)),
+            ("number", num(1.0)),
+            ("list", GqlValue::List(vec![s("a")])),
+        ];
+        for (case, value) in cases {
+            let o = obj(vec![("fields", value)]);
+            assert!(
+                fields_map(&o).is_err(),
+                "fields_map must reject a {case} fields value, not treat it as empty"
+            );
+            assert!(
+                fields_and_unsets(&o).is_err(),
+                "fields_and_unsets must reject a {case} fields value, not treat it as empty"
+            );
+        }
+    }
+
+    #[test]
+    fn fields_map_and_fields_and_unsets_reject_nested_null() {
+        let cases = [
+            (
+                "list",
+                fields_obj(vec![("tags_list", GqlValue::List(vec![s("a"), GqlValue::Null]))]),
+            ),
+            (
+                "object",
+                fields_obj(vec![(
+                    "m",
+                    fields_obj(vec![("ok", num(1.0)), ("bad", GqlValue::Null)]),
+                )]),
+            ),
+        ];
+        for (case, value) in cases {
+            let o = obj(vec![("fields", value)]);
+            assert!(
+                fields_map(&o).is_err(),
+                "fields_map must reject a null nested inside a {case}"
+            );
+            assert!(
+                fields_and_unsets(&o).is_err(),
+                "fields_and_unsets must reject a null nested inside a {case}"
+            );
+        }
     }
 
     #[test]

@@ -1758,12 +1758,15 @@ mod tests {
     #[test]
     fn decode_json_fields_object_rejects_null_inside_list() {
         let input = gql_map(vec![(
-            "l",
+            "tags_list",
             GqlValue::List(vec![gql_str("a"), GqlValue::Null]),
         )]);
+        let err = decode_json_fields_object(&input)
+            .expect_err("null is only a top-level per-field signal, never a list element");
+        let msg = format!("{err:?}");
         assert!(
-            decode_json_fields_object(&input).is_err(),
-            "null is only a top-level per-field signal, never a list element"
+            msg.contains("tags_list"),
+            "the error must name the offending key 'tags_list', got {msg:?}"
         );
     }
 
@@ -1773,9 +1776,12 @@ mod tests {
             "m",
             GqlValue::Object(gql_map(vec![("ok", gql_num(1.0)), ("bad", GqlValue::Null)])),
         )]);
+        let err = decode_json_fields_object(&input)
+            .expect_err("null is only a top-level per-field signal, never a nested object value");
+        let msg = format!("{err:?}");
         assert!(
-            decode_json_fields_object(&input).is_err(),
-            "null is only a top-level per-field signal, never a nested object value"
+            msg.contains("bad"),
+            "the error must name the offending key 'bad', got {msg:?}"
         );
     }
 
@@ -1785,9 +1791,23 @@ mod tests {
             "l",
             GqlValue::List(vec![GqlValue::Object(gql_map(vec![("bad", GqlValue::Null)]))]),
         )]);
+        let err = decode_json_fields_object(&input)
+            .expect_err("a null nested at any depth below the top level must be rejected");
+        let msg = format!("{err:?}");
         assert!(
-            decode_json_fields_object(&input).is_err(),
-            "a null nested at any depth below the top level must be rejected"
+            msg.contains("bad"),
+            "the error must name the offending key 'bad', got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn decode_json_fields_object_decodes_integer_above_2_pow_53_without_panic() {
+        let input = gql_map(vec![("big", gql_num(9_007_199_254_740_993.0))]);
+        let decoded = decode_json_fields_object(&input)
+            .expect("a large integer must decode, lossy f64 precision is acceptable");
+        assert!(
+            matches!(decoded.get("big"), Some(Some(Value::Number(_)))),
+            "a large integer must decode to Value::Number, got {decoded:?}"
         );
     }
 }
