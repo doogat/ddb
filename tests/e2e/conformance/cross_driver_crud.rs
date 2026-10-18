@@ -177,7 +177,9 @@ fn search_value<'a>(driver: &str, step: usize, result: &'a super::result::Confor
 // within a 1e-9 relative tolerance (`search_hits_match`).
 #[test]
 fn filtered_search_returns_same_hits_and_full_field_set_on_cli_and_graphql() {
-    use super::comparator::{anonymize_search_hits, parse_cli_search_hits, parse_graphql_search_hits};
+    use super::comparator::{
+        anonymize_search_hits, parse_cli_search_hits, parse_graphql_search_hits,
+    };
 
     let fixture = workflows::filtered_search();
     let cli_results = CliDriver::new().run_workflow(&fixture);
