@@ -1,0 +1,14 @@
+[
+  {
+    "source": "bob",
+    "finding": "Test suite status is unknown (timeout, then exit 101 with no summary)",
+    "file": "N/A",
+    "command": "cargo test-ci"
+  },
+  {
+    "source": "bob",
+    "finding": "Test suite status is unknown (timeout, then exit 101 with no summary) - e2e leg",
+    "file": "N/A",
+    "command": "cargo build -p ddb-cli && cargo test -p ddb-e2e"
+  }
+]

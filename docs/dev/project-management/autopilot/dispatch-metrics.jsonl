@@ -399,3 +399,15 @@
 {"id":"f450f9cd","kind":"ivan","task":"5","queued_at":1792326547,"prompt_bytes":27531}
 {"id":"f450f9cd","ended_at":1792326977,"elapsed_s":430,"outcome":"ok","detail":null}
 {"kind":"handoff","site":"build","edge":"leave","at":1792330177,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792330218,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}
+{"id":"728550fc","kind":"bob","task":"review-00177-c1-20261018","queued_at":1792332068,"prompt_bytes":13584}
+{"id":"103a4a76","kind":"carl","task":"review-00177-c1-20261018","queued_at":1792332068,"prompt_bytes":6603}
+{"id":"caaa6863","kind":"bob","task":"review-00177-c1-20261018","queued_at":1792332918,"prompt_bytes":13584}
+{"id":"d47485bd","kind":"carl","task":"review-00177-c1-20261018","queued_at":1792332918,"prompt_bytes":6603}
+{"id":"caaa6863","ended_at":1792334690,"elapsed_s":1772,"outcome":"ok","detail":null}
+{"id":"d47485bd","ended_at":1792334692,"elapsed_s":1774,"outcome":"ok","detail":null}
+{"id":"caaa6863","ended_at":1792335133,"elapsed_s":2215,"outcome":"ok","detail":null}
+{"id":"d47485bd","ended_at":1792335133,"elapsed_s":2215,"outcome":"ok","detail":null}
+{"id":"728550fc","ended_at":1792335211,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"103a4a76","ended_at":1792335211,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792335211,"phase":"review","prd":"00177-ffi-crud-through-contract-v1.md"}

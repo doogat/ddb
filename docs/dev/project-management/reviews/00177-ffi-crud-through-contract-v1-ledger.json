@@ -1,0 +1,66 @@
+[
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "The `DdbError` variants `Git`, `Yaml`, `Sql`, `Automerge`, `Parse`, `Config` and `SqlEngine` are still exported but nothing produces them any more. The code, the ledger and the docs say so, but Swift/Kotlin consumers still get dead cases. Remove them in a follow-up breaking-surface PRD",
+    "file": "ddb-core/src/ffi/records.rs:41",
+    "reason": "Removing a UniFFI enum variant is a breaking binding-surface change this PRD does not authorize; the finders themselves say 'follow-up breaking-surface PRD'. A test already pins them as unreachable. Deferred to batch end."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "`core_to_field_value` and `core_to_field_scalar` are `#[cfg(test)]` only, so about nine tests in `records_tests.rs` (round trip, verbatim strings, bit-exact numbers, repeated items, native variants) exercise code that never ships. The design allowed this, but the tests cover only the `field_value_to_core` direction as production behavior. Drop the test-only direction and its tests, or keep it and say so in the file header",
+    "file": "ddb-core/src/ffi/records.rs:398",
+    "reason": "The design doc explicitly sanctioned `#[cfg(test)]` here over shipping unused production code, and the doubt lens filed it under KNOWN for that reason. Removing the direction would drop the round-trip proof. Settled by design."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "medium",
+    "issue": "`ddb-core/src/ffi/tests.rs` is now 1982 lines (limit 800) and this diff grew it by 20 net lines. The overage is already recorded as a deferred low, but the file was edited again rather than split. The new test files are under the limit",
+    "file": "ddb-core/src/ffi/tests.rs:1",
+    "reason": "Pre-existing overage already recorded as a deferred low under 00176; this PRD correctly put its new tests in split submodules. Splitting the parent file is unrelated to this PRD's behavior."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "`meta.id.map(|id| id.0).unwrap_or_default()` returns an empty `id` string if the service ever returns a doogat without an id, instead of an error. Create and update always set one today, so this only masks a future contract break",
+    "file": "ddb-core/src/ffi/records.rs:502",
+    "reason": "Cannot occur today - create and update always mint an id. Erroring here would be defensive handling for an impossible state, which the repo's coding-style rules forbid."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "`doogat_result_parts` returns a 6-tuple behind a `DoogatResultParts` alias, and two `from_output` bodies re-destructure it field by field. A private `struct DoogatResultFields` (or one constructor with `Self { .. }` built from a shared helper) is easier to read. The design doc prescribes the tuple, so this is optional",
+    "file": "ddb-core/src/ffi/records.rs:489",
+    "reason": "The design doc prescribes the tuple and the finder marks it optional. Pure style churn on reviewed, working code."
+  },
+  {
+    "cycle": 1,
+    "disposition": "settled-deferral",
+    "severity": "low",
+    "issue": "`FfiVariant::NotFound` maps to `DdbError::NotFound { msg }`, which has no `code`/`context` fields, so a `Structured` `SINGLETON_NOT_FOUND`'s context is silently discarded at the boundary while Conflict/Validation keep theirs",
+    "file": "ddb-core/src/ffi/records.rs:320",
+    "reason": "Adding `code`/`context` to `DdbError::NotFound` is a binding-shape change outside this PRD's scope; the doubt lens filed it under KNOWN for that reason."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "medium",
+    "issue": "The raw helpers `create_doogat_raw` and `update_doogat_raw` are still public. No production code calls them any more. The remaining callers are ddb-core tests (raw_ffi_semantics.rs and others) and ddb-server/src/rest/search_tests.rs:491. The PRD says to delete helpers left with no consumers. The doc comment still says \"Unknown types are accepted (legacy FFI contract)\", which is the silent policy the PRD wanted gone. Those tests pin the legacy behaviour and keep it alive as library API.",
+    "file": "ddb-core/src/service/create.rs:428",
+    "reason": "False premise. The PRD's condition is 'remove obsolete raw helpers only after checking their actual callers' and 'delete helpers left with no consumers'. The finding itself names live consumers (ddb-core tests, ddb-server/src/rest/search_tests.rs:491), so the condition is not met. Task 2's description also explicitly scopes these service-level helpers OUT: 'Do not touch DoogatService::create_doogat_raw/update_doogat_raw ... out of scope for this PRD.' The PRD's deletion target was the FFI DoogatDriver exports, which are gone."
+  },
+  {
+    "cycle": 1,
+    "disposition": "discarded",
+    "severity": "low",
+    "issue": "The GraphQL/CLI parity tests live in tests/e2e/integration_ffi_warning_parity.rs, not in ddb-core/src/ffi/tests.rs as the PRD's structure map says. The GraphQL parity check uses the TITLE_FROM_TEMPLATE warning, because GraphQL rejects unregistered types under `Strict`. This is reasonable. The CLI parity check covers `BaseOnly` code and message.",
+    "file": "tests/e2e/integration_ffi_warning_parity.rs:66",
+    "reason": "Not a defect - the finder's own text concludes the placement and the warning choice are reasonable. A GraphQL parity test needs a running server, which belongs in tests/e2e/, not a ddb-core unit module. The PRD's structure map is indicative, not binding on test placement."
+  }
+]
