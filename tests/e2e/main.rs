@@ -42,6 +42,7 @@ mod integration_nosql_during_compact;
 mod integration_orderby_base_fields;
 mod integration_rest_pgwire;
 mod integration_rest_search_filtered;
+mod integration_search_pagination_warnings;
 mod integration_singleton_flow;
 mod integration_singleton_parity;
 mod integration_singleton_races;
