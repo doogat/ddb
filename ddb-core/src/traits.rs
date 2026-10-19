@@ -68,12 +68,24 @@ pub trait SqlBackend: DoogatIndex {
     /// Raw SQLite connection for DDL execution, prepared statements, and
     /// transaction savepoints.
     ///
-    /// **TRANSITIONAL EXCEPTION** — this method exposes a concrete `rusqlite::Connection`
-    /// on the `SqlBackend` trait, violating the adapter-neutral boundary established by
-    /// PRD 00141. Removing it requires rewriting dozens of call sites across
-    /// `sql_engine/{dml,ddl,transaction,junction,mod}.rs`. That rewrite is scoped to a
-    /// follow-up Phase 3 effort; until then this method is retained as a documented
-    /// exception and must not be extended to new callers.
+    /// **TRANSITIONAL EXCEPTION — RETAINED** — this method exposes a concrete
+    /// `rusqlite::Connection` on the `SqlBackend` trait, violating the adapter-neutral
+    /// boundary established by PRD 00141. Removing it requires rewriting ~90 call sites
+    /// across 25 files (post-split inventory):
+    ///
+    /// - `sql_engine/`: `mod.rs`, `delete.rs`, `junction.rs`, `transaction.rs`, `tests.rs`,
+    ///   `ddl/{mod,create,alter,drop,rename,zone_ops}.rs`,
+    ///   `dml/{insert,update,validate,materialize_row}.rs`
+    /// - `service/`: `sql.rs`, `batch.rs`, `create.rs`, `update.rs`, `delete.rs`,
+    ///   `write_helpers.rs`, `mock_index_tests.rs`
+    /// - `indexer/ports.rs`, `id_minting.rs`
+    /// - this trait definition
+    ///
+    /// That rewrite is deferred with no successor PRD scheduled; ownership of the removal
+    /// decision belongs to the next evolution assessment. Until then this method is
+    /// retained as a documented exception and must not be extended to new callers.
+    /// See `docs/src/architecture/design-decisions.md` →
+    /// "`SqlBackend::sql_conn`: Retained Transitional Exception".
     fn sql_conn(&self) -> &Connection;
 
     /// Execute a SQL query returning column names and rows.

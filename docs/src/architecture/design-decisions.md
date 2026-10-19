@@ -207,6 +207,21 @@ state does not persist across separate CLI invocations.
 
 **Tradeoff**: a fixed line can understate new discoveries. Rule: a newly found data-safety gap (P0) joins the v1.0 gate; anything else lands post-v1 unless a maintainer decision promotes it.
 
+## `SqlBackend::sql_conn`: Retained Transitional Exception
+
+**Decision** (2026-10-20, after the `sql_engine` module splits in PRD 00183): `SqlBackend::sql_conn` is RETAINED. It exposes a concrete `rusqlite::Connection` on a core trait, which violates the adapter-neutral boundary of PRD 00141, and it stays as a documented exception that must not be extended to new callers.
+
+**Why**: removal means rewriting ~90 production call sites across 25 files. That is far outside the scope of a module-split PRD, and the splits did not change the coupling — they only moved it into more files.
+
+**Post-split caller inventory** (25 files):
+
+- `sql_engine/`: `mod.rs`, `delete.rs`, `junction.rs`, `transaction.rs`, `tests.rs`, `ddl/{mod,create,alter,drop,rename,zone_ops}.rs`, `dml/{insert,update,validate,materialize_row}.rs`
+- `service/`: `sql.rs`, `batch.rs`, `create.rs`, `update.rs`, `delete.rs`, `write_helpers.rs`, `mock_index_tests.rs`
+- `indexer/ports.rs`, `id_minting.rs`
+- the trait definition itself in `traits.rs`
+
+**Exit, deferred**: no successor PRD is scheduled. Ownership of the removal decision belongs to the next evolution assessment, which can weigh the ~90-site rewrite against the boundary violation with fresh evidence. Until then, `sql_conn` keeps its doc comment in `traits.rs` and gains no new callers.
+
 ## Known Limitations
 
 | Area | Limitation | Plan |
