@@ -540,3 +540,13 @@
 {"id":"7cf40ce3","kind":"pat","task":"4","queued_at":1792434457,"prompt_bytes":24281}
 {"id":"7cf40ce3","ended_at":1792434504,"elapsed_s":47,"outcome":"ok","detail":null}
 {"kind":"handoff","site":"build","edge":"leave","at":1792434624,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792434669,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"id":"0ab58de0","kind":"ivan","task":"5","queued_at":1792434845,"prompt_bytes":25342}
+{"id":"0ab58de0","ended_at":1792436198,"elapsed_s":1353,"outcome":"ok","detail":null}
+{"id":"47280d0a","kind":"ivan","task":"5","queued_at":1792436235,"prompt_bytes":24625}
+{"id":"47280d0a","ended_at":1792436528,"elapsed_s":293,"outcome":"ok","detail":null}
+{"id":"829bc03d","kind":"ivan","task":"5","queued_at":1792436551,"prompt_bytes":24583}
+{"id":"829bc03d","ended_at":1792436828,"elapsed_s":277,"outcome":"ok","detail":null}
+{"id":"74b89424","kind":"pat","task":"5","queued_at":1792437108,"prompt_bytes":35337}
+{"id":"74b89424","ended_at":1792437138,"elapsed_s":30,"outcome":"ok","detail":null}
+{"kind":"handoff","site":"build","edge":"leave","at":1792437226,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
