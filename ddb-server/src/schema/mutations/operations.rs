@@ -2,6 +2,7 @@ use async_graphql::dynamic::*;
 use async_graphql::{Name, Value as GqlValue};
 use base64::engine::general_purpose as base64_engine;
 use base64::Engine as _;
+use ddb_core::error::DoogatError;
 use ddb_core::schema_diff::plan::SchemaApplyReport;
 use ddb_core::types::{BatchCreateInput, BatchUpdateInput};
 use indexmap::IndexMap;
@@ -27,8 +28,7 @@ pub(super) fn build_create_doogat_field() -> Field {
             let content = opt_string(map, "content");
             let tags = string_list(map, "tags");
             let doogat_type = opt_string(map, "type");
-            let fields =
-                fields_map(map).map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+            let fields = fields_map(map).map_err(|msg| to_graphql_error(DoogatError::Validation(msg)))?;
             let on_conflict = conflict_action(ctx.args.as_index_map());
             let output = a
                 .create_doogat(title, content, tags, doogat_type, fields, on_conflict)
@@ -62,7 +62,7 @@ pub(super) fn build_update_doogat_field() -> Field {
             let tags = opt_string_list(map, "tags");
             let doogat_type = opt_string(map, "type");
             let (fields, unset_fields) = fields_and_unsets(map)
-                .map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                .map_err(|msg| to_graphql_error(DoogatError::Validation(msg)))?;
             let output = a
                 .update_doogat(crate::actor::UpdateDoogatParams {
                     id,
@@ -101,7 +101,7 @@ pub(super) fn build_batch_update_field() -> Field {
                 let tags = opt_string_list(map, "tags");
                 let doogat_type = opt_string(map, "type");
                 let (fields, unset_fields) = match opt_fields_and_unsets(map)
-                    .map_err(|msg| async_graphql::ServerError::new(msg, None))?
+                    .map_err(|msg| to_graphql_error(DoogatError::Validation(msg)))?
                 {
                     Some((fields, unsets)) => (Some(fields), Some(unsets)),
                     None => (None, opt_string_list(map, "unsetFields")),
@@ -146,7 +146,7 @@ pub(super) fn build_create_many_field() -> Field {
                 let tags = string_list(map, "tags");
                 let doogat_type = opt_string(map, "type");
                 let fields =
-                    fields_map(map).map_err(|msg| async_graphql::ServerError::new(msg, None))?;
+                    fields_map(map).map_err(|msg| to_graphql_error(DoogatError::Validation(msg)))?;
                 inputs.push(BatchCreateInput {
                     title,
                     body,
