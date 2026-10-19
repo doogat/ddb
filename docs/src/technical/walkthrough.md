@@ -250,7 +250,7 @@ When `git_ops::GitRepo::merge_remote()` detects conflicts, it returns `MergeResu
 4. `merge_reference()` uses an Automerge List CRDT, sorting entries on export.
 5. The merged zones are reassembled via the parser into a final Markdown string.
 
-Three CRDT strategy presets are supported (see `crdt_resolver.rs:resolve_conflicts()`):
+Three CRDT strategy presets are supported (see `crdt_resolver/frontmatter.rs:resolve_conflicts()`):
 
 - `preset:default` -- zone-level merge as described above.
 - `preset:last-writer-wins` -- HLC comparison picks the newer version wholesale.
@@ -667,7 +667,7 @@ brokenSequences: [BrokenSequence!]!
 
 ## 13. Zone Inference
 
-When `CREATE TABLE` defines columns, each column's SQL data type determines its default zone placement. This inference runs in `sql_engine/ddl.rs:extract_columns()` during typedef creation.
+When `CREATE TABLE` defines columns, each column's SQL data type determines its default zone placement. This inference runs in `sql_engine/ddl/create.rs:extract_columns()` during typedef creation.
 
 ### Inference rules (applied in order)
 
@@ -713,7 +713,7 @@ This approach keeps the parser dependency clean while supporting Doogat DB-speci
 
 Multi-valued `REFERENCES` columns use auto-created junction tables for many-to-many relationships.
 
-### Auto-creation (sql_engine/ddl.rs)
+### Auto-creation (sql_engine/ddl/)
 
 When `CREATE TABLE` includes a column with `REFERENCES`, `handle_create_table()` calls `junction_table_ddl(table_name, col_name)` to generate:
 
@@ -727,7 +727,7 @@ CREATE TABLE IF NOT EXISTS "{table}_{col}" (
 
 This junction table is created in SQLite alongside the main materialized table.
 
-### Write-through (materialize.rs)
+### Write-through (indexer/materialize/)
 
 During doogat indexing, `materialize_row()` handles junction population:
 
@@ -741,7 +741,7 @@ During doogat indexing, `materialize_row()` handles junction population:
 
 `DROP TABLE <name> CASCADE` drops both the main table and all its junction tables. The engine iterates columns with references and drops each `{table}_{col}` table before dropping the main table and deleting the typedef doogat.
 
-### GraphQL list field resolution (schema/base_types.rs)
+### GraphQL list field resolution (schema/base_types/)
 
 For each column with a `REFERENCES` target, the dynamic GraphQL schema adds a pluralized list field:
 
@@ -765,15 +765,15 @@ PRD 00139 adds a `SINGLETON` typedef primitive: a typedef constrained to hold at
 
 `types/schema.rs::TableSchema` carries `pub singleton: bool` alongside the other table-level booleans (`folder`, `unique_together`). Serde skips serializing when `false`, so legacy typedef YAML is byte-identical to pre-PRD output.
 
-### DDL parsing (sql_engine/helpers.rs)
+### DDL parsing (sql_engine/helpers/)
 
-`SINGLETON` and `SINGLETON DEFAULT VALUES` are not ANSI SQL. A regex pre-scan in `helpers.rs` detects the markers on `CREATE TABLE ... SINGLETON [DEFAULT VALUES]`, strips them, and hands the residue to `sqlparser`. `handle_create_table` reads the captured flags into the `TableSchema`. `ALTER TABLE x SET SINGLETON` / `ALTER TABLE x DROP SINGLETON` dispatch to `handle_set_singleton` / `handle_drop_singleton`, modeled on the `handle_rename_table` (PRD 00132) and `handle_alter_column_type` (PRD 00128) patterns.
+`SINGLETON` and `SINGLETON DEFAULT VALUES` are not ANSI SQL. A regex pre-scan in `helpers/regexes.rs` detects the markers on `CREATE TABLE ... SINGLETON [DEFAULT VALUES]`, strips them, and hands the residue to `sqlparser`. `handle_create_table` reads the captured flags into the `TableSchema`. `ALTER TABLE x SET SINGLETON` / `ALTER TABLE x DROP SINGLETON` dispatch to `handle_set_singleton` / `handle_drop_singleton`, modeled on the `handle_rename_table` (PRD 00132) and `handle_alter_column_type` (PRD 00128) patterns.
 
 ### Three-layer enforcement
 
 1. **Typed-write validation** -- `service/validation.rs::check_singleton_constraint` queries the materialized table for `COUNT(*) >= 1` before any INSERT through the service layer. On hit, returns `DoogatError::singleton_violation(table, existing_id)`.
-2. **SQL DML pre-check** -- `sql_engine/dml.rs` INSERT Pass 1 runs the same check before any commit lands, and rejects two-rows-in-one-batch (`rows.len() > 1` against an empty table) with `existing_id = "<intra-batch>"`. The service-layer batch path in `service/batch.rs` uses a `seen_singleton` HashMap for the same purpose across a multi-row typed write.
-3. **Materializer UNIQUE index** -- `indexer/materialize.rs::create_singleton_lock_index` issues `CREATE UNIQUE INDEX <table>_singleton_lock ON <table> ((1))`. The expression-index trick rejects any second materialized row even when the upstream service path is bypassed (direct git write, manual reindex).
+2. **SQL DML pre-check** -- `sql_engine/dml/insert.rs` INSERT Pass 1 runs the same check before any commit lands, and rejects two-rows-in-one-batch (`rows.len() > 1` against an empty table) with `existing_id = "<intra-batch>"`. The service-layer batch path in `service/batch.rs` uses a `seen_singleton` HashMap for the same purpose across a multi-row typed write.
+3. **Materializer UNIQUE index** -- `indexer/materialize/tables.rs::create_singleton_lock_index` issues `CREATE UNIQUE INDEX <table>_singleton_lock ON <table> ((1))`. The expression-index trick rejects any second materialized row even when the upstream service path is bypassed (direct git write, manual reindex).
 
 The three layers are integration-tested together in `ddb-core/tests/singleton_layers.rs` and must produce byte-identical structured errors.
 
