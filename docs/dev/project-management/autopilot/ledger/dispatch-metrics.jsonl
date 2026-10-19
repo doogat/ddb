@@ -509,3 +509,5 @@
 {"kind":"handoff","site":"build","edge":"leave","at":1792396089,"phase":"build","prd":"00179-sql-identifier-escaping-materializer-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792396112,"phase":"build","prd":"00180-server-security-resource-hardening-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792398336,"phase":"build","prd":"00180-server-security-resource-hardening-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792398353,"phase":"build","prd":"00181-index-health-quarantine-surface-v1.md"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792399251,"phase":"build","prd":"00181-index-health-quarantine-surface-v1.md"}

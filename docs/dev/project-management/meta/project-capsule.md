@@ -91,11 +91,11 @@ Generated: 2026-10-19 (00180 build entering; GitHub State and Active Work refres
 - [x] **00178 structured-fields-input-v1** (DONE 2026-10-19, in `done/`; 2 cycles) — native JSON object `fields` input (REST `serde_json::Value`, GraphQL `JSON` scalar) replacing the stringified-JSON blob, with `normalize_create_fields`/`normalize_update_fields` null-policy (create-omit, update-unset). Cycle 2 hit `rework_cap` 2 with 1 HIGH unresolved (R1: the new GraphQL VALIDATION_ERROR mapping is untested, and the same gap is unfixed in the singleton update/upsert resolvers) plus a `verify-escape` (`cargo test-ci` exit 101 on the known pre-existing parallel-unsafe `actor::tests::shared_actor_preserves_schema_applys_owned_transaction`, out of scope). Both deferred; R1 minted as hold-triage stub 00236.
 
 - [!] **00179 sql-identifier-escaping-materializer-v1** (STALLED, moved to `hold/`) — parked by the loop before this session; detail not re-derived here, see batch deferred JSON. Resume via `mv docs/dev/project-management/prds/hold/00179-sql-identifier-escaping-materializer-v1.md docs/dev/project-management/prds/backlog/`.
-- [>] **00180 server-security-resource-hardening-v1** (IN PROGRESS, `wip/`; build entering 2026-10-19)
+- [!] **00180 server-security-resource-hardening-v1** (STALLED, moved to `hold/` — plan_expansion, module_drift; batch kept draining). Resume via `mv docs/dev/project-management/prds/hold/00180-server-security-resource-hardening-v1.md docs/dev/project-management/prds/backlog/`.
+- [>] **00181 index-health-quarantine-surface-v1** (IN PROGRESS, `wip/`; build entering 2026-10-19)
 
-### Remaining backlog (20 PRDs)
+### Remaining backlog (19 PRDs)
 
-- [ ] 00181-index-health-quarantine-surface-v1
 - [ ] 00182-where-filter-correctness-completeness-v2
 - [ ] 00183-split-oversized-modules-round-2-v1
 - [ ] 00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1
