@@ -1473,6 +1473,13 @@
       "detail": "module_drift; note docs/dev/project-management/autopilot/split-notes/00181-index-health-quarantine-surface-v1.md",
       "op_id": "aa27983fde52",
       "prd": "00181-index-health-quarantine-surface-v1.md"
+    },
+    {
+      "type": "stall",
+      "site": "plan_expansion",
+      "detail": "module_drift 2 > 1 (., docs/src/technical); note docs/dev/project-management/autopilot/split-notes/00182-where-filter-correctness-completeness-v2.md",
+      "op_id": "eefe86bed70f",
+      "prd": "00182-where-filter-correctness-completeness-v2.md"
     }
   ]
 }
