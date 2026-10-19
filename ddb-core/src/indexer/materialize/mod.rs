@@ -12,7 +12,7 @@ mod tests;
 /// user-defined ones when iterating `TableSchema.columns` post-PRD 00122.
 ///
 /// This is intentionally narrower than `RESERVED_COLUMNS` in
-/// `ddb-core/src/sql_engine/dml.rs`: this set drives whether a user-declared
+/// `ddb-core/src/sql_engine/dml/mod.rs`: this set drives whether a user-declared
 /// column gets a slot in the materialized typed table. `created_at` and
 /// `tags` are NOT in this set because pre-PRD 122 users could legally
 /// declare them as typed columns; the doogat pipeline itself doesn't write
