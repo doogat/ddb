@@ -668,75 +668,109 @@ mod tests {
 
     use serde_json::json;
 
+    fn assert_fields_decode(raw: &BTreeMap<String, Option<DdbValue>>, expected: &[(&str, DdbValue)]) {
+        assert_eq!(raw.len(), expected.len(), "no key may be dropped, got {raw:?}");
+        for (key, want) in expected {
+            assert_eq!(
+                raw.get(*key),
+                Some(&Some(want.clone())),
+                "'{key}' must keep its native JSON type, got {raw:?}"
+            );
+        }
+    }
+
     #[test]
-    fn fields_object_decodes_native_values_without_string_coercion() {
+    fn fields_scalars_decode_without_string_coercion() {
         let raw = json_value_to_fields_input(json!({
             "s": "true",
             "n": 42,
             "f": -1.5,
             "b_true": true,
             "b_false": false,
-            "l": ["a", 2, true],
-            "m": {"inner": -1.5, "flag": false, "Inner": "upper"},
-            "tenth": 0.1,
-            "huge": 1e300,
-            "big_int": 9_007_199_254_740_993_u64,
+            // Numeric-looking strings stay strings.
             "n_str": "42",
             "inf": "inf",
-            "ll": [[1, 2], []],
-            "lm": [{"k": 1}],
+            // Keys keep their case.
             "MixedCase": "v",
         }))
-        .expect("a JSON object of scalars and containers must decode");
+        .expect("a JSON object of scalars must decode");
+
+        assert_fields_decode(
+            &raw,
+            &[
+                ("s", DdbValue::String("true".into())),
+                ("n", DdbValue::Number(42.0)),
+                ("f", DdbValue::Number(-1.5)),
+                ("b_true", DdbValue::Bool(true)),
+                ("b_false", DdbValue::Bool(false)),
+                ("n_str", DdbValue::String("42".into())),
+                ("inf", DdbValue::String("inf".into())),
+                ("MixedCase", DdbValue::String("v".into())),
+            ],
+        );
+    }
+
+    #[test]
+    fn fields_containers_decode_without_string_coercion() {
+        let raw = json_value_to_fields_input(json!({
+            "l": ["a", 2, true],
+            "m": {"inner": -1.5, "flag": false, "Inner": "upper"},
+            // Nested lists and objects inside lists keep their shape.
+            "ll": [[1, 2], []],
+            "lm": [{"k": 1}],
+        }))
+        .expect("a JSON object of containers must decode");
 
         let mut nested = BTreeMap::new();
         nested.insert("inner".to_string(), DdbValue::Number(-1.5));
         nested.insert("flag".to_string(), DdbValue::Bool(false));
+        // Keys keep their case, including nested.
         nested.insert("Inner".to_string(), DdbValue::String("upper".into()));
         let mut list_item_map = BTreeMap::new();
         list_item_map.insert("k".to_string(), DdbValue::Number(1.0));
-        let expected = [
-            ("s", DdbValue::String("true".into())),
-            ("n", DdbValue::Number(42.0)),
-            ("f", DdbValue::Number(-1.5)),
-            ("b_true", DdbValue::Bool(true)),
-            ("b_false", DdbValue::Bool(false)),
-            (
-                "l",
-                DdbValue::List(vec![
-                    DdbValue::String("a".into()),
-                    DdbValue::Number(2.0),
-                    DdbValue::Bool(true),
-                ]),
-            ),
-            ("m", DdbValue::Map(nested)),
-            // f64 precision: none of these survive an f32 round trip.
-            ("tenth", DdbValue::Number(0.1)),
-            ("huge", DdbValue::Number(1e300)),
-            ("big_int", DdbValue::Number(9_007_199_254_740_993_u64 as f64)),
-            // Numeric-looking strings stay strings.
-            ("n_str", DdbValue::String("42".into())),
-            ("inf", DdbValue::String("inf".into())),
-            // Nested lists and objects inside lists keep their shape.
-            (
-                "ll",
-                DdbValue::List(vec![
-                    DdbValue::List(vec![DdbValue::Number(1.0), DdbValue::Number(2.0)]),
-                    DdbValue::List(vec![]),
-                ]),
-            ),
-            ("lm", DdbValue::List(vec![DdbValue::Map(list_item_map)])),
-            // Keys keep their case, top-level and nested.
-            ("MixedCase", DdbValue::String("v".into())),
-        ];
-        assert_eq!(raw.len(), expected.len(), "no key may be dropped, got {raw:?}");
-        for (key, want) in expected {
-            assert_eq!(
-                raw.get(key),
-                Some(&Some(want)),
-                "'{key}' must keep its native JSON type, got {raw:?}"
-            );
-        }
+
+        assert_fields_decode(
+            &raw,
+            &[
+                (
+                    "l",
+                    DdbValue::List(vec![
+                        DdbValue::String("a".into()),
+                        DdbValue::Number(2.0),
+                        DdbValue::Bool(true),
+                    ]),
+                ),
+                ("m", DdbValue::Map(nested)),
+                (
+                    "ll",
+                    DdbValue::List(vec![
+                        DdbValue::List(vec![DdbValue::Number(1.0), DdbValue::Number(2.0)]),
+                        DdbValue::List(vec![]),
+                    ]),
+                ),
+                ("lm", DdbValue::List(vec![DdbValue::Map(list_item_map)])),
+            ],
+        );
+    }
+
+    #[test]
+    fn fields_f64_precision_survives_without_f32_round_trip() {
+        let raw = json_value_to_fields_input(json!({
+            "tenth": 0.1,
+            "huge": 1e300,
+            "big_int": 9_007_199_254_740_993_u64,
+        }))
+        .expect("a JSON object of high-precision numbers must decode");
+
+        // None of these survive an f32 round trip.
+        assert_fields_decode(
+            &raw,
+            &[
+                ("tenth", DdbValue::Number(0.1)),
+                ("huge", DdbValue::Number(1e300)),
+                ("big_int", DdbValue::Number(9_007_199_254_740_993_u64 as f64)),
+            ],
+        );
     }
 
     #[test]
