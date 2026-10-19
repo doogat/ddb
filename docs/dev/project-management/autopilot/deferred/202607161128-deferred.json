@@ -294,7 +294,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "Several newly-ported multi-process race test functions run well past the 50-line guideline (integration_61_b_concurrent_cli_and_graphql_write_lock ≈145 lines, integration_55_d_cli_vs_pgwire_singleton_insert_race ≈152 lines)",
+      "issue": "Several newly-ported multi-process race test functions run well past the 50-line guideline (integration_61_b_concurrent_cli_and_graphql_write_lock \u2248145 lines, integration_55_d_cli_vs_pgwire_singleton_insert_race \u2248152 lines)",
       "file": "tests/e2e/integration_write_lock_races.rs",
       "severity": "low",
       "consensus": "1/4",
@@ -305,7 +305,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "The mechanical fail-first/tautology finder for this cycle reports \"Checked 0 test function(s)\" and \"replay: skipped (the diff touches no test function)\" despite ~60 new/changed e2e test files — the automated tautology net did not fire for this diff",
+      "issue": "The mechanical fail-first/tautology finder for this cycle reports \"Checked 0 test function(s)\" and \"replay: skipped (the diff touches no test function)\" despite ~60 new/changed e2e test files \u2014 the automated tautology net did not fire for this diff",
       "file": "N/A",
       "severity": "low",
       "consensus": "1/4",
@@ -316,7 +316,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "[KNOWN] PRD says the §55/§61 race sections are \"marked serial\"; no serial marker exists (no serial_test, no shared mutex) — design doc lines 92-100 and 289 supersede this with per-test tempdir + unique-port isolation, and every race outcome is order-independent (SINGLETON forces exactly one winner; 61.B requires every write to land), so a serial marker would only slow the suite.",
+      "issue": "[KNOWN] PRD says the \u00a755/\u00a761 race sections are \"marked serial\"; no serial marker exists (no serial_test, no shared mutex) \u2014 design doc lines 92-100 and 289 supersede this with per-test tempdir + unique-port isolation, and every race outcome is order-independent (SINGLETON forces exactly one winner; 61.B requires every write to land), so a serial marker would only slow the suite.",
       "file": "tests/e2e/integration_singleton_races.rs",
       "severity": "low",
       "consensus": "1/4",
@@ -327,7 +327,7 @@
     {
       "type": "review-observation",
       "cycle": 1,
-      "issue": "[KNOWN] PRD spawn helper \"polls /health\"; `ServerGuard::start` (tests/e2e/common.rs:81-102) waits on the stderr \"listening on\" lines plus a 50 ms sleep, no /health poll — design lines 84-89 reused the existing guard unchanged, the health round trip is pinned by `serve::health_returns_ok`, and the internals are 00188's to change.",
+      "issue": "[KNOWN] PRD spawn helper \"polls /health\"; `ServerGuard::start` (tests/e2e/common.rs:81-102) waits on the stderr \"listening on\" lines plus a 50 ms sleep, no /health poll \u2014 design lines 84-89 reused the existing guard unchanged, the health round trip is pinned by `serve::health_returns_ok`, and the internals are 00188's to change.",
       "file": "tests/e2e/common.rs",
       "severity": "low",
       "consensus": "1/4",
@@ -614,7 +614,7 @@
     },
     {
       "issue": "Push has no deadline, PushOptions or callbacks; push relies only on the process-global libgit2 idle timeout, so a trickling remote never aborts a push.",
-      "severity": "🟠",
+      "severity": "\ud83d\udfe0",
       "file": "ddb-core/src/git_ops/remote.rs:27",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -623,7 +623,7 @@
     },
     {
       "issue": "Silent-stall protection is installed only by server startup; CLI/FFI callers use the changed core operations without installing the native timeout options.",
-      "severity": "🟠",
+      "severity": "\ud83d\udfe0",
       "file": "ddb-core/src/git_ops/remote.rs:72",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -632,7 +632,7 @@
     },
     {
       "issue": "The diff touches files already over the 800-line limit (git_ops/mod.rs 1135, git_ops/tests.rs 4168, sync_manager/tests.rs 2143, property_tests.rs 2400), changing only call arities there.",
-      "severity": "⚪",
+      "severity": "\u26aa",
       "file": "ddb-core/src/git_ops/tests.rs",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1170,7 +1170,7 @@
     },
     {
       "issue": "The `DdbError` variants `Git`, `Yaml`, `Sql`, `Automerge`, `Parse`, `Config` and `SqlEngine` are still exported but nothing produces them any more. The code, the ledger and the docs say so, but Swift/Kotlin consumers still get dead cases. Remove them in a follow-up breaking-surface PRD",
-      "severity": "🟡",
+      "severity": "\ud83d\udfe1",
       "file": "ddb-core/src/ffi/records.rs:41",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1179,7 +1179,7 @@
     },
     {
       "issue": "`core_to_field_value` and `core_to_field_scalar` are `#[cfg(test)]` only, so about nine tests in `records_tests.rs` (round trip, verbatim strings, bit-exact numbers, repeated items, native variants) exercise code that never ships. The design allowed this, but the tests cover only the `field_value_to_core` direction as production behavior. Drop the test-only direction and its tests, or keep it and say so in the file header",
-      "severity": "🟡",
+      "severity": "\ud83d\udfe1",
       "file": "ddb-core/src/ffi/records.rs:398",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1188,7 +1188,7 @@
     },
     {
       "issue": "`ddb-core/src/ffi/tests.rs` is now 1982 lines (limit 800) and this diff grew it by 20 net lines. The overage is already recorded as a deferred low, but the file was edited again rather than split. The new test files are under the limit",
-      "severity": "🟡",
+      "severity": "\ud83d\udfe1",
       "file": "ddb-core/src/ffi/tests.rs:1",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1197,7 +1197,7 @@
     },
     {
       "issue": "`meta.id.map(|id| id.0).unwrap_or_default()` returns an empty `id` string if the service ever returns a doogat without an id, instead of an error. Create and update always set one today, so this only masks a future contract break",
-      "severity": "⚪",
+      "severity": "\u26aa",
       "file": "ddb-core/src/ffi/records.rs:502",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1206,7 +1206,7 @@
     },
     {
       "issue": "`doogat_result_parts` returns a 6-tuple behind a `DoogatResultParts` alias, and two `from_output` bodies re-destructure it field by field. A private `struct DoogatResultFields` (or one constructor with `Self { .. }` built from a shared helper) is easier to read. The design doc prescribes the tuple, so this is optional",
-      "severity": "⚪",
+      "severity": "\u26aa",
       "file": "ddb-core/src/ffi/records.rs:489",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1215,7 +1215,7 @@
     },
     {
       "issue": "`FfiVariant::NotFound` maps to `DdbError::NotFound { msg }`, which has no `code`/`context` fields, so a `Structured` `SINGLETON_NOT_FOUND`'s context is silently discarded at the boundary while Conflict/Validation keep theirs",
-      "severity": "⚪",
+      "severity": "\u26aa",
       "file": "ddb-core/src/ffi/records.rs:320",
       "reason": "deferred by review-close",
       "type": "deferred_decision",
@@ -1430,6 +1430,28 @@
       "action": "deferred to batch end",
       "reason": "rework cap reached with this finding unresolved",
       "prd": "00177-ffi-crud-through-contract-v1.md"
+    },
+    {
+      "type": "deferred_decision",
+      "original_type": "cap-overflow",
+      "issue": "[cycle 2] R1: the GraphQL VALIDATION_ERROR mapping added in task 6 is untested - no test asserts extensions.code == VALIDATION_ERROR on any GraphQL path, so reverting the four to_graphql_error call sites in ddb-server/src/schema/mutations/operations.rs to ServerError::new(msg, None) would still pass every test. Alice also found the same gap unfixed in the singleton update/upsert resolvers (ddb-server/src/schema/mutations/singleton.rs:45 and :99).",
+      "severity": "high",
+      "consensus": "1/3",
+      "file": "tests/e2e/integration_structured_fields_input.rs:303",
+      "reason": "rework cap reached with this finding unresolved",
+      "prd": "00178-structured-fields-input-v1.md",
+      "cycle": 2
+    },
+    {
+      "type": "deferred_decision",
+      "original_type": "verify-escape",
+      "issue": "queued check failed: cargo test-ci -> exit 101. actor::tests::shared_actor_preserves_schema_applys_owned_transaction fails inside the full ddb-server parallel lib suite (2103 passed, 1 failed) and passes in isolation in 0.35s. Reproduced on a clean sequential gate run with no concurrent cargo, so it is a parallel-unsafe test rather than a host-load artifact. Pre-existing and unrelated to the 00178 diff; already logged in PRD 00177 review history. The gate aborts at ddb-server, so later crates are never reached by cargo test-ci.",
+      "severity": "medium",
+      "command": "cargo test-ci",
+      "exit": 101,
+      "reason": "cycle-2 verification check did not pass; pre-existing parallel-unsafe test, out of scope for 00178",
+      "prd": "00178-structured-fields-input-v1.md",
+      "cycle": 2
     }
   ]
 }

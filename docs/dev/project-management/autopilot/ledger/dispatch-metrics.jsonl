@@ -502,3 +502,6 @@
 {"id":"489a4fa8","ended_at":1792392891,"elapsed_s":170,"outcome":"ok","detail":null}
 {"id":"a276a198","ended_at":1792394837,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792394837,"phase":"done","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792394862,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"done","edge":"resume","at":1792394869,"phase":"done","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"done","edge":"leave","at":1792394956,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
