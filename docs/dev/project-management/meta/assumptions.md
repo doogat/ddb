@@ -21,3 +21,10 @@ Ivan (graph.rs):
 Ivan (parser/mod.rs):
 - Included the doc-comment lines immediately before the briefing's stated ranges (lines 9 and 641), since the briefing's line numbers were off by one.
 - Gated the test-only imports (`strip_wikilink`, `MAX_FRONTMATTER_BYTES`, `DoogatMeta`, `Value`) with `#[cfg(test)]` in `mod.rs`, because `tests.rs` is not this task's to edit and relies on `use super::*`.
+
+## 10: Update module docs for the new split module layout
+
+Ivan:
+- Read the bare "Write-through (materialize.rs)" heading as the `indexer/materialize/` directory, because `materialize_row` and the junction code live in `indexer/materialize/rows.rs` and `schema_helpers.rs`.
+- Described `crdt_resolver/mod.rs` as the entry point and trait impl, from the `resolve_conflicts` signature at line 27.
+- Described the other `crdt_resolver` files by filename (frontmatter, body, append_log, lww) without opening them.
