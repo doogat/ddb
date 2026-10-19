@@ -1459,6 +1459,13 @@
       "detail": "module_drift 4 > 1 (., ddb-core/src, docs/src/technical, tests/e2e); note docs/dev/project-management/autopilot/split-notes/00179-sql-identifier-escaping-materializer-v1.md",
       "op_id": "1e0a4b6c6647",
       "prd": "00179-sql-identifier-escaping-materializer-v1.md"
+    },
+    {
+      "type": "stall",
+      "site": "plan_expansion",
+      "detail": "module_drift 6 > 1 (., ddb-core/src, ddb-server, ddb-server/src, docs/src/technical, tests/e2e); note docs/dev/project-management/autopilot/split-notes/00180-server-security-resource-hardening-v1.md",
+      "op_id": "1c2af13bf00e",
+      "prd": "00180-server-security-resource-hardening-v1.md"
     }
   ]
 }
