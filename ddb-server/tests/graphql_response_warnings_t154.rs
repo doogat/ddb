@@ -42,7 +42,7 @@ async fn graphql_create_doogat_surfaces_title_from_template_warning() {
         mutation {
           createDoogat(input: {
             type: "bookmark",
-            fields: "{\"url\": \"https://example.com\"}"
+            fields: { url: "https://example.com" }
           }) { id }
         }
     "#;
