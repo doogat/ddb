@@ -484,3 +484,15 @@
 {"id":"cdc98a08","ended_at":1792377695,"elapsed_s":4023,"outcome":"ok","detail":null}
 {"id":"92bfd2bf","ended_at":1792377695,"elapsed_s":4023,"outcome":"timeout","detail":null}
 {"kind":"handoff","site":"review","edge":"leave","at":1792377783,"phase":"review","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792377808,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"id":"7c11051c","kind":"pat","task":"6","queued_at":1792378429,"prompt_bytes":7398}
+{"id":"d39276e5","kind":"pat","task":"7","queued_at":1792378591,"prompt_bytes":5177}
+{"id":"2c30381e","kind":"ivan","task":"8","queued_at":1792378679,"prompt_bytes":21527}
+{"id":"68415f76","kind":"pat","task":"9","queued_at":1792378809,"prompt_bytes":8536}
+{"id":"c24be193","kind":"pat","task":"8","queued_at":1792379532,"prompt_bytes":10782}
+{"id":"7c11051c","ended_at":1792387767,"elapsed_s":null,"outcome":"ok","detail":"closed-by: artifact"}
+{"id":"d39276e5","ended_at":1792387767,"elapsed_s":null,"outcome":"ok","detail":"closed-by: artifact"}
+{"id":"68415f76","ended_at":1792387767,"elapsed_s":null,"outcome":"ok","detail":"closed-by: artifact"}
+{"id":"c24be193","ended_at":1792387767,"elapsed_s":null,"outcome":"ok","detail":"closed-by: artifact"}
+{"id":"2c30381e","ended_at":1792387767,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792387767,"phase":"review","prd":"00178-structured-fields-input-v1.md"}
