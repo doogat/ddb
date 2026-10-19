@@ -92,12 +92,12 @@ Generated: 2026-10-19 (00180 build entering; GitHub State and Active Work refres
 
 - [!] **00179 sql-identifier-escaping-materializer-v1** (STALLED, moved to `hold/`) — parked by the loop before this session; detail not re-derived here, see batch deferred JSON. Resume via `mv docs/dev/project-management/prds/hold/00179-sql-identifier-escaping-materializer-v1.md docs/dev/project-management/prds/backlog/`.
 - [!] **00180 server-security-resource-hardening-v1** (STALLED, moved to `hold/` — plan_expansion, module_drift; batch kept draining). Resume via `mv docs/dev/project-management/prds/hold/00180-server-security-resource-hardening-v1.md docs/dev/project-management/prds/backlog/`.
-- [>] **00181 index-health-quarantine-surface-v1** (IN PROGRESS, `wip/`; build entering 2026-10-19)
+- [!] **00181 index-health-quarantine-surface-v1** (STALLED, moved to `hold/` after this session's brief was written; batch kept draining). Resume via `mv docs/dev/project-management/prds/hold/00181-index-health-quarantine-surface-v1.md docs/dev/project-management/prds/backlog/`.
+- [!] **00182 where-filter-correctness-completeness-v2** (STALLED, moved to `hold/`; batch kept draining). Resume via `mv docs/dev/project-management/prds/hold/00182-where-filter-correctness-completeness-v2.md docs/dev/project-management/prds/backlog/`.
+- [>] **00183 split-oversized-modules-round-2-v1** (IN PROGRESS, `wip/`; build entering 2026-10-19; its design doc had an empty `## Review log` from a prior session — deleted and regenerated this session via the Phase 1.5 design gate)
 
-### Remaining backlog (19 PRDs)
+### Remaining backlog (18 PRDs)
 
-- [ ] 00182-where-filter-correctness-completeness-v2
-- [ ] 00183-split-oversized-modules-round-2-v1
 - [ ] 00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1
 - [ ] 00185-ddb-client-rust-crate-v1
 - [ ] 00186-offline-sdl-export-and-capability-handshake-v1
@@ -130,11 +130,10 @@ Numeric order = autopilot execution order (memory `project_ddb_growth_roadmap`);
 
 Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration shell scenarios to the Rust e2e crate`): only self-hits, 00171's own PRD file (repo and portfolio scope return the identical five rows, all within the PRD itself or adjacent Phase-2-titled sections of other backlog PRDs); no external prior art. Staleness stamp (`engram status --scope portfolio`, 2026-08-16, nonzero exit): memory stale=14, prd stale=1, transcripts stale=2 dead=5640, code stale=4 (skipped=3598), discovery/findings clean; many sibling repos report absent prd/decision/discovery layers. Review harvest: `dev/local/reviews/*-review-NN.md` files upserted (30 total, incl. 00170's two cycles); the `*-audit.md` renders still fail to parse (`missing frontmatter`) and are NOT harvested — the audit trail survives only as files, so it dies with a `dev/local` GC.
 
-## GitHub State (refreshed 2026-10-19, 00180 build entering)
+## GitHub State (refreshed 2026-10-19, 00183 build entering)
 
 - 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 428 unreleased commits on master.
-- **Test RED on master `44f7290f` (run 39155763909) via `cargo-deny` advisories, same unfixed dependency-policy class as before:** unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449, no safe upgrade), yanked `chacha20 0.10.0` and `spin 0.9.8`. Still not triaged into its own PRD; relevant to 00180's scope (server security/resource hardening) as a candidate finding, not yet confirmed in-scope.
-- Latest `Test` on master `in_progress` at catchup time (2026-10-19); prior run on `44f7290f` failed on the advisories above. Docs workflow green.
+- **Test RED on master, latest run `39216349387` at `b159ae3c` (coverage job): `app_contract_error_t6::maps_internal_core_errors_to_internal_app_errors` fails — a sql-engine "unsupported operation" error now maps to `{SQL_ERROR, InvalidInput}` but the test still expects `{INTERNAL_ERROR, Internal}`.** This looks like unreviewed drift in the single error-mapping table (00173's domain) introduced somewhere in 00174-00178; not yet triaged into its own PRD. Unrelated to 00183's scope (pure-move module splits) — do not fix it under this PRD. Prior red runs also showed `cargo-deny` advisories (unmaintained `unsafe-libyaml` RUSTSEC-2024-0449, yanked `chacha20`/`spin`); still untriaged, candidate 00180 finding. Docs workflow green; Nightly `in_progress` at catchup time.
 
 ### Prior snapshot (2026-09-07)
 

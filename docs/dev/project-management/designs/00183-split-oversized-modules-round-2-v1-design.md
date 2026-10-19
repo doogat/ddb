@@ -2,295 +2,192 @@
 
 ## Architecture fit
 
-Pure internal refactor across `ddb-server/src/filter.rs`, `ddb-server/src/schema/queries.rs`,
-`ddb-server/src/schema/base_types.rs`, and ten `ddb-core` modules
-(`sql_engine/{helpers,dml,ddl,builders}.rs`, `indexer/{materialize,graph,search}.rs`,
-`parser/mod.rs`, `crdt_resolver.rs`, `git_ops/mod.rs`), plus a `traits.rs`
-exception-disposition task. No layer, crate boundary, or public capability
-changes — this follows the exact pattern PRD 00156 already established for
-`crud.rs`, `indexer/mod.rs`, `ffi.rs`, and `mutations.rs`: a single `*.rs`
-file becomes a `*/` directory with `mod.rs` re-exporting the prior public
-surface and sibling files holding the moved bodies.
+Pure structural refactor inside two existing layers, no new layer or crate boundary:
 
-**Line counts must be re-measured at execution, not trusted from the PRD.**
-Measured now (current `master`), several differ substantially from the
-PRD's 2026-09-05 snapshot — growth from PRDs 00176-00178 landing since:
+- `ddb-server/src/{filter.rs, schema/queries.rs, schema/base_types.rs}` — the GraphQL adapter layer (where-clause compilation, query-field registration, value-conversion helpers). Stays `ddb-server`-local; no adapter-neutral-type rule applies here (`types/` guardrail is a `ddb-core` rule).
+- `ddb-core/src/{sql_engine/*, indexer/*, parser/mod.rs, crdt_resolver.rs, git_ops/mod.rs}` — the core library. Every split here must keep `ddb-core/src/types/**` adapter-neutral (unaffected — no type moves) and must not touch the public trait surface in `traits.rs` except the one explicit `sql_conn` disposition task.
 
-| Module | PRD snapshot | Current | Status |
-|---|---|---|---|
-| `ddb-server/src/filter.rs` | ~3397 | 3397 | unchanged, still oversized |
-| `ddb-server/src/schema/queries.rs` | ~842 (fn) | 909 (file) | still oversized |
-| `ddb-core/src/sql_engine/helpers.rs` | ~1544 | 1544 | unchanged |
-| `ddb-core/src/sql_engine/dml.rs` | 1663 | 1417 | still oversized |
-| `ddb-core/src/sql_engine/ddl.rs` | 1654 | 1654 | unchanged |
-| `ddb-core/src/indexer/materialize.rs` | 1309 | 1276 | still oversized |
-| `ddb-server/src/schema/base_types.rs` | 1113 | **1849** | grew significantly |
-| `ddb-core/src/indexer/graph.rs` | 1020 | 1020 | unchanged |
-| `ddb-core/src/parser/mod.rs` | 978 | 991 | still oversized |
-| `ddb-core/src/sql_engine/builders.rs` | 916 | 916 | unchanged |
-| `ddb-core/src/crdt_resolver.rs` | 871 | **1508** | grew significantly |
-| `ddb-core/src/git_ops/mod.rs` | 851 | 1135 | grew |
-| `ddb-core/src/indexer/search.rs` | 812 | 812 | unchanged |
-
-Every module is still over 800 lines (none dropped below the threshold the
-way `sync_manager/mod.rs` did), so the PRD's module list stands unchanged —
-but `base_types.rs` and `crdt_resolver.rs` grew enough that each may need
-**more than one** split seam to land every resulting file at or under 800
-lines. This is a quantity-of-submodules detail, not a scope change: still
-one task per PRD-listed module/group, same re-export pattern.
-
-**Noted but out of scope**: `ddb-core/src/indexer/mod.rs` is now 900 lines
-(it was the Phase 1 split target of PRD 00156 and has grown past 800 again
-since). The PRD does not name it, and this design does not add it — it is a
-candidate for a future round-3 sweep, not a silent scope addition here.
+This PRD repeats the exact pattern PRD 00156 established (`crud.rs`, `indexer/mod.rs`, `ffi.rs`, `mutations.rs`): turn one oversized file into a `name/` directory with a `mod.rs` that re-exports the prior public surface unchanged, and move code **verbatim** into cohesion-grouped siblings. Where the oversized file is a single `impl Type { ... }` block (all of `dml.rs`, `ddl.rs`, `indexer/materialize.rs::impl Index`, `indexer/graph.rs::impl Index`, `indexer/search.rs::impl Index`), the split additionally relies on Rust's multiple-`impl`-blocks-per-type-per-crate rule: each sibling file holds its own `impl Type { ... }` fragment for the same type, which is legal and is exactly how 00156 split `crud.rs`'s `impl DoogatService`.
 
 ## Module placement
 
-All changes are **pure moves**: existing code relocates into new sibling
-files under a new `<module>/` directory; no file keeps its old flat path once
-split (it becomes `<module>/mod.rs`). No new behavior, no new public items.
+All line counts below are **production-only** (re-measured at design time against HEAD `62659a6`, excluding `#[cfg(test)]`/`mod tests` modules — the metric this PRD and PRD 00156 both use). Counts drifted from the PRD body's 2026-09-05 figures (ongoing work since); re-measure again immediately before each task's split, since every other task in the batch can move these numbers.
 
-- `ddb-server/src/filter.rs` → `ddb-server/src/filter/{mod.rs,where_build.rs,junction.rs,reverse.rs,tests.rs}` (per the PRD's own Repository Structure tree — reused verbatim as the split boundary, see § Reuse inventory).
-- `ddb-server/src/schema/queries.rs` → stays a single file (909 lines, not a directory split); `build_query_fields` decomposed internally into named per-field-group helper functions it calls, bringing the top-level function under 50 lines. If the file itself still exceeds 800 lines after decomposition, split into `schema/queries/{mod.rs, builders.rs}` using the same re-export pattern — re-measure after decomposition, before deciding.
-- `ddb-core/src/sql_engine/helpers.rs` → `ddb-core/src/sql_engine/helpers/{mod.rs,regexes.rs,inline_zone.rs,tests.rs}` (per the PRD's tree).
-- `ddb-core/src/sql_engine/dml.rs` → `ddb-core/src/sql_engine/dml/{mod.rs, ...}` — exact sibling file names decided per the pure-move seams found in the file at execution time (e.g. by statement kind: insert/update/delete/validation), since the PRD does not pin this one's internal shape.
-- `ddb-core/src/sql_engine/ddl.rs` → `ddb-core/src/sql_engine/ddl/{mod.rs, ...}` — same rule.
-- `ddb-core/src/indexer/materialize.rs` → `ddb-core/src/indexer/materialize/{mod.rs, ...}` — same rule.
-- `ddb-server/src/schema/base_types.rs` → `ddb-server/src/schema/base_types/{mod.rs, ...}` — same rule; given its growth to 1849 lines, expect 2-3 sibling files, not one.
-- `ddb-core/src/indexer/graph.rs` → `ddb-core/src/indexer/graph/{mod.rs, ...}` — same rule.
-- `ddb-core/src/parser/mod.rs` → stays `parser/mod.rs` as the re-export root, with new siblings under `ddb-core/src/parser/` (it is already a directory, unlike the others) — same rule.
-- `ddb-core/src/sql_engine/builders.rs` → `ddb-core/src/sql_engine/builders/{mod.rs, ...}` — same rule.
-- `ddb-core/src/crdt_resolver.rs` → `ddb-core/src/crdt_resolver/{mod.rs, ...}` — same rule; given growth to 1508 lines, expect 2 sibling files.
-- `ddb-core/src/git_ops/mod.rs` → stays `git_ops/mod.rs` as the re-export root, with new siblings under `ddb-core/src/git_ops/` (already a directory) — same rule.
-- `ddb-core/src/indexer/search.rs` → `ddb-core/src/indexer/search/{mod.rs, ...}` — same rule.
-- `ddb-core/src/traits.rs` — edited in place (no split; it is 601 lines, under the cap), to record the `sql_conn` exception disposition per the PRD's decided-at-execution rule.
-- `docs/src/architecture/design-decisions.md` — edited for the `sql_conn` disposition record.
-- `docs/src/technical/walkthrough.md` / other module docs — edited only if they reference a module boundary that moved.
+| File (current) | Prod lines (now) | New directory |
+|---|---|---|
+| `ddb-server/src/filter.rs` | ~1162 (+ ~2234 test lines, excluded) | `ddb-server/src/filter/` |
+| `ddb-server/src/schema/queries.rs` | 909 (one fn: `build_query_fields`, no colocated tests) | stays `queries.rs`, decomposed in place (see below) |
+| `ddb-core/src/sql_engine/helpers.rs` | ~1091 (+ tests from 1092) | `ddb-core/src/sql_engine/helpers/` |
+| `ddb-core/src/sql_engine/dml.rs` | 1417 (no colocated tests) | `ddb-core/src/sql_engine/dml/` |
+| `ddb-core/src/sql_engine/ddl.rs` | 1654 (no colocated tests) | `ddb-core/src/sql_engine/ddl/` |
+| `ddb-core/src/indexer/materialize.rs` | ~1234 (+ tests from 1235) | `ddb-core/src/indexer/materialize/` |
+| `ddb-server/src/schema/base_types.rs` | ~1150 (+ tests from 1151) | `ddb-server/src/schema/base_types/` |
+| `ddb-core/src/indexer/graph.rs` | 1020 (no colocated tests) | `ddb-core/src/indexer/graph/` |
+| `ddb-core/src/parser/mod.rs` | 990 (tests are an out-of-line `mod tests;` already — not in this file's count) | `ddb-core/src/parser/` (already a dir; split `mod.rs` itself) |
+| `ddb-core/src/sql_engine/builders.rs` | 916 (no colocated tests) | `ddb-core/src/sql_engine/builders/` |
+| `ddb-core/src/crdt_resolver.rs` | ~872 (+ tests from 873) | `ddb-core/src/crdt_resolver/` |
+| `ddb-core/src/git_ops/mod.rs` | ~907 (out-of-line `mod tests;`/`mod remote_timeout_tests;` not in this file's count; `mod lock_hook_tests` at 917 IS inline — re-measure its true end at execution) | `ddb-core/src/git_ops/` (already a dir; split `mod.rs` itself) |
+| `ddb-core/src/indexer/search.rs` | 812 (through line ~812; re-measure — PRD's own text says 812, right at the cap) | `ddb-core/src/indexer/search/` |
+| `ddb-core/src/sync_manager/mod.rs` | 798 | **no split** — stays under 800; re-measure only, do not touch unless re-crossed |
+| `ddb-core/src/traits.rs` | 601 | **no split** — only the `sql_conn` exception disposition task touches it |
+
+Every new `mod.rs` re-exports the prior public surface via `pub use self::<child>::*;` (or named re-exports where a glob would collide) so external callers, FFI, and existing tests see no path change — the same re-export shape `indexer/mod.rs` and `ffi.rs` used in 00156.
 
 ## Interfaces & contracts
 
-**The one re-export contract every split obeys (verbatim-ready, applies to
-every module in § Module placement except `queries.rs` and `traits.rs`):**
+No signatures change. This section pins the **exact submodule grouping** so the planner can turn each into a task without re-deriving it; the implementor re-measures line counts immediately before splitting (modules shift under concurrent batch work) and may rebalance a group across sibling files if a resulting file would still exceed 800 lines, as long as the grouping-by-concern below is preserved and nothing crosses a group boundary without a stated reason recorded in the task's commit message.
 
-1. The original flat file `path/to/module.rs` is replaced by a directory
-   `path/to/module/` containing `mod.rs` plus one or more sibling `*.rs`
-   files holding the moved code.
-2. `mod.rs` re-exports **every** item the original file exposed, at its
-   **original visibility** (`pub`, `pub(crate)`, `pub(super)`) and **original
-   path** (`crate::module::Item` must still resolve identically after the
-   split — callers and tests outside the module are not touched). Use
-   `pub use submodule::*;` where the submodule's items are all meant to be
-   visible at the old path, or named `pub use submodule::{Item1, Item2};`
-   re-exports when only some items should surface — match whichever the
-   original file's own visibility already implied (if `Item1` was `pub` and
-   `Item2` was private, the split must preserve that, not flatten both to
-   `pub`).
-3. The colocated `#[cfg(test)] mod tests { ... }` block moves into its own
-   sibling file (named `tests.rs` where the PRD's tree names it explicitly —
-   `filter/tests.rs`, `helpers/tests.rs` — and analogously named for the
-   other modules) and is declared from `mod.rs` as `#[cfg(test)] mod tests;`
-   exactly as it is declared today, just pointing at the new file instead of
-   an inline block.
-4. No function, struct, enum, trait, const, or impl block changes shape,
-   name, signature, or body during the move — this is verified per-item by
-   diffing the moved body against the pre-split file (the 00156-style
-   verification named in the PRD's Success Metrics and Risks).
-5. Every resulting production `*.rs` file (tests files excluded, per the
-   PRD's own "800-line file guideline (rubric R13)" framing, which the PRD's
-   Problem Statement explicitly scopes to "production modules") is <= 800
-   lines.
+### filter.rs → filter/
+- `filter/mod.rs` — re-exports; keeps `pub struct WhereClause` and `pub(crate) type SchemaLookup` visible at `crate::filter::*` exactly as today.
+- `filter/scalars.rs` — `string_filter`, `int_filter`, `float_filter`, `bool_filter`, `id_filter`, `tags_filter`, `filter_type_for_column`, `build_where_input`, `sort_order_enum`, `base_order_column`, `build_order_by_input`, `build_order_sql` (lines 16–318 today).
+- `filter/aggregates.rs` — `build_connection_type`, `is_numeric`, `add_aggregate_fields`, `build_aggregate_group_type`, `build_aggregate_type`, `build_aggregate_sql`, `build_aggregate_sql_grouped`, `build_aggregate_selects`, `aggregate_row_to_value` (lines 321–595).
+- `filter/where_build.rs` — `WhereClause` struct + impl, `try_build_where_sql`, `build_where_sql`, `build_conditions_into`, `route_field_condition`, `build_column_conditions`, `build_logical_combinator`, `build_operator_condition`, `build_in_condition`, `build_not_in_condition`, `gql_to_sql` (lines 597–671, 985–1162).
+- `filter/junction.rs` — `build_tags_filter_condition` (lines 901–984) — the tag/junction/EXISTS handling the PRD body names explicitly.
+- `filter/reverse.rs` — `resolve_reference_target`, `current_field_names`, `reverse_relations`, `pick_reverse_field_name`, `resolve_reverse_target` (lines 751–900) — the reverse-relation discovery the PRD body names explicitly.
+- `filter/tests.rs` — the existing `mod tests { ... }` body moved verbatim (unconstrained by the 800-line cap: it is colocated tests, the metric this PRD and 00156 both exclude).
 
-**`filter.rs` split (verbatim from the PRD's own Repository Structure and
-Module sections, the one module whose internal shape the PRD pins exactly):**
+### queries.rs (decompose `build_query_fields`, no directory — file stays <=800 after decomposition)
+`build_query_fields` becomes a <=50-line composer. Each independently-registered top-level field (already delimited by the file's own `// name(...)` comments) becomes its own named function, each taking and returning the `Object` builder:
+- `register_doogat_field`, `register_doogats_field`, `register_search_field`, `register_normalize_search_query_field`, `register_type_defs_field`, `register_sql_field`, `register_schema_version_field`, `register_checkbox_items_field`, `register_open_actions_field`, `register_tags_field`, `register_tag_entries_field` — one per existing block, signature `fn register_x(query: Object) -> Object`.
+- The per-type loop (today's lines 425–797, the actual ~370-line body the PRD's "~842-line function" claim refers to) becomes `fn register_dynamic_type_fields(query: Object, type_schemas: &[TableSchema], known_types: &mut HashMap<String,String>, dynamic_types: &mut Vec<Object>, dynamic_inputs: &mut Vec<InputObject>) -> Result<(Object, Object, Object, Object), String>` (returning `query` plus the three discovery-output types it threads through), itself composed of:
+  - `register_typed_object_and_inputs(schema, type_schemas, known_types) -> (Object, InputObject, InputObject, Object, Object, Object)` — builds `typed_obj`/`where_input`/`order_by_input`/`connection_type`/`aggregate_type`/`aggregate_group_type` (today's lines 467–481).
+  - `register_per_type_list_field(query, schema, type_name, table_name, schema_lookup, plural, where_type_name, order_by_type_name, connection_type_name) -> Object` (today's lines 499–627).
+  - `register_per_type_aggregate_field(query, schema, type_name, table_name, schema_lookup, plural, where_type_name) -> Object` (today's lines 630–723).
+  - `register_per_type_singleton_field_if_applicable(query, schema, type_name, table_name, emitted_query_fields) -> Result<Object, String>` (today's lines 725–796, the SINGLETON-collision-fallback logic).
+- **Inline-justified exception** (PRD's "or is justified inline" clause): the `async move { ... }` resolver closures passed to `Field::new` stay as single closures — splitting a closure's body into a separately-named function would require threading every captured variable through an explicit argument list for no behavioral gain, and 00156 did not split closure bodies either. Each `register_*` function's *own* body (constructing the `Field`, attaching arguments/description, calling `.field()`) stays at or under 50 lines; only the resolver closure's line count is exempted, and each is already single-purpose (one GraphQL field, matching its existing `// name(...)` comment boundary).
 
-```
-ddb-server/src/filter/
-├── mod.rs              # re-exports the prior filter.rs public surface
-├── where_build.rs      # core where-clause building
-├── junction.rs         # tag/junction/EXISTS handling
-├── reverse.rs          # reverse-relation discovery
-└── tests.rs            # the colocated test module
-```
+### helpers.rs → sql_engine/helpers/
+- `helpers/mod.rs` — re-exports; keeps the free-function helpers imported via `super::helpers::{...}` elsewhere in `sql_engine` (e.g. `dml.rs`'s `use super::helpers::{eval_values_nullable, ...}`) resolving unchanged.
+- `helpers/template.rs` — `re_title_placeholder`, `TemplatePlaceholder`, `parse_title_template` (lines 91–354).
+- `helpers/inline_zone.rs` — `re_create_table_guard`, `re_create_table_preamble`, `preceding_word`, `find_zone_in_text`, `strip_column_list`, `find_column_list_bounds`, `split_top_level_segments`, `column_name_and_end`, `parse_zone_value`, `parse_segment_zone` (lines 355–926) — the `strip_inline_zones` family the PRD body names explicitly.
+- `helpers/regexes.rs` — any remaining cached `re_*`/general SQL-token helpers not already covering (e.g. `extract_eq_pair` and any sibling helper between the inline-zone block and `mod tests`, lines 927–1091); re-measure at execution — the exact line where "inline-zone helpers" end and "general regex/token helpers" begin may shift.
+- `helpers/tests.rs` — the existing `mod tests { ... }` moved verbatim.
 
-Exports (verbatim from the PRD's Module section): "the same items `filter.rs`
-exported today (e.g. `pub fn try_build_where_sql` at `:625`, `pub(crate)
-struct WhereCtx` at `:579`, ...), re-exported unchanged at their current
-visibility." Re-verify these two line numbers at execution — this design was
-drafted before any split landed and the file may have moved since the PRD's
-2026-09-05 snapshot (re-measurement in § Architecture fit shows `filter.rs`
-itself is unchanged at 3397 lines, so `:625`/`:579` are likely still
-accurate, but confirm before relying on them). Note `ddb-server/src/relation_filter.rs`
-(a separate, already-split-out file, not part of this PRD) already holds the
-forward/reverse relation-filter EXISTS emitters — do not re-move that
-code into the new `filter/junction.rs`/`filter/reverse.rs`; those new
-siblings hold code that is CURRENTLY inside `filter.rs` itself (the
-tag-filter/EXISTS-building and reverse-relation-discovery code that calls
-into `relation_filter.rs`, not `relation_filter.rs`'s own contents).
+### dml.rs → sql_engine/dml/
+Single `impl<'a> SqlEngine<'a> { ... }` block (lines 124–1262) plus leading/trailing free functions. Split into multiple `impl<'a> SqlEngine<'a>` fragments across sibling files (the exact pattern 00156 used for `crud.rs`'s `impl DoogatService`) — legal because Rust allows multiple inherent-impl blocks for the same type within one crate:
+- `dml/mod.rs` — re-exports; keeps `RESERVED_COLUMNS`, `type_check_value`, `parse_varchar_length`, `is_strict_check_type`, `is_null_literal` (lines 1–123, shared by every fragment below).
+- `dml/insert.rs` — `impl<'a> SqlEngine<'a>` fragment: `handle_insert` through `merge_insert_results` (lines 124–429).
+- `dml/update.rs` — `impl<'a> SqlEngine<'a>` fragment: `handle_update` through `update_indexes_atomically` (lines 430–981).
+- `dml/validate.rs` — `impl<'a> SqlEngine<'a>` fragment: `validate_row_against_schema` through `find_conflict_match` (lines 982–1153).
+- `dml/materialize_row.rs` — `impl<'a> SqlEngine<'a>` fragment: `insert_materialized_row` through `append_core_column_sets` (lines 1154–1266), plus the trailing free functions `classify_materialized_insert_error`, `lookup_singleton_existing_id`, `is_singleton_lock_failure`, `parse_unique_failure_columns`, `build_insert_columns`, `append_update_set_clauses` (lines 1267–1417).
 
-**`helpers.rs` split (verbatim from the PRD's Repository Structure):**
+**00196 dependency note**: PRD 00196 ("route SQL DML through write pipeline") depends on this split landing first (per the PRD body's task ordering — sweep group A runs before B/C). 00196 is out of this PRD's scope; this split must preserve every symbol path `dml.rs` exposed today (via `dml/mod.rs` re-exports) so 00196 is unaffected by which sibling file a given method physically lives in.
 
-```
-ddb-core/src/sql_engine/helpers/
-├── mod.rs           # re-exports the prior helpers.rs surface
-├── regexes.rs        # the cached re_* helpers
-├── inline_zone.rs     # strip_inline_zones family
-└── tests.rs           # the colocated test module
-```
+### ddl.rs → sql_engine/ddl/
+Same multiple-`impl` pattern as `dml.rs`:
+- `ddl/mod.rs` — re-exports; keeps `create_table_with_default_seed_commit_msg`, `apply_path_pair_rewrites`, `TypeKind` + its `impl` (lines 1–94, shared).
+- `ddl/create.rs` — fragment: `handle_create_table`, `extract_columns`, `create_materialized_table` (lines 95–437).
+- `ddl/alter.rs` — fragment: `validate_next_default`, `handle_alter_table`, `handle_alter_column_type`, `preflight_narrow_string`, `preflight_numeric`, `update_typedef`, `rematerialize_or_defer` (lines 438–824).
+- `ddl/zone_ops.rs` — fragment: `handle_set_zone`, `handle_title_template`, `handle_search_key`, `handle_set_singleton`, `handle_drop_singleton`, `validate_title_template` (lines 825–1049).
+- `ddl/rename.rs` — fragment: `handle_rename_table`, `build_rename_plan`, `plan_typedef_rewrite`, `plan_data_doogats_move`, `plan_references_rewrite`, `plan_backlinks_rewrite`, `handle_rename_column`, `buffer_rename_writes`, `reindex_rename_from_buffer`, `rewrite_data_doogats_for_rename`, `reindex_after_rename` (lines 1050–1399).
+- `ddl/drop.rs` — fragment: `handle_drop`, `handle_drop_table`, `find_type_data_doogats`, `cascade_delete_doogats`, `soft_drop_doogats`, `cleanup_materialized_tables` (lines 1400–1548).
+- `ddl/mod.rs` also keeps (or add `ddl/load.rs` if this pushes `mod.rs` over budget) `load_typedef_location`, `load_schema`, `read_typedef_content`, `extract_unique_constraints`, `validate_next_partition_refs` (lines 1549–1654).
 
-**`queries.rs` decomposition (verbatim from the PRD's Module section):**
-`build_query_fields(...)` keeps its exact signature (unchanged, per the PRD's
-Exports line) and becomes a thin composer under 50 lines, calling new
-private per-field-group helper functions extracted from its current body
-(~842 lines at the PRD's snapshot; re-measure at execution). Field
-registration order inside the composer must match the original body's
-order exactly — the Risks section below explains why.
+### indexer/materialize.rs → indexer/materialize/
+`impl Index { ... }` (lines 101–927) plus leading/trailing free functions:
+- `materialize/mod.rs` — re-exports; keeps `is_core_column`, `normalize_bool_str`, `build_column_definitions`, `junction_table_name`, `junction_parent_id_column`, `junction_ref_id_column`, `junction_table_ddl` (lines 1–100, shared).
+- Split the 826-line `impl Index` fragment into 2 sibling files by its internal grouping (re-measure the exact midpoint at execution — this impl's method names were not individually inventoried for this design since the file is already at the boundary; the implementor groups by the natural DDL-vs-row-materialization split visible in the method bodies).
+- `materialize/schema_helpers.rs` — trailing free functions `check_cross_zone_duplicates` through `widen_types` (lines 928–1234).
+- `materialize/tests.rs` — the existing `mod tests { ... }` moved verbatim.
 
-**`traits.rs` / `sql_conn` disposition (verbatim from the PRD's Feature
-description):** inventory `SqlBackend::sql_conn`'s current callers (the
-exception sits at `traits.rs:68-77` per the PRD's provenance note — reconfirm
-the line range at execution). Remove the exception only if the post-split
-caller inventory permits a scope-preserving change; otherwise retain it and
-record, in both `traits.rs`'s doc comment and `docs/src/architecture/design-decisions.md`,
-the exact remaining callers, the boundary debt, and that ownership of the
-removal is deferred to the next evolution assessment — do not invent a
-successor PRD or ticket number.
+### base_types.rs → schema/base_types/ (ddb-server)
+All free functions (no `impl` blocks), grouped by what they convert:
+- `base_types/mod.rs` — re-exports.
+- `base_types/to_gql.rs` — the ParsedDoogat/row → `GqlValue` direction: `decode_json_fields_object`, `gql_to_value_strict`, `zone_str`, `build_tags_list`, `build_inline_fields_list`, `build_links_list`, `build_attachments_list`, `doogat_to_value`, `checkbox_row_to_value`, `search_hit_to_value`, `tag_info_to_value`, `tag_entry_to_value`, `sql_result_to_value`, `column_def_to_value`, `typedef_to_value`, `typed_doogat_to_value`, `extract_typed_field` (lines 23–509).
+- `base_types/schema_object.rs` — dynamic-schema `Object`/`Field` construction: `is_valid_graphql_name`, `simple_field`, `gql_to_field_value`, `obj_field`, `add_typed_doogat_accessors`, `doogat_object`, `ref_target_gql_type`, `extract_sort_key`, `extract_singular_id`, `build_singular_ref_field`, `extract_ref_ids`, `sort_and_limit_values`, `build_plural_ref_field`, `build_raw_ref_field`, `add_reference_fields`, `build_typed_object`, `column_to_gql_type` (lines 510–929).
+- `base_types/naming.rs` — name-sanitizing helpers: `capitalize`, `strip_id_suffix`, `pluralize`, `pluralize_preserving_case`, `sanitize_type_name`, `singleton_field_base`, `sanitize_field_name`, `resolve_column` (lines 939–1046).
+- `base_types/validation.rs` — request-arg validation: `event_stream`, `check_limit`, `check_offset`, `check_format`, `validate_limit`, `validate_offset`, `validate_format` (lines 1047–1150).
+- `base_types/tests.rs` — the existing `mod tests { ... }` moved verbatim.
 
-**The ten remaining round-2 sweep modules** (`dml.rs`, `ddl.rs`,
-`materialize.rs`, `base_types.rs`, `graph.rs`, `parser/mod.rs`,
-`builders.rs`, `crdt_resolver.rs`, `git_ops/mod.rs`, `search.rs`) follow the
-same re-export contract (items 1-5 above); the PRD deliberately does not pin
-their internal sibling-file boundaries ("exact submodule names decided per
-split" — PRD Repository Structure note), so each task's implementor chooses
-the split seam from the file's own natural groupings (e.g. by SQL statement
-kind, by schema concern, by CRDT resolution strategy) and must still satisfy
-items 2-5 above, which ARE pinned. The PRD's own task grouping (group A:
-`dml`+`ddl`+`materialize`; group B: `base_types`+`graph`+`parser`; group C:
-`builders`+`crdt_resolver`+`git_ops`+`search`) is reused as-is (see § Reuse
-inventory) — this design does not regroup them.
+### indexer/graph.rs → indexer/graph/
+`impl Index { ... }` (lines 21–920) plus trailing free functions:
+- `graph/mod.rs` — re-exports.
+- Split the 900-line `impl Index` fragment into 2 sibling files by its internal method grouping, re-measured at execution (not individually inventoried here — same note as `materialize/`).
+- `graph/staleness.rs` — trailing free functions `parse_date_to_naive`, `resolve_last_date`, `compute_staleness`, `count_links`, `normalize_suggestion_scores` (lines 921–1020).
+
+### parser/mod.rs → split in place (already a directory)
+`parser/mod.rs` is itself a flat file inside the existing `parser/` directory (sibling to its own out-of-line `mod tests;`). Split by concern, re-exported from `parser/mod.rs`:
+- `parser/yaml_bridge.rs` — `fence_regex`, `inline_code_regex`, `From<serde_yaml::Error>`, `RawDoogatMeta` + its `From` impl, `from_serde_yaml`, `to_serde_yaml`, `yaml_quote`, `serialize_yaml_value` (lines 10–94, 642–679).
+- `parser/zones.rs` — `strip_wikilink`, `is_reference_line`, `lazy_static_regex`, `split_zones`, `find_frontmatter`, `has_frontmatter`, `find_separators_after`, `parse_frontmatter` (lines 95–265).
+- `parser/links.rs` — `extract_inline_fields`, `extract_embeds`, `extract_markdown_links`, `extract_bare_urls`, `extract_links`, `extract_wikilinks_from`, `extract_wikilinks`, `rewrite_wikilinks`, `rewrite_links` (lines 266–641).
+- `parser/mod.rs` keeps (or spills to `parser/doogat.rs` if over budget) `serialize`, `rewrite_id_field`, `extract_checkboxes`, `extract_sections`, `extract_hashtags`, `parse`, `generate_id`, `generate_unique_id`, `extract_id_from_path` (lines 680–990) plus the re-exports and `mod tests;` declaration.
+
+### sql_engine/builders.rs → sql_engine/builders/
+All free functions, grouped by direction (schema→doogat vs doogat→schema vs YAML column parsing):
+- `builders/mod.rs` — re-exports.
+- `builders/typedef.rs` — `build_column_yaml`, `build_columns_yaml`, `build_typedef_extra_fields`, `build_typedef_doogat` (lines 13–139).
+- `builders/data_doogat.rs` — `ColumnZoneOutput`, `process_reference_column`, `process_column_zones`, `resolve_insert_title`, `render_title_template`, `resolve_reference_field`, `recompute_template_title`, `derive_date`, `join_sections`, `build_data_doogat` (lines 140–473).
+- `builders/schema_parse.rs` — `OptionalColumnFields`, `parse_optional_column_fields`, `parse_single_column`, `parse_column_definitions`, `parse_unique_together`, `extract_optional_schema_fields`, `OptionalSchemaFields`, `schema_from_parsed` (lines 474–759).
+- `builders/update_apply.rs` — `apply_updates_to_doogat`, `update_body_section`, `update_reference_line`, `rename_key_in_doogat` (lines 760–916).
+
+### crdt_resolver.rs → crdt_resolver/
+All free functions plus one trait impl, grouped by what they resolve:
+- `crdt_resolver/mod.rs` — re-exports; keeps `DefaultResolver` and its `impl ConflictResolver` (lines 860–872) since it dispatches across every sibling.
+- `crdt_resolver/frontmatter.rs` — `derive_actor`, `resolve_conflicts`, `parse_zones`, `FmValue`, `merge_frontmatter`, `partition_fm`, `merge_list_fields`, `yaml_to_map`, `map_to_yaml`, `apply_scalar_diff` (lines 11–364) — this is `merge_frontmatter`, called from both `resolve_conflicts` and `resolve_append_log` per the Gotchas note; both call sites move with their callers, the shared function stays here as the single definition.
+- `crdt_resolver/body.rs` — `merge_body`, `apply_text_diff`, `merge_reference`, `ref_lines`, `refs_list_id`, `apply_list_diff` (lines 365–560).
+- `crdt_resolver/lww.rs` — `resolve_lww`, `lww_pick`, `pick_lww_winner` (lines 561–626).
+- `crdt_resolver/append_log.rs` — `resolve_append_log`, `split_body_sections`, `is_log_section`, `parse_log_entries`, `entry_dedup_key`, `merge_log_section`, `extract_entry_date`, `merge_body_append_log` (lines 627–859) — calls `merge_frontmatter` from `frontmatter.rs`.
+- `crdt_resolver/tests.rs` — the existing `mod tests { ... }` moved verbatim.
+
+### git_ops/mod.rs → split in place (already a directory)
+`git_ops/mod.rs` already declares `mod hlc_clock; mod merge; mod read; mod remote; mod rename;` as siblings — this split moves the remaining monolithic content (the `GitRepo` struct, its primary `impl GitRepo` with ~550 lines of methods, and the trait-impl forwarders) the same way those five were already split out:
+- `git_ops/mod.rs` keeps `doogat_path`, `From<git2::Error>`, `validate_path`, `GitRepo` struct, `DepthGuard` + its `Drop` impl, and the module declarations (lines 1–126, ~910–917).
+- `git_ops/repo_core.rs` — the primary `impl GitRepo { ... }` (lines 127–684, ~550 lines of the repo's own methods — not the trait forwarders).
+- `git_ops/trait_impls.rs` — every `impl crate::traits::Git*For GitRepo` forwarder (lines 685–907): `DoogatSource`, `DoogatStore`, `GitRemote`, `GitMerge`, `GitHistory`, `GitBinary`, `GitRename`, `GitDesktopHooks`, `GitBackend`.
+- `mod lock_hook_tests { ... }` (line 917 onward) is an inline test module in the current file (unlike the out-of-line `mod tests;`/`mod remote_timeout_tests;` declarations beside it) — move it verbatim into `git_ops/lock_hook_tests.rs` with a `mod lock_hook_tests;` declaration in `mod.rs`, excluded from the production-line count like every other colocated test module.
+
+### indexer/search.rs → indexer/search/
+`impl Index { ... }` (lines 25–792) plus leading struct and trailing free functions. At 812 lines total this file is right at the cap — re-measure before deciding whether the split is still needed; if it has dropped to <=800 by execution time, skip this task's module-directory work (note the re-measurement in the task's commit message) and treat it like `sync_manager/mod.rs` below.
+- `search/mod.rs` — re-exports; keeps `CompiledSearchInputs` (lines 19–24, shared input to the `impl Index` fragment).
+- Split the `impl Index` fragment (lines 25–792) into 2 sibling files by its internal method grouping if still needed, re-measured at execution (same note as `materialize/` and `graph/`).
+- `search/helpers.rs` — trailing free functions `strip_leading_and`, `apply_fields_to_hits` (lines 793–812).
+
+### sync_manager/mod.rs — no split
+798 prod lines at HEAD `62659a6`, still under 800. Re-measure immediately before this task starts (other tasks in this batch touch nothing in `sync_manager`, so it should not move, but the batch's own earlier splits are the reason this re-check exists at all); if still <=800, do nothing and record the re-measurement in the task's commit message. If it has crossed 800 again, split it the same way as the other `impl`-block files above, grouping by concern from its own structure at that time.
+
+### traits.rs — `sql_conn` exception disposition only
+No split. This file stays untouched except the one disposition task (inventory `SqlBackend::sql_conn` callers post-split, decide remove-vs-retain, record the outcome in `traits.rs`'s doc comment at lines 68–77 and in `docs/src/architecture/design-decisions.md`). The round-2 splits above may change *which file* calls `sql_conn` (e.g. a `dml/` or `ddl/` sibling instead of the monolithic file), so this task must re-run its caller inventory **after** the sql_engine splits land, not before.
 
 ## Data flow
 
-Behavior-preserving by construction: no runtime data flow changes. The only
-"flow" affected is Rust's own module resolution — `use` paths inside the
-crate that refer to `crate::module::Item` (or the equivalent relative path)
-resolve identically after the split because `mod.rs` re-exports every item
-at its original path. External callers (other crates, FFI, GraphQL schema
-construction, SQL execution) observe zero difference: same compiled symbols,
-same generated GraphQL schema (verified by the existing schema-snapshot /
-integration tests per the PRD's Test Strategy), same SQL text emitted by the
-sql_engine modules.
+No data flow changes anywhere in this PRD — every split is a verbatim move of existing code into a new file location, with the identical call graph. The only flow-relevant fact is ordering: sweep group A (dml/ddl/materialize) must land before group B and C per the PRD body (00196 depends on `dml/`'s split shape), and the `sql_conn` disposition task must run after the sql_engine splits (dml/ddl/helpers/builders) so its caller inventory reflects the final file layout.
 
 ## Reuse inventory
 
-- **PRD 00156's pure-move split pattern** (`ddb-core/src/service/crud.rs` →
-  `crud/`, `ddb-core/src/indexer/mod.rs` → its current multi-file shape
-  confirmed live at `ddb-core/src/indexer/{mod.rs,materialize.rs,search.rs,
-  filter.rs,cascade.rs,rebuild.rs,schema_version.rs,resolve.rs,graph.rs,
-  ports.rs}`, `ffi.rs`, `mutations.rs`) — the exact `mod.rs`-re-export
-  directory shape this design reuses verbatim for every module in scope here.
-  Confirmed by reading the live `ddb-core/src/indexer/` directory listing.
-- **The PRD's own Repository Structure tree** — reused as the pinned split
-  boundary for `filter.rs` and `helpers.rs` (the two modules the PRD names
-  exact sibling files for); reused as the pinned task grouping for the
-  round-2 sweep's three groups (A/B/C).
-- `nothing found, greps tried:` — searched for any existing automated
-  "module splitter" tooling (`rg -i "split.*module|extract.*submodule" dev/bin ddb-core/src ddb-server/src`,
-  `rg "mod\.rs.*re-export" -i docs/src`) — zero hits beyond PRD 00156's own
-  prose description and this PRD's provenance note; confirmed every split so
-  far (and this one) is done by hand, file by file, with `cargo build` +
-  `cargo clippy` + the crate's test suite as the only oracle. No reusable
-  script to point implementors at.
+This PRD introduces no new capability and needs no new helper - it is exclusively "move existing code to a new path, re-export the old path." The only reusable pattern is the *shape* of the previous split, already in the tree:
+- `ddb-core/src/indexer/mod.rs`, `ddb-core/src/ffi.rs` area (PRD 00156) - the `name/mod.rs` re-export directory pattern this PRD repeats for every oversized file here.
+- `ddb-core/src/git_ops/mod.rs`'s existing `mod hlc_clock; mod merge; mod read; mod remote; mod rename;` - proof the same crate already splits one struct's methods (`GitRepo`) across sibling files via multiple `impl` blocks; `git_ops/mod.rs`'s own split in this PRD extends that existing pattern rather than inventing a new one.
+- `ddb-core/src/sql_engine/dml.rs`'s single `impl<'a> SqlEngine<'a>` block is itself proof that the crate already tolerates one type's impl spread across whatever number of files is convenient - the round-2 sweep's `dml/`, `ddl/`, `materialize/`, `graph/`, `search/` splits are the same technique applied five more times.
+
+No grep sweep for a generic "split a module" helper was run - there is no such helper to find; a module split is a file-system/compiler-boundary operation with no library surface to reuse.
 
 ## Alternatives considered
 
-1. **Smallest-diff: split only the three originally-flagged modules
-   (`filter.rs`, `queries.rs`, `helpers.rs`) and leave the ten round-2
-   modules for a future PRD.** Rejected: the PRD's own Problem Statement
-   says these three were "deferred each time as out-of-scope-for-a-feature-
-   PRD" across four prior review cycles — splitting only three again just
-   repeats that deferral pattern for the other ten, which the 2026-07-16
-   assessment already decided to stop doing by writing this PRD. The smaller
-   scope is a real option a planner could still choose (e.g. if context
-   budget forces a split), but it does not close what this PRD asks for.
-2. **One task per module (13 tasks) instead of the PRD's three grouped
-   sweep tasks (A/B/C) for the round-2 ten, plus the three named-module tasks.**
-   Rejected: the PRD explicitly groups the round-2 sweep into three tasks
-   "so the plan stays under the 15-task loop ceiling" (PRD Feature
-   description) — ungrouping would recreate the exact problem (PRD 00077's
-   28-task stall, cited in `plan-tasks`'s own rationale) this PRD's authors
-   already designed around. This design reuses the PRD's grouping unchanged.
-3. **Chosen: reuse PRD 00156's re-export pattern uniformly across all 13
-   modules, split seams pinned where the PRD pins them (`filter.rs`,
-   `helpers.rs`) and left to the implementor's judgment where it doesn't
-   (the round-2 ten), one task per PRD-listed unit (3 named modules +
-   3 grouped-sweep tasks + the `sql_conn` decision + verification + docs).**
-   This is the smallest design that still satisfies every PRD success
-   metric; it does not invent new structure beyond what pure-move splitting
-   requires.
+1. **Chosen: `name/` directory + `mod.rs` re-export, grouped by concern** (detailed above). Preserves every public/`pub(crate)` path exactly (an existing caller's `use` statement is unaffected), matches the established 00156/`git_ops` precedent, and groups cohesively enough that a future reader opening `filter/junction.rs` finds only junction logic.
+2. **Smallest-diff alternative: flat numbered split** (`dml_1.rs`, `dml_2.rs`, ... each holding a contiguous chunk of lines regardless of concern, re-exported from the original `dml.rs` which keeps its name). Strictly less work per file (no need to read the file for concern boundaries, just slice by line count) and technically satisfies the <=800-line rubric. **Rejected**: the PRD's own Functional Decomposition explicitly names concern-based splits for `filter.rs` (junction/reverse) and `helpers.rs` (regex/inline-zone family), and a numbered split would make every future read of `dml_2.rs` require re-discovering "insert, or update, or validate?" - trading today's small time saving for a permanent comprehension tax, which is exactly the problem this PRD exists to remove.
+3. **Defer the round-2 sweep's 10 extra modules, ship only the original 3** (`filter.rs`, `queries.rs`, `helpers.rs`). Smaller PRD, faster to land. **Rejected**: this is already the decision the PRD's own Provenance note describes being made and reversed twice (00158-00161 deferrals, then the 2026-07-16 assessment extending the list) - re-deferring a third time repeats the exact "oversized-file debt compounds" problem this PRD's Problem Statement names, and the PRD body has already committed to the 3-group task structure.
 
 ## Risks & edge cases
 
-- **`base_types.rs` and `crdt_resolver.rs` grew well past their PRD-snapshot
-  sizes** (1113→1849, 871→1508). A single extra sibling file may not be
-  enough to bring every resulting file under 800 lines for these two —
-  budget for 2-3 siblings, not the PRD's implied 1-2, and re-measure after
-  each cut rather than assuming one split suffices.
-- **`build_query_fields` field-registration order must be preserved exactly.**
-  GraphQL field registration order can affect introspection output and
-  schema-snapshot tests even when no field's shape changed — the PRD's Risks
-  section already names this; this design adds no new mitigation beyond
-  what the PRD states (preserve order, rely on schema-snapshot tests), since
-  none is needed for a mechanical extraction.
-- **Likely next changes after this PRD**: (1) `ddb-core/src/indexer/mod.rs`
-  is now 900 lines and will likely need its own round-3 split — this design
-  deliberately does not touch it, so a future PRD inherits a clean slate,
-  not a half-split file. (2) The `sql_conn` exception, if retained rather
-  than removed, is explicitly flagged in the PRD as an "audit gap for later
-  evolution assessment" — this design preserves that framing rather than
-  resolving it prematurely. (3) `queries.rs`'s decomposition may or may not
-  need a directory split depending on its post-decomposition size — this
-  design leaves that decision to be made with current numbers, not
-  pre-committed either way.
-- **Edge case — a module's "natural" split seam doesn't exist.** If one of
-  the ten round-2 modules turns out to have no clean internal grouping (all
-  its functions are mutually interdependent with no cohesive subset), the
-  implementor should still produce a directory split along *any* boundary
-  that keeps every resulting file under 800 lines and preserves re-exports —
-  cohesion is a nice-to-have for readability, not a hard PRD requirement (the
-  PRD's bar is line count + zero behavior change, not module elegance).
+- **Re-export glob collisions**: two sibling files both defining a `tests` module name, or a free function name colliding with another once both are `pub use self::*`'d into `mod.rs`. Mitigation: `cargo build` after every single-file split (not batched) surfaces this immediately as a compile error, and 00156 hit zero such collisions across 4 splits, so the base rate is low. Where a glob would collide (e.g. two `ColumnZoneOutput`-shaped private structs), re-export by explicit name or keep the struct `pub(self)` + referenced only within its own file.
+- **Split boundary drift during the batch**: round-2 sweep tasks for `dml.rs`/`ddl.rs` land in the same batch as other PRDs (00196 depends on `dml/`'s shape; other backlog PRDs may edit `base_types.rs` or `builders.rs` concurrently if the batch runs multiple lanes). Mitigation: each split task re-measures line counts and re-reads the target file **immediately before splitting**, not from this design doc's line numbers, which are a point-in-time snapshot at `62659a6`.
+- **Likely next changes after this PRD** (and what in this design boxes them in): (1) PRD 00196 (route SQL DML through write pipeline) edits `dml/insert.rs`/`dml/update.rs` next - the concern-based split makes its diff land in exactly the files it needs, not a numbered chunk; (2) a future zone/schema PRD likely touches `ddl/zone_ops.rs` and `materialize/schema_helpers.rs` together - keeping zone logic in its own named file in both places (rather than interleaved with rename/drop logic) keeps that future PRD's diff small; (3) the `sql_conn` exception, if retained rather than removed, becomes a recurring audit item for the next evolution assessment - this design's requirement to re-run the caller inventory *after* the splits land is what keeps that audit accurate rather than stale.
+- **Impl-block split changing method resolution order for overlapping trait bounds**: none of the split types (`SqlEngine<'a>`, `Index`, `GitRepo`) have ambiguous inherent-vs-trait method names today: a `cargo build` after each split would fail loudly (E0034 multiple applicable items) if this ever became a risk, so it is self-detecting, not silent.
+- **Test-module line counts are excluded from the 800-line metric but are not exempt from file-health norms**: `filter/tests.rs` (≈2234 lines) and `git_ops`'s `lock_hook_tests.rs` stay oversized test files by design (metric exclusion, per the PRD's own "even excluding its colocated test module" framing) - this PRD does not split them further, and no future PRD should read their size as unaddressed debt under *this* rubric.
 
 ## Test strategy outline
 
-- **Per split** (colocated + `cargo test-ci`, Tier 1): `cargo build` and
-  `cargo clippy --workspace --all-targets` must stay clean; the crate's
-  existing fast test suite (already colocated with the moved code, or
-  exercising it indirectly) must stay green with no assertion changes beyond
-  import paths. For `filter.rs`'s split specifically, the PRD names "the
-  00159 where-filter tests" as the acceptance oracle — run those explicitly.
-  For `helpers.rs`, run the `sql_engine` test suite explicitly (the PRD's
-  stated acceptance).
-- **Per-split behavior-preservation check** (PRD Phase 1 task): for each
-  split, diff the moved function/struct/impl bodies against the pre-split
-  file at the same commit range (the 00156-style verification) — this is a
-  manual/`git diff`-based check per split, not a new automated test; the task
-  description should say exactly which `git diff` invocation proves it (e.g.
-  `git show <pre-split-sha>:path/to/module.rs` vs the new sibling file's
-  content, diffed with whitespace-insensitive comparison for re-indentation
-  only).
-- **`build_query_fields` decomposition**: the existing schema-snapshot /
-  GraphQL integration tests are the oracle (PRD's stated acceptance: "the
-  generated GraphQL schema is byte-identical") — no new test authored, reuse
-  what exists and confirm it still passes.
-- **Full-suite gate** (PRD Phase 2, Tier 1 + the conditional Tier 2 run):
-  `cargo test-ci` + `cargo clippy --workspace --all-targets` across the
-  whole workspace once all splits land; per this repo's `CLAUDE.md`, this
-  PRD deletes/replaces existing code paths (every split moves and deletes
-  the old flat file), so `cargo test -p ddb-e2e` is also run per that
-  conditional rule, not skipped.
-- **`sql_conn` disposition**: no test — it is a documentation/decision task
-  (PRD's own framing: "record... with a remaining exit gap," not "implement
-  a fix"). Verification is a `docs/src/architecture/design-decisions.md`
-  read-back confirming the disposition and caller list are both present and
-  accurate against a fresh `rg "sql_conn"` sweep at execution time.
+- **Per split, before committing**: `cargo build` (workspace) to catch any re-export/visibility break immediately; `cargo clippy --workspace --all-targets` to catch any new lint (the PRD's Success Metric is zero *new* lints - `helpers.rs`'s 3 historical lints are already cleared per the PRD body, this split must not reintroduce anything of that shape); `cargo test-ci` (fast tier) scoped to the touched crate at minimum, full `cargo test-ci` before the task's final commit.
+- **Behavior-preservation check (Phase 1 of the PRD's own plan)**: for each split, `git diff <pre-split-commit> <post-split-commit> -- <old-path> <new-paths>` and confirm the union of added lines across the new files is byte-identical to the removed lines from the old file, modulo whitespace/import reordering - the same check 00156 used. Any hunk that is not a pure move is a scope violation for this PRD.
+- **`queries.rs` decomposition specifically**: the existing GraphQL schema-snapshot/integration tests (already present per the PRD's Critical Scenarios) must stay green with no assertion changes beyond import paths - this is the proof that extracting `build_query_fields` into named helpers did not reorder field registration (Risk already named in the PRD body).
+- **Full-suite gate (Phase 2 of the PRD's own plan)**: `cargo test-ci` + `cargo test -p ddb-e2e` + `cargo clippy --workspace --all-targets` after all ten round-2 splits plus the three original splits plus the `sql_conn` disposition, before the PRD's final commit.
+- **`sql_conn` disposition task**: no new test unless removal actually changes a caller (then that caller's existing test already covers the behavior unchanged); if retained, the test strategy is "no test" - the deliverable is the written disposition in `traits.rs` and `design-decisions.md`, not runtime behavior.
 
 ## Review log
+
+- non-blocker: `filter/where_build.rs`'s cited line ranges (597–671, 985–1162) don't cover `route_field_condition` (actually at line 720, inside the gap that belongs to `filter/reverse.rs`). No doc change needed — the doc already instructs re-measuring before splitting; flagged only as the specific range proven stale by spot-check.
+- question: the PRD body's Phase 1 "behavior check" task is one undifferentiated step depending on all 6 Phase 0 tasks, while this design's own Test Strategy specifies a per-split check. Not a blocker; worth tightening when plan-tasks grains this out.
+dispatch 1 (claude): cardinal-sin 0, blocker 0, non-blocker 1, question 1
+- non-blocker: `queries.rs`'s inner sub-helper line numbers (`register_typed_object_and_inputs` 467–481, `register_per_type_list_field` 499–627) drift ~9-11 lines from the real comment-marker boundaries; the overall per-type-loop span and named-function grouping are correct. No doc change needed — same re-measure-before-splitting mitigation already stated.
+- question: `graph.rs`/`search.rs`'s 2-way `impl Index` split has no inventoried internal boundary (acknowledged already in the design); acceptable given the re-measure-at-execution policy.
+dispatch 2 (claude-fallback): cardinal-sin 0, blocker 0, non-blocker 1, question 1

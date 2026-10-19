@@ -513,3 +513,14 @@
 {"kind":"handoff","site":"build","edge":"leave","at":1792399251,"phase":"build","prd":"00181-index-health-quarantine-surface-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792399269,"phase":"build","prd":"00182-where-filter-correctness-completeness-v2.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792400358,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792408331,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792408398,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"id":"f103d3e0","kind":"ivan","task":"1","queued_at":1792410004,"prompt_bytes":25265}
+{"id":"780a0c0e","kind":"ivan","task":"1","queued_at":1792410022,"prompt_bytes":25265}
+{"id":"780a0c0e","ended_at":1792411717,"elapsed_s":1695,"outcome":"ok","detail":null}
+{"id":"6eb9fe0a","kind":"deslop","task":"1","queued_at":1792415460,"prompt_bytes":4389}
+{"id":"6eb9fe0a","ended_at":1792416245,"elapsed_s":785,"outcome":"ok","detail":null}
+{"id":"c08f20d2","kind":"pat","task":"1","queued_at":1792416301,"prompt_bytes":279921}
+{"id":"c08f20d2","ended_at":1792416408,"elapsed_s":null,"outcome":"ok","detail":"closed-by: artifact"}
+{"id":"f103d3e0","ended_at":1792416408,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792416408,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}

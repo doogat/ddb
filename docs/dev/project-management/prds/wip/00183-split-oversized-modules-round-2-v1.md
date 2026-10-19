@@ -1,6 +1,8 @@
 ---
 default_model: sonnet
 model_tier_rationale: pure-move splits with the existing suites as the oracle; deliberate deviation from the equivalence row, the classifier still raises any contract_edit
+plan_expansion: allow
+plan_expansion_rationale: the PRD's own Repository Structure tree names the round-2 sweep's 10 extra modules only via the condensed "(+ per-module split dirs)" comment line, not one tree entry per directory ("exact submodule names decided per split" is the PRD's own deliberate deferral to the design doc) - the plan-expansion gate's module_drift check parses explicit tree entries only, so it flags every one of those 16 directories as undocumented even though the PRD's Provenance note and Functional Decomposition already name and group them (filter/, helpers/, dml/, ddl/, materialize/, base_types/, graph/, parser/, builders/, crdt_resolver/, git_ops/, search/). This is the already-reviewed 2026-09-05 backlog decision to group the sweep into 3 tasks to stay under the 15-task ceiling, not scope creep.
 ---
 
 # Split oversized server/core modules (round 2)
