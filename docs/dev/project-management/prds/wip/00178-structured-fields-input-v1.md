@@ -26,7 +26,7 @@ Downstream apps (jink) building generic create/update payloads; they want to pas
 ### Success Metrics
 - The generic create/update inputs on GraphQL/REST/FFI accept `fields` as a JSON OBJECT with native scalars (number/boolean/null), normalized through one core policy into typed fields plus update unset_fields.
 - A boolean in the object lands in a boolean column; a number in a numeric column — no `'true'`/`'false'` string needed.
-- JSON-string fields are rejected with InvalidInput; migrate GraphQL operations from String variables to the JSON scalar as part of this beta replacement.
+- JSON-string fields are rejected with InvalidInput; migrate GraphQL operations from String variables to the JSON scalar as part of this beta replacement. **Accepted exception**: a legacy `$f: String` variable passed into a `fields: JSON` position is not rejected by GraphQL schema validation (the dynamic schema accepts any scalar there) — it is rejected at decode time by the fields decoder, with the same migration-hint error. Net effect for callers is identical (operation fails, nothing is written); only the rejection layer differs from the originally stated schema-validation path.
 - Object-form fields preserve native scalar types; tests cover invalid string inputs and the documented GraphQL variable migration.
 - Core command maps remain BTreeMap<String, Value>; adapter-neutral normalization in app_contract returns typed fields plus update unset_fields. Boundary decoders remain in their transports.
 - The public request-shape change passes the compatibility/deprecation review AGENTS.md requires.
@@ -44,7 +44,7 @@ Downstream apps (jink) building generic create/update payloads; they want to pas
 - **Description**: replace the stringified fields input with a native object during beta.
 - **Inputs**: object-form fields; GraphQL variables declare the existing JSON scalar.
 - **Outputs**: normalized typed fields/unsets, or a structured invalid-input error.
-- **Behavior**: reject JSON-string fields; old GraphQL String-variable operations fail schema validation and are explicitly migrated in examples, callers, fixtures, and release notes. No legacy decoder or compatibility window remains.
+- **Behavior**: reject JSON-string fields; old GraphQL String-variable operations fail (rejected by the fields decoder at execution, not by schema validation — see the accepted exception in Success Metrics) and are explicitly migrated in examples, callers, fixtures, and release notes. No legacy decoder or compatibility window remains.
 
 ## Structural Decomposition
 
@@ -129,7 +129,7 @@ Depends on 00172 and 00177.
 ### Critical Scenarios
 - **Happy path**: create with `fields: { "done": true, "priority": 3 }` → Expected: `done` stored as a boolean column value, `priority` as a number.
 - **Edge case**: `fields: { "note": null }` → Expected: on create `note` is omitted from the document; on update `note` is unset; no literal null text is written — identical on GraphQL/REST/FFI.
-- **Error case**: encoded-string fields are rejected with InvalidInput, and GraphQL String-variable operations fail schema validation; neither silently reinterprets the old input.
+- **Error case**: encoded-string fields are rejected with InvalidInput, and GraphQL String-variable operations fail (decoder-rejected, not schema-validation-rejected — accepted exception, see Success Metrics); neither silently reinterprets the old input.
 
 ## Risks
 
