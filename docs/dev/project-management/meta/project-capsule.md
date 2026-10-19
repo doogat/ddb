@@ -1,6 +1,6 @@
 # Project Capsule: Doogat DB
 
-Generated: 2026-10-18 (00177 build resuming at task 4/5; GitHub State and Active Work refreshed). Prior header: 2026-09-07 (00171 finalized with explicit maintainer exceptions at `876a153`; 16/16 tasks completed, two review cycles, batch intentionally stopped). Older architecture and other-PRD entries retain their original verification scope.
+Generated: 2026-10-19 (00179 build entering; GitHub State and Active Work refreshed). Prior header: 2026-10-18 (00177 build resuming at task 4/5). Older architecture and other-PRD entries retain their original verification scope.
 
 **Capsule pruned this session.** Prior version had grown to ~56K tokens via a chained "Prior header follows" history reaching back to 2026-05 plus 12 duplicate `## GitHub State` blocks and 3 duplicate `## Project Health` blocks. That history is not lost — every completed PRD's story lives in `dev/local/prds/done/`, its review trail in `dev/local/reviews/<prd>-audit.md`, and the cross-PRD narrative in the `project_*` memory files (see § Project Memories). This capsule now carries only current state; update it going forward instead of appending another header chain.
 
@@ -90,9 +90,11 @@ Generated: 2026-10-18 (00177 build resuming at task 4/5; GitHub State and Active
 - [x] **00177 ffi-crud-through-contract-v1** (DONE 2026-10-18, in `done/`; 2 cycles, 9/9 tasks) — routed FFI `create_doogat`/`update_doogat` through `CreateCommand`/`UpdateCommand` (structured inputs, `on_conflict`, `BaseOnly` unregistered-type policy, warnings), retired the lossy FFI error-variant allowlist, removed raw FFI CRUD exports. Cycle 2 hit `rework_cap` 2 with 0 CRITICAL / 2 HIGH unresolved (update() warning policy divergence from PRD Transport Impact; result-record extra-field lossiness undocumented) plus a 23-item medium/low tail, all deferred at cap-out (no sweep). 2 HIGH findings minted as hold-triage stubs 00234-00235. `cargo test-ci` has a known load-sensitive flake (`actor::tests::shared_actor_preserves_schema_applys_owned_transaction`, green in isolation); `cargo test -p ddb-e2e` 603/603 passed.
 - [x] **00178 structured-fields-input-v1** (DONE 2026-10-19, in `done/`; 2 cycles) — native JSON object `fields` input (REST `serde_json::Value`, GraphQL `JSON` scalar) replacing the stringified-JSON blob, with `normalize_create_fields`/`normalize_update_fields` null-policy (create-omit, update-unset). Cycle 2 hit `rework_cap` 2 with 1 HIGH unresolved (R1: the new GraphQL VALIDATION_ERROR mapping is untested, and the same gap is unfixed in the singleton update/upsert resolvers) plus a `verify-escape` (`cargo test-ci` exit 101 on the known pre-existing parallel-unsafe `actor::tests::shared_actor_preserves_schema_applys_owned_transaction`, out of scope). Both deferred; R1 minted as hold-triage stub 00236.
 
-### Remaining backlog (22 PRDs)
+- [>] **00179 sql-identifier-escaping-materializer-v1** (IN PROGRESS, `wip/`; build entering 2026-10-19) — promotes `quote_ident` into a shared `ddb-core` util, escapes every identifier interpolation in `materialize.rs`/`delete.rs`/`dml.rs`/the where-compilers, and adds write-boundary + sync-load charset guards on `type:`/field-key names. `default_model: opus`.
 
-- [ ] 00179-sql-identifier-escaping-materializer-v1
+### Remaining backlog (21 PRDs)
+
+- [ ] 00180-server-security-resource-hardening-v1
 - [ ] 00180-server-security-resource-hardening-v1
 - [ ] 00181-index-health-quarantine-surface-v1
 - [ ] 00182-where-filter-correctness-completeness-v2
@@ -129,11 +131,11 @@ Numeric order = autopilot execution order (memory `project_ddb_growth_roadmap`);
 
 Engram re-queried 2026-08-16 (fifth run, topic `master Migrate smoke/integration shell scenarios to the Rust e2e crate`): only self-hits, 00171's own PRD file (repo and portfolio scope return the identical five rows, all within the PRD itself or adjacent Phase-2-titled sections of other backlog PRDs); no external prior art. Staleness stamp (`engram status --scope portfolio`, 2026-08-16, nonzero exit): memory stale=14, prd stale=1, transcripts stale=2 dead=5640, code stale=4 (skipped=3598), discovery/findings clean; many sibling repos report absent prd/decision/discovery layers. Review harvest: `dev/local/reviews/*-review-NN.md` files upserted (30 total, incl. 00170's two cycles); the `*-audit.md` renders still fail to parse (`missing frontmatter`) and are NOT harvested — the audit trail survives only as files, so it dies with a `dev/local` GC.
 
-## GitHub State (refreshed 2026-10-18, work-resume catchup)
+## GitHub State (refreshed 2026-10-19, work-resume catchup)
 
-- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 351 unreleased commits on master.
-- **Test RED on master `78be1e86` (run 39110566975) with a REAL test regression, newly surfaced this session:** `ddb-core/tests/app_contract_error_t6.rs::maps_internal_core_errors_to_internal_app_errors` fails — a SqlEngine error renders as `SQL_ERROR`/`InvalidInput` where the test expects `INTERNAL_ERROR`/`Internal`. Landed with 00173's single-error-policy work (memory `project_two_error_mapping_paths`). It is a `--tests` integration target, so `cargo test-ci` (Tier 1) never runs it — the same Tier-1 blind spot as the 00164-00166 sync_test regression. Not 00177's doing; needs triage into its own PRD. Earlier `cargo-deny` dependency-policy red (unmaintained `unsafe-libyaml`, yanked `chacha20`/`spin`) is still unfixed too.
-- Nightly at `2026-10-18` was `in_progress` at catchup time.
+- 0 open issues, 0 open PRs, no stale remote branches. Latest release v0.2.7 (2026-07-17); 428 unreleased commits on master.
+- **Test RED on master `44f7290f` (run 39155763909) via `cargo-deny` advisories, same unfixed dependency-policy class as before:** unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449, no safe upgrade), yanked `chacha20 0.10.0` and `spin 0.9.8`. Still not triaged into its own PRD; unrelated to 00179's scope (SQL identifier escaping). Prior session's `app_contract_error_t6` regression note (2026-10-18) is unconfirmed this session — not re-checked, carried forward as a still-open risk.
+- Nightly at `2026-10-18` `in_progress`/results not re-checked this session; latest `Test` on master `in_progress` at catchup time (2026-10-19).
 
 ### Prior snapshot (2026-09-07)
 

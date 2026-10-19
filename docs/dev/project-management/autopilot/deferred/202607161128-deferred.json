@@ -1452,6 +1452,13 @@
       "reason": "cycle-2 verification check did not pass; pre-existing parallel-unsafe test, out of scope for 00178",
       "prd": "00178-structured-fields-input-v1.md",
       "cycle": 2
+    },
+    {
+      "type": "stall",
+      "site": "plan_expansion",
+      "detail": "module_drift 4 > 1 (., ddb-core/src, docs/src/technical, tests/e2e); note docs/dev/project-management/autopilot/split-notes/00179-sql-identifier-escaping-materializer-v1.md",
+      "op_id": "1e0a4b6c6647",
+      "prd": "00179-sql-identifier-escaping-materializer-v1.md"
     }
   ]
 }

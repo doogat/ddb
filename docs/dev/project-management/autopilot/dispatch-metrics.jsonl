@@ -505,3 +505,5 @@
 {"kind":"handoff","site":"build","edge":"resume","at":1792394862,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
 {"kind":"handoff","site":"done","edge":"resume","at":1792394869,"phase":"done","prd":"00178-structured-fields-input-v1.md"}
 {"kind":"handoff","site":"done","edge":"leave","at":1792394956,"phase":"build","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792395002,"phase":"build","prd":"00179-sql-identifier-escaping-materializer-v1.md"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792396089,"phase":"build","prd":"00179-sql-identifier-escaping-materializer-v1.md"}
