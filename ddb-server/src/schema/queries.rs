@@ -612,36 +612,12 @@ fn register_dynamic_type_fields(
         dynamic_types.push(aggregate_type);
         dynamic_types.push(aggregate_group_type);
 
-        let table_name = schema.table_name.clone();
-        let where_type_name = format!("{type_name}Where");
-        let order_by_type_name = format!("{type_name}OrderBy");
-        let connection_type_name = format!("{type_name}Connection");
-
-        // Per-type query returning Connection (items + totalCount)
-        query = register_per_type_list_field(
-            query,
-            schema,
-            &type_name,
-            &table_name,
-            &schema_lookup,
-            &plural,
-            &where_type_name,
-            &order_by_type_name,
-            &connection_type_name,
-        );
+        query = register_per_type_list_field(query, schema, &type_name, &schema_lookup, &plural);
         // T16: track plural field name for singleton-collision detection.
         emitted_query_fields.insert(plural.clone());
 
-        // Per-type aggregate query
-        query = register_per_type_aggregate_field(
-            query,
-            schema,
-            &type_name,
-            &table_name,
-            &schema_lookup,
-            &plural,
-            &where_type_name,
-        );
+        query =
+            register_per_type_aggregate_field(query, schema, &type_name, &schema_lookup, &plural);
 
         // PRD 00139 §6: SINGLETON typedefs gain a per-type singular query
         // field. The field returns the single materialized row or null
@@ -651,7 +627,6 @@ fn register_dynamic_type_fields(
             query,
             schema,
             &type_name,
-            &table_name,
             &mut emitted_query_fields,
         )?;
     }
@@ -695,23 +670,15 @@ fn register_typed_object_and_inputs(
 }
 
 // Per-type query returning Connection (items + totalCount)
-// 9 args: the design-doc-mandated signature threads the per-type context
-// (type/table names, lookup, plural, and the derived Where/OrderBy/Connection
-// type names) through to the resolver closure.
-#[allow(clippy::too_many_arguments)]
 fn register_per_type_list_field(
     query: Object,
     schema: &TableSchema,
     type_name: &str,
-    table_name: &str,
     schema_lookup: &crate::filter::SchemaLookup,
     plural: &str,
-    where_type_name: &str,
-    order_by_type_name: &str,
-    connection_type_name: &str,
 ) -> Object {
     let schema_clone = schema.clone();
-    let table_name = table_name.to_string();
+    let table_name = schema.table_name.clone();
     let schema_lookup = schema_lookup.clone();
     let query_desc = format!(
         "List all {} doogats with optional where, orderBy, tag, and pagination filters.",
@@ -720,7 +687,7 @@ fn register_per_type_list_field(
     query.field(
         Field::new(
             plural,
-            TypeRef::named_nn(connection_type_name),
+            TypeRef::named_nn(format!("{type_name}Connection")),
             move |ctx| {
                 let schema_clone = schema_clone.clone();
                 let table_name = table_name.clone();
@@ -826,10 +793,10 @@ fn register_per_type_list_field(
                 })
             },
         )
-        .argument(InputValue::new("where", TypeRef::named(where_type_name)).description("Filter conditions."))
+        .argument(InputValue::new("where", TypeRef::named(format!("{type_name}Where"))).description("Filter conditions."))
         .argument(InputValue::new(
             "orderBy",
-            TypeRef::named(order_by_type_name),
+            TypeRef::named(format!("{type_name}OrderBy")),
         ).description("Sort order specification."))
         .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)).description("Filter by tag name."))
         .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
@@ -844,14 +811,12 @@ fn register_per_type_aggregate_field(
     query: Object,
     schema: &TableSchema,
     type_name: &str,
-    table_name: &str,
     schema_lookup: &crate::filter::SchemaLookup,
     plural: &str,
-    where_type_name: &str,
 ) -> Object {
     let agg_type_name = format!("{type_name}Aggregate");
     let schema_clone = schema.clone();
-    let table_name = table_name.to_string();
+    let table_name = schema.table_name.clone();
     let schema_lookup = schema_lookup.clone();
     let agg_desc = format!(
         "Aggregate {} doogats. Returns count with optional groupBy breakdown.",
@@ -935,7 +900,7 @@ fn register_per_type_aggregate_field(
             },
         )
         .argument(
-            InputValue::new("where", TypeRef::named(where_type_name))
+            InputValue::new("where", TypeRef::named(format!("{type_name}Where")))
                 .description("Filter conditions for aggregation."),
         )
         .argument(
@@ -953,14 +918,13 @@ fn register_per_type_singleton_field_if_applicable(
     query: Object,
     schema: &TableSchema,
     type_name: &str,
-    table_name: &str,
     emitted_query_fields: &mut HashSet<String>,
 ) -> Result<Object, String> {
     if !schema.singleton {
         return Ok(query);
     }
     let schema_clone = schema.clone();
-    let table_name = table_name.to_string();
+    let table_name = schema.table_name.clone();
     let singular_desc = format!(
         "Fetch the singleton {} row, or null when the typedef is empty.",
         type_name
