@@ -496,3 +496,9 @@
 {"id":"c24be193","ended_at":1792387767,"elapsed_s":null,"outcome":"ok","detail":"closed-by: artifact"}
 {"id":"2c30381e","ended_at":1792387767,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792387767,"phase":"review","prd":"00178-structured-fields-input-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792387794,"phase":"review","prd":"00178-structured-fields-input-v1.md"}
+{"id":"a276a198","kind":"bob","task":"review-00178c2","queued_at":1792389089,"prompt_bytes":24088}
+{"id":"489a4fa8","kind":"bob","task":"review-00178c2","queued_at":1792392721,"prompt_bytes":24088}
+{"id":"489a4fa8","ended_at":1792392891,"elapsed_s":170,"outcome":"ok","detail":null}
+{"id":"a276a198","ended_at":1792394837,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792394837,"phase":"done","prd":"00178-structured-fields-input-v1.md"}

@@ -1,0 +1,13 @@
+[
+  {
+    "cycle": 2,
+    "finding": "The supplied gate exited 101 before later crates ran; the isolated timeout-test pass does not complete validation. Run `cargo test-ci` without concurrent cargo processes and confirm the complete gate exits successfully.",
+    "file": null,
+    "command": "cargo test-ci",
+    "source": "bob",
+    "result": {
+      "exit": 101,
+      "detail": "Run clean and sequential at d53521c with no concurrent cargo: 2103 passed, 1 failed. The failure is actor::tests::shared_actor_preserves_schema_applys_owned_transaction, which passes in isolation in 0.35s but fails inside the full ddb-server parallel lib suite. Reproduced without concurrent cargo, so it is a parallel-unsafe test rather than a host-load artifact. Pre-existing, unrelated to this PRD's diff. Gate exit 101 aborted at ddb-server, so later crates were not reached."
+    }
+  }
+]
