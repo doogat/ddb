@@ -550,3 +550,15 @@
 {"id":"74b89424","kind":"pat","task":"5","queued_at":1792437108,"prompt_bytes":35337}
 {"id":"74b89424","ended_at":1792437138,"elapsed_s":30,"outcome":"ok","detail":null}
 {"kind":"handoff","site":"build","edge":"leave","at":1792437226,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792437281,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"id":"2deb8822","kind":"ivan","task":"6","queued_at":1792437453,"prompt_bytes":8387}
+{"id":"9d5aae46","kind":"ivan","task":"6","queued_at":1792438152,"prompt_bytes":9094}
+{"id":"85ad7e22","kind":"ivan","task":"6","queued_at":1792438402,"prompt_bytes":8736}
+{"id":"ea2d4810","kind":"ivan","task":"6","queued_at":1792438796,"prompt_bytes":7850}
+{"id":"33129102","kind":"pat","task":"6","queued_at":1792440319,"prompt_bytes":23752}
+{"id":"2deb8822","ended_at":1792442835,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"9d5aae46","ended_at":1792442835,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"85ad7e22","ended_at":1792442835,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"ea2d4810","ended_at":1792442835,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"id":"33129102","ended_at":1792442835,"elapsed_s":null,"outcome":"lost","detail":"open at build/leave handoff"}
+{"kind":"handoff","site":"build","edge":"leave","at":1792442835,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
