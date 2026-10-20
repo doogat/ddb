@@ -1056,4 +1056,187 @@ types:
             report.value.ops
         );
     }
+
+    /// Desired-schema YAML for `widget` with one `unique_together` constraint
+    /// over `label`.
+    const WIDGET_UNIQUE_LABEL: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+    unique_together: [[label]]
+";
+
+    #[test]
+    fn apply_adds_unique_together_to_existing_type_and_enforces_it() {
+        // Happy path (PRD 00184 task 3): a unique_together added to an
+        // EXISTING type (not at CREATE time, which 00161 already covers)
+        // migrates the live table and the constraint is actually enforced
+        // afterward -- not just recorded in the typedef.
+        use crate::traits::GitHistory;
+
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('alpha')")
+            .unwrap();
+
+        let head_before = svc.repo.head_oid().unwrap().0;
+        let report = svc
+            .apply_schema(cmd(WIDGET_UNIQUE_LABEL, false, false))
+            .expect("adding a unique_together to an existing type must succeed, not fail mid-plan");
+        assert!(
+            report.value.applied,
+            "adding a unique_together must apply"
+        );
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "add_unique_constraint" && op.table == "widget"),
+            "the plan must contain an add_unique_constraint op, got: {:?}",
+            report.value.ops
+        );
+
+        // Single-commit atomic (PRD 00161 apply contract): one new commit,
+        // not a stray git write ahead of the buffered transaction.
+        let head_after = svc.repo.head_oid().unwrap().0;
+        assert_ne!(head_before, head_after, "a non-empty apply must advance HEAD");
+        let parent = svc.repo.commit_parent_oid(&head_after, 0).unwrap();
+        assert_eq!(
+            parent, head_before,
+            "add_unique_constraint must flush as ONE commit (new HEAD parent == pre-apply HEAD)"
+        );
+
+        let schema = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must exist after the unique_together apply");
+        assert_eq!(
+            schema.unique_together,
+            Some(vec![vec!["label".to_string()]]),
+            "typedef must record the new unique_together constraint"
+        );
+
+        // The constraint is enforced on the live materialized table: a
+        // duplicate `label` insert must now be rejected, not silently kept.
+        assert!(
+            svc.execute_sql("INSERT INTO widget (label) VALUES ('alpha')")
+                .is_err(),
+            "the live unique index must reject a duplicate `label` after the migration"
+        );
+    }
+
+    #[test]
+    fn reapply_unique_together_doc_is_idempotent_noop() {
+        // Edge case: re-applying the same desired schema after the
+        // constraint already landed converges to an empty plan.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        svc.apply_schema(cmd(WIDGET_UNIQUE_LABEL, false, false))
+            .unwrap();
+
+        let report = svc
+            .apply_schema(cmd(WIDGET_UNIQUE_LABEL, false, false))
+            .unwrap();
+        assert!(
+            !report.value.applied,
+            "re-applying the converged unique_together doc must not report applied"
+        );
+        assert!(
+            report.value.ops.is_empty(),
+            "re-applying the converged unique_together doc must produce no ops, got: {:?}",
+            report.value.ops
+        );
+    }
+
+    #[test]
+    fn apply_unique_together_on_existing_duplicate_data_fails_clearly_and_mutates_nothing() {
+        // Error case: adding a unique_together to a type that already holds
+        // duplicate rows must fail with a structured, non-silent error (not
+        // a panic, not a silently-skipped op), and leave the typedef's
+        // unique_together untouched -- no partial write.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('dup')")
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('dup')")
+            .unwrap();
+
+        let err = svc
+            .apply_schema(cmd(WIDGET_UNIQUE_LABEL, false, false))
+            .expect_err("adding a unique_together over existing duplicate rows must error");
+        // apply_schema wraps every mid-plan op failure as SCHEMA_APPLY_PARTIAL
+        // (see the atomic-apply rollback above); the handler's own
+        // UNIQUE_VIOLATION message is folded into this error's text.
+        match err {
+            crate::error::DoogatError::Structured { code, message, .. } => {
+                assert_eq!(code, crate::error::codes::SCHEMA_APPLY_PARTIAL);
+                assert!(
+                    message.contains("duplicate"),
+                    "error message must name the duplicate-data cause, got: {message}"
+                );
+            }
+            other => panic!("expected Structured SCHEMA_APPLY_PARTIAL, got: {other:?}"),
+        }
+
+        let schema = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must still exist after a failed unique_together apply");
+        assert_eq!(
+            schema.unique_together, None,
+            "a failed unique_together apply must not partially record the constraint"
+        );
+    }
+
+    #[test]
+    fn drop_then_readd_unique_together_round_trips() {
+        // Additional case: dropping a unique_together then re-adding it
+        // round-trips correctly through two more applies.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        svc.apply_schema(cmd(WIDGET_UNIQUE_LABEL, false, false))
+            .unwrap();
+
+        // Drop is destructive.
+        let report = svc
+            .apply_schema(cmd(WIDGET_ONE_COLUMN, false, true))
+            .expect("dropping the unique_together must succeed with allow_destructive");
+        assert!(report.value.applied, "dropping the unique_together must apply");
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "drop_unique_constraint" && op.table == "widget"),
+            "the plan must contain a drop_unique_constraint op, got: {:?}",
+            report.value.ops
+        );
+        let schema = svc.describe_type("widget").unwrap().unwrap();
+        assert_eq!(schema.unique_together, None, "constraint must be gone after drop");
+
+        // The constraint being gone means a duplicate insert now succeeds.
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('beta')")
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('beta')")
+            .unwrap();
+
+        // Re-add fails while the duplicate from the drop window exists --
+        // proof the round-trip re-enforces the check, not just the record.
+        let readd_err = svc
+            .apply_schema(cmd(WIDGET_UNIQUE_LABEL, false, false))
+            .expect_err("re-adding the unique_together over duplicates must error");
+        assert!(
+            matches!(readd_err, crate::error::DoogatError::Structured { .. }),
+            "expected a structured error, got: {readd_err:?}"
+        );
+    }
 }
