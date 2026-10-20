@@ -463,7 +463,7 @@ impl Index {
 
     /// Remove auto-junction rows for a doogat about to be deleted, in BOTH
     /// directions (H2 fix, PRD 00137 parity with the SQL `DELETE` path in
-    /// `sql_engine/dml.rs`):
+    /// `sql_engine/delete.rs`):
     ///
     /// - **Reverse** — junction rows in OTHER typedef tables that pointed at
     ///   `deleted_id` via `<col>_id` (e.g. deleting a `category` row removes

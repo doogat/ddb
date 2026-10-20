@@ -191,7 +191,7 @@ impl DoogatError {
 
     /// `NOT NULL REFERENCES` parent delete blocked by RESTRICT (or attempted
     /// against a column whose `ON DELETE` action is RESTRICT). Message
-    /// matches the existing wording from `materialize.rs::check_restrict_blocks_delete`.
+    /// matches the existing wording from `materialize/inference.rs::check_restrict_blocks_delete`.
     pub fn references_violation(
         table: impl Into<String>,
         column: impl Into<String>,
@@ -252,7 +252,7 @@ impl DoogatError {
 
     /// Required column missing on INSERT, or `SET col = NULL` on a NOT NULL
     /// column on UPDATE. Message matches the PRD 00122 wording emitted from
-    /// `dml.rs::check_not_null`.
+    /// `dml/validate.rs::check_not_null`.
     pub fn not_null_violation(table: impl Into<String>, column: impl Into<String>) -> Self {
         let table = table.into();
         let column = column.into();
@@ -267,7 +267,7 @@ impl DoogatError {
     }
 
     /// `fields` JSON has a key that's not in the typedef columns. Message
-    /// matches the PRD 00122 wording from `dml.rs::check_unknown_columns`
+    /// matches the PRD 00122 wording from `dml/validate.rs::check_unknown_columns`
     /// so pre-existing match-on-message callers keep working.
     pub fn unknown_field(table: impl Into<String>, field: impl Into<String>) -> Self {
         let table = table.into();

@@ -21,7 +21,7 @@ mod tests;
 /// declaration was harmless. The GraphQL server uses its own
 /// `BASE_DOOGAT_FIELDS` set to decide which typed-column fields would
 /// clobber a base doogat field — see `typed_doogat_to_value` in
-/// `ddb-server/src/schema/base_types.rs`.
+/// `ddb-server/src/schema/base_types/to_gql.rs`.
 pub fn is_core_column(name: &str) -> bool {
     matches!(name, "id" | "title" | "type" | "date" | "updated_at")
 }

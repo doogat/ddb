@@ -14,7 +14,7 @@ use super::DoogatService;
 /// the pipeline either owns them (`id`, `title`, `type`, `date`,
 /// `created_at`, `updated_at`) or routes them to a separate index
 /// (`tags`). Mirrors the SQL validator's RESERVED_COLUMNS set in
-/// `ddb-core/src/sql_engine/dml.rs`. PRD 00129 §1.
+/// `ddb-core/src/sql_engine/dml/mod.rs`. PRD 00129 §1.
 const RESERVED_TYPED_COLUMNS: &[&str] = &[
     "id",
     "title",

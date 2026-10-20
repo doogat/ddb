@@ -45,7 +45,7 @@ pub(crate) fn is_reserved_table(name: &str) -> bool {
 /// shapes (leading digit, hyphen, dot, whitespace), and reserved internal names
 /// (`doogats`, `_typedef`, `_ddb_*`, `sqlite_*`).
 ///
-/// Mirrors `is_valid_graphql_name` from `ddb-server/src/schema/base_types.rs`
+/// Mirrors `is_valid_graphql_name` from `ddb-server/src/schema/base_types/schema_object.rs`
 /// — keep both in sync. Duplicated here to keep `ddb-core` independent of the
 /// server crate.
 pub(crate) fn validate_rename_target_name(new_name: &str) -> Result<()> {

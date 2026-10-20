@@ -153,7 +153,7 @@ impl<G: GitBackend, I: IndexPort> DoogatService<G, I> {
             )));
         }
         // ORDER BY id keeps `existing_id` deterministic across Layer 1
-        // (this check), Layer 2 (sql_engine/dml.rs SINGLETON pre-check), and
+        // (this check), Layer 2 (sql_engine/dml/insert.rs SINGLETON pre-check), and
         // Layer 3 (`lookup_singleton_existing_id` after a UNIQUE-index hit).
         // Cycle-3 #5 pinned the ordering at `populate_materialized_table`;
         // pinning it at every consumer of that materialized table keeps the
