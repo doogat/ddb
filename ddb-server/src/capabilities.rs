@@ -62,7 +62,9 @@ mod tests {
         let mut first = capabilities();
         first.clear();
         first.push("tampered".to_string());
-        assert_eq!(capabilities(), expected_owned());
+        for call in 0..20 {
+            assert_eq!(capabilities(), expected_owned(), "call {call}");
+        }
     }
 
     #[test]
@@ -70,5 +72,17 @@ mod tests {
         let v = version();
         assert!(!v.is_empty());
         assert_eq!(v, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn version_is_compile_time_constant_not_runtime_lookup() {
+        // A shipped binary has no CARGO_PKG_VERSION in its environment;
+        // only `cargo test` sets it. Remove it so a runtime lookup degrades.
+        std::env::remove_var("CARGO_PKG_VERSION");
+        let first = version();
+        let second = version();
+        assert!(!first.is_empty());
+        assert_eq!(first, env!("CARGO_PKG_VERSION"));
+        assert!(std::ptr::eq(first, second));
     }
 }
