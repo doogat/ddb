@@ -2,6 +2,7 @@ mod base_types;
 mod discovery_queries;
 mod input;
 mod mutations;
+mod per_type_queries;
 mod queries;
 mod subscriptions;
 mod type_defs;

@@ -6,7 +6,7 @@ use ddb_core::search_query;
 use ddb_core::types::{ListFilter, SearchFieldFilter, SearchFieldOp, SearchFilters, TableSchema};
 use indexmap::IndexMap;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::actor::ActorHandle;
@@ -16,28 +16,6 @@ use crate::reload::SchemaReloader;
 use crate::warning_extension::forward_warnings;
 
 use super::base_types::*;
-
-const RESERVED_QUERY_FIELD_NAMES: &[&str] = &[
-    "doogat",
-    "doogats",
-    "search",
-    "normalizeSearchQuery",
-    "typeDefs",
-    "sql",
-    "schemaVersion",
-    "checkboxItems",
-    "openActions",
-    "unlinkedMentions",
-    "suggestions",
-    "staleDoogats",
-    "orphanDoogats",
-    "sequenceInfo",
-    "sequenceChildren",
-    "sequenceBreadcrumb",
-    "brokenSequences",
-    "tags",
-    "tagEntries",
-];
 
 /// Auxiliary types and collections produced by the query builder that must be
 /// registered on the schema alongside the Query object itself.
@@ -68,7 +46,7 @@ pub(crate) fn build_query_fields(type_schemas: &[TableSchema]) -> Result<QueryOu
     let mut dynamic_types: Vec<Object> = Vec::new();
     let mut dynamic_inputs: Vec<InputObject> = Vec::new();
     let (mut query, sequence_node_type, sequence_info_type, broken_sequence_type) =
-        register_dynamic_type_fields(
+        super::per_type_queries::register_dynamic_type_fields(
             query,
             type_schemas,
             &mut known_types,
@@ -178,104 +156,7 @@ fn register_doogats_field(query: Object) -> Object {
 fn register_search_field(query: Object) -> Object {
     query.field(
         Field::new("search", TypeRef::named_nn("SearchConnection"), |ctx| {
-            FieldFuture::new(async move {
-                let pool = ctx.data::<ReadPool>()?;
-                let q = ctx.args.try_get("query")?.string()?.to_string();
-                let page = PageRequest::decode(validate_limit(&ctx)?, validate_offset(&ctx)?)
-                    .map_err(to_graphql_error)?;
-
-                let types = ctx
-                    .args
-                    .get("types")
-                    .and_then(|v| v.list().ok())
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                            .collect::<Vec<_>>()
-                    });
-
-                let tag = ctx
-                    .args
-                    .get("tag")
-                    .and_then(|v| v.string().ok().map(|s| s.to_string()));
-
-                let where_filters = ctx
-                    .args
-                    .get("where")
-                    .and_then(|v| v.list().ok())
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|v| {
-                                let obj = v.object().ok()?;
-                                let field = obj.get("field")?.string().ok()?.to_string();
-                                if let Some(eq) = obj.get("eq") {
-                                    let val = eq.string().ok()?.to_string();
-                                    Some(SearchFieldFilter {
-                                        field,
-                                        op: SearchFieldOp::Eq(val),
-                                    })
-                                } else if let Some(contains) = obj.get("contains") {
-                                    let val = contains.string().ok()?.to_string();
-                                    Some(SearchFieldFilter {
-                                        field,
-                                        op: SearchFieldOp::Contains(val),
-                                    })
-                                } else if let Some(in_val) = obj.get("in") {
-                                    let vals = in_val.list().ok()?
-                                        .iter()
-                                        .filter_map(|v| v.string().ok().map(|s| s.to_string()))
-                                        .collect();
-                                    Some(SearchFieldFilter {
-                                        field,
-                                        op: SearchFieldOp::In(vals),
-                                    })
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    });
-
-                let normalized = search_query::normalize(&q);
-                // SearchCommand has no slot for structured `where`
-                // filters, so only the types/tag case routes through the
-                // app-contract facade.
-                let (hits, total) = if where_filters.is_some() {
-                    let filters = SearchFilters {
-                        types,
-                        tag,
-                        where_filters,
-                    };
-                    let result = pool
-                        .search(q, page.limit, page.offset, filters)
-                        .await
-                        .map_err(to_graphql_error)?;
-                    (result.hits, result.total_count)
-                } else {
-                    let output = pool
-                        .search_command(SearchCommand {
-                            query: q,
-                            page,
-                            types,
-                            tag,
-                        })
-                        .await
-                        .map_err(to_graphql_error)?;
-                    forward_warnings(&ctx, &output.warnings);
-                    (output.value.items, output.value.total)
-                };
-                let mut obj = IndexMap::new();
-                obj.insert(
-                    Name::new("hits"),
-                    GqlValue::List(hits.iter().map(search_hit_to_value).collect()),
-                );
-                obj.insert(Name::new("totalCount"), GqlValue::from(total as i64));
-                obj.insert(
-                    Name::new("queryNormalized"),
-                    GqlValue::from(normalized),
-                );
-                Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
-            })
+            FieldFuture::new(resolve_search(ctx))
         })
         .argument(InputValue::new("query", TypeRef::named_nn(TypeRef::STRING)).description("FTS5 query string. Supports AND, OR, NOT, quoted phrases, and field:value syntax."))
         .argument(InputValue::new(
@@ -291,6 +172,122 @@ fn register_search_field(query: Object) -> Object {
         .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip for pagination. Default 0."))
         .description("Full-text search with optional structured where filters. Returns paginated hits with BM25 ranking."),
     )
+}
+
+async fn resolve_search<'a>(
+    ctx: async_graphql::dynamic::ResolverContext<'a>,
+) -> async_graphql::Result<Option<FieldValue<'a>>> {
+    let pool = ctx.data::<ReadPool>()?;
+    let q = ctx.args.try_get("query")?.string()?.to_string();
+    let page = PageRequest::decode(validate_limit(&ctx)?, validate_offset(&ctx)?)
+        .map_err(to_graphql_error)?;
+
+    let types = parse_search_types(&ctx);
+    let tag = parse_search_tag(&ctx);
+    let where_filters = parse_search_where_filters(&ctx);
+
+    let normalized = search_query::normalize(&q);
+    let (hits, total) =
+        fetch_search_results(&ctx, pool, q, page, types, tag, where_filters).await?;
+
+    let mut obj = IndexMap::new();
+    obj.insert(
+        Name::new("hits"),
+        GqlValue::List(hits.iter().map(search_hit_to_value).collect()),
+    );
+    obj.insert(Name::new("totalCount"), GqlValue::from(total as i64));
+    obj.insert(Name::new("queryNormalized"), GqlValue::from(normalized));
+    Ok(Some(FieldValue::owned_any(GqlValue::Object(obj))))
+}
+
+fn parse_search_types(ctx: &async_graphql::dynamic::ResolverContext) -> Option<Vec<String>> {
+    ctx.args.get("types").and_then(|v| v.list().ok()).map(|list| {
+        list.iter()
+            .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+            .collect::<Vec<_>>()
+    })
+}
+
+fn parse_search_tag(ctx: &async_graphql::dynamic::ResolverContext) -> Option<String> {
+    ctx.args
+        .get("tag")
+        .and_then(|v| v.string().ok().map(|s| s.to_string()))
+}
+
+fn parse_search_where_filters(
+    ctx: &async_graphql::dynamic::ResolverContext,
+) -> Option<Vec<SearchFieldFilter>> {
+    ctx.args.get("where").and_then(|v| v.list().ok()).map(|list| {
+        list.iter()
+            .filter_map(parse_single_search_field_filter)
+            .collect::<Vec<_>>()
+    })
+}
+
+fn parse_single_search_field_filter(
+    v: async_graphql::dynamic::ValueAccessor,
+) -> Option<SearchFieldFilter> {
+    let obj = v.object().ok()?;
+    let field = obj.get("field")?.string().ok()?.to_string();
+    if let Some(eq) = obj.get("eq") {
+        let val = eq.string().ok()?.to_string();
+        return Some(SearchFieldFilter {
+            field,
+            op: SearchFieldOp::Eq(val),
+        });
+    }
+    if let Some(contains) = obj.get("contains") {
+        let val = contains.string().ok()?.to_string();
+        return Some(SearchFieldFilter {
+            field,
+            op: SearchFieldOp::Contains(val),
+        });
+    }
+    if let Some(in_val) = obj.get("in") {
+        let vals = in_val
+            .list()
+            .ok()?
+            .iter()
+            .filter_map(|v| v.string().ok().map(|s| s.to_string()))
+            .collect();
+        return Some(SearchFieldFilter {
+            field,
+            op: SearchFieldOp::In(vals),
+        });
+    }
+    None
+}
+
+// SearchCommand has no slot for structured `where` filters, so only the
+// types/tag case routes through the app-contract facade.
+async fn fetch_search_results<'a>(
+    ctx: &async_graphql::dynamic::ResolverContext<'a>,
+    pool: &ReadPool,
+    q: String,
+    page: PageRequest,
+    types: Option<Vec<String>>,
+    tag: Option<String>,
+    where_filters: Option<Vec<SearchFieldFilter>>,
+) -> async_graphql::Result<(Vec<ddb_core::types::SearchResult>, usize)> {
+    if where_filters.is_some() {
+        let filters = SearchFilters {
+            types,
+            tag,
+            where_filters,
+        };
+        let result = pool
+            .search(q, page.limit, page.offset, filters)
+            .await
+            .map_err(to_graphql_error)?;
+        Ok((result.hits, result.total_count))
+    } else {
+        let output = pool
+            .search_command(SearchCommand { query: q, page, types, tag })
+            .await
+            .map_err(to_graphql_error)?;
+        forward_warnings(ctx, &output.warnings);
+        Ok((output.value.items, output.value.total))
+    }
 }
 
 // normalizeSearchQuery(query)
@@ -470,65 +467,7 @@ fn register_tag_entries_field(query: Object) -> Object {
         Field::new(
             "tagEntries",
             TypeRef::named_nn("TagEntryConnection"),
-            |ctx| {
-                FieldFuture::new(async move {
-                    let pool = ctx.data::<ReadPool>()?;
-
-                    let mut filter = ddb_core::types::TagQueryFilter::default();
-
-                    if let Some(Ok(GqlValue::Object(map))) =
-                        ctx.args.get("where").map(|v| v.deserialize::<GqlValue>())
-                    {
-                        if let Some(GqlValue::Object(id_filter)) = map.get("doogatId") {
-                            if let Some(GqlValue::String(eq)) = id_filter.get("eq") {
-                                filter.doogat_id_eq = Some(eq.to_string());
-                            }
-                            if let Some(GqlValue::List(vals)) = id_filter.get("in") {
-                                filter.doogat_id_in = Some(
-                                    vals.iter()
-                                        .filter_map(|v| {
-                                            if let GqlValue::String(s) = v {
-                                                Some(s.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect(),
-                                );
-                            }
-                        }
-                        if let Some(GqlValue::Object(tag_filter)) = map.get("tag") {
-                            if let Some(GqlValue::String(eq)) = tag_filter.get("eq") {
-                                filter.tag_eq = Some(eq.to_string());
-                            }
-                            if let Some(GqlValue::String(c)) = tag_filter.get("contains") {
-                                filter.tag_contains = Some(c.to_string());
-                            }
-                            if let Some(GqlValue::List(vals)) = tag_filter.get("in") {
-                                filter.tag_in = Some(
-                                    vals.iter()
-                                        .filter_map(|v| {
-                                            if let GqlValue::String(s) = v {
-                                                Some(s.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect(),
-                                );
-                            }
-                        }
-                    }
-
-                    let entries = pool.query_tags(filter).await.map_err(to_graphql_error)?;
-                    let total_count = entries.len() as i64;
-                    let items = GqlValue::List(entries.iter().map(tag_entry_to_value).collect());
-                    let mut conn = IndexMap::new();
-                    conn.insert(Name::new("items"), items);
-                    conn.insert(Name::new("totalCount"), GqlValue::from(total_count));
-                    Ok(Some(FieldValue::owned_any(GqlValue::Object(conn))))
-                })
-            },
+            |ctx| FieldFuture::new(resolve_tag_entries(ctx)),
         )
         .argument(
             InputValue::new("where", TypeRef::named("TagEntriesWhere"))
@@ -540,453 +479,75 @@ fn register_tag_entries_field(query: Object) -> Object {
     )
 }
 
-// Discovery queries plus the dynamic per-type query fields, the per-type
-// object/input types they register, and the forward-relation filter inputs.
-fn register_dynamic_type_fields(
-    query: Object,
-    type_schemas: &[TableSchema],
-    known_types: &mut HashMap<String, String>,
-    dynamic_types: &mut Vec<Object>,
-    dynamic_inputs: &mut Vec<InputObject>,
-) -> Result<(Object, Object, Object, Object), String> {
-    // -- Discovery queries (orphans, unlinked mentions, sequences, etc.) --
-    let super::discovery_queries::DiscoveryOutput {
-        query: q,
-        sequence_node_type,
-        sequence_info_type,
-        broken_sequence_type,
-    } = super::discovery_queries::register_discovery_fields(query);
-    let mut query = q;
-
-    let mut seen_gql_names: HashSet<String> = HashSet::new();
-    for s in type_schemas {
-        let gql_name = sanitize_type_name(&s.table_name);
-        if !seen_gql_names.insert(gql_name.clone()) {
-            tracing::warn!(
-                "skipping typedef '{}': GraphQL name '{}' collides with another type",
-                s.table_name,
-                gql_name
-            );
-            continue;
-        }
-        known_types.insert(s.table_name.clone(), gql_name);
-    }
-    // PRD 00139 §6 / T16: track per-typedef-loop Query field names so the
-    // singleton singular field can detect collisions and fall back to
-    // `<base>_singleton`. The fallback also collides? -> hard error at
-    // schema-build time so a future operator notices instead of silently
-    // dropping the singular field.
-    let mut emitted_query_fields: HashSet<String> = RESERVED_QUERY_FIELD_NAMES
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect();
-    // Lookup of every registered type schema, threaded into the where-builder
-    // for relation resolution (consumed by later relation tasks). Built once.
-    let schema_lookup: crate::filter::SchemaLookup = type_schemas
-        .iter()
-        .filter(|s| known_types.contains_key(&s.table_name))
-        .map(|s| (s.table_name.clone(), s.clone()))
-        .collect();
-    for schema in type_schemas {
-        let type_name = match known_types.get(&schema.table_name) {
-            Some(name) => name.clone(),
-            None => continue,
-        };
-        let field_base = sanitize_field_name(&schema.table_name);
-        let plural = pluralize_preserving_case(&field_base);
-
-        // Create typed object and per-type Where/OrderBy inputs plus the
-        // Connection and Aggregate types.
-        let (
-            typed_obj,
-            where_input,
-            order_by_input,
-            connection_type,
-            aggregate_type,
-            aggregate_group_type,
-        ) = register_typed_object_and_inputs(&type_name, schema, type_schemas, known_types);
-        dynamic_types.push(typed_obj);
-        dynamic_inputs.push(where_input);
-        dynamic_inputs.push(order_by_input);
-        dynamic_types.push(connection_type);
-        dynamic_types.push(aggregate_type);
-        dynamic_types.push(aggregate_group_type);
-
-        query = register_per_type_list_field(query, schema, &type_name, &schema_lookup, &plural);
-        // T16: track plural field name for singleton-collision detection.
-        emitted_query_fields.insert(plural.clone());
-
-        query =
-            register_per_type_aggregate_field(query, schema, &type_name, &schema_lookup, &plural);
-
-        // PRD 00139 §6: SINGLETON typedefs gain a per-type singular query
-        // field. The field returns the single materialized row or null
-        // (when the typedef is not yet auto-seeded). The plural field
-        // already added above stays generated for backward compat.
-        query = register_per_type_singleton_field_if_applicable(
-            query,
-            schema,
-            &type_name,
-            &mut emitted_query_fields,
-        )?;
-    }
-
-    // Forward-relation `{Target}RelationFilter` inputs for every REFERENCES
-    // column whose target type is registered. Keyed off `known_types` so it
-    // agrees with `build_where_input` on which targets get a RelationFilter.
-    for relation_input in crate::relation_filter::relation_input_objects(type_schemas, known_types)
-    {
-        dynamic_inputs.push(relation_input);
-    }
-
-    Ok((query, sequence_node_type, sequence_info_type, broken_sequence_type))
+async fn resolve_tag_entries<'a>(
+    ctx: async_graphql::dynamic::ResolverContext<'a>,
+) -> async_graphql::Result<Option<FieldValue<'a>>> {
+    let pool = ctx.data::<ReadPool>()?;
+    let filter = parse_tag_entries_filter(&ctx);
+    let entries = pool.query_tags(filter).await.map_err(to_graphql_error)?;
+    let total_count = entries.len() as i64;
+    let items = GqlValue::List(entries.iter().map(tag_entry_to_value).collect());
+    let mut conn = IndexMap::new();
+    conn.insert(Name::new("items"), items);
+    conn.insert(Name::new("totalCount"), GqlValue::from(total_count));
+    Ok(Some(FieldValue::owned_any(GqlValue::Object(conn))))
 }
 
-// Builds the per-type object and its companion input/object types.
-fn register_typed_object_and_inputs(
-    type_name: &str,
-    schema: &TableSchema,
-    type_schemas: &[TableSchema],
-    known_types: &HashMap<String, String>,
-) -> (Object, InputObject, InputObject, Object, Object, Object) {
-    // Create typed object
-    let typed_obj = build_typed_object(type_name, schema, known_types);
-
-    // Create per-type Where, OrderBy inputs, Connection and Aggregate types
-    let where_input = crate::filter::build_where_input(type_name, schema, type_schemas, known_types);
-    let order_by_input = crate::filter::build_order_by_input(type_name, schema);
-    let connection_type = crate::filter::build_connection_type(type_name);
-    let aggregate_type = crate::filter::build_aggregate_type(type_name, schema);
-    let aggregate_group_type = crate::filter::build_aggregate_group_type(type_name, schema);
-
-    (
-        typed_obj,
-        where_input,
-        order_by_input,
-        connection_type,
-        aggregate_type,
-        aggregate_group_type,
-    )
-}
-
-// Per-type query returning Connection (items + totalCount)
-fn register_per_type_list_field(
-    query: Object,
-    schema: &TableSchema,
-    type_name: &str,
-    schema_lookup: &crate::filter::SchemaLookup,
-    plural: &str,
-) -> Object {
-    let schema_clone = schema.clone();
-    let table_name = schema.table_name.clone();
-    let schema_lookup = schema_lookup.clone();
-    let query_desc = format!(
-        "List all {} doogats with optional where, orderBy, tag, and pagination filters.",
-        type_name
-    );
-    query.field(
-        Field::new(
-            plural,
-            TypeRef::named_nn(format!("{type_name}Connection")),
-            move |ctx| {
-                let schema_clone = schema_clone.clone();
-                let table_name = table_name.clone();
-                let schema_lookup = schema_lookup.clone();
-                FieldFuture::new(async move {
-                    let pool = ctx.data::<ReadPool>()?;
-                    let tag = ctx
-                        .args
-                        .get("tag")
-                        .and_then(|v| v.string().ok())
-                        .map(|s| s.to_string());
-                    let limit = validate_limit(&ctx)?;
-                    let offset = validate_offset(&ctx)?;
-                    let distinct = ctx
-                        .args
-                        .get("distinct")
-                        .and_then(|v| v.string().ok())
-                        .and_then(|col| {
-                            resolve_column(&schema_clone.columns, col).map(|s| s.to_string())
-                        });
-
-                    // Parse optional orderBy
-                    let order_sql = ctx
-                        .args
-                        .get("orderBy")
-                        .and_then(|v| v.deserialize::<GqlValue>().ok())
-                        .and_then(|v| crate::filter::build_order_sql(&v, &schema_clone));
-
-                    // Build where clause. Validation errors (e.g.
-                    // empty `tags` filter, issue #11) bubble out
-                    // as GraphQL errors instead of silently
-                    // matching no rows.
-                    let where_val = ctx.args.get("where").map(|v| v.deserialize::<GqlValue>());
-                    let wc = match &where_val {
-                        Some(Ok(ref filter_input)) => {
-                            crate::filter::try_build_where_sql(
-                                filter_input,
-                                &schema_clone,
-                                &schema_lookup,
-                            )
-                            .map_err(|msg| async_graphql::ServerError::new(msg, None))?
-                        }
-                        _ => crate::filter::WhereClause::empty(),
-                    };
-
-                    // Fetch items (always use filtered_list)
-                    let doogats = pool
-                        .filtered_list(ddb_core::types::TypedListQuery {
-                            table_name: table_name.clone(),
-                            where_sql: wc.sql.clone(),
-                            params: wc.params.clone(),
-                            order_sql,
-                            tag: tag.clone(),
-                            limit,
-                            offset,
-                            distinct: distinct.clone(),
-                        })
-                        .await
-                        .map_err(to_graphql_error)?;
-
-                    // Fetch totalCount (same where + tag filters, no limit/offset)
-                    let mut count_conditions = Vec::new();
-                    if !wc.sql.is_empty() {
-                        count_conditions.push(wc.sql.clone());
-                    }
-                    if let Some(ref t) = tag {
-                        count_conditions.push(format!(
-                            "id IN (SELECT doogat_id FROM _ddb_tags WHERE tag = '{}')",
-                            t.replace('\'', "''")
-                        ));
-                    }
-                    let count_where = if count_conditions.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" WHERE {}", count_conditions.join(" AND "))
-                    };
-                    let count_sql = if let Some(ref col) = distinct {
-                        let escaped = col.replace('"', "\"\"");
-                        format!(
-                            "SELECT COUNT(DISTINCT \"{escaped}\") FROM \"{table_name}\"{count_where}"
-                        )
-                    } else {
-                        format!("SELECT COUNT(*) FROM \"{table_name}\"{count_where}")
-                    };
-                    let count_row = pool
-                        .aggregate_query(count_sql, wc.params)
-                        .await
-                        .map_err(to_graphql_error)?;
-                    let total_count: i64 =
-                        count_row.first().and_then(|s| s.parse().ok()).unwrap_or(0);
-
-                    let items = GqlValue::List(
-                        doogats
-                            .iter()
-                            .map(|z| typed_doogat_to_value(z, &schema_clone))
-                            .collect(),
-                    );
-                    let mut conn = IndexMap::new();
-                    conn.insert(Name::new("items"), items);
-                    conn.insert(Name::new("totalCount"), GqlValue::from(total_count));
-
-                    Ok(Some(FieldValue::owned_any(GqlValue::Object(conn))))
-                })
-            },
-        )
-        .argument(InputValue::new("where", TypeRef::named(format!("{type_name}Where"))).description("Filter conditions."))
-        .argument(InputValue::new(
-            "orderBy",
-            TypeRef::named(format!("{type_name}OrderBy")),
-        ).description("Sort order specification."))
-        .argument(InputValue::new("tag", TypeRef::named(TypeRef::STRING)).description("Filter by tag name."))
-        .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)).description("Maximum results to return."))
-        .argument(InputValue::new("offset", TypeRef::named(TypeRef::INT)).description("Number of results to skip."))
-        .argument(InputValue::new("distinct", TypeRef::named(TypeRef::STRING)).description("Column to deduplicate results by."))
-        .description(&query_desc),
-    )
-}
-
-// Per-type aggregate query
-fn register_per_type_aggregate_field(
-    query: Object,
-    schema: &TableSchema,
-    type_name: &str,
-    schema_lookup: &crate::filter::SchemaLookup,
-    plural: &str,
-) -> Object {
-    let agg_type_name = format!("{type_name}Aggregate");
-    let schema_clone = schema.clone();
-    let table_name = schema.table_name.clone();
-    let schema_lookup = schema_lookup.clone();
-    let agg_desc = format!(
-        "Aggregate {} doogats. Returns count with optional groupBy breakdown.",
-        type_name
-    );
-    query.field(
-        Field::new(
-            format!("{plural}Aggregate"),
-            TypeRef::named_nn(&agg_type_name),
-            move |ctx| {
-                let schema_clone = schema_clone.clone();
-                let table_name = table_name.clone();
-                let schema_lookup = schema_lookup.clone();
-                FieldFuture::new(async move {
-                    let pool = ctx.data::<ReadPool>()?;
-                    // Aggregate `where` shares the issue-#11
-                    // validation; bubble errors out cleanly.
-                    let wc = match ctx
-                        .args
-                        .get("where")
-                        .and_then(|v| v.deserialize::<GqlValue>().ok())
-                    {
-                        Some(v) => crate::filter::try_build_where_sql(
-                            &v,
-                            &schema_clone,
-                            &schema_lookup,
-                        )
-                        .map_err(|msg| async_graphql::ServerError::new(msg, None))?,
-                        None => crate::filter::WhereClause::empty(),
-                    };
-
-                    let group_by = ctx
-                        .args
-                        .get("groupBy")
-                        .and_then(|v| v.string().ok())
-                        .and_then(|col| {
-                            resolve_column(&schema_clone.columns, col).map(|s| s.to_string())
-                        });
-
-                    let (sql, names) = crate::filter::build_aggregate_sql_grouped(
-                        &table_name,
-                        &schema_clone,
-                        &wc,
-                        group_by.as_deref(),
-                    );
-
-                    if group_by.is_some() {
-                        let rows = pool
-                            .aggregate_query_rows(sql, wc.params)
-                            .await
-                            .map_err(to_graphql_error)?;
-                        let groups: Vec<GqlValue> = rows
-                            .iter()
-                            .map(|row| crate::filter::aggregate_row_to_value(row, &names))
-                            .collect();
-                        // Sum group counts for top-level count
-                        let total_count: i64 = groups
-                            .iter()
-                            .map(|g| {
-                                if let GqlValue::Object(map) = g {
-                                    if let Some(GqlValue::Number(n)) = map.get("count") {
-                                        return n.as_i64().unwrap_or(0);
-                                    }
-                                }
-                                0
-                            })
-                            .sum();
-                        let mut val = IndexMap::new();
-                        val.insert(Name::new("count"), GqlValue::from(total_count));
-                        val.insert(Name::new("groups"), GqlValue::List(groups));
-                        Ok(Some(FieldValue::owned_any(GqlValue::Object(val))))
-                    } else {
-                        let row = pool
-                            .aggregate_query(sql, wc.params)
-                            .await
-                            .map_err(to_graphql_error)?;
-                        let val = crate::filter::aggregate_row_to_value(&row, &names);
-                        Ok(Some(FieldValue::owned_any(val)))
-                    }
-                })
-            },
-        )
-        .argument(
-            InputValue::new("where", TypeRef::named(format!("{type_name}Where")))
-                .description("Filter conditions for aggregation."),
-        )
-        .argument(
-            InputValue::new("groupBy", TypeRef::named(TypeRef::STRING))
-                .description("Column to group results by."),
-        )
-        .description(&agg_desc),
-    )
-}
-
-// PRD 00139 §6 / T16: SINGLETON typedefs gain a per-type singular query
-// field with name-collision fallback. Returns the updated Query object, or an
-// error when both the base name and the `_singleton` fallback collide.
-fn register_per_type_singleton_field_if_applicable(
-    query: Object,
-    schema: &TableSchema,
-    type_name: &str,
-    emitted_query_fields: &mut HashSet<String>,
-) -> Result<Object, String> {
-    if !schema.singleton {
-        return Ok(query);
-    }
-    let schema_clone = schema.clone();
-    let table_name = schema.table_name.clone();
-    let singular_desc = format!(
-        "Fetch the singleton {} row, or null when the typedef is empty.",
-        type_name
-    );
-    let singleton_field_base = singleton_field_base(&schema.table_name);
-    // PRD 00139 §6 / T16: name-collision fallback. If the bare
-    // SINGLETON field base (e.g. `foo_bar`) already shipped as
-    // another Query field, fall back to `<field_base>_singleton`.
-    // If the fallback ALSO collides, fail schema build so the
-    // operator sees the bad schema instead of silently losing the
-    // field.
-    let singular_field_name = if emitted_query_fields.contains(&singleton_field_base) {
-        let fallback = format!("{singleton_field_base}_singleton");
-        if emitted_query_fields.contains(&fallback) {
-            return Err(format!(
-                "cannot build SINGLETON singular field for typedef '{}': '{}' collides on Query and fallback '{}' is also already in use",
-                schema.table_name, singleton_field_base, fallback
-            ));
-        }
-        tracing::warn!(
-            "SINGLETON typedef '{}' singular field '{}' collides with another Query field; emitting as '{}' instead",
-            schema.table_name,
-            singleton_field_base,
-            fallback
-        );
-        fallback
-    } else {
-        singleton_field_base
+fn parse_tag_entries_filter(
+    ctx: &async_graphql::dynamic::ResolverContext,
+) -> ddb_core::types::TagQueryFilter {
+    let mut filter = ddb_core::types::TagQueryFilter::default();
+    let Some(Ok(GqlValue::Object(map))) =
+        ctx.args.get("where").map(|v| v.deserialize::<GqlValue>())
+    else {
+        return filter;
     };
-    emitted_query_fields.insert(singular_field_name.clone());
-    Ok(query.field(
-        Field::new(
-            &singular_field_name,
-            TypeRef::named(type_name),
-            move |ctx| {
-                let schema_clone = schema_clone.clone();
-                let table_name = table_name.clone();
-                FieldFuture::new(async move {
-                    let pool = ctx.data::<ReadPool>()?;
-                    let doogats = pool
-                        .filtered_list(ddb_core::types::TypedListQuery {
-                            table_name,
-                            where_sql: String::new(),
-                            params: Vec::new(),
-                            order_sql: None,
-                            tag: None,
-                            limit: Some(1),
-                            offset: None,
-                            distinct: None,
-                        })
-                        .await
-                        .map_err(to_graphql_error)?;
-                    match doogats.first() {
-                        Some(d) => Ok(Some(FieldValue::owned_any(typed_doogat_to_value(
-                            d,
-                            &schema_clone,
-                        )))),
-                        None => Ok(None),
-                    }
-                })
-            },
-        )
-        .description(&singular_desc),
-    ))
+    apply_tag_entries_doogat_id_filter(&map, &mut filter);
+    apply_tag_entries_tag_filter(&map, &mut filter);
+    filter
+}
+
+fn apply_tag_entries_doogat_id_filter(
+    map: &IndexMap<Name, GqlValue>,
+    filter: &mut ddb_core::types::TagQueryFilter,
+) {
+    let Some(GqlValue::Object(id_filter)) = map.get("doogatId") else {
+        return;
+    };
+    if let Some(GqlValue::String(eq)) = id_filter.get("eq") {
+        filter.doogat_id_eq = Some(eq.to_string());
+    }
+    if let Some(GqlValue::List(vals)) = id_filter.get("in") {
+        filter.doogat_id_in = Some(gql_string_list_values(vals));
+    }
+}
+
+fn apply_tag_entries_tag_filter(
+    map: &IndexMap<Name, GqlValue>,
+    filter: &mut ddb_core::types::TagQueryFilter,
+) {
+    let Some(GqlValue::Object(tag_filter)) = map.get("tag") else {
+        return;
+    };
+    if let Some(GqlValue::String(eq)) = tag_filter.get("eq") {
+        filter.tag_eq = Some(eq.to_string());
+    }
+    if let Some(GqlValue::String(c)) = tag_filter.get("contains") {
+        filter.tag_contains = Some(c.to_string());
+    }
+    if let Some(GqlValue::List(vals)) = tag_filter.get("in") {
+        filter.tag_in = Some(gql_string_list_values(vals));
+    }
+}
+
+fn gql_string_list_values(vals: &[GqlValue]) -> Vec<String> {
+    vals.iter()
+        .filter_map(|v| {
+            if let GqlValue::String(s) = v {
+                Some(s.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
