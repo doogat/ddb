@@ -664,3 +664,8 @@
 {"kind":"handoff","site":"build","edge":"leave","at":1792528680,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792531251,"phase":"build","prd":"00185-ddb-client-rust-crate-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792532363,"phase":"build","prd":"00185-ddb-client-rust-crate-v1.md"}
+{"kind":"handoff","site":"build","edge":"resume","at":1792532382,"phase":"build","prd":"00186-offline-sdl-export-and-capability-handshake-v1.md"}
+{"id":"65f045d4","kind":"tess","task":"1","queued_at":1792533581,"prompt_bytes":40702}
+{"id":"a431e933","kind":"devon","task":"1","queued_at":1792533703,"prompt_bytes":5817}
+{"id":"a431e933","ended_at":1792534602,"elapsed_s":899,"outcome":"ok","detail":null}
+{"id":"39cd754b","kind":"ivan","task":"1","queued_at":1792534777,"prompt_bytes":14870}
