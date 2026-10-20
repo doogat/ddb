@@ -334,3 +334,40 @@ fn add_drop_add_round_trip_matches_single_add() {
         assert!(dup.is_err(), "{table}: duplicate must fail: {dup:?}");
     }
 }
+
+#[test]
+fn add_unique_over_twice_renamed_column_still_rejects_pre_existing_duplicates() {
+    // Regression (PRD 00184 task 8 follow-up, Pat review): a column renamed
+    // MORE THAN ONCE inside the same transaction (a -> b -> c) must still
+    // resolve all the way back to its live name (a) for the duplicate-check
+    // SELECT, not stop at the intermediate name (b), which is itself never
+    // live -- `live_probe_column` walks the rename chain transitively for
+    // exactly this case. The declarative differ can't express a two-hop
+    // rename in one apply (one `rename_from` per column), so this exercises
+    // the raw SQL path directly, inside one explicit transaction.
+    let (dir, repo, index) = setup();
+    let mut engine = SqlEngine::new(&index, &repo);
+    engine.execute(&format!("CREATE TABLE t1 {ABC})")).unwrap();
+    engine
+        .execute("INSERT INTO t1 (title, a) VALUES ('r1', 'dup')")
+        .unwrap();
+    engine
+        .execute("INSERT INTO t1 (title, a) VALUES ('r2', 'dup')")
+        .unwrap();
+
+    let before = commit_count(dir.path());
+    engine.execute("BEGIN").unwrap();
+    engine.execute("ALTER TABLE t1 RENAME COLUMN a TO mid").unwrap();
+    engine.execute("ALTER TABLE t1 RENAME COLUMN mid TO z").unwrap();
+    let err = engine
+        .execute("ALTER TABLE t1 ADD UNIQUE (z)")
+        .expect_err("pre-existing duplicate data must still be rejected across a renamed chain");
+    assert_duplicate_rejection(&err);
+    engine.execute("ROLLBACK").unwrap();
+    assert_eq!(constraints(&index, &repo, "t1"), BTreeSet::new());
+    assert_eq!(
+        commit_count(dir.path()),
+        before,
+        "a rejected combined transaction must not commit"
+    );
+}

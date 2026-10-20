@@ -31,28 +31,37 @@ impl<'a> SqlEngine<'a> {
 
     /// Resolve `desired_col` to the name it must be queried under on the
     /// LIVE materialized table right now: itself when already live, or its
-    /// pre-rename name when a `RenameColumn` buffered earlier in this same
-    /// transaction renamed it here (`rematerialize_or_defer` defers the
-    /// rebuild to commit, so the live table still carries the old name) --
-    /// `None` only when the column is genuinely new and holds no live data
-    /// under any name (PRD 00184 task 8; task 6 is the `None` case alone).
+    /// pre-rename name when one or more `RenameColumn`s buffered earlier in
+    /// this same transaction renamed it here (`rematerialize_or_defer`
+    /// defers the rebuild to commit, so the live table still carries the
+    /// old name) -- walking the chain transitively (`a` -> `b` -> `c` in
+    /// one transaction resolves `c` all the way back to `a`, not just to
+    /// `b`, which is itself never live). `None` only when the column is
+    /// genuinely new and holds no live data under any name in the chain
+    /// (PRD 00184 task 8; task 6 is the `None` case alone).
     fn live_probe_column(
         &self,
         table_name: &str,
         desired_col: &str,
         live_columns: &[String],
     ) -> Option<String> {
-        if live_columns.iter().any(|lc| lc.eq_ignore_ascii_case(desired_col)) {
-            return Some(desired_col.to_string());
+        static EMPTY: Vec<(String, String, String)> = Vec::new();
+        let renames = self.txn.as_ref().map_or(&EMPTY, |buf| &buf.column_renames);
+        let mut current = desired_col.to_string();
+        // Bounded by the rename count so a (never-expected) cycle in the
+        // buffered renames cannot loop forever.
+        for _ in 0..=renames.len() {
+            if live_columns.iter().any(|lc| lc.eq_ignore_ascii_case(&current)) {
+                return Some(current);
+            }
+            match renames.iter().find(|(t, _, new)| {
+                t.eq_ignore_ascii_case(table_name) && new.eq_ignore_ascii_case(&current)
+            }) {
+                Some((_, old, _)) => current = old.clone(),
+                None => return None,
+            }
         }
-        let old_name = self.txn.as_ref()?.column_renames.iter().find_map(|(t, old, new)| {
-            (t.eq_ignore_ascii_case(table_name) && new.eq_ignore_ascii_case(desired_col))
-                .then(|| old.clone())
-        })?;
-        live_columns
-            .iter()
-            .any(|lc| lc.eq_ignore_ascii_case(&old_name))
-            .then_some(old_name)
+        None
     }
 
     pub(in crate::sql_engine) fn handle_add_unique_constraint(
