@@ -583,3 +583,4 @@
 {"id":"f1f66df9","ended_at":1792459117,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
 {"kind":"handoff","site":"review","edge":"leave","at":1792459117,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792459148,"phase":"build","prd":"00183-split-oversized-modules-round-2-v1.md"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792474283,"phase":"review","prd":"00183-split-oversized-modules-round-2-v1.md"}
