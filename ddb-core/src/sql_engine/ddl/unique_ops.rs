@@ -61,7 +61,14 @@ impl<'a> SqlEngine<'a> {
         // than rebuilding it immediately, so the live materialized table may
         // not have the column yet. Querying it would fail with "no such
         // column"; a column with no rows yet cannot hold a duplicate, so
-        // skip the check for it.
+        // skip the check for it. Skipping is all-or-nothing for a composite
+        // key: a `unique_together` mixing an already-materialized column
+        // with a pending one skips the dup check for the whole tuple, so an
+        // existing duplicate on the materialized column alone is caught only
+        // later, by the real UNIQUE INDEX at commit-time rematerialize (a
+        // raw SQLite error there, not this handler's friendly message) --
+        // deliberately deferred, since that path cannot lose or persist
+        // duplicate data silently.
         let live_columns = self.live_table_columns(table_name);
         let pending_rematerialize = columns
             .iter()

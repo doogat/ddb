@@ -1339,17 +1339,19 @@ types:
             .expect_err(
                 "an unsupported TEXT -> INTEGER conversion combined with unique_together must error",
             );
+        // The op fails before it can be applied -- today via a SQL-parser
+        // error on the renderer's `ALTER COLUMN c TYPE t` syntax (a separate,
+        // pre-existing renderer defect: the engine's own parser requires
+        // `SET DATA TYPE`, tracked outside this task), and if that renderer
+        // bug is ever fixed, via `handle_alter_column_type`'s own
+        // "not supported" rejection instead. Either way the op never
+        // reaches the preflight or the commit, which is the guarantee this
+        // regression test exists to pin.
         match err {
             crate::error::DoogatError::Structured { code, .. } => {
                 assert_eq!(code, crate::error::codes::SCHEMA_APPLY_PARTIAL);
             }
-            crate::error::DoogatError::SqlEngine(ref message) => {
-                assert!(
-                    message.contains("not supported") || message.contains("conversion"),
-                    "expected an unsupported-conversion error, got: {message}"
-                );
-            }
-            other => panic!("expected a structured or SQL-engine conversion error, got: {other:?}"),
+            other => panic!("expected Structured SCHEMA_APPLY_PARTIAL, got: {other:?}"),
         }
 
         let head_after = svc.repo.head_oid().unwrap().0;
