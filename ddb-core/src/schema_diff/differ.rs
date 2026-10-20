@@ -1151,6 +1151,115 @@ mod tests {
         assert!(!mentions_unique_together(&plan.unsupported));
     }
 
+    #[test]
+    fn changed_non_first_constraint_column_yields_drop_old_and_add_new() {
+        // Same length, same smallest column (`day`): only the second sorted
+        // column differs, so identity must compare the whole column set.
+        let cols: &[&str] = &["day", "room", "slot"];
+        let desired = utbl("booking", cols, uniq(&[&["day", "slot"]]));
+        let live = utbl("booking", cols, uniq(&[&["day", "room"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(plan.ops.len(), 2, "exactly one drop and one add: {:?}", plan.ops);
+        assert!(plan.ops.contains(&add_uc("booking", &["day", "slot"])), "{:?}", plan.ops);
+        assert!(plan.ops.contains(&drop_uc("booking", &["day", "room"])), "{:?}", plan.ops);
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn constraint_on_column_added_in_same_plan_sorts_after_add_column() {
+        // `team` is new in desired and the new constraint depends on it: the
+        // AddColumn must come first or the constraint has nothing to cover.
+        let desired = utbl("membership", &["person", "team"], uniq(&[&["person", "team"]]));
+        let live = utbl("membership", &["person"], None);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(
+            plan.ops,
+            vec![
+                PlanOp::AddColumn {
+                    table: "membership".into(),
+                    column: col("team", "TEXT"),
+                },
+                add_uc("membership", &["person", "team"]),
+            ],
+            "AddColumn must precede the AddUniqueConstraint that needs it"
+        );
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn dropped_constraint_sorts_before_drop_of_its_own_column() {
+        // `team` and the constraint covering it both leave desired: the
+        // constraint must go before the column it references.
+        let desired = utbl("membership", &["person"], None);
+        let live = utbl("membership", &["person", "team"], uniq(&[&["person", "team"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+
+        assert_eq!(
+            plan.ops,
+            vec![
+                drop_uc("membership", &["person", "team"]),
+                PlanOp::DropColumn {
+                    table: "membership".into(),
+                    column: "team".into(),
+                },
+            ],
+            "DropUniqueConstraint must precede the DropColumn of a column it covers"
+        );
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn empty_inner_constraint_on_live_side_is_skipped() {
+        let desired = utbl("membership", MEMBER_COLS, None);
+        let live = utbl("membership", MEMBER_COLS, Some(vec![vec![]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+        assert!(plan.is_empty(), "a live empty constraint emits no drop: {:?}", plan.ops);
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+
+        // A live empty constraint beside a real one drops only the real one.
+        let desired = utbl("booking", BOOKING_COLS, None);
+        let live = utbl(
+            "booking",
+            BOOKING_COLS,
+            Some(vec![vec![], vec!["day".into(), "room".into()]]),
+        );
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+        assert_eq!(plan.ops, vec![drop_uc("booking", &["day", "room"])]);
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn duplicate_constraint_within_one_side_yields_one_op() {
+        // `[day, room]` and `[room, day]` are the same constraint (set-of-sets).
+        let dup = uniq(&[&["day", "room"], &["room", "day"]]);
+
+        let desired = utbl("booking", BOOKING_COLS, dup.clone());
+        let live = utbl("booking", BOOKING_COLS, None);
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+        assert_eq!(
+            plan.ops,
+            vec![add_uc("booking", &["day", "room"])],
+            "a constraint declared twice in desired is added once"
+        );
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+
+        let desired = utbl("booking", BOOKING_COLS, None);
+        let live = utbl("booking", BOOKING_COLS, dup.clone());
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+        assert_eq!(
+            plan.ops,
+            vec![drop_uc("booking", &["day", "room"])],
+            "a constraint held twice in live is dropped once"
+        );
+
+        let desired = utbl("booking", BOOKING_COLS, dup);
+        let live = utbl("booking", BOOKING_COLS, uniq(&[&["day", "room"]]));
+        let plan = diff(&doc(vec![desired]), &[Some(live)]);
+        assert!(plan.is_empty(), "duplicate of a present constraint is no change: {:?}", plan.ops);
+    }
+
     // ---- 17: unique-constraint PlanOp public methods ----
 
     #[test]
@@ -1188,5 +1297,37 @@ mod tests {
         assert!(d.contains("booking") && d.contains("day") && d.contains("room"), "{d}");
         let d = one.describe();
         assert!(d.contains("membership") && d.contains("person_id"), "{d}");
+    }
+
+    #[test]
+    fn three_column_unique_constraint_renders_every_column_in_order() {
+        assert_eq!(
+            add_uc("t", &["a", "b", "c"]).render_sql(),
+            r#"ALTER TABLE "t" ADD UNIQUE ("a", "b", "c")"#
+        );
+        assert_eq!(
+            drop_uc("t", &["a", "b", "c"]).render_sql(),
+            r#"ALTER TABLE "t" DROP UNIQUE ("a", "b", "c")"#
+        );
+    }
+
+    #[test]
+    fn unique_constraint_describe_states_its_own_direction_exactly() {
+        assert_eq!(
+            add_uc("membership", &["person", "team"]).describe(),
+            "add unique constraint (person, team) on membership"
+        );
+        assert_eq!(
+            drop_uc("booking", &["day", "room"]).describe(),
+            "drop unique constraint (day, room) on booking"
+        );
+        assert_eq!(
+            add_uc("t", &["a", "b", "c"]).describe(),
+            "add unique constraint (a, b, c) on t"
+        );
+        assert_eq!(
+            drop_uc("t", &["a", "b", "c"]).describe(),
+            "drop unique constraint (a, b, c) on t"
+        );
     }
 }
