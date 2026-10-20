@@ -637,3 +637,15 @@
 {"kind":"handoff","site":"build","edge":"resume","at":1792495980,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
 {"kind":"handoff","site":"build","edge":"resume","at":1792506924,"phase":"build","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
 {"kind":"handoff","site":"build","edge":"leave","at":1792506953,"phase":"review","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"kind":"handoff","site":"review","edge":"resume","at":1792507001,"phase":"review","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
+{"id":"9e21f4a3","kind":"bob","task":"review-00184-c1","queued_at":1792508807,"prompt_bytes":13373}
+{"id":"7993d8e3","kind":"carl","task":"review-00184-c1","queued_at":1792508807,"prompt_bytes":6576}
+{"id":"174ec5c6","kind":"bob","task":"review-00184-c1","queued_at":1792510078,"prompt_bytes":13373}
+{"id":"bf4cc2d0","kind":"carl","task":"review-00184-c1","queued_at":1792510078,"prompt_bytes":6576}
+{"id":"174ec5c6","ended_at":1792510396,"elapsed_s":318,"outcome":"ok","detail":null}
+{"id":"bf4cc2d0","ended_at":1792510400,"elapsed_s":322,"outcome":"error","detail":"retry: exit 1"}
+{"id":"174ec5c6","ended_at":1792511367,"elapsed_s":1289,"outcome":"ok","detail":null}
+{"id":"bf4cc2d0","ended_at":1792511367,"elapsed_s":1289,"outcome":"error","detail":null}
+{"id":"9e21f4a3","ended_at":1792511392,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"id":"7993d8e3","ended_at":1792511392,"elapsed_s":null,"outcome":"lost","detail":"open at review/leave handoff"}
+{"kind":"handoff","site":"review","edge":"leave","at":1792511392,"phase":"review","prd":"00184-schema-apply-v2-index-evolution-ffi-zone-parity-v1.md"}
