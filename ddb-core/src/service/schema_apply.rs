@@ -1070,6 +1070,93 @@ types:
     unique_together: [[label]]
 ";
 
+    /// Desired-schema YAML that, applied over `WIDGET_ONE_COLUMN`, adds a new
+    /// `code` column AND a `unique_together` over that SAME new column in one
+    /// apply. The differ orders `AddColumn` before `AddUniqueConstraint`
+    /// (schema_diff/differ.rs), so this exercises the in-transaction ordering
+    /// where the unique-constraint handler's duplicate-check SELECT must see
+    /// a column the live materialized table does not have yet (rematerialize
+    /// is deferred to commit inside a transaction).
+    const WIDGET_ADD_COLUMN_WITH_UNIQUE: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+      - name: code
+        data_type: VARCHAR(255)
+        zone: frontmatter
+    unique_together: [[code]]
+";
+
+    #[test]
+    fn apply_adds_column_and_unique_together_over_it_in_one_apply() {
+        // Regression (PRD 00184 task 6, ALICE): AddColumn only buffers the
+        // typedef and defers the table rebuild to commit
+        // (ddl/alter.rs rematerialize_or_defer). A unique constraint added
+        // over that SAME new column, in the same apply, must not fail with
+        // SCHEMA_APPLY_PARTIAL from a duplicate-check SELECT against the
+        // not-yet-rematerialized live table.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_ONE_COLUMN, false, false))
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label) VALUES ('alpha')")
+            .unwrap();
+
+        let report = svc
+            .apply_schema(cmd(WIDGET_ADD_COLUMN_WITH_UNIQUE, false, false))
+            .expect(
+                "adding a column and a unique_together over it in one apply must succeed, not fail mid-plan",
+            );
+        assert!(
+            report.value.applied,
+            "adding a column plus unique_together over it must apply"
+        );
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "add_column" && op.table == "widget"),
+            "the plan must contain an add_column op, got: {:?}",
+            report.value.ops
+        );
+        assert!(
+            report
+                .value
+                .ops
+                .iter()
+                .any(|op| op.kind == "add_unique_constraint" && op.table == "widget"),
+            "the plan must contain an add_unique_constraint op, got: {:?}",
+            report.value.ops
+        );
+
+        let schema = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must exist after the apply");
+        assert!(
+            has_column(&schema, "code"),
+            "the new `code` column must be recorded in the typedef"
+        );
+        assert_eq!(
+            schema.unique_together,
+            Some(vec![vec!["code".to_string()]]),
+            "typedef must record the new unique_together constraint over `code`"
+        );
+
+        // The constraint is enforced on the live (now rematerialized) table.
+        svc.execute_sql("INSERT INTO widget (label, code) VALUES ('beta', 'x')")
+            .unwrap();
+        assert!(
+            svc.execute_sql("INSERT INTO widget (label, code) VALUES ('gamma', 'x')")
+                .is_err(),
+            "the live unique index over the new column must reject a duplicate `code`"
+        );
+    }
+
     #[test]
     fn apply_adds_unique_together_to_existing_type_and_enforces_it() {
         // Happy path (PRD 00184 task 3): a unique_together added to an
@@ -1194,6 +1281,116 @@ types:
             schema.unique_together, None,
             "a failed unique_together apply must not partially record the constraint"
         );
+    }
+
+    /// Desired-schema YAML for `widget` with a TEXT `code` column, no
+    /// uniqueness yet -- the baseline before the combined type-narrowing +
+    /// unique_together apply below.
+    const WIDGET_TEXT_CODE: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+      - name: code
+        data_type: TEXT
+        zone: frontmatter
+";
+
+    /// Same `widget`, but `code` is now declared INTEGER AND carries a
+    /// `unique_together` over it in the SAME apply -- an unsupported
+    /// TEXT -> INTEGER conversion combined with a constraint add.
+    const WIDGET_CODE_TO_INTEGER_WITH_UNIQUE: &str = "\
+types:
+  - name: widget
+    columns:
+      - name: label
+        data_type: VARCHAR(255)
+        zone: frontmatter
+        required: true
+      - name: code
+        data_type: INTEGER
+        zone: frontmatter
+    unique_together: [[code]]
+";
+
+    #[test]
+    fn apply_unsupported_type_narrowing_combined_with_unique_rejects_atomically() {
+        // Regression (PRD 00184 task 6, BOB): a preflight for a lossy type
+        // change reads live SQLite values, but rematerialization after a
+        // combined transformation happens only at commit. Guard that an
+        // unsupported conversion (TEXT -> INTEGER) combined with a
+        // unique_together add in the SAME apply is rejected BEFORE HEAD
+        // moves, with no partial typedef write and both pre-existing
+        // TEXT values ('01' and '1', distinct as strings) preserved intact.
+        let (_tmp, mut svc) = fresh_svc();
+        svc.apply_schema(cmd(WIDGET_TEXT_CODE, false, false))
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label, code) VALUES ('alpha', '01')")
+            .unwrap();
+        svc.execute_sql("INSERT INTO widget (label, code) VALUES ('beta', '1')")
+            .unwrap();
+
+        let head_before = svc.repo.head_oid().unwrap().0;
+        let err = svc
+            .apply_schema(cmd(WIDGET_CODE_TO_INTEGER_WITH_UNIQUE, false, false))
+            .expect_err(
+                "an unsupported TEXT -> INTEGER conversion combined with unique_together must error",
+            );
+        match err {
+            crate::error::DoogatError::Structured { code, .. } => {
+                assert_eq!(code, crate::error::codes::SCHEMA_APPLY_PARTIAL);
+            }
+            crate::error::DoogatError::SqlEngine(ref message) => {
+                assert!(
+                    message.contains("not supported") || message.contains("conversion"),
+                    "expected an unsupported-conversion error, got: {message}"
+                );
+            }
+            other => panic!("expected a structured or SQL-engine conversion error, got: {other:?}"),
+        }
+
+        let head_after = svc.repo.head_oid().unwrap().0;
+        assert_eq!(
+            head_before, head_after,
+            "a rejected combined apply must not advance HEAD"
+        );
+
+        let schema = svc
+            .describe_type("widget")
+            .unwrap()
+            .expect("widget must still exist after a failed combined apply");
+        assert_eq!(
+            schema.unique_together, None,
+            "a failed apply must not partially record the unique_together constraint"
+        );
+        let code_col = schema
+            .columns
+            .iter()
+            .find(|c| c.name == "code")
+            .expect("code column must still exist");
+        assert!(
+            code_col.data_type.eq_ignore_ascii_case("text"),
+            "code column type must be unchanged (still TEXT), got: {}",
+            code_col.data_type
+        );
+
+        match svc
+            .execute_sql("SELECT code FROM widget ORDER BY code")
+            .expect("querying widget after a failed combined apply must succeed")
+        {
+            crate::sql_engine::SqlResult::Rows { rows, .. } => {
+                let codes: Vec<&str> = rows.iter().map(|r| r[0].as_str()).collect();
+                assert_eq!(
+                    codes,
+                    vec!["01", "1"],
+                    "both pre-existing distinct TEXT rows ('01' and '1') must survive the rejected apply, got: {codes:?}"
+                );
+            }
+            other => panic!("expected Rows from a SELECT, got: {other:?}"),
+        }
     }
 
     #[test]

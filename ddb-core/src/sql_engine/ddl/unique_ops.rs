@@ -16,6 +16,19 @@ fn sorted(columns: &[String]) -> Vec<String> {
 }
 
 impl<'a> SqlEngine<'a> {
+    /// Column names currently present on the live materialized table, or an
+    /// empty vec if the table or pragma query fails.
+    fn live_table_columns(&self, table_name: &str) -> Vec<String> {
+        self.index
+            .sql_conn()
+            .prepare(&format!("PRAGMA table_info(\"{table_name}\")"))
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| row.get::<_, String>(1))
+                    .map(|rows| rows.flatten().collect::<Vec<_>>())
+            })
+            .unwrap_or_default()
+    }
+
     pub(in crate::sql_engine) fn handle_add_unique_constraint(
         &mut self,
         table_name: &str,
@@ -42,13 +55,28 @@ impl<'a> SqlEngine<'a> {
             .map(|c| format!("{c} IS NOT NULL"))
             .collect::<Vec<_>>()
             .join(" AND ");
-        let dup_count: i64 = self.index.sql_conn().query_row(
-            &format!(
-                "SELECT COUNT(*) FROM (SELECT 1 FROM \"{table_name}\" WHERE {not_null} GROUP BY {group_by} HAVING COUNT(*) > 1)"
-            ),
-            [],
-            |row| row.get(0),
-        )?;
+        // A column added earlier in the same ALTER sequence may still be
+        // buffered: `rematerialize_or_defer` (ddl/alter.rs) pushes the table
+        // onto the pending-rematerialize list inside a transaction rather
+        // than rebuilding it immediately, so the live materialized table may
+        // not have the column yet. Querying it would fail with "no such
+        // column"; a column with no rows yet cannot hold a duplicate, so
+        // skip the check for it.
+        let live_columns = self.live_table_columns(table_name);
+        let pending_rematerialize = columns
+            .iter()
+            .any(|c| !live_columns.iter().any(|lc| lc.eq_ignore_ascii_case(c)));
+        let dup_count: i64 = if pending_rematerialize {
+            0
+        } else {
+            self.index.sql_conn().query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM \"{table_name}\" WHERE {not_null} GROUP BY {group_by} HAVING COUNT(*) > 1)"
+                ),
+                [],
+                |row| row.get(0),
+            )?
+        };
         if dup_count > 0 {
             return Err(DoogatError::Structured {
                 code: codes::UNIQUE_VIOLATION,
