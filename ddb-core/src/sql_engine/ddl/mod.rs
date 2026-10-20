@@ -2,7 +2,10 @@ mod alter;
 mod create;
 mod drop;
 mod rename;
+mod unique_ops;
 mod zone_ops;
+
+pub(super) use unique_ops::parse_quoted_column_list;
 
 use rusqlite::params;
 use sqlparser::ast::TableConstraint;

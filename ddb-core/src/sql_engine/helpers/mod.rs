@@ -20,9 +20,10 @@ pub(super) use identifiers::{
 };
 pub(super) use inline_zone::{strip_inline_zones, TableColumnZones};
 pub(super) use regexes::{
-    extract_junction_where, extract_where_id, re_create_table_singleton, re_drop_search_key,
-    re_drop_singleton, re_drop_title_template, re_set_search_key, re_set_singleton,
-    re_set_title_template, re_set_zone, re_unfilled_placeholder,
+    extract_junction_where, extract_where_id, re_add_unique, re_create_table_singleton,
+    re_drop_search_key, re_drop_singleton, re_drop_title_template, re_drop_unique,
+    re_set_search_key, re_set_singleton, re_set_title_template, re_set_zone,
+    re_unfilled_placeholder,
 };
 pub(super) use template::{is_safe_sql_identifier, parse_title_template};
 // `TemplatePlaceholder` is constructed directly only by sql_engine's #[cfg(test)] module.

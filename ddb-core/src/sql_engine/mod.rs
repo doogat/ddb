@@ -27,9 +27,9 @@ pub use classify::requires_schema_reload;
 pub use ddl::create_table_with_default_seed_commit_msg;
 
 use helpers::{
-    normalize_alter_column_type, re_create_table_singleton, re_drop_search_key, re_drop_singleton,
-    re_drop_title_template, re_set_search_key, re_set_singleton, re_set_title_template,
-    re_set_zone, strip_inline_zones, TableColumnZones,
+    normalize_alter_column_type, re_add_unique, re_create_table_singleton, re_drop_search_key,
+    re_drop_singleton, re_drop_title_template, re_drop_unique, re_set_search_key,
+    re_set_singleton, re_set_title_template, re_set_zone, strip_inline_zones, TableColumnZones,
 };
 
 #[derive(Debug)]
@@ -234,6 +234,26 @@ impl<'a> SqlEngine<'a> {
                 .expect("regex guarantees group 1 or 2")
                 .as_str();
             return Ok(Some(self.handle_drop_singleton(table)?));
+        }
+        if let Some(caps) = re_add_unique().captures(sql) {
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            let columns =
+                ddl::parse_quoted_column_list(caps.get(3).expect("regex guarantees group 3").as_str());
+            return Ok(Some(self.handle_add_unique_constraint(table, &columns)?));
+        }
+        if let Some(caps) = re_drop_unique().captures(sql) {
+            let table = caps
+                .get(1)
+                .or(caps.get(2))
+                .expect("regex guarantees group 1 or 2")
+                .as_str();
+            let columns =
+                ddl::parse_quoted_column_list(caps.get(3).expect("regex guarantees group 3").as_str());
+            return Ok(Some(self.handle_drop_unique_constraint(table, &columns)?));
         }
         Ok(None)
     }

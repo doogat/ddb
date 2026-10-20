@@ -79,6 +79,28 @@ pub(crate) fn re_drop_singleton() -> &'static Regex {
     })
 }
 
+/// `ALTER TABLE x ADD UNIQUE (a, b)` matcher. Group 3 is the column list.
+pub(crate) fn re_add_unique() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+ADD\s+UNIQUE\s*\(([^)]+)\)\s*;?\s*$"#,
+        )
+        .expect("valid regex")
+    })
+}
+
+/// `ALTER TABLE x DROP UNIQUE (a, b)` matcher. Group 3 is the column list.
+pub(crate) fn re_drop_unique() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)^\s*ALTER\s+TABLE\s+(?:"([^"]+)"|(\w[\w-]*))\s+DROP\s+UNIQUE\s*\(([^)]+)\)\s*;?\s*$"#,
+        )
+        .expect("valid regex")
+    })
+}
+
 pub(crate) fn re_unfilled_placeholder() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\{[^}]+\}").expect("valid regex"))
